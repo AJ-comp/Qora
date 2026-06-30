@@ -1,0 +1,183 @@
+@page "/"
+
+<PageTitle>Ket Playground</PageTitle>
+
+<div class="max-w-6xl mx-auto p-6 space-y-6">
+
+    <header class="space-y-1">
+        <h1 class="text-3xl font-bold tracking-tight">Ket Playground</h1>
+        <p class="text-muted-foreground">
+            Q# 스타일 양자 토이 언어 <span class="font-semibold">Ket</span>을 브라우저에서 바로 파싱·변환해보세요 —
+            <code class="font-mono">operation Foo(Qubit[n] q)</code> · <code class="font-mono">호출 Foo(q)</code> · <code class="font-mono">use … Qubit[n]</code> ·
+            <code class="font-mono">const/var/int</code> · <code class="font-mono">H / X / CNOT / S / T / CZ / SWAP / CCX</code> ·
+            <code class="font-mono">Rx / Ry / Rz (회전, pi/2)</code> ·
+            <code class="font-mono">bit r = M(…)</code> · <code class="font-mono">for … in</code> ·
+            <code class="font-mono">if</code> · <code class="font-mono">while</code> · <code class="font-mono">repeat … until</code>
+        </p>
+    </header>
+
+    <div class="grid gap-6 md:grid-cols-2">
+
+        @* --- input --- *@
+        <BbCard>
+            <BbCardHeader>
+                <BbCardTitle>Ket 코드</BbCardTitle>
+                <BbCardDescription>프로그램을 입력하고 Run을 누르세요.</BbCardDescription>
+            </BbCardHeader>
+            <BbCardContent>
+                <div style="height: 340px; border: 1px solid #e2e8f0; border-radius: 6px; overflow: hidden;">
+                    <StandaloneCodeEditor @ref="_editor" Id="ket-editor"
+                                          ConstructionOptions="EditorOptions"
+                                          OnDidInit="OnEditorInit" />
+                </div>
+            </BbCardContent>
+            <BbCardFooter>
+                <BbButton OnClick="Run">Run</BbButton>
+                <BbButton Variant="ButtonVariant.Outline" Class="ml-2" OnClick="LoadBell">예제 불러오기</BbButton>
+                <BbButton Variant="ButtonVariant.Ghost" Class="ml-2" OnClick="Clear">지우기</BbButton>
+            </BbCardFooter>
+        </BbCard>
+
+        @* --- output --- *@
+        <BbCard>
+            <BbCardHeader>
+                <div class="flex items-center gap-2">
+                    <BbCardTitle>결과</BbCardTitle>
+                    @if (_result is not null)
+                    {
+                        <BbBadge Variant="@(_result.Success ? BadgeVariant.Default : BadgeVariant.Destructive)">
+                            @(_result.Success ? "ACCEPTED" : "REJECTED")
+                        </BbBadge>
+                    }
+                </div>
+                <BbCardDescription>파싱 결과와 파스 트리</BbCardDescription>
+            </BbCardHeader>
+            <BbCardContent>
+                @if (_result is null)
+                {
+                    <p class="text-sm text-muted-foreground">아직 실행 전이에요.</p>
+                }
+                else if (_result.Success)
+                {
+                    <div class="flex gap-1 mb-3">
+                        <BbButton Size="ButtonSize.Small"
+                                  Variant="@(_view == "ast" ? ButtonVariant.Default : ButtonVariant.Outline)"
+                                  OnClick='@(() => SetView("ast"))'>AST</BbButton>
+                        <BbButton Size="ButtonSize.Small"
+                                  Variant="@(_view == "parse" ? ButtonVariant.Default : ButtonVariant.Outline)"
+                                  OnClick='@(() => SetView("parse"))'>파스 트리</BbButton>
+                    </div>
+                    <div class="tree-wrap" style="max-height: 60vh; overflow: auto;">
+                        <ul class="tree">
+                            @if (_view == "ast" && _result.Ast is not null)
+                            {
+                                <AstTreeNode Node="_result.Ast!" />
+                            }
+                            else if (_result.Tree is not null)
+                            {
+                                <ParseTreeNode Node="_result.Tree!" />
+                            }
+                        </ul>
+                    </div>
+                }
+                else
+                {
+                    <div class="space-y-2">
+                        <p class="text-sm text-destructive">파싱 실패 — 문법에 맞지 않아요.</p>
+                        @if (_result.Errors.Count > 0)
+                        {
+                            <pre class="text-xs font-mono whitespace-pre-wrap rounded-md bg-muted p-3">@string.Join("\n", _result.Errors)</pre>
+                        }
+                        else
+                        {
+                            <p class="text-xs text-muted-foreground">아래 토큰을 보고 키워드/기호가 맞는지 확인해보세요.</p>
+                        }
+                    </div>
+                }
+            </BbCardContent>
+        </BbCard>
+    </div>
+
+    @* --- OpenQASM 3.0 output --- *@
+    @if (_result is not null && _result.Success && !string.IsNullOrEmpty(_result.Qasm))
+    {
+        <BbCard>
+            <BbCardHeader>
+                <BbCardTitle>OpenQASM 3.0</BbCardTitle>
+                <BbCardDescription>이 Ket 코드를 표준 OpenQASM으로 변환한 결과 — Qiskit 등에 그대로 붙여넣을 수 있어요.</BbCardDescription>
+            </BbCardHeader>
+            <BbCardContent>
+                <pre class="text-xs font-mono whitespace-pre overflow-auto rounded-md bg-muted p-3" style="max-height: 40vh">@_result.Qasm</pre>
+            </BbCardContent>
+        </BbCard>
+    }
+
+    @* --- tokens --- *@
+    @if (_result is not null && _result.Tokens.Count > 0)
+    {
+        <BbCard>
+            <BbCardHeader>
+                <BbCardTitle>토큰 <span class="text-muted-foreground font-normal text-sm">(@(_result.Tokens.Count)개)</span></BbCardTitle>
+                <BbCardDescription>각 토큰이 어떤 종류로 인식됐는지</BbCardDescription>
+            </BbCardHeader>
+            <BbCardContent>
+                <div class="flex flex-wrap gap-1.5">
+                    @foreach (var t in _result.Tokens)
+                    {
+                        <BbBadge Variant="BadgeVariant.Outline" Class="font-mono text-xs">
+                            @t.Text<span class="text-muted-foreground ml-1.5">@t.Type</span>
+                        </BbBadge>
+                    }
+                </div>
+            </BbCardContent>
+        </BbCard>
+    }
+
+</div>
+
+@code {
+    private const string BellExample =
+        "operation Prepare(Qubit[2] q) {\n    H(q[0]);\n    CNOT(q[0], q[1]);\n    Rz(pi/4, q[1]);\n    Ry(0.5, q[0]);\n}\n\noperation Main() {\n    use q = Qubit[2];\n    Prepare(q);\n    for i in 0..1 {\n        Rx(pi/2, q[i]);\n    }\n    bit r = M(q[0]);\n    if (r == 1) {\n        X(q[1]);\n    }\n}";
+
+    private StandaloneCodeEditor _editor = null!;
+    private KetParseResult? _result;
+    private string _view = "ast";   // "ast" or "parse"
+
+    private StandaloneEditorConstructionOptions EditorOptions(StandaloneCodeEditor editor) =>
+        new StandaloneEditorConstructionOptions
+        {
+            AutomaticLayout = true,
+            Language = "ket",
+            Theme = "ket-theme",
+            Value = BellExample,
+            FontSize = 14,
+            ScrollBeyondLastLine = false,
+            Minimap = new EditorMinimapOptions { Enabled = false },
+            // render hover/suggest tooltips at the page level so they aren't clipped by the
+            // bordered wrapper's overflow:hidden when there's no room inside the editor.
+            FixedOverflowWidgets = true,
+        };
+
+    private async Task OnEditorInit() => await Run();
+
+    private void SetView(string view) => _view = view;
+
+    private async Task Run()
+    {
+        var code = await _editor.GetValue();
+        _result = KetParser.Parse(code);
+        StateHasChanged();
+    }
+
+    private async Task LoadBell()
+    {
+        await _editor.SetValue(BellExample);
+        await Run();
+    }
+
+    private async Task Clear()
+    {
+        await _editor.SetValue(string.Empty);
+        _result = null;
+    }
+}

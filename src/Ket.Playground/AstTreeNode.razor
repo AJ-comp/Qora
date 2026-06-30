@@ -1,0 +1,26 @@
+@using Janglim.FrontEnd.Ast
+
+@* Recursively renders one AST node (MeaningUnit-tagged) and its children as a nested list.
+   Non-terminals show their MeaningUnit name (Gate, Qubit, ...); terminals show their text. *@
+<li>
+    <span class="tree-label @(Node is AstTerminal ? "tree-leaf" : "tree-nt")">@Label(Node)</span>
+    @if (Node is AstNonTerminal nt && nt.Items.Count > 0)
+    {
+        <ul>
+            @foreach (var child in nt.Items)
+            {
+                <AstTreeNode Node="child" />
+            }
+        </ul>
+    }
+</li>
+
+@code {
+    [Parameter] public AstSymbol Node { get; set; } = default!;
+
+    private static string Label(AstSymbol node) => node switch
+    {
+        AstNonTerminal nt => nt.Name ?? nt.ToString() ?? string.Empty,
+        _ => node.ToString() ?? string.Empty,
+    };
+}

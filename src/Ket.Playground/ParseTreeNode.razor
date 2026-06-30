@@ -1,0 +1,20 @@
+@using Janglim.FrontEnd.ParseTree
+
+@* Recursively renders one parse-tree node and its children as a nested list.
+   (Ported from the Janglim Playground.) *@
+<li>
+    <span class="tree-label @(Node is ParseTreeTerminal ? "tree-leaf" : "tree-nt")">@Node.ToString()</span>
+    @if (Node is ParseTreeNonTerminal nt && nt.Items.Count > 0)
+    {
+        <ul>
+            @foreach (var child in nt.Items)
+            {
+                <ParseTreeNode Node="child" />
+            }
+        </ul>
+    }
+</li>
+
+@code {
+    [Parameter] public ParseTreeSymbol Node { get; set; } = default!;
+}

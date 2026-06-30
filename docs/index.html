@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>H 게이트를 화살표로 이해하기 — Ket</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --ink: #1f2430;
+    --muted: #5b6472;
+    --line: #e6e8ee;
+    --panel: #f7f8fb;
+    --plus: #1457d6;   /* + : 오른쪽, 파랑 */
+    --minus: #d62b39;  /* − : 왼쪽, 빨강 */
+    --accent: #6b3fd4;
+    --good: #11875b;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo",
+      "Malgun Gothic", "Noto Sans KR", "Segoe UI Symbol", "Cambria Math", sans-serif;
+    line-height: 1.75;
+    font-size: 17px;
+  }
+  .wrap { max-width: 820px; margin: 0 auto; padding: 0 20px 120px; }
+  header.hero {
+    padding: 64px 20px 40px;
+    text-align: center;
+    border-bottom: 1px solid var(--line);
+    background: linear-gradient(180deg, #faf9ff, #ffffff);
+  }
+  header.hero h1 { font-size: 2.1rem; margin: 0 0 10px; letter-spacing: -0.5px; }
+  header.hero p { color: var(--muted); margin: 0; font-size: 1.05rem; }
+  .tag { display:inline-block; font-size:.78rem; letter-spacing:.12em; text-transform:uppercase;
+         color: var(--accent); font-weight:700; margin-bottom:14px; }
+  h2 {
+    margin: 56px 0 14px; font-size: 1.5rem; letter-spacing: -0.3px;
+    padding-top: 14px; border-top: 2px solid var(--line);
+  }
+  h2 .n {
+    display:inline-flex; align-items:center; justify-content:center;
+    width: 1.7em; height: 1.7em; border-radius: 50%;
+    background: var(--accent); color:#fff; font-size: .82rem; font-weight:700;
+    margin-right: 10px; vertical-align: middle;
+  }
+  h3 { margin: 30px 0 8px; font-size: 1.12rem; }
+  p { margin: 14px 0; }
+  strong { color: #11203a; }
+  .lead { font-size: 1.08rem; }
+  code, .mono {
+    font-family: "SF Mono", "JetBrains Mono", "D2Coding", Consolas, "Segoe UI Symbol", monospace;
+  }
+  code {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 5px;
+    padding: 1px 6px; font-size: .9em;
+  }
+  /* 화살표 표 (진폭 패널) */
+  .panel {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 16px 18px; margin: 18px 0; overflow-x: auto;
+  }
+  .panel.mono { white-space: nowrap; }
+  table.amp { border-collapse: collapse; width: 100%; font-family: inherit; }
+  table.amp th, table.amp td {
+    padding: 9px 12px; text-align: center; border-bottom: 1px solid var(--line);
+    white-space: nowrap;
+  }
+  table.amp th { font-size: .82rem; color: var(--muted); font-weight: 600; }
+  table.amp td:first-child, table.amp th:first-child { text-align: left; font-weight: 600; }
+  table.amp tr:last-child td { border-bottom: none; }
+  .arrow-r { color: var(--plus); font-weight: 700; }   /* ▶ + 오른쪽 */
+  .arrow-l { color: var(--minus); font-weight: 700; }  /* ◀ − 왼쪽 */
+  .zero { color: var(--muted); }
+  /* 콜아웃 */
+  .call {
+    border-left: 4px solid var(--accent); background: #faf8ff;
+    padding: 14px 18px; border-radius: 0 8px 8px 0; margin: 20px 0;
+  }
+  .call.why { border-color: var(--good); background: #f2fbf7; }
+  .call.warn { border-color: #e6a417; background: #fff9ec; }
+  .call .h { font-weight: 700; display:block; margin-bottom: 4px; }
+  .rule {
+    text-align:center; font-size: 1.1rem; font-weight: 700; color:#1a1140;
+    background: #f3efff; border:1px solid #e2d8ff; border-radius: 10px;
+    padding: 16px; margin: 20px 0;
+  }
+  .step { display:flex; gap:14px; margin:16px 0; }
+  .step .num {
+    flex: 0 0 auto; width: 30px; height: 30px; border-radius: 50%;
+    background: var(--accent); color:#fff; font-weight:700; font-size:.9rem;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .step .body { flex: 1 1 auto; }
+  .step .body p { margin: 0 0 6px; }
+  hr { border:none; border-top:1px solid var(--line); margin: 40px 0; }
+  .math { text-align:center; font-size:1.05rem; margin: 16px 0; }
+  .toc { background: var(--panel); border:1px solid var(--line); border-radius:10px;
+         padding: 14px 18px; margin: 26px 0; }
+  .toc ol { margin: 6px 0 0; padding-left: 22px; }
+  .toc a { color: var(--ink); text-decoration: none; }
+  .toc a:hover { color: var(--accent); }
+  footer { text-align:center; color:var(--muted); font-size:.9rem; margin-top: 60px;
+           padding-top: 24px; border-top:1px solid var(--line); }
+  .legend { font-size:.9rem; color:var(--muted); margin: 6px 0 0; }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="tag">Ket · 양자 기초</div>
+  <h1>H 게이트를 화살표로 이해하기</h1>
+  <p>큐비트·진폭·간섭을 한 단계씩 — 누가 봐도 따라올 수 있게</p>
+</header>
+
+<div class="wrap">
+
+  <p class="lead">
+    이 글은 양자 게이트 중 가장 기본인 <strong>H(하다마드) 게이트</strong>를,
+    수식 덩어리가 아니라 <strong>"화살표"</strong> 하나로 끝까지 따라가며 설명합니다.
+    특히 "H를 두 번 걸면 왜 다시 처음으로 돌아오는가"라는 신기한 일(<strong>간섭</strong>)을,
+    한 단계도 건너뛰지 않고 직접 손으로 더해 봅니다.
+  </p>
+
+  <div class="toc">
+    <strong>차례</strong>
+    <ol>
+      <li><a href="#s1">큐비트는 "화살표"다</a></li>
+      <li><a href="#s2">H를 한 번 — 0을 반반으로</a></li>
+      <li><a href="#s3">왜 1/√2? — 진폭과 확률</a></li>
+      <li><a href="#s4">H의 정확한 규칙</a></li>
+      <li><a href="#s5">왜 마이너스가 붙는가 — 되돌릴 수 있어야 한다</a></li>
+      <li><a href="#s6">H를 두 번 — 간섭으로 0이 되살아난다</a></li>
+      <li><a href="#s7">이건 진짜인가, 그냥 표기인가?</a></li>
+      <li><a href="#s8">한 장 요약</a></li>
+    </ol>
+  </div>
+
+  <!-- ===================== 1 ===================== -->
+  <h2 id="s1"><span class="n">1</span>큐비트는 "화살표"다</h2>
+
+  <p>
+    큐비트 하나는 나올 수 있는 답이 <strong>0 아니면 1</strong>, 둘뿐입니다.
+    각 답마다 화살표가 하나씩 앉는 <strong>자리("칸")</strong>가 있다고 보세요. 화살표의
+    <strong>길이</strong>가 그 답의 <strong>진폭</strong>이고, 방향(오른쪽/왼쪽)은 부호(+/−)입니다.
+  </p>
+
+  <p>가장 단순한 상태부터 봅시다 — 0칸에만 꽉 찬 화살표가 있고, 1칸은 비어 있는 상태:</p>
+
+  <div class="panel">
+    <table class="amp">
+      <tr><th>칸(답)</th><th>화살표</th><th>진폭</th></tr>
+      <tr><td>0칸</td><td><span class="arrow-r">───▶</span></td><td>1 (꽉 참)</td></tr>
+      <tr><td>1칸</td><td><span class="zero">·</span></td><td>0 (없음)</td></tr>
+    </table>
+    <p class="legend">이 상태를 <code>|0⟩</code>이라고 부릅니다.</p>
+  </div>
+
+  <div class="rule">화살표 길이를 <strong>제곱</strong>한 값 = 그 답이 측정될 <strong>확률</strong></div>
+
+  <p>
+    그래서 위 <code>|0⟩</code>을 재면 — 0칸은 1² = <strong>100%</strong>, 1칸은 0² = <strong>0%</strong>,
+    즉 <strong>무조건 0</strong>이 나옵니다. (방향/부호는 2번 절부터 본격적으로 쓰니, 지금은 길이만 봐도 됩니다.)
+  </p>
+
+  <!-- ===================== 2 ===================== -->
+  <h2 id="s2"><span class="n">2</span>H를 한 번 — 0을 반반으로</h2>
+
+  <p>
+    H는 <strong>0을 0으로 두는 게 아니라</strong>, 받은 큐비트를 <strong>50/50으로 펴는</strong>
+    게이트입니다. <code>|0⟩</code>에 H를 걸면 0칸에 있던 화살표 하나가 0과 1로 절반씩 갈라집니다.
+  </p>
+
+  <div class="panel">
+    <table class="amp">
+      <tr><th>칸</th><th>H 전</th><th>H 후</th><th>H 후 확률</th></tr>
+      <tr><td>0칸</td><td><span class="arrow-r">───▶</span> 1</td><td><span class="arrow-r">──▶</span> 1/√2 ≈ 0.707</td><td>50%</td></tr>
+      <tr><td>1칸</td><td><span class="zero">· 0</span></td><td><span class="arrow-r">──▶</span> 1/√2 ≈ 0.707</td><td>50%</td></tr>
+    </table>
+  </div>
+
+  <p>
+    H 후에 0칸 화살표가 <strong>더 짧아진 게 보이죠</strong> — 길이가 1 → 0.707로 줄었습니다.
+    대신 비어 있던 1칸에 같은 길이의 화살표가 새로 생겼고요. 그래서 측정하면 0도 50%, 1도 50%가 됩니다.
+  </p>
+
+  <!-- ===================== 3 ===================== -->
+  <h2 id="s3"><span class="n">3</span>왜 1/√2? — 진폭과 확률</h2>
+
+  <p>
+    "반반이면 진폭이 1/2 아닌가?" 싶지만, 진폭은 <strong>1/2이 아니라 1/√2</strong>입니다.
+    이유는 <strong>확률 = 진폭²</strong>이라는 규칙과, <strong>확률을 다 더하면 1</strong>이라는 규칙
+    두 개가 함께 강제하기 때문입니다.
+  </p>
+
+  <p>만약 그냥 진폭을 1, 1로 두면:</p>
+  <div class="math mono">1² + 1² = 2 = 200% &nbsp; ❌ (확률이 200%일 순 없다)</div>
+
+  <p>그래서 둘 다 √2로 나눠 줄입니다:</p>
+  <div class="math mono">(1/√2)² + (1/√2)² = ½ + ½ = 1 = 100% &nbsp; ✓</div>
+
+  <div class="call why">
+    <span class="h">진폭 ↔ 확률 (같은 규칙, 두 방향)</span>
+    <strong>확률 = 진폭²</strong> 이면, 거꾸로 <strong>진폭 = √확률</strong> 입니다.
+    (넓이 = 변² ↔ 변 = √넓이 와 같은 한 식.)
+    그래서 상태에는 "확률의 제곱근"인 진폭을 적고, 측정할 때 제곱해서 확률을 되찾습니다.
+  </div>
+
+  <!-- ===================== 4 ===================== -->
+  <h2 id="s4"><span class="n">4</span>H의 정확한 규칙</h2>
+
+  <p>H가 하는 일은 딱 두 단계입니다.</p>
+
+  <div class="rule">① 입력 진폭을 0과 1 양쪽에 <u>복사</u> &nbsp;→&nbsp; ② 각각에 <u>1/√2</u>를 곱한다</div>
+
+  <p>예를 들어 진폭 1짜리 0을 펴면: 0칸·1칸에 각각 1을 복사 → 각각 ×1/√2 → 0칸 1/√2, 1칸 1/√2.</p>
+
+  <h3>부호 규칙 — 딱 한 군데만 마이너스</h3>
+  <p>
+    그런데 0을 펼 때와 1을 펼 때 <strong>부호</strong>가 다릅니다. H를 한 번 걸 때 생기는 "길"을 세어 보면 —
+    <strong>입력이 0이냐 1이냐(2가지)</strong> × <strong>그게 0칸으로 가느냐 1칸으로 가느냐(2가지)</strong>
+    = 모두 <strong>네 가지 길</strong>(0→0, 0→1, 1→0, 1→1)이 있습니다. 그 네 길 중
+    <strong>"입력도 1이고 AND 출력도 1"</strong>인 길(1→1) 하나에만 마이너스가 붙습니다.
+  </p>
+
+  <div class="panel">
+    <table class="amp">
+      <tr><th>입력 → 출력</th><th>부호</th></tr>
+      <tr><td>0 → 0</td><td><span class="arrow-r">+ (오른쪽)</span></td></tr>
+      <tr><td>0 → 1</td><td><span class="arrow-r">+ (오른쪽)</span></td></tr>
+      <tr><td>1 → 0</td><td><span class="arrow-r">+ (오른쪽)</span></td></tr>
+      <tr><td>1 → 1</td><td><span class="arrow-l">− (왼쪽)</span> ← 유일하게 여기만</td></tr>
+    </table>
+  </div>
+
+  <p>정리하면:</p>
+  <div class="panel">
+    <table class="amp">
+      <tr><th>펴는 대상</th><th>0칸</th><th>1칸</th></tr>
+      <tr><td>0 펴기</td><td><span class="arrow-r">+ ▶</span></td><td><span class="arrow-r">+ ▶</span></td></tr>
+      <tr><td>1 펴기</td><td><span class="arrow-r">+ ▶</span></td><td><span class="arrow-l">− ◀</span></td></tr>
+    </table>
+    <p class="legend">0칸은 언제나 +(오른쪽). 1칸만 — 0을 펴면 +, 1을 펴면 −.</p>
+  </div>
+
+  <!-- ===================== 5 ===================== -->
+  <h2 id="s5"><span class="n">5</span>왜 마이너스가 붙는가 — 되돌릴 수 있어야 한다</h2>
+
+  <p>
+    "그 마이너스는 무슨 논리로 붙는가?" 답은 — <strong>양자 게이트는 반드시 되돌릴 수 있어야</strong>
+    하기 때문입니다. (정보를 잃으면 안 된다 — 양자의 철칙.)
+  </p>
+
+  <p>만약 마이너스가 <strong>없어서</strong> H(0)과 H(1)이 똑같다면:</p>
+  <div class="math mono">
+    H(0) = (0 + 1)/√2 <br>
+    H(1) = (0 + 1)/√2 &nbsp; ← 둘이 완전히 같음!
+  </div>
+
+  <p>
+    그러면 누군가 <code>(0+1)/√2</code> 를 건넸을 때 <strong>원래 0이었는지 1이었는지 알 방법이 없습니다.</strong>
+    두 입력이 같은 출력으로 뭉개졌으니까요 → <strong>되돌리기 불가능</strong> → 양자에서 금지된 일입니다.
+  </p>
+
+  <p>그래서 H(0)과 H(1)은 <strong>반드시 달라야</strong> 하고, 그 차이를 만드는 것이 바로 마이너스입니다:</p>
+  <div class="math mono">
+    H(0) = (0 <span class="arrow-r">+</span> 1)/√2 &nbsp; (오른쪽끝, <code>|+⟩</code>)<br>
+    H(1) = (0 <span class="arrow-l">−</span> 1)/√2 &nbsp; (왼쪽끝, <code>|−⟩</code>) &nbsp; → 구별됨 ✓
+  </div>
+
+  <p>
+    그런데 왜 하필 <strong>1→1</strong> 자리일까요? — 0칸은 항상 +(오른쪽)로 두기로 약속하면,
+    두 출력 <code>H(0)</code>과 <code>H(1)</code>을 <strong>다르게 만들 수 있는 자리는 1칸뿐</strong>입니다.
+    그래서 마이너스가 갈 수 있는 곳이 <strong>1→1 한 군데로 정해지는</strong> 거죠.
+    (4번 절의 "0칸은 언제나 +"가 바로 이 약속이었습니다.)
+  </p>
+
+  <div class="call why">
+    <span class="h">핵심</span>
+    마이너스는 끼워 맞추려고 넣은 게 아니라, <strong>"H가 되돌릴 수 있는 게이트이려면 반드시 있어야"</strong>
+    하는 것입니다. 그리고 "되돌릴 수 있다"는 곧 <strong>H를 두 번 하면 자기 자신을 취소</strong>한다는 뜻입니다.
+  </div>
+
+  <!-- ===================== 6 ===================== -->
+  <h2 id="s6"><span class="n">6</span>H를 두 번 — 간섭으로 0이 되살아난다</h2>
+
+  <p>
+    H를 두 번 걸면 <code>|0⟩</code>이 <strong>100%로 되돌아옵니다.</strong> 동전이라면 "랜덤 두 번 = 여전히 랜덤"
+    이어야 하는데, 양자는 그렇지 않습니다. 왜 그런지 손으로 더해 봅시다.
+  </p>
+
+  <p>먼저 기억할 규칙: <strong>게이트는 각 부분에 따로 적용하고, 결과를 합친다.</strong>
+     1차 H 후 상태는 "0-줄기 1/√2, 1-줄기 1/√2"입니다. 2차 H는 이 두 줄기에 따로 적용합니다.</p>
+
+  <div class="step">
+    <div class="num">1</div>
+    <div class="body">
+      <p><strong>0-줄기(1/√2)를 편다</strong> — 0을 펴므로 둘 다 +. 1/√2 × 1/√2 = 1/2.</p>
+      <div class="panel mono">
+        0칸 ← <span class="arrow-r">+1/2</span> &nbsp;&nbsp; 1칸 ← <span class="arrow-r">+1/2</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="num">2</div>
+    <div class="body">
+      <p><strong>1-줄기(1/√2)를 편다</strong> — 1을 펴므로 1칸만 −. 양(1/2)은 똑같다.</p>
+      <div class="panel mono">
+        0칸 ← <span class="arrow-r">+1/2</span> &nbsp;&nbsp; 1칸 ← <span class="arrow-l">−1/2</span> &nbsp; ← 마이너스!
+      </div>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="num">3</div>
+    <div class="body">
+      <p><strong>칸별로 더한다</strong></p>
+      <div class="panel">
+        <table class="amp">
+          <tr><th>칸</th><th>0-줄기에서</th><th>1-줄기에서</th><th>합</th><th>결과</th></tr>
+          <tr>
+            <td>0칸</td>
+            <td><span class="arrow-r">+1/2</span></td>
+            <td><span class="arrow-r">+1/2</span></td>
+            <td><strong>+1</strong></td>
+            <td>같은 방향 → <strong style="color:var(--plus)">보강</strong></td>
+          </tr>
+          <tr>
+            <td>1칸</td>
+            <td><span class="arrow-r">+1/2</span></td>
+            <td><span class="arrow-l">−1/2</span></td>
+            <td><strong>0</strong></td>
+            <td>반대 방향 → <strong style="color:var(--minus)">상쇄</strong></td>
+          </tr>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="rule">
+    결과: 0칸 = +1 (확률 100%), 1칸 = 0 (확률 0%) &nbsp;→&nbsp; 다시 <code>|0⟩</code>!
+  </div>
+
+  <div class="call">
+    <span class="h">왜 50/50이 아니라 0인가</span>
+    <strong>1로 가는 길이 두 개</strong>였습니다 — 0을 거친 길(+1/2)과 1을 거친 길(−1/2).
+    그 둘이 <strong>부호가 반대라 만나서 사라졌습니다.</strong> 이것이 <strong>상쇄 간섭</strong>입니다.
+    동시에 0으로 가는 두 길은 같은 부호라 합쳐졌고요. 그 <code>−1/2</code>는 정확히 4번 절의
+    <strong>"1 → 1 = −"</strong> 한 칸에서 나온 것입니다.
+  </div>
+
+  <div class="call warn">
+    <span class="h">만약 마이너스가 없었다면?</span>
+    1칸은 +1/2 + 1/2 = +1이 되어 <strong>안 사라졌을</strong> 겁니다(여전히 50/50).
+    그 마이너스 하나가 상쇄를 만드는 전부입니다.
+  </div>
+
+  <!-- ===================== 7 ===================== -->
+  <h2 id="s7"><span class="n">7</span>이건 진짜인가, 그냥 표기인가?</h2>
+
+  <p>
+    이 화살표 계산은 <strong>"이렇게 정의하자"가 아니라, 자연이 실제로 그렇게 동작하는 것을
+    관측해서 수식으로 옮긴 것</strong>입니다. 발명이 아니라 발견입니다.
+  </p>
+
+  <h3>간섭은 눈으로 보인다 — 이중슬릿</h3>
+  <p>
+    전자·광자를 슬릿 두 개에 <strong>하나씩</strong> 쏘면 화면에 <strong>밝고 어두운 띠(간섭무늬)</strong>가 쌓입니다.
+    그 어두운 띠가 바로 <strong>진폭이 실제로 상쇄된 자리</strong> — 위에서 1칸이 0이 된 것과 똑같은 일이
+    실제 화면에 "어둠"으로 찍히는 겁니다.
+  </p>
+
+  <h3>H–H도 실제 양자컴에서 매일 돌아간다</h3>
+  <p>
+    진짜 큐비트(광자 편광, 원자, 초전도 큐비트)에 H를 두 번 걸고 측정하면 <strong>실제로 0이 ~100%</strong> 나옵니다.
+    50/50이 아닙니다.
+  </p>
+
+  <div class="call why">
+    <span class="h">이게 "진짜"라는 결정적 증거</span>
+    큐비트가 그냥 50/50 동전이라면 H 두 번 = 랜덤 두 번 = 여전히 50/50이어야 합니다.
+    그런데 실험은 100% 0이 나옵니다. 동전엔 없는 <strong>"부호 달린 진폭이 상쇄되는 일"</strong>이
+    실제로 일어나야만 설명됩니다. 그래서 실험이 우리에게 "진폭과 간섭은 진짜다"라고 강제로 알려줍니다.
+  </div>
+
+  <p>
+    딱 하나, "H"라는 이름이나 +/− 표기 방식엔 인간의 약속이 조금 섞여 있습니다. 하지만 그것이 가리키는
+    <strong>물리적 결과(두 번 하면 진짜 0으로 돌아옴)</strong>는 약속이 아니라 관측된 사실입니다.
+    "왜 자연이 이렇게 도는가"라는 가장 깊은 질문은 아직 아무도 모르는 바닥 공준이지만,
+    "그렇게 동작한다"는 것만큼은 의심의 여지가 없습니다.
+  </p>
+
+  <!-- ===================== 8 ===================== -->
+  <h2 id="s8"><span class="n">8</span>한 장 요약</h2>
+
+  <div class="panel">
+    <table class="amp">
+      <tr><th>개념</th><th>내용</th></tr>
+      <tr><td>큐비트</td><td>각 답(0, 1) 칸에 앉은 <strong>화살표(진폭)</strong></td></tr>
+      <tr><td>확률</td><td>화살표 <strong>길이의 제곱</strong> (그래서 진폭 = √확률)</td></tr>
+      <tr><td>정규화</td><td>제곱들의 합 = 1 → 반반이면 진폭 <strong>1/√2</strong></td></tr>
+      <tr><td>H의 동작</td><td>입력을 0·1로 <strong>복사</strong> → 각각 <strong>×1/√2</strong></td></tr>
+      <tr><td>부호</td><td><strong>1→1 한 군데만 −</strong>, 나머지는 +</td></tr>
+      <tr><td>마이너스 이유</td><td>H가 <strong>되돌릴 수 있어야</strong> 해서 (H(0)≠H(1))</td></tr>
+      <tr><td>H 두 번</td><td>1칸이 <strong>+½ 와 −½로 상쇄</strong> → 다시 <code>|0⟩</code> (간섭)</td></tr>
+      <tr><td>진짜인가</td><td><strong>실제 물리</strong>(이중슬릿·실제 양자컴). 발견이지 발명 아님</td></tr>
+    </table>
+  </div>
+
+  <div class="rule" style="margin-top:28px">
+    양자 알고리즘 = 이 <strong>상쇄·보강</strong>을 설계하는 것 —<br>
+    틀린 답은 상쇄되게, 맞는 답은 보강되게 화살표를 배치하기.
+  </div>
+
+  <footer>
+    <p>Ket — 직접 만드는 양자 토이 언어 · H 게이트 노트</p>
+  </footer>
+
+</div>
+</body>
+</html>
