@@ -112,6 +112,28 @@
     text-decoration: none;
   }
   .toc a:hover { color: var(--accent); }
+  .doc-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin: 20px 0 28px;
+  }
+  .doc-link {
+    align-items: center;
+    background: #f6f9ff;
+    border: 1px solid #cddcff;
+    border-radius: 999px;
+    color: #1745b5;
+    display: inline-flex;
+    font-weight: 800;
+    gap: 8px;
+    padding: 8px 14px;
+    text-decoration: none;
+  }
+  .doc-link:hover {
+    background: #eef4ff;
+    border-color: #9bb8ff;
+  }
   .part {
     margin: 52px 0 18px;
     padding: 18px 20px;
@@ -364,6 +386,10 @@
     목표는 단순해요.<br>
     낯선 수식을 외우기보다, 게이트 하나가 상태 하나를 어떻게 바꾸는지 직접 읽는 감각을 만드는 거예요.
   </p>
+
+  <nav class="doc-links" aria-label="다른 문서">
+    <a class="doc-link" href="index.html">H 게이트 단독 문서 보기</a>
+  </nav>
 
   <div class="toc">
     <strong>차례</strong>

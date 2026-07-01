@@ -481,6 +481,11 @@
   .toc ol { margin: 6px 0 0; padding-left: 22px; }
   .toc a { color: var(--ink); text-decoration: none; }
   .toc a:hover { color: var(--accent); }
+  .doc-links { display:flex; flex-wrap:wrap; gap:10px; margin: 20px 0 28px; }
+  .doc-link { display:inline-flex; align-items:center; gap:8px; border:1px solid #cddcff;
+              background:#f6f9ff; color:#1745b5; border-radius:999px; padding:8px 14px;
+              font-weight:800; text-decoration:none; }
+  .doc-link:hover { border-color:#9bb8ff; background:#eef4ff; }
   footer { text-align:center; color:var(--muted); font-size:.9rem; margin-top: 60px;
            padding-top: 24px; border-top:1px solid var(--line); }
   .legend { font-size:.9rem; color:var(--muted); margin: 6px 0 0; }
@@ -513,6 +518,10 @@
     특히 <code>|0⟩</code> 상태에 H 게이트를 두 번 적용하면 왜 다시 <code>|0⟩</code> 상태로 돌아오는지,
     가능한 측정 결과값 0과 1의 진폭을 한 단계씩 직접 더해서 확인합니다.
   </p>
+
+  <nav class="doc-links" aria-label="다른 문서">
+    <a class="doc-link" href="book-draft.html">Qora로 배우는 양자 게이트 전체 초안 보기</a>
+  </nav>
 
   <div class="toc">
     <strong>차례</strong>
