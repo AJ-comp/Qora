@@ -1,0 +1,5 @@
+{
+  "displayName": "Qora 언어",
+  "description": "Qora 양자 토이 언어를 위한 문법 하이라이팅, hover 설명, 스니펫, 실시간 파스 오류, OpenQASM 변환.",
+  "command.transpile.title": "Qora: OpenQASM으로 변환"
+}

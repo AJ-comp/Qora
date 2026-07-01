@@ -1,9 +1,10 @@
 {
   "name": "qora-language",
-  "displayName": "Qora Language",
-  "description": "Syntax highlighting, hover docs, snippets, live parse errors, and OpenQASM transpile for the Qora quantum toy language.",
-  "version": "0.3.0",
+  "displayName": "%displayName%",
+  "description": "%description%",
+  "version": "0.3.1",
   "publisher": "qora-lang",
+  "icon": "icon.png",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -34,9 +35,7 @@
   "devDependencies": {
     "@vscode/vsce": "^3.2.0"
   },
-  "activationEvents": [
-    "onLanguage:qora"
-  ],
+  "activationEvents": [],
   "contributes": {
     "languages": [
       {
@@ -67,7 +66,7 @@
     "commands": [
       {
         "command": "qora.transpile",
-        "title": "Qora: Transpile to OpenQASM",
+        "title": "%command.transpile.title%",
         "category": "Qora"
       }
     ],

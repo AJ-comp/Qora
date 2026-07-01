@@ -24,6 +24,10 @@ jobs:
     name: ${{ matrix.target }}
     strategy:
       fail-fast: false
+      # Publish one platform at a time: on a brand-new extension the first job CREATES it and the rest
+      # UPDATE it. Running them in parallel makes all three try to create it at once -> the losers fail
+      # with "extension already exists" (a first-publish race).
+      max-parallel: 1
       matrix:
         include:
           - os: windows-latest
