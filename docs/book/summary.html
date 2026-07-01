@@ -1,0 +1,596 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>1부에서 배운 것을 정리해보자 — Qora</title>
+<style>
+:root {
+    --bg: #ffffff;
+    --ink: #1f2430;
+    --muted: #5b6472;
+    --line: #e6e8ee;
+    --panel: #f7f8fb;
+    --accent: #6b3fd4;
+    --plus: #1457d6;
+    --minus: #d62b39;
+    --good: #11875b;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo",
+      "Malgun Gothic", "Noto Sans KR", "Segoe UI Symbol", "Cambria Math", sans-serif;
+    line-height: 1.78;
+    font-size: 17px;
+    word-break: keep-all;
+  }
+  header.hero {
+    padding: 64px 20px 42px;
+    text-align: center;
+    border-bottom: 1px solid var(--line);
+    background: linear-gradient(180deg, #faf9ff, #ffffff);
+  }
+  .tag {
+    display: inline-block;
+    color: var(--accent);
+    font-size: .78rem;
+    font-weight: 800;
+    letter-spacing: .12em;
+    margin-bottom: 14px;
+    text-transform: uppercase;
+  }
+  h1 {
+    margin: 0 0 10px;
+    font-size: 2.15rem;
+    line-height: 1.25;
+  }
+  header.hero p {
+    margin: 0;
+    color: var(--muted);
+    font-size: 1.05rem;
+  }
+  .wrap {
+    max-width: 860px;
+    margin: 0 auto;
+    padding: 0 20px 120px;
+  }
+  h2 {
+    margin: 58px 0 14px;
+    padding-top: 14px;
+    border-top: 2px solid var(--line);
+    font-size: 1.52rem;
+    line-height: 1.45;
+  }
+  h3 {
+    margin: 34px 0 10px;
+    font-size: 1.18rem;
+    line-height: 1.45;
+  }
+  h4 {
+    margin: 0 0 8px;
+    font-size: 1.03rem;
+    line-height: 1.45;
+  }
+  p { margin: 14px 0; }
+  .card p {
+    max-width: 68ch;
+  }
+  strong { color: #11203a; }
+  code,
+  .mono {
+    font-family: "SF Mono", "JetBrains Mono", "D2Coding", Consolas, "Segoe UI Symbol", monospace;
+  }
+  code {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    padding: 1px 6px;
+    font-size: .9em;
+  }
+  .nowrap {
+    white-space: nowrap;
+  }
+  .lead {
+    margin-top: 28px;
+    font-size: 1.08rem;
+  }
+  .toc {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    margin: 26px 0;
+    padding: 16px 18px;
+  }
+  .toc strong { display: block; margin-bottom: 6px; }
+  .toc ol { margin: 0; padding-left: 22px; }
+  .toc a {
+    color: var(--ink);
+    text-decoration: none;
+  }
+  .toc a:hover { color: var(--accent); }
+  .doc-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin: 20px 0 28px;
+  }
+  .doc-link {
+    align-items: center;
+    background: #f6f9ff;
+    border: 1px solid #cddcff;
+    border-radius: 999px;
+    color: #1745b5;
+    display: inline-flex;
+    font-weight: 800;
+    gap: 8px;
+    padding: 8px 14px;
+    text-decoration: none;
+  }
+  .doc-link:hover {
+    background: #eef4ff;
+    border-color: #9bb8ff;
+  }
+  .part {
+    margin: 52px 0 18px;
+    padding: 18px 20px;
+    border-radius: 10px;
+    background: #f3efff;
+    border: 1px solid #e2d8ff;
+  }
+  .part .label {
+    display: inline-block;
+    color: var(--accent);
+    font-size: .78rem;
+    font-weight: 900;
+    letter-spacing: .08em;
+    margin-bottom: 8px;
+  }
+  .part h2 {
+    margin: 0 0 8px;
+    padding: 0;
+    border: 0;
+  }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    margin: 18px 0;
+    padding: 16px 18px;
+    overflow-x: auto;
+  }
+  .call {
+    border-left: 4px solid var(--accent);
+    background: #faf8ff;
+    border-radius: 0 8px 8px 0;
+    margin: 20px 0;
+    padding: 14px 18px;
+  }
+  .call.why {
+    border-color: var(--good);
+    background: #f2fbf7;
+  }
+  .call.warn {
+    border-color: #e6a417;
+    background: #fff9ec;
+  }
+  .call .h {
+    display: block;
+    font-weight: 800;
+    margin-bottom: 4px;
+  }
+  .point-list {
+    display: grid;
+    gap: 10px;
+    margin: 14px 0 22px;
+  }
+  .point {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 10px;
+    align-items: start;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 11px 13px;
+  }
+  .point .marker {
+    color: var(--accent);
+    font-weight: 900;
+    white-space: nowrap;
+  }
+  .rule {
+    background: #f3efff;
+    border: 1px solid #e2d8ff;
+    border-radius: 10px;
+    color: #1a1140;
+    font-size: 1.08rem;
+    font-weight: 800;
+    margin: 20px 0;
+    padding: 16px;
+    text-align: center;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+  th,
+  td {
+    border-bottom: 1px solid var(--line);
+    padding: 9px 12px;
+    text-align: center;
+    white-space: nowrap;
+  }
+  th {
+    color: var(--muted);
+    font-size: .82rem;
+    font-weight: 700;
+  }
+  td:first-child,
+  th:first-child {
+    text-align: left;
+    font-weight: 700;
+  }
+  tr:last-child td { border-bottom: 0; }
+  .math {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    font-weight: 800;
+    margin: 14px 0;
+    padding: 12px 14px;
+    text-align: center;
+  }
+  .math-line + .math-line {
+    margin-top: 4px;
+  }
+  .compare-grid,
+  .summary-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 14px;
+    margin: 16px 0 22px;
+  }
+  @media (min-width: 760px) {
+    .compare-grid,
+    .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  .card {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 15px 16px;
+  }
+  .card.good { border-top: 5px solid var(--good); }
+  .card.warn { border-top: 5px solid #e6a417; }
+  .card.plus { border-top: 5px solid var(--plus); }
+  .card.minus { border-top: 5px solid var(--minus); }
+  .card.accent { border-top: 5px solid var(--accent); }
+  .tag-small {
+    display: inline-block;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    color: var(--muted);
+    font-size: .76rem;
+    font-weight: 900;
+    margin-bottom: 8px;
+    padding: 2px 9px;
+  }
+  .practice {
+    background: #f8fbff;
+    border: 1px solid #cfe0ff;
+    border-left: 8px solid var(--plus);
+    border-radius: 8px;
+    margin: 28px 0 34px;
+    padding: 18px;
+  }
+  .practice .practice-label {
+    display: inline-block;
+    color: var(--plus);
+    background: #edf4ff;
+    border: 1px solid #cfe0ff;
+    border-radius: 999px;
+    font-size: .78rem;
+    font-weight: 900;
+    margin-bottom: 10px;
+    padding: 3px 11px;
+  }
+  .practice h3 { margin-top: 0; }
+  pre {
+    background: #111827;
+    border-radius: 8px;
+    color: #eef4ff;
+    font-size: .88rem;
+    line-height: 1.55;
+    margin: 12px 0 0;
+    overflow-x: auto;
+    padding: 14px 15px;
+  }
+  pre code {
+    background: transparent;
+    border: 0;
+    color: inherit;
+    padding: 0;
+  }
+  .next {
+    background: #f2fbf7;
+    border: 1px solid #b8e5d2;
+    border-radius: 10px;
+    margin-top: 42px;
+    padding: 16px 18px;
+  }
+  .chapter-nav {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 10px;
+    margin: 34px 0 46px;
+  }
+  @media (min-width: 680px) {
+    .chapter-nav { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  .chapter-nav a {
+    display: block;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 12px 14px;
+    text-decoration: none;
+    color: var(--ink);
+    background: #fff;
+  }
+  .chapter-nav a:hover {
+    border-color: #c9d6ff;
+    background: #f8fbff;
+  }
+  .chapter-nav .k {
+    display: block;
+    color: var(--muted);
+    font-size: .78rem;
+    font-weight: 900;
+    margin-bottom: 3px;
+  }
+  .chapter-nav .t {
+    display: block;
+    font-weight: 900;
+  }
+  .chapter-nav .disabled {
+    background: var(--panel);
+    color: var(--muted);
+  }
+  footer {
+    border-top: 1px solid var(--line);
+    color: var(--muted);
+    font-size: .9rem;
+    margin-top: 60px;
+    padding-top: 24px;
+    text-align: center;
+  }
+  .book-shell {
+    display: grid;
+    gap: 28px;
+    grid-template-columns: 260px minmax(0, 1fr);
+    margin: 0 auto;
+    max-width: 1180px;
+    padding: 0 20px 120px;
+  }
+  .side-nav {
+    align-self: start;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    margin-top: 28px;
+    max-height: calc(100vh - 36px);
+    overflow: auto;
+    padding: 14px;
+    position: sticky;
+    top: 18px;
+  }
+  .side-nav strong {
+    display: block;
+    font-size: .9rem;
+    margin: 0 0 8px;
+  }
+  .side-nav a {
+    border-radius: 7px;
+    color: var(--ink);
+    display: block;
+    font-size: .94rem;
+    line-height: 1.35;
+    padding: 7px 8px;
+    text-decoration: none;
+  }
+  .side-nav a:hover,
+  .side-nav a.current {
+    background: #eef4ff;
+    color: #1745b5;
+    font-weight: 800;
+  }
+  .side-nav .group {
+    border-top: 1px solid var(--line);
+    margin-top: 10px;
+    padding-top: 10px;
+  }
+  .article {
+    min-width: 0;
+    padding-bottom: 120px;
+  }
+  .article > h2:first-child,
+  .article > .part:first-child + h2 {
+    margin-top: 28px;
+  }
+  .breadcrumb {
+    color: var(--muted);
+    font-size: .9rem;
+    font-weight: 700;
+    margin: 26px 0 0;
+  }
+  .overview-list {
+    display: grid;
+    gap: 10px;
+    margin: 18px 0 28px;
+  }
+  .overview-item {
+    align-items: baseline;
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    color: var(--ink);
+    display: grid;
+    gap: 8px;
+    grid-template-columns: 92px minmax(0, 1fr);
+    padding: 12px 14px;
+    text-decoration: none;
+  }
+  .overview-item:hover {
+    border-color: #c9d6ff;
+    background: #f8fbff;
+  }
+  .overview-item .num {
+    color: var(--accent);
+    font-size: .86rem;
+    font-weight: 900;
+  }
+  .overview-item .title {
+    font-weight: 900;
+  }
+  .page-nav {
+    display: grid;
+    gap: 12px;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    margin-top: 46px;
+  }
+  .page-nav > a,
+  .page-nav > span {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    color: var(--ink);
+    min-height: 78px;
+    padding: 13px 14px;
+    text-decoration: none;
+  }
+  .page-nav a:hover {
+    border-color: #c9d6ff;
+    background: #f8fbff;
+  }
+  .page-nav .k {
+    color: var(--muted);
+    display: block;
+    font-size: .78rem;
+    font-weight: 900;
+    margin-bottom: 4px;
+  }
+  .page-nav .t {
+    display: block;
+    font-weight: 900;
+    line-height: 1.35;
+  }
+  .page-nav .disabled {
+    background: var(--panel);
+    color: var(--muted);
+  }
+  .page-nav .home {
+    text-align: center;
+  }
+  @media (max-width: 860px) {
+    .book-shell {
+      display: block;
+      padding: 0 18px 90px;
+    }
+    .side-nav {
+      max-height: none;
+      position: static;
+    }
+    .page-nav {
+      grid-template-columns: 1fr;
+    }
+    .overview-item {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="tag">Qora · 양자 게이트 문서</div>
+  <h1>1부에서 배운 것을 정리해보자</h1>
+  <p>큐비트 상태, 진폭, 중첩, 간섭, 가역성을 한 번 묶어보자</p>
+</header>
+
+<div class="book-shell">
+  <aside class="side-nav" aria-label="책 차례">
+    <strong>Qora로 배우는 양자 게이트</strong>
+      <a href="index.html">개요</a>
+      <a href="intro.html">들어가며. 왜 Qora로 양자 게이트를 배울까?</a>
+      <a href="chapter-01.html">1장. 큐비트 상태에는 무엇이 들어 있을까?</a>
+      <a href="chapter-02.html">2장. 진폭과 확률은 어떻게 연결될까?</a>
+      <a href="chapter-03.html">3장. 중첩은 그냥 &quot;모르는 상태&quot;일까?</a>
+      <a href="chapter-04.html">4장. 간섭은 언제 생길까?</a>
+      <a href="chapter-05.html">5장. 양자 게이트는 왜 되돌릴 수 있어야 할까?</a>
+      <a href="chapter-06.html">6장. Qora 코드는 어떻게 읽을까?</a>
+      <a class="current" href="summary.html">정리. 1부에서 배운 것을 정리해보자</a>
+      <a href="chapter-07.html">7장. X 게이트는 무엇을 뒤집을까?</a>
+      <a href="chapter-08.html">8장. H 게이트는 진폭을 어떻게 나눌까?</a>
+      <a href="chapter-09.html">9장. Z 게이트는 무엇의 부호를 바꿀까?</a>
+      <a href="chapter-10.html">10장. CNOT 게이트는 두 큐비트를 어떻게 연결할까?</a>
+      <a href="chapter-11.html">11장. 작은 회로 하나를 끝까지 읽어보자</a>
+    <div class="group">
+      <a href="../index.html">H 게이트 단독 문서</a>
+    </div>
+  </aside>
+  <main class="article">
+    <div class="breadcrumb">Qora로 배우는 양자 게이트 / 정리</div>
+<h2 id="summary">1부에서 배운 것을 정리해보자</h2>
+
+  <div class="summary-grid">
+    <div class="card accent">
+      <span class="tag-small">큐비트 상태</span>
+      <h4>큐비트 상태와 진폭</h4>
+      <p>한 큐비트에는 측정 결과값 0의 진폭과 측정 결과값 1의 진폭이 붙어 있어요.</p>
+    </div>
+
+    <div class="card accent">
+      <span class="tag-small">측정 확률</span>
+      <h4>측정 확률과 진폭 길이</h4>
+      <p>50% 확률의 진폭은 1/2이 아니라 1/√2예요.</p>
+    </div>
+
+    <div class="card plus">
+      <span class="tag-small">중첩</span>
+      <h4>중첩: 여러 진폭이 함께 있는 상태</h4>
+      <p>중첩은 단순히 결과를 모르는 상태가 아니에요.</p>
+    </div>
+
+    <div class="card minus">
+      <span class="tag-small">간섭</span>
+      <h4>간섭: 진폭 기여가 더해지는 순간</h4>
+      <p>같은 부호면 보강되고, 반대 부호면 상쇄돼요.</p>
+    </div>
+  </div>
+
+  <div class="next">
+    <strong>다음 장에서는 무엇을 볼까요?</strong>
+    <p>
+      다음 장에서는 X 게이트를 살펴봐요.<br>
+      X 게이트는 측정 결과값 0과 측정 결과값 1의 진폭 위치를 바꾸는 게이트예요.<br>
+      고전적인 NOT 연산과 가장 비슷하게 느껴지는 게이트이므로,
+      양자 게이트를 처음 익히기에 좋은 출발점으로 삼기 좋아요.
+    </p>
+  </div>
+  <nav class="page-nav" aria-label="장 이동">
+    <a href="chapter-06.html"><span class="k">이전</span><span class="t">6장. Qora 코드는 어떻게 읽을까?</span></a>
+    <a class="home" href="index.html"><span class="k">개요</span><span class="t">전체 차례로 돌아가기</span></a>
+    <a href="chapter-07.html"><span class="k">다음</span><span class="t">7장. X 게이트는 무엇을 뒤집을까?</span></a>
+  </nav>
+    <footer>
+      <p>Qora — 직접 만드는 양자 토이 언어</p>
+    </footer>
+  </main>
+</div>
+
+</body>
+</html>
