@@ -6,7 +6,7 @@ using Janglim.FrontEnd.RegularGrammar;
 namespace Qora;
 
 /// <summary>
-/// Qora v0.8 — a Q#/C#-flavored quantum language on the Janglim engine.
+/// Qora v0.9 — a Q#/C#-flavored quantum language on the Janglim engine.
 ///
 ///   operation Bell(Qubit[2] q) {       // a subroutine, with C#-style parameters
 ///       H(q[0]);
@@ -24,9 +24,10 @@ namespace Qora;
 /// apart by name (a defined operation -> a call, otherwise a gate). The operation named <c>Main</c>
 /// is the entry (its body becomes the QASM top-level); every other operation becomes a <c>def</c>.
 ///
-/// v0.8 adds: single-gate functors <c>Adjoint G(...)</c> / <c>Controlled G(...)</c> (-> OpenQASM
+/// v0.8 added: single-gate functors <c>Adjoint G(...)</c> / <c>Controlled G(...)</c> (-> OpenQASM
 /// <c>inv @</c> / <c>ctrl @</c>), richer conditions (== != &lt; &lt;= &gt; &gt;= &amp;&amp; || !),
-/// <c>if/else</c> (and <c>else if</c>), first-class <c>Reset</c>, and <c>//</c> / <c>/* */</c> comments.
+/// <c>if/else</c> (and <c>else if</c>), and first-class <c>Reset</c>.
+/// v0.9 adds: <c>//</c> line comments (block <c>/* */</c> comments still pending engine support).
 /// Operations are still void (no return value yet).
 /// </summary>
 public class QoraGrammar : Grammar
@@ -55,10 +56,12 @@ public class QoraGrammar : Grammar
     public Terminal Int { get; } = new Terminal(TokenType.Keyword, "int", "int", true, false);
     public Terminal Bit { get; } = new Terminal(TokenType.Keyword, "bit", "bit", true, false);
 
-    // Comments (`//` and `/* */`) are NOT supported yet: they need the Janglim lexer to do TRUE
-    // longest-match — today it only fakes it, so a single "/" operator out-prioritizes a "//" / "/*"
-    // comment pattern. This is an ENGINE gap (see AJPGS/docs/TODO.md "true longest-match"); deferred to
-    // the engine rather than worked around in Qora.
+    // Line comments: `//` to end of line. Value is a RAW regex — Janglim >=0.2.0-preview.3 uses a
+    // comment terminal's Value verbatim (no \b wrapping), so "//.*$" wins the lexer's longest-match over
+    // the "/" operator; meaning=false + TokenType.SpecialToken.Comment -> the lexer filters it out of the
+    // parse stream. (Block comments `/* */` still need the engine's ScopeInfo path wired into this Lexer,
+    // so they stay deferred — see AJPGS/docs/TODO.md.)
+    public Terminal LineComment { get; } = new Terminal(TokenType.SpecialToken.Comment, "//.*$", false, true);
 
     // --- identifier + numbers (meaning=true -> kept in AST). Float must out-length Num so the lexer's
     //     longest-match picks "0.5" as one Float (not Num "0" + ".5"); `pi` is just an identifier the

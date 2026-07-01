@@ -1,9 +1,15 @@
 name: Publish Qora VS Code extension
 
-# Manual release of the Qora VS Code extension to the Marketplace.
+# Release of the Qora VS Code extension to the Marketplace.
 # For each target OS/arch it builds a self-contained, single-file Qora CLI (NO trim / NO AOT — Janglim's
 # grammar reflection breaks under both), bundles it into a platform-specific .vsix, and publishes.
-# Trigger it by hand from the Actions tab.
+#
+# AUTOMATIC on push to main: a "gate" job compares vscode/package.json's version to the version already
+# on the Marketplace. It publishes ONLY when they differ (i.e. you bumped the version); an unchanged
+# version is skipped cleanly (green, no "already exists" failure). So the flow is simply:
+#   bump vscode/package.json version + push  ->  publishes
+#   push without a version bump              ->  skips
+# You can still run it by hand from the Actions tab (with an optional dry-run).
 #
 # Requires a repository secret VSCE_PAT: an Azure DevOps Personal Access Token scoped to
 # Marketplace > Manage (All accessible organizations).
@@ -15,13 +21,54 @@ on:
         description: "Package only — do NOT publish (use to test the build)"
         type: boolean
         default: false
+  push:
+    branches: [main]
+    paths:
+      - 'vscode/**'
+      - 'src/**'
+      - '.github/workflows/publish-vsce.yml'
 
 permissions:
   contents: read
 
 jobs:
+  # Decide whether there is a new version to publish. Publishes only when the local package.json version
+  # differs from what is already live on the Marketplace, so ordinary pushes never fail with "already
+  # exists" — they just skip.
+  gate:
+    name: check version
+    runs-on: ubuntu-latest
+    outputs:
+      should_publish: ${{ steps.check.outputs.should_publish }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - id: check
+        shell: bash
+        run: |
+          local_v="$(node -p "require('./vscode/package.json').version")"
+          # Latest version currently on the Marketplace ('' if the extension is not published yet or the
+          # query fails — which then counts as "different" so the first publish still goes through).
+          meta="$(npx --yes @vscode/vsce show qora-lang.qora-language --json 2>/dev/null || echo '{}')"
+          published_v="$(printf '%s' "$meta" | node -e "let s='';process.stdin.on('data',c=>s+=c).on('end',()=>{try{process.stdout.write(((JSON.parse(s).versions||[])[0]||{}).version||'')}catch(e){process.stdout.write('')}})")"
+          echo "local='$local_v'  marketplace='$published_v'"
+          if [ "$local_v" != "$published_v" ]; then
+            echo "→ new version, will publish"
+            echo "should_publish=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "→ version unchanged, skipping publish"
+            echo "should_publish=false" >> "$GITHUB_OUTPUT"
+          fi
+
   publish:
     name: ${{ matrix.target }}
+    needs: gate
+    # Publish on a manual run, or when the gate found a new version. A same-version push skips this job.
+    if: ${{ github.event_name == 'workflow_dispatch' || needs.gate.outputs.should_publish == 'true' }}
     strategy:
       fail-fast: false
       # Publish one platform at a time: on a brand-new extension the first job CREATES it and the rest

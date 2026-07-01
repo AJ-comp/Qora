@@ -6,7 +6,7 @@ using Janglim.FrontEnd.Ast;
 namespace Qora;
 
 /// <summary>
-/// Walks a Qora v0.8 AST and emits OpenQASM 3.0.
+/// Walks a Qora v0.9 AST and emits OpenQASM 3.0.
 /// <list type="bullet">
 ///   <item>each operation becomes either the top-level program (the one named <c>Main</c>, else the
 ///         first/only one) or a <c>def</c> subroutine; subroutines are emitted first so they precede

@@ -1,7 +1,19 @@
+<div align="center">
+
+<img src="docs/images/quantum-language-icon-128.png" alt="Qora" width="128" height="128">
+
 # Qora
 
-A small **quantum toy language** for learning — it parses (via the
-[Janglim](https://www.nuget.org/packages/Janglim) parser-generator) and emits **OpenQASM 3.0**.
+**A small quantum toy language for learning** — parse with [Janglim](https://www.nuget.org/packages/Janglim), emit **OpenQASM 3.0**.
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-111827?style=flat-square&labelColor=111827)](LICENSE)
+[![Built on Janglim](https://img.shields.io/badge/built%20on-Janglim%200.2.0--preview.3-111827?style=flat-square&labelColor=111827)](https://www.nuget.org/packages/Janglim)
+[![Emits OpenQASM 3.0](https://img.shields.io/badge/emits-OpenQASM%203.0-111827?style=flat-square&labelColor=111827)](https://openqasm.com/)
+[![VS Code Extension](https://img.shields.io/badge/VS%20Code-Extension-111827?style=flat-square&labelColor=111827)](https://marketplace.visualstudio.com/items?itemName=qora-lang.qora-language)
+
+</div>
+
+---
 
 ```
 operation Bell(Qubit[2] q) {
@@ -11,7 +23,7 @@ operation Bell(Qubit[2] q) {
 operation Main() {
     use q = Qubit[2];
     Bell(q);
-    bit r = M(q[0]);
+    bit r = M(q[0]);   // measure into a classical bit
 }
 ```
 
@@ -37,3 +49,8 @@ repository secret).
 
 `docs/index.html` is a self-contained page. To publish on GitHub Pages:
 **Settings → Pages → Deploy from a branch → `main` / `/docs`.**
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for the language's release notes (v0.1 → v0.9). The VS Code extension
+is versioned separately in [vscode/CHANGELOG.md](vscode/CHANGELOG.md).

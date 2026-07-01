@@ -4,9 +4,12 @@ All notable changes to the Qora Language extension.
 
 ## 0.4.0
 
-- Bundles the **Qora v0.8** parser, so live errors and transpile now understand the new language
-  features: single-gate functors (`Adjoint G(...)` / `Controlled G(...)`), richer conditions
-  (`!= < <= > >= && || !`), `if` / `else` / `else if`, and first-class `Reset` / `ResetAll`.
+- Bundles the **Qora v0.9** parser (Janglim `0.2.0-preview.3`), so live errors and transpile now
+  understand the newer language features:
+  - single-gate functors (`Adjoint G(...)` / `Controlled G(...)`), richer conditions
+    (`!= < <= > >= && || !`), `if` / `else` / `else if`, and first-class `Reset` / `ResetAll`;
+  - **`//` line comments** — recognized and dropped before parsing, while a lone `/` still lexes as
+    division. (Block `/* */` comments are still pending engine support.)
 
 ## 0.3.1
 
