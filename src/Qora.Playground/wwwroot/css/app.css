@@ -228,6 +228,6 @@ code {
 
 /* Monaco editor needs an explicit height on the editor element ITSELF — without it the
    editor collapses to a thin strip at the top of its container. Filling the 340px wrapper. */
-#ket-editor {
+#qora-editor {
     height: 100%;
 }

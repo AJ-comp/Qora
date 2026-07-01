@@ -1,0 +1,39 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Qora",
+  "scopeName": "source.qora",
+  "patterns": [
+    { "include": "#keywords" },
+    { "include": "#types" },
+    { "include": "#gates" },
+    { "include": "#constants" },
+    { "include": "#numbers" },
+    { "include": "#operators" }
+  ],
+  "repository": {
+    "keywords": {
+      "name": "keyword.control.qor",
+      "match": "\\b(operation|use|const|var|if|for|in|while|repeat|until)\\b"
+    },
+    "types": {
+      "name": "storage.type.qor",
+      "match": "\\b(Qubit|int|bit)\\b"
+    },
+    "gates": {
+      "name": "support.function.qor",
+      "match": "\\b(CNOT|CCX|SWAP|CX|CY|CZ|Rx|Ry|Rz|H|X|Y|Z|S|T|M)\\b"
+    },
+    "constants": {
+      "name": "constant.language.qor",
+      "match": "\\bpi\\b"
+    },
+    "numbers": {
+      "name": "constant.numeric.qor",
+      "match": "\\b\\d+(\\.\\d+)?\\b"
+    },
+    "operators": {
+      "name": "keyword.operator.qor",
+      "match": "==|\\.\\.|[-+*/=]"
+    }
+  }
+}

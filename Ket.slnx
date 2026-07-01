@@ -1,7 +1,0 @@
-<Solution>
-  <Folder Name="/src/">
-    <Project Path="src/Ket.Core/Ket.Core.csproj" />
-    <Project Path="src/Ket.Playground/Ket.Playground.csproj" />
-    <Project Path="src/Ket/Ket.csproj" />
-  </Folder>
-</Solution>

@@ -1,0 +1,14 @@
+# Excluded from the packaged .vsix (keep the shipped extension lean).
+# NOTE: bin/<target>/Qora[.exe] is intentionally NOT ignored — the per-platform build script
+# stages only the matching binary in bin/ before `vsce package --target`, so each .vsix carries
+# exactly one platform's binary.
+.vscode/**
+node_modules/**
+dist/**
+scripts/**
+**/*.pdb
+**/*.vsix
+**/*.map
+**/.DS_Store
+.gitignore
+.vscodeignore

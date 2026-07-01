@@ -1,0 +1,7 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Qora.Core/Qora.Core.csproj" />
+    <Project Path="src/Qora.Playground/Qora.Playground.csproj" />
+    <Project Path="src/Qora/Qora.csproj" />
+  </Folder>
+</Solution>

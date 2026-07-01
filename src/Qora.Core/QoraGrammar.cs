@@ -3,10 +3,10 @@ using Janglim.FrontEnd;
 using Janglim.FrontEnd.Grammars;
 using Janglim.FrontEnd.RegularGrammar;
 
-namespace Ket;
+namespace Qora;
 
 /// <summary>
-/// Ket v0.6 — a Q#/C#-flavored quantum language on the Janglim engine.
+/// Qora v0.6 — a Q#/C#-flavored quantum language on the Janglim engine.
 ///
 ///   operation Bell(Qubit[2] q) {       // a subroutine, with C#-style parameters
 ///       H(q[0]);
@@ -24,7 +24,7 @@ namespace Ket;
 /// is the entry (its body becomes the QASM top-level); every other operation becomes a <c>def</c>.
 /// Operations are void for now (no return value yet).
 /// </summary>
-public class KetGrammar : Grammar
+public class QoraGrammar : Grammar
 {
     // --- keywords (meaning=false -> excluded from AST; bWord=false -> win the lexer tie vs identifier) ---
     public Terminal Operation { get; } = new Terminal(TokenType.Keyword, "operation", false);
@@ -110,7 +110,7 @@ public class KetGrammar : Grammar
 
     public override NonTerminal EbnfRoot => program;
 
-    public KetGrammar()
+    public QoraGrammar()
     {
         program.AddItem(operationList, ProgramM);
         operationList.AddItem(operation | operationList + operation);

@@ -1,4 +1,4 @@
-// Registers a "ket" language with Monaco: syntax highlighting + hover docs.
+// Registers a "qora" language with Monaco: syntax highlighting + hover docs.
 //   keywords (operation/use/const/var/if/for/…) -> blue
 //   types    (Qubit/int/bit)                      -> teal
 //   gates    (H/X/CNOT/Rx/…/M)                    -> purple
@@ -11,9 +11,9 @@
         return;
     }
 
-    monaco.languages.register({ id: 'ket' });
+    monaco.languages.register({ id: 'qora' });
 
-    monaco.languages.setMonarchTokensProvider('ket', {
+    monaco.languages.setMonarchTokensProvider('qora', {
         keywords: ['operation', 'use', 'const', 'var', 'if', 'for', 'in', 'while', 'repeat', 'until'],
         types: ['Qubit', 'int', 'bit'],
         gates: ['H', 'X', 'Y', 'Z', 'S', 'T', 'CNOT', 'CX', 'CZ', 'SWAP', 'CCX', 'Rx', 'Ry', 'Rz', 'M'],
@@ -38,7 +38,7 @@
         }
     });
 
-    monaco.editor.defineTheme('ket-theme', {
+    monaco.editor.defineTheme('qora-theme', {
         base: 'vs',
         inherit: true,
         rules: [
@@ -54,7 +54,7 @@
     });
 
     // --- hover docs: keyed by the exact word under the cursor ---
-    const KET_DOCS = {
+    const QORA_DOCS = {
         // single-qubit gates
         'H': '**H** — 하다마드 게이트\n\n큐비트를 **중첩**(50/50)으로 만들어요.\n|0⟩ → (|0⟩+|1⟩)/√2\n\n`H(q[0]);` → `h q[0];`',
         'X': '**X** — 파울리-X (NOT)\n\n큐비트를 **뒤집어요**. |0⟩ ↔ |1⟩\n\n`X(q[0]);` → `x q[0];`',
@@ -89,11 +89,11 @@
         'repeat': '**repeat** — 반복-until\n\n`repeat { … } until (r == 1);` — 조건 만족까지 반복(최소 한 번 실행).',
     };
 
-    monaco.languages.registerHoverProvider('ket', {
+    monaco.languages.registerHoverProvider('qora', {
         provideHover(model, position) {
             const word = model.getWordAtPosition(position);
             if (!word) return null;
-            const md = KET_DOCS[word.word];
+            const md = QORA_DOCS[word.word];
             if (!md) return null;
             return {
                 range: new monaco.Range(position.lineNumber, word.startColumn, position.lineNumber, word.endColumn),

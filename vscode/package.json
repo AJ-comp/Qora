@@ -1,0 +1,93 @@
+{
+  "name": "qora-language",
+  "displayName": "Qora Language",
+  "description": "Syntax highlighting, hover docs, snippets, live parse errors, and OpenQASM transpile for the Qora quantum toy language.",
+  "version": "0.3.0",
+  "publisher": "qora-lang",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/AJ-comp/Qora.git",
+    "directory": "vscode"
+  },
+  "bugs": {
+    "url": "https://github.com/AJ-comp/Qora/issues"
+  },
+  "homepage": "https://github.com/AJ-comp/Qora#readme",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "keywords": [
+    "qora",
+    "quantum",
+    "openqasm",
+    "qubit"
+  ],
+  "main": "./extension.js",
+  "scripts": {
+    "package": "bash scripts/build-vsix.sh",
+    "package:win": "bash scripts/build-vsix.sh win32-x64"
+  },
+  "devDependencies": {
+    "@vscode/vsce": "^3.2.0"
+  },
+  "activationEvents": [
+    "onLanguage:qora"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "qora",
+        "aliases": [
+          "Qora",
+          "qora"
+        ],
+        "extensions": [
+          ".qor"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "qora",
+        "scopeName": "source.qora",
+        "path": "./syntaxes/qora.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "qora",
+        "path": "./snippets/qora.code-snippets"
+      }
+    ],
+    "commands": [
+      {
+        "command": "qora.transpile",
+        "title": "Qora: Transpile to OpenQASM",
+        "category": "Qora"
+      }
+    ],
+    "configuration": {
+      "title": "Qora",
+      "properties": {
+        "qora.command": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Override the Qora parser CLI. **Leave empty to use the parser bundled with the extension** (a per-platform self-contained binary — no .NET install needed). Set this to a Qora executable, or to `dotnet` together with `#qora.args#` pointing at a `Qora.dll`. The extension appends `--json` and feeds the document on stdin."
+        },
+        "qora.args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "markdownDescription": "Extra arguments before `--json`, used only when `#qora.command#` is set (or as a `dotnet` fallback when no bundled binary matches your platform). For example your built `Qora.dll` (`[\"C:/…/Qora/src/Qora/bin/Debug/net10.0/Qora.dll\"]`), or `[\"run\", \"--project\", \"C:/…/Qora/src/Qora\", \"--\"]` to run from source."
+        }
+      }
+    }
+  }
+}

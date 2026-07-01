@@ -1,0 +1,19 @@
+operation Prepare(Qubit[2] q) {
+    H(q[0]);
+    CNOT(q[0], q[1]);
+    Rz(pi/4, q[1]);
+    Ry(0.5, q[0]);
+}
+
+operation Main() {
+    use q = Qubit[2];
+    const int n = 3;
+    Prepare(q);
+    for i in 0..1 {
+        Rx(pi/2, q[i]);
+    }
+    bit r = M(q[0]);
+    if (r == 1) {
+        X(q[1]);
+    }
+}

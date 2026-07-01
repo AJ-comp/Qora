@@ -1,6 +1,6 @@
 using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.Components.WebAssembly.Hosting;
-using Ket.Playground;
+using Qora.Playground;
 using BlazorBlueprint.Components;
 
 var builder = WebAssemblyHostBuilder.CreateDefault(args);

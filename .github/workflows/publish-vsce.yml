@@ -1,0 +1,83 @@
+name: Publish Qora VS Code extension
+
+# Manual release of the Qora VS Code extension to the Marketplace.
+# For each target OS/arch it builds a self-contained, single-file Qora CLI (NO trim / NO AOT — Janglim's
+# grammar reflection breaks under both), bundles it into a platform-specific .vsix, and publishes.
+# Trigger it by hand from the Actions tab.
+#
+# Requires a repository secret VSCE_PAT: an Azure DevOps Personal Access Token scoped to
+# Marketplace > Manage (All accessible organizations).
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Package only — do NOT publish (use to test the build)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: win32-x64
+            rid: win-x64
+          - os: macos-latest
+            target: darwin-arm64
+            rid: osx-arm64
+          - os: ubuntu-latest
+            target: linux-x64
+            rid: linux-x64
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: vscode
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # Self-contained single-file CLI, built natively on each target's own runner (most reliable for
+      # single-file apphost generation). The Janglim engine comes from the published NuGet package.
+      - name: Publish Qora CLI
+        run: >-
+          dotnet publish ../src/Qora/Qora.csproj -c Release -r ${{ matrix.rid }}
+          --self-contained true -p:PublishSingleFile=true -o "bin/${{ matrix.target }}"
+
+      - name: Strip debug symbols
+        shell: bash
+        run: rm -f "bin/${{ matrix.target }}"/*.pdb
+
+      - name: Mark binary executable (unix)
+        if: matrix.os != 'windows-latest'
+        run: chmod +x "bin/${{ matrix.target }}/Qora"
+
+      - name: Package .vsix
+        run: npx --yes @vscode/vsce package --target ${{ matrix.target }} -o "qora-${{ matrix.target }}.vsix"
+
+      - name: Publish to Marketplace
+        if: ${{ !inputs.dry_run }}
+        run: npx --yes @vscode/vsce publish --packagePath "qora-${{ matrix.target }}.vsix"
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+
+      - name: Upload .vsix artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: qora-${{ matrix.target }}
+          path: vscode/qora-${{ matrix.target }}.vsix

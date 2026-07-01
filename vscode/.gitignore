@@ -1,0 +1,7 @@
+# Built per-platform Qora binaries (produced by scripts/build-vsix.sh; ~70 MB each — don't commit).
+bin/
+# Packaged extensions.
+dist/
+*.vsix
+# Node.
+node_modules/

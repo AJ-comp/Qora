@@ -3,10 +3,10 @@ using System.Linq;
 using System.Text;
 using Janglim.FrontEnd.Ast;
 
-namespace Ket;
+namespace Qora;
 
 /// <summary>
-/// Walks a Ket v0.6 AST and emits OpenQASM 3.0.
+/// Walks a Qora v0.6 AST and emits OpenQASM 3.0.
 /// <list type="bullet">
 ///   <item>each operation becomes either the top-level program (the one named <c>Main</c>, else the
 ///         first/only one) or a <c>def</c> subroutine; subroutines are emitted first so they precede
@@ -19,7 +19,7 @@ namespace Ket;
 ///   <item>classical decls / control flow / arithmetic map straight through (see the v0.5 rules).</item>
 /// </list>
 /// </summary>
-public static class KetQasmEmitter
+public static class QoraQasmEmitter
 {
     private static readonly Dictionary<string, string> GateNames = new()
     {

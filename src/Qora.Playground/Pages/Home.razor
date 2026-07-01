@@ -1,13 +1,13 @@
 @page "/"
 
-<PageTitle>Ket Playground</PageTitle>
+<PageTitle>Qora Playground</PageTitle>
 
 <div class="max-w-6xl mx-auto p-6 space-y-6">
 
     <header class="space-y-1">
-        <h1 class="text-3xl font-bold tracking-tight">Ket Playground</h1>
+        <h1 class="text-3xl font-bold tracking-tight">Qora Playground</h1>
         <p class="text-muted-foreground">
-            Q# 스타일 양자 토이 언어 <span class="font-semibold">Ket</span>을 브라우저에서 바로 파싱·변환해보세요 —
+            Q# 스타일 양자 토이 언어 <span class="font-semibold">Qora</span>을 브라우저에서 바로 파싱·변환해보세요 —
             <code class="font-mono">operation Foo(Qubit[n] q)</code> · <code class="font-mono">호출 Foo(q)</code> · <code class="font-mono">use … Qubit[n]</code> ·
             <code class="font-mono">const/var/int</code> · <code class="font-mono">H / X / CNOT / S / T / CZ / SWAP / CCX</code> ·
             <code class="font-mono">Rx / Ry / Rz (회전, pi/2)</code> ·
@@ -21,12 +21,12 @@
         @* --- input --- *@
         <BbCard>
             <BbCardHeader>
-                <BbCardTitle>Ket 코드</BbCardTitle>
+                <BbCardTitle>Qora 코드</BbCardTitle>
                 <BbCardDescription>프로그램을 입력하고 Run을 누르세요.</BbCardDescription>
             </BbCardHeader>
             <BbCardContent>
                 <div style="height: 340px; border: 1px solid #e2e8f0; border-radius: 6px; overflow: hidden;">
-                    <StandaloneCodeEditor @ref="_editor" Id="ket-editor"
+                    <StandaloneCodeEditor @ref="_editor" Id="qora-editor"
                                           ConstructionOptions="EditorOptions"
                                           OnDidInit="OnEditorInit" />
                 </div>
@@ -104,7 +104,7 @@
         <BbCard>
             <BbCardHeader>
                 <BbCardTitle>OpenQASM 3.0</BbCardTitle>
-                <BbCardDescription>이 Ket 코드를 표준 OpenQASM으로 변환한 결과 — Qiskit 등에 그대로 붙여넣을 수 있어요.</BbCardDescription>
+                <BbCardDescription>이 Qora 코드를 표준 OpenQASM으로 변환한 결과 — Qiskit 등에 그대로 붙여넣을 수 있어요.</BbCardDescription>
             </BbCardHeader>
             <BbCardContent>
                 <pre class="text-xs font-mono whitespace-pre overflow-auto rounded-md bg-muted p-3" style="max-height: 40vh">@_result.Qasm</pre>
@@ -140,15 +140,15 @@
         "operation Prepare(Qubit[2] q) {\n    H(q[0]);\n    CNOT(q[0], q[1]);\n    Rz(pi/4, q[1]);\n    Ry(0.5, q[0]);\n}\n\noperation Main() {\n    use q = Qubit[2];\n    Prepare(q);\n    for i in 0..1 {\n        Rx(pi/2, q[i]);\n    }\n    bit r = M(q[0]);\n    if (r == 1) {\n        X(q[1]);\n    }\n}";
 
     private StandaloneCodeEditor _editor = null!;
-    private KetParseResult? _result;
+    private QoraParseResult? _result;
     private string _view = "ast";   // "ast" or "parse"
 
     private StandaloneEditorConstructionOptions EditorOptions(StandaloneCodeEditor editor) =>
         new StandaloneEditorConstructionOptions
         {
             AutomaticLayout = true,
-            Language = "ket",
-            Theme = "ket-theme",
+            Language = "qora",
+            Theme = "qora-theme",
             Value = BellExample,
             FontSize = 14,
             ScrollBeyondLastLine = false,
@@ -165,7 +165,7 @@
     private async Task Run()
     {
         var code = await _editor.GetValue();
-        _result = KetParser.Parse(code);
+        _result = QoraParser.Parse(code);
         StateHasChanged();
     }
 

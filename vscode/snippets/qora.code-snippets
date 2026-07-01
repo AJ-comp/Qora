@@ -1,0 +1,42 @@
+{
+  "operation": {
+    "prefix": "operation",
+    "body": ["operation ${1:Name}(${2}) {", "\t$0", "}"],
+    "description": "operation(서브루틴) 정의"
+  },
+  "Main entry": {
+    "prefix": "main",
+    "body": ["operation Main() {", "\tuse q = Qubit[${1:2}];", "\t$0", "}"],
+    "description": "Main 진입점 + 큐비트 할당"
+  },
+  "use (qubit alloc)": {
+    "prefix": "use",
+    "body": ["use ${1:q} = Qubit[${2:2}];"],
+    "description": "큐비트 할당"
+  },
+  "measure": {
+    "prefix": "measure",
+    "body": ["bit ${1:r} = M(${2:q}[${3:0}]);"],
+    "description": "측정 → 고전 비트"
+  },
+  "for loop": {
+    "prefix": "for",
+    "body": ["for ${1:i} in ${2:0}..${3:2} {", "\t$0", "}"],
+    "description": "범위 반복 (양끝 포함)"
+  },
+  "if (feedback)": {
+    "prefix": "if",
+    "body": ["if (${1:r} == ${2:1}) {", "\t$0", "}"],
+    "description": "조건 분기 (측정 피드백)"
+  },
+  "Bell state": {
+    "prefix": "bell",
+    "body": [
+      "operation Bell(Qubit[2] q) {",
+      "\tH(q[0]);",
+      "\tCNOT(q[0], q[1]);",
+      "}"
+    ],
+    "description": "벨 상태 만들기 (중첩 + 얽힘)"
+  }
+}
