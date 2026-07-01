@@ -2,6 +2,16 @@
 
 All notable changes to the Qora Language extension.
 
+## 0.4.0
+
+- Bundles the **Qora v0.8** parser, so live errors and transpile now understand the new language
+  features: single-gate functors (`Adjoint G(...)` / `Controlled G(...)`), richer conditions
+  (`!= < <= > >= && || !`), `if` / `else` / `else if`, and first-class `Reset` / `ResetAll`.
+
+## 0.3.1
+
+- Patch release (bundled-parser bring-up across win32-x64 / darwin-arm64 / linux-x64).
+
 ## 0.3.0
 
 - **Bundled parser** — the Qora parser now ships inside the extension as a per-platform, self-contained

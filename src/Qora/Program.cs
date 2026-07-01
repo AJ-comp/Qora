@@ -74,7 +74,7 @@ const string sample = """
 
 var result = QoraParser.Parse(sample);
 
-Console.WriteLine("=== Qora v0.7 (console) ===\n");
+Console.WriteLine("=== Qora v0.8 (console) ===\n");
 Console.WriteLine($"parse: {(result.Success ? "ACCEPTED" : "REJECTED")}\n");
 
 if (result.Success)

@@ -6,17 +6,17 @@ using Janglim.FrontEnd.Ast;
 namespace Qora;
 
 /// <summary>
-/// Walks a Qora v0.6 AST and emits OpenQASM 3.0.
+/// Walks a Qora v0.8 AST and emits OpenQASM 3.0.
 /// <list type="bullet">
 ///   <item>each operation becomes either the top-level program (the one named <c>Main</c>, else the
 ///         first/only one) or a <c>def</c> subroutine; subroutines are emitted first so they precede
 ///         their call sites;</item>
 ///   <item>an invocation <c>Foo(args)</c> emits as a gate (<c>foo args;</c>) when the name is a known
-///         gate, otherwise as a subroutine call (<c>foo(args);</c>);</item>
-///   <item>parameters map type-first: <c>Qubit[2] q</c>→<c>qubit[2] q</c>, <c>Qubit q</c>→<c>qubit q</c>,
-///         <c>int n</c>→<c>int n</c>;</item>
-///   <item>qubits (<c>use</c>) and measurement bits are hoisted within their operation's scope;</item>
-///   <item>classical decls / control flow / arithmetic map straight through (see the v0.5 rules).</item>
+///         gate, otherwise as a subroutine call (<c>foo(args);</c>); a functor prefix maps to an
+///         OpenQASM gate modifier — <c>Adjoint G</c>→<c>inv @ g</c>, <c>Controlled G</c>→<c>ctrl @ g</c>;</item>
+///   <item>parameters map type-first; qubits (<c>use</c>) and measurement bits are hoisted;</item>
+///   <item>conditions (== != &lt; &lt;= &gt; &gt;= &amp;&amp; || !) and control flow (if/else, for, while,
+///         repeat) map straight through.</item>
 /// </list>
 /// </summary>
 public static class QoraQasmEmitter
@@ -31,18 +31,28 @@ public static class QoraQasmEmitter
         ["T"] = "t",        // π/8  (√S)
         ["CNOT"] = "cx",
         ["CX"] = "cx",
+        ["CY"] = "cy",      // controlled-Y
         ["CZ"] = "cz",      // controlled-Z
         ["SWAP"] = "swap",  // swap two qubits
         ["CCX"] = "ccx",    // Toffoli (controlled-controlled-X)
         ["Rx"] = "rx",      // rotation about X by an angle  (parametrized)
         ["Ry"] = "ry",      // rotation about Y
         ["Rz"] = "rz",      // rotation about Z
+        ["Reset"] = "reset",     // return a qubit (or register) to |0>
+        ["ResetAll"] = "reset",  // reset a whole register
     };
 
     // parametrized rotation gates: Rx(θ, q) -> rx(θ) q;  (angle in parens, qubit after)
     private static readonly HashSet<string> RotationGates = new() { "Rx", "Ry", "Rz" };
 
     private static readonly HashSet<string> TypeKeywords = new() { "int", "bit" };
+
+    // functor prefix -> OpenQASM gate modifier
+    private static readonly Dictionary<string, string> Functors = new()
+    {
+        ["Adjoint"] = "inv @ ",
+        ["Controlled"] = "ctrl @ ",
+    };
 
     public static string Emit(AstSymbol? ast)
     {
@@ -116,6 +126,8 @@ public static class QoraQasmEmitter
                 case "For":
                 case "While":
                 case "Repeat":
+                    // recurse into every nested statement (both then- and else-branches; the Condition
+                    // node has no declarations so it is simply skipped by the switch).
                     HoistDecls(node.Items.OfType<AstNonTerminal>(), decls);
                     break;
             }
@@ -150,50 +162,84 @@ public static class QoraQasmEmitter
                     break;
 
                 case "If":
-                    var c = Conditions(node);
-                    body.AppendLine($"{pad}if ({At(c, 0)} == {At(c, 1)}) {{");
-                    EmitStatements(node.Items.OfType<AstNonTerminal>(), body, indent + 1, ops);
-                    body.AppendLine($"{pad}}}");
+                    EmitIf(node, body, indent, ops);
                     break;
 
                 case "For":
                     var f = Conditions(node);
                     body.AppendLine($"{pad}for int {At(f, 0)} in [{At(f, 1)}:{At(f, 2)}] {{");
-                    EmitStatements(node.Items.OfType<AstNonTerminal>(), body, indent + 1, ops);
+                    EmitStatements(BodyStmts(node), body, indent + 1, ops);
                     body.AppendLine($"{pad}}}");
                     break;
 
                 case "While":
-                    var w = Conditions(node);
-                    body.AppendLine($"{pad}while ({At(w, 0)} == {At(w, 1)}) {{");
-                    EmitStatements(node.Items.OfType<AstNonTerminal>(), body, indent + 1, ops);
+                    body.AppendLine($"{pad}while ({EmitCondition(CondOf(node))}) {{");
+                    EmitStatements(BodyStmts(node), body, indent + 1, ops);
                     body.AppendLine($"{pad}}}");
                     break;
 
                 case "Repeat":
-                    var rp = Conditions(node);
                     body.AppendLine($"{pad}while (true) {{");
-                    EmitStatements(node.Items.OfType<AstNonTerminal>(), body, indent + 1, ops);
-                    body.AppendLine($"{pad}  if ({At(rp, 0)} == {At(rp, 1)}) {{ break; }}");
+                    EmitStatements(BodyStmts(node), body, indent + 1, ops);
+                    body.AppendLine($"{pad}  if ({EmitCondition(CondOf(node))}) {{ break; }}");
                     body.AppendLine($"{pad}}}");
                     break;
             }
         }
     }
 
-    /// <summary>A statement-level invocation: a subroutine call <c>foo(a, b);</c> or a gate <c>h q[0];</c>.</summary>
+    /// <summary>if (cond) { … }  with an optional  else { … }  (an `else if` nests as `else { if … }`).</summary>
+    private static void EmitIf(AstNonTerminal node, StringBuilder body, int indent, HashSet<string> ops)
+    {
+        var pad = new string(' ', indent * 2);
+        var items = node.Items;
+
+        // the `else` terminal (if present) splits the then-branch statements from the else-branch.
+        int elseIdx = -1;
+        for (int k = 0; k < items.Count; k++)
+            if (items[k] is AstTerminal t && t.ToString() == "else") { elseIdx = k; break; }
+
+        var thenStmts = new List<AstNonTerminal>();
+        var elseStmts = new List<AstNonTerminal>();
+        for (int k = 0; k < items.Count; k++)
+        {
+            if (items[k] is not AstNonTerminal nt || nt.Name == "Condition") continue;
+            (elseIdx < 0 || k < elseIdx ? thenStmts : elseStmts).Add(nt);
+        }
+
+        body.AppendLine($"{pad}if ({EmitCondition(CondOf(node))}) {{");
+        EmitStatements(thenStmts, body, indent + 1, ops);
+        body.AppendLine($"{pad}}}");
+
+        if (elseIdx >= 0)
+        {
+            body.AppendLine($"{pad}else {{");
+            EmitStatements(elseStmts, body, indent + 1, ops);
+            body.AppendLine($"{pad}}}");
+        }
+    }
+
+    /// <summary>A statement-level invocation: a subroutine call, a gate, or a functor-modified gate.</summary>
     private static string EmitInvocation(AstNonTerminal node, HashSet<string> ops)
     {
-        var name = node.Items.Count > 0 ? node.Items[0].ToString() ?? string.Empty : string.Empty;
-        var args = node.Items.Skip(1).Select(RenderArg).ToList();
+        var items = node.Items;
+        var head = items.Count > 0 ? items[0].ToString() ?? string.Empty : string.Empty;
+
+        // optional functor prefix (Adjoint / Controlled) -> an OpenQASM gate modifier.
+        var modifier = string.Empty;
+        var start = 0;
+        if (Functors.TryGetValue(head, out var mod)) { modifier = mod; start = 1; }
+
+        var name = items.Count > start ? items[start].ToString() ?? string.Empty : string.Empty;
+        var args = items.Skip(start + 1).Select(RenderArg).ToList();
 
         // Rx(θ, q) -> rx(θ) q;   (angle in parens, qubit after — OpenQASM's parametrized-gate form)
         if (RotationGates.Contains(name) && args.Count >= 2)
-            return $"{MapGate(name)}({args[0]}) {args[1]};";
+            return $"{modifier}{MapGate(name)}({args[0]}) {args[1]};";
 
         return ops.Contains(name)
-            ? $"{name}({string.Join(", ", args)});"          // subroutine call
-            : $"{MapGate(name)} {string.Join(", ", args)};"; // gate application
+            ? $"{modifier}{name}({string.Join(", ", args)});"          // subroutine call
+            : $"{modifier}{MapGate(name)} {string.Join(", ", args)};"; // gate application
     }
 
     private static string RenderArg(AstSymbol sym)
@@ -237,7 +283,7 @@ public static class QoraQasmEmitter
         return $"qubit {name}";                                  // Qubit q
     }
 
-    // --- expressions ---
+    // --- expressions & conditions ---
 
     private static string EmitExpr(AstNonTerminal? expr)
     {
@@ -253,6 +299,20 @@ public static class QoraQasmEmitter
         return string.Join(" ", expr.Items.OfType<AstTerminal>().Select(t => t.ToString()));
     }
 
+    /// <summary>A condition emitted verbatim: Expr children through <see cref="EmitExpr"/>, operators as-is.</summary>
+    private static string EmitCondition(AstNonTerminal? cond)
+    {
+        if (cond is null) return string.Empty;
+
+        var parts = new List<string>();
+        foreach (var item in cond.Items)
+        {
+            if (item is AstNonTerminal nt && nt.Name == "Expr") parts.Add(EmitExpr(nt));
+            else parts.Add(item.ToString() ?? string.Empty);   // ==, !=, <, &&, ! …
+        }
+        return string.Join(" ", parts);
+    }
+
     // --- helpers ---
 
     private static string OpName(AstNonTerminal op) =>
@@ -263,6 +323,13 @@ public static class QoraQasmEmitter
 
     private static IEnumerable<AstNonTerminal> Body(AstNonTerminal op) =>
         op.Items.OfType<AstNonTerminal>().Where(n => n.Name != "Param");
+
+    /// <summary>Statement children of a control-flow node (everything except its Condition).</summary>
+    private static IEnumerable<AstNonTerminal> BodyStmts(AstNonTerminal node) =>
+        node.Items.OfType<AstNonTerminal>().Where(n => n.Name != "Condition");
+
+    private static AstNonTerminal? CondOf(AstNonTerminal node) =>
+        node.Items.OfType<AstNonTerminal>().FirstOrDefault(n => n.Name == "Condition");
 
     private static AstNonTerminal? ExprOf(AstNonTerminal node) =>
         node.Items.OfType<AstNonTerminal>().FirstOrDefault(n => n.Name == "Expr");
