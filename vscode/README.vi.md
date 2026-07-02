@@ -12,6 +12,11 @@ chuột, **báo lỗi thời gian thực** và một lệnh **chuyển đổi**.
 - **Tô sáng cú pháp** — từ khóa (`operation`/`use`/`if`/`for`/…), kiểu (`Qubit`/`int`/`bit`), cổng (`H`/`CNOT`/`Rx`/…), `pi`, số, toán tử
 - **Chú thích khi di chuột** — di chuột lên một cổng hoặc từ khóa để xem mô tả ngắn (ví dụ `Rx`, `CNOT`, `M`)
 - **Báo lỗi thời gian thực** — bộ phân tích chạy khi bạn gõ và gạch chân token gây lỗi
+- **Phản hồi trên status bar** — tệp `.qor` đang mở hiển thị `Qora: OK`, số lỗi hoặc trạng thái parser
+- **CodeLens cho Main** — phía trên `operation Main()` có lối tắt để chuyển sang OpenQASM và xem các giai đoạn biên dịch
+- **Hướng dẫn bắt đầu** — theo dõi luồng Qora đầu tiên từ trang Getting Started của VS Code
+- **Nút trên thanh tiêu đề editor** — khi mở tệp `.qor`, bạn có thể chuyển đổi, xem giai đoạn hoặc mở ví dụ ngay
+- **Ví dụ dùng ngay** — chạy **`Qora: Mở ví dụ`** để mở `demo.qor`, hoặc **`Qora: Tạo ví dụ Bell mới`** để bắt đầu từ một mạch Bell nhỏ
 - **Chuyển đổi sang OpenQASM** — chạy **`Qora: Transpile to OpenQASM`** từ Command Palette; kết quả mở ở cửa sổ bên cạnh
 - **Hiển thị các giai đoạn biên dịch** — chạy **`Qora: Hiển thị các giai đoạn biên dịch`** để xem pipeline: AST → QoraIR → IR nghịch đảo (khi dùng `Adjoint`) → OpenQASM; tự cập nhật khi lưu
 - **Đoạn mã mẫu (snippets)** — `operation`, `main`, `use`, `measure`, `for`, `if`, `bell`

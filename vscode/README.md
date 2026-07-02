@@ -12,9 +12,11 @@ extension gives `.qor` files syntax highlighting, hover docs, **live error diagn
 - **Syntax highlighting** — keywords (`operation`/`use`/`if`/`for`/…), types (`Qubit`/`int`/`bit`), gates (`H`/`CNOT`/`Rx`/…), `pi`, numbers, operators
 - **Hover docs** — hover a gate or keyword for a short description (e.g. `Rx`, `CNOT`, `M`)
 - **Live parse errors** — the parser runs as you type and underlines the offending token
+- **Status bar feedback** — the active `.qor` file shows `Qora: OK`, an error count, or parser status
+- **Main CodeLens actions** — `operation Main()` gets quick links for OpenQASM transpile and compilation stages
 - **Getting Started walkthrough** — install the extension and follow the Qora guide from VS Code's Getting Started page
 - **Editor title actions** — open a `.qor` file and use the top-right buttons to transpile, inspect stages, or open an example
-- **Examples on demand** — run **`Qora: Open Example`** or **`Qora: New Bell Example`** to start from working code
+- **Examples on demand** — run **`Qora: Open Example`** to open `demo.qor`, or **`Qora: New Bell Example`** to start from a scratch Bell circuit
 - **Transpile to OpenQASM** — run **`Qora: Transpile to OpenQASM`** from the Command Palette; the result opens beside your file
 - **Show compilation stages** — run **`Qora: Show Compilation Stages`** to see the pipeline live: AST → QoraIR → synthesized inverse IR (for `Adjoint`) → OpenQASM; refreshes on save
 - **Snippets** — `operation`, `main`, `use`, `measure`, `for`, `if`, `bell`

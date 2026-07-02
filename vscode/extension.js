@@ -68,10 +68,12 @@ operation Main() {
 `;
 
 let diagnostics;
+let statusBarItem;
 let warnedInfra = false;
 let extRoot;                       // context.extensionPath, captured in activate()
 const chmodDone = new Set();       // binaries we've already +x'd this session
 const debounceTimers = new Map();
+const parseStates = new Map();
 
 /**
  * Resolve which CLI to run, as { command, args }, or null when nothing runnable is available.
@@ -174,15 +176,76 @@ function spanToRange(document, start, end) {
   return new vscode.Range(document.positionAt(start), document.positionAt(end));
 }
 
+function documentKey(document) {
+  return document.uri.toString();
+}
+
+function activeQoraDocument() {
+  const editor = vscode.window.activeTextEditor;
+  return editor && editor.document.languageId === 'qora' ? editor.document : null;
+}
+
+function setParseState(document, kind, message = '') {
+  if (!document || document.languageId !== 'qora') return;
+  parseStates.set(documentKey(document), { kind, message });
+  if (activeQoraDocument()?.uri.toString() === document.uri.toString()) updateStatusBar(document);
+}
+
+function qoraErrorCount(document) {
+  return (diagnostics.get(document.uri) || [])
+    .filter((d) => d.severity === vscode.DiagnosticSeverity.Error)
+    .length;
+}
+
+function updateStatusBar(document = activeQoraDocument()) {
+  if (!statusBarItem) return;
+  if (!document || document.languageId !== 'qora') {
+    statusBarItem.hide();
+    return;
+  }
+
+  const state = parseStates.get(documentKey(document));
+  statusBarItem.backgroundColor = undefined;
+  statusBarItem.command = undefined;
+
+  if (state?.kind === 'checking') {
+    statusBarItem.text = '$(sync~spin) Qora: checking';
+    statusBarItem.tooltip = 'Qora parser is checking this file.';
+  } else if (state?.kind === 'unavailable') {
+    statusBarItem.text = '$(warning) Qora: parser unavailable';
+    statusBarItem.tooltip = state.message || 'Qora parser could not run.';
+    statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
+  } else {
+    const count = qoraErrorCount(document);
+    if (count > 0) {
+      statusBarItem.text = `$(error) Qora: ${count} ${count === 1 ? 'error' : 'errors'}`;
+      statusBarItem.tooltip = 'Open the Problems panel for Qora parse errors.';
+      statusBarItem.command = 'workbench.actions.view.problems';
+      statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
+    } else {
+      statusBarItem.text = '$(check) Qora: OK';
+      statusBarItem.tooltip = 'Qora parser accepted this file.';
+    }
+  }
+
+  statusBarItem.show();
+}
+
 async function refreshDiagnostics(document) {
   if (!document || document.languageId !== 'qora') return;
 
+  setParseState(document, 'checking');
   const version = document.version;                 // guard against a slower run overwriting a newer one
   const { result, error } = await runQora(document.getText());
   // Bail if the buffer moved on (a fresher run is/will be queued) OR the document was closed while we ran —
   // closing does NOT bump .version, so without the isClosed check a late result re-adds orphaned squiggles.
   if (document.isClosed || document.version !== version) return;
-  if (error) { warnInfraOnce(error); return; }      // don't clobber squiggles on an infra hiccup
+  // Don't clobber squiggles on an infra hiccup.
+  if (error) {
+    setParseState(document, 'unavailable', error);
+    warnInfraOnce(error);
+    return;
+  }
 
   const diags = (result.errors || []).map((e) => {
     const d = new vscode.Diagnostic(
@@ -195,17 +258,24 @@ async function refreshDiagnostics(document) {
     return d;
   });
   diagnostics.set(document.uri, diags);
+  setParseState(document, 'ready');
+  updateStatusBar(document);
 }
 
 function scheduleRefresh(document) {
   if (!document || document.languageId !== 'qora') return;
+  setParseState(document, 'checking');
   const key = document.uri.toString();
   clearTimeout(debounceTimers.get(key));
   debounceTimers.set(key, setTimeout(() => refreshDiagnostics(document), 400));
 }
 
+function bundledExamplePath() {
+  return path.join(extRoot || __dirname, 'examples', 'demo.qor');
+}
+
 function bundledExampleSource() {
-  const examplePath = path.join(extRoot || __dirname, 'examples', 'demo.qor');
+  const examplePath = bundledExamplePath();
   try {
     return fs.readFileSync(examplePath, 'utf8');
   } catch {
@@ -223,6 +293,12 @@ async function openQoraScratch(content) {
 }
 
 async function openExample() {
+  const examplePath = bundledExamplePath();
+  if (fs.existsSync(examplePath)) {
+    const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(examplePath));
+    await vscode.window.showTextDocument(doc, vscode.ViewColumn.Active);
+    return;
+  }
   await openQoraScratch(bundledExampleSource());
 }
 
@@ -343,6 +419,22 @@ async function showStages() {
   await refreshStages(editor.document);
 }
 
+function provideQoraCodeLenses(document) {
+  const lenses = [];
+  for (let i = 0; i < document.lineCount; i++) {
+    const line = document.lineAt(i);
+    if (!/^\s*operation\s+Main\s*\(/.test(line.text)) continue;
+
+    const start = line.firstNonWhitespaceCharacterIndex;
+    const range = new vscode.Range(i, start, i, Math.min(line.text.length, start + 'operation Main'.length));
+    lenses.push(
+      new vscode.CodeLens(range, { title: 'OpenQASM으로 변환', command: 'qora.transpile' }),
+      new vscode.CodeLens(range, { title: '컴파일 단계 보기', command: 'qora.showStages' })
+    );
+  }
+  return lenses;
+}
+
 function activate(context) {
   extRoot = context.extensionPath;   // used to locate the bundled per-platform binary
 
@@ -357,8 +449,17 @@ function activate(context) {
     })
   );
 
+  context.subscriptions.push(
+    vscode.languages.registerCodeLensProvider('qora', {
+      provideCodeLenses: provideQoraCodeLenses,
+    })
+  );
+
   diagnostics = vscode.languages.createDiagnosticCollection('qora');
   context.subscriptions.push(diagnostics);
+
+  statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
+  context.subscriptions.push(statusBarItem);
 
   context.subscriptions.push(
     vscode.commands.registerCommand('qora.transpile', transpile),
@@ -366,6 +467,7 @@ function activate(context) {
     vscode.commands.registerCommand('qora.openExample', openExample),
     vscode.commands.registerCommand('qora.newBellExample', newBellExample),
     vscode.commands.registerCommand('qora.openWalkthrough', openWalkthrough),
+    vscode.window.onDidChangeActiveTextEditor((editor) => updateStatusBar(editor?.document)),
     vscode.workspace.onDidOpenTextDocument(refreshDiagnostics),
     vscode.workspace.onDidChangeTextDocument((e) => scheduleRefresh(e.document)),
     vscode.workspace.onDidSaveTextDocument(refreshDiagnostics),
@@ -377,16 +479,20 @@ function activate(context) {
       clearTimeout(debounceTimers.get(key));
       debounceTimers.delete(key);
       diagnostics.delete(doc.uri);
+      parseStates.delete(doc.uri.toString());
+      updateStatusBar();
     })
   );
 
   // Lint any Qora files already open when the extension activates.
   vscode.workspace.textDocuments.forEach(refreshDiagnostics);
+  updateStatusBar();
 }
 
 function deactivate() {
   for (const t of debounceTimers.values()) clearTimeout(t);
   debounceTimers.clear();
+  parseStates.clear();
 }
 
 module.exports = { activate, deactivate };

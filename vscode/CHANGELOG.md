@@ -2,6 +2,15 @@
 
 All notable changes to the Qora Language extension.
 
+## 0.5.5
+
+- Added a Qora status bar item for the active `.qor` file: checking, OK, parse-error count, or parser
+  unavailable.
+- Added CodeLens actions above `operation Main()` for quick OpenQASM transpile and compilation-stage
+  inspection.
+- Changed **`Qora: Open Example`** to open the bundled `examples/demo.qor` file directly, with a scratch
+  fallback when the file is unavailable.
+
 ## 0.5.4
 
 - Added a polished first-run path: a Getting Started walkthrough, editor-title actions for Qora files,
