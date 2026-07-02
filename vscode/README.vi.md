@@ -1,4 +1,4 @@
-[English](README.md) · [한국어](README.ko.md) · [日本語](README.ja.md) · **Tiếng Việt**
+[English](https://github.com/AJ-comp/Qora/blob/main/vscode/README.md) · [한국어](https://github.com/AJ-comp/Qora/blob/main/vscode/README.ko.md) · [日本語](https://github.com/AJ-comp/Qora/blob/main/vscode/README.ja.md) · **Tiếng Việt**
 
 # Qora Language
 

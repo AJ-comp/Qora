@@ -2,6 +2,12 @@
 
 All notable changes to the Qora Language extension.
 
+## 0.5.3
+
+- Fixed the language-switcher links (한국어 / 日本語 / Tiếng Việt) on the marketplace page: the
+  marketplace rewrites relative README links against the repository ROOT, ignoring the extension's
+  `vscode/` subdirectory, so they 404'd — now absolute GitHub URLs.
+
 ## 0.5.2
 
 - Bundles the **Qora v0.11** compiler (Janglim 0.3.0-preview.1): hardened validation — argument kinds
