@@ -370,11 +370,11 @@
   }
   .book-shell {
     display: grid;
-    gap: 28px;
-    grid-template-columns: 260px minmax(0, 1fr);
+    gap: 44px;
+    grid-template-columns: 300px minmax(0, 1060px);
     margin: 0 auto;
-    max-width: 1180px;
-    padding: 0 20px 120px;
+    max-width: 1600px;
+    padding: 0 24px 120px;
   }
   .side-nav {
     align-self: start;
@@ -547,57 +547,126 @@
 <h2 id="h-gate">8장. H 게이트는 진폭을 어떻게 나눌까?</h2>
 
   <p>
-    H 게이트는 0을 그대로 0에 묶어 두지 않고, 한 값에 모여 있던 진폭을 측정 결과값 0과 측정 결과값 1 쪽으로 나눠 보내는 게이트예요.<br>
-    그래서 <code>|0⟩</code> 상태에 H 게이트를 적용하면 측정 결과값 0의 진폭과 측정 결과값 1의 진폭이 둘 다 생겨요.
+    H 게이트는 한쪽 기저 상태에 모여 있던 진폭을 두 기저 상태 쪽으로 나눠 보내는 게이트예요.<br>
+    정석적으로는 한 큐비트 상태 벡터에 아래 행렬을 곱하는 유니터리 변환으로 정의해요.
   </p>
 
-  <div class="math mono">H 게이트(|0⟩) = (|0⟩ + |1⟩) / √2</div>
+  <div class="math mono">
+    <div class="math-line">H = 1/√2 · [[1, 1], [1, -1]]</div>
+  </div>
 
   <p>
-    여기서 중요한 점은 측정 확률이 아니라 진폭이 먼저 바뀐다는 점이에요.<br>
-    H 게이트가 만든 두 진폭의 크기는 각각 <span class="mono">1/√2</span>이고, 이 값을 제곱하면 각각 50%가 돼요.
+    이 행렬은 <code>|0⟩</code>와 <code>|1⟩</code>를 다음 두 상태로 보내요.<br>
+    이 두 식이 H 게이트를 이해하는 출발점이에요.
+  </p>
+
+  <div class="math mono">
+    <div class="math-line">H|0⟩ = (|0⟩ + |1⟩) / √2</div>
+    <div class="math-line">H|1⟩ = (|0⟩ - |1⟩) / √2</div>
+  </div>
+
+  <p>
+    첫 번째 식만 보면 H 게이트가 단순히 “0을 반반 확률로 만든다”처럼 보일 수 있어요.<br>
+    하지만 핵심은 확률이 아니라 진폭이에요. H 게이트는 입력 진폭을 두 출력 기저 상태로 나눠 보내고, 같은 출력 기저 상태로 도착한 진폭 기여를 더해요.
   </p>
 
   <div class="panel">
     <table>
-      <tr><th>가능한 측정 결과값</th><th>H 게이트 적용 후 진폭</th><th>측정 확률</th></tr>
-      <tr><td>측정 결과값 0</td><td><span class="mono">1/√2</span></td><td>50%</td></tr>
-      <tr><td>측정 결과값 1</td><td><span class="mono">1/√2</span></td><td>50%</td></tr>
+      <tr><th>입력 기저 상태</th><th>H 게이트 적용 후 상태</th><th>바로 측정하면</th></tr>
+      <tr><td><code>|0⟩</code></td><td><code>(|0⟩ + |1⟩) / √2</code></td><td>0과 1이 각각 50%</td></tr>
+      <tr><td><code>|1⟩</code></td><td><code>(|0⟩ - |1⟩) / √2</code></td><td>0과 1이 각각 50%</td></tr>
     </table>
   </div>
 
   <h3>H 게이트의 정확한 진폭 변환 규칙</h3>
 
   <p>
-    H 게이트는 입력 상태의 한쪽 진폭만 사용하지 않아요.<br>
-    적용 전 측정 결과값 0의 진폭과 적용 전 측정 결과값 1의 진폭이 모두 적용 후의 두 측정 결과값에 기여해요.<br>
-    같은 측정 결과값으로 도착한 진폭 기여들은 서로 더해져요.
+    적용 전 상태를 <code>|ψ⟩ = a₀|0⟩ + a₁|1⟩</code>라고 해볼게요.<br>
+    H 게이트는 <code>a₀</code>만 따로 보거나 <code>a₁</code>만 따로 보지 않아요.<br>
+    두 입력 진폭이 모두 적용 후의 <code>|0⟩</code> 성분과 <code>|1⟩</code> 성분에 기여하고, 같은 성분으로 도착한 기여가 더해져요.
   </p>
 
   <div class="math mono">
-    <div class="math-line">적용 후 측정 결과값 0의 진폭 = a₀ × 1/√2 + a₁ × 1/√2</div>
-    <div class="math-line">적용 후 측정 결과값 1의 진폭 = a₀ × 1/√2 + a₁ × (-1/√2)</div>
+    <div class="math-line">H(a₀|0⟩ + a₁|1⟩) = ((a₀ + a₁)|0⟩ + (a₀ - a₁)|1⟩) / √2</div>
+  </div>
+
+  <div class="panel">
+    <table>
+      <tr><th>출발하는 입력 진폭</th><th><code>|0⟩</code>으로 가는 기여</th><th><code>|1⟩</code>으로 가는 기여</th></tr>
+      <tr><td>적용 전 <code>|0⟩</code>의 진폭 <span class="mono">a₀</span></td><td><span class="mono">+ a₀ × 1/√2</span></td><td><span class="mono">+ a₀ × 1/√2</span></td></tr>
+      <tr><td>적용 전 <code>|1⟩</code>의 진폭 <span class="mono">a₁</span></td><td><span class="mono">+ a₁ × 1/√2</span></td><td><span class="mono">- a₁ × 1/√2</span></td></tr>
+    </table>
   </div>
 
   <div class="call warn">
-    <span class="h">마이너스 부호는 입력 1에서 출력 1로 가는 기여에만 붙어요</span>
-    네 가지 입력-출력 조합 중 입력도 1이고 출력도 1인 조합에만 마이너스 부호가 붙어요.<br>
-    이 부호 덕분에 H 게이트를 두 번 적용했을 때 측정 결과값 0 쪽 진폭은 보강되고, 측정 결과값 1 쪽 진폭은 상쇄돼요.
+    <span class="h">마이너스 부호가 붙는 위치</span>
+    네 가지 입력-출력 조합 중 <strong>적용 전 <code>|1⟩</code>의 진폭이 적용 후 <code>|1⟩</code> 성분으로 가는 기여</strong>에만 마이너스 부호가 붙어요.<br>
+    갑자기 “1→1 항”이라고 말하면 모호하므로, 이 책에서는 “적용 전 <code>|1⟩</code>에서 와서 적용 후 <code>|1⟩</code>로 가는 진폭 기여”라고 풀어서 부를게요.
+  </div>
+
+  <h3><code>|0⟩</code> 상태에 H 게이트를 적용해보자</h3>
+
+  <p>
+    <code>|0⟩</code> 상태는 <span class="mono">a₀ = 1</span>, <span class="mono">a₁ = 0</span>인 상태예요.<br>
+    이 값을 H 게이트 변환 규칙에 넣으면 적용 후 <code>|0⟩</code> 성분과 <code>|1⟩</code> 성분이 둘 다 <span class="mono">1/√2</span>가 돼요.
+  </p>
+
+  <div class="math mono">
+    <div class="math-line">적용 후 |0⟩의 진폭 = 1 × 1/√2 + 0 × 1/√2 = 1/√2</div>
+    <div class="math-line">적용 후 |1⟩의 진폭 = 1 × 1/√2 + 0 × (-1/√2) = 1/√2</div>
+  </div>
+
+  <p>
+    그래서 <code>H|0⟩</code>은 <code>(|0⟩ + |1⟩) / √2</code>가 되고, 바로 측정하면 0과 1이 각각 50% 확률로 나와요.<br>
+    여기까지가 흔히 “H 게이트가 중첩을 만든다”라고 말하는 부분이에요.
+  </p>
+
+  <h3>왜 마이너스 부호가 필요한가</h3>
+
+  <p>
+    H 게이트는 양자 게이트이므로 유니터리여야 해요.<br>
+    따라서 <code>|0⟩</code>과 <code>|1⟩</code>처럼 서로 직교하는 입력 상태는 H 게이트를 지나도 서로 직교하는 출력 상태로 가야 해요.
+  </p>
+
+  <div class="compare-grid">
+    <div class="card warn">
+      <span class="tag-small">마이너스 부호가 없다면</span>
+      <div class="math mono">
+        <div class="math-line">H|0⟩ = (|0⟩ + |1⟩) / √2</div>
+        <div class="math-line">H|1⟩ = (|0⟩ + |1⟩) / √2</div>
+      </div>
+      <p>서로 다른 두 입력 상태가 같은 출력 상태로 합쳐져요. 그러면 되돌릴 수 없고, 유니터리 게이트가 아니에요.</p>
+    </div>
+
+    <div class="card good">
+      <span class="tag-small">마이너스 부호가 있으면</span>
+      <div class="math mono">
+        <div class="math-line">H|0⟩ = (|0⟩ + |1⟩) / √2</div>
+        <div class="math-line">H|1⟩ = (|0⟩ - |1⟩) / √2</div>
+      </div>
+      <p>두 출력 상태가 서로 직교해요. 그래서 입력 정보를 잃지 않고, 다시 되돌릴 수 있어요.</p>
+    </div>
   </div>
 
   <h3>H 게이트를 두 번 적용하면 왜 다시 돌아올까?</h3>
 
   <p>
-    <code>|0⟩</code> 상태에서 시작하면 첫 번째 H 게이트 뒤의 두 진폭은 모두 <span class="mono">1/√2</span>예요.<br>
-    이 값을 H 게이트 변환 규칙에 다시 넣으면 측정 결과값 0의 진폭은 <span class="mono">1</span>이 되고, 측정 결과값 1의 진폭은 <span class="mono">0</span>이 돼요.
+    <code>|0⟩</code> 상태에서 시작하면 첫 번째 H 게이트 뒤의 상태는 <code>(|0⟩ + |1⟩) / √2</code>예요.<br>
+    따라서 두 번째 H 게이트를 적용하기 직전에는 <span class="mono">a₀ = 1/√2</span>, <span class="mono">a₁ = 1/√2</span>예요.<br>
+    이 값을 같은 변환 규칙에 다시 넣으면 끝이에요.
   </p>
 
   <div class="math mono">
-    <div class="math-line">두 번째 H 뒤 측정 결과값 0의 진폭 = 1/2 + 1/2 = 1</div>
-    <div class="math-line">두 번째 H 뒤 측정 결과값 1의 진폭 = 1/2 - 1/2 = 0</div>
+    <div class="math-line">두 번째 H 뒤 |0⟩의 진폭 = (1/√2) × 1/√2 + (1/√2) × 1/√2 = 1/2 + 1/2 = 1</div>
+    <div class="math-line">두 번째 H 뒤 |1⟩의 진폭 = (1/√2) × 1/√2 + (1/√2) × (-1/√2) = 1/2 - 1/2 = 0</div>
   </div>
 
   <div class="rule mono">H 게이트(H 게이트(|0⟩)) = |0⟩</div>
+
+  <p>
+    이 계산에서 <code>|0⟩</code> 성분으로 가는 두 진폭 기여는 보강되고, <code>|1⟩</code> 성분으로 가는 두 진폭 기여는 상쇄돼요.<br>
+    그래서 H 게이트를 두 번 적용하면 “랜덤이 두 번 일어나서 다시 0이 된다”가 아니라, 진폭의 보강과 상쇄 때문에 정확히 처음 상태로 돌아와요.
+  </p>
 
   <div class="practice">
     <span class="practice-label">Qora로 실습해보기</span>

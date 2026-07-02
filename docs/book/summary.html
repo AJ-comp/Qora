@@ -370,11 +370,11 @@
   }
   .book-shell {
     display: grid;
-    gap: 28px;
-    grid-template-columns: 260px minmax(0, 1fr);
+    gap: 44px;
+    grid-template-columns: 300px minmax(0, 1060px);
     margin: 0 auto;
-    max-width: 1180px;
-    padding: 0 20px 120px;
+    max-width: 1600px;
+    padding: 0 24px 120px;
   }
   .side-nav {
     align-self: start;
@@ -549,31 +549,43 @@
   <div class="summary-grid">
     <div class="card accent">
       <span class="tag-small">큐비트 상태</span>
-      <h4>큐비트 상태와 진폭</h4>
-      <p>한 큐비트에는 측정 결과값 0의 진폭과 측정 결과값 1의 진폭이 붙어 있어요.</p>
+      <h4>상태는 벡터예요</h4>
+      <p>한 큐비트 상태는 <code>|ψ⟩ = α|0⟩ + β|1⟩</code>처럼 계산 기저에 붙은 진폭으로 표현해요.</p>
     </div>
 
     <div class="card accent">
       <span class="tag-small">측정 확률</span>
-      <h4>측정 확률과 진폭 길이</h4>
-      <p>50% 확률의 진폭은 1/2이 아니라 1/√2예요.</p>
+      <h4>확률은 Born 규칙으로 얻어요</h4>
+      <p>측정 확률은 진폭 자체가 아니라 진폭의 절댓값 제곱이에요. 그래서 50% 확률의 진폭 크기는 <span class="mono">1/√2</span>예요.</p>
     </div>
 
     <div class="card plus">
       <span class="tag-small">중첩</span>
-      <h4>중첩: 여러 진폭이 함께 있는 상태</h4>
-      <p>중첩은 단순히 결과를 모르는 상태가 아니에요.</p>
+      <h4>중첩은 고전적인 무지가 아니에요</h4>
+      <p>중첩 상태는 여러 계산 기저 성분이 상태 벡터 안에 함께 들어 있는 상태예요. 진폭의 부호와 위상도 상태의 일부예요.</p>
     </div>
 
     <div class="card minus">
       <span class="tag-small">간섭</span>
-      <h4>간섭: 진폭 기여가 더해지는 순간</h4>
-      <p>같은 부호면 보강되고, 반대 부호면 상쇄돼요.</p>
+      <h4>간섭은 진폭을 먼저 더할 때 생겨요</h4>
+      <p>같은 기저 상태로 도착한 진폭 기여는 확률로 바뀌기 전에 먼저 더해져요. 같은 위상은 보강되고 반대 위상은 상쇄돼요.</p>
+    </div>
+
+    <div class="card good">
+      <span class="tag-small">양자 게이트</span>
+      <h4>게이트는 유니터리 변환이에요</h4>
+      <p>측정 전의 양자 게이트는 상태 벡터의 길이와 직교성을 보존해요. 그래서 되돌릴 수 있고, 전체 확률도 100%로 유지돼요.</p>
+    </div>
+
+    <div class="card good">
+      <span class="tag-small">Qora 코드</span>
+      <h4>코드는 변환 순서를 고정해요</h4>
+      <p><code>use</code>로 큐비트를 준비하고, 게이트 호출로 유니터리 변환을 적용한 뒤, <code>M</code>으로 측정해요.</p>
     </div>
   </div>
 
   <div class="next">
-    <strong>다음 장에서는 무엇을 볼까요?</strong>
+    <strong>다음 장에서 볼 내용</strong>
     <p>
       다음 장에서는 X 게이트를 살펴봐요.<br>
       X 게이트는 측정 결과값 0과 측정 결과값 1의 진폭 위치를 바꾸는 게이트예요.<br>

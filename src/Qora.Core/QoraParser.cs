@@ -5,6 +5,7 @@ using Janglim.FrontEnd.Ast;
 using Janglim.FrontEnd.Parsers.LR;
 using Janglim.FrontEnd.ParseTree;
 using Janglim.FrontEnd.Tokenize;
+using Qora.Ir;
 
 namespace Qora;
 
@@ -74,7 +75,7 @@ public static class QoraParser
             Tree = tree,
             Ast = ast,
             AstText = ast?.ToTreeString() ?? string.Empty,
-            Qasm = ast != null ? QoraQasmEmitter.Emit(ast) : string.Empty,
+            Qasm = ast != null ? QIrEmitter.Emit(QoraLowering.Lower(ast)) : string.Empty,
             Errors = result.Success
                 ? new List<QoraError>()
                 : result.AllErrors.Select(ToQoraError).ToList(),

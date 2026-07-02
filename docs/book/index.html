@@ -370,11 +370,11 @@
   }
   .book-shell {
     display: grid;
-    gap: 28px;
-    grid-template-columns: 260px minmax(0, 1fr);
+    gap: 44px;
+    grid-template-columns: 300px minmax(0, 1060px);
     margin: 0 auto;
-    max-width: 1180px;
-    padding: 0 20px 120px;
+    max-width: 1600px;
+    padding: 0 24px 120px;
   }
   .side-nav {
     align-self: start;
@@ -545,14 +545,44 @@
   <main class="article">
     <div class="breadcrumb">Qora로 배우는 양자 게이트 / 개요</div>
   <p class="lead">
-    이 문서는 장별 HTML 파일로 나누어 읽는 Qora 양자 게이트 문서예요.<br>
-    왼쪽 차례에서 원하는 장으로 바로 이동할 수 있고, 각 페이지 아래의 이전/다음 버튼으로 순서대로 따라갈 수 있어요.<br>
-    먼저 개요에서 전체 흐름을 잡고, 그 다음에는 들어가며부터 11장까지 차례대로 읽어보면 좋아요.
+    이 문서는 Qora 코드로 양자 회로를 써 보면서, 그 코드가 실제로 어떤 양자역학 개념을 건드리는지 차례대로 읽는 문서예요.<br>
+    목표는 게이트 이름을 외우는 것이 아니라, 한 줄의 코드가 큐비트 상태 벡터의 진폭을 어떻게 바꾸는지 직접 따라갈 수 있게 되는 거예요.
   </p>
 
   <div class="call why">
-    <span class="h">읽는 흐름</span>
-    <p>1부에서는 큐비트 상태, 진폭, 확률, 중첩, 간섭, 가역성처럼 회로를 읽기 위한 기본 개념을 잡아요. 2부에서는 X, H, Z, CNOT 게이트를 하나씩 읽고, 마지막에는 작은 회로 하나를 처음부터 끝까지 따라가봐요.</p>
+    <span class="h">이 문서의 기준점</span>
+    <p>큐비트는 <strong>복소수 벡터 공간</strong>의 상태 벡터로 다루고, 측정 확률은 <strong>Born 규칙</strong>으로 계산해요. 양자 게이트는 상태 벡터에 작용하는 <strong>유니터리 선형 변환</strong>으로 설명하고, Qora 코드는 그 변환 순서를 회로 형태로 적는 도구로 사용해요.</p>
+  </div>
+
+  <h2>전체 흐름</h2>
+
+  <div class="point-list">
+    <div class="point">
+      <span class="marker">1단계</span>
+      <span><strong>상태를 벡터로 보기</strong><br>한 큐비트 상태는 <code>|0⟩</code>와 <code>|1⟩</code>라는 계산 기저에 붙은 두 진폭으로 표현해요.</span>
+    </div>
+    <div class="point">
+      <span class="marker">2단계</span>
+      <span><strong>진폭에서 확률 얻기</strong><br>진폭 자체가 확률은 아니고, 진폭의 절댓값을 제곱해야 측정 확률이 돼요.</span>
+    </div>
+    <div class="point">
+      <span class="marker">3단계</span>
+      <span><strong>게이트를 선형 변환으로 읽기</strong><br>X, H, Z, CNOT 같은 게이트는 상태 벡터의 좌표를 바꾸는 유니터리 행렬이에요.</span>
+    </div>
+    <div class="point">
+      <span class="marker">4단계</span>
+      <span><strong>간섭 계산하기</strong><br>같은 측정 결과로 도착하는 진폭 기여는 먼저 더해지고, 그 다음에 제곱되어 확률로 바뀌어요.</span>
+    </div>
+  </div>
+
+  <div class="panel">
+    <table>
+      <tr><th>정석 개념</th><th>이 문서에서 하는 일</th><th>Qora에서 보이는 형태</th></tr>
+      <tr><td>상태 벡터</td><td>큐비트가 어떤 진폭을 가지고 있는지 읽어요</td><td><code>use q = Qubit[1];</code></td></tr>
+      <tr><td>유니터리 게이트</td><td>상태 벡터를 보존 가능한 방식으로 바꿔요</td><td><code>H(q[0]);</code>, <code>X(q[0]);</code></td></tr>
+      <tr><td>측정</td><td>진폭의 절댓값 제곱으로 결과 확률을 얻어요</td><td><code>bit r = M(q[0]);</code></td></tr>
+      <tr><td>여러 큐비트</td><td>기저 상태 수가 늘어나고 게이트가 큐비트 사이의 관계를 만들어요</td><td><code>CNOT(q[0], q[1]);</code></td></tr>
+    </table>
   </div>
 
   <h2>차례</h2>

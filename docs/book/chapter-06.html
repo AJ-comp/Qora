@@ -370,11 +370,11 @@
   }
   .book-shell {
     display: grid;
-    gap: 28px;
-    grid-template-columns: 260px minmax(0, 1fr);
+    gap: 44px;
+    grid-template-columns: 300px minmax(0, 1060px);
     margin: 0 auto;
-    max-width: 1180px;
-    padding: 0 20px 120px;
+    max-width: 1600px;
+    padding: 0 24px 120px;
   }
   .side-nav {
     align-self: start;
@@ -548,8 +548,12 @@
 
   <p>
     마지막으로, 앞으로 자주 보게 될 Qora 코드의 기본 모양을 함께 살펴볼게요.<br>
-    Qora 프로그램은 <code>operation</code>으로 시작하고,
-    가장 먼저 실행되는 작업에는 보통 <code>Main</code>이라는 이름을 붙여요.
+    Qora 코드는 양자 상태를 직접 눈으로 보여 주는 표기법은 아니지만, 어떤 큐비트에 어떤 게이트를 어떤 순서로 적용하는지 명확하게 적어줘요.<br>
+    그래서 수학적으로는 상태 벡터에 유니터리 변환을 차례대로 적용하는 회로 설명으로 읽을 수 있어요.
+  </p>
+
+  <p>
+    Qora 프로그램은 <code>operation</code>으로 시작하고, 가장 먼저 실행되는 작업에는 보통 <code>Main</code>이라는 이름을 붙여요.
   </p>
 
   <div class="practice">
@@ -569,7 +573,8 @@
   <p>
     이 코드는 큐비트 하나를 준비한 뒤, 그 큐비트 묶음에 <code>q</code>라는 이름을 붙여요.<br>
     <code>Qubit[1]</code>은 큐비트가 한 개라는 뜻이고,
-    그 큐비트는 <code>q[0]</code>으로 가리켜요.
+    그 큐비트는 <code>q[0]</code>으로 가리켜요.<br>
+    이 책에서는 새로 준비한 큐비트가 계산 기저 상태 <code>|0⟩</code>에서 시작한다고 읽을게요.
   </p>
 
   <h3>게이트 적용하기</h3>
@@ -580,6 +585,7 @@
 
   <p>
     이 코드는 <code>q[0]</code>에 H 게이트를 적용하는 줄이에요.<br>
+    수학적으로는 현재 상태 벡터에 H 행렬을 곱하는 단계예요.<br>
     X 게이트는 <code>X(q[0]);</code>처럼,
     두 큐비트 게이트인 CNOT은 <code>CNOT(q[0], q[1]);</code>처럼 쓰면 돼요.
   </p>

@@ -370,11 +370,11 @@
   }
   .book-shell {
     display: grid;
-    gap: 28px;
-    grid-template-columns: 260px minmax(0, 1fr);
+    gap: 44px;
+    grid-template-columns: 300px minmax(0, 1060px);
     margin: 0 auto;
-    max-width: 1180px;
-    padding: 0 20px 120px;
+    max-width: 1600px;
+    padding: 0 24px 120px;
   }
   .side-nav {
     align-self: start;
@@ -547,36 +547,49 @@
 <h2 id="intro">들어가며. 왜 Qora로 양자 게이트를 배울까?</h2>
 
   <p>
-    양자컴퓨팅을 처음 배우면 낯선 말이 한꺼번에 나와요.<br>
-    예를 들어 큐비트, 중첩, 진폭, 위상, 간섭, 얽힘, 측정 같은 말인데, 각 단어를 따로 들으면 멋있어 보이지만,<br>
-    실제로 회로를 읽으려고 하면 금방 막히게 돼요.
+    양자컴퓨팅을 처음 배우면 큐비트, 중첩, 진폭, 위상, 간섭, 얽힘, 측정 같은 말이 한꺼번에 나와요.<br>
+    이 단어들은 따로 보면 그럴듯하지만, 회로 한 줄을 실제로 읽으려고 하면 금방 흐려져요.<br>
+    그래서 이 책에서는 말뜻을 먼저 외우기보다, 작은 회로 하나가 상태 벡터를 어떻게 바꾸는지부터 차분히 따라가요.
   </p>
 
-  <p>예를 들어 H 게이트를 처음 보면, 보통 아래와 같은 식을 먼저 만날 거예요.</p>
+  <p>
+    예를 들어 H 게이트를 처음 보면, 보통 아래와 같은 식을 먼저 만날 거예요.
+  </p>
 
   <div class="math mono">H 게이트(|0⟩) = (|0⟩ + |1⟩) / √2</div>
 
   <p>
-    이 문장 자체는 맞지만, 처음 배우는 사람에게는 <code>|0⟩</code>가 무엇인지, 왜 <code>|1⟩</code>와 더하는지, 왜 2가 아니라 √2로 나누는지, 이 식을 측정하면 무엇이 나오는지 같은 질문이 한꺼번에 생겨서 설명이 <span class="nowrap">금방 어려워져요.</span>
+    이 식은 맞지만, 처음 배우는 사람에게는 질문이 한꺼번에 생겨요.<br>
+    <code>|0⟩</code>는 무엇인지, 왜 <code>|1⟩</code>와 더하는지, 왜 2가 아니라 √2로 나누는지, 그리고 이 상태를 측정하면 무엇이 나오는지 모두 따져봐야 해요.
   </p>
 
   <div class="call">
-    <span class="h">여기서는 이렇게 살펴볼게요</span>
-    <p>이런 질문을 그냥 넘기지 않고, 작은 회로 하나를 놓고 상태가 어떻게 바뀌는지 한 단계씩 따라가보면서,<br>
-    그 과정마다 Qora 코드도 함께 확인해봐요.</p>
+    <span class="h">이 책에서 쓰는 설명 순서</span>
+    <p>먼저 큐비트를 <strong>상태 벡터</strong>로 보고, 그 상태 벡터의 좌표를 <strong>진폭</strong>이라고 부를게요. 그 다음 진폭의 절댓값 제곱이 측정 확률이 된다는 Born 규칙을 확인하고, 게이트를 상태 벡터에 곱하는 유니터리 행렬로 읽어볼게요.</p>
   </div>
 
-  <p>Qora는 여기서 두 가지 역할을 맡아요.</p>
+  <p>
+    Qora는 여기서 두 가지 역할을 맡아요.
+  </p>
 
   <div class="point-list">
     <div class="point">
       <span class="marker">첫째</span>
-      <span>양자 회로를 짧고 읽기 쉬운 형태로 적을 수 있게 해 줘요.</span>
+      <span>양자 회로를 짧고 읽기 쉬운 형태로 적게 해 줘요. 그래서 설명이 추상적인 말에만 머물지 않아요.</span>
     </div>
     <div class="point">
       <span class="marker">둘째</span>
-      <span>추상적인 설명을 다시 실행 가능한 코드로 돌려놓아요.</span>
+      <span>게이트 적용 순서를 코드로 고정해 줘요. 그러면 “어떤 상태에서 어떤 변환이 일어났는지”를 한 줄씩 확인할 수 있어요.</span>
     </div>
+  </div>
+
+  <div class="panel">
+    <table>
+      <tr><th>수학에서 보는 것</th><th>Qora 코드에서 보는 것</th><th>읽는 방법</th></tr>
+      <tr><td>초기 상태 <code>|0⟩</code></td><td><code>use q = Qubit[1];</code></td><td>큐비트 하나를 계산 기저 <code>|0⟩</code> 상태로 준비해요</td></tr>
+      <tr><td>유니터리 변환 <code>H</code></td><td><code>H(q[0]);</code></td><td>상태 벡터에 H 행렬을 적용해요</td></tr>
+      <tr><td>측정 연산</td><td><code>bit result = M(q[0]);</code></td><td>현재 진폭으로부터 측정 결과값을 얻어요</td></tr>
+    </table>
   </div>
 
   <div class="practice">
@@ -595,7 +608,7 @@
   </div>
 
   <p>
-    자, 이제 각 줄이 큐비트 상태와 진폭을 어떻게 바꾸는지 차례대로 읽어볼까요?
+    자, 이제 각 줄이 큐비트 상태와 진폭을 어떻게 바꾸는지 차례대로 읽어봐요.
   </p>
   <nav class="page-nav" aria-label="장 이동">
     <a href="index.html"><span class="k">이전</span><span class="t">개요. Qora로 배우는 양자 게이트</span></a>

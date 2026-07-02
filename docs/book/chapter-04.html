@@ -370,11 +370,11 @@
   }
   .book-shell {
     display: grid;
-    gap: 28px;
-    grid-template-columns: 260px minmax(0, 1fr);
+    gap: 44px;
+    grid-template-columns: 300px minmax(0, 1060px);
     margin: 0 auto;
-    max-width: 1180px;
-    padding: 0 20px 120px;
+    max-width: 1600px;
+    padding: 0 24px 120px;
   }
   .side-nav {
     align-self: start;
@@ -544,21 +544,26 @@
   </aside>
   <main class="article">
     <div class="breadcrumb">Qora로 배우는 양자 게이트 / 4장</div>
-<h2 id="interference">4장. 간섭은 언제 생길까?</h2>
+  <h2 id="interference">4장. 간섭은 언제 생길까?</h2>
 
   <p>
     간섭은 양자컴퓨팅에서 가장 중요한 개념 중 하나예요.<br>
-    그렇다고 처음부터 거창하게 생각할 필요는 없고,
-    여기서는 다음 문장 하나로 출발해봐요.
+    정석적으로 말하면, 간섭은 같은 기저 상태에 대한 여러 진폭 기여가 더해진 뒤에 Born 규칙이 적용될 때 생겨요.<br>
+    즉 확률을 먼저 더하는 것이 아니라, <strong>진폭을 먼저 더하고 나중에 제곱</strong>해요.
   </p>
 
-  <div class="rule">같은 측정 결과값에 도착한 진폭 기여들은 서로 더해져요.</div>
+  <div class="rule">같은 기저 상태에 도착한 진폭 기여들은 먼저 더해져요.</div>
 
   <p>
-    어떤 게이트는 입력 진폭을 여러 측정 결과값 쪽으로 나눠 보내요.<br>
-    그렇게 나뉜 진폭 기여가 같은 측정 결과값에 도착할 수 있고,
-    바로 그 순간, 같은 측정 결과값에 도착한 진폭 기여들이 서로 더해져요.
+    게이트는 상태 벡터에 선형적으로 작용해요.<br>
+    그래서 입력 상태가 여러 기저 상태의 합으로 되어 있으면, 게이트는 각 기저 성분을 따로 변환한 뒤 그 결과를 다시 더해요.<br>
+    이 과정에서 같은 출력 기저 상태로 모인 진폭 기여가 같은 부호와 위상을 가지면 보강되고, 반대 부호나 반대 위상을 가지면 상쇄돼요.
   </p>
+
+  <div class="math mono">
+    <div class="math-line">입력: α|0⟩ + β|1⟩</div>
+    <div class="math-line">게이트 뒤: α·U|0⟩ + β·U|1⟩</div>
+  </div>
 
   <div class="compare-grid">
     <div class="card plus">
@@ -577,6 +582,11 @@
   </div>
 
   <h3>H 게이트를 두 번 적용하면 간섭이 어떻게 보일까?</h3>
+
+  <p>
+    <code>|0⟩</code> 상태에 H 게이트를 한 번 적용하면 <code>|0⟩</code> 성분과 <code>|1⟩</code> 성분이 모두 생겨요.<br>
+    여기에 H 게이트를 한 번 더 적용하면 두 성분이 각각 다시 <code>|0⟩</code>과 <code>|1⟩</code> 쪽으로 기여를 보내고, 같은 기저 상태로 도착한 기여들이 더해져요.
+  </p>
 
   <div class="practice">
     <span class="practice-label">Qora로 실습해보기</span>
@@ -608,21 +618,20 @@
   </div>
 
   <p>
-    두 번째 H 게이트를 적용하면,
-    측정 결과값 0 쪽으로 도착한 진폭 기여는 이렇게 더해져요.
+    두 번째 H 게이트를 적용하면 측정 결과값 0 쪽으로 도착한 진폭 기여는 이렇게 더해져요.
   </p>
 
   <div class="math mono">+1/2 + +1/2 = +1</div>
 
   <p>
-    측정 결과값 1 쪽으로 도착한 진폭 기여도 같은 방식으로 계산할 수 있어요.
+    측정 결과값 1 쪽으로 도착한 진폭 기여도 같은 방식으로 계산해요.
   </p>
 
   <div class="math mono">+1/2 + -1/2 = 0</div>
 
   <p>
     그래서 최종 상태는 다시 <code>|0⟩</code> 상태로 돌아오게 돼요.<br>
-    이 계산은 H 게이트 장에서 조금 더 자세히 다시 살펴볼게요.
+    이 계산은 8장에서 H 게이트의 변환 규칙을 놓고 더 자세히 다시 살펴봐요.
   </p>
   <nav class="page-nav" aria-label="장 이동">
     <a href="chapter-03.html"><span class="k">이전</span><span class="t">3장. 중첩은 그냥 &quot;모르는 상태&quot;일까?</span></a>
