@@ -51,6 +51,22 @@ const DOCS = {
   'repeat': '**repeat** — 반복-until\n\n`repeat { … } until (r == 1);` — 조건 만족까지 반복(최소 한 번 실행).',
 };
 
+const WALKTHROUGH_ID = 'qora-lang.qora-language#qora.gettingStarted';
+
+const BELL_EXAMPLE = `operation Bell(Qubit[2] q) {
+    H(q[0]);
+    CNOT(q[0], q[1]);
+}
+
+operation Main() {
+    use q = Qubit[2];
+    Bell(q);
+
+    bit r0 = M(q[0]);
+    bit r1 = M(q[1]);
+}
+`;
+
 let diagnostics;
 let warnedInfra = false;
 let extRoot;                       // context.extensionPath, captured in activate()
@@ -188,6 +204,40 @@ function scheduleRefresh(document) {
   debounceTimers.set(key, setTimeout(() => refreshDiagnostics(document), 400));
 }
 
+function bundledExampleSource() {
+  const examplePath = path.join(extRoot || __dirname, 'examples', 'demo.qor');
+  try {
+    return fs.readFileSync(examplePath, 'utf8');
+  } catch {
+    return BELL_EXAMPLE;
+  }
+}
+
+async function openQoraScratch(content) {
+  const doc = await vscode.workspace.openTextDocument({
+    content: content.trimEnd() + '\n',
+    language: 'qora',
+  });
+  await vscode.window.showTextDocument(doc, vscode.ViewColumn.Active);
+  return doc;
+}
+
+async function openExample() {
+  await openQoraScratch(bundledExampleSource());
+}
+
+async function newBellExample() {
+  await openQoraScratch(BELL_EXAMPLE);
+}
+
+async function openWalkthrough() {
+  try {
+    await vscode.commands.executeCommand('workbench.action.openWalkthrough', WALKTHROUGH_ID, false);
+  } catch {
+    await vscode.commands.executeCommand('workbench.action.openGettingStarted');
+  }
+}
+
 async function transpile() {
   const editor = vscode.window.activeTextEditor;
   if (!editor || editor.document.languageId !== 'qora') {
@@ -313,6 +363,9 @@ function activate(context) {
   context.subscriptions.push(
     vscode.commands.registerCommand('qora.transpile', transpile),
     vscode.commands.registerCommand('qora.showStages', showStages),
+    vscode.commands.registerCommand('qora.openExample', openExample),
+    vscode.commands.registerCommand('qora.newBellExample', newBellExample),
+    vscode.commands.registerCommand('qora.openWalkthrough', openWalkthrough),
     vscode.workspace.onDidOpenTextDocument(refreshDiagnostics),
     vscode.workspace.onDidChangeTextDocument((e) => scheduleRefresh(e.document)),
     vscode.workspace.onDidSaveTextDocument(refreshDiagnostics),

@@ -2,5 +2,16 @@
   "displayName": "Qora 언어",
   "description": "Qora 양자 토이 언어를 위한 문법 하이라이팅, hover 설명, 스니펫, 실시간 파스 오류, OpenQASM 변환.",
   "command.transpile.title": "Qora: OpenQASM으로 변환",
-  "command.showStages.title": "Qora: 컴파일 단계 보기 (AST / IR / OpenQASM)"
+  "command.showStages.title": "Qora: 컴파일 단계 보기 (AST / IR / OpenQASM)",
+  "command.openExample.title": "Qora: 예제 열기",
+  "command.newBellExample.title": "Qora: 새 Bell 예제 만들기",
+  "command.openWalkthrough.title": "Qora: 시작 안내 보기",
+  "walkthrough.gettingStarted.title": "Qora 시작하기",
+  "walkthrough.gettingStarted.description": "Qora 파일을 만들고, Bell 회로를 돌려보고, OpenQASM으로 변환해봐요.",
+  "walkthrough.step.createBell.title": "Bell 회로로 시작",
+  "walkthrough.step.createBell.description": "준비된 Qora 예제를 열거나, 더 작은 Bell 예제를 새 편집기에 만들어봐요.\n[데모 열기](command:qora.openExample)\n[새 Bell 예제 만들기](command:qora.newBellExample)",
+  "walkthrough.step.transpile.title": "OpenQASM으로 변환",
+  "walkthrough.step.transpile.description": "Qora 파일을 연 상태에서 번들 파서로 보내면, 만들어진 OpenQASM이 옆 편집기에 열려요.\n[현재 파일 변환하기](command:qora.transpile)",
+  "walkthrough.step.stages.title": "컴파일 파이프라인 확인",
+  "walkthrough.step.stages.description": "같은 소스가 AST, QoraIR, 역 IR, OpenQASM으로 이어지는 과정을 보면 언어 흐름이 훨씬 덜 막연해져요.\n[컴파일 단계 보기](command:qora.showStages)"
 }

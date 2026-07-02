@@ -2,6 +2,13 @@
 
 All notable changes to the Qora Language extension.
 
+## 0.5.4
+
+- Added a polished first-run path: a Getting Started walkthrough, editor-title actions for Qora files,
+  and quick commands to open the bundled demo or create a fresh Bell example.
+- Added `//` line-comment highlighting and VS Code line-comment toggling for Qora files.
+- Updated the marketplace README with the new onboarding entry points.
+
 ## 0.5.3
 
 - Fixed the language-switcher links (한국어 / 日本語 / Tiếng Việt) on the marketplace page: the

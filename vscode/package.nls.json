@@ -2,5 +2,16 @@
   "displayName": "Qora Language",
   "description": "Syntax highlighting, hover docs, snippets, live parse errors, and OpenQASM transpile for the Qora quantum toy language.",
   "command.transpile.title": "Qora: Transpile to OpenQASM",
-  "command.showStages.title": "Qora: Show Compilation Stages (AST / IR / OpenQASM)"
+  "command.showStages.title": "Qora: Show Compilation Stages (AST / IR / OpenQASM)",
+  "command.openExample.title": "Qora: Open Example",
+  "command.newBellExample.title": "Qora: New Bell Example",
+  "command.openWalkthrough.title": "Qora: Open Getting Started",
+  "walkthrough.gettingStarted.title": "Get Started with Qora",
+  "walkthrough.gettingStarted.description": "Create a Qora file, try a Bell circuit, and transpile it to OpenQASM.",
+  "walkthrough.step.createBell.title": "Start with a Bell Circuit",
+  "walkthrough.step.createBell.description": "Open a ready-made Qora example, or create a smaller Bell example in a new unsaved editor.\n[Open Demo](command:qora.openExample)\n[Create Bell Example](command:qora.newBellExample)",
+  "walkthrough.step.transpile.title": "Transpile to OpenQASM",
+  "walkthrough.step.transpile.description": "With a Qora file active, send it through the bundled parser and open the generated OpenQASM beside your source.\n[Transpile Active File](command:qora.transpile)",
+  "walkthrough.step.stages.title": "Inspect the Pipeline",
+  "walkthrough.step.stages.description": "Watch the same source move through AST, QoraIR, inverse IR, and OpenQASM so the language feels less like a black box.\n[Show Compilation Stages](command:qora.showStages)"
 }

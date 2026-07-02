@@ -3,6 +3,7 @@
   "name": "Qora",
   "scopeName": "source.qora",
   "patterns": [
+    { "include": "#comments" },
     { "include": "#keywords" },
     { "include": "#types" },
     { "include": "#gates" },
@@ -11,6 +12,10 @@
     { "include": "#operators" }
   ],
   "repository": {
+    "comments": {
+      "name": "comment.line.double-slash.qora",
+      "match": "//.*$"
+    },
     "keywords": {
       "name": "keyword.control.qor",
       "match": "\\b(operation|use|const|var|if|for|in|while|repeat|until)\\b"
