@@ -263,8 +263,13 @@ function stagesHtml(fileName, result) {
 
 async function refreshStages(document) {
   if (!stagesPanel || !document) return;
+  // capture identity BEFORE the (slow) CLI run: the panel may be disposed, re-targeted to another
+  // document, or the document may change/close while we wait — a stale result must never render.
+  const uri = document.uri.toString();
+  const version = document.version;
   const { result, error } = await runQora(document.getText(), ['--stages']);
-  if (!stagesPanel) return;                       // disposed while the CLI ran
+  if (!stagesPanel || stagesDocUri !== uri) return;         // disposed or re-targeted while the CLI ran
+  if (document.isClosed || document.version !== version) return;  // buffer moved on; a fresher run follows
   if (error) { warnInfraOnce(error); return; }
   stagesPanel.webview.html = stagesHtml(path.basename(document.fileName), result);
 }

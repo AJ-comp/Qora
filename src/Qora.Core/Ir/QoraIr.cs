@@ -18,7 +18,13 @@ namespace Qora.Ir;
 ///         layer. They can graduate to a real expression tree later without touching the rest.</item>
 /// </list>
 /// </summary>
-public sealed record QProgram(IReadOnlyList<QOperation> Operations);
+/// <param name="Operations">The program's operations (global namespace, until resolution lands).</param>
+/// <param name="ModuleDecls">
+/// Module-system declarations found in the source (<c>import X;</c> / <c>namespace N { … }</c>),
+/// rendered as display strings. The grammar accepts them; until the resolver pass exists the validator
+/// gates them with an "in progress" error so nothing compiles silently wrong. Null/empty = none.
+/// </param>
+public sealed record QProgram(IReadOnlyList<QOperation> Operations, IReadOnlyList<string>? ModuleDecls = null);
 
 public sealed record QOperation(string Name, IReadOnlyList<QParam> Params, IReadOnlyList<QStmt> Body);
 
@@ -164,23 +170,32 @@ public static class QoraGates
     public static readonly IReadOnlySet<string> MeasureLike = new HashSet<string> { "M", "Measure", "measure" };
 
     /// <summary>
-    /// Identifiers a Qora program must not declare (as an operation, parameter, variable, register, or
-    /// loop variable), because they collide in the emitted OpenQASM: language keywords and built-in
-    /// constants, every gate name <c>stdgates.inc</c> defines (declarations share one global namespace
-    /// with gates there, so <c>int t = 2;</c> would clash with the <c>t</c> gate), and — derived
-    /// automatically — whatever QASM name a <see cref="Gates"/> entry lowers to.
+    /// OpenQASM 3 keywords, types, and built-in constants — lexically reserved, so NO Qora declaration
+    /// may use them anywhere (a local named <c>pi</c> or <c>def</c> cannot even parse in QASM).
     /// </summary>
-    public static readonly IReadOnlySet<string> QasmReserved = new HashSet<string>
+    public static readonly IReadOnlySet<string> QasmKeywords = new HashSet<string>
     {
-        // OpenQASM 3 keywords, types, and built-in constants
         "OPENQASM", "include", "def", "gate", "qubit", "bit", "int", "uint", "float", "angle", "bool",
         "complex", "array", "duration", "stretch", "let", "const", "measure", "reset", "barrier",
         "delay", "if", "else", "for", "while", "in", "return", "break", "continue", "end", "input",
         "output", "extern", "box", "ctrl", "negctrl", "inv", "pow", "im", "true", "false", "pi",
         "euler", "tau", "defcal", "defcalgrammar", "cal", "durationof", "sizeof", "U", "gphase",
-        // gate names defined by stdgates.inc
+    };
+
+    /// <summary>
+    /// Gate names <c>stdgates.inc</c> defines (plus — derived — whatever a <see cref="Gates"/> entry
+    /// lowers to). These live in the QASM GLOBAL scope, so only Qora declarations that land there
+    /// (operation names, the entry op's registers/top-level variables) may not collide; def-local
+    /// parameters/variables/loop variables may legally shadow them (OpenQASM scoping rules).
+    /// </summary>
+    public static readonly IReadOnlySet<string> StdgatesNames = new HashSet<string>
+    {
         "p", "x", "y", "z", "h", "s", "sdg", "t", "tdg", "sx", "rx", "ry", "rz", "cx", "cy", "cz",
         "cp", "crx", "cry", "crz", "ch", "swap", "ccx", "cswap", "cu", "CX", "phase", "cphase", "id",
         "u1", "u2", "u3",
     }.Concat(Gates.Values.Select(g => g.QasmName)).ToHashSet();
+
+    /// <summary>Everything above combined — names that can never be a global identifier.</summary>
+    public static readonly IReadOnlySet<string> QasmReserved =
+        QasmKeywords.Concat(StdgatesNames).ToHashSet();
 }

@@ -104,7 +104,7 @@ public static class QasmEmitter
         var decls = new StringBuilder();
         HoistDecls(entry.Body, decls);
         var body = new StringBuilder();
-        EmitStatements(entry.Body, body, 0, ctx);
+        EmitStatements(entry.Body, body, 0, ctx, SeedVarTypes(entry));
         sb.Append(decls);
         sb.Append(body);
 
@@ -218,7 +218,7 @@ public static class QasmEmitter
         var decls = new StringBuilder();
         HoistDecls(op.Body, decls);
         var body = new StringBuilder();
-        EmitStatements(op.Body, body, 1, ctx);
+        EmitStatements(op.Body, body, 1, ctx, SeedVarTypes(op));
 
         sb.AppendLine($"def {op.Name}({ps}) {{");
         foreach (var line in decls.ToString().Split('\n'))
@@ -232,7 +232,7 @@ public static class QasmEmitter
     {
         var ps = string.Join(", ", op.Params.Select(EmitParam));
         var body = new StringBuilder();
-        EmitStatements(inverse, body, 1, ctx);
+        EmitStatements(inverse, body, 1, ctx, SeedVarTypes(op));
 
         sb.AppendLine($"def {ctx.AdjNames[op.Name]}({ps}) {{");
         sb.Append(body);
@@ -273,7 +273,7 @@ public static class QasmEmitter
         }
     }
 
-    private static void EmitStatements(IReadOnlyList<QStmt> stmts, StringBuilder body, int indent, Ctx ctx)
+    private static void EmitStatements(IReadOnlyList<QStmt> stmts, StringBuilder body, int indent, Ctx ctx, Dictionary<string, string> varTypes)
     {
         var pad = new string(' ', indent * 2);
 
@@ -289,7 +289,7 @@ public static class QasmEmitter
                     break;
 
                 case QDecl d:
-                    EmitDecl(d, body, pad);
+                    EmitDecl(d, body, pad, varTypes);
                     break;
 
                 case QAssign a:
@@ -297,25 +297,25 @@ public static class QasmEmitter
                     break;
 
                 case QIf i:
-                    EmitIf(i, body, indent, ctx);
+                    EmitIf(i, body, indent, ctx, varTypes);
                     break;
 
                 case QFor f:
                     var range = f.Step is null ? $"[{f.From}:{f.To}]" : $"[{f.From}:{f.Step}:{f.To}]";
                     body.AppendLine($"{pad}for int {f.Var} in {range} {{");
-                    EmitStatements(f.Body, body, indent + 1, ctx);
+                    EmitStatements(f.Body, body, indent + 1, ctx, varTypes);
                     body.AppendLine($"{pad}}}");
                     break;
 
                 case QWhile w:
                     body.AppendLine($"{pad}while ({w.Cond.Text}) {{");
-                    EmitStatements(w.Body, body, indent + 1, ctx);
+                    EmitStatements(w.Body, body, indent + 1, ctx, varTypes);
                     body.AppendLine($"{pad}}}");
                     break;
 
                 case QRepeat r:
                     body.AppendLine($"{pad}while (true) {{");
-                    EmitStatements(r.Body, body, indent + 1, ctx);
+                    EmitStatements(r.Body, body, indent + 1, ctx, varTypes);
                     body.AppendLine($"{pad}  if ({r.Until.Text}) {{ break; }}");
                     body.AppendLine($"{pad}}}");
                     break;
@@ -323,18 +323,18 @@ public static class QasmEmitter
         }
     }
 
-    private static void EmitIf(QIf node, StringBuilder body, int indent, Ctx ctx)
+    private static void EmitIf(QIf node, StringBuilder body, int indent, Ctx ctx, Dictionary<string, string> varTypes)
     {
         var pad = new string(' ', indent * 2);
 
         body.AppendLine($"{pad}if ({node.Cond.Text}) {{");
-        EmitStatements(node.Then, body, indent + 1, ctx);
+        EmitStatements(node.Then, body, indent + 1, ctx, varTypes);
         body.AppendLine($"{pad}}}");
 
         if (node.Else.Count > 0)
         {
             body.AppendLine($"{pad}else {{");
-            EmitStatements(node.Else, body, indent + 1, ctx);
+            EmitStatements(node.Else, body, indent + 1, ctx, varTypes);
             body.AppendLine($"{pad}}}");
         }
     }
@@ -374,7 +374,7 @@ public static class QasmEmitter
     private static string Reason(Ctx ctx, string name) =>
         ctx.NotInvertible.TryGetValue(name, out var r) ? r : "body is not invertible";
 
-    private static void EmitDecl(QDecl d, StringBuilder body, string pad)
+    private static void EmitDecl(QDecl d, StringBuilder body, string pad, Dictionary<string, string> varTypes)
     {
         if (d.Value is QMeasure)
         {
@@ -382,18 +382,33 @@ public static class QasmEmitter
             return;
         }
 
-        var type = TypeName(d.Type) ?? InferDefaultType(d.Value);
+        var type = TypeName(d.Type) ?? InferDefaultType(d.Value, varTypes);
+        varTypes.TryAdd(d.Name, type);
         var prefix = d.IsConst ? "const " : string.Empty;
         body.AppendLine($"{pad}{prefix}{type} {d.Name} = {RenderExpr(d.Value)};");
     }
 
     /// <summary>
-    /// The default type of an untyped `var`/`const`: real-valued initializers (a float literal or the
-    /// built-in constants) get `float` — emitting `int t = pi / 4;` would be an invalid narrowing.
+    /// The default type of an untyped `var`/`const`: `float` when the initializer is real-valued — a
+    /// float literal, a built-in constant, or a variable already known to be float (so floatness
+    /// propagates: `var a = pi; var b = a / 2;` makes `b` a float too). `int t = pi / 4;` would be an
+    /// invalid narrowing in the emitted QASM.
     /// </summary>
-    private static string InferDefaultType(QExpr value) =>
-        value is QText t && t.Text.Split(' ').Any(tok => tok is "pi" or "tau" or "euler" || tok.Contains('.'))
+    private static string InferDefaultType(QExpr value, Dictionary<string, string> varTypes) =>
+        value is QText t && t.Text.Split(' ').Any(tok =>
+            tok is "pi" or "tau" or "euler" || tok.Contains('.')
+            || (varTypes.TryGetValue(tok, out var vt) && vt == "float"))
             ? "float" : "int";
+
+    /// <summary>Seed the per-op variable-type map from the op's classical parameters.</summary>
+    private static Dictionary<string, string> SeedVarTypes(QOperation op)
+    {
+        var map = new Dictionary<string, string>();
+        foreach (var p in op.Params)
+            if (p.Type == QType.Int) map[p.Name] = "int";
+            else if (p.Type == QType.Bit) map[p.Name] = "bit";
+        return map;
+    }
 
     private static string EmitParam(QParam p) => p.Type switch
     {

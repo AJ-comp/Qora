@@ -6,7 +6,7 @@ using Janglim.FrontEnd.RegularGrammar;
 namespace Qora;
 
 /// <summary>
-/// Qora v0.10 — a Q#/C#-flavored quantum language on the Janglim engine.
+/// Qora v0.11 — a Q#/C#-flavored quantum language on the Janglim engine.
 ///
 ///   operation Bell(Qubit[2] q) {       // a subroutine, with C#-style parameters
 ///       H(q[0]);
@@ -28,14 +28,22 @@ namespace Qora;
 /// <c>inv @</c> / <c>ctrl @</c>), richer conditions (== != &lt; &lt;= &gt; &gt;= &amp;&amp; || !),
 /// <c>if/else</c> (and <c>else if</c>), and first-class <c>Reset</c>.
 /// v0.9 added: <c>//</c> line comments (block <c>/* */</c> comments still pending engine support).
-/// v0.10 adds: whole-operation <c>Adjoint</c> (synthesized inverse defs, via the typed IR pipeline in
+/// v0.10 added: whole-operation <c>Adjoint</c> (synthesized inverse defs, via the typed IR pipeline in
 /// <c>Ir/</c> with semantic validation QSEM001-015), unary minus in expressions, and zero-argument
-/// functor calls. Operations are still void (no return value yet).
+/// functor calls.
+/// v0.11 adds: hardened validation (argument kinds for built-ins, full user-op call signatures,
+/// index bounds QSEM016, measure-into-bit QSEM017; QSEM013 relaxed so def-locals may shadow stdgates
+/// names), the module-system grammar (<c>import</c> / <c>namespace</c> / <c>open</c>, parsed and gated
+/// as in-progress — see docs/namespaces-design.md), and string literals (Janglim 0.3.0-preview.1's
+/// raw-regex StringLiteral token). Operations are still void (no return value yet).
 /// </summary>
 public class QoraGrammar : Grammar
 {
     // --- keywords (meaning=false -> excluded from AST; bWord=false -> win the lexer tie vs identifier) ---
     public Terminal Operation { get; } = new Terminal(TokenType.Keyword, "operation", false);
+    public Terminal Namespace { get; } = new Terminal(TokenType.Keyword, "namespace", false);
+    public Terminal Open { get; } = new Terminal(TokenType.Keyword, "open", false);
+    public Terminal Import { get; } = new Terminal(TokenType.Keyword, "import", false);
     public Terminal Use { get; } = new Terminal(TokenType.Keyword, "use", false);
     public Terminal Qubit { get; } = new Terminal(TokenType.Keyword, "Qubit", false);
     public Terminal Const { get; } = new Terminal(TokenType.Keyword, "const", false);
@@ -83,6 +91,11 @@ public class QoraGrammar : Grammar
     public Terminal Comma { get; } = new Terminal(TokenType.Operator.Comma, ",", false);
     public Terminal Assign { get; } = new Terminal(TokenType.Operator, "=", false);
     public Terminal DotDot { get; } = new Terminal(TokenType.Operator, "..", false);
+    // single dot for qualified names (Lib.Op); ".." wins by longest match, "0.5" lexes as one Float.
+    public Terminal Dot { get; } = new Terminal(TokenType.Operator, ".", "." , true, false);
+    // Quote-delimited string (raw regex — Janglim >=0.3.0-preview.1's StringLiteral token type skips
+    // the \b wrapping that made this impossible before; see docs/janglim-request-raw-regex-terminal.md).
+    public Terminal StringLit { get; } = new Terminal(TokenType.Literal.StringLiteral, "\"[^\"]*\"", "string", true, true);
 
     // comparison + boolean operators (meaning=true; the lexer's longest-match keeps == / != / <= / >= whole)
     public Terminal Eq { get; } = new Terminal(TokenType.Operator, "==", "==", true, false);
@@ -104,6 +117,12 @@ public class QoraGrammar : Grammar
     // --- non-terminals ---
     private NonTerminal program = new NonTerminal("program", true);
     private NonTerminal operationList = new NonTerminal("operationList");
+    private NonTerminal topItem = new NonTerminal("topItem");
+    private NonTerminal importStmt = new NonTerminal("importStmt");
+    private NonTerminal namespaceDecl = new NonTerminal("namespaceDecl");
+    private NonTerminal nsItem = new NonTerminal("nsItem");
+    private NonTerminal openStmt = new NonTerminal("openStmt");
+    private NonTerminal qname = new NonTerminal("qname");
     private NonTerminal operation = new NonTerminal("operation");
     private NonTerminal paramList = new NonTerminal("paramList");
     private NonTerminal param = new NonTerminal("param");
@@ -129,6 +148,9 @@ public class QoraGrammar : Grammar
 
     // --- semantic tags ---
     public static MeaningUnit ProgramM { get; } = new MeaningUnit("Program");
+    public static MeaningUnit ImportM { get; } = new MeaningUnit("Import");
+    public static MeaningUnit NamespaceM { get; } = new MeaningUnit("Namespace");
+    public static MeaningUnit OpenM { get; } = new MeaningUnit("Open");
     public static MeaningUnit OperationM { get; } = new MeaningUnit("Operation");
     public static MeaningUnit ParamM { get; } = new MeaningUnit("Param");
     public static MeaningUnit UseM { get; } = new MeaningUnit("Use");
@@ -150,7 +172,19 @@ public class QoraGrammar : Grammar
     public QoraGrammar()
     {
         program.AddItem(operationList, ProgramM);
-        operationList.AddItem(operation | operationList + operation);
+        operationList.AddItem(topItem | operationList + topItem);
+        topItem.AddItem(operation | importStmt | namespaceDecl);
+
+        // module system (in progress — parsed and surfaced, gated by the validator until resolution lands):
+        //   import gates_lib;        // bare module name -> gates_lib.qor (dots become directories later)
+        //   import "gates lib.qor";  // string path form (for names a bare identifier can't spell)
+        //   namespace Lib.Sub { open Other; operation Foo() { … } }
+        importStmt.AddItem(Import + qname + Semicolon, ImportM);
+        importStmt.AddItem(Import + StringLit + Semicolon, ImportM);
+        namespaceDecl.AddItem(Namespace + qname + LBrace + nsItem.ZeroOrMore() + RBrace, NamespaceM);
+        nsItem.AddItem(openStmt | operation);
+        openStmt.AddItem(Open + qname + Semicolon, OpenM);
+        qname.AddItem(Ident + (Dot + Ident).ZeroOrMore());
 
         // operation Name() { … }   /   operation Name(params) { … }
         operation.AddItem(Operation + Ident + LParen + RParen + LBrace + statement.ZeroOrMore() + RBrace, OperationM);

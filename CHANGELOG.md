@@ -11,6 +11,36 @@ emitted as **OpenQASM 3.0**.
 > **Note:** Qora was renamed from **Ket** on 2026-07-01 (a "Ket" extension already existed). Versions
 > 0.1–0.7 below were authored under the old name.
 
+## 0.11 — 2026-07-03
+
+### Added
+- **Module-system grammar (in progress).** `import gates_lib;` / `import "path.qor";`,
+  `namespace A.B { open C.D; … }`, and dotted qualified names now parse. Until the resolver pass lands
+  they are gated with a clear QSEM099 error, so a namespaced program can never silently compile with
+  global semantics. Design: `docs/namespaces-design.md` (resolution = local scope → own namespace →
+  opened namespaces, ambiguity is an error; built-in gate names stay reserved in v1).
+- **String literals.** Janglim `0.3.0-preview.1` adds a raw-regex `StringLiteral` token type
+  (requested in `docs/janglim-request-raw-regex-terminal.md`), enabling the string-path import form —
+  quote-delimited tokens were previously impossible to lex.
+- **Hardened validation** (fourth adversarial review, 17 confirmed findings fixed):
+  - argument KINDS for built-in gates — `Rx(q[0], pi/2)` (swapped), `H(pi)`, `X(5)` are now errors;
+  - full user-operation call signatures — argument count, register size, single-qubit vs register,
+    qubit-into-classical (QSEM006), including `Adjoint` call sites;
+  - whole-register duplicate/overlap operands — `CNOT(q, q)`, `CNOT(q, q[0])` (QSEM014);
+  - literal index bounds and no indexing of single-qubit parameters (QSEM016);
+  - measurement must land in a `bit` (QSEM017); duplicate parameter/register/measure-bit names (QSEM015).
+- **QSEM013 relaxed to match OpenQASM scoping**: def-local parameters, variables, and loop variables
+  may legally shadow stdgates names (`operation ApplyTwice(Qubit t)` is valid again); QASM keywords
+  stay illegal everywhere, and global-scope declarations plus operation names stay checked.
+
+### Fixed
+- `!` in conditions parenthesizes its operand, so Qora's negate-the-whole-expression meaning survives
+  OpenQASM's re-parse.
+- Untyped `var`/`const` float inference now propagates through variables (`var a = pi; var b = a / 2;`
+  emits `float b`).
+- Hoisted declarations deduplicate; the stages view's inverse-IR column now shows the same transitive,
+  uniquified inverse defs the QASM contains.
+
 ## 0.10 — 2026-07-02
 
 ### Added

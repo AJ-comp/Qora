@@ -37,6 +37,15 @@ Rx/Ry/Rz), measurement (`bit r = M(q)`), classical vars (const/var/int/bit) + re
 
 ## 🟡 MEDIUM — gateway features (bigger work)
 
+- **Module system + namespaces** ⚛️ — multi-file programs (`import`), `namespace` / `open`, qualified
+  names, and built-in gates living in a `Qora.Intrinsic`-style namespace. Decided 2026-07-02: adoption
+  basics come before ecosystem (chicken-and-egg), so this is elevated ahead of the sequencing below.
+  Requires the real name-resolution machinery (symbol tables, scoped lookup) — which the effect-analysis
+  step needs anyway, so build it once here and reuse it there. OpenQASM has no module system, so
+  namespaces flatten by name-mangling at emit (C++-style). Once resolution exists, QSEM013's
+  "operation may not shadow a built-in" rule relaxes to Q#-style "declaration allowed, ambiguous use is
+  an error"; silent reinterpretation stays forbidden. (hard)
+
 - **`function` vs `operation`** ⚛️ — a deterministic-classical `function` alongside the effectful quantum
   `operation` (Q#'s central classical/quantum boundary). Trivial as a keyword; the real value needs a
   light purity check (reject qubit ops inside a `function`). Both still lower to `def`. (workable)
@@ -86,8 +95,10 @@ Rx/Ry/Rz), measurement (`bit r = M(q)`), classical vars (const/var/int/bit) + re
 
 ## Sequencing note
 
-The natural next chunk is the **return-value gateway** (function-vs-operation → typed returns →
-calls-as-expressions), which unlocks real program structure, then **float/angle types** and
-**range/expression bounds** for honest, scalable circuits, then **`within`/`apply`** (now unblocked by
-single-gate `Adjoint`). Whole-operation auto-functors and the erasing types (Result/Pauli/namespaces)
-come last. Comments wait on the engine's longest-match lexer.
+Updated 2026-07-02 (post-v0.10: whole-op `Adjoint`, the typed IR pipeline, and semantic validation
+QSEM001–017 all landed). The next chunk is the **module system + namespaces** above — its symbol-table /
+scoped-resolution machinery is the same foundation the **effect analysis** (qfree/mfree/const +
+liveness) needs, which in turn unlocks the end goal: **automatic uncomputation** (Silq-style, injected
+as the synthetic `QConjugate` IR node the pipeline already carries). The return-value gateway
+(function-vs-operation → typed returns → calls-as-expressions) and **float/angle types** slot in
+alongside; whole-operation auto-`Controlled` and the erasing types (Result/Pauli) come last.

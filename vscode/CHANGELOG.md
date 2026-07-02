@@ -2,6 +2,16 @@
 
 All notable changes to the Qora Language extension.
 
+## 0.5.2
+
+- Bundles the **Qora v0.11** compiler (Janglim 0.3.0-preview.1): hardened validation — argument kinds
+  for built-in gates, full user-operation call signatures, index bounds (QSEM016), measure-into-bit
+  (QSEM017) — and QSEM013 relaxed so def-local names like `Qubit t` are valid again. The module-system
+  grammar (`import` / `namespace` / `open`) parses and reports an in-progress error until resolution
+  lands. String literals now lex.
+- Stages panel: the inverse-IR column shows the same transitive, uniquified inverse defs as the QASM;
+  fixed a race where a slow refresh could render stale or wrong-document content.
+
 ## 0.5.1
 
 - New marketplace icon — the Qora "Q orbital" mark (matches the project docs).

@@ -20,13 +20,32 @@ public static class QoraLowering
     {
         if (ast is not AstNonTerminal program) return null;
 
-        var operations = program.Items.OfType<AstNonTerminal>()
-            .Where(n => n.Name == "Operation")
-            .Select(LowerOperation)
-            .ToList();
+        var operations = new List<QOperation>();
+        var moduleDecls = new List<string>();
+        foreach (var item in program.Items.OfType<AstNonTerminal>())
+        {
+            switch (item.Name)
+            {
+                case "Operation":
+                    operations.Add(LowerOperation(item));
+                    break;
+                // module system (in progress): surface the declarations so the validator can gate them
+                // with a clear message instead of silently dropping namespaced code.
+                case "Import":
+                    moduleDecls.Add($"import {QnameText(item)}");
+                    break;
+                case "Namespace":
+                    moduleDecls.Add($"namespace {QnameText(item)}");
+                    break;
+            }
+        }
 
-        return new QProgram(operations);
+        return new QProgram(operations, moduleDecls.Count > 0 ? moduleDecls : null);
     }
+
+    /// <summary>The leading dotted name of an Import/Namespace node (its terminals up to the first block content).</summary>
+    private static string QnameText(AstNonTerminal node) =>
+        string.Concat(node.Items.TakeWhile(i => i is AstTerminal).Select(i => i.ToString()));
 
     private static QOperation LowerOperation(AstNonTerminal op)
     {
@@ -161,17 +180,23 @@ public static class QoraLowering
 
         var parts = new List<string>();
         var hasCall = false;
+        var negateNext = false;   // a `!` binds to the WHOLE following expr in Qora's grammar
         foreach (var item in cond.Items)
         {
             if (item is AstNonTerminal nt && nt.Name == "Expr")
             {
                 var (text, call) = RenderExpr(nt);
-                parts.Add(text);
+                // Qora's `!expr` negates the whole expression, but the flat re-parsed QASM would bind
+                // `!` to the first token only (`! a + 1` -> (!a)+1) — parenthesize to keep the meaning.
+                parts.Add(negateNext ? $"({text})" : text);
+                negateNext = false;
                 hasCall |= call;
             }
             else
             {
-                parts.Add(item.ToString() ?? string.Empty);
+                var tok = item.ToString() ?? string.Empty;
+                parts.Add(tok);
+                negateNext = tok == "!";
             }
         }
         return new QCond(string.Join(" ", parts), hasCall);

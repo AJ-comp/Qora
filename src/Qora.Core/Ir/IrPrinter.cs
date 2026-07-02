@@ -32,33 +32,70 @@ public static class IrPrinter
     }
 
     /// <summary>
-    /// The synthesized inverse of every operation the program applies <c>Adjoint</c> to — stage 3 of the
-    /// pipeline, the part no source line wrote. Ops that cannot be inverted are listed with the reason
-    /// (the validator reports them as QSEM001 anyway; this keeps the stages view self-explanatory).
+    /// The synthesized inverse of every operation the program needs — stage 3 of the pipeline, the part
+    /// no source line wrote. Mirrors the emitter exactly: the set is closed TRANSITIVELY (an inverse
+    /// body's plain calls become <c>Adjoint</c> calls needing their own inverses) and each block is
+    /// headed by the same uniquified def name the QASM will contain, so the stages panel's inverse
+    /// column maps one-to-one onto the emitted defs. Non-invertible targets are listed with the reason.
     /// </summary>
     public static string PrintInverses(QProgram? program)
     {
         if (program is null) return string.Empty;
 
         var ops = program.Operations.Select(o => o.Name).ToHashSet();
-        var adjointed = new HashSet<string>();
-        foreach (var op in program.Operations)
-            CollectAdjointRefs(op.Body, ops, adjointed);
-        if (adjointed.Count == 0) return string.Empty;
+        var opByName = new Dictionary<string, QOperation>();
+        foreach (var o in program.Operations) opByName.TryAdd(o.Name, o);
 
+        // transitive closure over Adjoint references — same worklist the emitter runs.
         var inverter = new Inverter(program.Operations);
-        var sb = new StringBuilder();
-        foreach (var name in adjointed.OrderBy(n => n))
+        var inverses = new Dictionary<string, IReadOnlyList<QStmt>>();
+        var adjOrder = new List<string>();
+        var notInvertible = new Dictionary<string, string>();
+        var seen = new HashSet<string>();
+        var worklist = new Queue<string>();
+        void Enqueue(IReadOnlyList<QStmt> body)
         {
+            var refs = new HashSet<string>();
+            CollectAdjointRefs(body, ops, refs);
+            foreach (var r in refs) if (seen.Add(r)) worklist.Enqueue(r);
+        }
+        foreach (var op in program.Operations) Enqueue(op.Body);
+        while (worklist.Count > 0)
+        {
+            var name = worklist.Dequeue();
+            if (!opByName.ContainsKey(name)) continue;
             if (inverter.TryInvertOperation(name, out var inverse, out var reason))
             {
-                sb.AppendLine($"inverse of {name}:");
-                PrintBody(inverse, sb, "  ");
+                inverses[name] = inverse;
+                adjOrder.Add(name);
+                Enqueue(inverse);
             }
             else
             {
-                sb.AppendLine($"inverse of {name}: (not invertible: {reason})");
+                notInvertible[name] = reason;
             }
+        }
+        if (adjOrder.Count == 0 && notInvertible.Count == 0) return string.Empty;
+
+        // same uniquify rule as the emitter, so the shown def names match the QASM.
+        var adjNames = new Dictionary<string, string>();
+        foreach (var name in adjOrder)
+        {
+            var candidate = name + "__adj";
+            while (ops.Contains(candidate) || adjNames.ContainsValue(candidate)) candidate += "_";
+            adjNames[name] = candidate;
+        }
+
+        var sb = new StringBuilder();
+        foreach (var name in adjOrder)
+        {
+            sb.AppendLine($"def {adjNames[name]}  (inverse of {name}):");
+            PrintBody(inverses[name], sb, "  ");
+            sb.AppendLine();
+        }
+        foreach (var (name, reason) in notInvertible.OrderBy(kv => kv.Key))
+        {
+            sb.AppendLine($"inverse of {name}: (not invertible: {reason})");
             sb.AppendLine();
         }
         return sb.ToString().TrimEnd();
