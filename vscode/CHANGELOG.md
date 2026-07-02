@@ -2,6 +2,10 @@
 
 All notable changes to the Qora Language extension.
 
+## 0.5.1
+
+- New marketplace icon — the Qora "Q orbital" mark (matches the project docs).
+
 ## 0.5.0
 
 - **"Qora: Show Compilation Stages" command** — opens a side panel showing how the current file moves
