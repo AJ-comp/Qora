@@ -1,0 +1,454 @@
+using System.Text;
+
+namespace Qora.Ir;
+
+/// <summary>
+/// Lowers Qora IR (<see cref="QProgram"/>) to OpenQASM 3.0 — the final, text-producing pass.
+///
+/// Inversion is not done here: the whole-operation <c>Adjoint</c> feature runs on <see cref="Inverter"/>
+/// (a pure IR→IR pass), and this emitter just prints the inverse bodies it returns as ordinary
+/// statements. A call site <c>Adjoint Foo(args)</c> lowers to a call to the synthesized inverse def
+/// (named <c>Foo__adj</c>, uniquified if a user op already took that name), and one op's inverse body
+/// may itself call another's, so the set of needed inverse defs is closed transitively.
+///
+/// OpenQASM requires declare-before-use for defs and has no forward declarations, so all defs (forward
+/// and synthesized) are emitted in dependency (topological) order; on a call cycle — only reachable
+/// through forward recursion, which inversion already rejects — it falls back to the stable order.
+///
+/// Constructs OpenQASM cannot express are emitted as a visible <c>// Qora:</c> note instead of invalid
+/// text: gate modifiers on a def call (<c>Controlled Foo(...)</c> / non-invertible <c>Adjoint Foo</c>)
+/// and gate modifiers on <c>reset</c>.
+/// </summary>
+public static class QasmEmitter
+{
+    private static readonly Dictionary<string, string> FunctorMods = new()
+    {
+        ["Adjoint"] = "inv @ ",
+        ["Controlled"] = "ctrl @ ",
+    };
+
+    /// <summary>Everything statement emission needs to resolve a call site.</summary>
+    private sealed record Ctx(
+        HashSet<string> Ops,
+        Dictionary<string, IReadOnlyList<QStmt>> Adjointed,   // op name -> its inverse body
+        Dictionary<string, string> AdjNames,                  // op name -> unique inverse-def name
+        Dictionary<string, string> NotInvertible);            // op name -> why it has no inverse
+
+    public static string Emit(QProgram? program)
+    {
+        if (program is null || program.Operations.Count == 0) return string.Empty;
+
+        var operations = program.Operations;
+        var entry = operations.FirstOrDefault(o => o.Name == "Main") ?? operations[0];
+        var subroutines = operations.Where(o => o != entry).ToList();
+        var ops = operations.Select(o => o.Name).ToHashSet();
+
+        var opByName = new Dictionary<string, QOperation>();
+        foreach (var o in operations) opByName[o.Name] = o;
+
+        // Resolve every `Adjoint Foo(...)` reference to an inverse body (or a reason). One inverse body
+        // can reference further ops (`Bar(...)` inverts to `Adjoint Bar(...)`), so close the set with a
+        // worklist until no new names appear. adjOrder records discovery order for stable emission.
+        var inverter = new Inverter(operations);
+        var ctx = new Ctx(ops, new(), new(), new());
+        var adjOrder = new List<string>();
+
+        var seen = new HashSet<string>();
+        var worklist = new Queue<string>();
+        void Enqueue(IReadOnlyList<QStmt> body)
+        {
+            var refs = new HashSet<string>();
+            CollectAdjointRefs(body, ops, refs);
+            foreach (var r in refs) if (seen.Add(r)) worklist.Enqueue(r);
+        }
+
+        Enqueue(entry.Body);
+        foreach (var d in subroutines) Enqueue(d.Body);
+        while (worklist.Count > 0)
+        {
+            var name = worklist.Dequeue();
+            if (!opByName.ContainsKey(name)) continue;
+            if (inverter.TryInvertOperation(name, out var inverse, out var reason))
+            {
+                ctx.Adjointed[name] = inverse;
+                adjOrder.Add(name);
+                Enqueue(inverse);
+            }
+            else
+            {
+                ctx.NotInvertible[name] = reason;
+            }
+        }
+
+        // Unique inverse-def names: `Foo__adj` unless a user op (or an earlier synthesized name)
+        // already claimed it — then keep appending `_` until free.
+        foreach (var name in adjOrder)
+        {
+            var candidate = name + "__adj";
+            while (ops.Contains(candidate) || ctx.AdjNames.ContainsValue(candidate)) candidate += "_";
+            ctx.AdjNames[name] = candidate;
+        }
+
+        var sb = new StringBuilder();
+        sb.AppendLine("OPENQASM 3;");
+        sb.AppendLine("include \"stdgates.inc\";");
+
+        foreach (var (kind, name) in OrderDefs(subroutines, adjOrder, entry.Name, opByName, ctx))
+        {
+            sb.AppendLine();
+            if (kind == DefKind.Forward) EmitDef(opByName[name], ctx, sb);
+            else EmitAdjDef(opByName[name], ctx.Adjointed[name], ctx, sb);
+        }
+
+        sb.AppendLine();
+        var decls = new StringBuilder();
+        HoistDecls(entry.Body, decls);
+        var body = new StringBuilder();
+        EmitStatements(entry.Body, body, 0, ctx);
+        sb.Append(decls);
+        sb.Append(body);
+
+        return sb.ToString().TrimEnd();
+    }
+
+    // --- def ordering (declare-before-use) ---
+
+    private enum DefKind { Forward, Adj }
+
+    /// <summary>
+    /// Order all defs (forward subroutines + synthesized inverses) so every def appears before its
+    /// callers: Kahn's algorithm over the call graph, tie-broken by the stable order (subroutines in
+    /// source order, then inverse defs in discovery order). A cycle — possible only via forward
+    /// recursion, which OpenQASM cannot express anyway — falls back to appending the rest stably.
+    /// </summary>
+    private static List<(DefKind Kind, string Name)> OrderDefs(
+        List<QOperation> subroutines, List<string> adjOrder, string entryName,
+        Dictionary<string, QOperation> opByName, Ctx ctx)
+    {
+        var nodes = new List<(DefKind Kind, string Name)>();
+        foreach (var s in subroutines) nodes.Add((DefKind.Forward, s.Name));
+        foreach (var a in adjOrder) nodes.Add((DefKind.Adj, a));
+
+        var index = new Dictionary<(DefKind, string), int>();
+        for (int i = 0; i < nodes.Count; i++) index[nodes[i]] = i;
+
+        IReadOnlyList<QStmt> BodyOf((DefKind Kind, string Name) n) =>
+            n.Kind == DefKind.Forward ? opByName[n.Name].Body : ctx.Adjointed[n.Name];
+
+        // edges: callee -> callers (a def depends on the defs it calls)
+        var dependents = new Dictionary<int, List<int>>();
+        var indegree = new int[nodes.Count];
+        for (int i = 0; i < nodes.Count; i++)
+        {
+            var deps = new HashSet<(DefKind, string)>();
+            CollectCallDeps(BodyOf(nodes[i]), entryName, ctx, deps);
+            foreach (var dep in deps)
+            {
+                if (!index.TryGetValue(dep, out var j) || j == i) continue;
+                if (!dependents.TryGetValue(j, out var list)) dependents[j] = list = new List<int>();
+                list.Add(i);
+                indegree[i]++;
+            }
+        }
+
+        var result = new List<(DefKind, string)>();
+        var emitted = new bool[nodes.Count];
+        while (result.Count < nodes.Count)
+        {
+            var next = -1;
+            for (int i = 0; i < nodes.Count; i++)
+                if (!emitted[i] && indegree[i] == 0) { next = i; break; }
+            if (next < 0) // cycle: emit the stably-first remaining node anyway
+                for (int i = 0; i < nodes.Count; i++)
+                    if (!emitted[i]) { next = i; break; }
+
+            emitted[next] = true;
+            result.Add(nodes[next]);
+            if (dependents.TryGetValue(next, out var users))
+                foreach (var u in users) indegree[u]--;
+        }
+        return result;
+    }
+
+    /// <summary>Collect which defs a body's call sites will reference, mirroring EmitStmtInline's resolution.</summary>
+    private static void CollectCallDeps(IReadOnlyList<QStmt> stmts, string entryName, Ctx ctx, HashSet<(DefKind, string)> into)
+    {
+        foreach (var stmt in stmts)
+        {
+            switch (stmt)
+            {
+                case QGate g when ctx.Ops.Contains(g.Name) && g.Name != entryName:
+                    if (g.Functors.FirstOrDefault() == "Adjoint")
+                    {
+                        if (ctx.Adjointed.ContainsKey(g.Name)) into.Add((DefKind.Adj, g.Name));
+                        // non-invertible -> a note, no call
+                    }
+                    else if (g.Functors.Count == 0)
+                    {
+                        into.Add((DefKind.Forward, g.Name));
+                    }
+                    // Controlled on a user op -> a note, no call
+                    break;
+                case QIf i:
+                    CollectCallDeps(i.Then, entryName, ctx, into);
+                    CollectCallDeps(i.Else, entryName, ctx, into);
+                    break;
+                case QFor f:
+                    CollectCallDeps(f.Body, entryName, ctx, into);
+                    break;
+                case QWhile w:
+                    CollectCallDeps(w.Body, entryName, ctx, into);
+                    break;
+                case QRepeat r:
+                    CollectCallDeps(r.Body, entryName, ctx, into);
+                    break;
+                case QConjugate c:
+                    CollectCallDeps(c.Within, entryName, ctx, into);
+                    CollectCallDeps(c.Apply, entryName, ctx, into);
+                    break;
+            }
+        }
+    }
+
+    // --- def emission ---
+
+    private static void EmitDef(QOperation op, Ctx ctx, StringBuilder sb)
+    {
+        var ps = string.Join(", ", op.Params.Select(EmitParam));
+        var decls = new StringBuilder();
+        HoistDecls(op.Body, decls);
+        var body = new StringBuilder();
+        EmitStatements(op.Body, body, 1, ctx);
+
+        sb.AppendLine($"def {op.Name}({ps}) {{");
+        foreach (var line in decls.ToString().Split('\n'))
+            if (line.Trim().Length > 0) sb.AppendLine($"  {line.TrimEnd()}");
+        sb.Append(body);
+        sb.AppendLine("}");
+    }
+
+    /// <summary>Print a synthesized inverse def: same signature as the original, body from <see cref="Inverter"/>.</summary>
+    private static void EmitAdjDef(QOperation op, IReadOnlyList<QStmt> inverse, Ctx ctx, StringBuilder sb)
+    {
+        var ps = string.Join(", ", op.Params.Select(EmitParam));
+        var body = new StringBuilder();
+        EmitStatements(inverse, body, 1, ctx);
+
+        sb.AppendLine($"def {ctx.AdjNames[op.Name]}({ps}) {{");
+        sb.Append(body);
+        sb.AppendLine("}");
+    }
+
+    private static void HoistDecls(IReadOnlyList<QStmt> stmts, StringBuilder decls) =>
+        HoistDecls(stmts, decls, new HashSet<string>());
+
+    // Hoisted declarations are deduplicated by name: the same measure-bit declared in both branches of
+    // an if/else must become ONE top-level declaration (QASM scopes are flat; a duplicate is invalid).
+    private static void HoistDecls(IReadOnlyList<QStmt> stmts, StringBuilder decls, HashSet<string> seen)
+    {
+        foreach (var stmt in stmts)
+        {
+            switch (stmt)
+            {
+                case QUse u:
+                    if (seen.Add(u.Name)) decls.AppendLine($"qubit[{u.Size}] {u.Name};");
+                    break;
+                case QDecl d when d.Value is QMeasure:
+                    if (seen.Add(d.Name)) decls.AppendLine($"{TypeName(d.Type) ?? "bit"} {d.Name};");
+                    break;
+                case QIf i:
+                    HoistDecls(i.Then, decls, seen);
+                    HoistDecls(i.Else, decls, seen);
+                    break;
+                case QFor f:
+                    HoistDecls(f.Body, decls, seen);
+                    break;
+                case QWhile w:
+                    HoistDecls(w.Body, decls, seen);
+                    break;
+                case QRepeat r:
+                    HoistDecls(r.Body, decls, seen);
+                    break;
+            }
+        }
+    }
+
+    private static void EmitStatements(IReadOnlyList<QStmt> stmts, StringBuilder body, int indent, Ctx ctx)
+    {
+        var pad = new string(' ', indent * 2);
+
+        foreach (var stmt in stmts)
+        {
+            switch (stmt)
+            {
+                case QUse:
+                    break; // hoisted
+
+                case QGate g:
+                    body.AppendLine(pad + EmitStmtInline(g, ctx));
+                    break;
+
+                case QDecl d:
+                    EmitDecl(d, body, pad);
+                    break;
+
+                case QAssign a:
+                    body.AppendLine($"{pad}{a.Name} = {RenderExpr(a.Value)};");
+                    break;
+
+                case QIf i:
+                    EmitIf(i, body, indent, ctx);
+                    break;
+
+                case QFor f:
+                    var range = f.Step is null ? $"[{f.From}:{f.To}]" : $"[{f.From}:{f.Step}:{f.To}]";
+                    body.AppendLine($"{pad}for int {f.Var} in {range} {{");
+                    EmitStatements(f.Body, body, indent + 1, ctx);
+                    body.AppendLine($"{pad}}}");
+                    break;
+
+                case QWhile w:
+                    body.AppendLine($"{pad}while ({w.Cond.Text}) {{");
+                    EmitStatements(w.Body, body, indent + 1, ctx);
+                    body.AppendLine($"{pad}}}");
+                    break;
+
+                case QRepeat r:
+                    body.AppendLine($"{pad}while (true) {{");
+                    EmitStatements(r.Body, body, indent + 1, ctx);
+                    body.AppendLine($"{pad}  if ({r.Until.Text}) {{ break; }}");
+                    body.AppendLine($"{pad}}}");
+                    break;
+            }
+        }
+    }
+
+    private static void EmitIf(QIf node, StringBuilder body, int indent, Ctx ctx)
+    {
+        var pad = new string(' ', indent * 2);
+
+        body.AppendLine($"{pad}if ({node.Cond.Text}) {{");
+        EmitStatements(node.Then, body, indent + 1, ctx);
+        body.AppendLine($"{pad}}}");
+
+        if (node.Else.Count > 0)
+        {
+            body.AppendLine($"{pad}else {{");
+            EmitStatements(node.Else, body, indent + 1, ctx);
+            body.AppendLine($"{pad}}}");
+        }
+    }
+
+    /// <summary>Render one gate/call/functor invocation as a single line (used inline and inside adj defs).</summary>
+    private static string EmitStmtInline(QStmt stmt, Ctx ctx)
+    {
+        if (stmt is not QGate gate) return string.Empty;
+
+        var name = gate.Name;
+        var isUserOp = ctx.Ops.Contains(name);
+        var args = gate.Args.Select(RenderArg).ToList();
+        var modifier = string.Concat(gate.Functors.Select(f => FunctorMods.TryGetValue(f, out var m) ? m : string.Empty));
+
+        // whole-operation Adjoint on a user op -> call the synthesized inverse def (or explain why not).
+        if (isUserOp && gate.Functors.FirstOrDefault() == "Adjoint")
+            return ctx.AdjNames.TryGetValue(name, out var adjName)
+                ? $"{adjName}({string.Join(", ", args)});"
+                : $"// Qora: Adjoint of `{name}` not supported yet ({Reason(ctx, name)})";
+
+        // any other functor on a user op has no lowering: OpenQASM gate modifiers apply to gates, not defs.
+        if (isUserOp && gate.Functors.Count > 0)
+            return $"// Qora: {gate.Functors[0]} of `{name}` not supported yet (OpenQASM cannot apply {FunctorMods[gate.Functors[0]].TrimEnd(' ', '@').Trim()} @ to a def)";
+
+        // reset is a statement, not a gate — it takes no modifiers.
+        if (gate.Functors.Count > 0 && MapGate(name) == "reset")
+            return $"// Qora: {string.Join(" ", gate.Functors)} {name} is not supported (reset is not a gate and takes no modifiers)";
+
+        if (QoraGates.Rotations.Contains(name) && args.Count >= 2)
+            return $"{modifier}{MapGate(name)}({args[0]}) {string.Join(", ", args.Skip(1))};";
+
+        return isUserOp
+            ? $"{modifier}{name}({string.Join(", ", args)});"
+            : $"{modifier}{MapGate(name)} {string.Join(", ", args)};";
+    }
+
+    private static string Reason(Ctx ctx, string name) =>
+        ctx.NotInvertible.TryGetValue(name, out var r) ? r : "body is not invertible";
+
+    private static void EmitDecl(QDecl d, StringBuilder body, string pad)
+    {
+        if (d.Value is QMeasure)
+        {
+            body.AppendLine($"{pad}{d.Name} = {RenderExpr(d.Value)};");
+            return;
+        }
+
+        var type = TypeName(d.Type) ?? InferDefaultType(d.Value);
+        var prefix = d.IsConst ? "const " : string.Empty;
+        body.AppendLine($"{pad}{prefix}{type} {d.Name} = {RenderExpr(d.Value)};");
+    }
+
+    /// <summary>
+    /// The default type of an untyped `var`/`const`: real-valued initializers (a float literal or the
+    /// built-in constants) get `float` — emitting `int t = pi / 4;` would be an invalid narrowing.
+    /// </summary>
+    private static string InferDefaultType(QExpr value) =>
+        value is QText t && t.Text.Split(' ').Any(tok => tok is "pi" or "tau" or "euler" || tok.Contains('.'))
+            ? "float" : "int";
+
+    private static string EmitParam(QParam p) => p.Type switch
+    {
+        QType.Int => $"int {p.Name}",
+        QType.Bit => $"bit {p.Name}",
+        _ => p.RegisterSize is int n ? $"qubit[{n}] {p.Name}" : $"qubit {p.Name}",
+    };
+
+    private static string RenderArg(QArg arg) => arg switch
+    {
+        QQubitArg q => $"{q.Reg}[{q.Index}]",
+        QTextArg t => t.Text,
+        _ => string.Empty,
+    };
+
+    private static string RenderExpr(QExpr expr) => expr switch
+    {
+        QMeasure m => m.Target is null ? "measure" : $"measure {m.Target.Reg}[{m.Target.Index}]",
+        QText t => t.Text,
+        _ => string.Empty,
+    };
+
+    private static string MapGate(string name) =>
+        QoraGates.Names.TryGetValue(name, out var qasm) ? qasm : name.ToLowerInvariant();
+
+    private static string? TypeName(QType? t) => t switch { QType.Int => "int", QType.Bit => "bit", _ => null };
+
+    /// <summary>Collect user-op names invoked under an <c>Adjoint</c> functor (recursing into control flow).</summary>
+    private static void CollectAdjointRefs(IReadOnlyList<QStmt> stmts, HashSet<string> ops, HashSet<string> into)
+    {
+        foreach (var stmt in stmts)
+        {
+            switch (stmt)
+            {
+                case QGate g when g.Functors.FirstOrDefault() == "Adjoint" && ops.Contains(g.Name):
+                    into.Add(g.Name);
+                    break;
+                case QIf i:
+                    CollectAdjointRefs(i.Then, ops, into);
+                    CollectAdjointRefs(i.Else, ops, into);
+                    break;
+                case QFor f:
+                    CollectAdjointRefs(f.Body, ops, into);
+                    break;
+                case QWhile w:
+                    CollectAdjointRefs(w.Body, ops, into);
+                    break;
+                case QRepeat r:
+                    CollectAdjointRefs(r.Body, ops, into);
+                    break;
+                case QConjugate c:
+                    CollectAdjointRefs(c.Within, ops, into);
+                    CollectAdjointRefs(c.Apply, ops, into);
+                    break;
+            }
+        }
+    }
+}

@@ -2,6 +2,21 @@
 
 All notable changes to the Qora Language extension.
 
+## 0.5.0
+
+- **"Qora: Show Compilation Stages" command** — opens a side panel showing how the current file moves
+  through the compiler: AST → QoraIR → (synthesized inverse IR, when `Adjoint` is used) → OpenQASM 3.
+  The panel refreshes on save; the heavy payload is fetched only when you ask (keystroke diagnostics
+  stay on the lean `--json` contract).
+- Bundles the compiler with the new **semantic-validation pass**: invalid programs now fail with
+  QSEM001–QSEM015 errors (shown as squiggles) instead of silently emitting broken OpenQASM —
+  non-invertible `Adjoint`, calls in expressions, wrong argument counts/shapes, reserved names,
+  recursion, `use` misplacement, and more.
+- **Whole-operation `Adjoint`** — `Adjoint Foo(q)` on a user operation now compiles to a synthesized
+  inverse subroutine (`Foo__adj`), covering gates, `for` (reversed), `if`, classical declarations, and
+  nested calls transitively.
+- Grammar: zero-argument functor calls (`Adjoint Nop();`) and unary minus (`Rx(-pi/2, q[0]);`).
+
 ## 0.4.0
 
 - Bundles the **Qora v0.9** parser (Janglim `0.2.0-preview.3`), so live errors and transpile now

@@ -35,6 +35,8 @@ public sealed class QoraParseResult
     /// <summary>The semantic AST root (MeaningUnit-tagged; null when parsing failed).</summary>
     public AstSymbol? Ast { get; init; }
     public string AstText { get; init; } = string.Empty;
+    /// <summary>The lowered IR (null when parsing failed) — present even when semantic errors block emission.</summary>
+    public Ir.QProgram? Ir { get; init; }
     /// <summary>The AST emitted as OpenQASM 3.0 (empty when parsing failed).</summary>
     public string Qasm { get; init; } = string.Empty;
     /// <summary>Parse errors, each carrying a source span (see <see cref="QoraError"/>); empty on success.</summary>
@@ -65,9 +67,15 @@ public static class QoraParser
         var tree = hasParse ? result.ToParseTree : null;
         var ast = hasParse ? result.AstRoot : null;
 
+        // Pipeline: AST → Lower → IR → validation pass → (only when clean) emit. Semantic errors gate
+        // emission: an invalid program reports every violation and produces no QASM, so the emitter only
+        // ever runs on validated IR.
+        var ir = ast != null ? QoraLowering.Lower(ast) : null;
+        var semanticErrors = QoraValidator.Validate(ir);
+
         return new QoraParseResult
         {
-            Success = result.Success,
+            Success = result.Success && semanticErrors.Count == 0,
             Tokens = tokens
                 .Select(c => new QoraToken(c.Data, c.PatternInfo?.Terminal?.ToString() ?? "?"))
                 .ToList(),
@@ -75,10 +83,11 @@ public static class QoraParser
             Tree = tree,
             Ast = ast,
             AstText = ast?.ToTreeString() ?? string.Empty,
-            Qasm = ast != null ? QIrEmitter.Emit(QoraLowering.Lower(ast)) : string.Empty,
-            Errors = result.Success
-                ? new List<QoraError>()
-                : result.AllErrors.Select(ToQoraError).ToList(),
+            Ir = ir,
+            Qasm = ir != null && semanticErrors.Count == 0 ? QasmEmitter.Emit(ir) : string.Empty,
+            Errors = !result.Success
+                ? result.AllErrors.Select(ToQoraError).ToList()
+                : semanticErrors,
         };
     }
 

@@ -12,6 +12,7 @@ Q#/C# 느낌의 문법으로 회로를 적고 **OpenQASM 3**로 변환합니다.
 - **hover 설명** — 게이트·키워드에 마우스를 올리면 짧은 설명 (예: `Rx`, `CNOT`, `M`)
 - **실시간 파스 오류** — 타이핑하는 동안 파서가 돌며 문제 토큰에 빨간 밑줄을 그어요
 - **OpenQASM으로 변환** — 명령 팔레트에서 **`Qora: Transpile to OpenQASM`** → 결과가 옆 편집기에 열려요
+- **컴파일 단계 보기** — **`Qora: 컴파일 단계 보기`** 명령으로 파이프라인을 실시간 관찰: AST → QoraIR → 역 IR(`Adjoint` 사용 시 합성) → OpenQASM. 저장하면 갱신돼요
 - **스니펫** — `operation`, `main`, `use`, `measure`, `for`, `if`, `bell`
 - **괄호 자동 닫기 / 짝 맞추기**
 

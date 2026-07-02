@@ -57,42 +57,50 @@
                 {
                     <p class="text-sm text-muted-foreground">아직 실행 전이에요.</p>
                 }
-                else if (_result.Success)
-                {
-                    <div class="flex gap-1 mb-3">
-                        <BbButton Size="ButtonSize.Small"
-                                  Variant="@(_view == "ast" ? ButtonVariant.Default : ButtonVariant.Outline)"
-                                  OnClick='@(() => SetView("ast"))'>AST</BbButton>
-                        <BbButton Size="ButtonSize.Small"
-                                  Variant="@(_view == "parse" ? ButtonVariant.Default : ButtonVariant.Outline)"
-                                  OnClick='@(() => SetView("parse"))'>파스 트리</BbButton>
-                    </div>
-                    <div class="tree-wrap" style="max-height: 60vh; overflow: auto;">
-                        <ul class="tree">
-                            @if (_view == "ast" && _result.Ast is not null)
-                            {
-                                <AstTreeNode Node="_result.Ast!" />
-                            }
-                            else if (_result.Tree is not null)
-                            {
-                                <ParseTreeNode Node="_result.Tree!" />
-                            }
-                        </ul>
-                    </div>
-                }
                 else
                 {
-                    <div class="space-y-2">
-                        <p class="text-sm text-destructive">파싱 실패 — 문법에 맞지 않아요.</p>
-                        @if (_result.Errors.Count > 0)
-                        {
-                            <pre class="text-xs font-mono whitespace-pre-wrap rounded-md bg-muted p-3">@string.Join("\n", _result.Errors)</pre>
-                        }
-                        else
-                        {
-                            <p class="text-xs text-muted-foreground">아래 토큰을 보고 키워드/기호가 맞는지 확인해보세요.</p>
-                        }
-                    </div>
+                    @* a failed result with an AST means parsing succeeded and the errors are semantic *@
+                    @if (!_result.Success)
+                    {
+                        <div class="space-y-2 mb-3">
+                            <p class="text-sm text-destructive">
+                                @(_result.Ast is not null
+                                    ? "컴파일 실패 — 문법은 맞지만 의미 오류가 있어요."
+                                    : "파싱 실패 — 문법에 맞지 않아요.")
+                            </p>
+                            @if (_result.Errors.Count > 0)
+                            {
+                                <pre class="text-xs font-mono whitespace-pre-wrap rounded-md bg-muted p-3">@string.Join("\n", _result.Errors)</pre>
+                            }
+                            else
+                            {
+                                <p class="text-xs text-muted-foreground">아래 토큰을 보고 키워드/기호가 맞는지 확인해보세요.</p>
+                            }
+                        </div>
+                    }
+                    @if (_result.Ast is not null || _result.Tree is not null)
+                    {
+                        <div class="flex gap-1 mb-3">
+                            <BbButton Size="ButtonSize.Small"
+                                      Variant="@(_view == "ast" ? ButtonVariant.Default : ButtonVariant.Outline)"
+                                      OnClick='@(() => SetView("ast"))'>AST</BbButton>
+                            <BbButton Size="ButtonSize.Small"
+                                      Variant="@(_view == "parse" ? ButtonVariant.Default : ButtonVariant.Outline)"
+                                      OnClick='@(() => SetView("parse"))'>파스 트리</BbButton>
+                        </div>
+                        <div class="tree-wrap" style="max-height: 60vh; overflow: auto;">
+                            <ul class="tree">
+                                @if (_view == "ast" && _result.Ast is not null)
+                                {
+                                    <AstTreeNode Node="_result.Ast!" />
+                                }
+                                else if (_result.Tree is not null)
+                                {
+                                    <ParseTreeNode Node="_result.Tree!" />
+                                }
+                            </ul>
+                        </div>
+                    }
                 }
             </BbCardContent>
         </BbCard>

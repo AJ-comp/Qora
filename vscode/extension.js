@@ -100,12 +100,15 @@ function ensureExecutable(binPath) {
 /**
  * Run the Qora CLI over `text`. Resolves to `{ result }` on a parsed JSON reply,
  * or `{ error }` when the process could not run / did not return JSON.
+ * `extraArgs` extends the contract per call — e.g. ['--stages'] asks for the heavy
+ * ast/ir/irInverse payload, which the keystroke-driven diagnostics path never sends.
  */
-function runQora(text) {
+function runQora(text, extraArgs = []) {
   return new Promise((resolve) => {
     const inv = qoraInvocation();
     if (!inv) { resolve({ error: 'no-binary' }); return; }   // no bundled binary + no override configured
-    const { command, args } = inv;
+    const command = inv.command;
+    const args = [...inv.args, ...extraArgs];
     let proc;
     try {
       proc = cp.spawn(command, args);
@@ -205,6 +208,86 @@ async function transpile() {
   await vscode.window.showTextDocument(doc, vscode.ViewColumn.Beside);
 }
 
+// ---- "Show compilation stages" panel ----------------------------------------------------------
+// Explicit-request only: the heavy `--stages` payload (AST / IR / synthesized inverse IR) is fetched
+// when the user runs the command, never on keystrokes. While the panel stays open it refreshes on
+// SAVE of the same document (opening the panel is the opt-in; save is a deliberate checkpoint).
+
+let stagesPanel = null;      // the single reusable webview panel
+let stagesDocUri = null;     // which document the panel is following
+
+function escapeHtml(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+/** One pipeline stage as a titled column; hidden when its text is empty. */
+function stageColumn(title, text) {
+  if (!text) return '';
+  return `<section><h2>${escapeHtml(title)}</h2><pre>${escapeHtml(text)}</pre></section>`;
+}
+
+function stagesHtml(fileName, result) {
+  const errors = (result.errors || [])
+    .map((e) => `<li><code>${escapeHtml(e.code)}</code> ${escapeHtml(e.message)}</li>`)
+    .join('');
+  const banner = result.success
+    ? ''
+    : `<div class="errors"><strong>컴파일 실패 — 아래 단계까지 진행된 모습이에요.</strong><ul>${errors}</ul></div>`;
+
+  return `<!DOCTYPE html>
+<html lang="ko"><head><meta charset="UTF-8"><style>
+  body { font-family: var(--vscode-editor-font-family, monospace); color: var(--vscode-editor-foreground);
+         background: var(--vscode-editor-background); padding: 10px 14px; }
+  .file { color: var(--vscode-descriptionForeground); margin-bottom: 10px; }
+  .flow { color: var(--vscode-descriptionForeground); font-size: 12px; margin-bottom: 12px; }
+  .errors { border-left: 3px solid var(--vscode-editorError-foreground); padding: 6px 12px; margin-bottom: 12px; }
+  .errors ul { margin: 6px 0 0; padding-left: 18px; }
+  main { display: flex; gap: 14px; align-items: flex-start; overflow-x: auto; }
+  section { flex: 1 1 0; min-width: 260px; }
+  h2 { font-size: 13px; margin: 0 0 6px; color: var(--vscode-descriptionForeground);
+       border-bottom: 1px solid var(--vscode-panel-border); padding-bottom: 4px; }
+  pre { font-size: 12px; line-height: 1.45; white-space: pre; overflow-x: auto;
+        background: var(--vscode-textCodeBlock-background); padding: 10px; border-radius: 6px; }
+</style></head><body>
+  <div class="file">${escapeHtml(fileName)} — 저장하면 갱신돼요</div>
+  <div class="flow">소스 → 파싱 → AST → Lowering → QoraIR → (Inverter → 역 IR) → Emitter → OpenQASM</div>
+  ${banner}
+  <main>
+    ${stageColumn('1. AST (파서 출력)', result.ast)}
+    ${stageColumn('2. QoraIR (Lowering)', result.ir)}
+    ${stageColumn('3. 역 IR (Inverter가 합성)', result.irInverse)}
+    ${stageColumn('4. OpenQASM 3 (Emitter)', result.qasm)}
+  </main>
+</body></html>`;
+}
+
+async function refreshStages(document) {
+  if (!stagesPanel || !document) return;
+  const { result, error } = await runQora(document.getText(), ['--stages']);
+  if (!stagesPanel) return;                       // disposed while the CLI ran
+  if (error) { warnInfraOnce(error); return; }
+  stagesPanel.webview.html = stagesHtml(path.basename(document.fileName), result);
+}
+
+async function showStages() {
+  const editor = vscode.window.activeTextEditor;
+  if (!editor || editor.document.languageId !== 'qora') {
+    vscode.window.showInformationMessage('Qora: open a .qor file first.');
+    return;
+  }
+
+  stagesDocUri = editor.document.uri.toString();
+  if (!stagesPanel) {
+    stagesPanel = vscode.window.createWebviewPanel(
+      'qoraStages', 'Qora: 컴파일 단계', vscode.ViewColumn.Beside, { enableScripts: false }
+    );
+    stagesPanel.onDidDispose(() => { stagesPanel = null; stagesDocUri = null; });
+  } else {
+    stagesPanel.reveal(undefined, true);
+  }
+  await refreshStages(editor.document);
+}
+
 function activate(context) {
   extRoot = context.extensionPath;   // used to locate the bundled per-platform binary
 
@@ -224,9 +307,13 @@ function activate(context) {
 
   context.subscriptions.push(
     vscode.commands.registerCommand('qora.transpile', transpile),
+    vscode.commands.registerCommand('qora.showStages', showStages),
     vscode.workspace.onDidOpenTextDocument(refreshDiagnostics),
     vscode.workspace.onDidChangeTextDocument((e) => scheduleRefresh(e.document)),
     vscode.workspace.onDidSaveTextDocument(refreshDiagnostics),
+    vscode.workspace.onDidSaveTextDocument((doc) => {
+      if (stagesPanel && doc.uri.toString() === stagesDocUri) refreshStages(doc);
+    }),
     vscode.workspace.onDidCloseTextDocument((doc) => {
       const key = doc.uri.toString();
       clearTimeout(debounceTimers.get(key));

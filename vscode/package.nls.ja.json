@@ -1,5 +1,6 @@
 {
   "displayName": "Qora 言語",
   "description": "Qora 量子トイ言語のためのシンタックスハイライト、ホバー説明、スニペット、リアルタイム構文エラー、OpenQASM 変換。",
-  "command.transpile.title": "Qora: OpenQASM に変換"
+  "command.transpile.title": "Qora: OpenQASM に変換",
+  "command.showStages.title": "Qora: コンパイル段階を表示 (AST / IR / OpenQASM)"
 }

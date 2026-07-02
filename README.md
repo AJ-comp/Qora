@@ -52,5 +52,5 @@ repository secret).
 
 ## Changelog
 
-See [CHANGELOG.md](CHANGELOG.md) for the language's release notes (v0.1 → v0.9). The VS Code extension
+See [CHANGELOG.md](CHANGELOG.md) for the language's release notes (v0.1 → v0.10). The VS Code extension
 is versioned separately in [vscode/CHANGELOG.md](vscode/CHANGELOG.md).

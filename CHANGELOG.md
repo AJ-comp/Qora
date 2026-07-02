@@ -1,8 +1,8 @@
 # Changelog
 
-Release notes for the **Qora language** — its grammar (`QoraGrammar`) and OpenQASM emitter
-(`QoraQasmEmitter`). This tracks the language itself; the VS Code extension is versioned separately in
-[`vscode/CHANGELOG.md`](vscode/CHANGELOG.md).
+Release notes for the **Qora language** — its grammar (`QoraGrammar`) and compiler pipeline
+(`src/Qora.Core/Ir/`: lowering, validation, inversion, OpenQASM emission). This tracks the language
+itself; the VS Code extension is versioned separately in [`vscode/CHANGELOG.md`](vscode/CHANGELOG.md).
 
 Qora is a Q#/C#-flavored quantum learning language built on the
 [Janglim](https://www.nuget.org/packages/Janglim) parser engine: source is parsed into an AST, which is
@@ -10,6 +10,41 @@ emitted as **OpenQASM 3.0**.
 
 > **Note:** Qora was renamed from **Ket** on 2026-07-01 (a "Ket" extension already existed). Versions
 > 0.1–0.7 below were authored under the old name.
+
+## 0.10 — 2026-07-02
+
+### Added
+- **Whole-operation `Adjoint`.** `Adjoint Foo(args)` on a user operation now compiles: the compiler
+  synthesizes the inverse subroutine (`Foo__adj` — body reversed, each gate inverted) instead of
+  emitting the invalid `inv @ Foo`. Covers straight-line gates, classical declarations (kept in
+  place), `if` (branches inverted), `for` (iterated backwards as `[hi:-1:lo]`), and nested operation
+  calls (their inverses are synthesized transitively). Non-invertible bodies — measurement, reset,
+  classical mutation, `while`/`repeat`, local `use`, recursion — are compile errors with the reason
+  chained through the call graph.
+- **A typed intermediate representation (`QProgram`, `src/Qora.Core/Ir/`).** The pipeline is now
+  `AST → lowering → IR → validation → inversion → emission`; every pass works on IR the compiler
+  owns, and the Janglim AST stops at the lowering boundary.
+- **Semantic validation (QSEM001–QSEM015).** Invalid programs now fail *before* emission — with every
+  violation reported in one compile — instead of silently producing broken OpenQASM: non-invertible
+  `Adjoint` (001), functors on defs/reset (002/003), bare or in-expression measurement (004/005),
+  argument count and qubit shape/size mismatches for built-ins *and* user operations (006), unknown
+  names with a case hint (007), duplicate definitions (008), entry-op calls/params (009/010),
+  recursion (011), misplaced `use` (012), reserved/shadowing names (013), duplicate gate operands
+  (014), duplicate registers (015).
+- **Grammar:** unary minus in expressions (`Rx(-pi/2, q[0]);`) and zero-argument functor calls
+  (`Adjoint Nop();`).
+- **Emitter correctness:** defs are emitted in dependency (declare-before-use) order; synthesized
+  inverse names are uniquified on collision; hoisted declarations are deduplicated; untyped
+  `var`/`const` with a real-valued initializer infer `float`; functor-modified rotation gates keep
+  all their arguments.
+- **Compilation-stages output.** `qora --json --stages` additionally returns `ast` / `ir` /
+  `irInverse` texts (consumed by the VS Code "Show Compilation Stages" panel); the default `--json`
+  reply stays lean for keystroke diagnostics.
+
+### Changed
+- The built-in gate table is a single registry (`QoraGates`): the emitter's name mapping, the
+  validator's arity/unitarity checks, the inverter's irreversibility rules, and the reserved-name set
+  all derive from one entry per gate.
 
 ## 0.9 — 2026-07-02
 

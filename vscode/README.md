@@ -13,6 +13,7 @@ extension gives `.qor` files syntax highlighting, hover docs, **live error diagn
 - **Hover docs** — hover a gate or keyword for a short description (e.g. `Rx`, `CNOT`, `M`)
 - **Live parse errors** — the parser runs as you type and underlines the offending token
 - **Transpile to OpenQASM** — run **`Qora: Transpile to OpenQASM`** from the Command Palette; the result opens beside your file
+- **Show compilation stages** — run **`Qora: Show Compilation Stages`** to see the pipeline live: AST → QoraIR → synthesized inverse IR (for `Adjoint`) → OpenQASM; refreshes on save
 - **Snippets** — `operation`, `main`, `use`, `measure`, `for`, `if`, `bell`
 - **Bracket matching / auto-closing**
 

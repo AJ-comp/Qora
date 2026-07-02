@@ -5,6 +5,8 @@ using Qora;
 // Two modes:
 //   qora --json [file]   parse [file] (or stdin when no path) and print ONE line of JSON — the machine
 //                       contract the VS Code extension consumes for squiggles + transpile.
+//                       `--stages` additionally includes the compilation stages (ast / ir / irInverse) —
+//                       kept out of the default reply because diagnostics run on every keystroke.
 //   qora                 parse a built-in sample and pretty-print the result (console demo).
 if (args.Contains("--json"))
 {
@@ -30,12 +32,29 @@ if (args.Contains("--json"))
         }
 
         var r = QoraParser.Parse(source);
-        Console.WriteLine(JsonSerializer.Serialize(new
+        if (args.Contains("--stages"))
         {
-            success = r.Success,
-            qasm = r.Qasm,
-            errors = r.Errors.Select(e => new { message = e.Message, code = e.Code, start = e.Start, end = e.End }),
-        }));
+            // stage texts are present even when semantic errors block emission (qasm is empty then):
+            // the stages view teaches best when it can show WHERE in the pipeline things stopped.
+            Console.WriteLine(JsonSerializer.Serialize(new
+            {
+                success = r.Success,
+                qasm = r.Qasm,
+                errors = r.Errors.Select(e => new { message = e.Message, code = e.Code, start = e.Start, end = e.End }),
+                ast = r.AstText,
+                ir = Qora.Ir.IrPrinter.Print(r.Ir),
+                irInverse = Qora.Ir.IrPrinter.PrintInverses(r.Ir),
+            }));
+        }
+        else
+        {
+            Console.WriteLine(JsonSerializer.Serialize(new
+            {
+                success = r.Success,
+                qasm = r.Qasm,
+                errors = r.Errors.Select(e => new { message = e.Message, code = e.Code, start = e.Start, end = e.End }),
+            }));
+        }
     }
     catch (Exception ex)
     {
@@ -74,7 +93,7 @@ const string sample = """
 
 var result = QoraParser.Parse(sample);
 
-Console.WriteLine("=== Qora v0.9 (console) ===\n");
+Console.WriteLine("=== Qora v0.10 (console) ===\n");
 Console.WriteLine($"parse: {(result.Success ? "ACCEPTED" : "REJECTED")}\n");
 
 if (result.Success)

@@ -1,5 +1,6 @@
 {
   "displayName": "Qora Language",
   "description": "Syntax highlighting, hover docs, snippets, live parse errors, and OpenQASM transpile for the Qora quantum toy language.",
-  "command.transpile.title": "Qora: Transpile to OpenQASM"
+  "command.transpile.title": "Qora: Transpile to OpenQASM",
+  "command.showStages.title": "Qora: Show Compilation Stages (AST / IR / OpenQASM)"
 }

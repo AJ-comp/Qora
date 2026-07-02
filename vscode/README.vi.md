@@ -13,6 +13,7 @@ chuột, **báo lỗi thời gian thực** và một lệnh **chuyển đổi**.
 - **Chú thích khi di chuột** — di chuột lên một cổng hoặc từ khóa để xem mô tả ngắn (ví dụ `Rx`, `CNOT`, `M`)
 - **Báo lỗi thời gian thực** — bộ phân tích chạy khi bạn gõ và gạch chân token gây lỗi
 - **Chuyển đổi sang OpenQASM** — chạy **`Qora: Transpile to OpenQASM`** từ Command Palette; kết quả mở ở cửa sổ bên cạnh
+- **Hiển thị các giai đoạn biên dịch** — chạy **`Qora: Hiển thị các giai đoạn biên dịch`** để xem pipeline: AST → QoraIR → IR nghịch đảo (khi dùng `Adjoint`) → OpenQASM; tự cập nhật khi lưu
 - **Đoạn mã mẫu (snippets)** — `operation`, `main`, `use`, `measure`, `for`, `if`, `bell`
 - **Khớp / tự đóng dấu ngoặc**
 

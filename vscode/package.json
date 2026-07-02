@@ -2,7 +2,7 @@
   "name": "qora-language",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "publisher": "qora-lang",
   "icon": "icon.png",
   "license": "MIT",
@@ -67,6 +67,11 @@
       {
         "command": "qora.transpile",
         "title": "%command.transpile.title%",
+        "category": "Qora"
+      },
+      {
+        "command": "qora.showStages",
+        "title": "%command.showStages.title%",
         "category": "Qora"
       }
     ],

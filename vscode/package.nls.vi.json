@@ -1,5 +1,6 @@
 {
   "displayName": "Ngôn ngữ Qora",
   "description": "Tô sáng cú pháp, chú thích khi di chuột, đoạn mã mẫu, báo lỗi thời gian thực và chuyển đổi OpenQASM cho ngôn ngữ lượng tử đồ chơi Qora.",
-  "command.transpile.title": "Qora: Chuyển đổi sang OpenQASM"
+  "command.transpile.title": "Qora: Chuyển đổi sang OpenQASM",
+  "command.showStages.title": "Qora: Hiển thị các giai đoạn biên dịch (AST / IR / OpenQASM)"
 }

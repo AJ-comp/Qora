@@ -6,7 +6,7 @@ using Janglim.FrontEnd.RegularGrammar;
 namespace Qora;
 
 /// <summary>
-/// Qora v0.9 — a Q#/C#-flavored quantum language on the Janglim engine.
+/// Qora v0.10 — a Q#/C#-flavored quantum language on the Janglim engine.
 ///
 ///   operation Bell(Qubit[2] q) {       // a subroutine, with C#-style parameters
 ///       H(q[0]);
@@ -27,8 +27,10 @@ namespace Qora;
 /// v0.8 added: single-gate functors <c>Adjoint G(...)</c> / <c>Controlled G(...)</c> (-> OpenQASM
 /// <c>inv @</c> / <c>ctrl @</c>), richer conditions (== != &lt; &lt;= &gt; &gt;= &amp;&amp; || !),
 /// <c>if/else</c> (and <c>else if</c>), and first-class <c>Reset</c>.
-/// v0.9 adds: <c>//</c> line comments (block <c>/* */</c> comments still pending engine support).
-/// Operations are still void (no return value yet).
+/// v0.9 added: <c>//</c> line comments (block <c>/* */</c> comments still pending engine support).
+/// v0.10 adds: whole-operation <c>Adjoint</c> (synthesized inverse defs, via the typed IR pipeline in
+/// <c>Ir/</c> with semantic validation QSEM001-015), unary minus in expressions, and zero-argument
+/// functor calls. Operations are still void (no return value yet).
 /// </summary>
 public class QoraGrammar : Grammar
 {
@@ -172,7 +174,9 @@ public class QoraGrammar : Grammar
         //   Controlled X(c,t) -> ctrl @ x c, t;
         gateStmt.AddItem(Ident + LParen + RParen + Semicolon, GateM);
         gateStmt.AddItem(Ident + LParen + arg + (Comma + arg).ZeroOrMore() + RParen + Semicolon, GateM);
+        gateStmt.AddItem(Adjoint + Ident + LParen + RParen + Semicolon, GateM);
         gateStmt.AddItem(Adjoint + Ident + LParen + arg + (Comma + arg).ZeroOrMore() + RParen + Semicolon, GateM);
+        gateStmt.AddItem(Controlled + Ident + LParen + RParen + Semicolon, GateM);
         gateStmt.AddItem(Controlled + Ident + LParen + arg + (Comma + arg).ZeroOrMore() + RParen + Semicolon, GateM);
         arg.AddItem(qubitRef | expr);   // q[0] (qubit)  |  an expression: q (register) / 5 / pi/2 / 0.5
 
@@ -206,8 +210,10 @@ public class QoraGrammar : Grammar
         condAtom.AddItem(Not + expr);
 
         // expression: atoms joined by + - * /   (e.g.  i + 1 ,  pi / 2 ,  2 * pi ,  0.5 ,  M(q[0]) ).
+        // A leading unary minus is its own production (e.g. -pi/2 for rotation angles).
         expr.AddItem(primary + ((Plus | Minus | Mul | Div) + primary).ZeroOrMore(), ExprM);
         primary.AddItem(Num | Float | Ident | call);
+        primary.AddItem(Minus + primary);
         call.AddItem(Ident + LParen + qubitRef + RParen, CallM);   // M(q[0])
 
         qubitRef.AddItem(Ident + LBracket + index + RBracket, QubitM);

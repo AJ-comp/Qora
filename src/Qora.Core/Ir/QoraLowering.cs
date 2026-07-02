@@ -59,8 +59,8 @@ public static class QoraLowering
         "Assign" => new QAssign(FirstIdent(node), LowerExpr(ExprOf(node))),
         "If" => LowerIf(node),
         "For" => LowerFor(node),
-        "While" => new QWhile(new QCond(RenderCondition(CondOf(node))), BodyStmts(node).Select(LowerStmt).ToList()),
-        "Repeat" => new QRepeat(BodyStmts(node).Select(LowerStmt).ToList(), new QCond(RenderCondition(CondOf(node)))),
+        "While" => new QWhile(LowerCondition(CondOf(node)), BodyStmts(node).Select(LowerStmt).ToList()),
+        "Repeat" => new QRepeat(BodyStmts(node).Select(LowerStmt).ToList(), LowerCondition(CondOf(node))),
         _ => new QGate(new List<string>(), node.Name, new List<QArg>()), // defensive: unknown node -> inert
     };
 
@@ -83,7 +83,11 @@ public static class QoraLowering
         if (sym is AstNonTerminal nt)
         {
             if (nt.Name == "Qubit") return new QQubitArg(Child(nt, 0), Child(nt, 1));
-            if (nt.Name == "Expr") return new QTextArg(RenderExprText(nt));
+            if (nt.Name == "Expr")
+            {
+                var (text, hasCall) = RenderExpr(nt);
+                return new QTextArg(text, hasCall);
+            }
         }
         return new QTextArg(sym.ToString() ?? string.Empty);
     }
@@ -113,7 +117,7 @@ public static class QoraLowering
             (elseIdx < 0 || k < elseIdx ? thenStmts : elseStmts).Add(LowerStmt(nt));
         }
 
-        return new QIf(new QCond(RenderCondition(CondOf(node))), thenStmts, elseStmts);
+        return new QIf(LowerCondition(CondOf(node)), thenStmts, elseStmts);
     }
 
     private static QFor LowerFor(AstNonTerminal node)
@@ -122,45 +126,73 @@ public static class QoraLowering
         return new QFor(At(f, 0), At(f, 1), At(f, 2), BodyStmts(node).Select(LowerStmt).ToList());
     }
 
-    // measurement (M(q) via a Call child) -> QMeasure; anything else -> its rendered text.
+    // A decl/assign RHS. The only legal call form is a LONE call to the registered measurement
+    // function (`bit r = M(q[i]);`), which becomes QMeasure — exact name, no aliases. Any other call —
+    // a different name, or a call mixed with arithmetic — has no OpenQASM lowering: keep the full
+    // rendered text and set HasCall so the validator rejects it. (Nothing is silently dropped: the old
+    // code truncated `M(q) + 1` to just the measure, and read ANY call name as a measurement.)
     private static QExpr LowerExpr(AstNonTerminal? expr)
     {
         if (expr is null) return new QText(string.Empty);
 
         var call = expr.Items.OfType<AstNonTerminal>().FirstOrDefault(n => n.Name == "Call");
-        if (call is not null)
+        if (call is null)
+            return new QText(string.Join(" ", expr.Items.OfType<AstTerminal>().Select(t => t.ToString())));
+
+        var isLoneCall = expr.Items.Count == 1;
+        if (isLoneCall && CallName(call) == QoraGates.Measurement)
         {
             var qref = call.Items.OfType<AstNonTerminal>().FirstOrDefault(q => q.Name == "Qubit");
             return new QMeasure(qref is null ? null : new QQubitArg(Child(qref, 0), Child(qref, 1)));
         }
-        return new QText(string.Join(" ", expr.Items.OfType<AstTerminal>().Select(t => t.ToString())));
+        return new QText(RenderItems(expr), HasCall: true);
     }
 
-    // A gate argument that is an expression renders like the old EmitExpr (space-joined tokens; a call
-    // becomes `measure …` — args never carry one in practice, but kept faithful).
-    private static string RenderExprText(AstNonTerminal expr)
+    /// <summary>Render an expression to text, reporting whether a call appeared anywhere inside it.</summary>
+    private static (string Text, bool HasCall) RenderExpr(AstNonTerminal expr)
     {
-        var call = expr.Items.OfType<AstNonTerminal>().FirstOrDefault(n => n.Name == "Call");
-        if (call is not null)
-        {
-            var qref = call.Items.OfType<AstNonTerminal>().FirstOrDefault(q => q.Name == "Qubit");
-            return qref is null ? "measure" : $"measure {Child(qref, 0)}[{Child(qref, 1)}]";
-        }
-        return string.Join(" ", expr.Items.OfType<AstTerminal>().Select(t => t.ToString()));
+        var hasCall = expr.Items.OfType<AstNonTerminal>().Any(n => n.Name == "Call");
+        return (RenderItems(expr), hasCall);
     }
 
-    private static string RenderCondition(AstNonTerminal? cond)
+    private static QCond LowerCondition(AstNonTerminal? cond)
     {
-        if (cond is null) return string.Empty;
+        if (cond is null) return new QCond(string.Empty);
 
         var parts = new List<string>();
+        var hasCall = false;
         foreach (var item in cond.Items)
         {
-            if (item is AstNonTerminal nt && nt.Name == "Expr") parts.Add(RenderExprText(nt));
-            else parts.Add(item.ToString() ?? string.Empty);
+            if (item is AstNonTerminal nt && nt.Name == "Expr")
+            {
+                var (text, call) = RenderExpr(nt);
+                parts.Add(text);
+                hasCall |= call;
+            }
+            else
+            {
+                parts.Add(item.ToString() ?? string.Empty);
+            }
         }
-        return string.Join(" ", parts);
+        return new QCond(string.Join(" ", parts), hasCall);
     }
+
+    private static string RenderItems(AstNonTerminal expr) =>
+        string.Join(" ", expr.Items.Select(item => item switch
+        {
+            AstNonTerminal { Name: "Call" } call => RenderCall(call),
+            AstNonTerminal nt => nt.ToString() ?? string.Empty,
+            _ => item.ToString() ?? string.Empty,
+        }));
+
+    private static string RenderCall(AstNonTerminal call)
+    {
+        var qref = call.Items.OfType<AstNonTerminal>().FirstOrDefault(q => q.Name == "Qubit");
+        return qref is null ? $"{CallName(call)}()" : $"{CallName(call)}({Child(qref, 0)}[{Child(qref, 1)}])";
+    }
+
+    private static string CallName(AstNonTerminal call) =>
+        call.Items.OfType<AstTerminal>().FirstOrDefault()?.ToString() ?? string.Empty;
 
     // --- helpers (ported from the old emitter's AST accessors) ---
 
