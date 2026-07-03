@@ -2,6 +2,16 @@
 
 All notable changes to the Qora Language extension.
 
+## 0.7.2
+
+- Fixed the Run setup dialog appearing several seconds late: the extension no longer spawns any
+  process (compile, Python probes) before showing it — the consent dialog now pops instantly on
+  click, and Python detection / provisioning happen afterward under the progress bar. It also
+  prefers a suitable system Python before downloading anything.
+- The setup progress bar now shows live activity during the long install steps (streaming the
+  installer's per-package output) instead of a static message, so it no longer looks stalled while
+  the ~200 MB simulator downloads.
+
 ## 0.7.1
 
 - Polished the Run setup experience: the one-time consent dialog now uses a proper title + detail

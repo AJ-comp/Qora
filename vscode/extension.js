@@ -193,12 +193,13 @@ const RUN_L10N = {
   en: {
     setupTitle: 'Set up the Qora simulator?',
     setupDetail: 'One-time setup so ▶ Run works:\n\n'
-      + '  •  a private Python + the Braket quantum simulator (~200 MB)\n'
+      + '  •  a suitable Python if you have one, else a private Python + the Braket simulator (~200 MB)\n'
       + '  •  installed only into this extension\'s own storage — nothing else on your system is touched\n'
       + '  •  afterwards every run takes a few seconds, offline\n\n'
       + 'Needs an internet connection (about 2–3 minutes).',
     setupButton: 'Set up',
     progressTitle: 'Qora: setting up the simulator (one-time)',
+    stepProbe: 'looking for a usable Python…',
     stepUv: 'fetching the installer…',
     stepUnpack: 'unpacking…',
     stepPython: 'installing Python 3.12…',
@@ -213,12 +214,13 @@ const RUN_L10N = {
   ko: {
     setupTitle: 'Qora 시뮬레이터를 준비할까요?',
     setupDetail: '▶ 실행을 위해 처음 한 번만 준비하면 돼요:\n\n'
-      + '  •  전용 Python + Braket 양자 시뮬레이터 (~200 MB)\n'
+      + '  •  적합한 Python이 있으면 그걸 쓰고, 없으면 전용 Python + Braket 시뮬레이터(~200 MB)를 받아요\n'
       + '  •  확장 전용 폴더에만 설치돼요 — 시스템의 다른 곳은 건드리지 않아요\n'
       + '  •  이후에는 인터넷 없이 몇 초 만에 실행돼요\n\n'
       + '인터넷 연결이 필요해요 (약 2~3분).',
     setupButton: '준비 시작',
     progressTitle: 'Qora: 시뮬레이터 준비 중 (최초 1회)',
+    stepProbe: '쓸 수 있는 Python 찾는 중…',
     stepUv: '설치 도구 받는 중…',
     stepUnpack: '압축 푸는 중…',
     stepPython: 'Python 3.12 설치 중…',
@@ -233,12 +235,13 @@ const RUN_L10N = {
   ja: {
     setupTitle: 'Qora シミュレータをセットアップしますか?',
     setupDetail: '▶ 実行のための初回セットアップです:\n\n'
-      + '  •  専用 Python + Braket 量子シミュレータ (~200 MB)\n'
+      + '  •  使える Python があればそれを使い、なければ専用 Python + Braket シミュレータ(~200 MB)を取得します\n'
       + '  •  この拡張機能専用のフォルダにのみインストールされます — システムの他の場所には触れません\n'
       + '  •  以降はオフラインで数秒で実行できます\n\n'
       + 'インターネット接続が必要です (約 2〜3 分)。',
     setupButton: 'セットアップ',
     progressTitle: 'Qora: シミュレータを準備中 (初回のみ)',
+    stepProbe: '使える Python を探しています…',
     stepUv: 'インストーラを取得中…',
     stepUnpack: '展開中…',
     stepPython: 'Python 3.12 をインストール中…',
@@ -253,12 +256,13 @@ const RUN_L10N = {
   vi: {
     setupTitle: 'Thiết lập trình mô phỏng Qora?',
     setupDetail: 'Thiết lập một lần để ▶ Run hoạt động:\n\n'
-      + '  •  Python riêng + trình mô phỏng lượng tử Braket (~200 MB)\n'
+      + '  •  dùng Python sẵn có nếu phù hợp, nếu không thì tải Python riêng + Braket (~200 MB)\n'
       + '  •  chỉ cài vào bộ nhớ riêng của tiện ích — không đụng đến phần còn lại của hệ thống\n'
       + '  •  sau đó mỗi lần chạy chỉ mất vài giây, không cần mạng\n\n'
       + 'Cần kết nối internet (khoảng 2–3 phút).',
     setupButton: 'Thiết lập',
     progressTitle: 'Qora: đang chuẩn bị trình mô phỏng (một lần)',
+    stepProbe: 'đang tìm Python phù hợp…',
     stepUv: 'đang tải trình cài đặt…',
     stepUnpack: 'đang giải nén…',
     stepPython: 'đang cài Python 3.12…',
@@ -280,18 +284,34 @@ function runL10n() {
 
 function runnerDir() { return path.join(extRoot, 'runner'); }
 
-/** Spawn and collect output; resolves { code, stdout, stderr } and never rejects. */
-function execP(command, args, options = {}, stdinText) {
+/**
+ * Spawn and collect output; resolves { code, stdout, stderr } and never rejects.
+ * `onLine(text)` (optional) is called for each complete output line as it arrives — used to stream a
+ * long install's live progress into the progress bar. uv redraws with `\r` and ANSI codes, so we split
+ * on either newline kind and strip escape sequences before handing the line over.
+ */
+function execP(command, args, options = {}, stdinText, onLine) {
   return new Promise((resolve) => {
     let proc;
     try { proc = cp.spawn(command, args, options); }
     catch (e) { resolve({ code: -1, stdout: '', stderr: String(e.message || e) }); return; }
     let stdout = '';
     let stderr = '';
+    let lineBuf = '';
+    const feed = (chunk) => {
+      if (!onLine) return;
+      lineBuf += chunk;
+      let nl;
+      while ((nl = lineBuf.search(/[\r\n]/)) >= 0) {
+        const line = lineBuf.slice(0, nl).replace(/\[[0-9;?]*[A-Za-z]/g, '').trim();
+        lineBuf = lineBuf.slice(nl + 1);
+        if (line) onLine(line);
+      }
+    };
     proc.stdout?.setEncoding('utf8');
     proc.stderr?.setEncoding('utf8');
-    proc.stdout?.on('data', (d) => { stdout += d; });
-    proc.stderr?.on('data', (d) => { stderr += d; });
+    proc.stdout?.on('data', (d) => { stdout += d; feed(d); });
+    proc.stderr?.on('data', (d) => { stderr += d; feed(d); });
     proc.on('error', (e) => resolve({ code: -1, stdout, stderr: stderr || String(e.message || e) }));
     proc.on('close', (code) => resolve({ code, stdout, stderr }));
     if (stdinText !== undefined) {
@@ -393,12 +413,17 @@ async function provisionEnv(progress) {
   const python = path.join(envDir, process.platform === 'win32' ? 'Scripts' : 'bin',
     process.platform === 'win32' ? 'python.exe' : 'python');
 
+  // stream uv's live output into the progress message so the two long steps visibly move instead of
+  // sitting on a static label for minutes. uv prints plain per-package lines to a pipe (no TTY = no
+  // ANSI): "Resolved 40 packages…", "Prepared…", "Installed 40 packages in 8s".
+  const live = (label) => (l) => progress.report({ message: `${label} · ${l}` });
+
   progress.report({ message: t.stepPython });
-  let r = await execP(uv, ['venv', envDir, '--python', '3.12'], { env: uvEnv });
+  let r = await execP(uv, ['venv', envDir, '--python', '3.12'], { env: uvEnv }, undefined, live(t.stepPython));
   if (r.code !== 0) throw new Error(`Python install failed: ${(r.stderr || '').slice(-300)}`);
 
   progress.report({ message: t.stepBraket });
-  r = await execP(uv, ['pip', 'install', '--python', python, 'amazon-braket-sdk'], { env: uvEnv });
+  r = await execP(uv, ['pip', 'install', '--python', python, 'amazon-braket-sdk'], { env: uvEnv }, undefined, live(t.stepBraket));
   if (r.code !== 0) throw new Error(`Braket SDK install failed: ${(r.stderr || '').slice(-300)}`);
 
   progress.report({ message: t.stepVerify });
@@ -406,38 +431,44 @@ async function provisionEnv(progress) {
   return python;
 }
 
-/** A python that can run Braket — resolving through override → remembered → system → provision. */
+/**
+ * A python that can run Braket — resolving through override → remembered → consent → probe/provision.
+ * CRITICAL for latency: everything BEFORE the consent dialog is a cheap synchronous check (settings,
+ * a file-exists test). NO process is spawned until AFTER the user consents, so the dialog appears
+ * instantly on click. Probing system pythons and provisioning happen under the progress bar, later.
+ */
 async function ensureBraketPython() {
   if (braketPythonCache) return braketPythonCache;
-  const override = (vscode.workspace.getConfiguration('qora').get('python') || '').trim();
-  if (override) {
-    if (await pythonUsable(override)) return (braketPythonCache = override);
-    vscode.window.showErrorMessage(`Qora: "qora.python" (${override}) must be Python 3.10–3.13 with amazon-braket-sdk installed.`);
-    return null;
-  }
-
-  const remembered = extContext.globalState.get('qora.braketPython');
-  if (remembered && fs.existsSync(remembered) && await pythonUsable(remembered)) {
-    return (braketPythonCache = remembered);
-  }
-
-  for (const candidate of ['python', 'python3', 'py']) {
-    if (await pythonUsable(candidate)) return (braketPythonCache = candidate);
-  }
-
   const t = runL10n();
+
+  // (1) explicit override — trust the configured path; a bad one surfaces at run time.
+  const override = (vscode.workspace.getConfiguration('qora').get('python') || '').trim();
+  if (override) return (braketPythonCache = override);
+
+  // (2) a previously chosen/provisioned env — trust its existence (a cheap fs check, NO spawn).
+  const remembered = extContext.globalState.get('qora.braketPython');
+  if (remembered && fs.existsSync(remembered)) return (braketPythonCache = remembered);
+
+  // (3) nothing known yet → ask consent NOW, before spawning anything, so the dialog is instant.
   const pick = await vscode.window.showInformationMessage(
     t.setupTitle,
     { modal: true, detail: t.setupDetail },
     t.setupButton);
   if (pick !== t.setupButton) return null;
 
+  // (4) only after consent do we spawn: prefer a usable system python (skips the download), else provision.
   try {
-    const python = await vscode.window.withProgress(
+    return await vscode.window.withProgress(
       { location: vscode.ProgressLocation.Notification, title: t.progressTitle },
-      (progress) => provisionEnv(progress));
-    await extContext.globalState.update('qora.braketPython', python);
-    return (braketPythonCache = python);
+      async (progress) => {
+        progress.report({ message: t.stepProbe });
+        for (const candidate of process.platform === 'win32' ? ['python', 'py'] : ['python3', 'python']) {
+          if (await pythonUsable(candidate)) return (braketPythonCache = candidate);
+        }
+        const python = await provisionEnv(progress);
+        await extContext.globalState.update('qora.braketPython', python);
+        return (braketPythonCache = python);
+      });
   } catch (e) {
     vscode.window.showErrorMessage(t.setupFailed(e.message || e));
     return null;
@@ -452,6 +483,11 @@ async function runProgram() {
   }
   const document = editor.document;
 
+  // Resolve the runner FIRST — this shows the (instant) setup dialog when needed, before the compile
+  // spawn. So clicking Run pops the dialog immediately instead of after compile + probe latency.
+  const python = await ensureBraketPython();
+  if (!python) return;
+
   const { result, error } = await runQora(document.getText(), docArgs(document));
   if (error) { warnInfraOnce(error); return; }
   if (!result.success) {
@@ -459,9 +495,6 @@ async function runProgram() {
     vscode.window.showErrorMessage(runL10n().cannotRun(first));
     return;
   }
-
-  const python = await ensureBraketPython();
-  if (!python) return;
 
   const shots = vscode.workspace.getConfiguration('qora').get('shots', 1000);
   const name = path.basename(document.fileName);
