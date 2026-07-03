@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>第7章 Xゲートは何を反転させるのか？ — Qora</title>
+<title>第7章. Qoraコードはどう読むのか？ — Qora</title>
 <style>
 :root {
     --bg: #ffffff;
@@ -518,98 +518,118 @@
 
 <header class="hero">
   <div class="tag">Qora · 量子ゲートドキュメント</div>
-  <h1>第7章 Xゲートは何を反転させるのか？</h1>
-  <p>測定値 0 と 1 の振幅の位置がどう入れ替わるのかを見てみましょう</p>
+  <h1>第7章. Qoraコードはどう読むのか？</h1>
+  <p>キュービットの準備、ゲートの適用、測定をコード1行ずつ読んでみましょう</p>
 </header>
 
 <div class="book-shell">
-  <aside class="side-nav" aria-label="本の目次">
+    <aside class="side-nav" aria-label="本の目次">
     <strong>Qoraで学ぶ量子ゲート</strong>
       <a href="index.html">概要</a>
-      <a href="intro.html">はじめに なぜQoraで量子ゲートを学ぶのか？</a>
-      <a href="chapter-01.html">第1章 キュービットの状態には何が入っているのか？</a>
-      <a href="chapter-02.html">第2章 振幅と確率はどうつながっているのか？</a>
-      <a href="chapter-03.html">第3章 重ね合わせはただの「わからない状態」なのか？</a>
-      <a href="chapter-04.html">第4章 干渉はいつ生まれるのか？</a>
-      <a href="chapter-05.html">第5章 量子ゲートはなぜ元に戻せなければならないのか？</a>
-      <a href="chapter-06.html">第6章 Qoraコードはどう読むのか？</a>
-      <a href="summary.html">まとめ 第1部で学んだことを整理してみましょう</a>
-      <a class="current" href="chapter-07.html">第7章 Xゲートは何を反転させるのか？</a>
-      <a href="chapter-08.html">第8章 Hゲートは振幅をどう分けるのか？</a>
-      <a href="chapter-09.html">第9章 Zゲートは何の符号を変えるのか？</a>
-      <a href="chapter-10.html">第10章 CNOTゲートは2つのキュービットをどうつなぐのか？</a>
-      <a href="chapter-11.html">第11章 小さな回路をひとつ最後まで読んでみましょう</a>
+      <a href="intro.html">はじめに。なぜQoraで量子ゲートを学ぶのか？</a>
+      <a href="chapter-01.html">第1章. キュービットの状態には何が入っているのか？</a>
+      <a href="chapter-02.html">第2章. 振幅と確率はどうつながっているのか？</a>
+      <a href="chapter-03.html">第3章. 重ね合わせと干渉とは何か？</a>
+      <a href="chapter-04.html">第4章. 重ね合わせはただの「わからない状態」なのか？</a>
+      <a href="chapter-05.html">第5章. 干渉はいつ生まれるのか？</a>
+      <a href="chapter-06.html">第6章. 量子ゲートはなぜ元に戻せなければならないのか？</a>
+      <a class="current" href="chapter-07.html">第7章. Qoraコードはどう読むのか？</a>
+      <a href="summary.html">まとめ. 第1部で学んだことを整理してみましょう</a>
+      <a href="chapter-08.html">第8章. Xゲートは何を反転させるのか？</a>
+      <a href="chapter-09.html">第9章. Hゲートは振幅をどう分けるのか？</a>
+      <a href="chapter-10.html">第10章. Zゲートは何の符号を変えるのか？</a>
+      <a href="chapter-11.html">第11章. CNOTゲートは2つのキュービットをどうつなぐのか？</a>
+      <a href="chapter-12.html">第12章. 小さな回路をひとつ最後まで読んでみましょう</a>
     <div class="group">
       <a href="../index.html">Hゲート単独ドキュメント</a>
     </div>
   </aside>
   <main class="article">
     <div class="breadcrumb">Qoraで学ぶ量子ゲート / 第7章</div>
-<section id="part2" class="part">
-    <span class="label">第2部</span>
-    <h2>基本の量子ゲートを一つずつ読んでいきましょう</h2>
-    <p>
-      第1部では、キュービットの状態、振幅、確率、重ね合わせ、干渉、元に戻せる変換、Qoraコードの読み方を準備しました。<br>
-      ここからは、その準備をもとに実際のゲートを一つずつ読んでいきます。<br>
-      Xゲートは振幅の位置を入れ替え、Hゲートは振幅を分けて送り、Zゲートは符号を変え、CNOTゲートは2つのキュービットの間の関係を作ります。
-    </p>
-  </section>
-
-  <h2 id="x-gate">第7章 Xゲートは何を反転させるのか？</h2>
+<h2 id="qora-code">第7章. Qoraコードはどう読むのか？</h2>
 
   <p>
-    Xゲートは、1キュービットで最初に出会うのにちょうどよいゲートです。<br>
-    古典的なNOT演算のように感じられるからです。<br>
-    ただし量子回路では、測定値そのものを反転させると言うより、測定値 0 にあった振幅と測定値 1 にあった振幅の位置を互いに入れ替えると読むほうがより正確です。
+    最後に、これからよく目にする Qora コードの基本的な形を一緒に見ていきましょう。<br>
+    Qora コードは量子状態をそのまま目に見せてくれる表記法ではありませんが、どのキュービットにどのゲートをどの順序で適用するのかを明確に書き表してくれます。<br>
+    そのため数学的には、状態ベクトルにユニタリ変換を順番に適用していく回路の説明として読むことができます。
   </p>
-
-  <div class="rule">Xゲートは測定値 0 の振幅と測定値 1 の振幅を互いに入れ替えます。</div>
-
-  <div class="panel">
-    <table>
-      <tr><th>入力状態</th><th>Xゲート適用後の状態</th><th>測定するとどう見えるのか？</th></tr>
-      <tr><td><code>|0⟩</code></td><td><code>|1⟩</code></td><td>測定値 1 が出ます</td></tr>
-      <tr><td><code>|1⟩</code></td><td><code>|0⟩</code></td><td>測定値 0 が出ます</td></tr>
-    </table>
-  </div>
 
   <p>
-    一般的な1キュービットの状態を、測定値 0 の振幅 <span class="mono">a₀</span> と測定値 1 の振幅 <span class="mono">a₁</span> で書くと、Xゲートはこの2つの値を互いに入れ替えます。<br>
-    そのため、Xゲート適用前に測定値 0 側にあった振幅は適用後には測定値 1 側へ移り、適用前に測定値 1 側にあった振幅は適用後には測定値 0 側へ移ります。
+    Qora プログラムは <code>operation</code> で始まり、最初に実行される操作にはふつう <code>Main</code> という名前を付けます。
   </p>
-
-  <div class="math mono">
-    <div class="math-line">Xゲート適用前: 測定値 0 の振幅 = a₀, 測定値 1 の振幅 = a₁</div>
-    <div class="math-line">Xゲート適用後: 測定値 0 の振幅 = a₁, 測定値 1 の振幅 = a₀</div>
-  </div>
-
-  <div class="call warn">
-    <span class="h">Xゲートは測定した後の数字を変えるものではありません</span>
-    Xゲートは、測定の前にキュービット状態の振幅の配置を変えます。<br>
-    その後に測定すると、変わった振幅の配置に従って測定結果が出ます。<br>
-    だからXゲートは「結果を反転させる命令」ではなく「測定値 0 と 1 についた振幅の位置を入れ替えるゲート」として読む必要があります。
-  </div>
 
   <div class="practice">
-    <span class="practice-label">Qoraで実習してみよう</span>
-    <h3>Xゲートを一度適用してみましょう</h3>
+    <span class="practice-label">基本形</span>
+    <h3>いちばん小さな Qora プログラムから見てみましょう</h3>
+    <pre><code>operation Main() {
+    // ここに実行する量子回路を書く
+}</code></pre>
+  </div>
+
+  <h3>キュービットを準備する</h3>
+
+  <p>キュービットの準備は <code>use</code> で始まります。</p>
+
+  <div class="math mono">use q = Qubit[1];</div>
+
+  <p>
+    このコードはキュービットを1つ準備し、そのキュービットの束に <code>q</code> という名前を付けます。<br>
+    <code>Qubit[1]</code> はキュービットが1個という意味で、
+    そのキュービットは <code>q[0]</code> で指し示します。<br>
+    この本では、新しく準備したキュービットは計算基底状態 <code>|0⟩</code> から始まるものとして読んでいきます。
+  </p>
+
+  <h3>ゲートを適用する</h3>
+
+  <p>ゲートは関数呼び出しのように書けば大丈夫です。</p>
+
+  <div class="math mono">H(q[0]);</div>
+
+  <p>
+    このコードは <code>q[0]</code> に H ゲートを適用する行です。<br>
+    数学的には、現在の状態ベクトルに H 行列を掛けるステップです。<br>
+    X ゲートは <code>X(q[0]);</code> のように、
+    2キュービットゲートである CNOT は <code>CNOT(q[0], q[1]);</code> のように書きます。
+  </p>
+
+  <h3>測定する</h3>
+
+  <p>測定には <code>M</code> を使います。</p>
+
+  <div class="math mono">bit result = M(q[0]);</div>
+
+  <p>
+    この行は <code>q[0]</code> を測定し、その結果を古典ビット <code>result</code> に保存します。<br>
+    測定する前のキュービットは振幅を持つ量子状態で、
+    測定した後には測定値 0 または測定値 1 のどちらかが古典ビットに保存されます。
+  </p>
+
+  <h3>コメントを書く</h3>
+
+  <p>
+    Qora では <code>//</code> で1行コメントを書くことができます。<br>
+    コメントは回路の実行に影響を与えないので、
+    この本の Qora 実習コードでも、状態の変化を書き込むときによく使っていきます。
+  </p>
+
+  <div class="practice">
+    <span class="practice-label">コメント付きの Qora コード</span>
+    <h3>コードの行ごとに状態の変化を書いてみましょう</h3>
     <pre><code>operation Main() {
     // キュービットを1つ準備
-    // 準備直後、q[0]は|0⟩状態
     use q = Qubit[1];
 
-    // Xゲートを適用
-    // |0⟩状態が|1⟩状態に変わる
-    X(q[0]);
+    // q[0] に H ゲートを適用
+    H(q[0]);
 
-    // 理想的な実行環境: 測定値 1
+    // q[0] を測定
     bit result = M(q[0]);
 }</code></pre>
   </div>
-  <nav class="page-nav" aria-label="章の移動">
-    <a href="summary.html"><span class="k">前へ</span><span class="t">第1部で学んだことを整理してみましょう</span></a>
+    <nav class="page-nav" aria-label="章の移動">
+    <a href="chapter-06.html"><span class="k">前へ</span><span class="t">第6章. 量子ゲートはなぜ元に戻せなければならないのか？</span></a>
     <a class="home" href="index.html"><span class="k">概要</span><span class="t">全体の目次に戻る</span></a>
-    <a href="chapter-08.html"><span class="k">次へ</span><span class="t">第8章 Hゲートは振幅をどう分けるのか？</span></a>
+    <a href="summary.html"><span class="k">次へ</span><span class="t">まとめ. 第1部で学んだことを整理してみましょう</span></a>
   </nav>
     <footer>
       <p>Qora — 自分の手で作る量子トイ言語</p>

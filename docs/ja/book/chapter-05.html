@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>第5章 量子ゲートはなぜ元に戻せなければならないのか？ — Qora</title>
+<title>第5章. 干渉はいつ生まれるのか？ — Qora</title>
 <style>
 :root {
     --bg: #ffffff;
@@ -269,6 +269,24 @@
   .card.plus { border-top: 5px solid var(--plus); }
   .card.minus { border-top: 5px solid var(--minus); }
   .card.accent { border-top: 5px solid var(--accent); }
+  .concept-figure {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    margin: 24px 0 32px;
+    padding: 12px;
+  }
+  .concept-figure img {
+    display: block;
+    width: 100%;
+    height: auto;
+    border-radius: 8px;
+  }
+  .concept-figure figcaption {
+    color: var(--muted);
+    font-size: .92rem;
+    margin: 10px 4px 2px;
+  }
   .tag-small {
     display: inline-block;
     background: var(--panel);
@@ -518,101 +536,134 @@
 
 <header class="hero">
   <div class="tag">Qora · 量子ゲートドキュメント</div>
-  <h1>第5章 量子ゲートはなぜ元に戻せなければならないのか？</h1>
-  <p>異なる入力状態が同じ出力状態にまとめられてしまうと、なぜ問題になるのかを見てみましょう</p>
+  <h1>第5章. 干渉はいつ生まれるのか？</h1>
+  <p>同じ測定値にたどり着いた振幅の寄与が足し合わされる瞬間を追いかけてみましょう</p>
 </header>
 
 <div class="book-shell">
-  <aside class="side-nav" aria-label="本の目次">
+    <aside class="side-nav" aria-label="本の目次">
     <strong>Qoraで学ぶ量子ゲート</strong>
       <a href="index.html">概要</a>
-      <a href="intro.html">はじめに なぜQoraで量子ゲートを学ぶのか？</a>
-      <a href="chapter-01.html">第1章 キュービットの状態には何が入っているのか？</a>
-      <a href="chapter-02.html">第2章 振幅と確率はどうつながっているのか？</a>
-      <a href="chapter-03.html">第3章 重ね合わせはただの「わからない状態」なのか？</a>
-      <a href="chapter-04.html">第4章 干渉はいつ生まれるのか？</a>
-      <a class="current" href="chapter-05.html">第5章 量子ゲートはなぜ元に戻せなければならないのか？</a>
-      <a href="chapter-06.html">第6章 Qoraコードはどう読むのか？</a>
-      <a href="summary.html">まとめ 第1部で学んだことを整理してみましょう</a>
-      <a href="chapter-07.html">第7章 Xゲートは何を反転させるのか？</a>
-      <a href="chapter-08.html">第8章 Hゲートは振幅をどう分けるのか？</a>
-      <a href="chapter-09.html">第9章 Zゲートは何の符号を変えるのか？</a>
-      <a href="chapter-10.html">第10章 CNOTゲートは2つのキュービットをどうつなぐのか？</a>
-      <a href="chapter-11.html">第11章 小さな回路をひとつ最後まで読んでみましょう</a>
+      <a href="intro.html">はじめに。なぜQoraで量子ゲートを学ぶのか？</a>
+      <a href="chapter-01.html">第1章. キュービットの状態には何が入っているのか？</a>
+      <a href="chapter-02.html">第2章. 振幅と確率はどうつながっているのか？</a>
+      <a href="chapter-03.html">第3章. 重ね合わせと干渉とは何か？</a>
+      <a href="chapter-04.html">第4章. 重ね合わせはただの「わからない状態」なのか？</a>
+      <a class="current" href="chapter-05.html">第5章. 干渉はいつ生まれるのか？</a>
+      <a href="chapter-06.html">第6章. 量子ゲートはなぜ元に戻せなければならないのか？</a>
+      <a href="chapter-07.html">第7章. Qoraコードはどう読むのか？</a>
+      <a href="summary.html">まとめ. 第1部で学んだことを整理してみましょう</a>
+      <a href="chapter-08.html">第8章. Xゲートは何を反転させるのか？</a>
+      <a href="chapter-09.html">第9章. Hゲートは振幅をどう分けるのか？</a>
+      <a href="chapter-10.html">第10章. Zゲートは何の符号を変えるのか？</a>
+      <a href="chapter-11.html">第11章. CNOTゲートは2つのキュービットをどうつなぐのか？</a>
+      <a href="chapter-12.html">第12章. 小さな回路をひとつ最後まで読んでみましょう</a>
     <div class="group">
       <a href="../index.html">Hゲート単独ドキュメント</a>
     </div>
   </aside>
   <main class="article">
     <div class="breadcrumb">Qoraで学ぶ量子ゲート / 第5章</div>
-  <h2 id="reversible">第5章 量子ゲートはなぜ元に戻せなければならないのか？</h2>
+  <h2 id="interference">第5章. 干渉はいつ生まれるのか？</h2>
 
   <p>
-    量子ゲートは、状態ベクトルに作用する線形変換なら何でもよい、というわけではありません。<br>
-    標準的な量子回路では、測定前のゲートは<strong>ユニタリ変換</strong>でなければなりません。<br>
-    ユニタリ変換は状態ベクトルの長さを保存し、互いに区別できる状態を互いに区別できる状態へ写し、逆変換を持ちます。
+    干渉は、量子コンピューティングでもっとも重要な概念のひとつです。<br>
+    正確に言うと、干渉は同じ基底状態への複数の振幅の寄与が足し合わされたあとに、ボルンの規則が適用されるときに生まれます。<br>
+    つまり確率を先に足すのではなく、<strong>振幅を先に足して、あとで2乗</strong>します。
   </p>
 
-  <div class="rule mono">U†U = I</div>
+  <div class="rule">同じ基底状態にたどり着いた振幅の寄与は、まず足し合わされます。</div>
 
   <p>
-    ここで <span class="mono">U</span> はゲートの行列で、<span class="mono">U†</span> はその行列の共役転置です。<br>
-    最初は記号が見慣れないかもしれませんが、核心はシンプルです。ユニタリゲートは状態全体の確率を100%に保ち、情報をつぶして失うことがありません。
-  </p>
-
-  <div class="panel">
-    <table>
-      <tr><th>条件</th><th>意味</th><th>なぜ必要か</th></tr>
-      <tr><td>長さの保存</td><td>状態ベクトル全体の確率が1に保たれます</td><td>測定確率の合計は常に100%でなければなりません</td></tr>
-      <tr><td>直交性の保存</td><td>互いに区別できる入力状態は出力でも区別できます</td><td>異なる入力が同じ出力にまとめられてはいけません</td></tr>
-      <tr><td>逆変換の存在</td><td>ゲートを逆向きに戻すことができます</td><td>測定前の量子的な時間発展は情報を失いません</td></tr>
-    </table>
-  </div>
-
-  <p>
-    たとえば、異なる2つの入力状態が同じ出力状態にまとめられてしまう変換は、ユニタリ変換ではありません。<br>
-    出力だけを見て入力を復元する方法がなく、状態空間の異なる方向をひとつに押しつぶしてしまうからです。
-  </p>
-
-  <h3>Hゲートのマイナス符号はなぜ必要なのか？</h3>
-
-  <p>Hゲートは <code>|0⟩</code> 状態と <code>|1⟩</code> 状態を次のように変えます。</p>
-
-  <div class="math mono">
-    <div class="math-line">Hゲート(|0⟩) = (|0⟩ + |1⟩) / √2</div>
-    <div class="math-line">Hゲート(|1⟩) = (|0⟩ - |1⟩) / √2</div>
-  </div>
-
-  <p>
-    ここで重要なのは、2行目のマイナス符号です。<br>
-    この符号のおかげで、2つの出力状態 <code>(|0⟩ + |1⟩) / √2</code> と <code>(|0⟩ - |1⟩) / √2</code> は互いに直交します。
+    ゲートは状態ベクトルに線形に作用します。<br>
+    そのため入力状態が複数の基底状態の和になっていると、ゲートは各基底成分を別々に変換したあと、その結果をふたたび足し合わせます。<br>
+    この過程で、同じ出力基底状態に集まった振幅の寄与が同じ符号と位相を持てば強め合い、逆の符号や逆の位相を持てば打ち消し合います。
   </p>
 
   <div class="math mono">
-    <div class="math-line">Hゲート(|0⟩) = (|0⟩ + |1⟩) / √2</div>
-    <div class="math-line">Hゲート(|1⟩) = (|0⟩ + |1⟩) / √2</div>
+    <div class="math-line">入力: α|0⟩ + β|1⟩</div>
+    <div class="math-line">ゲート後: α·U|0⟩ + β·U|1⟩</div>
+  </div>
+
+  <div class="compare-grid">
+    <div class="card plus">
+      <span class="tag-small">強め合う干渉</span>
+      <h4>同じ符号の振幅の寄与: 強め合い</h4>
+      <div class="math mono">+1/2 + +1/2 = +1</div>
+      <p>測定値0の振幅が大きくなります。</p>
+    </div>
+
+    <div class="card minus">
+      <span class="tag-small">打ち消し合う干渉</span>
+      <h4>逆の符号の振幅の寄与: 打ち消し合い</h4>
+      <div class="math mono">+1/2 + -1/2 = 0</div>
+      <p>測定値1の振幅が消えてしまいます。</p>
+    </div>
+  </div>
+
+  <h3>Hゲートを2回適用すると、干渉はどう見えるのでしょうか?</h3>
+
+  <p>
+    <code>|0⟩</code>状態にHゲートを1回適用すると、<code>|0⟩</code>成分と<code>|1⟩</code>成分の両方が生まれます。<br>
+    ここにHゲートをもう1回適用すると、2つの成分がそれぞれふたたび<code>|0⟩</code>と<code>|1⟩</code>の側へ寄与を送り、同じ基底状態にたどり着いた寄与どうしが足し合わされます。
+  </p>
+
+  <div class="practice">
+    <span class="practice-label">Qoraで実習してみよう</span>
+    <h3>Hゲートを2回適用してみよう</h3>
+    <pre><code>operation Main() {
+    // キュービットを1つ準備
+    // 準備直後のq[0]は|0⟩状態
+    use q = Qubit[1];
+
+    // 1回目のHゲートを適用
+    // 測定値0と測定値1の振幅はどちらも1/√2
+    H(q[0]);
+
+    // 2回目のHゲートを適用
+    // 測定値0への振幅の寄与は強め合い
+    // 測定値1への振幅の寄与は打ち消し合い
+    H(q[0]);
+
+    // 理想的な実行環境では: 測定値0
+    bit result = M(q[0]);
+}</code></pre>
+  </div>
+
+  <p>1回目のHゲートのあとには、2つの振幅が残っています。</p>
+
+  <div class="math mono">
+    <div class="math-line">測定値0の振幅 = 1/√2</div>
+    <div class="math-line">測定値1の振幅 = 1/√2</div>
   </div>
 
   <p>
-    マイナス符号がなければ、2つの入力状態 <code>|0⟩</code> と <code>|1⟩</code> は同じ出力状態にまとめられてしまいます。<br>
-    そうなると、出力状態だけを見ても入力が何だったのかわからず、変換を逆向きに戻すこともできません。<br>
-    したがって、そのような変換は測定前の量子ゲートとして認めることができません。
+    2回目のHゲートを適用すると、測定値0の側にたどり着いた振幅の寄与は次のように足し合わされます。
   </p>
 
-  <div class="call why">
-    <span class="h">ここがポイント</span>
-    Hゲートのマイナス符号は、説明のつじつまを合わせるために付けた飾りではありません。<br>
-    Hゲートがユニタリゲートであるためには、異なる入力基底状態が互いに直交する出力状態へ写らなければならず、その直交性を作り出す鍵がマイナス符号なのです。
-  </div>
+  <div class="math mono">+1/2 + +1/2 = +1</div>
 
-  <div class="rule mono">Hゲート(Hゲート(|0⟩)) = |0⟩</div>
-  <nav class="page-nav" aria-label="章の移動">
-    <a href="chapter-04.html"><span class="k">前へ</span><span class="t">第4章 干渉はいつ生まれるのか？</span></a>
+  <p>
+    測定値1の側にたどり着いた振幅の寄与も、同じやり方で計算します。
+  </p>
+
+  <div class="math mono">+1/2 + -1/2 = 0</div>
+
+  <p>
+    そのため最終状態は、ふたたび<code>|0⟩</code>状態に戻ることになります。<br>
+    この計算は、第9章でHゲートの変換規則を取り上げながら、もっと詳しく見直します。
+  </p>
+  <figure class="concept-figure">
+    <img src="../../images/part1-quantum-concepts-overview-accurate.png" alt="キュービットの状態ベクトルから振幅と確率を分けて示し、振幅がHゲートを通って出力振幅と確率へつながる概観図">
+    <figcaption>ここまで来ると、図の流れが自然につながります。確率の棒は測定したときの参考情報であり、Hゲートが実際に変えるのはその前にある振幅 <span class="mono">α</span> と <span class="mono">β</span> です。</figcaption>
+  </figure>
+    <nav class="page-nav" aria-label="章の移動">
+    <a href="chapter-04.html"><span class="k">前へ</span><span class="t">第4章. 重ね合わせはただの「わからない状態」なのか？</span></a>
     <a class="home" href="index.html"><span class="k">概要</span><span class="t">全体の目次に戻る</span></a>
-    <a href="chapter-06.html"><span class="k">次へ</span><span class="t">第6章 Qoraコードはどう読むのか？</span></a>
+    <a href="chapter-06.html"><span class="k">次へ</span><span class="t">第6章. 量子ゲートはなぜ元に戻せなければならないのか？</span></a>
   </nav>
     <footer>
-      <p>Qora — 自分の手で作る量子トイ言語</p>
+      <p>Qora — 自分の手でつくる量子トイ言語</p>
     </footer>
   </main>
 </div>

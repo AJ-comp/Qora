@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Chapter 8. How Does the H Gate Split Amplitudes? — Qora</title>
+<title>Chapter 8. What Does the X Gate Flip? — Qora</title>
 <style>
 :root {
     --bg: #ffffff;
@@ -153,6 +153,24 @@
     margin: 0 0 8px;
     padding: 0;
     border: 0;
+  }
+  .concept-figure {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    margin: 22px 0 30px;
+    padding: 12px;
+  }
+  .concept-figure img {
+    display: block;
+    width: 100%;
+    height: auto;
+    border-radius: 8px;
+  }
+  .concept-figure figcaption {
+    color: var(--muted);
+    font-size: .92rem;
+    margin: 10px 4px 2px;
   }
   .panel {
     background: var(--panel);
@@ -517,182 +535,104 @@
 <div class="qora-lang-switch" style="position:sticky;top:0;z-index:99;text-align:right;padding:8px 16px;background:rgba(255,255,255,.92);backdrop-filter:blur(4px);border-bottom:1px solid #e6e8ee;font-size:13px;font-family:sans-serif;"><strong>English</strong> · <a href="../../ko/book/chapter-08.html" onclick="try{localStorage.setItem(&quot;qora-lang&quot;,&quot;ko&quot;)}catch(e){}">한국어</a> · <a href="../../ja/book/chapter-08.html" onclick="try{localStorage.setItem(&quot;qora-lang&quot;,&quot;ja&quot;)}catch(e){}">日本語</a></div>
 
 <header class="hero">
-  <div class="tag">Qora · Quantum Gate Book</div>
-  <h1>Chapter 8. How Does the H Gate Split Amplitudes?</h1>
-  <p>Let's follow the rule that splits amplitude toward the two measurement outcomes</p>
+  <div class="tag">Qora · Quantum Gate Documentation</div>
+  <h1>Chapter 8. What Does the X Gate Flip?</h1>
+  <p>Let's see how the amplitudes at measurement outcomes 0 and 1 swap places</p>
 </header>
 
 <div class="book-shell">
-  <aside class="side-nav" aria-label="Book table of contents">
-    <strong>Learning Quantum Gates with Qora</strong>
+    <aside class="side-nav" aria-label="Book contents">
+    <strong>Quantum Gates with Qora</strong>
       <a href="index.html">Overview</a>
       <a href="intro.html">Introduction. Why Learn Quantum Gates with Qora?</a>
       <a href="chapter-01.html">Chapter 1. What Is Inside a Qubit State?</a>
-      <a href="chapter-02.html">Chapter 2. How Are Amplitudes and Probabilities Connected?</a>
-      <a href="chapter-03.html">Chapter 3. Is Superposition Just an &quot;Unknown State&quot;?</a>
-      <a href="chapter-04.html">Chapter 4. When Does Interference Happen?</a>
-      <a href="chapter-05.html">Chapter 5. Why Must Quantum Gates Be Reversible?</a>
-      <a href="chapter-06.html">Chapter 6. How Do We Read Qora Code?</a>
-      <a href="summary.html">Summary. Let's Review What We Learned in Part 1</a>
-      <a href="chapter-07.html">Chapter 7. What Does the X Gate Flip?</a>
-      <a class="current" href="chapter-08.html">Chapter 8. How Does the H Gate Split Amplitudes?</a>
-      <a href="chapter-09.html">Chapter 9. Whose Sign Does the Z Gate Change?</a>
-      <a href="chapter-10.html">Chapter 10. How Does the CNOT Gate Connect Two Qubits?</a>
-      <a href="chapter-11.html">Chapter 11. Let's Read One Small Circuit All the Way Through</a>
+      <a href="chapter-02.html">Chapter 2. How Are Amplitudes Connected to Probabilities?</a>
+      <a href="chapter-03.html">Chapter 3. What Are Superposition and Interference?</a>
+      <a href="chapter-04.html">Chapter 4. Is Superposition Just a &quot;State We Don&#39;t Know&quot;?</a>
+      <a href="chapter-05.html">Chapter 5. When Does Interference Appear?</a>
+      <a href="chapter-06.html">Chapter 6. Why Must Quantum Gates Be Reversible?</a>
+      <a href="chapter-07.html">Chapter 7. How Do We Read Qora Code?</a>
+      <a href="summary.html">Wrap-up. Let&#39;s Review What We Learned in Part 1</a>
+      <a class="current" href="chapter-08.html">Chapter 8. What Does the X Gate Flip?</a>
+      <a href="chapter-09.html">Chapter 9. How Does the H Gate Split Amplitudes?</a>
+      <a href="chapter-10.html">Chapter 10. What Does the Z Gate Change the Sign Of?</a>
+      <a href="chapter-11.html">Chapter 11. How Does the CNOT Gate Connect Two Qubits?</a>
+      <a href="chapter-12.html">Chapter 12. Let&#39;s Read One Small Circuit from Start to Finish</a>
     <div class="group">
       <a href="../index.html">Standalone H Gate Document</a>
     </div>
   </aside>
   <main class="article">
-    <div class="breadcrumb">Learning Quantum Gates with Qora / Chapter 8</div>
-<h2 id="h-gate">Chapter 8. How Does the H Gate Split Amplitudes?</h2>
+    <div class="breadcrumb">Quantum Gates with Qora / Chapter 8</div>
+<section id="part2" class="part">
+    <span class="label">Part 2</span>
+    <h2>Let's Read the Basic Quantum Gates One by One</h2>
+    <p>
+      In Part 1, we prepared everything we need: qubit states, amplitudes, probabilities, superposition, interference, reversible transformations, and how to read Qora code.<br>
+      From here on, we will take that preparation and read the actual gates one by one.<br>
+      The X gate swaps the positions of amplitudes, the H gate splits amplitudes and sends them along, the Z gate changes signs, and the CNOT gate creates a relationship between two qubits.
+    </p>
+  </section>
+  <figure class="concept-figure">
+    <img src="../../images/part2-gates-overview.png" alt="Overview diagram showing X, H, Z, and CNOT gates as amplitude swapping, amplitude splitting, sign change, and conditional flipping">
+    <figcaption>Part 2 reads the X, H, Z, and CNOT gates one by one, focusing on how they change amplitude positions, amplitude distribution, signs, and relationships between two qubits.</figcaption>
+  </figure>
+
+  <h2 id="x-gate">Chapter 8. What Does the X Gate Flip?</h2>
 
   <p>
-    The H gate takes amplitude that was concentrated in one basis state and splits it toward both basis states.<br>
-    Formally, it is defined as the unitary transformation that multiplies a single-qubit state vector by the matrix below.
+    The X gate is a good first gate to meet when working with a single qubit.<br>
+    That is because it feels like the classical NOT operation.<br>
+    In a quantum circuit, however, rather than saying it flips the measurement outcome itself, it is more accurate to read it as swapping the positions of the amplitude at measurement outcome 0 and the amplitude at measurement outcome 1.
   </p>
 
-  <div class="math mono">
-    <div class="math-line">H = 1/√2 · [[1, 1], [1, -1]]</div>
-  </div>
-
-  <p>
-    This matrix sends <code>|0⟩</code> and <code>|1⟩</code> to the following two states.<br>
-    These two equations are the starting point for understanding the H gate.
-  </p>
-
-  <div class="math mono">
-    <div class="math-line">H|0⟩ = (|0⟩ + |1⟩) / √2</div>
-    <div class="math-line">H|1⟩ = (|0⟩ - |1⟩) / √2</div>
-  </div>
-
-  <p>
-    Looking only at the first equation, the H gate may seem to simply “turn 0 into a fifty-fifty chance.”<br>
-    But the key is amplitude, not probability. The H gate splits each input amplitude toward the two output basis states, and adds together the amplitude contributions that arrive at the same output basis state.
-  </p>
+  <div class="rule">The X gate swaps the amplitude of measurement outcome 0 and the amplitude of measurement outcome 1.</div>
 
   <div class="panel">
     <table>
-      <tr><th>Input basis state</th><th>State after applying the H gate</th><th>If measured right away</th></tr>
-      <tr><td><code>|0⟩</code></td><td><code>(|0⟩ + |1⟩) / √2</code></td><td>0 and 1, 50% each</td></tr>
-      <tr><td><code>|1⟩</code></td><td><code>(|0⟩ - |1⟩) / √2</code></td><td>0 and 1, 50% each</td></tr>
+      <tr><th>Input state</th><th>State after the X gate</th><th>What do we see when we measure?</th></tr>
+      <tr><td><code>|0⟩</code></td><td><code>|1⟩</code></td><td>We get measurement outcome 1</td></tr>
+      <tr><td><code>|1⟩</code></td><td><code>|0⟩</code></td><td>We get measurement outcome 0</td></tr>
     </table>
   </div>
 
-  <h3>The H gate's exact amplitude transformation rule</h3>
-
   <p>
-    Let's write the state before the gate as <code>|ψ⟩ = a₀|0⟩ + a₁|1⟩</code>.<br>
-    The H gate does not look at <code>a₀</code> alone or at <code>a₁</code> alone.<br>
-    Both input amplitudes contribute to the <code>|0⟩</code> component and the <code>|1⟩</code> component after the gate, and contributions arriving at the same component are added together.
+    If we write a general single-qubit state with amplitude <span class="mono">a₀</span> at measurement outcome 0 and amplitude <span class="mono">a₁</span> at measurement outcome 1, the X gate swaps the two values.<br>
+    So the amplitude that was on the measurement outcome 0 side before the X gate moves to the measurement outcome 1 side afterward, and the amplitude that was on the measurement outcome 1 side before moves to the measurement outcome 0 side afterward.
   </p>
 
   <div class="math mono">
-    <div class="math-line">H(a₀|0⟩ + a₁|1⟩) = ((a₀ + a₁)|0⟩ + (a₀ - a₁)|1⟩) / √2</div>
-  </div>
-
-  <div class="panel">
-    <table>
-      <tr><th>Starting input amplitude</th><th>Contribution going to <code>|0⟩</code></th><th>Contribution going to <code>|1⟩</code></th></tr>
-      <tr><td>Amplitude of <code>|0⟩</code> before the gate <span class="mono">a₀</span></td><td><span class="mono">+ a₀ × 1/√2</span></td><td><span class="mono">+ a₀ × 1/√2</span></td></tr>
-      <tr><td>Amplitude of <code>|1⟩</code> before the gate <span class="mono">a₁</span></td><td><span class="mono">+ a₁ × 1/√2</span></td><td><span class="mono">- a₁ × 1/√2</span></td></tr>
-    </table>
+    <div class="math-line">Before the X gate: amplitude of measurement outcome 0 = a₀, amplitude of measurement outcome 1 = a₁</div>
+    <div class="math-line">After the X gate: amplitude of measurement outcome 0 = a₁, amplitude of measurement outcome 1 = a₀</div>
   </div>
 
   <div class="call warn">
-    <span class="h">Where the minus sign appears</span>
-    Of the four input-output combinations, only <strong>the contribution where the amplitude of <code>|1⟩</code> before the gate goes to the <code>|1⟩</code> component after the gate</strong> picks up a minus sign.<br>
-    Suddenly calling this “the 1→1 term” would be ambiguous, so in this book we spell it out as “the amplitude contribution that comes from <code>|1⟩</code> before the gate and goes to <code>|1⟩</code> after the gate.”
+    <span class="h">The X gate does not change the number after measurement</span>
+    The X gate changes the amplitude arrangement of the qubit state before measurement.<br>
+    When we then measure, the measurement result follows the new amplitude arrangement.<br>
+    So we should read the X gate not as a “command that flips the result” but as a “gate that swaps the positions of the amplitudes attached to measurement outcomes 0 and 1.”
   </div>
-
-  <h3>Let's apply the H gate to the <code>|0⟩</code> state</h3>
-
-  <p>
-    The <code>|0⟩</code> state is the state with <span class="mono">a₀ = 1</span> and <span class="mono">a₁ = 0</span>.<br>
-    Plugging these values into the H gate's transformation rule, the <code>|0⟩</code> component and the <code>|1⟩</code> component after the gate both become <span class="mono">1/√2</span>.
-  </p>
-
-  <div class="math mono">
-    <div class="math-line">Amplitude of |0⟩ after the gate = 1 × 1/√2 + 0 × 1/√2 = 1/√2</div>
-    <div class="math-line">Amplitude of |1⟩ after the gate = 1 × 1/√2 + 0 × (-1/√2) = 1/√2</div>
-  </div>
-
-  <p>
-    So <code>H|0⟩</code> becomes <code>(|0⟩ + |1⟩) / √2</code>, and measuring right away gives 0 and 1 with 50% probability each.<br>
-    This is the part people usually mean when they say “the H gate creates superposition.”
-  </p>
-
-  <h3>Why the minus sign is necessary</h3>
-
-  <p>
-    The H gate is a quantum gate, so it must be unitary.<br>
-    Therefore, input states that are orthogonal to each other, like <code>|0⟩</code> and <code>|1⟩</code>, must still go to output states that are orthogonal to each other after passing through the H gate.
-  </p>
-
-  <div class="compare-grid">
-    <div class="card warn">
-      <span class="tag-small">Without the minus sign</span>
-      <div class="math mono">
-        <div class="math-line">H|0⟩ = (|0⟩ + |1⟩) / √2</div>
-        <div class="math-line">H|1⟩ = (|0⟩ + |1⟩) / √2</div>
-      </div>
-      <p>Two different input states merge into the same output state. Then it cannot be reversed, and it is not a unitary gate.</p>
-    </div>
-
-    <div class="card good">
-      <span class="tag-small">With the minus sign</span>
-      <div class="math mono">
-        <div class="math-line">H|0⟩ = (|0⟩ + |1⟩) / √2</div>
-        <div class="math-line">H|1⟩ = (|0⟩ - |1⟩) / √2</div>
-      </div>
-      <p>The two output states are orthogonal to each other. So no input information is lost, and the gate can be reversed.</p>
-    </div>
-  </div>
-
-  <h3>Why does applying the H gate twice bring the state back?</h3>
-
-  <p>
-    Starting from the <code>|0⟩</code> state, the state after the first H gate is <code>(|0⟩ + |1⟩) / √2</code>.<br>
-    So just before applying the second H gate, we have <span class="mono">a₀ = 1/√2</span> and <span class="mono">a₁ = 1/√2</span>.<br>
-    All that's left is to plug these values into the same transformation rule again.
-  </p>
-
-  <div class="math mono">
-    <div class="math-line">Amplitude of |0⟩ after the second H = (1/√2) × 1/√2 + (1/√2) × 1/√2 = 1/2 + 1/2 = 1</div>
-    <div class="math-line">Amplitude of |1⟩ after the second H = (1/√2) × 1/√2 + (1/√2) × (-1/√2) = 1/2 - 1/2 = 0</div>
-  </div>
-
-  <div class="rule mono">H gate(H gate(|0⟩)) = |0⟩</div>
-
-  <p>
-    In this calculation, the two amplitude contributions going to the <code>|0⟩</code> component reinforce each other, and the two amplitude contributions going to the <code>|1⟩</code> component cancel out.<br>
-    So applying the H gate twice does not mean “randomness happened twice and landed back on 0” — the state returns exactly to where it started because of the reinforcement and cancellation of amplitudes.
-  </p>
 
   <div class="practice">
-    <span class="practice-label">Practice with Qora</span>
-    <h3>Let's apply the H gate twice</h3>
+    <span class="practice-label">Try It in Qora</span>
+    <h3>Let's apply the X gate once</h3>
     <pre><code>operation Main() {
     // Prepare one qubit
     // Right after preparation, q[0] is in the |0⟩ state
     use q = Qubit[1];
 
-    // Apply the first H gate
-    // The amplitude splits toward measurement outcomes 0 and 1
-    H(q[0]);
+    // Apply the X gate
+    // The |0⟩ state changes to the |1⟩ state
+    X(q[0]);
 
-    // Apply the second H gate
-    // Reinforcement and cancellation bring the state back to |0⟩
-    H(q[0]);
-
-    // Ideal execution environment: measurement outcome 0
+    // Ideal execution environment: measurement outcome 1
     bit result = M(q[0]);
 }</code></pre>
   </div>
-  <nav class="page-nav" aria-label="Chapter navigation">
-    <a href="chapter-07.html"><span class="k">Previous</span><span class="t">Chapter 7. What Does the X Gate Flip?</span></a>
+    <nav class="page-nav" aria-label="Chapter navigation">
+    <a href="summary.html"><span class="k">Previous</span><span class="t">Wrap-up. Let&#39;s Review What We Learned in Part 1</span></a>
     <a class="home" href="index.html"><span class="k">Overview</span><span class="t">Back to the full table of contents</span></a>
-    <a href="chapter-09.html"><span class="k">Next</span><span class="t">Chapter 9. Whose Sign Does the Z Gate Change?</span></a>
+    <a href="chapter-09.html"><span class="k">Next</span><span class="t">Chapter 9. How Does the H Gate Split Amplitudes?</span></a>
   </nav>
     <footer>
       <p>Qora — a quantum toy language you build yourself</p>

@@ -247,6 +247,14 @@
   .math-line + .math-line {
     margin-top: 4px;
   }
+  .amp-change {
+    color: var(--plus);
+    font-weight: 900;
+  }
+  .amp-zero {
+    color: var(--minus);
+    font-weight: 900;
+  }
   .compare-grid,
   .summary-grid {
     display: grid;
@@ -523,22 +531,23 @@
 </header>
 
 <div class="book-shell">
-  <aside class="side-nav" aria-label="책 차례">
+    <aside class="side-nav" aria-label="책 차례">
     <strong>Qora로 배우는 양자 게이트</strong>
       <a href="index.html">개요</a>
       <a href="intro.html">들어가며. 왜 Qora로 양자 게이트를 배울까?</a>
       <a href="chapter-01.html">1장. 큐비트 상태에는 무엇이 들어 있을까?</a>
       <a class="current" href="chapter-02.html">2장. 진폭과 확률은 어떻게 연결될까?</a>
-      <a href="chapter-03.html">3장. 중첩은 그냥 &quot;모르는 상태&quot;일까?</a>
-      <a href="chapter-04.html">4장. 간섭은 언제 생길까?</a>
-      <a href="chapter-05.html">5장. 양자 게이트는 왜 되돌릴 수 있어야 할까?</a>
-      <a href="chapter-06.html">6장. Qora 코드는 어떻게 읽을까?</a>
+      <a href="chapter-03.html">3장. 중첩은 무엇이고 간섭은 무엇일까?</a>
+      <a href="chapter-04.html">4장. 중첩은 그냥 &quot;모르는 상태&quot;일까?</a>
+      <a href="chapter-05.html">5장. 간섭은 언제 생길까?</a>
+      <a href="chapter-06.html">6장. 양자 게이트는 왜 되돌릴 수 있어야 할까?</a>
+      <a href="chapter-07.html">7장. Qora 코드는 어떻게 읽을까?</a>
       <a href="summary.html">정리. 1부에서 배운 것을 정리해보자</a>
-      <a href="chapter-07.html">7장. X 게이트는 무엇을 뒤집을까?</a>
-      <a href="chapter-08.html">8장. H 게이트는 진폭을 어떻게 나눌까?</a>
-      <a href="chapter-09.html">9장. Z 게이트는 무엇의 부호를 바꿀까?</a>
-      <a href="chapter-10.html">10장. CNOT 게이트는 두 큐비트를 어떻게 연결할까?</a>
-      <a href="chapter-11.html">11장. 작은 회로 하나를 끝까지 읽어보자</a>
+      <a href="chapter-08.html">8장. X 게이트는 무엇을 뒤집을까?</a>
+      <a href="chapter-09.html">9장. H 게이트는 진폭을 어떻게 나눌까?</a>
+      <a href="chapter-10.html">10장. Z 게이트는 무엇의 부호를 바꿀까?</a>
+      <a href="chapter-11.html">11장. CNOT 게이트는 두 큐비트를 어떻게 연결할까?</a>
+      <a href="chapter-12.html">12장. 작은 회로 하나를 끝까지 읽어보자</a>
     <div class="group">
       <a href="../index.html">H 게이트 단독 문서</a>
     </div>
@@ -546,11 +555,11 @@
   <main class="article">
     <div class="breadcrumb">Qora로 배우는 양자 게이트 / 2장</div>
   <h2 id="amplitude">2장. 진폭과 확률은 어떻게 연결될까?</h2>
-
   <p>
     큐비트 상태가 <code>|ψ⟩ = α|0⟩ + β|1⟩</code>로 쓰인다고 했어요.<br>
-    여기서 <span class="mono">α</span>와 <span class="mono">β</span>는 확률이 아니라 <strong>확률 진폭</strong>이에요.<br>
-    측정 확률은 진폭 자체가 아니라, 진폭의 절댓값을 제곱해서 얻어요.
+    여기서 <span class="mono">α</span>와 <span class="mono">β</span>는 확률이 아니라 <strong>진폭</strong>이에요.<br>
+    정확한 용어로는 <strong>확률 진폭</strong>이라고 불러요.<br>
+    그리고 측정 확률은 진폭의 절댓값을 제곱해서 얻어요.
   </p>
 
   <div class="rule">측정 결과값 0의 확률 = |α|², 측정 결과값 1의 확률 = |β|²</div>
@@ -617,12 +626,41 @@
 
   <p>
     여기서 중요한 점은 H 게이트가 확률을 직접 반으로 나누는 게 아니라는 점이에요.<br>
-    게이트가 먼저 바꾸는 것은 상태 벡터의 진폭이고, 측정할 때 그 진폭의 절댓값 제곱이 확률로 나타나요.
+    게이트가 먼저 바꾸는 것은 상태의 진폭이고, 측정할 때 그 진폭의 절댓값 제곱이 확률로 나타나요.
   </p>
-  <nav class="page-nav" aria-label="장 이동">
+
+  <div class="compare-grid">
+    <div class="card accent">
+      <span class="tag-small">적용 전</span>
+      <h4>H 게이트 적용 전 상태</h4>
+      <div class="math mono">|0⟩ = <span class="amp-change">1</span>|0⟩ + <span class="amp-zero">0</span>|1⟩</div>
+      <h4>적용 전 확률 계산</h4>
+      <div class="math mono">
+        <div class="math-line">측정 결과값 0의 확률 = |<span class="amp-change">1</span>|² = 1 = 100%</div>
+        <div class="math-line">측정 결과값 1의 확률 = |<span class="amp-zero">0</span>|² = 0 = 0%</div>
+      </div>
+    </div>
+
+    <div class="card plus">
+      <span class="tag-small">적용 후</span>
+      <h4>H 게이트 적용 후 상태</h4>
+      <div class="math mono">H|0⟩ = <span class="amp-change">(1/√2)</span>|0⟩ + <span class="amp-change">(1/√2)</span>|1⟩</div>
+      <h4>적용 후 확률 계산</h4>
+      <div class="math mono">
+        <div class="math-line">측정 결과값 0의 확률 = |<span class="amp-change">1/√2</span>|² = 1/2 = 50%</div>
+        <div class="math-line">측정 결과값 1의 확률 = |<span class="amp-change">1/√2</span>|² = 1/2 = 50%</div>
+      </div>
+    </div>
+  </div>
+
+  <p>
+    H 게이트가 만든 값은 확률 <span class="mono">1/2</span>이 아니라 진폭 <span class="mono">1/√2</span>예요.<br>
+    그 다음 측정 확률을 구할 때 이 진폭의 절댓값을 제곱해요.
+  </p>
+    <nav class="page-nav" aria-label="장 이동">
     <a href="chapter-01.html"><span class="k">이전</span><span class="t">1장. 큐비트 상태에는 무엇이 들어 있을까?</span></a>
     <a class="home" href="index.html"><span class="k">개요</span><span class="t">전체 차례로 돌아가기</span></a>
-    <a href="chapter-03.html"><span class="k">다음</span><span class="t">3장. 중첩은 그냥 &quot;모르는 상태&quot;일까?</span></a>
+    <a href="chapter-03.html"><span class="k">다음</span><span class="t">3장. 중첩은 무엇이고 간섭은 무엇일까?</span></a>
   </nav>
     <footer>
       <p>Qora — 직접 만드는 양자 토이 언어</p>

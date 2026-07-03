@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>10장. CNOT 게이트는 두 큐비트를 어떻게 연결할까? — Qora</title>
+<title>10장. Z 게이트는 무엇의 부호를 바꿀까? — Qora</title>
 <style>
 :root {
     --bg: #ffffff;
@@ -518,100 +518,93 @@
 
 <header class="hero">
   <div class="tag">Qora · 양자 게이트 문서</div>
-  <h1>10장. CNOT 게이트는 두 큐비트를 어떻게 연결할까?</h1>
-  <p>제어 큐비트와 대상 큐비트의 관계를 상태별로 읽어보자</p>
+  <h1>10장. Z 게이트는 무엇의 부호를 바꿀까?</h1>
+  <p>측정 결과값 1의 진폭 부호가 왜 중요한지 살펴보자</p>
 </header>
 
 <div class="book-shell">
-  <aside class="side-nav" aria-label="책 차례">
+    <aside class="side-nav" aria-label="책 차례">
     <strong>Qora로 배우는 양자 게이트</strong>
       <a href="index.html">개요</a>
       <a href="intro.html">들어가며. 왜 Qora로 양자 게이트를 배울까?</a>
       <a href="chapter-01.html">1장. 큐비트 상태에는 무엇이 들어 있을까?</a>
       <a href="chapter-02.html">2장. 진폭과 확률은 어떻게 연결될까?</a>
-      <a href="chapter-03.html">3장. 중첩은 그냥 &quot;모르는 상태&quot;일까?</a>
-      <a href="chapter-04.html">4장. 간섭은 언제 생길까?</a>
-      <a href="chapter-05.html">5장. 양자 게이트는 왜 되돌릴 수 있어야 할까?</a>
-      <a href="chapter-06.html">6장. Qora 코드는 어떻게 읽을까?</a>
+      <a href="chapter-03.html">3장. 중첩은 무엇이고 간섭은 무엇일까?</a>
+      <a href="chapter-04.html">4장. 중첩은 그냥 &quot;모르는 상태&quot;일까?</a>
+      <a href="chapter-05.html">5장. 간섭은 언제 생길까?</a>
+      <a href="chapter-06.html">6장. 양자 게이트는 왜 되돌릴 수 있어야 할까?</a>
+      <a href="chapter-07.html">7장. Qora 코드는 어떻게 읽을까?</a>
       <a href="summary.html">정리. 1부에서 배운 것을 정리해보자</a>
-      <a href="chapter-07.html">7장. X 게이트는 무엇을 뒤집을까?</a>
-      <a href="chapter-08.html">8장. H 게이트는 진폭을 어떻게 나눌까?</a>
-      <a href="chapter-09.html">9장. Z 게이트는 무엇의 부호를 바꿀까?</a>
-      <a class="current" href="chapter-10.html">10장. CNOT 게이트는 두 큐비트를 어떻게 연결할까?</a>
-      <a href="chapter-11.html">11장. 작은 회로 하나를 끝까지 읽어보자</a>
+      <a href="chapter-08.html">8장. X 게이트는 무엇을 뒤집을까?</a>
+      <a href="chapter-09.html">9장. H 게이트는 진폭을 어떻게 나눌까?</a>
+      <a class="current" href="chapter-10.html">10장. Z 게이트는 무엇의 부호를 바꿀까?</a>
+      <a href="chapter-11.html">11장. CNOT 게이트는 두 큐비트를 어떻게 연결할까?</a>
+      <a href="chapter-12.html">12장. 작은 회로 하나를 끝까지 읽어보자</a>
     <div class="group">
       <a href="../index.html">H 게이트 단독 문서</a>
     </div>
   </aside>
   <main class="article">
     <div class="breadcrumb">Qora로 배우는 양자 게이트 / 10장</div>
-<h2 id="cnot-gate">10장. CNOT 게이트는 두 큐비트를 어떻게 연결할까?</h2>
-
+  <h2 id="z-gate">10장. Z 게이트는 무엇의 부호를 바꿀까?</h2>
   <p>
-    CNOT 게이트는 두 큐비트에 작용하는 게이트예요.<br>
-    첫 번째 큐비트를 제어 큐비트라고 부르고, 두 번째 큐비트를 대상 큐비트라고 불러요.<br>
-    제어 큐비트가 측정 결과값 1인 쪽에 있을 때만 대상 큐비트에 X 게이트가 적용돼요.
+    Z 게이트는 측정 결과값 0의 진폭은 그대로 두고, 측정 결과값 1의 진폭에만 마이너스 부호를 붙이는 게이트예요.<br>
+    그래서 Z 게이트를 바로 측정만 해 보면 아무 일도 일어나지 않은 것처럼 보일 수 있어요.<br>
+    하지만 나중에 H 게이트처럼 진폭을 다시 섞는 게이트를 만나면, 그 부호 차이가 측정 결과를 바꿔요.
   </p>
-
-  <div class="rule">CNOT 게이트는 제어 큐비트가 1일 때만 대상 큐비트를 뒤집어요.</div>
 
   <div class="panel">
     <table>
-      <tr><th>입력 상태</th><th>제어 큐비트</th><th>대상 큐비트 변화</th><th>출력 상태</th></tr>
-      <tr><td><code>|00⟩</code></td><td>0</td><td>그대로</td><td><code>|00⟩</code></td></tr>
-      <tr><td><code>|01⟩</code></td><td>0</td><td>그대로</td><td><code>|01⟩</code></td></tr>
-      <tr><td><code>|10⟩</code></td><td>1</td><td>0이 1로 바뀜</td><td><code>|11⟩</code></td></tr>
-      <tr><td><code>|11⟩</code></td><td>1</td><td>1이 0으로 바뀜</td><td><code>|10⟩</code></td></tr>
+      <tr><th>입력 상태</th><th>Z 게이트 적용 후 상태</th><th>바로 측정하면?</th></tr>
+      <tr><td><code>|0⟩</code></td><td><code>|0⟩</code></td><td>측정 결과값 0</td></tr>
+      <tr><td><code>|1⟩</code></td><td><code>-|1⟩</code></td><td>측정 결과값 1</td></tr>
     </table>
   </div>
 
   <p>
-    여기서 <code>|10⟩</code>은 첫 번째 큐비트의 측정 결과값이 1이고 두 번째 큐비트의 측정 결과값이 0인 두 큐비트 상태를 뜻해요.<br>
-    따라서 <code>|10⟩</code>에서 CNOT 게이트를 적용하면 제어 큐비트가 1이므로 대상 큐비트가 뒤집히고, 최종 상태는 <code>|11⟩</code>이 돼요.
+    측정 확률은 진폭의 길이를 제곱해서 얻어요.<br>
+    <span class="mono">1</span>과 <span class="mono">-1</span>은 부호가 다르지만 길이는 같으므로, 바로 측정하면 둘 다 같은 확률을 만들어요.<br>
+    그래서 Z 게이트의 효과는 “확률을 바꾸는 효과”라기보다 “나중에 간섭할 때 드러나는 부호 변화”로 읽는 편이 좋아요.
   </p>
 
-  <h3>제어 큐비트가 중첩이면 어떤 일이 생길까?</h3>
+  <h3>Z 게이트의 효과는 H 게이트를 다시 만날 때 드러나요</h3>
 
   <p>
-    첫 번째 큐비트에 H 게이트를 적용하면 첫 번째 큐비트의 진폭이 측정 결과값 0과 1 쪽으로 나뉘어요.<br>
-    그 상태에서 CNOT 게이트를 적용하면, 제어 큐비트가 0인 가지에서는 대상 큐비트가 그대로 있고 제어 큐비트가 1인 가지에서는 대상 큐비트가 뒤집혀요.<br>
-    그래서 두 큐비트가 <code>|00⟩</code>과 <code>|11⟩</code> 두 가능성으로 함께 묶인 상태가 돼요.
+    먼저 H 게이트로 <code>|0⟩</code> 상태를 <code>(|0⟩ + |1⟩) / √2</code> 상태로 만들어요.<br>
+    그 다음 Z 게이트를 적용하면 측정 결과값 1의 진폭 부호가 바뀌어서 <code>(|0⟩ - |1⟩) / √2</code> 상태가 돼요.<br>
+    마지막으로 H 게이트를 한 번 더 적용하면 상쇄와 보강의 방향이 바뀌어서 최종 상태가 <code>|1⟩</code>이 돼요.
   </p>
 
-  <div class="math mono">|00⟩ → H(q[0]) → (|00⟩ + |10⟩) / √2 → CNOT(q[0], q[1]) → (|00⟩ + |11⟩) / √2</div>
-
-  <div class="call why">
-    <span class="h">이 상태가 얽힘을 이해하는 출발점이에요</span>
-    마지막 상태를 측정하면 두 큐비트가 각각 따로 무작위로 나오는 것처럼 보이지 않아요.<br>
-    측정 결과는 <code>00</code> 또는 <code>11</code>로만 나와요.<br>
-    첫 번째 큐비트와 두 번째 큐비트의 측정 결과가 서로 맞물려 있기 때문이에요.
-  </div>
+  <div class="math mono">|0⟩ → H 게이트 → (|0⟩ + |1⟩) / √2 → Z 게이트 → (|0⟩ - |1⟩) / √2 → H 게이트 → |1⟩</div>
 
   <div class="practice">
     <span class="practice-label">Qora로 실습해보기</span>
-    <h3>CNOT 게이트로 두 큐비트를 연결해보자</h3>
+    <h3>H, Z, H 순서로 적용해보자</h3>
     <pre><code>operation Main() {
-    // 큐비트 두 개 준비
-    // 준비 직후 q[0]q[1]은 |00⟩ 상태
-    use q = Qubit[2];
+    // 큐비트 하나 준비
+    // 준비 직후 q[0]은 |0⟩ 상태
+    use q = Qubit[1];
 
-    // 첫 번째 큐비트에 H 게이트 적용
-    // q[0]의 진폭이 측정 결과값 0과 1로 나뉨
+    // H 게이트 적용
+    // 측정 결과값 0과 1의 진폭이 모두 1/√2
     H(q[0]);
 
-    // CNOT 게이트 적용
-    // q[0]이 제어 큐비트, q[1]이 대상 큐비트
-    CNOT(q[0], q[1]);
+    // Z 게이트 적용
+    // 측정 결과값 1의 진폭 부호가 음수로 바뀜
+    Z(q[0]);
 
-    // 이상적인 실행 환경: 00 또는 11
-    bit first = M(q[0]);
-    bit second = M(q[1]);
+    // H 게이트 적용
+    // 부호 차이가 간섭으로 드러나 |1⟩ 상태가 됨
+    H(q[0]);
+
+    // 이상적인 실행 환경: 측정 결과값 1
+    bit result = M(q[0]);
 }</code></pre>
   </div>
-  <nav class="page-nav" aria-label="장 이동">
-    <a href="chapter-09.html"><span class="k">이전</span><span class="t">9장. Z 게이트는 무엇의 부호를 바꿀까?</span></a>
+    <nav class="page-nav" aria-label="장 이동">
+    <a href="chapter-09.html"><span class="k">이전</span><span class="t">9장. H 게이트는 진폭을 어떻게 나눌까?</span></a>
     <a class="home" href="index.html"><span class="k">개요</span><span class="t">전체 차례로 돌아가기</span></a>
-    <a href="chapter-11.html"><span class="k">다음</span><span class="t">11장. 작은 회로 하나를 끝까지 읽어보자</span></a>
+    <a href="chapter-11.html"><span class="k">다음</span><span class="t">11장. CNOT 게이트는 두 큐비트를 어떻게 연결할까?</span></a>
   </nav>
     <footer>
       <p>Qora — 직접 만드는 양자 토이 언어</p>

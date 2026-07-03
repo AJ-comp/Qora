@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>第9章 Zゲートは何の符号を変えるのか？ — Qora</title>
+<title>第9章. Hゲートは振幅をどう分けるのか？ — Qora</title>
 <style>
 :root {
     --bg: #ffffff;
@@ -518,93 +518,182 @@
 
 <header class="hero">
   <div class="tag">Qora · 量子ゲートドキュメント</div>
-  <h1>第9章 Zゲートは何の符号を変えるのか？</h1>
-  <p>測定値 1 の振幅の符号がなぜ重要なのかを見ていきましょう</p>
+  <h1>第9章. Hゲートは振幅をどう分けるのか？</h1>
+  <p>振幅を2つの測定値の方へ分けて送るルールをたどってみましょう</p>
 </header>
 
 <div class="book-shell">
-  <aside class="side-nav" aria-label="本の目次">
+    <aside class="side-nav" aria-label="本の目次">
     <strong>Qoraで学ぶ量子ゲート</strong>
       <a href="index.html">概要</a>
-      <a href="intro.html">はじめに なぜQoraで量子ゲートを学ぶのか？</a>
-      <a href="chapter-01.html">第1章 キュービットの状態には何が入っているのか？</a>
-      <a href="chapter-02.html">第2章 振幅と確率はどうつながっているのか？</a>
-      <a href="chapter-03.html">第3章 重ね合わせはただの「わからない状態」なのか？</a>
-      <a href="chapter-04.html">第4章 干渉はいつ生まれるのか？</a>
-      <a href="chapter-05.html">第5章 量子ゲートはなぜ元に戻せなければならないのか？</a>
-      <a href="chapter-06.html">第6章 Qoraコードはどう読むのか？</a>
-      <a href="summary.html">まとめ 第1部で学んだことを整理してみましょう</a>
-      <a href="chapter-07.html">第7章 Xゲートは何を反転させるのか？</a>
-      <a href="chapter-08.html">第8章 Hゲートは振幅をどう分けるのか？</a>
-      <a class="current" href="chapter-09.html">第9章 Zゲートは何の符号を変えるのか？</a>
-      <a href="chapter-10.html">第10章 CNOTゲートは2つのキュービットをどうつなぐのか？</a>
-      <a href="chapter-11.html">第11章 小さな回路をひとつ最後まで読んでみましょう</a>
+      <a href="intro.html">はじめに。なぜQoraで量子ゲートを学ぶのか？</a>
+      <a href="chapter-01.html">第1章. キュービットの状態には何が入っているのか？</a>
+      <a href="chapter-02.html">第2章. 振幅と確率はどうつながっているのか？</a>
+      <a href="chapter-03.html">第3章. 重ね合わせと干渉とは何か？</a>
+      <a href="chapter-04.html">第4章. 重ね合わせはただの「わからない状態」なのか？</a>
+      <a href="chapter-05.html">第5章. 干渉はいつ生まれるのか？</a>
+      <a href="chapter-06.html">第6章. 量子ゲートはなぜ元に戻せなければならないのか？</a>
+      <a href="chapter-07.html">第7章. Qoraコードはどう読むのか？</a>
+      <a href="summary.html">まとめ. 第1部で学んだことを整理してみましょう</a>
+      <a href="chapter-08.html">第8章. Xゲートは何を反転させるのか？</a>
+      <a class="current" href="chapter-09.html">第9章. Hゲートは振幅をどう分けるのか？</a>
+      <a href="chapter-10.html">第10章. Zゲートは何の符号を変えるのか？</a>
+      <a href="chapter-11.html">第11章. CNOTゲートは2つのキュービットをどうつなぐのか？</a>
+      <a href="chapter-12.html">第12章. 小さな回路をひとつ最後まで読んでみましょう</a>
     <div class="group">
       <a href="../index.html">Hゲート単独ドキュメント</a>
     </div>
   </aside>
   <main class="article">
     <div class="breadcrumb">Qoraで学ぶ量子ゲート / 第9章</div>
-<h2 id="z-gate">第9章 Zゲートは何の符号を変えるのか？</h2>
+<h2 id="h-gate">第9章. Hゲートは振幅をどう分けるのか？</h2>
 
   <p>
-    Z ゲートは、測定値 0 の振幅はそのままにして、測定値 1 の振幅にだけマイナスの符号を付けるゲートです。<br>
-    そのため、Z ゲートの直後にすぐ測定だけをしてみると、何も起きていないように見えることがあります。<br>
-    しかし後で H ゲートのように振幅を再び混ぜるゲートに出会うと、その符号の違いが測定結果を変えます。
+    Hゲートは、片方の基底状態に集まっていた振幅を2つの基底状態の方へ分けて送るゲートです。<br>
+    正式には、1キュービットの状態ベクトルに下の行列を掛けるユニタリ変換として定義します。
+  </p>
+
+  <div class="math mono">
+    <div class="math-line">H = 1/√2 · [[1, 1], [1, -1]]</div>
+  </div>
+
+  <p>
+    この行列は <code>|0⟩</code> と <code>|1⟩</code> を次の2つの状態に送ります。<br>
+    この2つの式が、Hゲートを理解する出発点です。
+  </p>
+
+  <div class="math mono">
+    <div class="math-line">H|0⟩ = (|0⟩ + |1⟩) / √2</div>
+    <div class="math-line">H|1⟩ = (|0⟩ - |1⟩) / √2</div>
+  </div>
+
+  <p>
+    最初の式だけを見ると、Hゲートは単に「0を半々の確率にする」だけのように見えるかもしれません。<br>
+    しかし核心は確率ではなく振幅です。Hゲートは入力の振幅を2つの出力基底状態へ分けて送り、同じ出力基底状態に届いた振幅の寄与を足し合わせます。
   </p>
 
   <div class="panel">
     <table>
-      <tr><th>入力状態</th><th>Z ゲート適用後の状態</th><th>すぐに測定すると？</th></tr>
-      <tr><td><code>|0⟩</code></td><td><code>|0⟩</code></td><td>測定値 0</td></tr>
-      <tr><td><code>|1⟩</code></td><td><code>-|1⟩</code></td><td>測定値 1</td></tr>
+      <tr><th>入力基底状態</th><th>Hゲート適用後の状態</th><th>すぐに測定すると</th></tr>
+      <tr><td><code>|0⟩</code></td><td><code>(|0⟩ + |1⟩) / √2</code></td><td>0と1がそれぞれ50%</td></tr>
+      <tr><td><code>|1⟩</code></td><td><code>(|0⟩ - |1⟩) / √2</code></td><td>0と1がそれぞれ50%</td></tr>
     </table>
   </div>
 
-  <p>
-    測定確率は、振幅の長さを2乗して得られます。<br>
-    <span class="mono">1</span> と <span class="mono">-1</span> は符号が異なりますが長さは同じなので、すぐに測定するとどちらも同じ確率になります。<br>
-    そのため Z ゲートの効果は、「確率を変える効果」というより「後で干渉するときに現れる符号の変化」として読むのがよいでしょう。
-  </p>
-
-  <h3>Z ゲートの効果は H ゲートに再び出会うときに現れます</h3>
+  <h3>Hゲートの正確な振幅変換ルール</h3>
 
   <p>
-    まず H ゲートで <code>|0⟩</code> 状態を <code>(|0⟩ + |1⟩) / √2</code> 状態にします。<br>
-    次に Z ゲートを適用すると、測定値 1 の振幅の符号が変わって <code>(|0⟩ - |1⟩) / √2</code> 状態になります。<br>
-    最後に H ゲートをもう一度適用すると、打ち消し合いと強め合いの向きが変わり、最終状態は <code>|1⟩</code> になります。
+    適用前の状態を <code>|ψ⟩ = a₀|0⟩ + a₁|1⟩</code> としてみましょう。<br>
+    Hゲートは <code>a₀</code> だけを単独で見たり、<code>a₁</code> だけを単独で見たりはしません。<br>
+    2つの入力振幅がどちらも適用後の <code>|0⟩</code> 成分と <code>|1⟩</code> 成分に寄与し、同じ成分に届いた寄与が足し合わされます。
   </p>
 
-  <div class="math mono">|0⟩ → H ゲート → (|0⟩ + |1⟩) / √2 → Z ゲート → (|0⟩ - |1⟩) / √2 → H ゲート → |1⟩</div>
+  <div class="math mono">
+    <div class="math-line">H(a₀|0⟩ + a₁|1⟩) = ((a₀ + a₁)|0⟩ + (a₀ - a₁)|1⟩) / √2</div>
+  </div>
+
+  <div class="panel">
+    <table>
+      <tr><th>出発する入力振幅</th><th><code>|0⟩</code> へ向かう寄与</th><th><code>|1⟩</code> へ向かう寄与</th></tr>
+      <tr><td>適用前の <code>|0⟩</code> の振幅 <span class="mono">a₀</span></td><td><span class="mono">+ a₀ × 1/√2</span></td><td><span class="mono">+ a₀ × 1/√2</span></td></tr>
+      <tr><td>適用前の <code>|1⟩</code> の振幅 <span class="mono">a₁</span></td><td><span class="mono">+ a₁ × 1/√2</span></td><td><span class="mono">- a₁ × 1/√2</span></td></tr>
+    </table>
+  </div>
+
+  <div class="call warn">
+    <span class="h">マイナス符号が付く位置</span>
+    4つの入力・出力の組み合わせのうち、<strong>適用前の <code>|1⟩</code> の振幅が適用後の <code>|1⟩</code> 成分へ向かう寄与</strong>にだけマイナス符号が付きます。<br>
+    いきなり「1→1 の項」と言うと曖昧なので、本書では「適用前の <code>|1⟩</code> から来て適用後の <code>|1⟩</code> へ向かう振幅の寄与」とかみ砕いた言い方で呼ぶことにします。
+  </div>
+
+  <h3><code>|0⟩</code> 状態にHゲートを適用してみよう</h3>
+
+  <p>
+    <code>|0⟩</code> 状態は <span class="mono">a₀ = 1</span>、<span class="mono">a₁ = 0</span> の状態です。<br>
+    この値をHゲートの変換ルールに入れると、適用後の <code>|0⟩</code> 成分と <code>|1⟩</code> 成分はどちらも <span class="mono">1/√2</span> になります。
+  </p>
+
+  <div class="math mono">
+    <div class="math-line">適用後の |0⟩ の振幅 = 1 × 1/√2 + 0 × 1/√2 = 1/√2</div>
+    <div class="math-line">適用後の |1⟩ の振幅 = 1 × 1/√2 + 0 × (-1/√2) = 1/√2</div>
+  </div>
+
+  <p>
+    そのため <code>H|0⟩</code> は <code>(|0⟩ + |1⟩) / √2</code> になり、すぐに測定すると0と1がそれぞれ50%の確率で出ます。<br>
+    ここまでが、よく「Hゲートが重ね合わせを作る」と言われる部分です。
+  </p>
+
+  <h3>なぜマイナス符号が必要なのか</h3>
+
+  <p>
+    Hゲートは量子ゲートなので、ユニタリでなければなりません。<br>
+    したがって <code>|0⟩</code> と <code>|1⟩</code> のように互いに直交する入力状態は、Hゲートを通っても互いに直交する出力状態へ行かなければなりません。
+  </p>
+
+  <div class="compare-grid">
+    <div class="card warn">
+      <span class="tag-small">マイナス符号がなければ</span>
+      <div class="math mono">
+        <div class="math-line">H|0⟩ = (|0⟩ + |1⟩) / √2</div>
+        <div class="math-line">H|1⟩ = (|0⟩ + |1⟩) / √2</div>
+      </div>
+      <p>異なる2つの入力状態が同じ出力状態に合流してしまいます。そうすると元に戻せず、ユニタリゲートではありません。</p>
+    </div>
+
+    <div class="card good">
+      <span class="tag-small">マイナス符号があれば</span>
+      <div class="math mono">
+        <div class="math-line">H|0⟩ = (|0⟩ + |1⟩) / √2</div>
+        <div class="math-line">H|1⟩ = (|0⟩ - |1⟩) / √2</div>
+      </div>
+      <p>2つの出力状態は互いに直交します。そのため入力の情報を失わず、再び元に戻せます。</p>
+    </div>
+  </div>
+
+  <h3>Hゲートを2回適用するとなぜ元に戻るのか？</h3>
+
+  <p>
+    <code>|0⟩</code> 状態から始めると、1回目のHゲートの後の状態は <code>(|0⟩ + |1⟩) / √2</code> です。<br>
+    したがって2回目のHゲートを適用する直前は <span class="mono">a₀ = 1/√2</span>、<span class="mono">a₁ = 1/√2</span> です。<br>
+    この値を同じ変換ルールにもう一度入れれば終わりです。
+  </p>
+
+  <div class="math mono">
+    <div class="math-line">2回目のHの後の |0⟩ の振幅 = (1/√2) × 1/√2 + (1/√2) × 1/√2 = 1/2 + 1/2 = 1</div>
+    <div class="math-line">2回目のHの後の |1⟩ の振幅 = (1/√2) × 1/√2 + (1/√2) × (-1/√2) = 1/2 - 1/2 = 0</div>
+  </div>
+
+  <div class="rule mono">Hゲート(Hゲート(|0⟩)) = |0⟩</div>
+
+  <p>
+    この計算では、<code>|0⟩</code> 成分へ向かう2つの振幅の寄与は強め合い、<code>|1⟩</code> 成分へ向かう2つの振幅の寄与は打ち消し合います。<br>
+    そのためHゲートを2回適用しても「ランダムが2回起きてまた0になる」のではなく、振幅の強め合いと打ち消し合いによって、正確に最初の状態に戻ります。
+  </p>
 
   <div class="practice">
     <span class="practice-label">Qoraで実習してみよう</span>
-    <h3>H、Z、H の順に適用してみよう</h3>
+    <h3>Hゲートを2回適用してみよう</h3>
     <pre><code>operation Main() {
     // キュービットを1つ準備
     // 準備直後の q[0] は |0⟩ 状態
     use q = Qubit[1];
 
-    // H ゲートを適用
-    // 測定値 0 と 1 の振幅がどちらも 1/√2
+    // 1回目のHゲートを適用
+    // 振幅が測定値 0 と 1 に分かれる
     H(q[0]);
 
-    // Z ゲートを適用
-    // 測定値 1 の振幅の符号が負に変わる
-    Z(q[0]);
-
-    // H ゲートを適用
-    // 符号の違いが干渉として現れ、|1⟩ 状態になる
+    // 2回目のHゲートを適用
+    // 強め合いと打ち消し合いが起きて再び |0⟩ 状態になる
     H(q[0]);
 
-    // 理想的な実行環境: 測定値 1
+    // 理想的な実行環境: 測定値 0
     bit result = M(q[0]);
 }</code></pre>
   </div>
-  <nav class="page-nav" aria-label="章の移動">
-    <a href="chapter-08.html"><span class="k">前へ</span><span class="t">第8章 Hゲートは振幅をどう分けるのか？</span></a>
+    <nav class="page-nav" aria-label="章の移動">
+    <a href="chapter-08.html"><span class="k">前へ</span><span class="t">第8章. Xゲートは何を反転させるのか？</span></a>
     <a class="home" href="index.html"><span class="k">概要</span><span class="t">全体の目次に戻る</span></a>
-    <a href="chapter-10.html"><span class="k">次へ</span><span class="t">第10章 CNOTゲートは2つのキュービットをどうつなぐのか？</span></a>
+    <a href="chapter-10.html"><span class="k">次へ</span><span class="t">第10章. Zゲートは何の符号を変えるのか？</span></a>
   </nav>
     <footer>
       <p>Qora — 自分の手で作る量子トイ言語</p>

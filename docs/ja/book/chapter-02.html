@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>第2章 振幅と確率はどうつながっているのか？ — Qora</title>
+<title>第2章. 振幅と確率はどうつながっているのか？ — Qora</title>
 <style>
 :root {
     --bg: #ffffff;
@@ -246,6 +246,14 @@
   }
   .math-line + .math-line {
     margin-top: 4px;
+  }
+  .amp-change {
+    color: var(--plus);
+    font-weight: 900;
+  }
+  .amp-zero {
+    color: var(--minus);
+    font-weight: 900;
   }
   .compare-grid,
   .summary-grid {
@@ -518,39 +526,41 @@
 
 <header class="hero">
   <div class="tag">Qora · 量子ゲートドキュメント</div>
-  <h1>第2章 振幅と確率はどうつながっているのか？</h1>
+  <h1>第2章. 振幅と確率はどうつながっているのか？</h1>
   <p>振幅を2乗すると測定確率になる理由を見ていきましょう</p>
 </header>
 
 <div class="book-shell">
-  <aside class="side-nav" aria-label="本の目次">
+    <aside class="side-nav" aria-label="本の目次">
     <strong>Qoraで学ぶ量子ゲート</strong>
       <a href="index.html">概要</a>
-      <a href="intro.html">はじめに なぜQoraで量子ゲートを学ぶのか？</a>
-      <a href="chapter-01.html">第1章 キュービットの状態には何が入っているのか？</a>
-      <a class="current" href="chapter-02.html">第2章 振幅と確率はどうつながっているのか？</a>
-      <a href="chapter-03.html">第3章 重ね合わせはただの「わからない状態」なのか？</a>
-      <a href="chapter-04.html">第4章 干渉はいつ起こるのか？</a>
-      <a href="chapter-05.html">第5章 量子ゲートはなぜ元に戻せなければならないのか？</a>
-      <a href="chapter-06.html">第6章 Qoraコードはどう読むのか？</a>
-      <a href="summary.html">まとめ 第1部で学んだことを整理しよう</a>
-      <a href="chapter-07.html">第7章 Xゲートは何を反転させるのか？</a>
-      <a href="chapter-08.html">第8章 Hゲートは振幅をどう分けるのか？</a>
-      <a href="chapter-09.html">第9章 Zゲートは何の符号を変えるのか？</a>
-      <a href="chapter-10.html">第10章 CNOTゲートは2つのキュービットをどうつなぐのか？</a>
-      <a href="chapter-11.html">第11章 小さな回路を最後まで読んでみよう</a>
+      <a href="intro.html">はじめに。なぜQoraで量子ゲートを学ぶのか？</a>
+      <a href="chapter-01.html">第1章. キュービットの状態には何が入っているのか？</a>
+      <a class="current" href="chapter-02.html">第2章. 振幅と確率はどうつながっているのか？</a>
+      <a href="chapter-03.html">第3章. 重ね合わせと干渉とは何か？</a>
+      <a href="chapter-04.html">第4章. 重ね合わせはただの「わからない状態」なのか？</a>
+      <a href="chapter-05.html">第5章. 干渉はいつ生まれるのか？</a>
+      <a href="chapter-06.html">第6章. 量子ゲートはなぜ元に戻せなければならないのか？</a>
+      <a href="chapter-07.html">第7章. Qoraコードはどう読むのか？</a>
+      <a href="summary.html">まとめ. 第1部で学んだことを整理してみましょう</a>
+      <a href="chapter-08.html">第8章. Xゲートは何を反転させるのか？</a>
+      <a href="chapter-09.html">第9章. Hゲートは振幅をどう分けるのか？</a>
+      <a href="chapter-10.html">第10章. Zゲートは何の符号を変えるのか？</a>
+      <a href="chapter-11.html">第11章. CNOTゲートは2つのキュービットをどうつなぐのか？</a>
+      <a href="chapter-12.html">第12章. 小さな回路をひとつ最後まで読んでみましょう</a>
     <div class="group">
       <a href="../index.html">Hゲート単独ドキュメント</a>
     </div>
   </aside>
   <main class="article">
     <div class="breadcrumb">Qoraで学ぶ量子ゲート / 第2章</div>
-  <h2 id="amplitude">第2章 振幅と確率はどうつながっているのか？</h2>
+  <h2 id="amplitude">第2章. 振幅と確率はどうつながっているのか？</h2>
 
   <p>
     キュービットの状態は <code>|ψ⟩ = α|0⟩ + β|1⟩</code> と書けるのでした。<br>
-    ここで <span class="mono">α</span> と <span class="mono">β</span> は確率ではなく、<strong>確率振幅</strong>です。<br>
-    測定確率は振幅そのものではなく、振幅の絶対値を2乗して得られます。
+    ここで <span class="mono">α</span> と <span class="mono">β</span> は確率ではなく、<strong>振幅</strong>です。<br>
+    正確な用語では <strong>確率振幅</strong> と呼びます。<br>
+    そして測定確率は、振幅の絶対値を2乗して得られます。
   </p>
 
   <div class="rule">測定値 0 の確率 = |α|²、測定値 1 の確率 = |β|²</div>
@@ -617,12 +627,41 @@
 
   <p>
     ここで重要なのは、Hゲートが確率を直接半分に分けているわけではない、という点です。<br>
-    ゲートがまず変えるのは状態ベクトルの振幅であり、測定するときにその振幅の絶対値の2乗が確率として現れます。
+    ゲートがまず変えるのは状態の振幅であり、測定するときにその振幅の絶対値の2乗が確率として現れます。
   </p>
-  <nav class="page-nav" aria-label="章の移動">
-    <a href="chapter-01.html"><span class="k">前へ</span><span class="t">第1章 キュービットの状態には何が入っているのか？</span></a>
+
+  <div class="compare-grid">
+    <div class="card accent">
+      <span class="tag-small">適用前</span>
+      <h4>Hゲート適用前の状態</h4>
+      <div class="math mono">|0⟩ = <span class="amp-change">1</span>|0⟩ + <span class="amp-zero">0</span>|1⟩</div>
+      <h4>適用前の確率計算</h4>
+      <div class="math mono">
+        <div class="math-line">測定値0の確率 = |<span class="amp-change">1</span>|² = 1 = 100%</div>
+        <div class="math-line">測定値1の確率 = |<span class="amp-zero">0</span>|² = 0 = 0%</div>
+      </div>
+    </div>
+
+    <div class="card plus">
+      <span class="tag-small">適用後</span>
+      <h4>Hゲート適用後の状態</h4>
+      <div class="math mono">H|0⟩ = <span class="amp-change">(1/√2)</span>|0⟩ + <span class="amp-change">(1/√2)</span>|1⟩</div>
+      <h4>適用後の確率計算</h4>
+      <div class="math mono">
+        <div class="math-line">測定値0の確率 = |<span class="amp-change">1/√2</span>|² = 1/2 = 50%</div>
+        <div class="math-line">測定値1の確率 = |<span class="amp-change">1/√2</span>|² = 1/2 = 50%</div>
+      </div>
+    </div>
+  </div>
+
+  <p>
+    Hゲートが作った値は確率 <span class="mono">1/2</span> ではなく、振幅 <span class="mono">1/√2</span> です。<br>
+    そのあと測定確率を求めるときに、この振幅の絶対値を2乗します。
+  </p>
+    <nav class="page-nav" aria-label="章の移動">
+    <a href="chapter-01.html"><span class="k">前へ</span><span class="t">第1章. キュービットの状態には何が入っているのか？</span></a>
     <a class="home" href="index.html"><span class="k">概要</span><span class="t">全体の目次に戻る</span></a>
-    <a href="chapter-03.html"><span class="k">次へ</span><span class="t">第3章 重ね合わせはただの「わからない状態」なのか？</span></a>
+    <a href="chapter-03.html"><span class="k">次へ</span><span class="t">第3章. 重ね合わせと干渉とは何か？</span></a>
   </nav>
     <footer>
       <p>Qora — 自分で作る量子トイ言語</p>

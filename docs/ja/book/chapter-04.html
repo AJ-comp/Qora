@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>第4章 干渉はいつ生まれるのか? — Qora</title>
+<title>第4章. 重ね合わせはただの「わからない状態」なのか？ — Qora</title>
 <style>
 :root {
     --bg: #ffffff;
@@ -518,129 +518,113 @@
 
 <header class="hero">
   <div class="tag">Qora · 量子ゲートドキュメント</div>
-  <h1>第4章 干渉はいつ生まれるのか?</h1>
-  <p>同じ測定値にたどり着いた振幅の寄与が足し合わされる瞬間を追いかけてみましょう</p>
+  <h1>第4章. 重ね合わせはただの「わからない状態」なのか？</h1>
+  <p>重ね合わせと古典的な「わからない」がどう違うのか比べてみましょう</p>
 </header>
 
 <div class="book-shell">
-  <aside class="side-nav" aria-label="本の目次">
+    <aside class="side-nav" aria-label="本の目次">
     <strong>Qoraで学ぶ量子ゲート</strong>
       <a href="index.html">概要</a>
-      <a href="intro.html">はじめに なぜQoraで量子ゲートを学ぶのか?</a>
-      <a href="chapter-01.html">第1章 キュービットの状態には何が入っているのか?</a>
-      <a href="chapter-02.html">第2章 振幅と確率はどうつながっているのか?</a>
-      <a href="chapter-03.html">第3章 重ね合わせはただの「わからない状態」なのか?</a>
-      <a class="current" href="chapter-04.html">第4章 干渉はいつ生まれるのか?</a>
-      <a href="chapter-05.html">第5章 量子ゲートはなぜ元に戻せなければならないのか?</a>
-      <a href="chapter-06.html">第6章 Qoraコードはどう読めばいいのか?</a>
-      <a href="summary.html">まとめ 第1部で学んだことを整理しよう</a>
-      <a href="chapter-07.html">第7章 Xゲートは何を反転させるのか?</a>
-      <a href="chapter-08.html">第8章 Hゲートは振幅をどう分けるのか?</a>
-      <a href="chapter-09.html">第9章 Zゲートは何の符号を変えるのか?</a>
-      <a href="chapter-10.html">第10章 CNOTゲートは2つのキュービットをどうつなぐのか?</a>
-      <a href="chapter-11.html">第11章 小さな回路をひとつ最後まで読んでみよう</a>
+      <a href="intro.html">はじめに。なぜQoraで量子ゲートを学ぶのか？</a>
+      <a href="chapter-01.html">第1章. キュービットの状態には何が入っているのか？</a>
+      <a href="chapter-02.html">第2章. 振幅と確率はどうつながっているのか？</a>
+      <a href="chapter-03.html">第3章. 重ね合わせと干渉とは何か？</a>
+      <a class="current" href="chapter-04.html">第4章. 重ね合わせはただの「わからない状態」なのか？</a>
+      <a href="chapter-05.html">第5章. 干渉はいつ生まれるのか？</a>
+      <a href="chapter-06.html">第6章. 量子ゲートはなぜ元に戻せなければならないのか？</a>
+      <a href="chapter-07.html">第7章. Qoraコードはどう読むのか？</a>
+      <a href="summary.html">まとめ. 第1部で学んだことを整理してみましょう</a>
+      <a href="chapter-08.html">第8章. Xゲートは何を反転させるのか？</a>
+      <a href="chapter-09.html">第9章. Hゲートは振幅をどう分けるのか？</a>
+      <a href="chapter-10.html">第10章. Zゲートは何の符号を変えるのか？</a>
+      <a href="chapter-11.html">第11章. CNOTゲートは2つのキュービットをどうつなぐのか？</a>
+      <a href="chapter-12.html">第12章. 小さな回路をひとつ最後まで読んでみましょう</a>
     <div class="group">
       <a href="../index.html">Hゲート単独ドキュメント</a>
     </div>
   </aside>
   <main class="article">
     <div class="breadcrumb">Qoraで学ぶ量子ゲート / 第4章</div>
-  <h2 id="interference">第4章 干渉はいつ生まれるのか?</h2>
+  <h2 id="superposition">第4章. 重ね合わせはただの「わからない状態」なのか？</h2>
 
   <p>
-    干渉は、量子コンピューティングでもっとも重要な概念のひとつです。<br>
-    正確に言うと、干渉は同じ基底状態への複数の振幅の寄与が足し合わされたあとに、ボルンの規則が適用されるときに生まれます。<br>
-    つまり確率を先に足すのではなく、<strong>振幅を先に足して、あとで2乗</strong>します。
+    重ね合わせは、量子コンピューティングを学ぶときに最も誤解されやすい言葉です。<br>
+    量子力学でいう重ね合わせは、「結果がまだわからない状態」を意味しません。<br>
+    正確には、ある基底状態の組を決めたとき、1つの量子状態がその基底状態のうち2つ以上に0でない振幅を持つ線形結合として表されるなら、その基底に関する重ね合わせ状態と呼びます。
   </p>
 
-  <div class="rule">同じ基底状態にたどり着いた振幅の寄与は、まず足し合わされます。</div>
+  <p>
+    この説明は少し難しく聞こえるかもしれないので、ここでは基底状態を <code>|0⟩</code> と <code>|1⟩</code> に決めて見ていきます。<br>
+    下の式は <code>|0⟩</code> 側にも振幅があり、<code>|1⟩</code> 側にも振幅がある状態です。
+  </p>
+
+  <div class="math mono">(|0⟩ + |1⟩) / √2</div>
 
   <p>
-    ゲートは状態ベクトルに線形に作用します。<br>
-    そのため入力状態が複数の基底状態の和になっていると、ゲートは各基底成分を別々に変換したあと、その結果をふたたび足し合わせます。<br>
-    この過程で、同じ出力基底状態に集まった振幅の寄与が同じ符号と位相を持てば強め合い、逆の符号や逆の位相を持てば打ち消し合います。
+    この表現は、第1章で見た一般形 <code>|ψ⟩ = α|0⟩ + β|1⟩</code> と別の話ではありません。<br>
+    かっこ全体を <span class="mono">√2</span> で割るということは、かっこの中の各項に <span class="mono">1/√2</span> を掛けるという意味です。
   </p>
 
   <div class="math mono">
-    <div class="math-line">入力: α|0⟩ + β|1⟩</div>
-    <div class="math-line">ゲート後: α·U|0⟩ + β·U|1⟩</div>
+    <div class="math-line">(|0⟩ + |1⟩) / √2</div>
+    <div class="math-line">= (1/√2)(|0⟩ + |1⟩)</div>
+    <div class="math-line">= (1/√2)|0⟩ + (1/√2)|1⟩</div>
   </div>
+
+  <p>
+    したがってこの状態は、一般形に合わせて見ると <span class="mono">α = 1/√2</span>、<span class="mono">β = 1/√2</span> の状態です。
+  </p>
+
+  <p>
+    上の状態は、<code>|0⟩</code> 方向の振幅が <span class="mono">1/√2</span> で、<code>|1⟩</code> 方向の振幅も <span class="mono">1/√2</span> である状態です。
+  </p>
+
+  <div class="call why">
+    このように <code>|0⟩</code> と <code>|1⟩</code> という2つの基底状態がどちらも1つの状態ベクトルを作ることに参加しているため、この状態は計算基底に関する重ね合わせ状態です。
+  </div>
+
+  <p>
+    コインを投げて手で覆っておくと、コインはすでに表か裏かに決まっていて、私たちがその結果を知らないだけです。<br>
+    しかし量子の重ね合わせは、そのような古典的な無知ではありません。測定前の状態ベクトルそのものが <code>|0⟩</code> 成分と <code>|1⟩</code> 成分を一緒に持っています。
+  </p>
+
+  <div class="call why">
+    <span class="h">確率だけを見ても状態のすべてはわかりません</span>
+    量子状態には、測定確率だけでなく振幅の符号と位相も含まれています。<br>
+    この情報はすぐに測定すると消えてしまうように見えることもありますが、別のゲートを通るときに干渉を生み出すため、実際の計算結果に影響を与えます。
+  </div>
+
+  <h3>同じ50%に見えても本当に同じ状態なのか？</h3>
 
   <div class="compare-grid">
     <div class="card plus">
-      <span class="tag-small">強め合う干渉</span>
-      <h4>同じ符号の振幅の寄与: 強め合い</h4>
-      <div class="math mono">+1/2 + +1/2 = +1</div>
-      <p>測定値0の振幅が大きくなります。</p>
+      <span class="tag-small">状態 A</span>
+      <h4>測定値 1 の振幅が正である状態</h4>
+      <div class="math mono">(|0⟩ + |1⟩) / √2</div>
+      <p>すぐに測定すると、測定値 0 と 1 がそれぞれ 50% の確率で出ます。</p>
     </div>
 
     <div class="card minus">
-      <span class="tag-small">打ち消し合う干渉</span>
-      <h4>逆の符号の振幅の寄与: 打ち消し合い</h4>
-      <div class="math mono">+1/2 + -1/2 = 0</div>
-      <p>測定値1の振幅が消えてしまいます。</p>
+      <span class="tag-small">状態 B</span>
+      <h4>測定値 1 の振幅が負である状態</h4>
+      <div class="math mono">(|0⟩ - |1⟩) / √2</div>
+      <p>すぐに測定すると、この状態もやはり測定値 0 と 1 がそれぞれ 50% の確率で出ます。</p>
     </div>
   </div>
 
-  <h3>Hゲートを2回適用すると、干渉はどう見えるのでしょうか?</h3>
-
   <p>
-    <code>|0⟩</code>状態にHゲートを1回適用すると、<code>|0⟩</code>成分と<code>|1⟩</code>成分の両方が生まれます。<br>
-    ここにHゲートをもう1回適用すると、2つの成分がそれぞれふたたび<code>|0⟩</code>と<code>|1⟩</code>の側へ寄与を送り、同じ基底状態にたどり着いた寄与どうしが足し合わされます。
+    2つの状態は、すぐに測定すると同じ確率を示しますが、同じ状態ではありません。<br>
+    測定値 1 の振幅の符号が異なり、この符号の違いが、別のゲートをもう一度適用したときに結果の違いを生み出します。<br>
+    この違いを正式に言うと、2つの状態は互いに異なる状態ベクトルであり、H ゲートのような変換に再び出会うと、互いに異なる方向へ移動します。
   </p>
-
-  <div class="practice">
-    <span class="practice-label">Qoraで実習してみよう</span>
-    <h3>Hゲートを2回適用してみよう</h3>
-    <pre><code>operation Main() {
-    // キュービットを1つ準備
-    // 準備直後のq[0]は|0⟩状態
-    use q = Qubit[1];
-
-    // 1回目のHゲートを適用
-    // 測定値0と測定値1の振幅はどちらも1/√2
-    H(q[0]);
-
-    // 2回目のHゲートを適用
-    // 測定値0への振幅の寄与は強め合い
-    // 測定値1への振幅の寄与は打ち消し合い
-    H(q[0]);
-
-    // 理想的な実行環境では: 測定値0
-    bit result = M(q[0]);
-}</code></pre>
-  </div>
-
-  <p>1回目のHゲートのあとには、2つの振幅が残っています。</p>
-
-  <div class="math mono">
-    <div class="math-line">測定値0の振幅 = 1/√2</div>
-    <div class="math-line">測定値1の振幅 = 1/√2</div>
-  </div>
-
-  <p>
-    2回目のHゲートを適用すると、測定値0の側にたどり着いた振幅の寄与は次のように足し合わされます。
-  </p>
-
-  <div class="math mono">+1/2 + +1/2 = +1</div>
-
-  <p>
-    測定値1の側にたどり着いた振幅の寄与も、同じやり方で計算します。
-  </p>
-
-  <div class="math mono">+1/2 + -1/2 = 0</div>
-
-  <p>
-    そのため最終状態は、ふたたび<code>|0⟩</code>状態に戻ることになります。<br>
-    この計算は、第8章でHゲートの変換規則を取り上げながら、もっと詳しく見直します。
-  </p>
-  <nav class="page-nav" aria-label="章の移動">
-    <a href="chapter-03.html"><span class="k">前へ</span><span class="t">第3章 重ね合わせはただの「わからない状態」なのか?</span></a>
+    <nav class="page-nav" aria-label="章の移動">
+    <a href="chapter-03.html"><span class="k">前へ</span><span class="t">第3章. 重ね合わせと干渉とは何か？</span></a>
     <a class="home" href="index.html"><span class="k">概要</span><span class="t">全体の目次に戻る</span></a>
-    <a href="chapter-05.html"><span class="k">次へ</span><span class="t">第5章 量子ゲートはなぜ元に戻せなければならないのか?</span></a>
+    <a href="chapter-05.html"><span class="k">次へ</span><span class="t">第5章. 干渉はいつ生まれるのか？</span></a>
   </nav>
     <footer>
-      <p>Qora — 自分の手でつくる量子トイ言語</p>
+      <p>Qora — 自分の手で作る量子トイ言語</p>
     </footer>
   </main>
 </div>

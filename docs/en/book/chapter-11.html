@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Chapter 11. Let's Read One Small Circuit from Start to Finish — Qora</title>
+<title>Chapter 11. How Does the CNOT Gate Connect Two Qubits? — Qora</title>
 <style>
 :root {
     --bg: #ffffff;
@@ -517,109 +517,102 @@
 <div class="qora-lang-switch" style="position:sticky;top:0;z-index:99;text-align:right;padding:8px 16px;background:rgba(255,255,255,.92);backdrop-filter:blur(4px);border-bottom:1px solid #e6e8ee;font-size:13px;font-family:sans-serif;"><strong>English</strong> · <a href="../../ko/book/chapter-11.html" onclick="try{localStorage.setItem(&quot;qora-lang&quot;,&quot;ko&quot;)}catch(e){}">한국어</a> · <a href="../../ja/book/chapter-11.html" onclick="try{localStorage.setItem(&quot;qora-lang&quot;,&quot;ja&quot;)}catch(e){}">日本語</a></div>
 
 <header class="hero">
-  <div class="tag">Qora · Quantum Gate Book</div>
-  <h1>Chapter 11. Let's Read One Small Circuit from Start to Finish</h1>
-  <p>Let's wrap up by following the state changes that the H gate and the CNOT gate create together</p>
+  <div class="tag">Qora · Quantum Gate Documentation</div>
+  <h1>Chapter 11. How Does the CNOT Gate Connect Two Qubits?</h1>
+  <p>Let's read the relationship between the control qubit and the target qubit, state by state</p>
 </header>
 
 <div class="book-shell">
-  <aside class="side-nav" aria-label="Book contents">
-    <strong>Learning Quantum Gates with Qora</strong>
+    <aside class="side-nav" aria-label="Book contents">
+    <strong>Quantum Gates with Qora</strong>
       <a href="index.html">Overview</a>
       <a href="intro.html">Introduction. Why Learn Quantum Gates with Qora?</a>
       <a href="chapter-01.html">Chapter 1. What Is Inside a Qubit State?</a>
-      <a href="chapter-02.html">Chapter 2. How Are Amplitudes and Probabilities Connected?</a>
-      <a href="chapter-03.html">Chapter 3. Is Superposition Just an &quot;Unknown State&quot;?</a>
-      <a href="chapter-04.html">Chapter 4. When Does Interference Happen?</a>
-      <a href="chapter-05.html">Chapter 5. Why Must Quantum Gates Be Reversible?</a>
-      <a href="chapter-06.html">Chapter 6. How Do We Read Qora Code?</a>
-      <a href="summary.html">Recap. Let's Review What We Learned in Part 1</a>
-      <a href="chapter-07.html">Chapter 7. What Does the X Gate Flip?</a>
-      <a href="chapter-08.html">Chapter 8. How Does the H Gate Split Amplitudes?</a>
-      <a href="chapter-09.html">Chapter 9. Whose Sign Does the Z Gate Change?</a>
-      <a href="chapter-10.html">Chapter 10. How Does the CNOT Gate Connect Two Qubits?</a>
-      <a class="current" href="chapter-11.html">Chapter 11. Let's Read One Small Circuit from Start to Finish</a>
+      <a href="chapter-02.html">Chapter 2. How Are Amplitudes Connected to Probabilities?</a>
+      <a href="chapter-03.html">Chapter 3. What Are Superposition and Interference?</a>
+      <a href="chapter-04.html">Chapter 4. Is Superposition Just a &quot;State We Don&#39;t Know&quot;?</a>
+      <a href="chapter-05.html">Chapter 5. When Does Interference Appear?</a>
+      <a href="chapter-06.html">Chapter 6. Why Must Quantum Gates Be Reversible?</a>
+      <a href="chapter-07.html">Chapter 7. How Do We Read Qora Code?</a>
+      <a href="summary.html">Wrap-up. Let&#39;s Review What We Learned in Part 1</a>
+      <a href="chapter-08.html">Chapter 8. What Does the X Gate Flip?</a>
+      <a href="chapter-09.html">Chapter 9. How Does the H Gate Split Amplitudes?</a>
+      <a href="chapter-10.html">Chapter 10. What Does the Z Gate Change the Sign Of?</a>
+      <a class="current" href="chapter-11.html">Chapter 11. How Does the CNOT Gate Connect Two Qubits?</a>
+      <a href="chapter-12.html">Chapter 12. Let&#39;s Read One Small Circuit from Start to Finish</a>
     <div class="group">
       <a href="../index.html">Standalone H Gate Document</a>
     </div>
   </aside>
   <main class="article">
-    <div class="breadcrumb">Learning Quantum Gates with Qora / Chapter 11</div>
-<h2 id="first-circuit">Chapter 11. Let's Read One Small Circuit from Start to Finish</h2>
+    <div class="breadcrumb">Quantum Gates with Qora / Chapter 11</div>
+<h2 id="cnot-gate">Chapter 11. How Does the CNOT Gate Connect Two Qubits?</h2>
 
   <p>
-    Now it's time to read one short circuit from beginning to end.<br>
-    This circuit prepares two qubits, applies an H gate to the first qubit, and then connects the two qubits with a CNOT gate.<br>
-    It is the Bell state circuit, which you will often meet in introductions to quantum computing.
+    The CNOT gate is a gate that acts on two qubits.<br>
+    The first qubit is called the control qubit, and the second qubit is called the target qubit.<br>
+    An X gate is applied to the target qubit only when the control qubit is on the measurement outcome 1 side.
   </p>
 
+  <div class="rule">The CNOT gate flips the target qubit only when the control qubit is 1.</div>
+
+  <div class="panel">
+    <table>
+      <tr><th>Input state</th><th>Control qubit</th><th>Change in target qubit</th><th>Output state</th></tr>
+      <tr><td><code>|00⟩</code></td><td>0</td><td>Unchanged</td><td><code>|00⟩</code></td></tr>
+      <tr><td><code>|01⟩</code></td><td>0</td><td>Unchanged</td><td><code>|01⟩</code></td></tr>
+      <tr><td><code>|10⟩</code></td><td>1</td><td>0 becomes 1</td><td><code>|11⟩</code></td></tr>
+      <tr><td><code>|11⟩</code></td><td>1</td><td>1 becomes 0</td><td><code>|10⟩</code></td></tr>
+    </table>
+  </div>
+
+  <p>
+    Here, <code>|10⟩</code> means the two-qubit state where the first qubit's measurement outcome is 1 and the second qubit's measurement outcome is 0.<br>
+    So if we apply the CNOT gate to <code>|10⟩</code>, the control qubit is 1, so the target qubit flips, and the final state becomes <code>|11⟩</code>.
+  </p>
+
+  <h3>What Happens When the Control Qubit Is in Superposition?</h3>
+
+  <p>
+    When we apply an H gate to the first qubit, the first qubit's amplitude splits toward measurement outcomes 0 and 1.<br>
+    If we then apply the CNOT gate, the target qubit stays the same on the branch where the control qubit is 0, and the target qubit flips on the branch where the control qubit is 1.<br>
+    As a result, the two qubits end up bound together in a state with just the two possibilities <code>|00⟩</code> and <code>|11⟩</code>.
+  </p>
+
+  <div class="math mono">|00⟩ → H(q[0]) → (|00⟩ + |10⟩) / √2 → CNOT(q[0], q[1]) → (|00⟩ + |11⟩) / √2</div>
+
+  <div class="call why">
+    <span class="h">This state is the starting point for understanding entanglement</span>
+    When you measure the final state, the two qubits do not look like they each come out randomly on their own.<br>
+    The measurement outcomes are only ever <code>00</code> or <code>11</code>.<br>
+    That is because the measurement outcomes of the first qubit and the second qubit are locked together.
+  </div>
+
   <div class="practice">
-    <span class="practice-label">Try It in Qora</span>
-    <h3>Let's Write the Bell State Circuit in Qora</h3>
+    <span class="practice-label">Try it in Qora</span>
+    <h3>Let's Connect Two Qubits with the CNOT Gate</h3>
     <pre><code>operation Main() {
     // Prepare two qubits
     // Right after preparation, q[0]q[1] is in the |00⟩ state
     use q = Qubit[2];
 
     // Apply an H gate to the first qubit
-    // Amplitudes appear for |00⟩ and |10⟩
+    // q[0]'s amplitude splits into measurement outcomes 0 and 1
     H(q[0]);
 
     // Apply the CNOT gate
-    // The target qubit on the |10⟩ side flips, giving |11⟩
+    // q[0] is the control qubit, q[1] is the target qubit
     CNOT(q[0], q[1]);
 
-    // Measure both qubits
-    // In an ideal execution environment: 00 or 11
+    // Ideal execution environment: 00 or 11
     bit first = M(q[0]);
     bit second = M(q[1]);
 }</code></pre>
   </div>
-
-  <h3>Let's Follow the Circuit as State Changes</h3>
-
-  <div class="panel">
-    <table>
-      <tr><th>Step</th><th>State</th><th>How to read it</th></tr>
-      <tr><td>Right after preparation</td><td><code>|00⟩</code></td><td>Both qubits sit on the measurement outcome 0 side</td></tr>
-      <tr><td>After H(q[0])</td><td><code>(|00⟩ + |10⟩) / √2</code></td><td>The first qubit's amplitude is split between 0 and 1</td></tr>
-      <tr><td>After CNOT</td><td><code>(|00⟩ + |11⟩) / √2</code></td><td>On the branch where the control qubit is 1, the target qubit flips</td></tr>
-      <tr><td>Measurement</td><td><code>00</code> or <code>11</code></td><td>The two outcomes come out locked together</td></tr>
-    </table>
-  </div>
-
-  <p>
-    The key to reading this circuit is not "we measure the first qubit to get 0 or 1, and then change the second qubit."<br>
-    Instead, read it as: the two amplitude branches created by the H gate pass through the CNOT gate and settle into a <code>|00⟩</code> branch and a <code>|11⟩</code> branch.<br>
-    Then, when we measure at the end, the two qubits' outcomes appear together as <code>00</code> or <code>11</code>.
-  </p>
-
-  <div class="summary-grid">
-    <div class="card accent">
-      <span class="tag-small">X gate</span>
-      <h4>Swaps the positions of amplitudes</h4>
-      <p>It swaps the amplitude of measurement outcome 0 with the amplitude of measurement outcome 1.</p>
-    </div>
-    <div class="card plus">
-      <span class="tag-small">H gate</span>
-      <h4>Splits and distributes amplitude</h4>
-      <p>It splits the amplitude that was on one side across both measurement outcomes, setting up interference later.</p>
-    </div>
-    <div class="card minus">
-      <span class="tag-small">Z gate</span>
-      <h4>Changes the sign</h4>
-      <p>It flips the sign of the amplitude of measurement outcome 1, and that difference shows up in the next interference.</p>
-    </div>
-    <div class="card good">
-      <span class="tag-small">CNOT gate</span>
-      <h4>Connects two qubits</h4>
-      <p>It flips the target qubit only on the branch where the control qubit is 1, creating a relationship between the two qubits.</p>
-    </div>
-  </div>
-  <nav class="page-nav" aria-label="Chapter navigation">
-    <a href="chapter-10.html"><span class="k">Previous</span><span class="t">Chapter 10. How Does the CNOT Gate Connect Two Qubits?</span></a>
+    <nav class="page-nav" aria-label="Chapter navigation">
+    <a href="chapter-10.html"><span class="k">Previous</span><span class="t">Chapter 10. What Does the Z Gate Change the Sign Of?</span></a>
     <a class="home" href="index.html"><span class="k">Overview</span><span class="t">Back to the full table of contents</span></a>
-    <span class="disabled"><span class="k">Next</span><span class="t">This is the last page</span></span>
+    <a href="chapter-12.html"><span class="k">Next</span><span class="t">Chapter 12. Let&#39;s Read One Small Circuit from Start to Finish</span></a>
   </nav>
     <footer>
       <p>Qora — a quantum toy language you build yourself</p>

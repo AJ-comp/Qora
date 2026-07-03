@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>第11章 小さな回路をひとつ最後まで読んでみましょう — Qora</title>
+<title>第11章. CNOTゲートは2つのキュービットをどうつなぐのか？ — Qora</title>
 <style>
 :root {
     --bg: #ffffff;
@@ -518,108 +518,101 @@
 
 <header class="hero">
   <div class="tag">Qora · 量子ゲートドキュメント</div>
-  <h1>第11章 小さな回路をひとつ最後まで読んでみましょう</h1>
-  <p>H ゲートと CNOT ゲートが一緒に作る状態変化を仕上げていきましょう</p>
+  <h1>第11章. CNOTゲートは2つのキュービットをどうつなぐのか？</h1>
+  <p>制御キュービットとターゲットキュービットの関係を、状態ごとに読んでみましょう</p>
 </header>
 
 <div class="book-shell">
-  <aside class="side-nav" aria-label="本の目次">
+    <aside class="side-nav" aria-label="本の目次">
     <strong>Qoraで学ぶ量子ゲート</strong>
       <a href="index.html">概要</a>
-      <a href="intro.html">はじめに なぜQoraで量子ゲートを学ぶのか？</a>
-      <a href="chapter-01.html">第1章 キュービットの状態には何が入っているのか？</a>
-      <a href="chapter-02.html">第2章 振幅と確率はどうつながっているのか？</a>
-      <a href="chapter-03.html">第3章 重ね合わせはただの「わからない状態」なのか？</a>
-      <a href="chapter-04.html">第4章 干渉はいつ生まれるのか？</a>
-      <a href="chapter-05.html">第5章 量子ゲートはなぜ元に戻せなければならないのか？</a>
-      <a href="chapter-06.html">第6章 Qoraコードはどう読むのか？</a>
-      <a href="summary.html">まとめ 第1部で学んだことを整理してみましょう</a>
-      <a href="chapter-07.html">第7章 Xゲートは何を反転させるのか？</a>
-      <a href="chapter-08.html">第8章 Hゲートは振幅をどう分けるのか？</a>
-      <a href="chapter-09.html">第9章 Zゲートは何の符号を変えるのか？</a>
-      <a href="chapter-10.html">第10章 CNOTゲートは2つのキュービットをどうつなぐのか？</a>
-      <a class="current" href="chapter-11.html">第11章 小さな回路をひとつ最後まで読んでみましょう</a>
+      <a href="intro.html">はじめに。なぜQoraで量子ゲートを学ぶのか？</a>
+      <a href="chapter-01.html">第1章. キュービットの状態には何が入っているのか？</a>
+      <a href="chapter-02.html">第2章. 振幅と確率はどうつながっているのか？</a>
+      <a href="chapter-03.html">第3章. 重ね合わせと干渉とは何か？</a>
+      <a href="chapter-04.html">第4章. 重ね合わせはただの「わからない状態」なのか？</a>
+      <a href="chapter-05.html">第5章. 干渉はいつ生まれるのか？</a>
+      <a href="chapter-06.html">第6章. 量子ゲートはなぜ元に戻せなければならないのか？</a>
+      <a href="chapter-07.html">第7章. Qoraコードはどう読むのか？</a>
+      <a href="summary.html">まとめ. 第1部で学んだことを整理してみましょう</a>
+      <a href="chapter-08.html">第8章. Xゲートは何を反転させるのか？</a>
+      <a href="chapter-09.html">第9章. Hゲートは振幅をどう分けるのか？</a>
+      <a href="chapter-10.html">第10章. Zゲートは何の符号を変えるのか？</a>
+      <a class="current" href="chapter-11.html">第11章. CNOTゲートは2つのキュービットをどうつなぐのか？</a>
+      <a href="chapter-12.html">第12章. 小さな回路をひとつ最後まで読んでみましょう</a>
     <div class="group">
       <a href="../index.html">Hゲート単独ドキュメント</a>
     </div>
   </aside>
   <main class="article">
     <div class="breadcrumb">Qoraで学ぶ量子ゲート / 第11章</div>
-<h2 id="first-circuit">第11章 小さな回路をひとつ最後まで読んでみましょう</h2>
+<h2 id="cnot-gate">第11章. CNOTゲートは2つのキュービットをどうつなぐのか？</h2>
 
   <p>
-    いよいよ、短い回路をひとつ、最初から最後まで読んでみる番です。<br>
-    この回路は 2 つのキュービットを準備し、1 つ目のキュービットに H ゲートを適用したあと、CNOT ゲートで 2 つのキュービットをつなぎます。<br>
-    これは量子コンピューティングの入門でよく出会うベル状態回路です。
+    CNOTゲートは、2つのキュービットに作用するゲートです。<br>
+    1つ目のキュービットを制御キュービットと呼び、2つ目のキュービットをターゲットキュービットと呼びます。<br>
+    制御キュービットが測定値1の側にあるときだけ、ターゲットキュービットにXゲートが適用されます。
   </p>
 
-  <div class="practice">
-    <span class="practice-label">Qoraで実習してみよう</span>
-    <h3>ベル状態回路を Qora で書いてみましょう</h3>
-    <pre><code>operation Main() {
-    // キュービットを 2 つ準備
-    // 準備直後、q[0]q[1] は |00⟩ の状態
-    use q = Qubit[2];
-
-    // 1 つ目のキュービットに H ゲートを適用
-    // |00⟩ と |10⟩ の振幅が生まれる
-    H(q[0]);
-
-    // CNOT ゲートを適用
-    // |10⟩ 側のターゲットキュービットが反転して |11⟩ になる
-    CNOT(q[0], q[1]);
-
-    // 2 つのキュービットを測定
-    // 理想的な実行環境では 00 または 11
-    bit first = M(q[0]);
-    bit second = M(q[1]);
-}</code></pre>
-  </div>
-
-  <h3>回路を状態変化として追いかけてみましょう</h3>
+  <div class="rule">CNOTゲートは、制御キュービットが1のときだけターゲットキュービットを反転させます。</div>
 
   <div class="panel">
     <table>
-      <tr><th>段階</th><th>状態</th><th>読み方</th></tr>
-      <tr><td>準備直後</td><td><code>|00⟩</code></td><td>2 つのキュービットがどちらも測定値 0 の側にあります</td></tr>
-      <tr><td>H(q[0]) の後</td><td><code>(|00⟩ + |10⟩) / √2</code></td><td>1 つ目のキュービットの振幅が 0 と 1 に分かれます</td></tr>
-      <tr><td>CNOT の後</td><td><code>(|00⟩ + |11⟩) / √2</code></td><td>制御キュービットが 1 の枝でターゲットキュービットが反転します</td></tr>
-      <tr><td>測定</td><td><code>00</code> または <code>11</code></td><td>2 つの結果が互いにかみ合って現れます</td></tr>
+      <tr><th>入力状態</th><th>制御キュービット</th><th>ターゲットキュービットの変化</th><th>出力状態</th></tr>
+      <tr><td><code>|00⟩</code></td><td>0</td><td>そのまま</td><td><code>|00⟩</code></td></tr>
+      <tr><td><code>|01⟩</code></td><td>0</td><td>そのまま</td><td><code>|01⟩</code></td></tr>
+      <tr><td><code>|10⟩</code></td><td>1</td><td>0が1に変わる</td><td><code>|11⟩</code></td></tr>
+      <tr><td><code>|11⟩</code></td><td>1</td><td>1が0に変わる</td><td><code>|10⟩</code></td></tr>
     </table>
   </div>
 
   <p>
-    この回路を読むときのポイントは、「1 つ目のキュービットを先に測定して 0 か 1 を得てから、2 つ目のキュービットを変える」ではありません。<br>
-    H ゲートが作った 2 つの振幅の枝が、CNOT ゲートを通りながら <code>|00⟩</code> の枝と <code>|11⟩</code> の枝に整理される、と読むべきです。<br>
-    そして最後に測定すると、2 つのキュービットの結果が <code>00</code> または <code>11</code> としてそろって現れます。
+    ここで <code>|10⟩</code> は、1つ目のキュービットの測定値が1で、2つ目のキュービットの測定値が0である2キュービットの状態を意味します。<br>
+    したがって <code>|10⟩</code> にCNOTゲートを適用すると、制御キュービットが1なのでターゲットキュービットが反転し、最終状態は <code>|11⟩</code> になります。
   </p>
 
-  <div class="summary-grid">
-    <div class="card accent">
-      <span class="tag-small">X ゲート</span>
-      <h4>振幅の位置を入れ替えます</h4>
-      <p>測定値 0 の振幅と測定値 1 の振幅を互いに入れ替えます。</p>
-    </div>
-    <div class="card plus">
-      <span class="tag-small">H ゲート</span>
-      <h4>振幅を分けて送ります</h4>
-      <p>片方にあった振幅を 2 つの測定値の側へ分けて送り、あとで干渉を作ります。</p>
-    </div>
-    <div class="card minus">
-      <span class="tag-small">Z ゲート</span>
-      <h4>符号を変えます</h4>
-      <p>測定値 1 の振幅の符号を変え、その違いは次の干渉で現れます。</p>
-    </div>
-    <div class="card good">
-      <span class="tag-small">CNOT ゲート</span>
-      <h4>2 つのキュービットをつなぎます</h4>
-      <p>制御キュービットが 1 の枝でだけターゲットキュービットを反転させて、2 つのキュービットの間の関係を作ります。</p>
-    </div>
+  <h3>制御キュービットが重ね合わせだと何が起きるのか？</h3>
+
+  <p>
+    1つ目のキュービットにHゲートを適用すると、1つ目のキュービットの振幅が測定値0と1の側に分かれます。<br>
+    その状態でCNOTゲートを適用すると、制御キュービットが0の枝ではターゲットキュービットはそのままで、制御キュービットが1の枝ではターゲットキュービットが反転します。<br>
+    その結果、2つのキュービットは <code>|00⟩</code> と <code>|11⟩</code> という2つの可能性として一緒に結びついた状態になります。
+  </p>
+
+  <div class="math mono">|00⟩ → H(q[0]) → (|00⟩ + |10⟩) / √2 → CNOT(q[0], q[1]) → (|00⟩ + |11⟩) / √2</div>
+
+  <div class="call why">
+    <span class="h">この状態が、もつれを理解する出発点です</span>
+    最後の状態を測定すると、2つのキュービットがそれぞれ別々にランダムに出るようには見えません。<br>
+    測定結果は <code>00</code> か <code>11</code> のどちらかしか出ません。<br>
+    1つ目のキュービットと2つ目のキュービットの測定結果が、互いにかみ合っているからです。
   </div>
-  <nav class="page-nav" aria-label="章の移動">
-    <a href="chapter-10.html"><span class="k">前へ</span><span class="t">第10章 CNOTゲートは2つのキュービットをどうつなぐのか？</span></a>
+
+  <div class="practice">
+    <span class="practice-label">Qoraで実習してみよう</span>
+    <h3>CNOTゲートで2つのキュービットをつないでみよう</h3>
+    <pre><code>operation Main() {
+    // キュービットを2つ準備
+    // 準備直後の q[0]q[1] は |00⟩ 状態
+    use q = Qubit[2];
+
+    // 1つ目のキュービットにHゲートを適用
+    // q[0] の振幅が測定値0と1に分かれる
+    H(q[0]);
+
+    // CNOTゲートを適用
+    // q[0] が制御キュービット、q[1] がターゲットキュービット
+    CNOT(q[0], q[1]);
+
+    // 理想的な実行環境: 00 または 11
+    bit first = M(q[0]);
+    bit second = M(q[1]);
+}</code></pre>
+  </div>
+    <nav class="page-nav" aria-label="章の移動">
+    <a href="chapter-10.html"><span class="k">前へ</span><span class="t">第10章. Zゲートは何の符号を変えるのか？</span></a>
     <a class="home" href="index.html"><span class="k">概要</span><span class="t">全体の目次に戻る</span></a>
-    <span class="disabled"><span class="k">次へ</span><span class="t">これが最後のページです</span></span>
+    <a href="chapter-12.html"><span class="k">次へ</span><span class="t">第12章. 小さな回路をひとつ最後まで読んでみましょう</span></a>
   </nav>
     <footer>
       <p>Qora — 自分の手で作る量子トイ言語</p>

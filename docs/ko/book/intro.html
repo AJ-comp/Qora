@@ -523,22 +523,23 @@
 </header>
 
 <div class="book-shell">
-  <aside class="side-nav" aria-label="책 차례">
+    <aside class="side-nav" aria-label="책 차례">
     <strong>Qora로 배우는 양자 게이트</strong>
       <a href="index.html">개요</a>
       <a class="current" href="intro.html">들어가며. 왜 Qora로 양자 게이트를 배울까?</a>
       <a href="chapter-01.html">1장. 큐비트 상태에는 무엇이 들어 있을까?</a>
       <a href="chapter-02.html">2장. 진폭과 확률은 어떻게 연결될까?</a>
-      <a href="chapter-03.html">3장. 중첩은 그냥 &quot;모르는 상태&quot;일까?</a>
-      <a href="chapter-04.html">4장. 간섭은 언제 생길까?</a>
-      <a href="chapter-05.html">5장. 양자 게이트는 왜 되돌릴 수 있어야 할까?</a>
-      <a href="chapter-06.html">6장. Qora 코드는 어떻게 읽을까?</a>
+      <a href="chapter-03.html">3장. 중첩은 무엇이고 간섭은 무엇일까?</a>
+      <a href="chapter-04.html">4장. 중첩은 그냥 &quot;모르는 상태&quot;일까?</a>
+      <a href="chapter-05.html">5장. 간섭은 언제 생길까?</a>
+      <a href="chapter-06.html">6장. 양자 게이트는 왜 되돌릴 수 있어야 할까?</a>
+      <a href="chapter-07.html">7장. Qora 코드는 어떻게 읽을까?</a>
       <a href="summary.html">정리. 1부에서 배운 것을 정리해보자</a>
-      <a href="chapter-07.html">7장. X 게이트는 무엇을 뒤집을까?</a>
-      <a href="chapter-08.html">8장. H 게이트는 진폭을 어떻게 나눌까?</a>
-      <a href="chapter-09.html">9장. Z 게이트는 무엇의 부호를 바꿀까?</a>
-      <a href="chapter-10.html">10장. CNOT 게이트는 두 큐비트를 어떻게 연결할까?</a>
-      <a href="chapter-11.html">11장. 작은 회로 하나를 끝까지 읽어보자</a>
+      <a href="chapter-08.html">8장. X 게이트는 무엇을 뒤집을까?</a>
+      <a href="chapter-09.html">9장. H 게이트는 진폭을 어떻게 나눌까?</a>
+      <a href="chapter-10.html">10장. Z 게이트는 무엇의 부호를 바꿀까?</a>
+      <a href="chapter-11.html">11장. CNOT 게이트는 두 큐비트를 어떻게 연결할까?</a>
+      <a href="chapter-12.html">12장. 작은 회로 하나를 끝까지 읽어보자</a>
     <div class="group">
       <a href="../index.html">H 게이트 단독 문서</a>
     </div>
@@ -549,6 +550,7 @@
 
   <p>
     양자컴퓨팅을 처음 배우면 큐비트, 중첩, 진폭, 위상, 간섭, 얽힘, 측정 같은 말이 한꺼번에 나와요.<br>
+    이런 단어가 한 번에 보이면 어렵게 느껴지는 것이 자연스러워요. 지금 당장 전부 이해하려고 애쓰지 않아도 돼요.<br>
     이 단어들은 따로 보면 그럴듯하지만, 회로 한 줄을 실제로 읽으려고 하면 금방 흐려져요.<br>
     그래서 이 책에서는 말뜻을 먼저 외우기보다, 작은 회로 하나가 상태 벡터를 어떻게 바꾸는지부터 차분히 따라가볼 거예요.
   </p>
@@ -566,7 +568,9 @@
 
   <div class="call">
     <span class="h">이 책에서 쓰는 설명 순서</span>
-    <p>먼저 큐비트를 <strong>상태 벡터</strong>로 보고, 그 상태 벡터의 좌표를 <strong>진폭</strong>이라고 부를게요. 그 다음 진폭의 절댓값 제곱이 측정 확률이 된다는 Born 규칙을 확인하고, 게이트를 상태 벡터에 곱하는 유니터리 행렬로 읽어볼게요.</p>
+    <p>처음부터 어려운 이름을 외우지는 않을 거예요.<br>
+    먼저 큐비트 하나를 준비하고, 게이트 하나를 적용하고, 마지막에 측정하면 무엇이 달라지는지 볼 거예요.<br>
+    그 흐름이 익숙해진 뒤에, 우리가 본 내용을 상태 벡터, 진폭, Born 규칙, 유니터리 변환 같은 정식 용어로 정리할 거예요.</p>
   </div>
 
   <p>
@@ -611,8 +615,8 @@
   <p>
     자, 이제 각 줄이 큐비트 상태와 진폭을 어떻게 바꾸는지 차례대로 읽어봐요.
   </p>
-  <nav class="page-nav" aria-label="장 이동">
-    <a href="index.html"><span class="k">이전</span><span class="t">개요. Qora로 배우는 양자 게이트</span></a>
+    <nav class="page-nav" aria-label="장 이동">
+    <a href="index.html"><span class="k">이전</span><span class="t">개요</span></a>
     <a class="home" href="index.html"><span class="k">개요</span><span class="t">전체 차례로 돌아가기</span></a>
     <a href="chapter-01.html"><span class="k">다음</span><span class="t">1장. 큐비트 상태에는 무엇이 들어 있을까?</span></a>
   </nav>

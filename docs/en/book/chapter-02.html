@@ -247,6 +247,14 @@
   .math-line + .math-line {
     margin-top: 4px;
   }
+  .amp-change {
+    color: var(--plus);
+    font-weight: 900;
+  }
+  .amp-zero {
+    color: var(--minus);
+    font-weight: 900;
+  }
   .compare-grid,
   .summary-grid {
     display: grid;
@@ -523,24 +531,25 @@
 </header>
 
 <div class="book-shell">
-  <aside class="side-nav" aria-label="Book contents">
+    <aside class="side-nav" aria-label="Book contents">
     <strong>Quantum Gates with Qora</strong>
       <a href="index.html">Overview</a>
-      <a href="intro.html">Introduction. Why learn quantum gates with Qora?</a>
-      <a href="chapter-01.html">Chapter 1. What is inside a qubit state?</a>
-      <a class="current" href="chapter-02.html">Chapter 2. How are amplitudes connected to probabilities?</a>
-      <a href="chapter-03.html">Chapter 3. Is superposition just an &quot;unknown state&quot;?</a>
-      <a href="chapter-04.html">Chapter 4. When does interference happen?</a>
-      <a href="chapter-05.html">Chapter 5. Why must quantum gates be reversible?</a>
-      <a href="chapter-06.html">Chapter 6. How do we read Qora code?</a>
-      <a href="summary.html">Recap. Let's review what we learned in Part 1</a>
-      <a href="chapter-07.html">Chapter 7. What does the X gate flip?</a>
-      <a href="chapter-08.html">Chapter 8. How does the H gate split amplitudes?</a>
-      <a href="chapter-09.html">Chapter 9. What does the Z gate change the sign of?</a>
-      <a href="chapter-10.html">Chapter 10. How does the CNOT gate connect two qubits?</a>
-      <a href="chapter-11.html">Chapter 11. Let's read one small circuit from start to finish</a>
+      <a href="intro.html">Introduction. Why Learn Quantum Gates with Qora?</a>
+      <a href="chapter-01.html">Chapter 1. What Is Inside a Qubit State?</a>
+      <a class="current" href="chapter-02.html">Chapter 2. How Are Amplitudes Connected to Probabilities?</a>
+      <a href="chapter-03.html">Chapter 3. What Are Superposition and Interference?</a>
+      <a href="chapter-04.html">Chapter 4. Is Superposition Just a &quot;State We Don&#39;t Know&quot;?</a>
+      <a href="chapter-05.html">Chapter 5. When Does Interference Appear?</a>
+      <a href="chapter-06.html">Chapter 6. Why Must Quantum Gates Be Reversible?</a>
+      <a href="chapter-07.html">Chapter 7. How Do We Read Qora Code?</a>
+      <a href="summary.html">Wrap-up. Let&#39;s Review What We Learned in Part 1</a>
+      <a href="chapter-08.html">Chapter 8. What Does the X Gate Flip?</a>
+      <a href="chapter-09.html">Chapter 9. How Does the H Gate Split Amplitudes?</a>
+      <a href="chapter-10.html">Chapter 10. What Does the Z Gate Change the Sign Of?</a>
+      <a href="chapter-11.html">Chapter 11. How Does the CNOT Gate Connect Two Qubits?</a>
+      <a href="chapter-12.html">Chapter 12. Let&#39;s Read One Small Circuit from Start to Finish</a>
     <div class="group">
-      <a href="../index.html">Standalone H gate document</a>
+      <a href="../index.html">Standalone H Gate Document</a>
     </div>
   </aside>
   <main class="article">
@@ -549,8 +558,9 @@
 
   <p>
     We said that a qubit state is written as <code>|ψ⟩ = α|0⟩ + β|1⟩</code>.<br>
-    Here, <span class="mono">α</span> and <span class="mono">β</span> are not probabilities — they are <strong>probability amplitudes</strong>.<br>
-    The measurement probability is not the amplitude itself; you get it by squaring the absolute value of the amplitude.
+    Here, <span class="mono">α</span> and <span class="mono">β</span> are not probabilities — they are <strong>amplitudes</strong>.<br>
+    The precise term is <strong>probability amplitude</strong>.<br>
+    And you get the measurement probability by squaring the absolute value of the amplitude.
   </p>
 
   <div class="rule">Probability of measurement outcome 0 = |α|², probability of measurement outcome 1 = |β|²</div>
@@ -617,12 +627,41 @@
 
   <p>
     The important point here is that the H gate does not directly split the probability in half.<br>
-    What the gate changes first is the amplitudes of the state vector, and when you measure, the squared absolute values of those amplitudes appear as probabilities.
+    What the gate changes first is the amplitudes of the state, and when you measure, the squared absolute values of those amplitudes appear as probabilities.
   </p>
-  <nav class="page-nav" aria-label="Chapter navigation">
-    <a href="chapter-01.html"><span class="k">Previous</span><span class="t">Chapter 1. What is inside a qubit state?</span></a>
+
+  <div class="compare-grid">
+    <div class="card accent">
+      <span class="tag-small">Before</span>
+      <h4>State before applying the H gate</h4>
+      <div class="math mono">|0⟩ = <span class="amp-change">1</span>|0⟩ + <span class="amp-zero">0</span>|1⟩</div>
+      <h4>Probability calculation before applying H</h4>
+      <div class="math mono">
+        <div class="math-line">Probability of measurement outcome 0 = |<span class="amp-change">1</span>|² = 1 = 100%</div>
+        <div class="math-line">Probability of measurement outcome 1 = |<span class="amp-zero">0</span>|² = 0 = 0%</div>
+      </div>
+    </div>
+
+    <div class="card plus">
+      <span class="tag-small">After</span>
+      <h4>State after applying the H gate</h4>
+      <div class="math mono">H|0⟩ = <span class="amp-change">(1/√2)</span>|0⟩ + <span class="amp-change">(1/√2)</span>|1⟩</div>
+      <h4>Probability calculation after applying H</h4>
+      <div class="math mono">
+        <div class="math-line">Probability of measurement outcome 0 = |<span class="amp-change">1/√2</span>|² = 1/2 = 50%</div>
+        <div class="math-line">Probability of measurement outcome 1 = |<span class="amp-change">1/√2</span>|² = 1/2 = 50%</div>
+      </div>
+    </div>
+  </div>
+
+  <p>
+    The value created by the H gate is not the probability <span class="mono">1/2</span>, but the amplitude <span class="mono">1/√2</span>.<br>
+    Then, when we calculate the measurement probability, we square the absolute value of that amplitude.
+  </p>
+    <nav class="page-nav" aria-label="Chapter navigation">
+    <a href="chapter-01.html"><span class="k">Previous</span><span class="t">Chapter 1. What Is Inside a Qubit State?</span></a>
     <a class="home" href="index.html"><span class="k">Overview</span><span class="t">Back to the full table of contents</span></a>
-    <a href="chapter-03.html"><span class="k">Next</span><span class="t">Chapter 3. Is superposition just an &quot;unknown state&quot;?</span></a>
+    <a href="chapter-03.html"><span class="k">Next</span><span class="t">Chapter 3. What Are Superposition and Interference?</span></a>
   </nav>
     <footer>
       <p>Qora — a quantum toy language built from scratch</p>

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>8장. H 게이트는 진폭을 어떻게 나눌까? — Qora</title>
+<title>8장. X 게이트는 무엇을 뒤집을까? — Qora</title>
 <style>
 :root {
     --bg: #ffffff;
@@ -153,6 +153,24 @@
     margin: 0 0 8px;
     padding: 0;
     border: 0;
+  }
+  .concept-figure {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    margin: 22px 0 30px;
+    padding: 12px;
+  }
+  .concept-figure img {
+    display: block;
+    width: 100%;
+    height: auto;
+    border-radius: 8px;
+  }
+  .concept-figure figcaption {
+    color: var(--muted);
+    font-size: .92rem;
+    margin: 10px 4px 2px;
   }
   .panel {
     background: var(--panel);
@@ -518,181 +536,101 @@
 
 <header class="hero">
   <div class="tag">Qora · 양자 게이트 문서</div>
-  <h1>8장. H 게이트는 진폭을 어떻게 나눌까?</h1>
-  <p>진폭을 두 측정 결과값 쪽으로 나눠 보내는 규칙을 따라가보자</p>
+  <h1>8장. X 게이트는 무엇을 뒤집을까?</h1>
+  <p>측정 결과값 0과 1의 진폭 위치가 어떻게 바뀌는지 보자</p>
 </header>
 
 <div class="book-shell">
-  <aside class="side-nav" aria-label="책 차례">
+    <aside class="side-nav" aria-label="책 차례">
     <strong>Qora로 배우는 양자 게이트</strong>
       <a href="index.html">개요</a>
       <a href="intro.html">들어가며. 왜 Qora로 양자 게이트를 배울까?</a>
       <a href="chapter-01.html">1장. 큐비트 상태에는 무엇이 들어 있을까?</a>
       <a href="chapter-02.html">2장. 진폭과 확률은 어떻게 연결될까?</a>
-      <a href="chapter-03.html">3장. 중첩은 그냥 &quot;모르는 상태&quot;일까?</a>
-      <a href="chapter-04.html">4장. 간섭은 언제 생길까?</a>
-      <a href="chapter-05.html">5장. 양자 게이트는 왜 되돌릴 수 있어야 할까?</a>
-      <a href="chapter-06.html">6장. Qora 코드는 어떻게 읽을까?</a>
+      <a href="chapter-03.html">3장. 중첩은 무엇이고 간섭은 무엇일까?</a>
+      <a href="chapter-04.html">4장. 중첩은 그냥 &quot;모르는 상태&quot;일까?</a>
+      <a href="chapter-05.html">5장. 간섭은 언제 생길까?</a>
+      <a href="chapter-06.html">6장. 양자 게이트는 왜 되돌릴 수 있어야 할까?</a>
+      <a href="chapter-07.html">7장. Qora 코드는 어떻게 읽을까?</a>
       <a href="summary.html">정리. 1부에서 배운 것을 정리해보자</a>
-      <a href="chapter-07.html">7장. X 게이트는 무엇을 뒤집을까?</a>
-      <a class="current" href="chapter-08.html">8장. H 게이트는 진폭을 어떻게 나눌까?</a>
-      <a href="chapter-09.html">9장. Z 게이트는 무엇의 부호를 바꿀까?</a>
-      <a href="chapter-10.html">10장. CNOT 게이트는 두 큐비트를 어떻게 연결할까?</a>
-      <a href="chapter-11.html">11장. 작은 회로 하나를 끝까지 읽어보자</a>
+      <a class="current" href="chapter-08.html">8장. X 게이트는 무엇을 뒤집을까?</a>
+      <a href="chapter-09.html">9장. H 게이트는 진폭을 어떻게 나눌까?</a>
+      <a href="chapter-10.html">10장. Z 게이트는 무엇의 부호를 바꿀까?</a>
+      <a href="chapter-11.html">11장. CNOT 게이트는 두 큐비트를 어떻게 연결할까?</a>
+      <a href="chapter-12.html">12장. 작은 회로 하나를 끝까지 읽어보자</a>
     <div class="group">
       <a href="../index.html">H 게이트 단독 문서</a>
     </div>
   </aside>
   <main class="article">
     <div class="breadcrumb">Qora로 배우는 양자 게이트 / 8장</div>
-<h2 id="h-gate">8장. H 게이트는 진폭을 어떻게 나눌까?</h2>
-
+<section id="part2" class="part">
+    <span class="label">2부</span>
+    <h2>기본 양자 게이트를 하나씩 읽어보자</h2>
+    <p>
+      1부에서는 큐비트 상태, 진폭, 확률, 중첩, 간섭, 되돌릴 수 있는 변환, Qora 코드 읽는 법을 준비했어요.<br>
+      이제부터는 그 준비를 가지고 실제 게이트를 하나씩 읽어볼 거예요.<br>
+      X 게이트는 진폭의 자리를 바꾸고, H 게이트는 진폭을 나눠 보내며, Z 게이트는 부호를 바꾸고, CNOT 게이트는 두 큐비트 사이의 관계를 만들어요.
+    </p>
+  </section>
+  <figure class="concept-figure">
+    <img src="../../images/part2-gates-overview.png" alt="X, H, Z, CNOT 게이트가 각각 진폭 교환, 진폭 분기, 부호 변화, 조건부 뒤집기를 나타내는 개요 그림">
+    <figcaption>2부에서는 X, H, Z, CNOT 게이트가 진폭의 위치, 크기 분배, 부호, 두 큐비트의 관계를 어떻게 바꾸는지 하나씩 읽어볼 거예요.</figcaption>
+  </figure>
+  <h2 id="x-gate">8장. X 게이트는 무엇을 뒤집을까?</h2>
   <p>
-    H 게이트는 한쪽 기저 상태에 모여 있던 진폭을 두 기저 상태 쪽으로 나눠 보내는 게이트예요.<br>
-    정석적으로는 한 큐비트 상태 벡터에 아래 행렬을 곱하는 유니터리 변환으로 정의해요.
+    X 게이트는 한 큐비트에서 가장 먼저 만나기 좋은 게이트예요.<br>
+    고전적인 NOT 연산처럼 느껴지기 때문이에요.<br>
+    다만 양자 회로에서는 측정 결과값 자체를 뒤집는다고 말하기보다, 측정 결과값 0에 있던 진폭과 측정 결과값 1에 있던 진폭의 위치를 서로 바꾼다고 읽는 편이 더 정확해요.
   </p>
 
-  <div class="math mono">
-    <div class="math-line">H = 1/√2 · [[1, 1], [1, -1]]</div>
-  </div>
-
-  <p>
-    이 행렬은 <code>|0⟩</code>와 <code>|1⟩</code>를 다음 두 상태로 보내요.<br>
-    이 두 식이 H 게이트를 이해하는 출발점이에요.
-  </p>
-
-  <div class="math mono">
-    <div class="math-line">H|0⟩ = (|0⟩ + |1⟩) / √2</div>
-    <div class="math-line">H|1⟩ = (|0⟩ - |1⟩) / √2</div>
-  </div>
-
-  <p>
-    첫 번째 식만 보면 H 게이트가 단순히 “0을 반반 확률로 만든다”처럼 보일 수 있어요.<br>
-    하지만 핵심은 확률이 아니라 진폭이에요. H 게이트는 입력 진폭을 두 출력 기저 상태로 나눠 보내고, 같은 출력 기저 상태로 도착한 진폭 기여를 더해요.
-  </p>
+  <div class="rule">X 게이트는 측정 결과값 0의 진폭과 측정 결과값 1의 진폭을 서로 바꿔요.</div>
 
   <div class="panel">
     <table>
-      <tr><th>입력 기저 상태</th><th>H 게이트 적용 후 상태</th><th>바로 측정하면</th></tr>
-      <tr><td><code>|0⟩</code></td><td><code>(|0⟩ + |1⟩) / √2</code></td><td>0과 1이 각각 50%</td></tr>
-      <tr><td><code>|1⟩</code></td><td><code>(|0⟩ - |1⟩) / √2</code></td><td>0과 1이 각각 50%</td></tr>
+      <tr><th>입력 상태</th><th>X 게이트 적용 후 상태</th><th>측정하면 어떻게 보일까?</th></tr>
+      <tr><td><code>|0⟩</code></td><td><code>|1⟩</code></td><td>측정 결과값 1이 나와요</td></tr>
+      <tr><td><code>|1⟩</code></td><td><code>|0⟩</code></td><td>측정 결과값 0이 나와요</td></tr>
     </table>
   </div>
 
-  <h3>H 게이트의 정확한 진폭 변환 규칙</h3>
-
   <p>
-    적용 전 상태를 <code>|ψ⟩ = a₀|0⟩ + a₁|1⟩</code>라고 해볼게요.<br>
-    H 게이트는 <code>a₀</code>만 따로 보거나 <code>a₁</code>만 따로 보지 않아요.<br>
-    두 입력 진폭이 모두 적용 후의 <code>|0⟩</code> 성분과 <code>|1⟩</code> 성분에 기여하고, 같은 성분으로 도착한 기여가 더해져요.
+    일반적인 한 큐비트 상태를 측정 결과값 0의 진폭 <span class="mono">a₀</span>와 측정 결과값 1의 진폭 <span class="mono">a₁</span>로 쓰면, X 게이트는 두 값을 서로 바꿔요.<br>
+    그래서 X 게이트 적용 전에는 측정 결과값 0 쪽에 있던 진폭이 적용 후에는 측정 결과값 1 쪽으로 가고, 적용 전에는 측정 결과값 1 쪽에 있던 진폭이 적용 후에는 측정 결과값 0 쪽으로 와요.
   </p>
 
   <div class="math mono">
-    <div class="math-line">H(a₀|0⟩ + a₁|1⟩) = ((a₀ + a₁)|0⟩ + (a₀ - a₁)|1⟩) / √2</div>
-  </div>
-
-  <div class="panel">
-    <table>
-      <tr><th>출발하는 입력 진폭</th><th><code>|0⟩</code>으로 가는 기여</th><th><code>|1⟩</code>으로 가는 기여</th></tr>
-      <tr><td>적용 전 <code>|0⟩</code>의 진폭 <span class="mono">a₀</span></td><td><span class="mono">+ a₀ × 1/√2</span></td><td><span class="mono">+ a₀ × 1/√2</span></td></tr>
-      <tr><td>적용 전 <code>|1⟩</code>의 진폭 <span class="mono">a₁</span></td><td><span class="mono">+ a₁ × 1/√2</span></td><td><span class="mono">- a₁ × 1/√2</span></td></tr>
-    </table>
+    <div class="math-line">X 게이트 적용 전: 측정 결과값 0의 진폭 = a₀, 측정 결과값 1의 진폭 = a₁</div>
+    <div class="math-line">X 게이트 적용 후: 측정 결과값 0의 진폭 = a₁, 측정 결과값 1의 진폭 = a₀</div>
   </div>
 
   <div class="call warn">
-    <span class="h">마이너스 부호가 붙는 위치</span>
-    네 가지 입력-출력 조합 중 <strong>적용 전 <code>|1⟩</code>의 진폭이 적용 후 <code>|1⟩</code> 성분으로 가는 기여</strong>에만 마이너스 부호가 붙어요.<br>
-    갑자기 “1→1 항”이라고 말하면 모호하므로, 이 책에서는 “적용 전 <code>|1⟩</code>에서 와서 적용 후 <code>|1⟩</code>로 가는 진폭 기여”라고 풀어서 부를게요.
+    <span class="h">X 게이트는 측정한 뒤의 숫자를 바꾸는 게 아니에요</span>
+    X 게이트는 측정 전에 큐비트 상태의 진폭 배치를 바꿔요.<br>
+    그 다음에 측정하면 바뀐 진폭 배치에 따라 측정 결과가 나와요.<br>
+    그래서 X 게이트를 “결과를 뒤집는 명령”이 아니라 “측정 결과값 0과 1에 붙은 진폭의 자리를 바꾸는 게이트”로 읽어야 해요.
   </div>
-
-  <h3><code>|0⟩</code> 상태에 H 게이트를 적용해보자</h3>
-
-  <p>
-    <code>|0⟩</code> 상태는 <span class="mono">a₀ = 1</span>, <span class="mono">a₁ = 0</span>인 상태예요.<br>
-    이 값을 H 게이트 변환 규칙에 넣으면 적용 후 <code>|0⟩</code> 성분과 <code>|1⟩</code> 성분이 둘 다 <span class="mono">1/√2</span>가 돼요.
-  </p>
-
-  <div class="math mono">
-    <div class="math-line">적용 후 |0⟩의 진폭 = 1 × 1/√2 + 0 × 1/√2 = 1/√2</div>
-    <div class="math-line">적용 후 |1⟩의 진폭 = 1 × 1/√2 + 0 × (-1/√2) = 1/√2</div>
-  </div>
-
-  <p>
-    그래서 <code>H|0⟩</code>은 <code>(|0⟩ + |1⟩) / √2</code>가 되고, 바로 측정하면 0과 1이 각각 50% 확률로 나와요.<br>
-    여기까지가 흔히 “H 게이트가 중첩을 만든다”라고 말하는 부분이에요.
-  </p>
-
-  <h3>왜 마이너스 부호가 필요한가</h3>
-
-  <p>
-    H 게이트는 양자 게이트이므로 유니터리여야 해요.<br>
-    따라서 <code>|0⟩</code>과 <code>|1⟩</code>처럼 서로 직교하는 입력 상태는 H 게이트를 지나도 서로 직교하는 출력 상태로 가야 해요.
-  </p>
-
-  <div class="compare-grid">
-    <div class="card warn">
-      <span class="tag-small">마이너스 부호가 없다면</span>
-      <div class="math mono">
-        <div class="math-line">H|0⟩ = (|0⟩ + |1⟩) / √2</div>
-        <div class="math-line">H|1⟩ = (|0⟩ + |1⟩) / √2</div>
-      </div>
-      <p>서로 다른 두 입력 상태가 같은 출력 상태로 합쳐져요. 그러면 되돌릴 수 없고, 유니터리 게이트가 아니에요.</p>
-    </div>
-
-    <div class="card good">
-      <span class="tag-small">마이너스 부호가 있으면</span>
-      <div class="math mono">
-        <div class="math-line">H|0⟩ = (|0⟩ + |1⟩) / √2</div>
-        <div class="math-line">H|1⟩ = (|0⟩ - |1⟩) / √2</div>
-      </div>
-      <p>두 출력 상태가 서로 직교해요. 그래서 입력 정보를 잃지 않고, 다시 되돌릴 수 있어요.</p>
-    </div>
-  </div>
-
-  <h3>H 게이트를 두 번 적용하면 왜 다시 돌아올까?</h3>
-
-  <p>
-    <code>|0⟩</code> 상태에서 시작하면 첫 번째 H 게이트 뒤의 상태는 <code>(|0⟩ + |1⟩) / √2</code>예요.<br>
-    따라서 두 번째 H 게이트를 적용하기 직전에는 <span class="mono">a₀ = 1/√2</span>, <span class="mono">a₁ = 1/√2</span>예요.<br>
-    이 값을 같은 변환 규칙에 다시 넣으면 끝이에요.
-  </p>
-
-  <div class="math mono">
-    <div class="math-line">두 번째 H 뒤 |0⟩의 진폭 = (1/√2) × 1/√2 + (1/√2) × 1/√2 = 1/2 + 1/2 = 1</div>
-    <div class="math-line">두 번째 H 뒤 |1⟩의 진폭 = (1/√2) × 1/√2 + (1/√2) × (-1/√2) = 1/2 - 1/2 = 0</div>
-  </div>
-
-  <div class="rule mono">H 게이트(H 게이트(|0⟩)) = |0⟩</div>
-
-  <p>
-    이 계산에서 <code>|0⟩</code> 성분으로 가는 두 진폭 기여는 보강되고, <code>|1⟩</code> 성분으로 가는 두 진폭 기여는 상쇄돼요.<br>
-    그래서 H 게이트를 두 번 적용하면 “랜덤이 두 번 일어나서 다시 0이 된다”가 아니라, 진폭의 보강과 상쇄 때문에 정확히 처음 상태로 돌아와요.
-  </p>
 
   <div class="practice">
     <span class="practice-label">Qora로 실습해보기</span>
-    <h3>H 게이트를 두 번 적용해보자</h3>
+    <h3>X 게이트를 한 번 적용해보자</h3>
     <pre><code>operation Main() {
     // 큐비트 하나 준비
     // 준비 직후 q[0]은 |0⟩ 상태
     use q = Qubit[1];
 
-    // 첫 번째 H 게이트 적용
-    // 진폭이 측정 결과값 0과 1로 나뉨
-    H(q[0]);
+    // X 게이트 적용
+    // |0⟩ 상태가 |1⟩ 상태로 바뀜
+    X(q[0]);
 
-    // 두 번째 H 게이트 적용
-    // 보강과 상쇄가 일어나 다시 |0⟩ 상태가 됨
-    H(q[0]);
-
-    // 이상적인 실행 환경: 측정 결과값 0
+    // 이상적인 실행 환경: 측정 결과값 1
     bit result = M(q[0]);
 }</code></pre>
   </div>
-  <nav class="page-nav" aria-label="장 이동">
-    <a href="chapter-07.html"><span class="k">이전</span><span class="t">7장. X 게이트는 무엇을 뒤집을까?</span></a>
+    <nav class="page-nav" aria-label="장 이동">
+    <a href="summary.html"><span class="k">이전</span><span class="t">정리. 1부에서 배운 것을 정리해보자</span></a>
     <a class="home" href="index.html"><span class="k">개요</span><span class="t">전체 차례로 돌아가기</span></a>
-    <a href="chapter-09.html"><span class="k">다음</span><span class="t">9장. Z 게이트는 무엇의 부호를 바꿀까?</span></a>
+    <a href="chapter-09.html"><span class="k">다음</span><span class="t">9장. H 게이트는 진폭을 어떻게 나눌까?</span></a>
   </nav>
     <footer>
       <p>Qora — 직접 만드는 양자 토이 언어</p>

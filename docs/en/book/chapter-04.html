@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Chapter 4. When Does Interference Appear? — Qora</title>
+<title>Chapter 4. Is Superposition Just a &quot;State We Don&#39;t Know&quot;? — Qora</title>
 <style>
 :root {
     --bg: #ffffff;
@@ -518,126 +518,110 @@
 
 <header class="hero">
   <div class="tag">Qora · Quantum Gate Documentation</div>
-  <h1>Chapter 4. When Does Interference Appear?</h1>
-  <p>Let's follow the moment when amplitude contributions arriving at the same measurement outcome are added together</p>
+  <h1>Chapter 4. Is Superposition Just a &quot;State We Don&#39;t Know&quot;?</h1>
+  <p>Let's compare how superposition differs from classical not-knowing</p>
 </header>
 
 <div class="book-shell">
-  <aside class="side-nav" aria-label="Book contents">
+    <aside class="side-nav" aria-label="Book contents">
     <strong>Quantum Gates with Qora</strong>
       <a href="index.html">Overview</a>
       <a href="intro.html">Introduction. Why Learn Quantum Gates with Qora?</a>
       <a href="chapter-01.html">Chapter 1. What Is Inside a Qubit State?</a>
-      <a href="chapter-02.html">Chapter 2. How Are Amplitudes and Probabilities Connected?</a>
-      <a href="chapter-03.html">Chapter 3. Is Superposition Just a &quot;State We Don't Know&quot;?</a>
-      <a class="current" href="chapter-04.html">Chapter 4. When Does Interference Appear?</a>
-      <a href="chapter-05.html">Chapter 5. Why Must Quantum Gates Be Reversible?</a>
-      <a href="chapter-06.html">Chapter 6. How Do We Read Qora Code?</a>
-      <a href="summary.html">Wrap-up. Let's Review What We Learned in Part 1</a>
-      <a href="chapter-07.html">Chapter 7. What Does the X Gate Flip?</a>
-      <a href="chapter-08.html">Chapter 8. How Does the H Gate Split Amplitudes?</a>
-      <a href="chapter-09.html">Chapter 9. What Does the Z Gate Change the Sign Of?</a>
-      <a href="chapter-10.html">Chapter 10. How Does the CNOT Gate Connect Two Qubits?</a>
-      <a href="chapter-11.html">Chapter 11. Let's Read One Small Circuit from Start to Finish</a>
+      <a href="chapter-02.html">Chapter 2. How Are Amplitudes Connected to Probabilities?</a>
+      <a href="chapter-03.html">Chapter 3. What Are Superposition and Interference?</a>
+      <a class="current" href="chapter-04.html">Chapter 4. Is Superposition Just a &quot;State We Don&#39;t Know&quot;?</a>
+      <a href="chapter-05.html">Chapter 5. When Does Interference Appear?</a>
+      <a href="chapter-06.html">Chapter 6. Why Must Quantum Gates Be Reversible?</a>
+      <a href="chapter-07.html">Chapter 7. How Do We Read Qora Code?</a>
+      <a href="summary.html">Wrap-up. Let&#39;s Review What We Learned in Part 1</a>
+      <a href="chapter-08.html">Chapter 8. What Does the X Gate Flip?</a>
+      <a href="chapter-09.html">Chapter 9. How Does the H Gate Split Amplitudes?</a>
+      <a href="chapter-10.html">Chapter 10. What Does the Z Gate Change the Sign Of?</a>
+      <a href="chapter-11.html">Chapter 11. How Does the CNOT Gate Connect Two Qubits?</a>
+      <a href="chapter-12.html">Chapter 12. Let&#39;s Read One Small Circuit from Start to Finish</a>
     <div class="group">
       <a href="../index.html">Standalone H Gate Document</a>
     </div>
   </aside>
   <main class="article">
     <div class="breadcrumb">Quantum Gates with Qora / Chapter 4</div>
-  <h2 id="interference">Chapter 4. When Does Interference Appear?</h2>
+  <h2 id="superposition">Chapter 4. Is Superposition Just a &quot;State We Don&#39;t Know&quot;?</h2>
 
   <p>
-    Interference is one of the most important concepts in quantum computing.<br>
-    Stated precisely, interference appears when multiple amplitude contributions to the same basis state are added together and then the Born rule is applied.<br>
-    In other words, we do not add probabilities first — we <strong>add the amplitudes first and square them later</strong>.
+    Superposition is one of the most misunderstood words when learning quantum computing.<br>
+    In quantum mechanics, superposition does not mean “we do not know the result yet.”<br>
+    More precisely, once we choose a set of basis states, if a quantum state can be written as a linear combination with nonzero amplitudes on two or more of those basis states, we call it a superposition with respect to that basis.
   </p>
 
-  <div class="rule">Amplitude contributions arriving at the same basis state are added together first.</div>
+  <p>
+    That sentence can feel a little dense, so in this example we will use <code>|0⟩</code> and <code>|1⟩</code> as the basis states.<br>
+    The state below has amplitude on the <code>|0⟩</code> side and also amplitude on the <code>|1⟩</code> side.
+  </p>
+
+  <div class="math mono">(|0⟩ + |1⟩) / √2</div>
 
   <p>
-    A gate acts linearly on the state vector.<br>
-    So when the input state is a sum of several basis states, the gate transforms each basis component separately and then adds the results back together.<br>
-    In this process, amplitude contributions gathering at the same output basis state reinforce each other when they share the same sign and phase, and cancel each other when they have opposite signs or opposite phases.
+    This expression is not a different story from the general form <code>|ψ⟩ = α|0⟩ + β|1⟩</code> we saw in Chapter 1.<br>
+    Dividing the whole parenthesized expression by <span class="mono">√2</span> means multiplying each term inside the parentheses by <span class="mono">1/√2</span>.
   </p>
 
   <div class="math mono">
-    <div class="math-line">Input: α|0⟩ + β|1⟩</div>
-    <div class="math-line">After the gate: α·U|0⟩ + β·U|1⟩</div>
+    <div class="math-line">(|0⟩ + |1⟩) / √2</div>
+    <div class="math-line">= (1/√2)(|0⟩ + |1⟩)</div>
+    <div class="math-line">= (1/√2)|0⟩ + (1/√2)|1⟩</div>
   </div>
+
+  <p>
+    So, matched to the general form, this state has <span class="mono">α = 1/√2</span> and <span class="mono">β = 1/√2</span>.
+  </p>
+
+  <p>
+    In the state above, the amplitude along the <code>|0⟩</code> direction is <span class="mono">1/√2</span>, and the amplitude along the <code>|1⟩</code> direction is also <span class="mono">1/√2</span>.
+  </p>
+
+  <div class="call why">
+    In this way, both basis states <code>|0⟩</code> and <code>|1⟩</code> take part in forming one state vector, so this state is a superposition with respect to the computational basis.
+  </div>
+
+  <p>
+    If you toss a coin and cover it with your hand, the coin is already fixed as heads or tails — we simply don't know the result.<br>
+    But quantum superposition is not that kind of classical ignorance. Before measurement, the state vector itself holds both a <code>|0⟩</code> component and a <code>|1⟩</code> component.
+  </p>
+
+  <div class="call why">
+    <span class="h">Probabilities alone can't tell you the whole state</span>
+    A quantum state contains not only measurement probabilities but also the signs and phases of the amplitudes.<br>
+    This information may seem to vanish if you measure right away, but it creates interference as the state passes through other gates, so it affects the actual result of the computation.
+  </div>
+
+  <h3>They both look like the same 50% — are they really the same state?</h3>
 
   <div class="compare-grid">
     <div class="card plus">
-      <span class="tag-small">Constructive interference</span>
-      <h4>Amplitude contributions with the same sign: reinforcement</h4>
-      <div class="math mono">+1/2 + +1/2 = +1</div>
-      <p>The amplitude of measurement outcome 0 grows.</p>
+      <span class="tag-small">State A</span>
+      <h4>A state where the amplitude of measurement outcome 1 is positive</h4>
+      <div class="math mono">(|0⟩ + |1⟩) / √2</div>
+      <p>If you measure right away, measurement outcomes 0 and 1 each appear with 50% probability.</p>
     </div>
 
     <div class="card minus">
-      <span class="tag-small">Destructive interference</span>
-      <h4>Amplitude contributions with opposite signs: cancellation</h4>
-      <div class="math mono">+1/2 + -1/2 = 0</div>
-      <p>The amplitude of measurement outcome 1 vanishes.</p>
+      <span class="tag-small">State B</span>
+      <h4>A state where the amplitude of measurement outcome 1 is negative</h4>
+      <div class="math mono">(|0⟩ - |1⟩) / √2</div>
+      <p>If you measure right away, this state also gives measurement outcomes 0 and 1 with 50% probability each.</p>
     </div>
   </div>
 
-  <h3>What does interference look like when we apply the H gate twice?</h3>
-
   <p>
-    Applying the H gate once to the <code>|0⟩</code> state creates both a <code>|0⟩</code> component and a <code>|1⟩</code> component.<br>
-    Applying the H gate once more makes each of the two components send contributions toward <code>|0⟩</code> and <code>|1⟩</code> again, and the contributions arriving at the same basis state are added together.
+    Measured right away, the two states show the same probabilities, but they are not the same state.<br>
+    The sign of the amplitude of measurement outcome 1 differs, and this sign difference produces different results the moment one more gate is applied.<br>
+    Put more formally, the two states are different state vectors, and when they meet a transformation like the H gate again, they move in different directions.
   </p>
-
-  <div class="practice">
-    <span class="practice-label">Try It in Qora</span>
-    <h3>Let's apply the H gate twice</h3>
-    <pre><code>operation Main() {
-    // Prepare one qubit
-    // Right after preparation, q[0] is in the |0⟩ state
-    use q = Qubit[1];
-
-    // Apply the first H gate
-    // The amplitudes of measurement outcome 0 and measurement outcome 1 are both 1/√2
-    H(q[0]);
-
-    // Apply the second H gate
-    // The amplitude contributions to measurement outcome 0 reinforce
-    // The amplitude contributions to measurement outcome 1 cancel
-    H(q[0]);
-
-    // In an ideal execution environment: measurement outcome 0
-    bit result = M(q[0]);
-}</code></pre>
-  </div>
-
-  <p>After the first H gate, two amplitudes remain.</p>
-
-  <div class="math mono">
-    <div class="math-line">Amplitude of measurement outcome 0 = 1/√2</div>
-    <div class="math-line">Amplitude of measurement outcome 1 = 1/√2</div>
-  </div>
-
-  <p>
-    When we apply the second H gate, the amplitude contributions arriving at measurement outcome 0 are added like this.
-  </p>
-
-  <div class="math mono">+1/2 + +1/2 = +1</div>
-
-  <p>
-    The amplitude contributions arriving at measurement outcome 1 are computed the same way.
-  </p>
-
-  <div class="math mono">+1/2 + -1/2 = 0</div>
-
-  <p>
-    So the final state returns to the <code>|0⟩</code> state again.<br>
-    We revisit this calculation in more detail in Chapter 8, when we work through the H gate's transformation rules.
-  </p>
-  <nav class="page-nav" aria-label="Chapter navigation">
-    <a href="chapter-03.html"><span class="k">Previous</span><span class="t">Chapter 3. Is Superposition Just a &quot;State We Don't Know&quot;?</span></a>
+    <nav class="page-nav" aria-label="Chapter navigation">
+    <a href="chapter-03.html"><span class="k">Previous</span><span class="t">Chapter 3. What Are Superposition and Interference?</span></a>
     <a class="home" href="index.html"><span class="k">Overview</span><span class="t">Back to the full table of contents</span></a>
-    <a href="chapter-05.html"><span class="k">Next</span><span class="t">Chapter 5. Why Must Quantum Gates Be Reversible?</span></a>
+    <a href="chapter-05.html"><span class="k">Next</span><span class="t">Chapter 5. When Does Interference Appear?</span></a>
   </nav>
     <footer>
       <p>Qora — a quantum toy language you build yourself</p>

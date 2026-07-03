@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Chapter 5. Why Must Quantum Gates Be Reversible? — Qora</title>
+<title>Chapter 5. When Does Interference Appear? — Qora</title>
 <style>
 :root {
     --bg: #ffffff;
@@ -269,6 +269,24 @@
   .card.plus { border-top: 5px solid var(--plus); }
   .card.minus { border-top: 5px solid var(--minus); }
   .card.accent { border-top: 5px solid var(--accent); }
+  .concept-figure {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    margin: 24px 0 32px;
+    padding: 12px;
+  }
+  .concept-figure img {
+    display: block;
+    width: 100%;
+    height: auto;
+    border-radius: 8px;
+  }
+  .concept-figure figcaption {
+    color: var(--muted);
+    font-size: .92rem;
+    margin: 10px 4px 2px;
+  }
   .tag-small {
     display: inline-block;
     background: var(--panel);
@@ -518,98 +536,131 @@
 
 <header class="hero">
   <div class="tag">Qora · Quantum Gate Documentation</div>
-  <h1>Chapter 5. Why Must Quantum Gates Be Reversible?</h1>
-  <p>Let's see why it becomes a problem when different input states merge into the same output state</p>
+  <h1>Chapter 5. When Does Interference Appear?</h1>
+  <p>Let's follow the moment when amplitude contributions arriving at the same measurement outcome are added together</p>
 </header>
 
 <div class="book-shell">
-  <aside class="side-nav" aria-label="Book contents">
+    <aside class="side-nav" aria-label="Book contents">
     <strong>Quantum Gates with Qora</strong>
       <a href="index.html">Overview</a>
       <a href="intro.html">Introduction. Why Learn Quantum Gates with Qora?</a>
       <a href="chapter-01.html">Chapter 1. What Is Inside a Qubit State?</a>
-      <a href="chapter-02.html">Chapter 2. How Are Amplitudes and Probabilities Connected?</a>
-      <a href="chapter-03.html">Chapter 3. Is Superposition Just a &quot;State We Don't Know&quot;?</a>
-      <a href="chapter-04.html">Chapter 4. When Does Interference Appear?</a>
-      <a class="current" href="chapter-05.html">Chapter 5. Why Must Quantum Gates Be Reversible?</a>
-      <a href="chapter-06.html">Chapter 6. How Do We Read Qora Code?</a>
-      <a href="summary.html">Wrap-up. Let's Review What We Learned in Part 1</a>
-      <a href="chapter-07.html">Chapter 7. What Does the X Gate Flip?</a>
-      <a href="chapter-08.html">Chapter 8. How Does the H Gate Split Amplitudes?</a>
-      <a href="chapter-09.html">Chapter 9. What Does the Z Gate Change the Sign Of?</a>
-      <a href="chapter-10.html">Chapter 10. How Does the CNOT Gate Connect Two Qubits?</a>
-      <a href="chapter-11.html">Chapter 11. Let's Read One Small Circuit from Start to Finish</a>
+      <a href="chapter-02.html">Chapter 2. How Are Amplitudes Connected to Probabilities?</a>
+      <a href="chapter-03.html">Chapter 3. What Are Superposition and Interference?</a>
+      <a href="chapter-04.html">Chapter 4. Is Superposition Just a &quot;State We Don&#39;t Know&quot;?</a>
+      <a class="current" href="chapter-05.html">Chapter 5. When Does Interference Appear?</a>
+      <a href="chapter-06.html">Chapter 6. Why Must Quantum Gates Be Reversible?</a>
+      <a href="chapter-07.html">Chapter 7. How Do We Read Qora Code?</a>
+      <a href="summary.html">Wrap-up. Let&#39;s Review What We Learned in Part 1</a>
+      <a href="chapter-08.html">Chapter 8. What Does the X Gate Flip?</a>
+      <a href="chapter-09.html">Chapter 9. How Does the H Gate Split Amplitudes?</a>
+      <a href="chapter-10.html">Chapter 10. What Does the Z Gate Change the Sign Of?</a>
+      <a href="chapter-11.html">Chapter 11. How Does the CNOT Gate Connect Two Qubits?</a>
+      <a href="chapter-12.html">Chapter 12. Let&#39;s Read One Small Circuit from Start to Finish</a>
     <div class="group">
       <a href="../index.html">Standalone H Gate Document</a>
     </div>
   </aside>
   <main class="article">
     <div class="breadcrumb">Quantum Gates with Qora / Chapter 5</div>
-  <h2 id="reversible">Chapter 5. Why Must Quantum Gates Be Reversible?</h2>
+  <h2 id="interference">Chapter 5. When Does Interference Appear?</h2>
 
   <p>
-    A quantum gate cannot be just any linear transformation acting on the state vector.<br>
-    In a standard quantum circuit, every gate before measurement must be a <strong>unitary transformation</strong>.<br>
-    A unitary transformation preserves the length of the state vector, sends distinguishable states to distinguishable states, and has an inverse.
+    Interference is one of the most important concepts in quantum computing.<br>
+    Stated precisely, interference appears when multiple amplitude contributions to the same basis state are added together and then the Born rule is applied.<br>
+    In other words, we do not add probabilities first — we <strong>add the amplitudes first and square them later</strong>.
   </p>
 
-  <div class="rule mono">U†U = I</div>
+  <div class="rule">Amplitude contributions arriving at the same basis state are added together first.</div>
 
   <p>
-    Here <span class="mono">U</span> is the gate matrix, and <span class="mono">U†</span> is its conjugate transpose.<br>
-    The symbols may feel unfamiliar at first, but the core idea is simple: a unitary gate keeps the total probability of the state at 100%, and it never smears information away.
-  </p>
-
-  <div class="panel">
-    <table>
-      <tr><th>Condition</th><th>Meaning</th><th>Why it is needed</th></tr>
-      <tr><td>Length preservation</td><td>The total probability of the state vector stays at 1</td><td>Measurement probabilities must always add up to 100%</td></tr>
-      <tr><td>Orthogonality preservation</td><td>Distinguishable input states stay distinguishable in the output</td><td>Different inputs must not merge into the same output</td></tr>
-      <tr><td>Inverse exists</td><td>The gate can be undone, step for step</td><td>Quantum evolution before measurement loses no information</td></tr>
-    </table>
-  </div>
-
-  <p>
-    For example, a transformation that merges two different input states into the same output state is not a unitary transformation.<br>
-    There is no way to recover the input from the output alone, because such a transformation squashes different directions of the state space into one.
-  </p>
-
-  <h3>Why Does the H Gate Need Its Minus Sign?</h3>
-
-  <p>The H gate transforms the <code>|0⟩</code> state and the <code>|1⟩</code> state like this.</p>
-
-  <div class="math mono">
-    <div class="math-line">H gate(|0⟩) = (|0⟩ + |1⟩) / √2</div>
-    <div class="math-line">H gate(|1⟩) = (|0⟩ - |1⟩) / √2</div>
-  </div>
-
-  <p>
-    The important part here is the minus sign on the second line.<br>
-    Thanks to this sign, the two output states <code>(|0⟩ + |1⟩) / √2</code> and <code>(|0⟩ - |1⟩) / √2</code> are orthogonal to each other.
+    A gate acts linearly on the state vector.<br>
+    So when the input state is a sum of several basis states, the gate transforms each basis component separately and then adds the results back together.<br>
+    In this process, amplitude contributions gathering at the same output basis state reinforce each other when they share the same sign and phase, and cancel each other when they have opposite signs or opposite phases.
   </p>
 
   <div class="math mono">
-    <div class="math-line">H gate(|0⟩) = (|0⟩ + |1⟩) / √2</div>
-    <div class="math-line">H gate(|1⟩) = (|0⟩ + |1⟩) / √2</div>
+    <div class="math-line">Input: α|0⟩ + β|1⟩</div>
+    <div class="math-line">After the gate: α·U|0⟩ + β·U|1⟩</div>
+  </div>
+
+  <div class="compare-grid">
+    <div class="card plus">
+      <span class="tag-small">Constructive interference</span>
+      <h4>Amplitude contributions with the same sign: reinforcement</h4>
+      <div class="math mono">+1/2 + +1/2 = +1</div>
+      <p>The amplitude of measurement outcome 0 grows.</p>
+    </div>
+
+    <div class="card minus">
+      <span class="tag-small">Destructive interference</span>
+      <h4>Amplitude contributions with opposite signs: cancellation</h4>
+      <div class="math mono">+1/2 + -1/2 = 0</div>
+      <p>The amplitude of measurement outcome 1 vanishes.</p>
+    </div>
+  </div>
+
+  <h3>What does interference look like when we apply the H gate twice?</h3>
+
+  <p>
+    Applying the H gate once to the <code>|0⟩</code> state creates both a <code>|0⟩</code> component and a <code>|1⟩</code> component.<br>
+    Applying the H gate once more makes each of the two components send contributions toward <code>|0⟩</code> and <code>|1⟩</code> again, and the contributions arriving at the same basis state are added together.
+  </p>
+
+  <div class="practice">
+    <span class="practice-label">Try It in Qora</span>
+    <h3>Let's apply the H gate twice</h3>
+    <pre><code>operation Main() {
+    // Prepare one qubit
+    // Right after preparation, q[0] is in the |0⟩ state
+    use q = Qubit[1];
+
+    // Apply the first H gate
+    // The amplitudes of measurement outcome 0 and measurement outcome 1 are both 1/√2
+    H(q[0]);
+
+    // Apply the second H gate
+    // The amplitude contributions to measurement outcome 0 reinforce
+    // The amplitude contributions to measurement outcome 1 cancel
+    H(q[0]);
+
+    // In an ideal execution environment: measurement outcome 0
+    bit result = M(q[0]);
+}</code></pre>
+  </div>
+
+  <p>After the first H gate, two amplitudes remain.</p>
+
+  <div class="math mono">
+    <div class="math-line">Amplitude of measurement outcome 0 = 1/√2</div>
+    <div class="math-line">Amplitude of measurement outcome 1 = 1/√2</div>
   </div>
 
   <p>
-    Without the minus sign, the two input states <code>|0⟩</code> and <code>|1⟩</code> would merge into the same output state.<br>
-    Then, looking at the output state alone, we could not tell what the input was, and we could not run the transformation backwards either.<br>
-    So such a transformation cannot be accepted as a quantum gate before measurement.
+    When we apply the second H gate, the amplitude contributions arriving at measurement outcome 0 are added like this.
   </p>
 
-  <div class="call why">
-    <span class="h">Key point here</span>
-    The minus sign of the H gate is not a decoration added to make the story work out.<br>
-    For the H gate to be a unitary gate, different input basis states must go to mutually orthogonal output states, and the minus sign is what creates that orthogonality.
-  </div>
+  <div class="math mono">+1/2 + +1/2 = +1</div>
 
-  <div class="rule mono">H gate(H gate(|0⟩)) = |0⟩</div>
-  <nav class="page-nav" aria-label="Chapter navigation">
-    <a href="chapter-04.html"><span class="k">Previous</span><span class="t">Chapter 4. When Does Interference Appear?</span></a>
+  <p>
+    The amplitude contributions arriving at measurement outcome 1 are computed the same way.
+  </p>
+
+  <div class="math mono">+1/2 + -1/2 = 0</div>
+
+  <p>
+    So the final state returns to the <code>|0⟩</code> state again.<br>
+    We revisit this calculation in more detail in Chapter 9, when we work through the H gate's transformation rules.
+  </p>
+  <figure class="concept-figure">
+    <img src="../../images/part1-quantum-concepts-overview-accurate.png" alt="Overview diagram separating amplitudes from probabilities and showing amplitudes passing through an H gate into output amplitudes and probabilities">
+    <figcaption>At this point, the whole picture should read naturally. The probability bars are reference information for measurement, while the H gate acts on the amplitudes <span class="mono">α</span> and <span class="mono">β</span>.</figcaption>
+  </figure>
+    <nav class="page-nav" aria-label="Chapter navigation">
+    <a href="chapter-04.html"><span class="k">Previous</span><span class="t">Chapter 4. Is Superposition Just a &quot;State We Don&#39;t Know&quot;?</span></a>
     <a class="home" href="index.html"><span class="k">Overview</span><span class="t">Back to the full table of contents</span></a>
-    <a href="chapter-06.html"><span class="k">Next</span><span class="t">Chapter 6. How Do We Read Qora Code?</span></a>
+    <a href="chapter-06.html"><span class="k">Next</span><span class="t">Chapter 6. Why Must Quantum Gates Be Reversible?</span></a>
   </nav>
     <footer>
       <p>Qora — a quantum toy language you build yourself</p>

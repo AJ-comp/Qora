@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Chapter 10. How Does the CNOT Gate Connect Two Qubits? — Qora</title>
+<title>Chapter 10. What Does the Z Gate Change the Sign Of? — Qora</title>
 <style>
 :root {
     --bg: #ffffff;
@@ -518,100 +518,94 @@
 
 <header class="hero">
   <div class="tag">Qora · Quantum Gate Documentation</div>
-  <h1>Chapter 10. How Does the CNOT Gate Connect Two Qubits?</h1>
-  <p>Let's read the relationship between the control qubit and the target qubit, state by state</p>
+  <h1>Chapter 10. What Does the Z Gate Change the Sign Of?</h1>
+  <p>Let's see why the sign of the amplitude of measurement outcome 1 matters</p>
 </header>
 
 <div class="book-shell">
-  <aside class="side-nav" aria-label="Book contents">
+    <aside class="side-nav" aria-label="Book contents">
     <strong>Quantum Gates with Qora</strong>
       <a href="index.html">Overview</a>
       <a href="intro.html">Introduction. Why Learn Quantum Gates with Qora?</a>
       <a href="chapter-01.html">Chapter 1. What Is Inside a Qubit State?</a>
-      <a href="chapter-02.html">Chapter 2. How Are Amplitudes and Probabilities Connected?</a>
-      <a href="chapter-03.html">Chapter 3. Is Superposition Just a &quot;State We Don't Know&quot;?</a>
-      <a href="chapter-04.html">Chapter 4. When Does Interference Appear?</a>
-      <a href="chapter-05.html">Chapter 5. Why Must Quantum Gates Be Reversible?</a>
-      <a href="chapter-06.html">Chapter 6. How Do We Read Qora Code?</a>
-      <a href="summary.html">Wrap-up. Let's Review What We Learned in Part 1</a>
-      <a href="chapter-07.html">Chapter 7. What Does the X Gate Flip?</a>
-      <a href="chapter-08.html">Chapter 8. How Does the H Gate Split Amplitudes?</a>
-      <a href="chapter-09.html">Chapter 9. What Does the Z Gate Change the Sign Of?</a>
-      <a class="current" href="chapter-10.html">Chapter 10. How Does the CNOT Gate Connect Two Qubits?</a>
-      <a href="chapter-11.html">Chapter 11. Let's Read One Small Circuit from Start to Finish</a>
+      <a href="chapter-02.html">Chapter 2. How Are Amplitudes Connected to Probabilities?</a>
+      <a href="chapter-03.html">Chapter 3. What Are Superposition and Interference?</a>
+      <a href="chapter-04.html">Chapter 4. Is Superposition Just a &quot;State We Don&#39;t Know&quot;?</a>
+      <a href="chapter-05.html">Chapter 5. When Does Interference Appear?</a>
+      <a href="chapter-06.html">Chapter 6. Why Must Quantum Gates Be Reversible?</a>
+      <a href="chapter-07.html">Chapter 7. How Do We Read Qora Code?</a>
+      <a href="summary.html">Wrap-up. Let&#39;s Review What We Learned in Part 1</a>
+      <a href="chapter-08.html">Chapter 8. What Does the X Gate Flip?</a>
+      <a href="chapter-09.html">Chapter 9. How Does the H Gate Split Amplitudes?</a>
+      <a class="current" href="chapter-10.html">Chapter 10. What Does the Z Gate Change the Sign Of?</a>
+      <a href="chapter-11.html">Chapter 11. How Does the CNOT Gate Connect Two Qubits?</a>
+      <a href="chapter-12.html">Chapter 12. Let&#39;s Read One Small Circuit from Start to Finish</a>
     <div class="group">
       <a href="../index.html">Standalone H Gate Document</a>
     </div>
   </aside>
   <main class="article">
     <div class="breadcrumb">Quantum Gates with Qora / Chapter 10</div>
-<h2 id="cnot-gate">Chapter 10. How Does the CNOT Gate Connect Two Qubits?</h2>
+<h2 id="z-gate">Chapter 10. What Does the Z Gate Change the Sign Of?</h2>
 
   <p>
-    The CNOT gate is a gate that acts on two qubits.<br>
-    The first qubit is called the control qubit, and the second qubit is called the target qubit.<br>
-    An X gate is applied to the target qubit only when the control qubit is on the measurement outcome 1 side.
+    The Z gate leaves the amplitude of measurement outcome 0 untouched and attaches a minus sign only to the amplitude of measurement outcome 1.<br>
+    So if you measure right after a Z gate, it can look as if nothing happened at all.<br>
+    But when the state later meets a gate that mixes the amplitudes again, like the H gate, that sign difference changes the measurement result.
   </p>
-
-  <div class="rule">The CNOT gate flips the target qubit only when the control qubit is 1.</div>
 
   <div class="panel">
     <table>
-      <tr><th>Input state</th><th>Control qubit</th><th>Change in target qubit</th><th>Output state</th></tr>
-      <tr><td><code>|00⟩</code></td><td>0</td><td>Unchanged</td><td><code>|00⟩</code></td></tr>
-      <tr><td><code>|01⟩</code></td><td>0</td><td>Unchanged</td><td><code>|01⟩</code></td></tr>
-      <tr><td><code>|10⟩</code></td><td>1</td><td>0 becomes 1</td><td><code>|11⟩</code></td></tr>
-      <tr><td><code>|11⟩</code></td><td>1</td><td>1 becomes 0</td><td><code>|10⟩</code></td></tr>
+      <tr><th>Input state</th><th>State after the Z gate</th><th>Measured right away?</th></tr>
+      <tr><td><code>|0⟩</code></td><td><code>|0⟩</code></td><td>Measurement outcome 0</td></tr>
+      <tr><td><code>|1⟩</code></td><td><code>-|1⟩</code></td><td>Measurement outcome 1</td></tr>
     </table>
   </div>
 
   <p>
-    Here, <code>|10⟩</code> means the two-qubit state where the first qubit's measurement outcome is 1 and the second qubit's measurement outcome is 0.<br>
-    So if we apply the CNOT gate to <code>|10⟩</code>, the control qubit is 1, so the target qubit flips, and the final state becomes <code>|11⟩</code>.
+    Measurement probabilities come from squaring the length of the amplitude.<br>
+    <span class="mono">1</span> and <span class="mono">-1</span> have different signs but the same length, so measured right away they both produce the same probability.<br>
+    That's why the Z gate's effect is better read not as “an effect that changes probabilities” but as “a sign change that shows up later, when interference happens.”
   </p>
 
-  <h3>What Happens When the Control Qubit Is in Superposition?</h3>
+  <h3>The Z gate's effect shows up when the state meets the H gate again</h3>
 
   <p>
-    When we apply an H gate to the first qubit, the first qubit's amplitude splits toward measurement outcomes 0 and 1.<br>
-    If we then apply the CNOT gate, the target qubit stays the same on the branch where the control qubit is 0, and the target qubit flips on the branch where the control qubit is 1.<br>
-    As a result, the two qubits end up bound together in a state with just the two possibilities <code>|00⟩</code> and <code>|11⟩</code>.
+    First, use an H gate to turn the <code>|0⟩</code> state into the <code>(|0⟩ + |1⟩) / √2</code> state.<br>
+    Next, apply a Z gate: the sign of the amplitude of measurement outcome 1 flips, giving the <code>(|0⟩ - |1⟩) / √2</code> state.<br>
+    Finally, apply the H gate once more: the directions of cancellation and reinforcement swap, and the final state becomes <code>|1⟩</code>.
   </p>
 
-  <div class="math mono">|00⟩ → H(q[0]) → (|00⟩ + |10⟩) / √2 → CNOT(q[0], q[1]) → (|00⟩ + |11⟩) / √2</div>
-
-  <div class="call why">
-    <span class="h">This state is the starting point for understanding entanglement</span>
-    When you measure the final state, the two qubits do not look like they each come out randomly on their own.<br>
-    The measurement outcomes are only ever <code>00</code> or <code>11</code>.<br>
-    That is because the measurement outcomes of the first qubit and the second qubit are locked together.
-  </div>
+  <div class="math mono">|0⟩ → H gate → (|0⟩ + |1⟩) / √2 → Z gate → (|0⟩ - |1⟩) / √2 → H gate → |1⟩</div>
 
   <div class="practice">
-    <span class="practice-label">Try it in Qora</span>
-    <h3>Let's Connect Two Qubits with the CNOT Gate</h3>
+    <span class="practice-label">Try It in Qora</span>
+    <h3>Let's Apply H, Z, and H in Order</h3>
     <pre><code>operation Main() {
-    // Prepare two qubits
-    // Right after preparation, q[0]q[1] is in the |00⟩ state
-    use q = Qubit[2];
+    // Prepare one qubit
+    // Right after preparation, q[0] is in the |0⟩ state
+    use q = Qubit[1];
 
-    // Apply an H gate to the first qubit
-    // q[0]'s amplitude splits into measurement outcomes 0 and 1
+    // Apply the H gate
+    // The amplitudes of measurement outcomes 0 and 1 are both 1/√2
     H(q[0]);
 
-    // Apply the CNOT gate
-    // q[0] is the control qubit, q[1] is the target qubit
-    CNOT(q[0], q[1]);
+    // Apply the Z gate
+    // The sign of the amplitude of measurement outcome 1 becomes negative
+    Z(q[0]);
 
-    // Ideal execution environment: 00 or 11
-    bit first = M(q[0]);
-    bit second = M(q[1]);
+    // Apply the H gate
+    // The sign difference shows up as interference, giving the |1⟩ state
+    H(q[0]);
+
+    // In an ideal execution environment: measurement outcome 1
+    bit result = M(q[0]);
 }</code></pre>
   </div>
-  <nav class="page-nav" aria-label="Chapter navigation">
-    <a href="chapter-09.html"><span class="k">Previous</span><span class="t">Chapter 9. What Does the Z Gate Change the Sign Of?</span></a>
+    <nav class="page-nav" aria-label="Chapter navigation">
+    <a href="chapter-09.html"><span class="k">Previous</span><span class="t">Chapter 9. How Does the H Gate Split Amplitudes?</span></a>
     <a class="home" href="index.html"><span class="k">Overview</span><span class="t">Back to the full table of contents</span></a>
-    <a href="chapter-11.html"><span class="k">Next</span><span class="t">Chapter 11. Let's Read One Small Circuit from Start to Finish</span></a>
+    <a href="chapter-11.html"><span class="k">Next</span><span class="t">Chapter 11. How Does the CNOT Gate Connect Two Qubits?</span></a>
   </nav>
     <footer>
       <p>Qora — a quantum toy language you build yourself</p>
