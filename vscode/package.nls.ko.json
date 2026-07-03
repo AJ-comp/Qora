@@ -13,5 +13,6 @@
   "walkthrough.step.transpile.title": "OpenQASM으로 변환",
   "walkthrough.step.transpile.description": "Qora 파일을 연 상태에서 번들 파서로 보내면, 만들어진 OpenQASM이 옆 편집기에 열려요.\n[현재 파일 변환하기](command:qora.transpile)",
   "walkthrough.step.stages.title": "컴파일 파이프라인 확인",
-  "walkthrough.step.stages.description": "같은 소스가 AST, QoraIR, 역 IR, OpenQASM으로 이어지는 과정을 보면 언어 흐름이 훨씬 덜 막연해져요.\n[컴파일 단계 보기](command:qora.showStages)"
+  "walkthrough.step.stages.description": "같은 소스가 AST, QoraIR, 역 IR, OpenQASM으로 이어지는 과정을 보면 언어 흐름이 훨씬 덜 막연해져요.\n[컴파일 단계 보기](command:qora.showStages)",
+  "command.run.title": "Qora: 프로그램 실행"
 }

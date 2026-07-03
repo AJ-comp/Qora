@@ -2,7 +2,7 @@
   "name": "qora-language",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "publisher": "qora-lang",
   "icon": "icon.png",
   "license": "MIT",
@@ -65,6 +65,12 @@
     ],
     "commands": [
       {
+        "command": "qora.run",
+        "title": "%command.run.title%",
+        "category": "Qora",
+        "icon": "$(play)"
+      },
+      {
         "command": "qora.transpile",
         "title": "%command.transpile.title%",
         "category": "Qora",
@@ -97,6 +103,11 @@
     ],
     "menus": {
       "editor/title": [
+        {
+          "command": "qora.run",
+          "when": "resourceLangId == qora",
+          "group": "navigation@0"
+        },
         {
           "command": "qora.transpile",
           "when": "resourceLangId == qora",
@@ -172,6 +183,16 @@
           },
           "default": [],
           "markdownDescription": "Extra arguments before `--json`, used only when `#qora.command#` is set (or as a `dotnet` fallback when no bundled binary matches your platform). For example your built `Qora.dll` (`[\"C:/…/Qora/src/Qora/bin/Debug/net10.0/Qora.dll\"]`), or `[\"run\", \"--project\", \"C:/…/Qora/src/Qora\", \"--\"]` to run from source."
+        },
+        "qora.python": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Python used by **Qora: Run Program** (needs 3.10–3.13 with `amazon-braket-sdk` installed). **Leave empty to let the extension handle it**: it uses a suitable system Python when one exists, and otherwise provisions a private one automatically on first run (one-time ~200 MB download into the extension's own storage)."
+        },
+        "qora.shots": {
+          "type": "number",
+          "default": 1000,
+          "markdownDescription": "How many shots (repeated executions) **Qora: Run Program** measures."
         }
       }
     }

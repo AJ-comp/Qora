@@ -2,6 +2,21 @@
 
 All notable changes to the Qora Language extension.
 
+## 0.7.0
+
+- **Run programs inside the editor**: new **`Qora: Run Program`** command (+ a ▶ CodeLens above
+  `Main` and an editor-title button) compiles the file and executes it on Amazon Braket's local
+  simulator — the engine measured to run Qora's FULL output (operations, loops, classical
+  variables, `while`) — then shows the measurement histogram in the "Qora Run" panel. No manual
+  installs: on first run the extension provisions a private Python + Braket SDK into its own
+  storage (one-time ~200 MB download; a suitable system Python is used instead when present;
+  `qora.python` overrides, `qora.shots` sets the shot count).
+- Bundles the **Qora v0.13** compiler: `const` is now enforced as an immutable binding (QSEM024 —
+  it may hold a measurement result, but reassigning it is an error with a fix-it hint), bit
+  conditions emit as `r == true` (the spelling Qiskit's importer accepts, so measure-then-branch
+  programs load there), emitted QASM records its compiler version, and every diagnostic carries a
+  source span.
+
 ## 0.6.0
 
 - **Precise error squiggles**: every semantic error (QSEM001-023) now underlines the exact offending

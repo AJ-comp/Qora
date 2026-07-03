@@ -41,6 +41,9 @@ namespace Qora.Ir.Passes;
 ///   <item><b>QSEM017</b> — a measurement assigned to a non-<c>bit</c> declaration.</item>
 ///   <item><b>QSEM022</b> — the same operation name defined more than once WITHIN one namespace
 ///         (namespaced twin of QSEM008; the same simple name in two different namespaces is fine).</item>
+///   <item><b>QSEM024</b> — assignment to a <c>const</c> name. <c>const</c> is an immutable BINDING
+///         (JS/Q#-let style): the initializer may be any value — a measurement result included — but
+///         the name can never be assigned again; use <c>var</c>/<c>bit</c> for mutable ones.</item>
 ///   <item><b>QSEM023</b> — names that would COLLIDE IN THE EMITTED PROGRAM: two distinct operation
 ///         names meeting at one mangled def name (`A.F` vs `A__F` → `A__F_`), an entry-op declaration
 ///         landing on a def's name (entry locals are QASM top-level globals), or a def-local shadowing
@@ -180,7 +183,8 @@ public static class QoraValidator
         Dictionary<string, int> Registers,       // register name -> size (sized qubit params + use)
         HashSet<string> SingleQubits,            // unsized qubit parameter names
         HashSet<string> Classicals,              // int/bit params + declared variables + loop vars
-        Dictionary<string, QSpan?> DeclSpans)    // declared name -> its declaration's span (first wins)
+        Dictionary<string, QSpan?> DeclSpans,    // declared name -> its declaration's span (first wins)
+        HashSet<string> Consts)                  // names declared `const` (immutable bindings)
     {
         public HashSet<string> UseNames { get; } = new();
     }
@@ -191,6 +195,7 @@ public static class QoraValidator
         var singles = new HashSet<string>();
         var classicals = new HashSet<string>();
         var declSpans = new Dictionary<string, QSpan?>();
+        var consts = new HashSet<string>();
 
         foreach (var p in op.Params)
         {
@@ -206,7 +211,7 @@ public static class QoraValidator
                 switch (s)
                 {
                     case QUse u: registers.TryAdd(u.Name, u.Size); declSpans.TryAdd(u.Name, u.Span); break;
-                    case QDecl d: classicals.Add(d.Name); declSpans.TryAdd(d.Name, d.Span); break;
+                    case QDecl d: classicals.Add(d.Name); declSpans.TryAdd(d.Name, d.Span); if (d.IsConst) consts.Add(d.Name); break;
                     case QFor f: classicals.Add(f.Var); declSpans.TryAdd(f.Var, f.Span); Scan(f.Body); break;
                     case QIf i: Scan(i.Then); Scan(i.Else); break;
                     case QWhile w: Scan(w.Body); break;
@@ -215,7 +220,7 @@ public static class QoraValidator
                 }
         }
         Scan(op.Body);
-        return new Scope(op, entryName, isEntry, registers, singles, classicals, declSpans);
+        return new Scope(op, entryName, isEntry, registers, singles, classicals, declSpans, consts);
     }
 
     /// <summary>Collect `use` register names and measure-bit declaration names, with spans (for QSEM015).</summary>
@@ -272,6 +277,12 @@ public static class QoraValidator
                     break;
 
                 case QAssign a:
+                    // QSEM024 — `const` is an IMMUTABLE BINDING (JS/Q#-let style): it may hold any
+                    // value, including a measurement result, but can never be assigned again.
+                    if (scope.Consts.Contains(a.Name))
+                        Add(errors, "QSEM024", a.Value is QMeasure
+                            ? $"in `{opName}`: `{a.Name}` is `const` and cannot be measured into again; declare it as `bit {a.Name} = ...` if it should be re-measured"
+                            : $"in `{opName}`: `{a.Name}` is `const` and cannot be reassigned; declare it with `var` if it needs to change", a.Span);
                     if (a.Value is QText { HasCall: true })
                         Add(errors, "QSEM005", $"in `{opName}`: the value assigned to `{a.Name}` contains a call; only the lone form `{a.Name} = M(q[i]);` is supported", a.Span);
                     if (a.Value is QMeasure am && am.Target is not null)

@@ -310,7 +310,7 @@ public static class QasmEmitter
                     break;
 
                 case QWhile w:
-                    body.AppendLine($"{pad}while ({w.Cond.Text}) {{");
+                    body.AppendLine($"{pad}while ({RewriteBitCond(w.Cond.Text, varTypes)}) {{");
                     EmitStatements(w.Body, body, indent + 1, ctx, varTypes);
                     body.AppendLine($"{pad}}}");
                     break;
@@ -318,7 +318,7 @@ public static class QasmEmitter
                 case QRepeat r:
                     body.AppendLine($"{pad}while (true) {{");
                     EmitStatements(r.Body, body, indent + 1, ctx, varTypes);
-                    body.AppendLine($"{pad}  if ({r.Until.Text}) {{ break; }}");
+                    body.AppendLine($"{pad}  if ({RewriteBitCond(r.Until.Text, varTypes)}) {{ break; }}");
                     body.AppendLine($"{pad}}}");
                     break;
             }
@@ -329,7 +329,7 @@ public static class QasmEmitter
     {
         var pad = new string(' ', indent * 2);
 
-        body.AppendLine($"{pad}if ({node.Cond.Text}) {{");
+        body.AppendLine($"{pad}if ({RewriteBitCond(node.Cond.Text, varTypes)}) {{");
         EmitStatements(node.Then, body, indent + 1, ctx, varTypes);
         body.AppendLine($"{pad}}}");
 
@@ -402,14 +402,53 @@ public static class QasmEmitter
             || (varTypes.TryGetValue(tok, out var vt) && vt == "float"))
             ? "float" : "int";
 
-    /// <summary>Seed the per-op variable-type map from the op's classical parameters.</summary>
+    /// <summary>
+    /// Seed the per-op variable-type map: classical parameters, plus every measure-bit / bit-typed
+    /// declaration anywhere in the body (pre-scanned so a condition emitted before its declaration
+    /// line still knows the name is a bit — declarations are hoisted anyway).
+    /// </summary>
     private static Dictionary<string, string> SeedVarTypes(QOperation op)
     {
         var map = new Dictionary<string, string>();
         foreach (var p in op.Params)
             if (p.Type == QType.Int) map[p.Name] = "int";
             else if (p.Type == QType.Bit) map[p.Name] = "bit";
+
+        void Scan(IReadOnlyList<QStmt> stmts)
+        {
+            foreach (var s in stmts)
+                switch (s)
+                {
+                    case QDecl d when d.Value is QMeasure || d.Type == QType.Bit: map.TryAdd(d.Name, "bit"); break;
+                    case QIf i: Scan(i.Then); Scan(i.Else); break;
+                    case QFor f: Scan(f.Body); break;
+                    case QWhile w: Scan(w.Body); break;
+                    case QRepeat r: Scan(r.Body); break;
+                    case QConjugate c: Scan(c.Within); Scan(c.Apply); break;
+                }
+        }
+        Scan(op.Body);
         return map;
+    }
+
+    /// <summary>
+    /// Bit comparisons emit against BOOL literals: `r == 1` → `r == true`, `r != 0` → `r != false`
+    /// (either operand order) whenever the name is a known bit. Both spellings are valid OpenQASM 3,
+    /// but the dominant consumer (Qiskit's qasm3 importer) accepts only `bit == const bool` — so emit
+    /// the one that actually loads. Ints and unknown names are left untouched.
+    /// </summary>
+    private static string RewriteBitCond(string text, Dictionary<string, string> varTypes)
+    {
+        var toks = text.Split(' ');
+        for (var i = 0; i + 2 < toks.Length; i++)
+        {
+            if (toks[i + 1] is not ("==" or "!=")) continue;
+            if (IsBit(toks[i]) && toks[i + 2] is "0" or "1") toks[i + 2] = toks[i + 2] == "1" ? "true" : "false";
+            else if (IsBit(toks[i + 2]) && toks[i] is "0" or "1") toks[i] = toks[i] == "1" ? "true" : "false";
+        }
+        return string.Join(" ", toks);
+
+        bool IsBit(string tok) => varTypes.TryGetValue(tok, out var t) && t == "bit";
     }
 
     private static string EmitParam(QParam p) => p.Type switch

@@ -17,6 +17,7 @@ chuột, **báo lỗi thời gian thực** và một lệnh **chuyển đổi**.
 - **Hướng dẫn bắt đầu** — theo dõi luồng Qora đầu tiên từ trang Getting Started của VS Code
 - **Nút trên thanh tiêu đề editor** — khi mở tệp `.qor`, bạn có thể chuyển đổi, xem giai đoạn hoặc mở ví dụ ngay
 - **Ví dụ dùng ngay** — chạy **`Qora: Mở ví dụ`** để mở `demo.qor`, hoặc **`Qora: Tạo ví dụ Bell mới`** để bắt đầu từ một mạch Bell nhỏ
+- **Chạy chương trình** — **`Qora: Chạy chương trình`** (hoặc CodeLens ▶ phía trên `Main`) thực thi tệp trên trình mô phỏng lượng tử thực (Amazon Braket cục bộ) và hiển thị biểu đồ kết quả đo. Lần chạy đầu tiên sẽ tự động thiết lập trình mô phỏng (tải một lần ~200 MB vào bộ nhớ riêng của tiện ích — bạn không cần cài gì cả).
 - **Chuyển đổi sang OpenQASM** — chạy **`Qora: Transpile to OpenQASM`** từ Command Palette; kết quả mở ở cửa sổ bên cạnh
 - **Hiển thị các giai đoạn biên dịch** — chạy **`Qora: Hiển thị các giai đoạn biên dịch`** để xem pipeline: AST → QoraIR → IR nghịch đảo (khi dùng `Adjoint`) → OpenQASM; tự cập nhật khi lưu
 - **Đoạn mã mẫu (snippets)** — `operation`, `main`, `use`, `measure`, `for`, `if`, `bell`

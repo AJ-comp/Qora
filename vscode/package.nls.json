@@ -13,5 +13,6 @@
   "walkthrough.step.transpile.title": "Transpile to OpenQASM",
   "walkthrough.step.transpile.description": "With a Qora file active, send it through the bundled parser and open the generated OpenQASM beside your source.\n[Transpile Active File](command:qora.transpile)",
   "walkthrough.step.stages.title": "Inspect the Pipeline",
-  "walkthrough.step.stages.description": "Watch the same source move through AST, QoraIR, inverse IR, and OpenQASM so the language feels less like a black box.\n[Show Compilation Stages](command:qora.showStages)"
+  "walkthrough.step.stages.description": "Watch the same source move through AST, QoraIR, inverse IR, and OpenQASM so the language feels less like a black box.\n[Show Compilation Stages](command:qora.showStages)",
+  "command.run.title": "Qora: Run Program"
 }

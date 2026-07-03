@@ -6,7 +6,7 @@ using Janglim.FrontEnd.RegularGrammar;
 namespace Qora;
 
 /// <summary>
-/// Qora v0.12 — a Q#/C#-flavored quantum language on the Janglim engine.
+/// Qora v0.13 — a Q#/C#-flavored quantum language on the Janglim engine.
 ///
 ///   operation Bell(Qubit[2] q) {       // a subroutine, with C#-style parameters
 ///       H(q[0]);
@@ -42,7 +42,12 @@ namespace Qora;
 /// (<c>Ir/Passes/NameMangler.cs</c>: <c>q</c>→<c>q_</c>, <c>MyLib.Bell</c>→<c>MyLib__Bell_</c>).
 /// Built-in gate names relaxed Q#-style: a NAMESPACED op may reuse one (ambiguous use ⇒ QSEM018,
 /// qualify via <c>L.Rx</c> / <c>Qora.Intrinsic.Rx</c>); measurement family + pi/tau/euler + global
-/// gate-named ops stay reserved (QSEM013). Operations are still void (no return value yet).
+/// gate-named ops stay reserved (QSEM013).
+/// v0.13 adds: `const` enforced as an immutable binding (QSEM024 on reassignment; measurement
+/// initializers allowed, Q#-let style), bit conditions emitted as bool literals (`r_ == true` — the
+/// spelling Qiskit's importer accepts), a provenance comment in emitted QASM, and the execution
+/// toolchain (Braket runner + two release-gate validators; Braket's local simulator runs the FULL
+/// language). Operations are still void (no return value yet).
 /// </summary>
 public class QoraGrammar : Grammar
 {

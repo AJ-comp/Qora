@@ -171,6 +171,238 @@ function docArgs(document) {
     : [];
 }
 
+// ---------- Run (Braket LocalSimulator) ----------
+//
+// "Qora: Run Program" compiles the active document with the bundled CLI, then executes the QASM on
+// Amazon Braket's LOCAL simulator — the one consumer measured to run Qora's FULL output (defs, ints,
+// loops, even `while`). Python resolution order:
+//   1. the `qora.python` setting (trusted override)
+//   2. the env this extension provisioned earlier (remembered in globalState)
+//   3. a suitable system Python (3.10–3.13 with amazon-braket-sdk importable)
+//   4. one-time auto-provisioning into the extension's own storage: `uv` (a single static binary)
+//      installs Python 3.12 + amazon-braket-sdk (~200 MB). The user never touches pip, and nothing
+//      outside the extension's storage is modified.
+
+let extContext;          // captured in activate() — globalStorage/globalState for provisioning
+let runChannel;          // "Qora Run" output channel, created lazily
+let braketPythonCache;   // per-session: a python we already verified
+
+function runnerDir() { return path.join(extRoot, 'runner'); }
+
+/** Spawn and collect output; resolves { code, stdout, stderr } and never rejects. */
+function execP(command, args, options = {}, stdinText) {
+  return new Promise((resolve) => {
+    let proc;
+    try { proc = cp.spawn(command, args, options); }
+    catch (e) { resolve({ code: -1, stdout: '', stderr: String(e.message || e) }); return; }
+    let stdout = '';
+    let stderr = '';
+    proc.stdout?.setEncoding('utf8');
+    proc.stderr?.setEncoding('utf8');
+    proc.stdout?.on('data', (d) => { stdout += d; });
+    proc.stderr?.on('data', (d) => { stderr += d; });
+    proc.on('error', (e) => resolve({ code: -1, stdout, stderr: stderr || String(e.message || e) }));
+    proc.on('close', (code) => resolve({ code, stdout, stderr }));
+    if (stdinText !== undefined) {
+      proc.stdin?.on('error', () => { /* EPIPE if it died early */ });
+      proc.stdin?.end(stdinText);
+    }
+  });
+}
+
+/** Is this python a 3.10–3.13 with the Braket SDK importable? (The SDK doesn't support 3.14 yet.) */
+async function pythonUsable(python) {
+  const probe = await execP(python, ['-c',
+    'import sys; assert (3,10) <= sys.version_info < (3,14); import braket.devices; print("ok")']);
+  return probe.code === 0 && probe.stdout.includes('ok');
+}
+
+/** Download to a file, following redirects (GitHub release assets redirect to a CDN). */
+function download(url, dest, redirectsLeft = 5) {
+  const https = require('https');
+  return new Promise((resolve, reject) => {
+    https.get(url, { headers: { 'User-Agent': 'qora-vscode' } }, (res) => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location && redirectsLeft > 0) {
+        res.resume();
+        resolve(download(res.headers.location, dest, redirectsLeft - 1));
+        return;
+      }
+      if (res.statusCode !== 200) { res.resume(); reject(new Error(`HTTP ${res.statusCode} for ${url}`)); return; }
+      const out = fs.createWriteStream(dest);
+      res.pipe(out);
+      out.on('finish', () => out.close(resolve));
+      out.on('error', reject);
+    }).on('error', reject);
+  });
+}
+
+/** The uv release asset for this platform, or null when there is none. */
+function uvAsset() {
+  return {
+    'win32-x64': 'uv-x86_64-pc-windows-msvc.zip',
+    'win32-arm64': 'uv-aarch64-pc-windows-msvc.zip',
+    'darwin-x64': 'uv-x86_64-apple-darwin.tar.gz',
+    'darwin-arm64': 'uv-aarch64-apple-darwin.tar.gz',
+    'linux-x64': 'uv-x86_64-unknown-linux-gnu.tar.gz',
+    'linux-arm64': 'uv-aarch64-unknown-linux-gnu.tar.gz',
+  }[`${process.platform}-${process.arch}`] || null;
+}
+
+/** Find a file by name anywhere under dir (uv archive layouts differ per platform). */
+function findFile(dir, name) {
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const p = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      const hit = findFile(p, name);
+      if (hit) return hit;
+    } else if (entry.name === name) {
+      return p;
+    }
+  }
+  return null;
+}
+
+/** One-time setup: uv → Python 3.12 → amazon-braket-sdk, all inside the extension's storage. */
+async function provisionEnv(progress) {
+  const storage = extContext.globalStorageUri.fsPath;
+  fs.mkdirSync(storage, { recursive: true });
+  // keep uv's python downloads and caches inside our storage too — uninstalling cleans everything.
+  const uvEnv = {
+    ...process.env,
+    UV_PYTHON_INSTALL_DIR: path.join(storage, 'pythons'),
+    UV_CACHE_DIR: path.join(storage, 'uv-cache'),
+  };
+
+  progress.report({ message: 'fetching uv…' });
+  let uv = 'uv';
+  if ((await execP(uv, ['--version'])).code !== 0) {
+    const uvDir = path.join(storage, 'uv');
+    const exeName = process.platform === 'win32' ? 'uv.exe' : 'uv';
+    let found = fs.existsSync(uvDir) ? findFile(uvDir, exeName) : null;
+    if (!found) {
+      const asset = uvAsset();
+      if (!asset) throw new Error(`no uv build for ${process.platform}-${process.arch}; set "qora.python" to a Python 3.10–3.13 with amazon-braket-sdk instead`);
+      fs.mkdirSync(uvDir, { recursive: true });
+      const archive = path.join(uvDir, asset);
+      await download(`https://github.com/astral-sh/uv/releases/latest/download/${asset}`, archive);
+      progress.report({ message: 'unpacking uv…' });
+      const un = asset.endsWith('.zip')
+        ? await execP('powershell', ['-NoProfile', '-Command', `Expand-Archive -Force -LiteralPath "${archive}" -DestinationPath "${uvDir}"`])
+        : await execP('tar', ['-xzf', archive, '-C', uvDir]);
+      if (un.code !== 0) throw new Error(`could not unpack uv: ${(un.stderr || '').slice(0, 200)}`);
+      found = findFile(uvDir, exeName);
+      if (!found) throw new Error('uv binary not found after unpacking');
+      if (process.platform !== 'win32') { try { fs.chmodSync(found, 0o755); } catch { /* spawn will surface it */ } }
+    }
+    uv = found;
+  }
+
+  const envDir = path.join(storage, 'braket-env');
+  const python = path.join(envDir, process.platform === 'win32' ? 'Scripts' : 'bin',
+    process.platform === 'win32' ? 'python.exe' : 'python');
+
+  progress.report({ message: 'installing Python 3.12…' });
+  let r = await execP(uv, ['venv', envDir, '--python', '3.12'], { env: uvEnv });
+  if (r.code !== 0) throw new Error(`Python install failed: ${(r.stderr || '').slice(-300)}`);
+
+  progress.report({ message: 'installing the Braket simulator (~200 MB, a few minutes)…' });
+  r = await execP(uv, ['pip', 'install', '--python', python, 'amazon-braket-sdk'], { env: uvEnv });
+  if (r.code !== 0) throw new Error(`Braket SDK install failed: ${(r.stderr || '').slice(-300)}`);
+
+  progress.report({ message: 'verifying…' });
+  if (!(await pythonUsable(python))) throw new Error('the provisioned Python failed verification');
+  return python;
+}
+
+/** A python that can run Braket — resolving through override → remembered → system → provision. */
+async function ensureBraketPython() {
+  if (braketPythonCache) return braketPythonCache;
+  const override = (vscode.workspace.getConfiguration('qora').get('python') || '').trim();
+  if (override) {
+    if (await pythonUsable(override)) return (braketPythonCache = override);
+    vscode.window.showErrorMessage(`Qora: "qora.python" (${override}) must be Python 3.10–3.13 with amazon-braket-sdk installed.`);
+    return null;
+  }
+
+  const remembered = extContext.globalState.get('qora.braketPython');
+  if (remembered && fs.existsSync(remembered) && await pythonUsable(remembered)) {
+    return (braketPythonCache = remembered);
+  }
+
+  for (const candidate of ['python', 'python3', 'py']) {
+    if (await pythonUsable(candidate)) return (braketPythonCache = candidate);
+  }
+
+  const pick = await vscode.window.showInformationMessage(
+    'Running Qora programs needs a one-time setup: the extension will install a private Python + the Braket simulator (~200 MB) into its own storage. Nothing else on your system is touched.',
+    { modal: true }, 'Set up');
+  if (pick !== 'Set up') return null;
+
+  try {
+    const python = await vscode.window.withProgress(
+      { location: vscode.ProgressLocation.Notification, title: 'Qora: setting up the simulator (one-time)' },
+      (progress) => provisionEnv(progress));
+    await extContext.globalState.update('qora.braketPython', python);
+    return (braketPythonCache = python);
+  } catch (e) {
+    vscode.window.showErrorMessage(`Qora: simulator setup failed — ${e.message || e}`);
+    return null;
+  }
+}
+
+async function runProgram() {
+  const editor = vscode.window.activeTextEditor;
+  if (!editor || editor.document.languageId !== 'qora') {
+    vscode.window.showInformationMessage('Qora: open a .qor file first.');
+    return;
+  }
+  const document = editor.document;
+
+  const { result, error } = await runQora(document.getText(), docArgs(document));
+  if (error) { warnInfraOnce(error); return; }
+  if (!result.success) {
+    const first = (result.errors && result.errors[0] && result.errors[0].message) || 'parse failed';
+    vscode.window.showErrorMessage(`Qora: cannot run — ${first}`);
+    return;
+  }
+
+  const python = await ensureBraketPython();
+  if (!python) return;
+
+  const shots = vscode.workspace.getConfiguration('qora').get('shots', 1000);
+  const name = path.basename(document.fileName);
+  const reply = await vscode.window.withProgress(
+    { location: vscode.ProgressLocation.Window, title: `Qora: running ${name}…` },
+    () => execP(python, [path.join(runnerDir(), 'braket_run.py'), '--shots', String(shots)],
+      { cwd: runnerDir() }, result.qasm));
+
+  let parsed;
+  try { parsed = JSON.parse(reply.stdout.trim().split('\n').pop()); }
+  catch { parsed = { error: (reply.stderr || reply.stdout || 'no output from the runner').slice(0, 300) }; }
+  if (parsed.error) {
+    vscode.window.showErrorMessage(`Qora: run failed — ${parsed.error}`);
+    return;
+  }
+  renderHistogram(name, parsed.counts, parsed.shots);
+}
+
+/** Measurement histogram in the "Qora Run" output channel (append-only, like a lab notebook). */
+function renderHistogram(name, counts, shots) {
+  if (!runChannel) {
+    runChannel = vscode.window.createOutputChannel('Qora Run');
+    extContext.subscriptions.push(runChannel);
+  }
+  const total = Object.values(counts).reduce((a, b) => a + b, 0) || 1;
+  const width = 40;
+  runChannel.appendLine('');
+  runChannel.appendLine(`${name} — ${shots} shots (Braket LocalSimulator, ${new Date().toLocaleTimeString()})`);
+  for (const [key, n] of Object.entries(counts).sort((a, b) => b[1] - a[1])) {
+    const bar = '█'.repeat(Math.max(1, Math.round(width * n / total)));
+    runChannel.appendLine(`  ${key}  ${bar}  ${n}  (${(100 * n / total).toFixed(1)}%)`);
+  }
+  runChannel.show(true);
+}
+
 /** One place to nag (once) when the CLI can't be run, so we don't spam on every keystroke. */
 function warnInfraOnce(message) {
   if (warnedInfra) return;
@@ -439,6 +671,7 @@ function provideQoraCodeLenses(document) {
     const start = line.firstNonWhitespaceCharacterIndex;
     const range = new vscode.Range(i, start, i, Math.min(line.text.length, start + 'operation Main'.length));
     lenses.push(
+      new vscode.CodeLens(range, { title: '▶ 실행', command: 'qora.run' }),
       new vscode.CodeLens(range, { title: 'OpenQASM으로 변환', command: 'qora.transpile' }),
       new vscode.CodeLens(range, { title: '컴파일 단계 보기', command: 'qora.showStages' })
     );
@@ -448,6 +681,7 @@ function provideQoraCodeLenses(document) {
 
 function activate(context) {
   extRoot = context.extensionPath;   // used to locate the bundled per-platform binary
+  extContext = context;              // globalStorage/globalState for the Run provisioning
 
   context.subscriptions.push(
     vscode.languages.registerHoverProvider('qora', {
@@ -473,6 +707,7 @@ function activate(context) {
   context.subscriptions.push(statusBarItem);
 
   context.subscriptions.push(
+    vscode.commands.registerCommand('qora.run', runProgram),
     vscode.commands.registerCommand('qora.transpile', transpile),
     vscode.commands.registerCommand('qora.showStages', showStages),
     vscode.commands.registerCommand('qora.openExample', openExample),

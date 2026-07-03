@@ -13,5 +13,6 @@
   "walkthrough.step.transpile.title": "OpenQASM に変換",
   "walkthrough.step.transpile.description": "Qora ファイルを開いた状態で、同梱パーサーに送り、生成された OpenQASM を横のエディターで確認できます。\n[現在のファイルを変換](command:qora.transpile)",
   "walkthrough.step.stages.title": "コンパイルの流れを確認",
-  "walkthrough.step.stages.description": "同じソースが AST、QoraIR、逆 IR、OpenQASM へ進む様子を見ると、言語の流れをつかみやすくなります。\n[コンパイル段階を表示](command:qora.showStages)"
+  "walkthrough.step.stages.description": "同じソースが AST、QoraIR、逆 IR、OpenQASM へ進む様子を見ると、言語の流れをつかみやすくなります。\n[コンパイル段階を表示](command:qora.showStages)",
+  "command.run.title": "Qora: プログラムを実行"
 }

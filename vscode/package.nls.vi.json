@@ -13,5 +13,6 @@
   "walkthrough.step.transpile.title": "Chuyển đổi sang OpenQASM",
   "walkthrough.step.transpile.description": "Khi đang mở tệp Qora, gửi tệp qua parser đi kèm và mở OpenQASM được tạo ở bên cạnh mã nguồn.\n[Chuyển đổi tệp hiện tại](command:qora.transpile)",
   "walkthrough.step.stages.title": "Xem pipeline biên dịch",
-  "walkthrough.step.stages.description": "Theo dõi cùng một nguồn đi qua AST, QoraIR, IR đảo ngược và OpenQASM để luồng ngôn ngữ dễ hiểu hơn.\n[Hiển thị các giai đoạn](command:qora.showStages)"
+  "walkthrough.step.stages.description": "Theo dõi cùng một nguồn đi qua AST, QoraIR, IR đảo ngược và OpenQASM để luồng ngôn ngữ dễ hiểu hơn.\n[Hiển thị các giai đoạn](command:qora.showStages)",
+  "command.run.title": "Qora: Chạy chương trình"
 }

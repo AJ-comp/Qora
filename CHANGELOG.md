@@ -11,6 +11,35 @@ emitted as **OpenQASM 3.0**.
 > **Note:** Qora was renamed from **Ket** on 2026-07-01 (a "Ket" extension already existed). Versions
 > 0.1–0.7 below were authored under the old name.
 
+## 0.13 — 2026-07-03
+
+### Changed
+- **Bit comparisons emit bool literals**: `if (r == 1)` now compiles to `if (r_ == true)` (either
+  operand order, `!=` too, only for names known to be bits). Both spellings are valid OpenQASM 3,
+  but the dominant consumer — Qiskit's `qasm3` importer — accepts only the bool form; this makes
+  the core measure-then-branch teaching pattern actually load and run in Qiskit.
+
+### Added
+- **Full-language execution path, measured and shipped.** Amazon Braket's LOCAL simulator runs
+  Qora's complete output — `def` subroutines (synthesized `___adj` included), `int`/`const`,
+  `for` with variable indices, measure→`if`, even `while` — verified 8/8 with correct statistics
+  (`tools/braket_validation.py`, now release gate #2; whole-operation `Adjoint` provably returns
+  states to `|0…0⟩` on an external engine). New `tools/run_braket.py` runs any `.qor` end-to-end
+  (compile → Braket → measurement histogram); `tools/stdgates.inc` ships the canonical standard-
+  gate library Braket needs on disk. Requires Python 3.10–3.13 (the Braket SDK does not support
+  3.14 yet).
+- **`const` is now enforced as an immutable binding (QSEM024).** `const` may hold any value —
+  including a measurement result (`const r = M(q[0]);`, the Q#-`let` idiom) — but assigning to a
+  `const` name is a compile error with a fix-it hint (`var` for mutable values, `bit` for
+  re-measured results). Previously `const` was accepted but silently unenforced.
+- **`tools/qiskit_validation.py`** — release-gate script: compiles golden programs, verifies they
+  LOAD (`qiskit.qasm3.loads`) and RUN (Aer) with correct measured statistics (Bell entanglement,
+  deterministic flips, functor identities, reset, measure→if feedback). First measured run
+  (Qiskit 2.4 / qiskit-qasm3-import 0.6.0) also mapped the importer's gaps: `def` subroutines,
+  `int`/`const` declarations, variable qubit indices (`q[i]` in for), and `&&`/`||` are not
+  accepted — the planned fix is a flattening emission mode (inline defs + unroll literal loops +
+  constant-fold), feasible because Qora guarantees literal bounds and no recursion.
+
 ## 0.12 — 2026-07-03
 
 ### Added

@@ -17,6 +17,7 @@ extension gives `.qor` files syntax highlighting, hover docs, **live error diagn
 - **Getting Started walkthrough** — install the extension and follow the Qora guide from VS Code's Getting Started page
 - **Editor title actions** — open a `.qor` file and use the top-right buttons to transpile, inspect stages, or open an example
 - **Examples on demand** — run **`Qora: Open Example`** to open `demo.qor`, or **`Qora: New Bell Example`** to start from a scratch Bell circuit
+- **Run your program** — **`Qora: Run Program`** (or the ▶ CodeLens above `Main`) executes the file on a real quantum simulator (Amazon Braket local) and shows the measurement histogram. First run sets the simulator up automatically (one-time ~200 MB download into the extension's storage — you install nothing yourself).
 - **Transpile to OpenQASM** — run **`Qora: Transpile to OpenQASM`** from the Command Palette; the result opens beside your file
 - **Show compilation stages** — run **`Qora: Show Compilation Stages`** to see the pipeline live: AST → QoraIR → synthesized inverse IR (for `Adjoint`) → OpenQASM; refreshes on save
 - **Snippets** — `operation`, `main`, `use`, `measure`, `for`, `if`, `bell`
