@@ -2,6 +2,12 @@
 
 All notable changes to the Qora Language extension.
 
+## 0.7.1
+
+- Polished the Run setup experience: the one-time consent dialog now uses a proper title + detail
+  layout (what gets installed, where, how long), and the whole Run flow — dialog, progress steps,
+  errors — speaks your VS Code display language (English / 한국어 / 日本語 / Tiếng Việt).
+
 ## 0.7.0
 
 - **Run programs inside the editor**: new **`Qora: Run Program`** command (+ a ▶ CodeLens above

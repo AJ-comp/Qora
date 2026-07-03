@@ -187,6 +187,97 @@ let extContext;          // captured in activate() — globalStorage/globalState
 let runChannel;          // "Qora Run" output channel, created lazily
 let braketPythonCache;   // per-session: a python we already verified
 
+// Run-flow strings in the user's display language (native modals can't be styled, but they CAN be
+// structured — title + detail — and speak the user's language).
+const RUN_L10N = {
+  en: {
+    setupTitle: 'Set up the Qora simulator?',
+    setupDetail: 'One-time setup so ▶ Run works:\n\n'
+      + '  •  a private Python + the Braket quantum simulator (~200 MB)\n'
+      + '  •  installed only into this extension\'s own storage — nothing else on your system is touched\n'
+      + '  •  afterwards every run takes a few seconds, offline\n\n'
+      + 'Needs an internet connection (about 2–3 minutes).',
+    setupButton: 'Set up',
+    progressTitle: 'Qora: setting up the simulator (one-time)',
+    stepUv: 'fetching the installer…',
+    stepUnpack: 'unpacking…',
+    stepPython: 'installing Python 3.12…',
+    stepBraket: 'installing the Braket simulator (~200 MB, a few minutes)…',
+    stepVerify: 'verifying…',
+    setupFailed: (m) => `Qora: simulator setup failed — ${m}`,
+    running: (name) => `Qora: running ${name}…`,
+    runFailed: (m) => `Qora: run failed — ${m}`,
+    openFirst: 'Qora: open a .qor file first.',
+    cannotRun: (m) => `Qora: cannot run — ${m}`,
+  },
+  ko: {
+    setupTitle: 'Qora 시뮬레이터를 준비할까요?',
+    setupDetail: '▶ 실행을 위해 처음 한 번만 준비하면 돼요:\n\n'
+      + '  •  전용 Python + Braket 양자 시뮬레이터 (~200 MB)\n'
+      + '  •  확장 전용 폴더에만 설치돼요 — 시스템의 다른 곳은 건드리지 않아요\n'
+      + '  •  이후에는 인터넷 없이 몇 초 만에 실행돼요\n\n'
+      + '인터넷 연결이 필요해요 (약 2~3분).',
+    setupButton: '준비 시작',
+    progressTitle: 'Qora: 시뮬레이터 준비 중 (최초 1회)',
+    stepUv: '설치 도구 받는 중…',
+    stepUnpack: '압축 푸는 중…',
+    stepPython: 'Python 3.12 설치 중…',
+    stepBraket: 'Braket 시뮬레이터 설치 중 (~200 MB, 몇 분)…',
+    stepVerify: '확인 중…',
+    setupFailed: (m) => `Qora: 시뮬레이터 준비 실패 — ${m}`,
+    running: (name) => `Qora: ${name} 실행 중…`,
+    runFailed: (m) => `Qora: 실행 실패 — ${m}`,
+    openFirst: 'Qora: 먼저 .qor 파일을 열어주세요.',
+    cannotRun: (m) => `Qora: 실행할 수 없어요 — ${m}`,
+  },
+  ja: {
+    setupTitle: 'Qora シミュレータをセットアップしますか?',
+    setupDetail: '▶ 実行のための初回セットアップです:\n\n'
+      + '  •  専用 Python + Braket 量子シミュレータ (~200 MB)\n'
+      + '  •  この拡張機能専用のフォルダにのみインストールされます — システムの他の場所には触れません\n'
+      + '  •  以降はオフラインで数秒で実行できます\n\n'
+      + 'インターネット接続が必要です (約 2〜3 分)。',
+    setupButton: 'セットアップ',
+    progressTitle: 'Qora: シミュレータを準備中 (初回のみ)',
+    stepUv: 'インストーラを取得中…',
+    stepUnpack: '展開中…',
+    stepPython: 'Python 3.12 をインストール中…',
+    stepBraket: 'Braket シミュレータをインストール中 (~200 MB, 数分)…',
+    stepVerify: '確認中…',
+    setupFailed: (m) => `Qora: セットアップに失敗しました — ${m}`,
+    running: (name) => `Qora: ${name} を実行中…`,
+    runFailed: (m) => `Qora: 実行に失敗しました — ${m}`,
+    openFirst: 'Qora: まず .qor ファイルを開いてください。',
+    cannotRun: (m) => `Qora: 実行できません — ${m}`,
+  },
+  vi: {
+    setupTitle: 'Thiết lập trình mô phỏng Qora?',
+    setupDetail: 'Thiết lập một lần để ▶ Run hoạt động:\n\n'
+      + '  •  Python riêng + trình mô phỏng lượng tử Braket (~200 MB)\n'
+      + '  •  chỉ cài vào bộ nhớ riêng của tiện ích — không đụng đến phần còn lại của hệ thống\n'
+      + '  •  sau đó mỗi lần chạy chỉ mất vài giây, không cần mạng\n\n'
+      + 'Cần kết nối internet (khoảng 2–3 phút).',
+    setupButton: 'Thiết lập',
+    progressTitle: 'Qora: đang chuẩn bị trình mô phỏng (một lần)',
+    stepUv: 'đang tải trình cài đặt…',
+    stepUnpack: 'đang giải nén…',
+    stepPython: 'đang cài Python 3.12…',
+    stepBraket: 'đang cài trình mô phỏng Braket (~200 MB, vài phút)…',
+    stepVerify: 'đang kiểm tra…',
+    setupFailed: (m) => `Qora: thiết lập thất bại — ${m}`,
+    running: (name) => `Qora: đang chạy ${name}…`,
+    runFailed: (m) => `Qora: chạy thất bại — ${m}`,
+    openFirst: 'Qora: hãy mở một tệp .qor trước.',
+    cannotRun: (m) => `Qora: không thể chạy — ${m}`,
+  },
+};
+
+/** The Run-flow string table for VS Code's display language (falls back to English). */
+function runL10n() {
+  const lang = (vscode.env.language || 'en').split('-')[0];
+  return RUN_L10N[lang] || RUN_L10N.en;
+}
+
 function runnerDir() { return path.join(extRoot, 'runner'); }
 
 /** Spawn and collect output; resolves { code, stdout, stderr } and never rejects. */
@@ -273,7 +364,8 @@ async function provisionEnv(progress) {
     UV_CACHE_DIR: path.join(storage, 'uv-cache'),
   };
 
-  progress.report({ message: 'fetching uv…' });
+  const t = runL10n();
+  progress.report({ message: t.stepUv });
   let uv = 'uv';
   if ((await execP(uv, ['--version'])).code !== 0) {
     const uvDir = path.join(storage, 'uv');
@@ -285,7 +377,7 @@ async function provisionEnv(progress) {
       fs.mkdirSync(uvDir, { recursive: true });
       const archive = path.join(uvDir, asset);
       await download(`https://github.com/astral-sh/uv/releases/latest/download/${asset}`, archive);
-      progress.report({ message: 'unpacking uv…' });
+      progress.report({ message: t.stepUnpack });
       const un = asset.endsWith('.zip')
         ? await execP('powershell', ['-NoProfile', '-Command', `Expand-Archive -Force -LiteralPath "${archive}" -DestinationPath "${uvDir}"`])
         : await execP('tar', ['-xzf', archive, '-C', uvDir]);
@@ -301,15 +393,15 @@ async function provisionEnv(progress) {
   const python = path.join(envDir, process.platform === 'win32' ? 'Scripts' : 'bin',
     process.platform === 'win32' ? 'python.exe' : 'python');
 
-  progress.report({ message: 'installing Python 3.12…' });
+  progress.report({ message: t.stepPython });
   let r = await execP(uv, ['venv', envDir, '--python', '3.12'], { env: uvEnv });
   if (r.code !== 0) throw new Error(`Python install failed: ${(r.stderr || '').slice(-300)}`);
 
-  progress.report({ message: 'installing the Braket simulator (~200 MB, a few minutes)…' });
+  progress.report({ message: t.stepBraket });
   r = await execP(uv, ['pip', 'install', '--python', python, 'amazon-braket-sdk'], { env: uvEnv });
   if (r.code !== 0) throw new Error(`Braket SDK install failed: ${(r.stderr || '').slice(-300)}`);
 
-  progress.report({ message: 'verifying…' });
+  progress.report({ message: t.stepVerify });
   if (!(await pythonUsable(python))) throw new Error('the provisioned Python failed verification');
   return python;
 }
@@ -333,19 +425,21 @@ async function ensureBraketPython() {
     if (await pythonUsable(candidate)) return (braketPythonCache = candidate);
   }
 
+  const t = runL10n();
   const pick = await vscode.window.showInformationMessage(
-    'Running Qora programs needs a one-time setup: the extension will install a private Python + the Braket simulator (~200 MB) into its own storage. Nothing else on your system is touched.',
-    { modal: true }, 'Set up');
-  if (pick !== 'Set up') return null;
+    t.setupTitle,
+    { modal: true, detail: t.setupDetail },
+    t.setupButton);
+  if (pick !== t.setupButton) return null;
 
   try {
     const python = await vscode.window.withProgress(
-      { location: vscode.ProgressLocation.Notification, title: 'Qora: setting up the simulator (one-time)' },
+      { location: vscode.ProgressLocation.Notification, title: t.progressTitle },
       (progress) => provisionEnv(progress));
     await extContext.globalState.update('qora.braketPython', python);
     return (braketPythonCache = python);
   } catch (e) {
-    vscode.window.showErrorMessage(`Qora: simulator setup failed — ${e.message || e}`);
+    vscode.window.showErrorMessage(t.setupFailed(e.message || e));
     return null;
   }
 }
@@ -353,7 +447,7 @@ async function ensureBraketPython() {
 async function runProgram() {
   const editor = vscode.window.activeTextEditor;
   if (!editor || editor.document.languageId !== 'qora') {
-    vscode.window.showInformationMessage('Qora: open a .qor file first.');
+    vscode.window.showInformationMessage(runL10n().openFirst);
     return;
   }
   const document = editor.document;
@@ -362,7 +456,7 @@ async function runProgram() {
   if (error) { warnInfraOnce(error); return; }
   if (!result.success) {
     const first = (result.errors && result.errors[0] && result.errors[0].message) || 'parse failed';
-    vscode.window.showErrorMessage(`Qora: cannot run — ${first}`);
+    vscode.window.showErrorMessage(runL10n().cannotRun(first));
     return;
   }
 
@@ -372,7 +466,7 @@ async function runProgram() {
   const shots = vscode.workspace.getConfiguration('qora').get('shots', 1000);
   const name = path.basename(document.fileName);
   const reply = await vscode.window.withProgress(
-    { location: vscode.ProgressLocation.Window, title: `Qora: running ${name}…` },
+    { location: vscode.ProgressLocation.Window, title: runL10n().running(name) },
     () => execP(python, [path.join(runnerDir(), 'braket_run.py'), '--shots', String(shots)],
       { cwd: runnerDir() }, result.qasm));
 
@@ -380,7 +474,7 @@ async function runProgram() {
   try { parsed = JSON.parse(reply.stdout.trim().split('\n').pop()); }
   catch { parsed = { error: (reply.stderr || reply.stdout || 'no output from the runner').slice(0, 300) }; }
   if (parsed.error) {
-    vscode.window.showErrorMessage(`Qora: run failed — ${parsed.error}`);
+    vscode.window.showErrorMessage(runL10n().runFailed(parsed.error));
     return;
   }
   renderHistogram(name, parsed.counts, parsed.shots);
