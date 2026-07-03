@@ -1,5 +1,19 @@
 namespace Qora.Ir;
 
+/// <summary>The compiler's version, stamped into emitted QASM for provenance.</summary>
+public static class QoraVersion
+{
+    public const string Value = "0.12";
+}
+
+/// <summary>
+/// A half-open character span <c>[Start, End)</c> into the ENTRY source document — the offsets the
+/// editor contract (<c>errors[].start/end</c>) speaks. Null wherever a node has no location: nodes
+/// lowered from IMPORTED files (their offsets would lie about the entry document) and synthesized
+/// nodes (inverse bodies, uncompute injections).
+/// </summary>
+public readonly record struct QSpan(int Start, int End);
+
 /// <summary>
 /// Qora's own intermediate representation (IR): a strongly-typed, immutable tree that the compiler
 /// owns end-to-end, decoupled from the Janglim parse-AST. The pipeline is
@@ -19,23 +33,58 @@ namespace Qora.Ir;
 /// </list>
 /// </summary>
 /// <param name="Operations">The program's operations (global namespace, until resolution lands).</param>
-/// <param name="ModuleDecls">
-/// Module-system declarations found in the source (<c>import X;</c> / <c>namespace N { … }</c>),
-/// rendered as display strings. The grammar accepts them; until the resolver pass exists the validator
-/// gates them with an "in progress" error so nothing compiles silently wrong. Null/empty = none.
+/// <param name="Imports">
+/// The file's <c>import</c> declarations, in source order. <see cref="Passes.ModuleLoader"/> consumes them
+/// (loading each file and merging its operations/opens into this program); after expansion the merged
+/// program carries null here. Null/empty = none.
 /// </param>
-public sealed record QProgram(IReadOnlyList<QOperation> Operations, IReadOnlyList<string>? ModuleDecls = null);
+/// <param name="Opens">Per-namespace <c>open</c> directives (namespace name → opened namespaces).</param>
+public sealed record QProgram(
+    IReadOnlyList<QOperation> Operations,
+    IReadOnlyList<QImport>? Imports = null,
+    IReadOnlyDictionary<string, IReadOnlyList<QOpen>>? Opens = null);
 
-public sealed record QOperation(string Name, IReadOnlyList<QParam> Params, IReadOnlyList<QStmt> Body);
+/// <summary>One <c>open Target;</c> directive inside a namespace block.</summary>
+public sealed record QOpen(string Target, QSpan? Span = null);
+
+/// <summary>
+/// One <c>import</c> declaration. <see cref="IsPath"/> distinguishes the two surface forms:
+/// <c>import lib.gates;</c> (bare dotted name — dots map to directories, giving <c>lib/gates.qor</c>)
+/// vs <c>import "gates lib.qor";</c> (a literal relative path, for names an identifier can't spell).
+/// <see cref="Target"/> holds the name/path WITHOUT quotes.
+/// </summary>
+public sealed record QImport(string Target, bool IsPath)
+{
+    /// <summary>The declaration as the user wrote it (for error messages).</summary>
+    public string Display => IsPath ? $"\"{Target}\"" : Target;
+
+    public QSpan? Span { get; init; }
+}
+
+/// <param name="Namespace">The namespace the op was declared in ("" = global). After the resolver
+/// pass runs, <see cref="Name"/> is the FULLY-QUALIFIED name and this records the origin.</param>
+public sealed record QOperation(string Name, IReadOnlyList<QParam> Params, IReadOnlyList<QStmt> Body, string Namespace = "")
+{
+    /// <summary>Span of the operation's NAME token (op-level errors point here).</summary>
+    public QSpan? Span { get; init; }
+}
 
 public enum QType { Qubit, Int, Bit }
 
 /// <summary>A def parameter: a qubit, a sized qubit register (<see cref="RegisterSize"/> != null), or an int/bit.</summary>
-public sealed record QParam(string Name, QType Type, int? RegisterSize);
+public sealed record QParam(string Name, QType Type, int? RegisterSize)
+{
+    /// <summary>Span of the parameter's NAME token.</summary>
+    public QSpan? Span { get; init; }
+}
 
 // ---- statements ----
 
-public abstract record QStmt;
+public abstract record QStmt
+{
+    /// <summary>Span of the whole statement in the entry document (see <see cref="QSpan"/>).</summary>
+    public QSpan? Span { get; init; }
+}
 
 /// <summary><c>use q = Qubit[Size];</c></summary>
 public sealed record QUse(string Name, int Size) : QStmt;
@@ -162,6 +211,14 @@ public static class QoraGates
     /// (<c>bit r = M(q[i]);</c>); no alias is accepted.
     /// </summary>
     public const string Measurement = "M";
+
+    /// <summary>
+    /// The namespace the built-in gates live in, implicitly opened everywhere (Q#'s
+    /// <c>Microsoft.Quantum.Intrinsic</c> analogue). <c>Qora.Intrinsic.H(q)</c> names the built-in
+    /// explicitly — the escape hatch when a user operation shadows a gate name. Declaring this
+    /// namespace is an error; the resolver rewrites qualified intrinsic calls back to the bare name.
+    /// </summary>
+    public const string IntrinsicNamespace = "Qora.Intrinsic";
 
     /// <summary>
     /// Names that read as measurement attempts. NOT legal — used only to classify errors, so a user who

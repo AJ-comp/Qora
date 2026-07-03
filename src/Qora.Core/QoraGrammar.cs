@@ -6,7 +6,7 @@ using Janglim.FrontEnd.RegularGrammar;
 namespace Qora;
 
 /// <summary>
-/// Qora v0.11 — a Q#/C#-flavored quantum language on the Janglim engine.
+/// Qora v0.12 — a Q#/C#-flavored quantum language on the Janglim engine.
 ///
 ///   operation Bell(Qubit[2] q) {       // a subroutine, with C#-style parameters
 ///       H(q[0]);
@@ -31,11 +31,18 @@ namespace Qora;
 /// v0.10 added: whole-operation <c>Adjoint</c> (synthesized inverse defs, via the typed IR pipeline in
 /// <c>Ir/</c> with semantic validation QSEM001-015), unary minus in expressions, and zero-argument
 /// functor calls.
-/// v0.11 adds: hardened validation (argument kinds for built-ins, full user-op call signatures,
+/// v0.11 added: hardened validation (argument kinds for built-ins, full user-op call signatures,
 /// index bounds QSEM016, measure-into-bit QSEM017; QSEM013 relaxed so def-locals may shadow stdgates
 /// names), the module-system grammar (<c>import</c> / <c>namespace</c> / <c>open</c>, parsed and gated
 /// as in-progress — see docs/namespaces-design.md), and string literals (Janglim 0.3.0-preview.1's
-/// raw-regex StringLiteral token). Operations are still void (no return value yet).
+/// raw-regex StringLiteral token).
+/// v0.12 adds: the module system for real — namespaces/opens/qualified calls resolve
+/// (<c>Ir/Passes/Resolver.cs</c>, QSEM018/019/022), <c>import</c> loads files (<c>Ir/Passes/ModuleLoader.cs</c>,
+/// QSEM020/021, CLI <c>--base-dir</c>), and emission name-mangles every user name
+/// (<c>Ir/Passes/NameMangler.cs</c>: <c>q</c>→<c>q_</c>, <c>MyLib.Bell</c>→<c>MyLib__Bell_</c>).
+/// Built-in gate names relaxed Q#-style: a NAMESPACED op may reuse one (ambiguous use ⇒ QSEM018,
+/// qualify via <c>L.Rx</c> / <c>Qora.Intrinsic.Rx</c>); measurement family + pi/tau/euler + global
+/// gate-named ops stay reserved (QSEM013). Operations are still void (no return value yet).
 /// </summary>
 public class QoraGrammar : Grammar
 {
@@ -206,12 +213,13 @@ public class QoraGrammar : Grammar
         // A functor prefix (Adjoint / Controlled) applies to a single built-in gate:
         //   Adjoint S(q)      -> inv @ s q;
         //   Controlled X(c,t) -> ctrl @ x c, t;
-        gateStmt.AddItem(Ident + LParen + RParen + Semicolon, GateM);
-        gateStmt.AddItem(Ident + LParen + arg + (Comma + arg).ZeroOrMore() + RParen + Semicolon, GateM);
-        gateStmt.AddItem(Adjoint + Ident + LParen + RParen + Semicolon, GateM);
-        gateStmt.AddItem(Adjoint + Ident + LParen + arg + (Comma + arg).ZeroOrMore() + RParen + Semicolon, GateM);
-        gateStmt.AddItem(Controlled + Ident + LParen + RParen + Semicolon, GateM);
-        gateStmt.AddItem(Controlled + Ident + LParen + arg + (Comma + arg).ZeroOrMore() + RParen + Semicolon, GateM);
+        // call/gate names may be namespace-qualified (MyLib.Bell) — qname = Ident (Dot Ident)*
+        gateStmt.AddItem(qname + LParen + RParen + Semicolon, GateM);
+        gateStmt.AddItem(qname + LParen + arg + (Comma + arg).ZeroOrMore() + RParen + Semicolon, GateM);
+        gateStmt.AddItem(Adjoint + qname + LParen + RParen + Semicolon, GateM);
+        gateStmt.AddItem(Adjoint + qname + LParen + arg + (Comma + arg).ZeroOrMore() + RParen + Semicolon, GateM);
+        gateStmt.AddItem(Controlled + qname + LParen + RParen + Semicolon, GateM);
+        gateStmt.AddItem(Controlled + qname + LParen + arg + (Comma + arg).ZeroOrMore() + RParen + Semicolon, GateM);
         arg.AddItem(qubitRef | expr);   // q[0] (qubit)  |  an expression: q (register) / 5 / pi/2 / 0.5
 
         // const i = expr;   /   const int i = expr;

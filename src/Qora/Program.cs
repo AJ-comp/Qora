@@ -16,14 +16,28 @@ if (args.Contains("--json"))
     {
         Console.OutputEncoding = Encoding.UTF8;
 
+        // `--base-dir <dir>` supplies the import-resolution root for stdin input (the extension's
+        // live-diagnostics path). Its VALUE must not be mistaken for the source-file argument, so pull
+        // the pair out before finding the first non-flag argument.
+        string? baseDir = null;
+        var positional = new List<string>();
+        for (var i = 0; i < args.Length; i++)
+        {
+            if (args[i] == "--base-dir" && i + 1 < args.Length) baseDir = args[++i];
+            else positional.Add(args[i]);
+        }
+
         // The first non-flag argument, if any, is a source file; otherwise read the whole of stdin.
         // Read stdin through an explicit UTF-8 reader so non-ASCII source (e.g. Korean comments) survives
         // the pipe regardless of the console's default input encoding.
-        var path = args.FirstOrDefault(a => !a.StartsWith("--"));
+        var path = positional.FirstOrDefault(a => !a.StartsWith("--"));
         string source;
+        string? sourcePath = null;
         if (path is not null)
         {
-            source = File.ReadAllText(path);
+            sourcePath = Path.GetFullPath(path);
+            source = File.ReadAllText(sourcePath);
+            baseDir ??= Path.GetDirectoryName(sourcePath); // a file's imports resolve next to it
         }
         else
         {
@@ -31,7 +45,7 @@ if (args.Contains("--json"))
             source = stdin.ReadToEnd();
         }
 
-        var r = QoraParser.Parse(source);
+        var r = QoraParser.Parse(source, baseDir, sourcePath);
         if (args.Contains("--stages"))
         {
             // stage texts are present even when semantic errors block emission (qasm is empty then):
@@ -93,7 +107,7 @@ const string sample = """
 
 var result = QoraParser.Parse(sample);
 
-Console.WriteLine("=== Qora v0.11 (console) ===\n");
+Console.WriteLine($"=== Qora v{Qora.Ir.QoraVersion.Value} (console) ===\n");
 Console.WriteLine($"parse: {(result.Success ? "ACCEPTED" : "REJECTED")}\n");
 
 if (result.Success)

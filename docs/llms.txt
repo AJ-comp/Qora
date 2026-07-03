@@ -1,0 +1,179 @@
+# Qora v0.12 — complete language reference for AI assistants
+
+Qora is a quantum programming language (Q#/C#-flavored syntax) that compiles to OpenQASM 3.
+File extension: `.qor`. This file is the full, authoritative surface spec: everything below is
+implemented and everything not mentioned does not exist. When generating Qora code, use ONLY the
+constructs listed here.
+
+Docs: https://aj-comp.github.io/Qora/  ·  Repo: https://github.com/AJ-comp/Qora
+VS Code extension: `qora-lang.qora-language` (bundles the compiler; errors as you type).
+
+## Compilation model
+
+- One entry file compiles to one OpenQASM 3 program: `qora --json main.qor`.
+  No project files. `import` statements load other files (transitively, relative to the importing
+  file). Everything merges into one program before name resolution.
+- The operation named `Main` (in the global namespace) is the entry point: its body becomes the
+  QASM top level. Every other operation becomes a `def`. If no `Main` exists, the first operation
+  is the entry.
+- Compilation is all-or-nothing: ANY semantic error (codes below) blocks emission and reports every
+  violation at once, each with a source span.
+- In the emitted QASM every user-defined name gets a trailing `_` (`q` -> `q_`, `Bell` -> `Bell_`,
+  `MyLib.Bell` -> `MyLib__Bell_`). This is name mangling for collision safety; do not be surprised
+  by it and do not imitate it in source code.
+
+## Program structure
+
+```qora
+import gates_lib;               // loads gates_lib.qor next to this file
+import lib.gates;               // dots map to directories: lib/gates.qor
+import "a b.qor";               // literal relative path form
+
+namespace MyLib {               // optional; may be dotted (namespace A.B { })
+    open OtherLib;              // unqualified access to OtherLib's operations (namespace-scope only)
+    operation Bell(Qubit[2] q) {
+        H(q[0]);
+        CNOT(q[0], q[1]);
+    }
+}
+
+operation Main() {              // global namespace; the entry point; takes NO parameters
+    use q = Qubit[2];           // qubit allocation: ONLY in the entry op, top level only
+    MyLib.Bell(q);              // qualified call
+    bit r = M(q[0]);            // measurement (the only way to get a bit)
+    if (r == 1) { X(q[1]); }
+}
+```
+
+## Types and declarations
+
+- `Qubit` (single qubit), `Qubit[N]` (register, N a literal integer) — parameter types only.
+- `int`, `bit` — classical. `bit` values come ONLY from measurement.
+- `use name = Qubit[N];` — allocate a register. Entry operation only, not inside loops/branches.
+- `const int n = expr;` / `const n = expr;` — constant. `var n = expr;` / `int n = expr;` — variable.
+- `bit r = M(q[i]);` — measure qubit i into a fresh bit. `r = M(q[i]);` re-measures.
+  M() is legal ONLY as the whole right-hand side of a declaration/assignment. Never in conditions,
+  arguments, or arithmetic (measure into a bit first).
+- No return values (operations are void). No calls in expressions. No arrays other than qubit
+  registers. Loop bounds and register sizes must be literal numbers.
+
+## Statements
+
+- Gate/operation call: `Name(args);` — qubits as `q` (whole register) or `q[i]`.
+- `if (cond) { } else { }` (else-if allowed). Conditions: == != < <= > >= && || ! over bits/ints.
+- `for i in 0..3 { }` — inclusive range, literal bounds.
+- `while (cond) { }` · `repeat { } until (cond);`
+- Comments: `//` to end of line. (No block comments.)
+
+## Built-in gates (complete list; case-sensitive)
+
+- 1-qubit: `H X Y Z S T` — e.g. `H(q[0]);`
+- 2-qubit: `CNOT CX CY CZ SWAP` — e.g. `CNOT(q[0], q[1]);` (CNOT and CX are the same gate)
+- 3-qubit: `CCX`
+- Rotations (ANGLE FIRST): `Rx Ry Rz` — e.g. `Rx(pi/2, q[0]);` Constants: `pi`, `tau`, `euler`.
+- Reset: `Reset(q[0]);` `ResetAll(q);` — statements, not gates: no functors on them.
+- Measurement: `M(q[i])` in the assignment forms above. `Measure`/`measure` are NOT valid.
+
+## Functors
+
+- `Adjoint G(args);` — inverse. On a built-in gate -> `inv @`. On a USER operation the compiler
+  SYNTHESIZES the inverse def transitively (gates reversed and inverted, for-loops run backwards,
+  if-bodies inverted, nested calls handled). Fails (QSEM001) if the target measures or resets.
+- `Controlled G(ctrl, ...args);` — adds a control qubit (FIRST argument). Built-in gates only,
+  never on user operations (QSEM002).
+
+## Name resolution (C#/Q# rules)
+
+For an unqualified call inside namespace NS, in order:
+1. NS's own operations; 2. the global namespace; 3. the `open`ed namespaces — exactly one match
+wins, two+ is error QSEM018 (qualify to fix), zero falls through to QSEM007.
+- Qualified names (`MyLib.Bell`) resolve directly. `open` is NOT transitive and does NOT load
+  files (import does). Namespaces merge across files; the same operation name twice in one
+  namespace is QSEM022 (in the global namespace, QSEM008).
+- Built-in gates live in the implicit namespace `Qora.Intrinsic` (always open). A NAMESPACED
+  operation may reuse a gate name (`namespace L { operation Rx ... }`); an unqualified use that
+  could mean both is QSEM018 — write `L.Rx(...)` or `Qora.Intrinsic.Rx(...)`. Global operations
+  may NOT take gate names (QSEM013). Reserved everywhere: `M`, `Measure`, `measure`, `pi`, `tau`,
+  `euler`, and declaring namespace `Qora.Intrinsic`.
+
+## Error codes (collect-all; every error carries a source span)
+
+QSEM001 Adjoint target not invertible (measures/resets, reason chained through calls)
+QSEM002 Controlled on a user operation        QSEM003 functor on Reset/ResetAll
+QSEM004 bare measurement statement            QSEM005 call inside an expression/condition/argument
+QSEM006 wrong argument count/kind/register-size for a call
+QSEM007 unknown gate/operation name           QSEM008 duplicate global operation name
+QSEM009 calling the entry operation           QSEM010 entry operation has parameters
+QSEM011 recursive operation calls             QSEM012 `use` outside entry op / inside loop/branch
+QSEM013 name shadows a built-in where qualification cannot disambiguate
+QSEM014 same qubit (or overlapping register/element) twice in one gate
+QSEM015 duplicate declared names in one operation
+QSEM016 literal qubit index out of range / indexing a single qubit
+QSEM017 measurement assigned to a non-bit     QSEM018 ambiguous unqualified name (candidates listed)
+QSEM019 unknown namespace/member in qualified name or `open`
+QSEM020 import file not found/unreadable/no file context
+QSEM021 import cycle (chain shown)            QSEM022 duplicate operation name within one namespace
+QSEM023 names that would collide in the emitted program (e.g. `A.F` vs `A__F`; entry local vs def)
+
+## CLI contract (for tooling/agents)
+
+```
+qora --json [file] [--stages] [--base-dir <dir>]
+```
+- Source from `file` or stdin (UTF-8). Imports resolve next to `file`, or against `--base-dir`
+  for stdin. Reply: ONE line of JSON:
+  `{"success":bool,"qasm":"...","errors":[{"message","code","start","end"}]}`
+  `start`/`end` are half-open character offsets into the entry document (-1 = no location).
+- `--stages` adds `"ast"`, `"ir"`, `"irInverse"` (pipeline snapshots; original names, unmangled).
+- Emitted QASM starts with `// generated by Qora v0.12`.
+
+## Complete examples
+
+Bell + measurement (minimal program):
+```qora
+operation Main() {
+    use q = Qubit[2];
+    H(q[0]);
+    CNOT(q[0], q[1]);
+    bit r0 = M(q[0]);
+    bit r1 = M(q[1]);
+}
+```
+
+Inverse synthesis (the flagship):
+```qora
+operation Prep(Qubit[2] q) {
+    H(q[0]);
+    T(q[1]);
+    for i in 0..1 { X(q[i]); }
+}
+operation Main() {
+    use q = Qubit[2];
+    Prep(q);
+    Adjoint Prep(q);      // compiler synthesizes Prep's inverse def
+}
+```
+
+Multi-file (lib.qor + main.qor):
+```qora
+// lib.qor
+namespace Lib {
+    operation Flip(Qubit q) { X(q); }
+}
+// main.qor
+import lib;
+operation Main() {
+    use q = Qubit[1];
+    Lib.Flip(q[0]);
+}
+```
+
+## Common mistakes to avoid
+
+- `use` inside a non-entry operation or inside a loop/branch (QSEM012) — allocate in Main, pass
+  qubits as parameters.
+- `if (M(q[0]) == 1)` (QSEM005) — measure into a bit first, then test the bit.
+- `Rx(q[0], pi/2)` (QSEM006) — rotations take the ANGLE first.
+- `qubit` lowercase as a type — the keyword is `Qubit` (capital Q).
+- Calling `Main` (QSEM009), giving `Main` parameters (QSEM010), recursion (QSEM011).
+- Expecting `open` to load a file — only `import` loads; `open` shortens names.

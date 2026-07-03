@@ -2,6 +2,24 @@
 
 All notable changes to the Qora Language extension.
 
+## 0.6.0
+
+- **Precise error squiggles**: every semantic error (QSEM001-023) now underlines the exact offending
+  statement or name instead of the whole document — wrong call, out-of-range index, duplicate
+  parameter, failing `import`/`open` line, and so on.
+- Bundles the **Qora v0.12** compiler: the full module system - `namespace` / `open` / qualified calls
+  (`MyLib.Bell(q)`) resolve for real (C#/Q#-style rules; ambiguity and unknown-name errors
+  QSEM018/019/022/023), and `import` loads real files: `import gates_lib;` reads `gates_lib.qor` next to
+  the importing file, `import lib.gates;` maps dots to directories, `import "a b.qor";` takes a
+  literal path. Missing files are QSEM020; import cycles are QSEM021 with the full chain shown.
+- The extension now passes the document's directory to the compiler (`--base-dir`), so imports
+  resolve live while you type - including in unsaved buffers. Untitled documents report a clear
+  error on `import`.
+- Emitted OpenQASM now name-mangles every user-defined name with a trailing `_` (namespaces flatten
+  as `MyLib.Bell` -> `MyLib__Bell_`), making collisions with OpenQASM keywords and stdgates names
+  structurally impossible - declarations like `bit s = M(q[0]);` now compile. The stages panel keeps
+  showing your original names; only the QASM output shows the mangled ones.
+
 ## 0.5.5
 
 - Added a Qora status bar item for the active `.qor` file: checking, OK, parse-error count, or parser

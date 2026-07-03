@@ -16,12 +16,20 @@ public static class QoraLowering
     private static readonly HashSet<string> TypeKeywords = new() { "int", "bit" };
     private static readonly HashSet<string> FunctorNames = new() { "Adjoint", "Controlled" };
 
-    public static QProgram? Lower(AstSymbol? ast)
+    // Spans are meaningful only for the ENTRY document (the editor contract's offsets). Imported files
+    // lower spanless (withSpans: false) so their nodes can never masquerade as entry-document
+    // locations. Thread-static instead of a parameter: it spares every helper below a threading
+    // argument, and Lower() is a synchronous single call per thread.
+    [ThreadStatic] private static bool _noSpans;
+
+    public static QProgram? Lower(AstSymbol? ast, bool withSpans = true)
     {
+        _noSpans = !withSpans;
         if (ast is not AstNonTerminal program) return null;
 
         var operations = new List<QOperation>();
-        var moduleDecls = new List<string>();
+        var imports = new List<QImport>();
+        var opens = new Dictionary<string, IReadOnlyList<QOpen>>();
         foreach (var item in program.Items.OfType<AstNonTerminal>())
         {
             switch (item.Name)
@@ -29,19 +37,55 @@ public static class QoraLowering
                 case "Operation":
                     operations.Add(LowerOperation(item));
                     break;
-                // module system (in progress): surface the declarations so the validator can gate them
-                // with a clear message instead of silently dropping namespaced code.
+                // import lib.gates;  (bare dotted name)  /  import "path.qor";  (string path — the
+                // StringLit token keeps its quotes, which is how the two forms are told apart here).
                 case "Import":
-                    moduleDecls.Add($"import {QnameText(item)}");
+                    var target = QnameText(item);
+                    imports.Add((target.StartsWith('"')
+                        ? new QImport(target.Trim('"'), IsPath: true)
+                        : new QImport(target, IsPath: false)) with { Span = SpanOf(item) });
                     break;
+                // namespace blocks lower for real: ops carry their namespace, opens are recorded
+                // per namespace (merged across blocks of the same name) for the resolver pass.
                 case "Namespace":
-                    moduleDecls.Add($"namespace {QnameText(item)}");
+                    var nsName = QnameText(item);
+                    var nsOpens = opens.TryGetValue(nsName, out var prev) ? new List<QOpen>(prev) : new List<QOpen>();
+                    foreach (var nested in item.Items.OfType<AstNonTerminal>())
+                    {
+                        if (nested.Name == "Operation")
+                            operations.Add(LowerOperation(nested) with { Namespace = nsName });
+                        else if (nested.Name == "Open")
+                            nsOpens.Add(new QOpen(QnameText(nested), SpanOf(nested)));
+                    }
+                    opens[nsName] = nsOpens;
                     break;
             }
         }
 
-        return new QProgram(operations, moduleDecls.Count > 0 ? moduleDecls : null);
+        return new QProgram(
+            operations,
+            imports.Count > 0 ? imports : null,
+            opens.Count > 0 ? opens : null);
     }
+
+    /// <summary>
+    /// Span of a whole AST node: first to last token, half-open. Prefers the node's connected PARSE
+    /// tree — the AST drops non-meaning tokens (<c>;</c>, parens), so AST tokens alone would end a
+    /// statement's squiggle at its last identifier instead of covering the full statement.
+    /// </summary>
+    private static QSpan? SpanOf(AstNonTerminal node)
+    {
+        if (_noSpans) return null;
+        var tokens = (node.ConnectedParseTree?.AllTokens ?? node.AllTokens)
+            .Where(t => t.StartIndex >= 0).ToList();
+        if (tokens.Count == 0) return null;
+        return new QSpan(tokens[0].StartIndex, tokens[^1].EndIndex + 1);
+    }
+
+    private static QSpan? SpanOf(AstTerminal? terminal) =>
+        _noSpans || terminal is null || terminal.Token.StartIndex < 0
+            ? null
+            : new QSpan(terminal.Token.StartIndex, terminal.Token.EndIndex + 1);
 
     /// <summary>The leading dotted name of an Import/Namespace node (its terminals up to the first block content).</summary>
     private static string QnameText(AstNonTerminal node) =>
@@ -51,9 +95,12 @@ public static class QoraLowering
     {
         var name = OpName(op);
         var ps = Params(op).Select(LowerParam).ToList();
-        var body = Body(op).Select(LowerStmt).ToList();
-        return new QOperation(name, ps, body);
+        var body = Body(op).Select(LowerSpanned).ToList();
+        return new QOperation(name, ps, body) { Span = SpanOf(op.Items.OfType<AstTerminal>().FirstOrDefault()) };
     }
+
+    /// <summary>Every statement gets its source span here, in ONE place, whatever its kind.</summary>
+    private static QStmt LowerSpanned(AstNonTerminal node) => LowerStmt(node) with { Span = SpanOf(node) };
 
     // Qubit q / Qubit[2] q / int n / bit b  (mirrors the old EmitParam token inspection).
     private static QParam LowerParam(AstNonTerminal param)
@@ -62,11 +109,12 @@ public static class QoraLowering
         var name = terms.FirstOrDefault(t => !TypeKeywords.Contains(t) && !IsNumber(t)) ?? string.Empty;
         var typeKw = terms.FirstOrDefault(t => TypeKeywords.Contains(t));
         var size = terms.FirstOrDefault(IsNumber);
+        var span = SpanOf(param.Items.OfType<AstTerminal>().FirstOrDefault(t => (t.ToString() ?? "") == name));
 
-        if (typeKw == "int") return new QParam(name, QType.Int, null);
-        if (typeKw == "bit") return new QParam(name, QType.Bit, null);
-        if (size is not null) return new QParam(name, QType.Qubit, int.Parse(size));
-        return new QParam(name, QType.Qubit, null);
+        if (typeKw == "int") return new QParam(name, QType.Int, null) { Span = span };
+        if (typeKw == "bit") return new QParam(name, QType.Bit, null) { Span = span };
+        if (size is not null) return new QParam(name, QType.Qubit, int.Parse(size)) { Span = span };
+        return new QParam(name, QType.Qubit, null) { Span = span };
     }
 
     private static QStmt LowerStmt(AstNonTerminal node) => node.Name switch
@@ -78,8 +126,8 @@ public static class QoraLowering
         "Assign" => new QAssign(FirstIdent(node), LowerExpr(ExprOf(node))),
         "If" => LowerIf(node),
         "For" => LowerFor(node),
-        "While" => new QWhile(LowerCondition(CondOf(node)), BodyStmts(node).Select(LowerStmt).ToList()),
-        "Repeat" => new QRepeat(BodyStmts(node).Select(LowerStmt).ToList(), LowerCondition(CondOf(node))),
+        "While" => new QWhile(LowerCondition(CondOf(node)), BodyStmts(node).Select(LowerSpanned).ToList()),
+        "Repeat" => new QRepeat(BodyStmts(node).Select(LowerSpanned).ToList(), LowerCondition(CondOf(node))),
         _ => new QGate(new List<string>(), node.Name, new List<QArg>()), // defensive: unknown node -> inert
     };
 
@@ -92,8 +140,18 @@ public static class QoraLowering
         var start = 0;
         if (FunctorNames.Contains(head)) { functors.Add(head); start = 1; }
 
+        // the callee may be namespace-qualified: consume Ident (Dot Ident)* into one dotted name.
         var name = items.Count > start ? items[start].ToString() ?? string.Empty : string.Empty;
-        var args = items.Skip(start + 1).Select(LowerArg).ToList();
+        var idx = start + 1;
+        while (idx + 1 < items.Count
+               && items[idx] is AstTerminal dot && (dot.ToString() ?? "") == "."
+               && items[idx + 1] is AstTerminal seg)
+        {
+            name += "." + seg;
+            idx += 2;
+        }
+
+        var args = items.Skip(idx).Select(LowerArg).ToList();
         return new QGate(functors, name, args);
     }
 
@@ -133,7 +191,7 @@ public static class QoraLowering
         for (int k = 0; k < items.Count; k++)
         {
             if (items[k] is not AstNonTerminal nt || nt.Name == "Condition") continue;
-            (elseIdx < 0 || k < elseIdx ? thenStmts : elseStmts).Add(LowerStmt(nt));
+            (elseIdx < 0 || k < elseIdx ? thenStmts : elseStmts).Add(LowerSpanned(nt));
         }
 
         return new QIf(LowerCondition(CondOf(node)), thenStmts, elseStmts);
@@ -142,7 +200,7 @@ public static class QoraLowering
     private static QFor LowerFor(AstNonTerminal node)
     {
         var f = node.Items.OfType<AstTerminal>().Select(t => t.ToString() ?? string.Empty).ToList();
-        return new QFor(At(f, 0), At(f, 1), At(f, 2), BodyStmts(node).Select(LowerStmt).ToList());
+        return new QFor(At(f, 0), At(f, 1), At(f, 2), BodyStmts(node).Select(LowerSpanned).ToList());
     }
 
     // A decl/assign RHS. The only legal call form is a LONE call to the registered measurement

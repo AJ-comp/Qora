@@ -58,16 +58,26 @@ error). `open` is NOT transitive: what A opens is invisible to files that open A
 Ambiguity error message shape (teaching-first):
 `` `H` is ambiguous here: it could be `MyLib.H` or `YourLib.H` — qualify the call (e.g. `MyLib.H(q)`) ``
 
-## Built-in gates (v1 decision)
+## Built-in gates (Q#-style relaxation — SHIPPED, replaces the v1 reservation)
 
-Built-in gate/measurement names (`QoraGates`) stay **reserved** — QSEM013's "an operation may not
-shadow a built-in" rule is kept even inside namespaces. Consequences:
+The built-ins live in the implicit **`Qora.Intrinsic`** namespace (Q#'s
+`Microsoft.Quantum.Intrinsic` analogue), open everywhere. The rule is "declaration allowed,
+ambiguous use is an error" — silent reinterpretation stays impossible:
 
-- The "local namespace wins" rule can never silently override `H`/`Rx`/`M` — what the book teaches is
-  what every program means. Ambiguity handling therefore only ever applies to user-vs-user collisions.
-- Revisit after the resolution machinery has settled: the Q#-style relaxation ("declaration allowed,
-  ambiguous use is an error") is compatible with this design and can be turned on later without
-  breaking programs.
+- A **namespaced** operation MAY take a gate name (`namespace L { operation Rx … }`); call it
+  qualified (`L.Rx(q)`).
+- An **unqualified** use that could mean both a user op and the built-in (own namespace or an `open`
+  provides the name) is **QSEM018** — the message lists the user candidate(s) and the built-in, and
+  shows both qualifications (`L.Rx(...)` / `Qora.Intrinsic.Rx(...)`). The "local namespace wins" rule
+  applies to user-vs-user names only; it never silently overrides a gate.
+- With **no user candidate in scope**, the bare gate name is the built-in — what the book teaches is
+  what the program means.
+- Still fully reserved (QSEM013): the measurement family (`M`/`Measure`/`measure`) and
+  `pi`/`tau`/`euler` (expression-position tokens the resolver never sees), gate names for **global**
+  operations (the global namespace shares one scope with the built-ins and has no qualifier), and
+  declaring `Qora.Intrinsic` itself.
+- `open Qora.Intrinsic;` is legal and a no-op (it is already open); `Qora.Intrinsic.H(q)` resolves to
+  the bare built-in and emits `h q;`.
 
 ## Lowering to OpenQASM (no module system there)
 
@@ -98,6 +108,7 @@ New semantic codes:
 | QSEM020 | import file not found / unreadable |
 | QSEM021 | cyclic imports |
 | QSEM022 | duplicate operation name within one namespace (QSEM008 becomes per-namespace) |
+| QSEM023 | names that would collide in the EMITTED program: two op names meeting at one mangled def name (`A.F` vs `A__F` → `A__F_`); an entry-op declaration landing on a def name (entry locals are QASM top-level globals); a def-local shadowing an operation that def calls |
 
 ## Tooling contract changes
 
@@ -109,9 +120,29 @@ New semantic codes:
 
 ## Increments
 
-1. **Grammar + IR**: `namespace`/`open`/`import` statements, dotted qualified names; IR nodes carry the
+1. **Grammar + IR** — DONE: `namespace`/`open`/`import` statements, dotted qualified names; IR nodes carry the
    namespace; no resolution yet (single file, single namespace still works).
-2. **Resolver pass** (single file, multiple namespaces): symbol table, the resolution algorithm above,
-   QSEM018/019/022.
-3. **Multi-file**: import loading, cycle detection (QSEM020/021), CLI/extension `--base-dir`.
-4. **Mangled emission** + stages/docs updates; adversarial review of the whole feature.
+2. **Resolver pass** — DONE (single file, multiple namespaces): `Resolver.cs` builds the symbol table,
+   runs the resolution algorithm above, and rewrites every op/callee name to its FQN; QSEM018 (ambiguous),
+   QSEM019 (unknown namespace/member — including `open` of a nonexistent namespace), QSEM022 (duplicate
+   within one namespace; global duplicates stay QSEM008). Pipeline: Lower → Resolve → Validate → Mangle →
+   Emit; resolver errors preempt validation. `NameMangler` encodes FQN dots as `__` (`MyLib.Bell` →
+   `MyLib__Bell_`); stages (`ast`/`ir`/`irInverse`) show original/FQN names, only QASM shows mangled ones.
+   `import` remains QSEM099-gated until increment 3.
+3. **Multi-file** — DONE: `ModuleLoader.cs` expands the import graph into one merged program before
+   resolution. `import gates_lib;` → `gates_lib.qor` next to the importing file, `import lib.gates;` →
+   `lib/gates.qor`, `import "a b.qor";` → literal path. Transitive with diamond-sharing (canonicalized,
+   case-insensitive paths load once); QSEM020 missing/unreadable file, QSEM021 cycle (chain shown);
+   parse errors in an imported file surface with the file name prefixed, span -1. CLI: entry-file
+   imports resolve next to the file; stdin takes `--base-dir` (extension passes the document's dir —
+   imports resolve live in unsaved buffers). No file context ⇒ clear QSEM020 (playground stays
+   single-file). Merged order keeps the entry file's ops first, so the entry-op rule is unchanged;
+   namespaces merge across files, opens union per namespace.
+4. **Mangled emission + docs + adversarial review** — DONE. README×3 and the adjoint-pipeline doc×3
+   now show real mangled output plus a namespaces/import tour section. The adversarial review found and
+   fixed three real bugs: (1) dot→`__` broke mangling injectivity — `A.F` vs `A__F` silently emitted
+   two `def A__F_`s, now QSEM023; (2) an entry-op local named like an operation emitted a top-level
+   global colliding with the def (`qubit[2] Bell_;` vs `def Bell_`), now QSEM023 (def-locals only
+   error when they shadow an op that def CALLS — plain shadowing stays legal, matching the QSEM013
+   relaxation philosophy); (3) `open` of a declared-but-empty namespace was a false QSEM019 — the
+   known-namespace set now includes every declared block, not just ones containing ops.

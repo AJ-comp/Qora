@@ -6,6 +6,7 @@ using Janglim.FrontEnd.Parsers.LR;
 using Janglim.FrontEnd.ParseTree;
 using Janglim.FrontEnd.Tokenize;
 using Qora.Ir;
+using Qora.Ir.Passes;
 
 namespace Qora;
 
@@ -49,7 +50,13 @@ public sealed class QoraParseResult
 /// </summary>
 public static class QoraParser
 {
-    public static QoraParseResult Parse(string source)
+    /// <summary>Single-file mode: no import resolution (an <c>import</c> reports QSEM020).</summary>
+    public static QoraParseResult Parse(string source) => Parse(source, baseDir: null);
+
+    /// <param name="baseDir">Directory the entry file's imports resolve against (null = single-file mode).</param>
+    /// <param name="sourcePath">The entry file's own path when known — lets the loader catch an import
+    /// cycle that leads back to the entry file itself.</param>
+    public static QoraParseResult Parse(string source, string? baseDir, string? sourcePath = null)
     {
         source ??= string.Empty;
 
@@ -71,7 +78,31 @@ public static class QoraParser
         // emission: an invalid program reports every violation and produces no QASM, so the emitter only
         // ever runs on validated IR.
         var ir = ast != null ? QoraLowering.Lower(ast) : null;
-        var semanticErrors = QoraValidator.Validate(ir);
+        // Import expansion first (the merged program is what everything downstream sees), then
+        // resolution (names become fully-qualified). Each step's errors preempt the next: a partially
+        // loaded or partially resolved program would only add unknown-name noise on top.
+        Ir.QProgram? expanded = null;
+        Ir.QProgram? resolved = null;
+        List<QoraError> semanticErrors;
+        if (ir != null)
+        {
+            var (merged, importErrors) = ModuleLoader.Expand(ir, baseDir, sourcePath);
+            expanded = merged;
+            if (importErrors.Count > 0)
+            {
+                semanticErrors = importErrors;
+            }
+            else
+            {
+                var (res, resolveErrors) = Resolver.Resolve(merged);
+                resolved = res;
+                semanticErrors = resolveErrors.Count > 0 ? resolveErrors : QoraValidator.Validate(res);
+            }
+        }
+        else
+        {
+            semanticErrors = new List<QoraError>();
+        }
 
         return new QoraParseResult
         {
@@ -83,12 +114,34 @@ public static class QoraParser
             Tree = tree,
             Ast = ast,
             AstText = ast?.ToTreeString() ?? string.Empty,
-            Ir = ir,
-            Qasm = ir != null && semanticErrors.Count == 0 ? QasmEmitter.Emit(ir) : string.Empty,
+            Ir = resolved ?? expanded ?? ir,
+            // emission runs on the MANGLED program (every user name gets `_` — see NameMangler);
+            // everything user-facing before this point (errors, ast/ir stages) keeps original names.
+            Qasm = resolved != null && semanticErrors.Count == 0 ? QasmEmitter.Emit(NameMangler.Mangle(resolved)) : string.Empty,
             Errors = !result.Success
                 ? result.AllErrors.Select(ToQoraError).ToList()
                 : semanticErrors,
         };
+    }
+
+    /// <summary>
+    /// The lean front end for IMPORTED files (<see cref="ModuleLoader"/>): source → lowered IR, no
+    /// tokens/trees/stages. Parse errors come back positioned in THAT file's offsets — the caller
+    /// re-labels them, since spans in the JSON contract refer to the entry document only.
+    /// </summary>
+    internal static (Ir.QProgram? Program, List<QoraError> ParseErrors) ParseToIr(string source)
+    {
+        var grammar = new QoraGrammar();
+        var lexer = new Lexer();
+        foreach (var terminal in grammar.TerminalSet) lexer.AddTokenRule(terminal);
+
+        var tokens = lexer.Lexing(source ?? string.Empty).TokensForParsing;
+        var result = new LALRParser(grammar, bLogging: false).Parsing(tokens);
+        if (!result.Success) return (null, result.AllErrors.Select(ToQoraError).ToList());
+
+        var ast = result.Count > 0 ? result.AstRoot : null;
+        // spanless: these nodes belong to ANOTHER document, so entry-document offsets would lie.
+        return (ast != null ? QoraLowering.Lower(ast, withSpans: false) : null, new List<QoraError>());
     }
 
     /// <summary>Map an engine <see cref="ParsingErrorInfo"/> to a positioned <see cref="QoraError"/>.</summary>

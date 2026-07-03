@@ -160,6 +160,17 @@ function runQora(text, extraArgs = []) {
   });
 }
 
+/**
+ * Per-document CLI args: the source travels on stdin (so unsaved edits are analyzed live), which
+ * loses the file's location — `--base-dir` restores it so `import` statements resolve relative to
+ * the document. Untitled/virtual documents get no base dir: their imports report a clear error.
+ */
+function docArgs(document) {
+  return document && document.uri && document.uri.scheme === 'file'
+    ? ['--base-dir', path.dirname(document.uri.fsPath)]
+    : [];
+}
+
 /** One place to nag (once) when the CLI can't be run, so we don't spam on every keystroke. */
 function warnInfraOnce(message) {
   if (warnedInfra) return;
@@ -236,7 +247,7 @@ async function refreshDiagnostics(document) {
 
   setParseState(document, 'checking');
   const version = document.version;                 // guard against a slower run overwriting a newer one
-  const { result, error } = await runQora(document.getText());
+  const { result, error } = await runQora(document.getText(), docArgs(document));
   // Bail if the buffer moved on (a fresher run is/will be queued) OR the document was closed while we ran —
   // closing does NOT bump .version, so without the isClosed check a late result re-adds orphaned squiggles.
   if (document.isClosed || document.version !== version) return;
@@ -321,7 +332,7 @@ async function transpile() {
     return;
   }
 
-  const { result, error } = await runQora(editor.document.getText());
+  const { result, error } = await runQora(editor.document.getText(), docArgs(editor.document));
   if (error) { warnInfraOnce(error); return; }
 
   if (!result.success) {
@@ -393,7 +404,7 @@ async function refreshStages(document) {
   // document, or the document may change/close while we wait — a stale result must never render.
   const uri = document.uri.toString();
   const version = document.version;
-  const { result, error } = await runQora(document.getText(), ['--stages']);
+  const { result, error } = await runQora(document.getText(), ['--stages', ...docArgs(document)]);
   if (!stagesPanel || stagesDocUri !== uri) return;         // disposed or re-targeted while the CLI ran
   if (document.isClosed || document.version !== version) return;  // buffer moved on; a fresher run follows
   if (error) { warnInfraOnce(error); return; }
