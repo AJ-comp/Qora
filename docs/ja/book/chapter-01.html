@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>第1章. キュービットの状態には何が入っているのか？ — Qora</title>
+<title>第1章. キュービット状態と振幅について見ていこう — Qora</title>
 <style>
 :root {
     --bg: #ffffff;
@@ -246,6 +246,140 @@
   }
   .math-line + .math-line {
     margin-top: 4px;
+  }
+  .concept-flow {
+    display: grid;
+    gap: 16px;
+    margin: 20px 0 26px;
+  }
+  .concept-step {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  .concept-step.basis { border-top: 5px solid #6b7280; }
+  .concept-step.vector { border-top: 5px solid var(--plus); }
+  .concept-step.amplitude { border-top: 5px solid var(--good); }
+  .concept-body {
+    padding: 16px 18px 18px;
+  }
+  .concept-title {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin: 0 0 10px;
+  }
+  .concept-title h3 {
+    margin: 0;
+  }
+  .step-badge {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    color: var(--muted);
+    display: inline-flex;
+    font-size: .76rem;
+    font-weight: 900;
+    line-height: 1;
+    padding: 6px 10px;
+    white-space: nowrap;
+  }
+  .visual-grid {
+    display: grid;
+    gap: 10px;
+    margin-top: 12px;
+  }
+  .visual-grid.two {
+    grid-template-columns: 1fr;
+  }
+  @media (min-width: 720px) {
+    .visual-grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  .basis-tile,
+  .component-tile,
+  .amplitude-tile {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 13px 14px;
+  }
+  .basis-line {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: center;
+    min-height: 44px;
+  }
+  .basis-line .from {
+    color: var(--muted);
+    font-size: .9rem;
+    font-weight: 700;
+  }
+  .basis-line .arrow {
+    color: var(--accent);
+    font-weight: 900;
+  }
+  .tile-note {
+    color: var(--muted);
+    display: block;
+    font-size: .88rem;
+    margin-top: 6px;
+    text-align: center;
+  }
+  .component-equation {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: center;
+    margin-top: 12px;
+  }
+  .component-part,
+  .formula-part {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    font-weight: 900;
+    padding: 9px 12px;
+  }
+  .component-part.x { color: var(--plus); }
+  .component-part.y { color: var(--accent); }
+  .formula-part.zero { color: var(--plus); }
+  .formula-part.one { color: var(--good); }
+  .operator {
+    color: var(--muted);
+    font-weight: 900;
+  }
+  .formula-final {
+    background: #f2fbf7;
+    border: 1px solid #b8e5d2;
+    border-radius: 8px;
+    font-size: 1.04rem;
+    font-weight: 900;
+    margin-top: 12px;
+    padding: 13px 14px;
+    text-align: center;
+  }
+  .meaning-list {
+    display: grid;
+    gap: 8px;
+    margin-top: 12px;
+  }
+  .meaning-row {
+    align-items: center;
+    display: grid;
+    gap: 8px;
+    grid-template-columns: minmax(96px, auto) 1fr;
+  }
+  .meaning-row strong {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 6px 9px;
+    text-align: center;
   }
   .compare-grid,
   .summary-grid {
@@ -517,169 +651,188 @@
 <div class="qora-lang-switch" style="position:sticky;top:0;z-index:99;text-align:right;padding:8px 16px;background:rgba(255,255,255,.92);backdrop-filter:blur(4px);border-bottom:1px solid #e6e8ee;font-size:13px;font-family:sans-serif;"><a href="../../en/book/chapter-01.html" onclick="try{localStorage.setItem(&quot;qora-lang&quot;,&quot;en&quot;)}catch(e){}">English</a> · <a href="../../ko/book/chapter-01.html" onclick="try{localStorage.setItem(&quot;qora-lang&quot;,&quot;ko&quot;)}catch(e){}">한국어</a> · <strong>日本語</strong></div>
 
 <header class="hero">
-  <div class="tag">Qora · 量子ゲートドキュメント</div>
-  <h1>第1章. キュービットの状態には何が入っているのか？</h1>
-  <p>キュービットの状態表記と、測定値に付く振幅をまず押さえましょう</p>
+  <div class="tag">Qora · 量子ゲート文書</div>
+  <h1>第1章. キュービット状態と振幅について見ていこう</h1>
+  <p>確率へ進む前に、キュービット状態が何を持つのかを読む</p>
 </header>
 
 <div class="book-shell">
-    <aside class="side-nav" aria-label="本の目次">
+            <aside class="side-nav" aria-label="目次">
     <strong>Qoraで学ぶ量子ゲート</strong>
       <a href="index.html">概要</a>
       <a href="intro.html">はじめに。なぜQoraで量子ゲートを学ぶのか？</a>
-      <a class="current" href="chapter-01.html">第1章. キュービットの状態には何が入っているのか？</a>
-      <a href="chapter-02.html">第2章. 振幅と確率はどうつながっているのか？</a>
-      <a href="chapter-03.html">第3章. 重ね合わせと干渉とは何か？</a>
-      <a href="chapter-04.html">第4章. 重ね合わせはただの「わからない状態」なのか？</a>
-      <a href="chapter-05.html">第5章. 干渉はいつ生まれるのか？</a>
-      <a href="chapter-06.html">第6章. 量子ゲートはなぜ元に戻せなければならないのか？</a>
-      <a href="chapter-07.html">第7章. Qoraコードはどう読むのか？</a>
-      <a href="summary.html">まとめ. 第1部で学んだことを整理してみましょう</a>
-      <a href="chapter-08.html">第8章. Xゲートは何を反転させるのか？</a>
-      <a href="chapter-09.html">第9章. Hゲートは振幅をどう分けるのか？</a>
-      <a href="chapter-10.html">第10章. Zゲートは何の符号を変えるのか？</a>
-      <a href="chapter-11.html">第11章. CNOTゲートは2つのキュービットをどうつなぐのか？</a>
-      <a href="chapter-12.html">第12章. 小さな回路をひとつ最後まで読んでみましょう</a>
+      <a class="current" href="chapter-01.html">第1章. キュービット状態と振幅について見ていこう</a>
+      <a href="chapter-02.html">第2章. 振幅と確率はどうつながるのか？</a>
+      <a href="chapter-03.html">第3章. |0⟩状態と|1⟩状態を直接読んでみよう</a>
+      <a href="chapter-04.html">第4章. 重ね合わせと干渉とは何だろう？</a>
+      <a href="chapter-05.html">第5章. 重ね合わせはただの「わからない状態」なのか？</a>
+      <a href="chapter-06.html">第6章. 干渉はいつ生まれるのか？</a>
+      <a href="chapter-07.html">第7章. 2つのキュービットの状態はどう読むのか？</a>
+      <a href="chapter-08.html">第8章. 量子もつれでは何が一緒に結びつくのか？</a>
+      <a href="chapter-09.html">第9章. 量子ゲートは元に戻せなければならない</a>
+      <a href="chapter-10.html">第10章. Qoraコードはどう読むのか？</a>
+      <a href="summary.html">まとめ。第1部で学んだことを整理してみよう</a>
+      <a href="chapter-11.html">第11章. Xゲートは何を反転させるのか？</a>
+      <a href="chapter-12.html">第12章. Hゲートは振幅をどう分けるのか？</a>
+      <a href="chapter-13.html">第13章. Zゲートは何の符号を変えるのか？</a>
+      <a href="chapter-14.html">第14章. CNOTゲートは2つのキュービットをどうつなぐのか？</a>
+      <a href="chapter-15.html">第15章. 小さな回路を最後まで読んでみよう</a>
     <div class="group">
-      <a href="../index.html">Hゲート単独ドキュメント</a>
+      <a href="../index.html">Hゲート単独文書</a>
     </div>
   </aside>
   <main class="article">
-    <div class="breadcrumb">Qoraで学ぶ量子ゲート / 第1章</div>
+    <div class="breadcrumb">Qoraで学ぶ量子ゲート / 第1章. キュービット状態と振幅について見ていこう</div>
 <section id="part1" class="part">
     <span class="label">第1部</span>
     <h2>量子を読むための準備をしよう</h2>
     <p>
-      第1部では、ゲートの説明に入る前に必要な共通言語をまず作っていきます。<br>
-      量子力学のすべてを扱う場ではありません。<br>
-      Hゲート、Xゲート、Zゲート、CNOTゲートの説明を読むために欠かせない概念だけを、先に押さえていきます。
+      第1部では、ゲートの説明に入る前に必要な言葉を先に整えます。<br>
+      量子力学全体を一度につかもうとはしません。<br>
+      Hゲート、Xゲート、Zゲート、CNOTゲートの説明を読むために必要な考え方だけを、順番に押さえていきます。
     </p>
   </section>
-  <h2 id="qubit-state">第1章. キュービットの状態には何が入っているのか？</h2>
+
+  <h2 id="qubit-state">第1章. キュービット状態と振幅について見ていこう</h2>
 
   <p>
-    1つのキュービットを最も標準的に説明する方法は、状態をベクトルとして見ることです。<br>
-    このベクトルには2つの基準方向があり、その基準方向はふつう<strong>計算基底</strong>と呼ばれます。<br>
-    1キュービットの計算基底は <code>|0⟩</code> と <code>|1⟩</code> の2つです。
+    キュービット状態を最初から難しく考える必要はありません。<br>
+    まずは「測定結果をどう状態の方向として書くのか」「その方向の前にどうして数が付くのか」を順番に見ていきます。
   </p>
 
-  <p>
-    そのため、1キュービットの状態は次のように書けます。
-  </p>
+  <div class="concept-flow">
+    <section class="concept-step basis">
+      <div class="concept-body">
+        <div class="concept-title">
+          <span class="step-badge">1段階</span>
+          <h3>測定結果に状態方向の名前を付けます</h3>
+        </div>
+        <p>
+          1つのキュービットを測定すると、結果は0または1になります。<br>
+          この結果をただの数字 <code>0</code>、<code>1</code> と書くこともできそうですが、それだけでは「測定結果」という意味は見えても、状態ベクトルの基準方向だという意味は見えにくくなります。<br>
+          そこで量子力学では、1キュービット状態をベクトルとして扱えるように、測定結果0に対応する基底状態を <code>|0⟩</code> と書き、測定結果1に対応する基底状態を <code>|1⟩</code> と書きます。
+        </p>
+        <div class="visual-grid two">
+          <div class="basis-tile">
+            <div class="basis-line">
+              <span class="from">測定結果0</span>
+              <span class="arrow">→</span>
+              <code>|0⟩</code>
+            </div>
+            <span class="tile-note">0側の状態方向</span>
+          </div>
+          <div class="basis-tile">
+            <div class="basis-line">
+              <span class="from">測定結果1</span>
+              <span class="arrow">→</span>
+              <code>|1⟩</code>
+            </div>
+            <span class="tile-note">1側の状態方向</span>
+          </div>
+        </div>
+        <p>
+          この2つの記号 <code>|0⟩</code> と <code>|1⟩</code> を、1キュービットの<strong>計算基底</strong>と呼びます。
+        </p>
+      </div>
+    </section>
 
-  <div class="math mono">|ψ⟩ = α|0⟩ + β|1⟩</div>
+    <section class="concept-step vector">
+      <div class="concept-body">
+        <div class="concept-title">
+          <span class="step-badge">2段階</span>
+          <h3>基準方向の前には、その成分の大きさを表す数が付きます</h3>
+        </div>
+        <p>
+          先ほど <code>|0⟩</code> と <code>|1⟩</code> を状態ベクトルの基準方向と呼びました。<br>
+          まだ少しなじみにくいので、まずは平面上のふつうのベクトルと同じ構造を見てみましょう。<br>
+          平面ベクトルは、x軸方向の成分とy軸方向の成分に分けて書けます。
+        </p>
+        <div class="component-equation mono">
+          <span class="component-part x">3·x方向</span>
+          <span class="operator">+</span>
+          <span class="component-part y">2·y方向</span>
+        </div>
+        <p>
+          ここで3はx軸方向成分の係数で、2はy軸方向成分の係数です。<br>
+          つまりベクトルを基準方向ごとに分けて書くには、それぞれの方向の前に「その方向の成分がどれだけあるか」を表す数が付きます。
+        </p>
+      </div>
+    </section>
+
+    <section class="concept-step amplitude">
+      <div class="concept-body">
+        <div class="concept-title">
+          <span class="step-badge">3段階</span>
+          <h3>キュービット状態も基準方向ごとの成分として書きます</h3>
+        </div>
+        <p>
+          キュービット状態では、<code>|0⟩</code> と <code>|1⟩</code> が基準方向の役割を持ちます。<br>
+          そのため各方向の前に数が必要になり、量子力学ではその数を<strong>振幅</strong>と呼びます。
+        </p>
+        <div class="component-equation mono">
+          <span class="formula-part zero">α|0⟩</span>
+          <span class="operator">+</span>
+          <span class="formula-part one">β|1⟩</span>
+        </div>
+        <div class="meaning-list">
+          <div class="meaning-row">
+            <strong class="mono">α</strong>
+            <span><code>|0⟩</code> 方向の成分がどれだけ入っているかを表す振幅です。</span>
+          </div>
+          <div class="meaning-row">
+            <strong class="mono">β</strong>
+            <span><code>|1⟩</code> 方向の成分がどれだけ入っているかを表す振幅です。</span>
+          </div>
+        </div>
+        <div class="formula-final mono">|ψ⟩ = α|0⟩ + β|1⟩</div>
+        <p>
+          したがってこの式は、「このキュービット状態には0側の振幅 <span class="mono">α</span> と1側の振幅 <span class="mono">β</span> が一緒に入っている」という意味です。
+        </p>
+      </div>
+    </section>
+  </div>
 
   <p>
-    ここで <span class="mono">α</span> は測定値0に付いた振幅で、<span class="mono">β</span> は測定値1に付いた振幅です。<br>
-    つまりキュービットの状態は、「あとで0が出るか1が出るか」という1つの結果ではなく、可能な測定値ごとに付いている振幅の全体を含んでいます。
+    ここで <code>|ψ⟩</code> は、このキュービットの状態全体を表す記号です。<br>
+    <span class="mono">ψ</span> はギリシャ文字の<strong>プサイ</strong>で、<code>|ψ⟩</code> はふつう<strong>ケット・プサイ</strong>または<strong>プサイ状態</strong>と読みます。<br>
+    正式には、<code>|ψ⟩</code> は <code>|0⟩</code> 方向の振幅と <code>|1⟩</code> 方向の振幅を一緒に含む<strong>状態ベクトル</strong>です。<br>
+    つまりキュービット状態は、「あとで0が出るのか1が出るのか」という答え1つではなく、可能な測定結果ごとに付いた振幅全体を持っています。
   </p>
 
   <div class="call">
     <span class="h"><code>|0⟩</code> と <code>|1⟩</code> は計算基底状態です</span>
-    <code>|0⟩</code> は測定すると必ず測定値0が出る状態で、<code>|1⟩</code> は測定すると必ず測定値1が出る状態です。<br>
-    数学的には、<code>|0⟩</code> と <code>|1⟩</code> が1キュービットの状態空間で互いに直交する2つの基準ベクトルの役割を果たします。
+    <code>|0⟩</code> は測定すると必ず測定結果0が出る基底状態で、<code>|1⟩</code> は測定すると必ず測定結果1が出る基底状態です。<br>
+    今はこの2つを「0側の方向」と「1側の方向」と読めれば十分です。<br>
+    数学的には、<code>|0⟩</code> と <code>|1⟩</code> は1キュービット状態空間の互いに直交する2つの基準ベクトルとして働きます。
   </div>
 
-  <h3>まず <code>|0⟩</code> 状態を見てみましょう</h3>
-
-  <p>
-    <code>|0⟩</code> 状態は <span class="mono">α = 1</span>、<span class="mono">β = 0</span> の状態です。<br>
-    測定値0の側に振幅がすべてあり、測定値1の側には振幅がありません。
-  </p>
-
-  <div class="panel">
-    <p>
-      先ほどの一般形に直接代入すると、もっとはっきり見えてきます。
-    </p>
-    <div class="math mono">|ψ⟩ = α|0⟩ + β|1⟩</div>
-    <p>
-      <code>|0⟩</code> 状態では <span class="mono">α = 1</span>、<span class="mono">β = 0</span> なので、一般形は次のように変わります。
-    </p>
-    <div class="math mono">|ψ⟩ = 1|0⟩ + 0|1⟩</div>
-    <p>
-      ここで <code>0|1⟩</code> は、測定値1の側に振幅がまったくないという意味なので省略できます。<br>
-      さらに <code>1|0⟩</code> の係数1もふつうは書かないため、最終的に <code>|0⟩</code> とだけ書きます。
-    </p>
-    <div class="math mono">1|0⟩ + 0|1⟩ = |0⟩</div>
+  <div class="call why">
+    <span class="h">この章で押さえたこと</span>
+    1キュービット状態は、<code>|0⟩</code> 方向の成分と <code>|1⟩</code> 方向の成分を一緒に持つ状態ベクトルです。<br>
+    そして <span class="mono">α</span> と <span class="mono">β</span> は各方向成分の前に付く数で、量子力学ではこの数を振幅と呼びます。
   </div>
-
-  <div class="panel">
-    <table>
-      <tr><th>可能な測定値</th><th>振幅の値</th><th>測定で出る確率</th></tr>
-      <tr><td>測定値 0</td><td>1</td><td>100%</td></tr>
-      <tr><td>測定値 1</td><td>0</td><td>0%</td></tr>
-    </table>
-  </div>
-
-  <p>
-    この状態を測定すると、必ず測定値0が出ます。<br>
-    Qoraでキュービットを新しく準備すると、基本的に <code>|0⟩</code> 状態から始まると読めば大丈夫です。
-  </p>
 
   <div class="practice">
-    <span class="practice-label">Qoraで実習してみよう</span>
-    <h3>準備した直後のキュービットを測定してみよう</h3>
+    <span class="practice-label">Qoraで試してみよう</span>
+    <h3>キュービットを1つ準備してみよう</h3>
     <pre><code>operation Main() {
     // キュービットを1つ準備
     // 準備直後の q[0] は |0⟩ 状態
-    // 測定値0の振幅 = 1
-    // 測定値1の振幅 = 0
+    // |0⟩ 方向の振幅 = 1
+    // |1⟩ 方向の振幅 = 0
     use q = Qubit[1];
-
-    // q[0] を測定
-    // 理想的な実行環境: 測定値0
-    bit result = M(q[0]);
 }</code></pre>
   </div>
 
-  <h3>今度は <code>|1⟩</code> 状態を見てみましょう</h3>
-
-  <p>
-    <code>|1⟩</code> 状態は <span class="mono">α = 0</span>、<span class="mono">β = 1</span> の状態です。<br>
-    測定値0の側には振幅がなく、測定値1の側に振幅がすべてあります。
-  </p>
-
-  <div class="panel">
-    <table>
-      <tr><th>可能な測定値</th><th>振幅の値</th><th>測定で出る確率</th></tr>
-      <tr><td>測定値 0</td><td>0</td><td>0%</td></tr>
-      <tr><td>測定値 1</td><td>1</td><td>100%</td></tr>
-    </table>
+  <div class="call why">
+    <span class="h">次の章で見ること</span>
+    この章では、キュービット状態と振幅が何かを先に押さえました。<br>
+    次の章では、振幅を測定確率としてどう読むのかを見ていきます。
   </div>
-
-  <p>
-    Qoraでは、<code>|0⟩</code> 状態で準備したキュービットにXゲートを適用すると
-    <code>|1⟩</code> 状態を作ることができます。<br>
-    Xゲートについては後で詳しく学びますが、
-    ひとまず測定値0と測定値1を反転するゲートと見ておけば大丈夫です。
-  </p>
-
-  <div class="practice">
-    <span class="practice-label">Qoraで実習してみよう</span>
-    <h3>Xゲートで <code>|1⟩</code> 状態を作ってみよう</h3>
-    <pre><code>operation Main() {
-    // キュービットを1つ準備
-    // 準備直後の q[0] は |0⟩ 状態
-    use q = Qubit[1];
-
-    // Xゲートを適用
-    // |0⟩ 状態が |1⟩ 状態に変わる
-    X(q[0]);
-
-    // 理想的な実行環境: 測定値1
-    bit result = M(q[0]);
-}</code></pre>
-  </div>
-
-  <div class="call warn">
-    <span class="h"><code>|0⟩ + |1⟩</code> と <code>|01⟩</code>: 混同しやすい表記</span>
-    <code>(|0⟩ + |1⟩) / √2</code> は、1つのキュービットが測定値0と測定値1に対する振幅を同時に持っている状態です。<br>
-    一方、<code>|01⟩</code> は2つのキュービットがあるときに使う基底状態の表記です。1番目のキュービットが0、2番目のキュービットが1である2キュービットの状態を意味します。
-  </div>
-    <nav class="page-nav" aria-label="章の移動">
+                        <nav class="page-nav" aria-label="章の移動">
     <a href="intro.html"><span class="k">前へ</span><span class="t">はじめに。なぜQoraで量子ゲートを学ぶのか？</span></a>
-    <a class="home" href="index.html"><span class="k">概要</span><span class="t">全体の目次に戻る</span></a>
-    <a href="chapter-02.html"><span class="k">次へ</span><span class="t">第2章. 振幅と確率はどうつながっているのか？</span></a>
+    <a class="home" href="index.html"><span class="k">概要</span><span class="t">全体の目次へ戻る</span></a>
+    <a href="chapter-02.html"><span class="k">次へ</span><span class="t">第2章. 振幅と確率はどうつながるのか？</span></a>
   </nav>
     <footer>
       <p>Qora — 自分で作る量子トイ言語</p>
@@ -689,3 +842,4 @@
 
 </body>
 </html>
+

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Chapter 10. What Does the Z Gate Change the Sign Of? — Qora</title>
+<title>Chapter 10. How Do We Read Qora Code? — Qora</title>
 <style>
 :root {
     --bg: #ffffff;
@@ -518,94 +518,121 @@
 
 <header class="hero">
   <div class="tag">Qora · Quantum Gate Documentation</div>
-  <h1>Chapter 10. What Does the Z Gate Change the Sign Of?</h1>
-  <p>Let's see why the sign of the amplitude of measurement outcome 1 matters</p>
+  <h1>Chapter 10. How Do We Read Qora Code?</h1>
+  <p>Connect the code form to qubits, gates, and measurement</p>
 </header>
 
 <div class="book-shell">
-    <aside class="side-nav" aria-label="Book contents">
-    <strong>Quantum Gates with Qora</strong>
+            <aside class="side-nav" aria-label="Table of contents">
+    <strong>Learning Quantum Gates with Qora</strong>
       <a href="index.html">Overview</a>
       <a href="intro.html">Introduction. Why Learn Quantum Gates with Qora?</a>
-      <a href="chapter-01.html">Chapter 1. What Is Inside a Qubit State?</a>
-      <a href="chapter-02.html">Chapter 2. How Are Amplitudes Connected to Probabilities?</a>
-      <a href="chapter-03.html">Chapter 3. What Are Superposition and Interference?</a>
-      <a href="chapter-04.html">Chapter 4. Is Superposition Just a &quot;State We Don&#39;t Know&quot;?</a>
-      <a href="chapter-05.html">Chapter 5. When Does Interference Appear?</a>
-      <a href="chapter-06.html">Chapter 6. Why Must Quantum Gates Be Reversible?</a>
-      <a href="chapter-07.html">Chapter 7. How Do We Read Qora Code?</a>
-      <a href="summary.html">Wrap-up. Let&#39;s Review What We Learned in Part 1</a>
-      <a href="chapter-08.html">Chapter 8. What Does the X Gate Flip?</a>
-      <a href="chapter-09.html">Chapter 9. How Does the H Gate Split Amplitudes?</a>
-      <a class="current" href="chapter-10.html">Chapter 10. What Does the Z Gate Change the Sign Of?</a>
-      <a href="chapter-11.html">Chapter 11. How Does the CNOT Gate Connect Two Qubits?</a>
-      <a href="chapter-12.html">Chapter 12. Let&#39;s Read One Small Circuit from Start to Finish</a>
+      <a href="chapter-01.html">Chapter 1. Learn About Qubit States and Amplitudes</a>
+      <a href="chapter-02.html">Chapter 2. How Are Amplitudes and Probabilities Connected?</a>
+      <a href="chapter-03.html">Chapter 3. Read the |0⟩ and |1⟩ States Directly</a>
+      <a href="chapter-04.html">Chapter 4. What Are Superposition and Interference?</a>
+      <a href="chapter-05.html">Chapter 5. Is Superposition Just a "State We Do Not Know"?</a>
+      <a href="chapter-06.html">Chapter 6. When Does Interference Appear?</a>
+      <a href="chapter-07.html">Chapter 7. How Do We Read a Two-Qubit State?</a>
+      <a href="chapter-08.html">Chapter 8. What Does Entanglement Mean?</a>
+      <a href="chapter-09.html">Chapter 9. Quantum Gates Must Be Reversible.</a>
+      <a class="current" href="chapter-10.html">Chapter 10. How Do We Read Qora Code?</a>
+      <a href="summary.html">Wrap-up. Review What We Learned in Part 1</a>
+      <a href="chapter-11.html">Chapter 11. What Does the X Gate Flip?</a>
+      <a href="chapter-12.html">Chapter 12. How Does the H Gate Split Amplitudes?</a>
+      <a href="chapter-13.html">Chapter 13. What Sign Does the Z Gate Change?</a>
+      <a href="chapter-14.html">Chapter 14. How Does the CNOT Gate Connect Two Qubits?</a>
+      <a href="chapter-15.html">Chapter 15. Read a Small Circuit All the Way Through</a>
     <div class="group">
       <a href="../index.html">Standalone H Gate Document</a>
     </div>
   </aside>
   <main class="article">
-    <div class="breadcrumb">Quantum Gates with Qora / Chapter 10</div>
-<h2 id="z-gate">Chapter 10. What Does the Z Gate Change the Sign Of?</h2>
+    <div class="breadcrumb">Learning Quantum Gates with Qora / Chapter 10. How Do We Read Qora Code?</div>
+<h2 id="qora-code">Chapter 10. How Do We Read Qora Code?</h2>
 
   <p>
-    The Z gate leaves the amplitude of measurement outcome 0 untouched and attaches a minus sign only to the amplitude of measurement outcome 1.<br>
-    So if you measure right after a Z gate, it can look as if nothing happened at all.<br>
-    But when the state later meets a gate that mixes the amplitudes again, like the H gate, that sign difference changes the measurement result.
+    Finally, let's look together at the basic shape of the Qora code you'll be seeing often from now on.<br>
+    Qora code isn't a notation that shows you the quantum state directly, but it does state clearly which gates are applied to which qubits, and in what order.<br>
+    So mathematically, you can read it as a circuit description that applies unitary transformations to the state vector one after another.
   </p>
-
-  <div class="panel">
-    <table>
-      <tr><th>Input state</th><th>State after the Z gate</th><th>Measured right away?</th></tr>
-      <tr><td><code>|0⟩</code></td><td><code>|0⟩</code></td><td>Measurement outcome 0</td></tr>
-      <tr><td><code>|1⟩</code></td><td><code>-|1⟩</code></td><td>Measurement outcome 1</td></tr>
-    </table>
-  </div>
 
   <p>
-    Measurement probabilities come from squaring the length of the amplitude.<br>
-    <span class="mono">1</span> and <span class="mono">-1</span> have different signs but the same length, so measured right away they both produce the same probability.<br>
-    That's why the Z gate's effect is better read not as “an effect that changes probabilities” but as “a sign change that shows up later, when interference happens.”
+    A Qora program starts with <code>operation</code>, and the operation that runs first is usually named <code>Main</code>.
   </p>
-
-  <h3>The Z gate's effect shows up when the state meets the H gate again</h3>
-
-  <p>
-    First, use an H gate to turn the <code>|0⟩</code> state into the <code>(|0⟩ + |1⟩) / √2</code> state.<br>
-    Next, apply a Z gate: the sign of the amplitude of measurement outcome 1 flips, giving the <code>(|0⟩ - |1⟩) / √2</code> state.<br>
-    Finally, apply the H gate once more: the directions of cancellation and reinforcement swap, and the final state becomes <code>|1⟩</code>.
-  </p>
-
-  <div class="math mono">|0⟩ → H gate → (|0⟩ + |1⟩) / √2 → Z gate → (|0⟩ - |1⟩) / √2 → H gate → |1⟩</div>
 
   <div class="practice">
-    <span class="practice-label">Try It in Qora</span>
-    <h3>Let's Apply H, Z, and H in Order</h3>
+    <span class="practice-label">Basic form</span>
+    <h3>Let's start with the smallest Qora program</h3>
     <pre><code>operation Main() {
-    // Prepare one qubit
-    // Right after preparation, q[0] is in the |0⟩ state
+    // write the quantum circuit to run here
+}</code></pre>
+  </div>
+
+  <h3>Preparing qubits</h3>
+
+  <p>Qubit preparation starts with <code>use</code>.</p>
+
+  <div class="math mono">use q = Qubit[1];</div>
+
+  <p>
+    This code prepares one qubit and gives the name <code>q</code> to that bundle of qubits.<br>
+    <code>Qubit[1]</code> means there is one qubit,
+    and you refer to that qubit as <code>q[0]</code>.<br>
+    In this book, we'll read a freshly prepared qubit as starting in the computational basis state <code>|0⟩</code>.
+  </p>
+
+  <h3>Applying gates</h3>
+
+  <p>Gates are written just like function calls.</p>
+
+  <div class="math mono">H(q[0]);</div>
+
+  <p>
+    This line applies the H gate to <code>q[0]</code>.<br>
+    Mathematically, it's the step that multiplies the current state vector by the H matrix.<br>
+    The X gate is written as <code>X(q[0]);</code>,
+    and the two-qubit CNOT gate as <code>CNOT(q[0], q[1]);</code>.
+  </p>
+
+  <h3>Measuring</h3>
+
+  <p>For measurement, we use <code>M</code>.</p>
+
+  <div class="math mono">bit result = M(q[0]);</div>
+
+  <p>
+    This line measures <code>q[0]</code> and stores the result in the classical bit <code>result</code>.<br>
+    Before measurement, the qubit is a quantum state with amplitudes,
+    and after measurement, either the measurement outcome 0 or the measurement outcome 1 is stored in the classical bit.
+  </p>
+
+  <h3>Writing comments</h3>
+
+  <p>
+    In Qora, you can write single-line comments with <code>//</code>.<br>
+    Comments don't affect how the circuit runs,
+    so the Qora practice code in this book will also use them often to note state changes.
+  </p>
+
+  <div class="practice">
+    <span class="practice-label">Qora code with comments</span>
+    <h3>Let's note the state change on each line of code</h3>
+    <pre><code>operation Main() {
+    // prepare one qubit
     use q = Qubit[1];
 
-    // Apply the H gate
-    // The amplitudes of measurement outcomes 0 and 1 are both 1/√2
+    // apply the H gate to q[0]
     H(q[0]);
 
-    // Apply the Z gate
-    // The sign of the amplitude of measurement outcome 1 becomes negative
-    Z(q[0]);
-
-    // Apply the H gate
-    // The sign difference shows up as interference, giving the |1⟩ state
-    H(q[0]);
-
-    // In an ideal execution environment: measurement outcome 1
+    // measure q[0]
     bit result = M(q[0]);
 }</code></pre>
   </div>
-    <nav class="page-nav" aria-label="Chapter navigation">
-    <a href="chapter-09.html"><span class="k">Previous</span><span class="t">Chapter 9. How Does the H Gate Split Amplitudes?</span></a>
+                        <nav class="page-nav" aria-label="Chapter navigation">
+    <a href="chapter-09.html"><span class="k">Previous</span><span class="t">Chapter 9. Quantum Gates Must Be Reversible.</span></a>
     <a class="home" href="index.html"><span class="k">Overview</span><span class="t">Back to the full table of contents</span></a>
-    <a href="chapter-11.html"><span class="k">Next</span><span class="t">Chapter 11. How Does the CNOT Gate Connect Two Qubits?</span></a>
+    <a href="summary.html"><span class="k">Next</span><span class="t">Wrap-up. Review What We Learned in Part 1</span></a>
   </nav>
     <footer>
       <p>Qora — a quantum toy language you build yourself</p>
@@ -615,3 +642,4 @@
 
 </body>
 </html>
+

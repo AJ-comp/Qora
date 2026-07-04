@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Chapter 2. How Are Amplitudes Connected to Probabilities? — Qora</title>
+<title>Chapter 2. How Are Amplitudes and Probabilities Connected? — Qora</title>
 <style>
 :root {
     --bg: #ffffff;
@@ -247,13 +247,139 @@
   .math-line + .math-line {
     margin-top: 4px;
   }
-  .amp-change {
-    color: var(--plus);
+  .concept-flow {
+    display: grid;
+    gap: 16px;
+    margin: 20px 0 26px;
+  }
+  .concept-step {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  .concept-step.basis { border-top: 5px solid #6b7280; }
+  .concept-step.vector { border-top: 5px solid var(--plus); }
+  .concept-step.amplitude { border-top: 5px solid var(--good); }
+  .concept-body {
+    padding: 16px 18px 18px;
+  }
+  .concept-title {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin: 0 0 10px;
+  }
+  .concept-title h3 {
+    margin: 0;
+  }
+  .step-badge {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    color: var(--muted);
+    display: inline-flex;
+    font-size: .76rem;
+    font-weight: 900;
+    line-height: 1;
+    padding: 6px 10px;
+    white-space: nowrap;
+  }
+  .visual-grid {
+    display: grid;
+    gap: 10px;
+    margin-top: 12px;
+  }
+  .visual-grid.two {
+    grid-template-columns: 1fr;
+  }
+  @media (min-width: 720px) {
+    .visual-grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  .basis-tile,
+  .component-tile,
+  .amplitude-tile {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 13px 14px;
+  }
+  .basis-line {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: center;
+    min-height: 44px;
+  }
+  .basis-line .from {
+    color: var(--muted);
+    font-size: .9rem;
+    font-weight: 700;
+  }
+  .basis-line .arrow {
+    color: var(--accent);
     font-weight: 900;
   }
-  .amp-zero {
-    color: var(--minus);
+  .tile-note {
+    color: var(--muted);
+    display: block;
+    font-size: .88rem;
+    margin-top: 6px;
+    text-align: center;
+  }
+  .component-equation {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: center;
+    margin-top: 12px;
+  }
+  .component-part,
+  .formula-part {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 8px;
     font-weight: 900;
+    padding: 9px 12px;
+  }
+  .component-part.x { color: var(--plus); }
+  .component-part.y { color: var(--accent); }
+  .formula-part.zero { color: var(--plus); }
+  .formula-part.one { color: var(--good); }
+  .operator {
+    color: var(--muted);
+    font-weight: 900;
+  }
+  .formula-final {
+    background: #f2fbf7;
+    border: 1px solid #b8e5d2;
+    border-radius: 8px;
+    font-size: 1.04rem;
+    font-weight: 900;
+    margin-top: 12px;
+    padding: 13px 14px;
+    text-align: center;
+  }
+  .meaning-list {
+    display: grid;
+    gap: 8px;
+    margin-top: 12px;
+  }
+  .meaning-row {
+    align-items: center;
+    display: grid;
+    gap: 8px;
+    grid-template-columns: minmax(96px, auto) 1fr;
+  }
+  .meaning-row strong {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 6px 9px;
+    text-align: center;
   }
   .compare-grid,
   .summary-grid {
@@ -525,87 +651,168 @@
 <div class="qora-lang-switch" style="position:sticky;top:0;z-index:99;text-align:right;padding:8px 16px;background:rgba(255,255,255,.92);backdrop-filter:blur(4px);border-bottom:1px solid #e6e8ee;font-size:13px;font-family:sans-serif;"><strong>English</strong> · <a href="../../ko/book/chapter-02.html" onclick="try{localStorage.setItem(&quot;qora-lang&quot;,&quot;ko&quot;)}catch(e){}">한국어</a> · <a href="../../ja/book/chapter-02.html" onclick="try{localStorage.setItem(&quot;qora-lang&quot;,&quot;ja&quot;)}catch(e){}">日本語</a></div>
 
 <header class="hero">
-  <div class="tag">Qora · Quantum Gate Docs</div>
-  <h1>Chapter 2. How Are Amplitudes Connected to Probabilities?</h1>
-  <p>Let's look at why squaring an amplitude gives the measurement probability</p>
+  <div class="tag">Qora · Quantum Gate Documentation</div>
+  <h1>Chapter 2. How Are Amplitudes and Probabilities Connected?</h1>
+  <p>See how amplitudes become measurement probabilities</p>
 </header>
 
 <div class="book-shell">
-    <aside class="side-nav" aria-label="Book contents">
-    <strong>Quantum Gates with Qora</strong>
+            <aside class="side-nav" aria-label="Table of contents">
+    <strong>Learning Quantum Gates with Qora</strong>
       <a href="index.html">Overview</a>
       <a href="intro.html">Introduction. Why Learn Quantum Gates with Qora?</a>
-      <a href="chapter-01.html">Chapter 1. What Is Inside a Qubit State?</a>
-      <a class="current" href="chapter-02.html">Chapter 2. How Are Amplitudes Connected to Probabilities?</a>
-      <a href="chapter-03.html">Chapter 3. What Are Superposition and Interference?</a>
-      <a href="chapter-04.html">Chapter 4. Is Superposition Just a &quot;State We Don&#39;t Know&quot;?</a>
-      <a href="chapter-05.html">Chapter 5. When Does Interference Appear?</a>
-      <a href="chapter-06.html">Chapter 6. Why Must Quantum Gates Be Reversible?</a>
-      <a href="chapter-07.html">Chapter 7. How Do We Read Qora Code?</a>
-      <a href="summary.html">Wrap-up. Let&#39;s Review What We Learned in Part 1</a>
-      <a href="chapter-08.html">Chapter 8. What Does the X Gate Flip?</a>
-      <a href="chapter-09.html">Chapter 9. How Does the H Gate Split Amplitudes?</a>
-      <a href="chapter-10.html">Chapter 10. What Does the Z Gate Change the Sign Of?</a>
-      <a href="chapter-11.html">Chapter 11. How Does the CNOT Gate Connect Two Qubits?</a>
-      <a href="chapter-12.html">Chapter 12. Let&#39;s Read One Small Circuit from Start to Finish</a>
+      <a href="chapter-01.html">Chapter 1. Learn About Qubit States and Amplitudes</a>
+      <a class="current" href="chapter-02.html">Chapter 2. How Are Amplitudes and Probabilities Connected?</a>
+      <a href="chapter-03.html">Chapter 3. Read the |0⟩ and |1⟩ States Directly</a>
+      <a href="chapter-04.html">Chapter 4. What Are Superposition and Interference?</a>
+      <a href="chapter-05.html">Chapter 5. Is Superposition Just a "State We Do Not Know"?</a>
+      <a href="chapter-06.html">Chapter 6. When Does Interference Appear?</a>
+      <a href="chapter-07.html">Chapter 7. How Do We Read a Two-Qubit State?</a>
+      <a href="chapter-08.html">Chapter 8. What Does Entanglement Mean?</a>
+      <a href="chapter-09.html">Chapter 9. Quantum Gates Must Be Reversible.</a>
+      <a href="chapter-10.html">Chapter 10. How Do We Read Qora Code?</a>
+      <a href="summary.html">Wrap-up. Review What We Learned in Part 1</a>
+      <a href="chapter-11.html">Chapter 11. What Does the X Gate Flip?</a>
+      <a href="chapter-12.html">Chapter 12. How Does the H Gate Split Amplitudes?</a>
+      <a href="chapter-13.html">Chapter 13. What Sign Does the Z Gate Change?</a>
+      <a href="chapter-14.html">Chapter 14. How Does the CNOT Gate Connect Two Qubits?</a>
+      <a href="chapter-15.html">Chapter 15. Read a Small Circuit All the Way Through</a>
     <div class="group">
       <a href="../index.html">Standalone H Gate Document</a>
     </div>
   </aside>
   <main class="article">
-    <div class="breadcrumb">Quantum Gates with Qora / Chapter 2</div>
-  <h2 id="amplitude">Chapter 2. How Are Amplitudes Connected to Probabilities?</h2>
+    <div class="breadcrumb">Learning Quantum Gates with Qora / Chapter 2. How Are Amplitudes and Probabilities Connected?</div>
+<section id="part1" class="part">
+    <span class="label">Part 1</span>
+    <h2>Let's Get Ready to Read Quantum</h2>
+    <p>
+      In the previous chapter, we wrote a qubit state as amplitudes attached to the <code>|0⟩</code> direction and the <code>|1⟩</code> direction.<br>
+      Now we will keep that state picture and ask what those amplitudes become when the qubit is measured.
+    </p>
+  </section>
+
+  <h2 id="amplitude-probability">Chapter 2. How Are Amplitudes and Probabilities Connected?</h2>
 
   <p>
-    We said that a qubit state is written as <code>|ψ⟩ = α|0⟩ + β|1⟩</code>.<br>
-    Here, <span class="mono">α</span> and <span class="mono">β</span> are not probabilities — they are <strong>amplitudes</strong>.<br>
-    The precise term is <strong>probability amplitude</strong>.<br>
-    And you get the measurement probability by squaring the absolute value of the amplitude.
+    In Chapter 1, we wrote a qubit state as <code>|ψ⟩ = α|0⟩ + β|1⟩</code>.<br>
+    In this chapter, we'll see how the amplitudes <span class="mono">α</span> and <span class="mono">β</span> are read as probabilities when we measure the state.
+  </p>
+
+  <div class="concept-flow">
+    <section class="concept-step basis">
+      <div class="concept-body">
+        <div class="concept-title">
+          <span class="step-badge">Step 1</span>
+          <h3>Inside the state, we read amplitudes</h3>
+        </div>
+        <p>
+          When we write a qubit state, <span class="mono">α</span> and <span class="mono">β</span> are not probabilities.<br>
+          <span class="mono">α</span> is the amplitude attached to the <code>|0⟩</code> direction, and <span class="mono">β</span> is the amplitude attached to the <code>|1⟩</code> direction.
+        </p>
+        <div class="formula-final mono">|ψ⟩ = α|0⟩ + β|1⟩</div>
+      </div>
+    </section>
+
+    <section class="concept-step vector">
+      <div class="concept-body">
+        <div class="concept-title">
+          <span class="step-badge">Step 2</span>
+          <h3>When we measure, amplitudes are converted into probabilities</h3>
+        </div>
+        <p>
+          We do not get a measurement probability by reading the amplitude itself.<br>
+          We calculate the probability by taking the squared absolute value of each amplitude.
+        </p>
+        <div class="component-equation mono">
+          <span class="component-part x">α</span>
+          <span class="operator">→</span>
+          <span class="component-part x">|α|²</span>
+          <span class="operator">,</span>
+          <span class="component-part y">β</span>
+          <span class="operator">→</span>
+          <span class="component-part y">|β|²</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="concept-step amplitude">
+      <div class="concept-body">
+        <div class="concept-title">
+          <span class="step-badge">Step 3</span>
+          <h3>The two probabilities must add up to 100%</h3>
+        </div>
+        <p>
+          Measuring one qubit gives either measurement outcome 0 or measurement outcome 1.<br>
+          Therefore the two measurement probabilities must add up to 1, which means 100%.
+        </p>
+        <div class="formula-final mono">|α|² + |β|² = 1</div>
+      </div>
+    </section>
+  </div>
+
+  <p>
+    More precisely, values such as <span class="mono">α</span> and <span class="mono">β</span> are <strong>probability amplitudes</strong>.<br>
+    To keep the wording lighter, this book usually calls them simply <strong>amplitudes</strong>.
   </p>
 
   <div class="rule">Probability of measurement outcome 0 = |α|², probability of measurement outcome 1 = |β|²</div>
 
   <p>
-    This rule is called the Born rule.<br>
-    When the amplitudes are real numbers you can treat it as a plain square, but in general quantum mechanics amplitudes can be complex numbers, so we compute the squared absolute value.
+    This rule is called the <strong>Born rule</strong>.<br>
+    If the amplitudes are real numbers, you can read this as ordinary squaring, but in general quantum mechanics amplitudes can be complex, so we use squared absolute values.
   </p>
 
   <div class="panel">
     <table>
-      <tr><th>State</th><th>Amplitudes</th><th>Measurement probability</th></tr>
-      <tr><td><code>|0⟩</code></td><td><span class="mono">α = 1, β = 0</span></td><td><span class="mono">|1|² = 100%</span>, <span class="mono">|0|² = 0%</span></td></tr>
-      <tr><td><code>|1⟩</code></td><td><span class="mono">α = 0, β = 1</span></td><td><span class="mono">|0|² = 0%</span>, <span class="mono">|1|² = 100%</span></td></tr>
+      <tr><th>What we read in the state</th><th>Value inside the state</th><th>Value obtained when measured</th></tr>
+      <tr><td><code>|0⟩</code> direction</td><td>amplitude <span class="mono">α</span></td><td>probability <span class="mono">|α|²</span></td></tr>
+      <tr><td><code>|1⟩</code> direction</td><td>amplitude <span class="mono">β</span></td><td>probability <span class="mono">|β|²</span></td></tr>
     </table>
   </div>
 
-  <h3>Why isn't the amplitude 1/2 when the probability is 50%?</h3>
+  <h3>We also give this condition a name: normalization</h3>
 
   <p>
-    If measurement outcomes 0 and 1 are fifty-fifty, it seems like each amplitude should also be 1/2 — but setting them that way breaks normalization.<br>
-    A quantum state must have a total measurement probability of 100%, so it has to satisfy <span class="mono">|α|² + |β|² = 1</span>.
+    We just saw that the two measurement probabilities must add up to 1, or 100%.<br>
+    A state that satisfies this condition is called a <strong>normalized state</strong>.<br>
+    In symbols, we write the condition like this.
+  </p>
+
+  <div class="rule mono">|α|² + |β|² = 1</div>
+
+  <p>
+    For now, it is enough to understand this as “a state whose total measurement probability is correctly set to 100%.”
+  </p>
+
+  <h3>Why is the amplitude for 50% probability 1/√2?</h3>
+
+  <p>
+    If measurement outcome 0 and measurement outcome 1 are split evenly, it may feel natural to set each amplitude to <span class="mono">1/2</span>.<br>
+    But probabilities come from squared amplitudes, so to make a 50% probability, the amplitude size must be <span class="mono">1/√2</span>.
   </p>
 
   <div class="compare-grid">
     <div class="card warn">
       <span class="tag-small">Wrong idea</span>
-      <h4>What happens if we set the amplitudes to 1/2?</h4>
-      <p>Each measurement outcome gets a probability of 25%.</p>
+      <h4>What happens if each amplitude is 1/2?</h4>
+      <p>Each measurement outcome gets probability 25%.</p>
       <div class="math mono">(1/2)² + (1/2)² = 1/4 + 1/4 = 1/2</div>
       <p>The total probability is only 50%, so this is not a valid qubit state.</p>
     </div>
 
     <div class="card good">
       <span class="tag-small">Correct amplitude</span>
-      <h4>Why does setting the amplitudes to 1/√2 work?</h4>
-      <p>Each measurement outcome comes out to a 50% probability.</p>
+      <h4>Why does 1/√2 work?</h4>
+      <p>Each measurement outcome gets probability 50%.</p>
       <div class="math mono">(1/√2)² + (1/√2)² = 1/2 + 1/2 = 1</div>
-      <p>The total probability is also a correct 100%.</p>
+      <p>The total probability is also 100%.</p>
     </div>
   </div>
 
   <div class="practice">
-    <span class="practice-label">Try it in Qora</span>
-    <h3>Let's make a 50% state with the H gate</h3>
+    <span class="practice-label">Try It in Qora</span>
+    <h3>Prepare one qubit and measure it</h3>
     <pre><code>operation Main() {
     // Prepare one qubit
     // Right after preparation, q[0] is in the |0⟩ state
@@ -613,61 +820,29 @@
     // Amplitude of measurement outcome 1 = 0
     use q = Qubit[1];
 
-    // Apply the H gate
-    // Amplitude of measurement outcome 0 = 1/√2
-    // Amplitude of measurement outcome 1 = 1/√2
-    // Each of the two measurement outcomes has a 50% probability
-    H(q[0]);
-
     // Measure q[0]
-    // Ideal execution environment: measurement outcomes 0 and 1 each about 50%
+    // Measurement turns the current amplitudes into one outcome
+    // In an ideal execution environment: measurement outcome 0
     bit result = M(q[0]);
 }</code></pre>
   </div>
 
-  <p>
-    The important point here is that the H gate does not directly split the probability in half.<br>
-    What the gate changes first is the amplitudes of the state, and when you measure, the squared absolute values of those amplitudes appear as probabilities.
-  </p>
-
-  <div class="compare-grid">
-    <div class="card accent">
-      <span class="tag-small">Before</span>
-      <h4>State before applying the H gate</h4>
-      <div class="math mono">|0⟩ = <span class="amp-change">1</span>|0⟩ + <span class="amp-zero">0</span>|1⟩</div>
-      <h4>Probability calculation before applying H</h4>
-      <div class="math mono">
-        <div class="math-line">Probability of measurement outcome 0 = |<span class="amp-change">1</span>|² = 1 = 100%</div>
-        <div class="math-line">Probability of measurement outcome 1 = |<span class="amp-zero">0</span>|² = 0 = 0%</div>
-      </div>
-    </div>
-
-    <div class="card plus">
-      <span class="tag-small">After</span>
-      <h4>State after applying the H gate</h4>
-      <div class="math mono">H|0⟩ = <span class="amp-change">(1/√2)</span>|0⟩ + <span class="amp-change">(1/√2)</span>|1⟩</div>
-      <h4>Probability calculation after applying H</h4>
-      <div class="math mono">
-        <div class="math-line">Probability of measurement outcome 0 = |<span class="amp-change">1/√2</span>|² = 1/2 = 50%</div>
-        <div class="math-line">Probability of measurement outcome 1 = |<span class="amp-change">1/√2</span>|² = 1/2 = 50%</div>
-      </div>
-    </div>
+  <div class="call why">
+    <span class="h">What comes next</span>
+    In this chapter, we fixed the rule for reading amplitudes as probabilities.<br>
+    In the next chapter, we'll plug actual values into the rule and read the <code>|0⟩</code> state, the <code>|1⟩</code> state, and an even 50/50 state directly.
   </div>
-
-  <p>
-    The value created by the H gate is not the probability <span class="mono">1/2</span>, but the amplitude <span class="mono">1/√2</span>.<br>
-    Then, when we calculate the measurement probability, we square the absolute value of that amplitude.
-  </p>
-    <nav class="page-nav" aria-label="Chapter navigation">
-    <a href="chapter-01.html"><span class="k">Previous</span><span class="t">Chapter 1. What Is Inside a Qubit State?</span></a>
+                        <nav class="page-nav" aria-label="Chapter navigation">
+    <a href="chapter-01.html"><span class="k">Previous</span><span class="t">Chapter 1. Learn About Qubit States and Amplitudes</span></a>
     <a class="home" href="index.html"><span class="k">Overview</span><span class="t">Back to the full table of contents</span></a>
-    <a href="chapter-03.html"><span class="k">Next</span><span class="t">Chapter 3. What Are Superposition and Interference?</span></a>
+    <a href="chapter-03.html"><span class="k">Next</span><span class="t">Chapter 3. Read the |0⟩ and |1⟩ States Directly</span></a>
   </nav>
     <footer>
-      <p>Qora — a quantum toy language built from scratch</p>
+      <p>Qora — a quantum toy language you build yourself</p>
     </footer>
   </main>
 </div>
 
 </body>
 </html>
+

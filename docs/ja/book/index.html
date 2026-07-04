@@ -517,35 +517,38 @@
 <div class="qora-lang-switch" style="position:sticky;top:0;z-index:99;text-align:right;padding:8px 16px;background:rgba(255,255,255,.92);backdrop-filter:blur(4px);border-bottom:1px solid #e6e8ee;font-size:13px;font-family:sans-serif;"><a href="../../en/book/index.html" onclick="try{localStorage.setItem(&quot;qora-lang&quot;,&quot;en&quot;)}catch(e){}">English</a> · <a href="../../ko/book/index.html" onclick="try{localStorage.setItem(&quot;qora-lang&quot;,&quot;ko&quot;)}catch(e){}">한국어</a> · <strong>日本語</strong></div>
 
 <header class="hero">
-  <div class="tag">Qora · 量子ゲートドキュメント</div>
+  <div class="tag">Qora · 量子ゲート文書</div>
   <h1>概要. Qoraで学ぶ量子ゲート</h1>
-  <p>まず全体の流れを眺めてから、各章を1ページずつめくって読んでいきましょう</p>
+  <p>Qoraコードと量子ゲートの説明を一緒に読むための道筋</p>
 </header>
 
 <div class="book-shell">
-    <aside class="side-nav" aria-label="本の目次">
+            <aside class="side-nav" aria-label="目次">
     <strong>Qoraで学ぶ量子ゲート</strong>
       <a class="current" href="index.html">概要</a>
       <a href="intro.html">はじめに。なぜQoraで量子ゲートを学ぶのか？</a>
-      <a href="chapter-01.html">第1章. キュービットの状態には何が入っているのか？</a>
-      <a href="chapter-02.html">第2章. 振幅と確率はどうつながっているのか？</a>
-      <a href="chapter-03.html">第3章. 重ね合わせと干渉とは何か？</a>
-      <a href="chapter-04.html">第4章. 重ね合わせはただの「わからない状態」なのか？</a>
-      <a href="chapter-05.html">第5章. 干渉はいつ生まれるのか？</a>
-      <a href="chapter-06.html">第6章. 量子ゲートはなぜ元に戻せなければならないのか？</a>
-      <a href="chapter-07.html">第7章. Qoraコードはどう読むのか？</a>
-      <a href="summary.html">まとめ. 第1部で学んだことを整理してみましょう</a>
-      <a href="chapter-08.html">第8章. Xゲートは何を反転させるのか？</a>
-      <a href="chapter-09.html">第9章. Hゲートは振幅をどう分けるのか？</a>
-      <a href="chapter-10.html">第10章. Zゲートは何の符号を変えるのか？</a>
-      <a href="chapter-11.html">第11章. CNOTゲートは2つのキュービットをどうつなぐのか？</a>
-      <a href="chapter-12.html">第12章. 小さな回路をひとつ最後まで読んでみましょう</a>
+      <a href="chapter-01.html">第1章. キュービット状態と振幅について見ていこう</a>
+      <a href="chapter-02.html">第2章. 振幅と確率はどうつながるのか？</a>
+      <a href="chapter-03.html">第3章. |0⟩状態と|1⟩状態を直接読んでみよう</a>
+      <a href="chapter-04.html">第4章. 重ね合わせと干渉とは何だろう？</a>
+      <a href="chapter-05.html">第5章. 重ね合わせはただの「わからない状態」なのか？</a>
+      <a href="chapter-06.html">第6章. 干渉はいつ生まれるのか？</a>
+      <a href="chapter-07.html">第7章. 2つのキュービットの状態はどう読むのか？</a>
+      <a href="chapter-08.html">第8章. 量子もつれでは何が一緒に結びつくのか？</a>
+      <a href="chapter-09.html">第9章. 量子ゲートは元に戻せなければならない</a>
+      <a href="chapter-10.html">第10章. Qoraコードはどう読むのか？</a>
+      <a href="summary.html">まとめ。第1部で学んだことを整理してみよう</a>
+      <a href="chapter-11.html">第11章. Xゲートは何を反転させるのか？</a>
+      <a href="chapter-12.html">第12章. Hゲートは振幅をどう分けるのか？</a>
+      <a href="chapter-13.html">第13章. Zゲートは何の符号を変えるのか？</a>
+      <a href="chapter-14.html">第14章. CNOTゲートは2つのキュービットをどうつなぐのか？</a>
+      <a href="chapter-15.html">第15章. 小さな回路を最後まで読んでみよう</a>
     <div class="group">
-      <a href="../index.html">Hゲート単独ドキュメント</a>
+      <a href="../index.html">Hゲート単独文書</a>
     </div>
   </aside>
   <main class="article">
-    <div class="breadcrumb">Qoraで学ぶ量子ゲート / 概要</div>
+    <div class="breadcrumb">Qoraで学ぶ量子ゲート / 概要. Qoraで学ぶ量子ゲート</div>
   <p class="lead">
     このドキュメントは、Qoraコードで量子回路を書いてみながら、そのコードが実際にどの量子力学の概念に触れているのかを順番に読んでいくものです。<br>
     目標はゲートの名前を暗記することではなく、1行のコードがキュービットの状態ベクトルの振幅をどう変えるのかを自分でたどれるようになることです。
@@ -575,10 +578,18 @@
     </div>
     <div class="point">
       <span class="marker">ステップ4</span>
-      <span><strong>ゲートを線形変換として読む</strong><br>X、H、Z、CNOTのようなゲートが、状態ベクトルの振幅をどう変えるのかを計算します。</span>
+      <span><strong>2キュービット状態へ広げる</strong><br>測定結果が<code>00</code>、<code>01</code>、<code>10</code>、<code>11</code>の4通りに増えるとき、状態ベクトルがどんな振幅を持つのかを見ます。</span>
     </div>
     <div class="point">
       <span class="marker">ステップ5</span>
+      <span><strong>量子もつれを標準的に区別する</strong><br>2キュービット全体の状態が、それぞれのキュービットの状態へ分けられない場合を量子もつれとして読みます。</span>
+    </div>
+    <div class="point">
+      <span class="marker">ステップ6</span>
+      <span><strong>ゲートを線形変換として読む</strong><br>X、H、Z、CNOTのようなゲートが、状態ベクトルの振幅をどう変えるのかを計算します。</span>
+    </div>
+    <div class="point">
+      <span class="marker">ステップ7</span>
       <span><strong>小さな回路を最後まで読む</strong><br>複数のゲートが続くときに状態がどう変わり、最後の測定確率がどう決まるのかをたどります。</span>
     </div>
   </div>
@@ -589,37 +600,41 @@
       <tr><td>状態ベクトル</td><td>キュービットがどんな振幅を持っているかを読みます</td><td><code>use q = Qubit[1];</code></td></tr>
       <tr><td>ユニタリゲート</td><td>状態ベクトルを保存できる形で変えます</td><td><code>H(q[0]);</code>, <code>X(q[0]);</code></td></tr>
       <tr><td>測定</td><td>振幅の絶対値の2乗から結果の確率を得ます</td><td><code>bit r = M(q[0]);</code></td></tr>
-      <tr><td>複数のキュービット</td><td>基底状態の数が増え、ゲートがキュービットの間の関係を作ります</td><td><code>CNOT(q[0], q[1]);</code></td></tr>
+      <tr><td>複数のキュービットと量子もつれ</td><td>基底状態の数が増え、全体の状態が個々のキュービット状態へ分かれない場合もあることを見ます</td><td><code>CNOT(q[0], q[1]);</code></td></tr>
     </table>
   </div>
 
   <h2>目次</h2>
-    <div class="overview-list">
+      <div class="overview-list">
     <a class="overview-item" href="intro.html"><span class="num">はじめに</span><span class="title">なぜQoraで量子ゲートを学ぶのか？</span></a>
-    <a class="overview-item" href="chapter-01.html"><span class="num">第1章</span><span class="title">キュービットの状態には何が入っているのか？</span></a>
-    <a class="overview-item" href="chapter-02.html"><span class="num">第2章</span><span class="title">振幅と確率はどうつながっているのか？</span></a>
-    <a class="overview-item" href="chapter-03.html"><span class="num">第3章</span><span class="title">重ね合わせと干渉とは何か？</span></a>
-    <a class="overview-item" href="chapter-04.html"><span class="num">第4章</span><span class="title">重ね合わせはただの「わからない状態」なのか？</span></a>
-    <a class="overview-item" href="chapter-05.html"><span class="num">第5章</span><span class="title">干渉はいつ生まれるのか？</span></a>
-    <a class="overview-item" href="chapter-06.html"><span class="num">第6章</span><span class="title">量子ゲートはなぜ元に戻せなければならないのか？</span></a>
-    <a class="overview-item" href="chapter-07.html"><span class="num">第7章</span><span class="title">Qoraコードはどう読むのか？</span></a>
-    <a class="overview-item" href="summary.html"><span class="num">まとめ</span><span class="title">第1部で学んだことを整理してみましょう</span></a>
-    <a class="overview-item" href="chapter-08.html"><span class="num">第8章</span><span class="title">Xゲートは何を反転させるのか？</span></a>
-    <a class="overview-item" href="chapter-09.html"><span class="num">第9章</span><span class="title">Hゲートは振幅をどう分けるのか？</span></a>
-    <a class="overview-item" href="chapter-10.html"><span class="num">第10章</span><span class="title">Zゲートは何の符号を変えるのか？</span></a>
-    <a class="overview-item" href="chapter-11.html"><span class="num">第11章</span><span class="title">CNOTゲートは2つのキュービットをどうつなぐのか？</span></a>
-    <a class="overview-item" href="chapter-12.html"><span class="num">第12章</span><span class="title">小さな回路をひとつ最後まで読んでみましょう</span></a>
+    <a class="overview-item" href="chapter-01.html"><span class="num">第1章</span><span class="title">キュービット状態と振幅について見ていこう</span></a>
+    <a class="overview-item" href="chapter-02.html"><span class="num">第2章</span><span class="title">振幅と確率はどうつながるのか？</span></a>
+    <a class="overview-item" href="chapter-03.html"><span class="num">第3章</span><span class="title">|0⟩状態と|1⟩状態を直接読んでみよう</span></a>
+    <a class="overview-item" href="chapter-04.html"><span class="num">第4章</span><span class="title">重ね合わせと干渉とは何だろう？</span></a>
+    <a class="overview-item" href="chapter-05.html"><span class="num">第5章</span><span class="title">重ね合わせはただの「わからない状態」なのか？</span></a>
+    <a class="overview-item" href="chapter-06.html"><span class="num">第6章</span><span class="title">干渉はいつ生まれるのか？</span></a>
+    <a class="overview-item" href="chapter-07.html"><span class="num">第7章</span><span class="title">2つのキュービットの状態はどう読むのか？</span></a>
+    <a class="overview-item" href="chapter-08.html"><span class="num">第8章</span><span class="title">量子もつれでは何が一緒に結びつくのか？</span></a>
+    <a class="overview-item" href="chapter-09.html"><span class="num">第9章</span><span class="title">量子ゲートは元に戻せなければならない</span></a>
+    <a class="overview-item" href="chapter-10.html"><span class="num">第10章</span><span class="title">Qoraコードはどう読むのか？</span></a>
+    <a class="overview-item" href="summary.html"><span class="num">まとめ</span><span class="title">第1部で学んだことを整理してみよう</span></a>
+    <a class="overview-item" href="chapter-11.html"><span class="num">第11章</span><span class="title">Xゲートは何を反転させるのか？</span></a>
+    <a class="overview-item" href="chapter-12.html"><span class="num">第12章</span><span class="title">Hゲートは振幅をどう分けるのか？</span></a>
+    <a class="overview-item" href="chapter-13.html"><span class="num">第13章</span><span class="title">Zゲートは何の符号を変えるのか？</span></a>
+    <a class="overview-item" href="chapter-14.html"><span class="num">第14章</span><span class="title">CNOTゲートは2つのキュービットをどうつなぐのか？</span></a>
+    <a class="overview-item" href="chapter-15.html"><span class="num">第15章</span><span class="title">小さな回路を最後まで読んでみよう</span></a>
   </div>
-    <nav class="page-nav" aria-label="章の移動">
+                        <nav class="page-nav" aria-label="章の移動">
     <span class="disabled"><span class="k">前へ</span><span class="t">最初のページです</span></span>
-    <a class="home" href="index.html"><span class="k">概要</span><span class="t">全体の目次に戻る</span></a>
+    <a class="home" href="index.html"><span class="k">概要</span><span class="t">全体の目次へ戻る</span></a>
     <a href="intro.html"><span class="k">次へ</span><span class="t">はじめに。なぜQoraで量子ゲートを学ぶのか？</span></a>
   </nav>
     <footer>
-      <p>Qora — 自分の手で作る量子トイ言語</p>
+      <p>Qora — 自分で作る量子トイ言語</p>
     </footer>
   </main>
 </div>
 
 </body>
 </html>
+

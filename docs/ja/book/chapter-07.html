@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>第7章. Qoraコードはどう読むのか？ — Qora</title>
+<title>第7章. 2つのキュービットの状態はどう読むのか？ — Qora</title>
 <style>
 :root {
     --bg: #ffffff;
@@ -269,6 +269,24 @@
   .card.plus { border-top: 5px solid var(--plus); }
   .card.minus { border-top: 5px solid var(--minus); }
   .card.accent { border-top: 5px solid var(--accent); }
+  .concept-figure {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    margin: 24px 0 32px;
+    padding: 12px;
+  }
+  .concept-figure img {
+    display: block;
+    width: 100%;
+    height: auto;
+    border-radius: 8px;
+  }
+  .concept-figure figcaption {
+    color: var(--muted);
+    font-size: .92rem;
+    margin: 10px 4px 2px;
+  }
   .tag-small {
     display: inline-block;
     background: var(--panel);
@@ -517,125 +535,151 @@
 <div class="qora-lang-switch" style="position:sticky;top:0;z-index:99;text-align:right;padding:8px 16px;background:rgba(255,255,255,.92);backdrop-filter:blur(4px);border-bottom:1px solid #e6e8ee;font-size:13px;font-family:sans-serif;"><a href="../../en/book/chapter-07.html" onclick="try{localStorage.setItem(&quot;qora-lang&quot;,&quot;en&quot;)}catch(e){}">English</a> · <a href="../../ko/book/chapter-07.html" onclick="try{localStorage.setItem(&quot;qora-lang&quot;,&quot;ko&quot;)}catch(e){}">한국어</a> · <strong>日本語</strong></div>
 
 <header class="hero">
-  <div class="tag">Qora · 量子ゲートドキュメント</div>
-  <h1>第7章. Qoraコードはどう読むのか？</h1>
-  <p>キュービットの準備、ゲートの適用、測定をコード1行ずつ読んでみましょう</p>
+  <div class="tag">Qora · 量子ゲート文書</div>
+  <h1>第7章. 2つのキュービットの状態はどう読むのか？</h1>
+  <p>1キュービットから2キュービットへ状態空間を広げる</p>
 </header>
 
 <div class="book-shell">
-    <aside class="side-nav" aria-label="本の目次">
+            <aside class="side-nav" aria-label="目次">
     <strong>Qoraで学ぶ量子ゲート</strong>
       <a href="index.html">概要</a>
       <a href="intro.html">はじめに。なぜQoraで量子ゲートを学ぶのか？</a>
-      <a href="chapter-01.html">第1章. キュービットの状態には何が入っているのか？</a>
-      <a href="chapter-02.html">第2章. 振幅と確率はどうつながっているのか？</a>
-      <a href="chapter-03.html">第3章. 重ね合わせと干渉とは何か？</a>
-      <a href="chapter-04.html">第4章. 重ね合わせはただの「わからない状態」なのか？</a>
-      <a href="chapter-05.html">第5章. 干渉はいつ生まれるのか？</a>
-      <a href="chapter-06.html">第6章. 量子ゲートはなぜ元に戻せなければならないのか？</a>
-      <a class="current" href="chapter-07.html">第7章. Qoraコードはどう読むのか？</a>
-      <a href="summary.html">まとめ. 第1部で学んだことを整理してみましょう</a>
-      <a href="chapter-08.html">第8章. Xゲートは何を反転させるのか？</a>
-      <a href="chapter-09.html">第9章. Hゲートは振幅をどう分けるのか？</a>
-      <a href="chapter-10.html">第10章. Zゲートは何の符号を変えるのか？</a>
-      <a href="chapter-11.html">第11章. CNOTゲートは2つのキュービットをどうつなぐのか？</a>
-      <a href="chapter-12.html">第12章. 小さな回路をひとつ最後まで読んでみましょう</a>
+      <a href="chapter-01.html">第1章. キュービット状態と振幅について見ていこう</a>
+      <a href="chapter-02.html">第2章. 振幅と確率はどうつながるのか？</a>
+      <a href="chapter-03.html">第3章. |0⟩状態と|1⟩状態を直接読んでみよう</a>
+      <a href="chapter-04.html">第4章. 重ね合わせと干渉とは何だろう？</a>
+      <a href="chapter-05.html">第5章. 重ね合わせはただの「わからない状態」なのか？</a>
+      <a href="chapter-06.html">第6章. 干渉はいつ生まれるのか？</a>
+      <a class="current" href="chapter-07.html">第7章. 2つのキュービットの状態はどう読むのか？</a>
+      <a href="chapter-08.html">第8章. 量子もつれでは何が一緒に結びつくのか？</a>
+      <a href="chapter-09.html">第9章. 量子ゲートは元に戻せなければならない</a>
+      <a href="chapter-10.html">第10章. Qoraコードはどう読むのか？</a>
+      <a href="summary.html">まとめ。第1部で学んだことを整理してみよう</a>
+      <a href="chapter-11.html">第11章. Xゲートは何を反転させるのか？</a>
+      <a href="chapter-12.html">第12章. Hゲートは振幅をどう分けるのか？</a>
+      <a href="chapter-13.html">第13章. Zゲートは何の符号を変えるのか？</a>
+      <a href="chapter-14.html">第14章. CNOTゲートは2つのキュービットをどうつなぐのか？</a>
+      <a href="chapter-15.html">第15章. 小さな回路を最後まで読んでみよう</a>
     <div class="group">
-      <a href="../index.html">Hゲート単独ドキュメント</a>
+      <a href="../index.html">Hゲート単独文書</a>
     </div>
   </aside>
   <main class="article">
-    <div class="breadcrumb">Qoraで学ぶ量子ゲート / 第7章</div>
-<h2 id="qora-code">第7章. Qoraコードはどう読むのか？</h2>
+    <div class="breadcrumb">Qoraで学ぶ量子ゲート / 第7章. 2つのキュービットの状態はどう読むのか？</div>
+    <h2 id="two-qubit-state">第7章. 2つのキュービットの状態はどう読むのか？</h2>
 
   <p>
-    最後に、これからよく目にする Qora コードの基本的な形を一緒に見ていきましょう。<br>
-    Qora コードは量子状態をそのまま目に見せてくれる表記法ではありませんが、どのキュービットにどのゲートをどの順序で適用するのかを明確に書き表してくれます。<br>
-    そのため数学的には、状態ベクトルにユニタリ変換を順番に適用していく回路の説明として読むことができます。
+    1つのキュービットでは、可能な測定結果は <code>0</code> と <code>1</code> の2つでした。<br>
+    2つのキュービットがあると、測定結果は1桁の数字ではなく、2桁の文字列になります。<br>
+    この文書では、左の桁を1つ目のキュービットの結果、右の桁を2つ目のキュービットの結果として読みます。
   </p>
 
+  <div class="call why">
+    <span class="h">新しい記号が多く見えても大丈夫です</span>
+    必要な考え方はシンプルです。<br>
+    1つのキュービットで基底状態が2つだったなら、2つのキュービットでは基底状態が4つに増えます。<br>
+    そのため状態ベクトルも、2つではなく4つの振幅を持ちます。
+  </div>
+
+  <figure class="concept-figure">
+    <img src="../../images/two-qubit-basis-overview.png" alt="2つのキュービットの基底状態 |00⟩、|01⟩、|10⟩、|11⟩ と4つの振幅を示す図">
+    <figcaption>2キュービット状態は、4つの計算基底状態に付いた振幅の全体として読みます。</figcaption>
+  </figure>
+
+  <h3>2つのキュービットの計算基底は4つあります</h3>
+
   <p>
-    Qora プログラムは <code>operation</code> で始まり、最初に実行される操作にはふつう <code>Main</code> という名前を付けます。
+    2つのキュービットを測定すると、結果は <code>00</code>、<code>01</code>、<code>10</code>、<code>11</code> の4通りです。<br>
+    そのため、2キュービットの計算基底状態も4つ書きます。
+  </p>
+
+  <div class="panel">
+    <table>
+      <tr><th>基底状態</th><th>1つ目のキュービット</th><th>2つ目のキュービット</th><th>測定で見える結果</th></tr>
+      <tr><td><code>|00⟩</code></td><td>0</td><td>0</td><td><code>00</code></td></tr>
+      <tr><td><code>|01⟩</code></td><td>0</td><td>1</td><td><code>01</code></td></tr>
+      <tr><td><code>|10⟩</code></td><td>1</td><td>0</td><td><code>10</code></td></tr>
+      <tr><td><code>|11⟩</code></td><td>1</td><td>1</td><td><code>11</code></td></tr>
+    </table>
+  </div>
+
+  <h3>状態ベクトルは4つの振幅を持ちます</h3>
+
+  <p>
+    1キュービットの状態を <code>α|0⟩ + β|1⟩</code> のように書いたなら、2キュービットの状態は4つの基底状態に振幅を付けて書きます。
+  </p>
+
+  <div class="math mono">
+    <div class="math-line">|ψ⟩ = a₀₀|00⟩ + a₀₁|01⟩</div>
+    <div class="math-line">+ a₁₀|10⟩ + a₁₁|11⟩</div>
+  </div>
+
+  <p>
+    ここで <span class="mono">a₀₀</span> は測定結果 <code>00</code> に付いた振幅で、<span class="mono">a₀₁</span> は <code>01</code> に付いた振幅です。<br>
+    同じように、<span class="mono">a₁₀</span> は <code>10</code> に付いた振幅で、<span class="mono">a₁₁</span> は <code>11</code> に付いた振幅です。<br>
+    測定確率はここでも、振幅の絶対値の2乗から得ます。
+  </p>
+
+  <div class="panel">
+    <table>
+      <tr><th>測定結果</th><th>振幅</th><th>測定確率</th></tr>
+      <tr><td><code>00</code></td><td><span class="mono">a₀₀</span></td><td><span class="mono">|a₀₀|²</span></td></tr>
+      <tr><td><code>01</code></td><td><span class="mono">a₀₁</span></td><td><span class="mono">|a₀₁|²</span></td></tr>
+      <tr><td><code>10</code></td><td><span class="mono">a₁₀</span></td><td><span class="mono">|a₁₀|²</span></td></tr>
+      <tr><td><code>11</code></td><td><span class="mono">a₁₁</span></td><td><span class="mono">|a₁₁|²</span></td></tr>
+    </table>
+  </div>
+
+  <p>
+    そのため、2キュービット状態でも測定確率の合計は100%でなければなりません。
+  </p>
+
+  <div class="rule mono">|a₀₀|² + |a₀₁|² + |a₁₀|² + |a₁₁|² = 1</div>
+
+  <h3>2キュービット状態は、いつも2つの状態を別々に貼り合わせたものとは限りません</h3>
+
+  <p>
+    ある2キュービット状態は、1つ目のキュービットの状態と2つ目のキュービットの状態を別々に書いてから、2つを合わせて説明できます。<br>
+    しかし、すべての2キュービット状態がそのように分けられるわけではありません。<br>
+    この違いが、次の章で見る量子もつれの出発点です。
   </p>
 
   <div class="practice">
-    <span class="practice-label">基本形</span>
-    <h3>いちばん小さな Qora プログラムから見てみましょう</h3>
+    <span class="practice-label">Qoraで実習してみよう</span>
+    <h3>キュービットを2つ準備してみよう</h3>
     <pre><code>operation Main() {
-    // ここに実行する量子回路を書く
+    // キュービットを2つ準備
+    // 準備直後の全体状態は |00⟩
+    // 測定結果00の振幅 = 1
+    // それ以外の測定結果の振幅 = 0
+    use q = Qubit[2];
+
+    // 1つ目のキュービットを測定
+    bit first = M(q[0]);
+
+    // 2つ目のキュービットを測定
+    bit second = M(q[1]);
 }</code></pre>
   </div>
 
-  <h3>キュービットを準備する</h3>
-
-  <p>キュービットの準備は <code>use</code> で始まります。</p>
-
-  <div class="math mono">use q = Qubit[1];</div>
-
-  <p>
-    このコードはキュービットを1つ準備し、そのキュービットの束に <code>q</code> という名前を付けます。<br>
-    <code>Qubit[1]</code> はキュービットが1個という意味で、
-    そのキュービットは <code>q[0]</code> で指し示します。<br>
-    この本では、新しく準備したキュービットは計算基底状態 <code>|0⟩</code> から始まるものとして読んでいきます。
-  </p>
-
-  <h3>ゲートを適用する</h3>
-
-  <p>ゲートは関数呼び出しのように書けば大丈夫です。</p>
-
-  <div class="math mono">H(q[0]);</div>
-
-  <p>
-    このコードは <code>q[0]</code> に H ゲートを適用する行です。<br>
-    数学的には、現在の状態ベクトルに H 行列を掛けるステップです。<br>
-    X ゲートは <code>X(q[0]);</code> のように、
-    2キュービットゲートである CNOT は <code>CNOT(q[0], q[1]);</code> のように書きます。
-  </p>
-
-  <h3>測定する</h3>
-
-  <p>測定には <code>M</code> を使います。</p>
-
-  <div class="math mono">bit result = M(q[0]);</div>
-
-  <p>
-    この行は <code>q[0]</code> を測定し、その結果を古典ビット <code>result</code> に保存します。<br>
-    測定する前のキュービットは振幅を持つ量子状態で、
-    測定した後には測定値 0 または測定値 1 のどちらかが古典ビットに保存されます。
-  </p>
-
-  <h3>コメントを書く</h3>
-
-  <p>
-    Qora では <code>//</code> で1行コメントを書くことができます。<br>
-    コメントは回路の実行に影響を与えないので、
-    この本の Qora 実習コードでも、状態の変化を書き込むときによく使っていきます。
-  </p>
-
-  <div class="practice">
-    <span class="practice-label">コメント付きの Qora コード</span>
-    <h3>コードの行ごとに状態の変化を書いてみましょう</h3>
-    <pre><code>operation Main() {
-    // キュービットを1つ準備
-    use q = Qubit[1];
-
-    // q[0] に H ゲートを適用
-    H(q[0]);
-
-    // q[0] を測定
-    bit result = M(q[0]);
-}</code></pre>
+  <div class="call why">
+    <span class="h">次の章につながる問い</span>
+    4つの振幅を持つ2キュービット状態の中には、1つ目のキュービットと2つ目のキュービットを切り離して完全には説明できない状態があります。<br>
+    そのような状態を量子もつれ状態と呼びます。
   </div>
-    <nav class="page-nav" aria-label="章の移動">
-    <a href="chapter-06.html"><span class="k">前へ</span><span class="t">第6章. 量子ゲートはなぜ元に戻せなければならないのか？</span></a>
-    <a class="home" href="index.html"><span class="k">概要</span><span class="t">全体の目次に戻る</span></a>
-    <a href="summary.html"><span class="k">次へ</span><span class="t">まとめ. 第1部で学んだことを整理してみましょう</span></a>
+
+                        <nav class="page-nav" aria-label="章の移動">
+    <a href="chapter-06.html"><span class="k">前へ</span><span class="t">第6章. 干渉はいつ生まれるのか？</span></a>
+    <a class="home" href="index.html"><span class="k">概要</span><span class="t">全体の目次へ戻る</span></a>
+    <a href="chapter-08.html"><span class="k">次へ</span><span class="t">第8章. 量子もつれでは何が一緒に結びつくのか？</span></a>
   </nav>
     <footer>
-      <p>Qora — 自分の手で作る量子トイ言語</p>
+      <p>Qora — 自分で作る量子トイ言語</p>
     </footer>
   </main>
 </div>
 
 </body>
 </html>
+

@@ -519,33 +519,36 @@
 <header class="hero">
   <div class="tag">Qora · Quantum Gate Documentation</div>
   <h1>Overview. Learning Quantum Gates with Qora</h1>
-  <p>See the whole flow first, then read each chapter one page at a time</p>
+  <p>A guided path for reading Qora code and quantum gate explanations together</p>
 </header>
 
 <div class="book-shell">
-    <aside class="side-nav" aria-label="Book contents">
-    <strong>Quantum Gates with Qora</strong>
+            <aside class="side-nav" aria-label="Table of contents">
+    <strong>Learning Quantum Gates with Qora</strong>
       <a class="current" href="index.html">Overview</a>
       <a href="intro.html">Introduction. Why Learn Quantum Gates with Qora?</a>
-      <a href="chapter-01.html">Chapter 1. What Is Inside a Qubit State?</a>
-      <a href="chapter-02.html">Chapter 2. How Are Amplitudes Connected to Probabilities?</a>
-      <a href="chapter-03.html">Chapter 3. What Are Superposition and Interference?</a>
-      <a href="chapter-04.html">Chapter 4. Is Superposition Just a &quot;State We Don&#39;t Know&quot;?</a>
-      <a href="chapter-05.html">Chapter 5. When Does Interference Appear?</a>
-      <a href="chapter-06.html">Chapter 6. Why Must Quantum Gates Be Reversible?</a>
-      <a href="chapter-07.html">Chapter 7. How Do We Read Qora Code?</a>
-      <a href="summary.html">Wrap-up. Let&#39;s Review What We Learned in Part 1</a>
-      <a href="chapter-08.html">Chapter 8. What Does the X Gate Flip?</a>
-      <a href="chapter-09.html">Chapter 9. How Does the H Gate Split Amplitudes?</a>
-      <a href="chapter-10.html">Chapter 10. What Does the Z Gate Change the Sign Of?</a>
-      <a href="chapter-11.html">Chapter 11. How Does the CNOT Gate Connect Two Qubits?</a>
-      <a href="chapter-12.html">Chapter 12. Let&#39;s Read One Small Circuit from Start to Finish</a>
+      <a href="chapter-01.html">Chapter 1. Learn About Qubit States and Amplitudes</a>
+      <a href="chapter-02.html">Chapter 2. How Are Amplitudes and Probabilities Connected?</a>
+      <a href="chapter-03.html">Chapter 3. Read the |0⟩ and |1⟩ States Directly</a>
+      <a href="chapter-04.html">Chapter 4. What Are Superposition and Interference?</a>
+      <a href="chapter-05.html">Chapter 5. Is Superposition Just a "State We Do Not Know"?</a>
+      <a href="chapter-06.html">Chapter 6. When Does Interference Appear?</a>
+      <a href="chapter-07.html">Chapter 7. How Do We Read a Two-Qubit State?</a>
+      <a href="chapter-08.html">Chapter 8. What Does Entanglement Mean?</a>
+      <a href="chapter-09.html">Chapter 9. Quantum Gates Must Be Reversible.</a>
+      <a href="chapter-10.html">Chapter 10. How Do We Read Qora Code?</a>
+      <a href="summary.html">Wrap-up. Review What We Learned in Part 1</a>
+      <a href="chapter-11.html">Chapter 11. What Does the X Gate Flip?</a>
+      <a href="chapter-12.html">Chapter 12. How Does the H Gate Split Amplitudes?</a>
+      <a href="chapter-13.html">Chapter 13. What Sign Does the Z Gate Change?</a>
+      <a href="chapter-14.html">Chapter 14. How Does the CNOT Gate Connect Two Qubits?</a>
+      <a href="chapter-15.html">Chapter 15. Read a Small Circuit All the Way Through</a>
     <div class="group">
       <a href="../index.html">Standalone H Gate Document</a>
     </div>
   </aside>
   <main class="article">
-    <div class="breadcrumb">Quantum Gates with Qora / Overview</div>
+    <div class="breadcrumb">Learning Quantum Gates with Qora / Overview. Learning Quantum Gates with Qora</div>
   <p class="lead">
     In this book, we write quantum circuits in Qora code and read, step by step, which quantum-mechanical concepts that code actually touches.<br>
     The goal is not to memorize gate names, but to become able to follow, on your own, how a single line of code changes the amplitudes of a qubit's state vector.
@@ -575,10 +578,18 @@
     </div>
     <div class="point">
       <span class="marker">Step 4</span>
-      <span><strong>Read gates as linear transformations</strong><br>Calculate how gates like X, H, Z, and CNOT change the amplitudes of the state vector.</span>
+      <span><strong>Extend the picture to two-qubit states</strong><br>See which amplitudes the state vector carries when the possible measurement outcomes become <code>00</code>, <code>01</code>, <code>10</code>, and <code>11</code>.</span>
     </div>
     <div class="point">
       <span class="marker">Step 5</span>
+      <span><strong>Distinguish entanglement in the standard way</strong><br>Read entanglement as the case where the overall two-qubit state cannot be separated into the states of the individual qubits.</span>
+    </div>
+    <div class="point">
+      <span class="marker">Step 6</span>
+      <span><strong>Read gates as linear transformations</strong><br>Calculate how gates like X, H, Z, and CNOT change the amplitudes of the state vector.</span>
+    </div>
+    <div class="point">
+      <span class="marker">Step 7</span>
       <span><strong>Read one small circuit from start to finish</strong><br>Follow how the state changes when several gates appear in sequence, and how the final measurement probabilities are determined.</span>
     </div>
   </div>
@@ -589,28 +600,31 @@
       <tr><td>State vector</td><td>Read which amplitudes a qubit is carrying</td><td><code>use q = Qubit[1];</code></td></tr>
       <tr><td>Unitary gate</td><td>Change the state vector in a way that can be reversed</td><td><code>H(q[0]);</code>, <code>X(q[0]);</code></td></tr>
       <tr><td>Measurement</td><td>Get outcome probabilities from the squared absolute values of amplitudes</td><td><code>bit r = M(q[0]);</code></td></tr>
-      <tr><td>Multiple qubits</td><td>The number of basis states grows, and gates create relationships between qubits</td><td><code>CNOT(q[0], q[1]);</code></td></tr>
+      <tr><td>Multiple qubits and entanglement</td><td>The number of basis states grows, and the overall state may not separate into individual qubit states</td><td><code>CNOT(q[0], q[1]);</code></td></tr>
     </table>
   </div>
 
   <h2>Table of Contents</h2>
-    <div class="overview-list">
+      <div class="overview-list">
     <a class="overview-item" href="intro.html"><span class="num">Introduction</span><span class="title">Why Learn Quantum Gates with Qora?</span></a>
-    <a class="overview-item" href="chapter-01.html"><span class="num">Chapter 1</span><span class="title">What Is Inside a Qubit State?</span></a>
-    <a class="overview-item" href="chapter-02.html"><span class="num">Chapter 2</span><span class="title">How Are Amplitudes Connected to Probabilities?</span></a>
-    <a class="overview-item" href="chapter-03.html"><span class="num">Chapter 3</span><span class="title">What Are Superposition and Interference?</span></a>
-    <a class="overview-item" href="chapter-04.html"><span class="num">Chapter 4</span><span class="title">Is Superposition Just a &quot;State We Don&#39;t Know&quot;?</span></a>
-    <a class="overview-item" href="chapter-05.html"><span class="num">Chapter 5</span><span class="title">When Does Interference Appear?</span></a>
-    <a class="overview-item" href="chapter-06.html"><span class="num">Chapter 6</span><span class="title">Why Must Quantum Gates Be Reversible?</span></a>
-    <a class="overview-item" href="chapter-07.html"><span class="num">Chapter 7</span><span class="title">How Do We Read Qora Code?</span></a>
-    <a class="overview-item" href="summary.html"><span class="num">Wrap-up</span><span class="title">Let&#39;s Review What We Learned in Part 1</span></a>
-    <a class="overview-item" href="chapter-08.html"><span class="num">Chapter 8</span><span class="title">What Does the X Gate Flip?</span></a>
-    <a class="overview-item" href="chapter-09.html"><span class="num">Chapter 9</span><span class="title">How Does the H Gate Split Amplitudes?</span></a>
-    <a class="overview-item" href="chapter-10.html"><span class="num">Chapter 10</span><span class="title">What Does the Z Gate Change the Sign Of?</span></a>
-    <a class="overview-item" href="chapter-11.html"><span class="num">Chapter 11</span><span class="title">How Does the CNOT Gate Connect Two Qubits?</span></a>
-    <a class="overview-item" href="chapter-12.html"><span class="num">Chapter 12</span><span class="title">Let&#39;s Read One Small Circuit from Start to Finish</span></a>
+    <a class="overview-item" href="chapter-01.html"><span class="num">Chapter 1</span><span class="title">Learn About Qubit States and Amplitudes</span></a>
+    <a class="overview-item" href="chapter-02.html"><span class="num">Chapter 2</span><span class="title">How Are Amplitudes and Probabilities Connected?</span></a>
+    <a class="overview-item" href="chapter-03.html"><span class="num">Chapter 3</span><span class="title">Read the |0⟩ and |1⟩ States Directly</span></a>
+    <a class="overview-item" href="chapter-04.html"><span class="num">Chapter 4</span><span class="title">What Are Superposition and Interference?</span></a>
+    <a class="overview-item" href="chapter-05.html"><span class="num">Chapter 5</span><span class="title">Is Superposition Just a "State We Do Not Know"?</span></a>
+    <a class="overview-item" href="chapter-06.html"><span class="num">Chapter 6</span><span class="title">When Does Interference Appear?</span></a>
+    <a class="overview-item" href="chapter-07.html"><span class="num">Chapter 7</span><span class="title">How Do We Read a Two-Qubit State?</span></a>
+    <a class="overview-item" href="chapter-08.html"><span class="num">Chapter 8</span><span class="title">What Does Entanglement Mean?</span></a>
+    <a class="overview-item" href="chapter-09.html"><span class="num">Chapter 9</span><span class="title">Quantum Gates Must Be Reversible.</span></a>
+    <a class="overview-item" href="chapter-10.html"><span class="num">Chapter 10</span><span class="title">How Do We Read Qora Code?</span></a>
+    <a class="overview-item" href="summary.html"><span class="num">Wrap-up</span><span class="title">Review What We Learned in Part 1</span></a>
+    <a class="overview-item" href="chapter-11.html"><span class="num">Chapter 11</span><span class="title">What Does the X Gate Flip?</span></a>
+    <a class="overview-item" href="chapter-12.html"><span class="num">Chapter 12</span><span class="title">How Does the H Gate Split Amplitudes?</span></a>
+    <a class="overview-item" href="chapter-13.html"><span class="num">Chapter 13</span><span class="title">What Sign Does the Z Gate Change?</span></a>
+    <a class="overview-item" href="chapter-14.html"><span class="num">Chapter 14</span><span class="title">How Does the CNOT Gate Connect Two Qubits?</span></a>
+    <a class="overview-item" href="chapter-15.html"><span class="num">Chapter 15</span><span class="title">Read a Small Circuit All the Way Through</span></a>
   </div>
-    <nav class="page-nav" aria-label="Chapter navigation">
+                        <nav class="page-nav" aria-label="Chapter navigation">
     <span class="disabled"><span class="k">Previous</span><span class="t">This is the first page</span></span>
     <a class="home" href="index.html"><span class="k">Overview</span><span class="t">Back to the full table of contents</span></a>
     <a href="intro.html"><span class="k">Next</span><span class="t">Introduction. Why Learn Quantum Gates with Qora?</span></a>
@@ -623,3 +637,4 @@
 
 </body>
 </html>
+

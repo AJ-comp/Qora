@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>2장. 진폭과 확률은 어떻게 연결될까? — Qora</title>
+<title>2장. 진폭과 확률은 어떻게 연결될까? - Qora</title>
 <style>
 :root {
     --bg: #ffffff;
@@ -247,13 +247,139 @@
   .math-line + .math-line {
     margin-top: 4px;
   }
-  .amp-change {
-    color: var(--plus);
+  .concept-flow {
+    display: grid;
+    gap: 16px;
+    margin: 20px 0 26px;
+  }
+  .concept-step {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  .concept-step.basis { border-top: 5px solid #6b7280; }
+  .concept-step.vector { border-top: 5px solid var(--plus); }
+  .concept-step.amplitude { border-top: 5px solid var(--good); }
+  .concept-body {
+    padding: 16px 18px 18px;
+  }
+  .concept-title {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin: 0 0 10px;
+  }
+  .concept-title h3 {
+    margin: 0;
+  }
+  .step-badge {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    color: var(--muted);
+    display: inline-flex;
+    font-size: .76rem;
+    font-weight: 900;
+    line-height: 1;
+    padding: 6px 10px;
+    white-space: nowrap;
+  }
+  .visual-grid {
+    display: grid;
+    gap: 10px;
+    margin-top: 12px;
+  }
+  .visual-grid.two {
+    grid-template-columns: 1fr;
+  }
+  @media (min-width: 720px) {
+    .visual-grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  .basis-tile,
+  .component-tile,
+  .amplitude-tile {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 13px 14px;
+  }
+  .basis-line {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: center;
+    min-height: 44px;
+  }
+  .basis-line .from {
+    color: var(--muted);
+    font-size: .9rem;
+    font-weight: 700;
+  }
+  .basis-line .arrow {
+    color: var(--accent);
     font-weight: 900;
   }
-  .amp-zero {
-    color: var(--minus);
+  .tile-note {
+    color: var(--muted);
+    display: block;
+    font-size: .88rem;
+    margin-top: 6px;
+    text-align: center;
+  }
+  .component-equation {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: center;
+    margin-top: 12px;
+  }
+  .component-part,
+  .formula-part {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 8px;
     font-weight: 900;
+    padding: 9px 12px;
+  }
+  .component-part.x { color: var(--plus); }
+  .component-part.y { color: var(--accent); }
+  .formula-part.zero { color: var(--plus); }
+  .formula-part.one { color: var(--good); }
+  .operator {
+    color: var(--muted);
+    font-weight: 900;
+  }
+  .formula-final {
+    background: #f2fbf7;
+    border: 1px solid #b8e5d2;
+    border-radius: 8px;
+    font-size: 1.04rem;
+    font-weight: 900;
+    margin-top: 12px;
+    padding: 13px 14px;
+    text-align: center;
+  }
+  .meaning-list {
+    display: grid;
+    gap: 8px;
+    margin-top: 12px;
+  }
+  .meaning-row {
+    align-items: center;
+    display: grid;
+    gap: 8px;
+    grid-template-columns: minmax(96px, auto) 1fr;
+  }
+  .meaning-row strong {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 6px 9px;
+    text-align: center;
   }
   .compare-grid,
   .summary-grid {
@@ -527,61 +653,142 @@
 <header class="hero">
   <div class="tag">Qora · 양자 게이트 문서</div>
   <h1>2장. 진폭과 확률은 어떻게 연결될까?</h1>
-  <p>진폭을 제곱하면 측정 확률이 되는 이유를 살펴보자</p>
+  <p>진폭의 절댓값 제곱이 측정 확률이 되는 이유를 살펴보자</p>
 </header>
 
 <div class="book-shell">
-    <aside class="side-nav" aria-label="책 차례">
+                        <aside class="side-nav" aria-label="책 차례">
     <strong>Qora로 배우는 양자 게이트</strong>
       <a href="index.html">개요</a>
       <a href="intro.html">들어가며. 왜 Qora로 양자 게이트를 배울까?</a>
-      <a href="chapter-01.html">1장. 큐비트 상태에는 무엇이 들어 있을까?</a>
+      <a href="chapter-01.html">1장. 큐비트 상태와 진폭에 대해 알아보자</a>
       <a class="current" href="chapter-02.html">2장. 진폭과 확률은 어떻게 연결될까?</a>
-      <a href="chapter-03.html">3장. 중첩은 무엇이고 간섭은 무엇일까?</a>
-      <a href="chapter-04.html">4장. 중첩은 그냥 &quot;모르는 상태&quot;일까?</a>
-      <a href="chapter-05.html">5장. 간섭은 언제 생길까?</a>
-      <a href="chapter-06.html">6장. 양자 게이트는 왜 되돌릴 수 있어야 할까?</a>
-      <a href="chapter-07.html">7장. Qora 코드는 어떻게 읽을까?</a>
+      <a href="chapter-03.html">3장. |0⟩ 상태와 |1⟩ 상태를 직접 읽어보자</a>
+      <a href="chapter-04.html">4장. 중첩은 무엇이고 간섭은 무엇일까?</a>
+      <a href="chapter-05.html">5장. 중첩은 그냥 "모르는 상태"일까?</a>
+      <a href="chapter-06.html">6장. 간섭은 언제 생길까?</a>
+      <a href="chapter-07.html">7장. 두 큐비트 상태는 어떻게 읽을까?</a>
+      <a href="chapter-08.html">8장. 얽힘은 무엇이 함께 묶인다는 뜻일까?</a>
+      <a href="chapter-09.html">9장. 양자 게이트는 되돌릴 수 있어야 한다.</a>
+      <a href="chapter-10.html">10장. Qora 코드는 어떻게 읽을까?</a>
       <a href="summary.html">정리. 1부에서 배운 것을 정리해보자</a>
-      <a href="chapter-08.html">8장. X 게이트는 무엇을 뒤집을까?</a>
-      <a href="chapter-09.html">9장. H 게이트는 진폭을 어떻게 나눌까?</a>
-      <a href="chapter-10.html">10장. Z 게이트는 무엇의 부호를 바꿀까?</a>
-      <a href="chapter-11.html">11장. CNOT 게이트는 두 큐비트를 어떻게 연결할까?</a>
-      <a href="chapter-12.html">12장. 작은 회로 하나를 끝까지 읽어보자</a>
+      <a href="chapter-11.html">11장. X 게이트는 무엇을 뒤집을까?</a>
+      <a href="chapter-12.html">12장. H 게이트는 진폭을 어떻게 나눌까?</a>
+      <a href="chapter-13.html">13장. Z 게이트는 무엇의 부호를 바꿀까?</a>
+      <a href="chapter-14.html">14장. CNOT 게이트는 두 큐비트를 어떻게 연결할까?</a>
+      <a href="chapter-15.html">15장. 작은 회로 하나를 끝까지 읽어보자</a>
     <div class="group">
       <a href="../index.html">H 게이트 단독 문서</a>
     </div>
   </aside>
   <main class="article">
     <div class="breadcrumb">Qora로 배우는 양자 게이트 / 2장</div>
-  <h2 id="amplitude">2장. 진폭과 확률은 어떻게 연결될까?</h2>
+<section id="part1" class="part">
+    <span class="label">1부</span>
+    <h2>양자를 읽기 위한 준비를 해보자</h2>
+    <p>
+      1부에서는 게이트 설명에 들어가기 전에 필요한 공통 언어를 먼저 만들어볼게요.<br>
+      모든 양자역학을 다루려는 자리는 아니에요.<br>
+      H 게이트, X 게이트, Z 게이트, CNOT 게이트 설명을 읽기 위해 꼭 필요한 개념만 먼저 잡고 갈 거예요.
+    </p>
+  </section>
+  <h2 id="amplitude-probability">2장. 진폭과 확률은 어떻게 연결될까?</h2>
   <p>
-    큐비트 상태가 <code>|ψ⟩ = α|0⟩ + β|1⟩</code>로 쓰인다고 했어요.<br>
-    여기서 <span class="mono">α</span>와 <span class="mono">β</span>는 확률이 아니라 <strong>진폭</strong>이에요.<br>
-    정확한 용어로는 <strong>확률 진폭</strong>이라고 불러요.<br>
-    그리고 측정 확률은 진폭의 절댓값을 제곱해서 얻어요.
+    1장에서는 큐비트 상태를 <code>|ψ⟩ = α|0⟩ + β|1⟩</code>처럼 적는 법을 봤어요.<br>
+    이번 장에서는 그 상태를 측정할 때, 진폭 <span class="mono">α</span>와 <span class="mono">β</span>가 확률로 어떻게 읽히는지 살펴볼 거예요.
+  </p>
+
+  <div class="concept-flow">
+    <section class="concept-step basis">
+      <div class="concept-body">
+        <div class="concept-title">
+          <span class="step-badge">1단계</span>
+          <h3>상태 안에서는 진폭을 읽어요</h3>
+        </div>
+        <p>
+          큐비트 상태를 적을 때 <span class="mono">α</span>와 <span class="mono">β</span>는 확률이 아니에요.<br>
+          <span class="mono">α</span>는 <code>|0⟩</code> 방향에 붙은 진폭이고, <span class="mono">β</span>는 <code>|1⟩</code> 방향에 붙은 진폭이에요.
+        </p>
+        <div class="formula-final mono">|ψ⟩ = α|0⟩ + β|1⟩</div>
+      </div>
+    </section>
+
+    <section class="concept-step vector">
+      <div class="concept-body">
+        <div class="concept-title">
+          <span class="step-badge">2단계</span>
+          <h3>측정할 때 진폭을 확률로 바꿔 읽어요</h3>
+        </div>
+        <p>
+          측정 결과값의 확률은 진폭을 그대로 읽어서 얻지 않아요.<br>
+          각 진폭의 절댓값을 제곱해서 확률을 계산해요.
+        </p>
+        <div class="component-equation mono">
+          <span class="component-part x">α</span>
+          <span class="operator">→</span>
+          <span class="component-part x">|α|²</span>
+          <span class="operator">,</span>
+          <span class="component-part y">β</span>
+          <span class="operator">→</span>
+          <span class="component-part y">|β|²</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="concept-step amplitude">
+      <div class="concept-body">
+        <div class="concept-title">
+          <span class="step-badge">3단계</span>
+          <h3>두 확률을 더하면 100%가 되어야 해요</h3>
+        </div>
+        <p>
+          한 큐비트를 측정하면 결과값 0 또는 결과값 1 중 하나가 나와요.<br>
+          그래서 두 측정 확률을 모두 더하면 항상 1, 즉 100%가 되어야 해요.
+        </p>
+        <div class="formula-final mono">|α|² + |β|² = 1</div>
+      </div>
+    </section>
+  </div>
+
+  <p>
+    정확히 말하면 <span class="mono">α</span>와 <span class="mono">β</span> 같은 값은 <strong>확률 진폭</strong>이에요.<br>
+    다만 앞으로 설명이 너무 무거워지지 않도록, 이 문서에서는 보통 <strong>진폭</strong>이라고 부를게요.
   </p>
 
   <div class="rule">측정 결과값 0의 확률 = |α|², 측정 결과값 1의 확률 = |β|²</div>
 
   <p>
-    이 규칙을 Born 규칙이라고 불러요.<br>
+    이 규칙을 <strong>Born 규칙</strong>이라고 불러요.<br>
     진폭이 실수일 때는 그냥 제곱으로 보아도 되지만, 일반적인 양자역학에서는 진폭이 복소수일 수 있으므로 절댓값 제곱으로 계산해요.
   </p>
 
   <div class="panel">
     <table>
-      <tr><th>상태</th><th>진폭</th><th>측정 확률</th></tr>
-      <tr><td><code>|0⟩</code></td><td><span class="mono">α = 1, β = 0</span></td><td><span class="mono">|1|² = 100%</span>, <span class="mono">|0|² = 0%</span></td></tr>
-      <tr><td><code>|1⟩</code></td><td><span class="mono">α = 0, β = 1</span></td><td><span class="mono">|0|² = 0%</span>, <span class="mono">|1|² = 100%</span></td></tr>
+      <tr><th>상태를 읽는 대상</th><th>상태 안에 들어 있는 값</th><th>측정할 때 얻는 값</th></tr>
+      <tr><td><code>|0⟩</code> 방향</td><td>진폭 <span class="mono">α</span></td><td>확률 <span class="mono">|α|²</span></td></tr>
+      <tr><td><code>|1⟩</code> 방향</td><td>진폭 <span class="mono">β</span></td><td>확률 <span class="mono">|β|²</span></td></tr>
     </table>
   </div>
 
-  <h3>왜 50% 확률인데 진폭은 1/2이 아닐까?</h3>
+  <h3>정규화라는 이름도 붙여둬요</h3>
 
   <p>
-    측정 결과값 0과 측정 결과값 1이 반반이면 진폭도 각각 1/2일 것처럼 보이지만, 그렇게 두면 정규화가 깨져요.<br>
-    양자 상태는 전체 측정 확률이 100%가 되어야 하므로 <span class="mono">|α|² + |β|² = 1</span>을 만족해야 해요.
+    앞에서 두 측정 확률을 모두 더하면 1, 즉 100%가 되어야 한다고 봤어요.<br>
+    이 조건을 만족하는 상태를 <strong>정규화된 상태</strong>라고 불러요.<br>
+    수식으로는 아래처럼 적어요.
+  </p>
+
+  <div class="rule mono">|α|² + |β|² = 1</div>
+
+  <p>
+    지금은 “전체 측정 확률이 100%로 맞춰진 상태”라고 이해하면 충분해요.
+  </p>
+
+  <h3>50% 확률의 진폭은 왜 1/√2일까?</h3>
+
+  <p>
+    측정 결과값 0과 측정 결과값 1이 반반이면 진폭도 각각 <span class="mono">1/2</span>일 것처럼 보일 수 있어요.<br>
+    하지만 확률은 진폭의 제곱에서 나오므로, 50% 확률을 만들려면 진폭의 크기가 <span class="mono">1/√2</span>이어야 해요.
   </p>
 
   <div class="compare-grid">
@@ -604,7 +811,7 @@
 
   <div class="practice">
     <span class="practice-label">Qora로 실습해보기</span>
-    <h3>H 게이트로 50% 상태를 만들어보자</h3>
+    <h3>큐비트 하나를 준비하고 측정해보자</h3>
     <pre><code>operation Main() {
     // 큐비트 하나 준비
     // 준비 직후 q[0]은 |0⟩ 상태
@@ -612,55 +819,22 @@
     // 측정 결과값 1의 진폭 = 0
     use q = Qubit[1];
 
-    // H 게이트 적용
-    // 측정 결과값 0의 진폭 = 1/√2
-    // 측정 결과값 1의 진폭 = 1/√2
-    // 두 측정 결과값의 확률은 각각 50%
-    H(q[0]);
-
     // q[0] 측정
-    // 이상적인 실행 환경: 측정 결과값 0과 1이 각각 약 50%
+    // 측정은 현재 진폭을 확률로 바꾸어 결과값 하나를 얻는 단계
+    // 이상적인 실행 환경: 측정 결과값 0
     bit result = M(q[0]);
 }</code></pre>
   </div>
 
-  <p>
-    여기서 중요한 점은 H 게이트가 확률을 직접 반으로 나누는 게 아니라는 점이에요.<br>
-    게이트가 먼저 바꾸는 것은 상태의 진폭이고, 측정할 때 그 진폭의 절댓값 제곱이 확률로 나타나요.
-  </p>
-
-  <div class="compare-grid">
-    <div class="card accent">
-      <span class="tag-small">적용 전</span>
-      <h4>H 게이트 적용 전 상태</h4>
-      <div class="math mono">|0⟩ = <span class="amp-change">1</span>|0⟩ + <span class="amp-zero">0</span>|1⟩</div>
-      <h4>적용 전 확률 계산</h4>
-      <div class="math mono">
-        <div class="math-line">측정 결과값 0의 확률 = |<span class="amp-change">1</span>|² = 1 = 100%</div>
-        <div class="math-line">측정 결과값 1의 확률 = |<span class="amp-zero">0</span>|² = 0 = 0%</div>
-      </div>
-    </div>
-
-    <div class="card plus">
-      <span class="tag-small">적용 후</span>
-      <h4>H 게이트 적용 후 상태</h4>
-      <div class="math mono">H|0⟩ = <span class="amp-change">(1/√2)</span>|0⟩ + <span class="amp-change">(1/√2)</span>|1⟩</div>
-      <h4>적용 후 확률 계산</h4>
-      <div class="math mono">
-        <div class="math-line">측정 결과값 0의 확률 = |<span class="amp-change">1/√2</span>|² = 1/2 = 50%</div>
-        <div class="math-line">측정 결과값 1의 확률 = |<span class="amp-change">1/√2</span>|² = 1/2 = 50%</div>
-      </div>
-    </div>
+  <div class="call why">
+    <span class="h">다음 장에서 할 일</span>
+    이번 장에서는 진폭을 확률로 읽는 규칙을 잡았어요.<br>
+    다음 장에서는 이 규칙을 실제 값에 대입해서 <code>|0⟩</code> 상태, <code>|1⟩</code> 상태, 반반 상태를 직접 읽어볼 거예요.
   </div>
-
-  <p>
-    H 게이트가 만든 값은 확률 <span class="mono">1/2</span>이 아니라 진폭 <span class="mono">1/√2</span>예요.<br>
-    그 다음 측정 확률을 구할 때 이 진폭의 절댓값을 제곱해요.
-  </p>
-    <nav class="page-nav" aria-label="장 이동">
-    <a href="chapter-01.html"><span class="k">이전</span><span class="t">1장. 큐비트 상태에는 무엇이 들어 있을까?</span></a>
+                <nav class="page-nav" aria-label="장 이동">
+    <a href="chapter-01.html"><span class="k">이전</span><span class="t">1장. 큐비트 상태와 진폭에 대해 알아보자</span></a>
     <a class="home" href="index.html"><span class="k">개요</span><span class="t">전체 차례로 돌아가기</span></a>
-    <a href="chapter-03.html"><span class="k">다음</span><span class="t">3장. 중첩은 무엇이고 간섭은 무엇일까?</span></a>
+    <a href="chapter-03.html"><span class="k">다음</span><span class="t">3장. |0⟩ 상태와 |1⟩ 상태를 직접 읽어보자</span></a>
   </nav>
     <footer>
       <p>Qora — 직접 만드는 양자 토이 언어</p>

@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="ko">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>3장. |0⟩ 상태와 |1⟩ 상태를 직접 읽어보자 - Qora</title>
+<title>Chapter 14. How Does the CNOT Gate Connect Two Qubits? — Qora</title>
 <style>
 :root {
     --bg: #ffffff;
@@ -246,14 +246,6 @@
   }
   .math-line + .math-line {
     margin-top: 4px;
-  }
-  .amp-change {
-    color: var(--plus);
-    font-weight: 900;
-  }
-  .amp-zero {
-    color: var(--minus);
-    font-weight: 900;
   }
   .compare-grid,
   .summary-grid {
@@ -522,198 +514,115 @@
 </style>
 </head>
 <body>
-<div class="qora-lang-switch" style="position:sticky;top:0;z-index:99;text-align:right;padding:8px 16px;background:rgba(255,255,255,.92);backdrop-filter:blur(4px);border-bottom:1px solid #e6e8ee;font-size:13px;font-family:sans-serif;"><a href="../../en/book/chapter-03.html" onclick="try{localStorage.setItem(&quot;qora-lang&quot;,&quot;en&quot;)}catch(e){}">English</a> · <strong>한국어</strong> · <a href="../../ja/book/chapter-03.html" onclick="try{localStorage.setItem(&quot;qora-lang&quot;,&quot;ja&quot;)}catch(e){}">日本語</a></div>
+<div class="qora-lang-switch" style="position:sticky;top:0;z-index:99;text-align:right;padding:8px 16px;background:rgba(255,255,255,.92);backdrop-filter:blur(4px);border-bottom:1px solid #e6e8ee;font-size:13px;font-family:sans-serif;"><strong>English</strong> · <a href="../../ko/book/chapter-14.html" onclick="try{localStorage.setItem(&quot;qora-lang&quot;,&quot;ko&quot;)}catch(e){}">한국어</a> · <a href="../../ja/book/chapter-14.html" onclick="try{localStorage.setItem(&quot;qora-lang&quot;,&quot;ja&quot;)}catch(e){}">日本語</a></div>
 
 <header class="hero">
-  <div class="tag">Qora · 양자 게이트 문서</div>
-  <h1>3장. |0⟩ 상태와 |1⟩ 상태를 직접 읽어보자</h1>
-  <p>기준 상태와 반반 상태를 실제 숫자로 읽어보자</p>
+  <div class="tag">Qora · Quantum Gate Documentation</div>
+  <h1>Chapter 14. How Does the CNOT Gate Connect Two Qubits?</h1>
+  <p>Read a two-qubit gate with a control and a target</p>
 </header>
 
 <div class="book-shell">
-                        <aside class="side-nav" aria-label="책 차례">
-    <strong>Qora로 배우는 양자 게이트</strong>
-      <a href="index.html">개요</a>
-      <a href="intro.html">들어가며. 왜 Qora로 양자 게이트를 배울까?</a>
-      <a href="chapter-01.html">1장. 큐비트 상태와 진폭에 대해 알아보자</a>
-      <a href="chapter-02.html">2장. 진폭과 확률은 어떻게 연결될까?</a>
-      <a class="current" href="chapter-03.html">3장. |0⟩ 상태와 |1⟩ 상태를 직접 읽어보자</a>
-      <a href="chapter-04.html">4장. 중첩은 무엇이고 간섭은 무엇일까?</a>
-      <a href="chapter-05.html">5장. 중첩은 그냥 "모르는 상태"일까?</a>
-      <a href="chapter-06.html">6장. 간섭은 언제 생길까?</a>
-      <a href="chapter-07.html">7장. 두 큐비트 상태는 어떻게 읽을까?</a>
-      <a href="chapter-08.html">8장. 얽힘은 무엇이 함께 묶인다는 뜻일까?</a>
-      <a href="chapter-09.html">9장. 양자 게이트는 되돌릴 수 있어야 한다.</a>
-      <a href="chapter-10.html">10장. Qora 코드는 어떻게 읽을까?</a>
-      <a href="summary.html">정리. 1부에서 배운 것을 정리해보자</a>
-      <a href="chapter-11.html">11장. X 게이트는 무엇을 뒤집을까?</a>
-      <a href="chapter-12.html">12장. H 게이트는 진폭을 어떻게 나눌까?</a>
-      <a href="chapter-13.html">13장. Z 게이트는 무엇의 부호를 바꿀까?</a>
-      <a href="chapter-14.html">14장. CNOT 게이트는 두 큐비트를 어떻게 연결할까?</a>
-      <a href="chapter-15.html">15장. 작은 회로 하나를 끝까지 읽어보자</a>
+            <aside class="side-nav" aria-label="Table of contents">
+    <strong>Learning Quantum Gates with Qora</strong>
+      <a href="index.html">Overview</a>
+      <a href="intro.html">Introduction. Why Learn Quantum Gates with Qora?</a>
+      <a href="chapter-01.html">Chapter 1. Learn About Qubit States and Amplitudes</a>
+      <a href="chapter-02.html">Chapter 2. How Are Amplitudes and Probabilities Connected?</a>
+      <a href="chapter-03.html">Chapter 3. Read the |0⟩ and |1⟩ States Directly</a>
+      <a href="chapter-04.html">Chapter 4. What Are Superposition and Interference?</a>
+      <a href="chapter-05.html">Chapter 5. Is Superposition Just a "State We Do Not Know"?</a>
+      <a href="chapter-06.html">Chapter 6. When Does Interference Appear?</a>
+      <a href="chapter-07.html">Chapter 7. How Do We Read a Two-Qubit State?</a>
+      <a href="chapter-08.html">Chapter 8. What Does Entanglement Mean?</a>
+      <a href="chapter-09.html">Chapter 9. Quantum Gates Must Be Reversible.</a>
+      <a href="chapter-10.html">Chapter 10. How Do We Read Qora Code?</a>
+      <a href="summary.html">Wrap-up. Review What We Learned in Part 1</a>
+      <a href="chapter-11.html">Chapter 11. What Does the X Gate Flip?</a>
+      <a href="chapter-12.html">Chapter 12. How Does the H Gate Split Amplitudes?</a>
+      <a href="chapter-13.html">Chapter 13. What Sign Does the Z Gate Change?</a>
+      <a class="current" href="chapter-14.html">Chapter 14. How Does the CNOT Gate Connect Two Qubits?</a>
+      <a href="chapter-15.html">Chapter 15. Read a Small Circuit All the Way Through</a>
     <div class="group">
-      <a href="../index.html">H 게이트 단독 문서</a>
+      <a href="../index.html">Standalone H Gate Document</a>
     </div>
   </aside>
   <main class="article">
-    <div class="breadcrumb">Qora로 배우는 양자 게이트 / 3장</div>
-  <h2 id="basis-state-calculation">3장. <code>|0⟩</code> 상태와 <code>|1⟩</code> 상태를 직접 읽어보자</h2>
-  <p>
-    1장에서는 한 큐비트 상태를 아래처럼 읽는다고 했어요.
-  </p>
-
-  <div class="math mono">|ψ⟩ = α|0⟩ + β|1⟩</div>
+    <div class="breadcrumb">Learning Quantum Gates with Qora / Chapter 14. How Does the CNOT Gate Connect Two Qubits?</div>
+<h2 id="cnot-gate">Chapter 14. How Does the CNOT Gate Connect Two Qubits?</h2>
 
   <p>
-    이번 장에서는 이 식에 실제 값을 넣어볼 거예요.<br>
-    먼저 <code>|0⟩</code> 상태와 <code>|1⟩</code> 상태를 계산해보고, 그 다음에는 측정 결과값 0과 1이 반반으로 나오는 상태도 같은 방식으로 읽어볼게요.
+    The CNOT gate is a gate that acts on two qubits.<br>
+    The first qubit is called the control qubit, and the second qubit is called the target qubit.<br>
+    An X gate is applied to the target qubit only when the control qubit is on the measurement outcome 1 side.
   </p>
 
-  <h3>먼저 <code>|0⟩</code> 상태를 보자</h3>
-
-  <p>
-    <code>|0⟩</code> 상태는 <span class="mono">α = 1</span>, <span class="mono">β = 0</span>인 상태예요.<br>
-    측정 결과값 0 쪽에 진폭이 전부 있고, 측정 결과값 1 쪽에는 진폭이 없어요.
-  </p>
-
-  <div class="panel">
-    <p>
-      일반식에 직접 넣어보면 더 분명해져요.
-    </p>
-    <div class="math mono">|ψ⟩ = α|0⟩ + β|1⟩</div>
-    <p>
-      <code>|0⟩</code> 상태에서는 <span class="mono">α = 1</span>이고 <span class="mono">β = 0</span>이므로, 일반식은 이렇게 바뀌어요.
-    </p>
-    <div class="math mono">|ψ⟩ = 1|0⟩ + 0|1⟩</div>
-    <p>
-      여기서 <code>0|1⟩</code>은 측정 결과값 1 쪽에 진폭이 전혀 없다는 뜻이라서 생략할 수 있어요.<br>
-      그리고 <code>1|0⟩</code>에서 계수 1은 보통 쓰지 않으므로, 최종적으로 그냥 <code>|0⟩</code>라고 써요.
-    </p>
-    <div class="math mono">1|0⟩ + 0|1⟩ = |0⟩</div>
-  </div>
+  <div class="rule">The CNOT gate flips the target qubit only when the control qubit is 1.</div>
 
   <div class="panel">
     <table>
-      <tr><th>가능한 측정 결과값</th><th>진폭 값</th><th>측정 확률</th></tr>
-      <tr><td>측정 결과값 0</td><td>1</td><td><span class="mono">|1|² = 100%</span></td></tr>
-      <tr><td>측정 결과값 1</td><td>0</td><td><span class="mono">|0|² = 0%</span></td></tr>
+      <tr><th>Input state</th><th>Control qubit</th><th>Change in target qubit</th><th>Output state</th></tr>
+      <tr><td><code>|00⟩</code></td><td>0</td><td>Unchanged</td><td><code>|00⟩</code></td></tr>
+      <tr><td><code>|01⟩</code></td><td>0</td><td>Unchanged</td><td><code>|01⟩</code></td></tr>
+      <tr><td><code>|10⟩</code></td><td>1</td><td>0 becomes 1</td><td><code>|11⟩</code></td></tr>
+      <tr><td><code>|11⟩</code></td><td>1</td><td>1 becomes 0</td><td><code>|10⟩</code></td></tr>
     </table>
   </div>
 
   <p>
-    이 상태를 측정하면 측정 결과값 0이 반드시 나와요.<br>
-    Qora에서 큐비트를 새로 준비하면 기본적으로 <code>|0⟩</code> 상태에서 시작한다고 읽으면 돼요.
+    Here, <code>|10⟩</code> means the two-qubit state where the first qubit's measurement outcome is 1 and the second qubit's measurement outcome is 0.<br>
+    So if we apply the CNOT gate to <code>|10⟩</code>, the control qubit is 1, so the target qubit flips, and the final state becomes <code>|11⟩</code>.
   </p>
 
-  <div class="practice">
-    <span class="practice-label">Qora로 실습해보기</span>
-    <h3>준비한 직후의 큐비트를 측정해보자</h3>
-    <pre><code>operation Main() {
-    // 큐비트 하나 준비
-    // 준비 직후 q[0]은 |0⟩ 상태
-    // 측정 결과값 0의 진폭 = 1
-    // 측정 결과값 1의 진폭 = 0
-    use q = Qubit[1];
-
-    // q[0] 측정
-    // 이상적인 실행 환경: 측정 결과값 0
-    bit result = M(q[0]);
-}</code></pre>
-  </div>
-
-  <h3>이번에는 <code>|1⟩</code> 상태를 보자</h3>
+  <h3>What Happens When the Control Qubit Is in Superposition?</h3>
 
   <p>
-    <code>|1⟩</code> 상태는 <span class="mono">α = 0</span>, <span class="mono">β = 1</span>인 상태예요.<br>
-    측정 결과값 0 쪽에는 진폭이 없고, 측정 결과값 1 쪽에 진폭이 전부 있어요.
+    When we apply an H gate to the first qubit, the first qubit's amplitude splits toward measurement outcomes 0 and 1.<br>
+    If we then apply the CNOT gate, the target qubit stays the same on the branch where the control qubit is 0, and the target qubit flips on the branch where the control qubit is 1.<br>
+    As a result, the two qubits end up bound together in a state with just the two possibilities <code>|00⟩</code> and <code>|11⟩</code>.
   </p>
 
-  <div class="panel">
-    <p>
-      같은 일반식에 <span class="mono">α = 0</span>, <span class="mono">β = 1</span>을 넣으면 이렇게 돼요.
-    </p>
-    <div class="math mono">|ψ⟩ = 0|0⟩ + 1|1⟩</div>
-    <p>
-      여기서 <code>0|0⟩</code>은 측정 결과값 0 쪽에 진폭이 전혀 없다는 뜻이라서 생략할 수 있어요.<br>
-      그리고 <code>1|1⟩</code>에서 계수 1도 보통 쓰지 않으므로, 최종적으로 <code>|1⟩</code>라고 써요.
-    </p>
-    <div class="math mono">0|0⟩ + 1|1⟩ = |1⟩</div>
-  </div>
-
-  <div class="panel">
-    <table>
-      <tr><th>가능한 측정 결과값</th><th>진폭 값</th><th>측정 확률</th></tr>
-      <tr><td>측정 결과값 0</td><td>0</td><td><span class="mono">|0|² = 0%</span></td></tr>
-      <tr><td>측정 결과값 1</td><td>1</td><td><span class="mono">|1|² = 100%</span></td></tr>
-    </table>
-  </div>
-
-  <p>
-    Qora에서는 <code>|0⟩</code> 상태로 준비한 큐비트에 X 게이트를 적용하면 <code>|1⟩</code> 상태를 만들 수 있어요.<br>
-    X 게이트는 뒤에서 자세히 배우겠지만, 일단은 측정 결과값 0과 측정 결과값 1을 뒤집는 게이트로 보면 돼요.
-  </p>
-
-  <div class="practice">
-    <span class="practice-label">Qora로 실습해보기</span>
-    <h3>X 게이트로 <code>|1⟩</code> 상태를 만들어보자</h3>
-    <pre><code>operation Main() {
-    // 큐비트 하나 준비
-    // 준비 직후 q[0]은 |0⟩ 상태
-    use q = Qubit[1];
-
-    // X 게이트 적용
-    // |0⟩ 상태가 |1⟩ 상태로 바뀜
-    X(q[0]);
-
-    // 이상적인 실행 환경: 측정 결과값 1
-    bit result = M(q[0]);
-}</code></pre>
-  </div>
-
-  <h3>반반 상태도 같은 방식으로 계산해보자</h3>
-
-  <p>
-    이번에는 측정 결과값 0과 측정 결과값 1이 각각 50% 확률로 나오는 상태를 봐요.<br>
-    이 상태는 아래처럼 쓸 수 있어요.
-  </p>
-
-  <div class="math mono">|ψ⟩ = (1/√2)|0⟩ + (1/√2)|1⟩</div>
-
-  <p>
-    여기서 게이트가 이 상태를 어떻게 만드는지는 아직 몰라도 괜찮아요.<br>
-    지금은 “상태가 이렇게 주어졌을 때 측정 확률을 어떻게 계산하는가”만 보면 돼요.
-  </p>
-
-  <div class="panel">
-    <table>
-      <tr><th>가능한 측정 결과값</th><th>진폭 값</th><th>측정 확률</th></tr>
-      <tr><td>측정 결과값 0</td><td><span class="mono">1/√2</span></td><td><span class="mono">|1/√2|² = 1/2 = 50%</span></td></tr>
-      <tr><td>측정 결과값 1</td><td><span class="mono">1/√2</span></td><td><span class="mono">|1/√2|² = 1/2 = 50%</span></td></tr>
-    </table>
-  </div>
+  <div class="math mono">|00⟩ → H(q[0]) → (|00⟩ + |10⟩) / √2 → CNOT(q[0], q[1]) → (|00⟩ + |11⟩) / √2</div>
 
   <div class="call why">
-    <span class="h">계산 순서만 기억해요</span>
-    먼저 상태 안에 들어 있는 값을 진폭으로 읽어요.<br>
-    그 다음 측정 확률을 구할 때 진폭의 절댓값을 제곱해요.<br>
-    확률을 먼저 반으로 나누고 상태를 만드는 것이 아니라, 상태의 진폭을 먼저 읽고 그 진폭으로 확률을 계산해요.
+    <span class="h">This state is the starting point for understanding entanglement</span>
+    When you measure the final state, the two qubits do not look like they each come out randomly on their own.<br>
+    The measurement outcomes are only ever <code>00</code> or <code>11</code>.<br>
+    That is because the measurement outcomes of the first qubit and the second qubit are locked together.
   </div>
 
-  <div class="call warn">
-    <span class="h"><code>|0⟩ + |1⟩</code>와 <code>|01⟩</code>: 헷갈리기 쉬운 표기</span>
-    <code>(|0⟩ + |1⟩) / √2</code>는 한 개의 큐비트가 측정 결과값 0과 측정 결과값 1에 대한 진폭을 동시에 가진 상태예요.<br>
-    반면에 <code>|01⟩</code>은 두 개의 큐비트가 있을 때 쓰는 기저 상태 표기예요. 첫 번째 큐비트는 0, 두 번째 큐비트는 1인 두 큐비트 상태를 뜻해요.
+  <div class="practice">
+    <span class="practice-label">Try it in Qora</span>
+    <h3>Let's Connect Two Qubits with the CNOT Gate</h3>
+    <pre><code>operation Main() {
+    // Prepare two qubits
+    // Right after preparation, q[0]q[1] is in the |00⟩ state
+    use q = Qubit[2];
+
+    // Apply an H gate to the first qubit
+    // q[0]'s amplitude splits into measurement outcomes 0 and 1
+    H(q[0]);
+
+    // Apply the CNOT gate
+    // q[0] is the control qubit, q[1] is the target qubit
+    CNOT(q[0], q[1]);
+
+    // Ideal execution environment: 00 or 11
+    bit first = M(q[0]);
+    bit second = M(q[1]);
+}</code></pre>
   </div>
-                <nav class="page-nav" aria-label="장 이동">
-    <a href="chapter-02.html"><span class="k">이전</span><span class="t">2장. 진폭과 확률은 어떻게 연결될까?</span></a>
-    <a class="home" href="index.html"><span class="k">개요</span><span class="t">전체 차례로 돌아가기</span></a>
-    <a href="chapter-04.html"><span class="k">다음</span><span class="t">4장. 중첩은 무엇이고 간섭은 무엇일까?</span></a>
+                        <nav class="page-nav" aria-label="Chapter navigation">
+    <a href="chapter-13.html"><span class="k">Previous</span><span class="t">Chapter 13. What Sign Does the Z Gate Change?</span></a>
+    <a class="home" href="index.html"><span class="k">Overview</span><span class="t">Back to the full table of contents</span></a>
+    <a href="chapter-15.html"><span class="k">Next</span><span class="t">Chapter 15. Read a Small Circuit All the Way Through</span></a>
   </nav>
     <footer>
-      <p>Qora — 직접 만드는 양자 토이 언어</p>
+      <p>Qora — a quantum toy language you build yourself</p>
     </footer>
   </main>
 </div>
 
 </body>
 </html>
+

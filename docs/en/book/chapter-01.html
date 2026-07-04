@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Chapter 1. What Is Inside a Qubit State? — Qora</title>
+<title>Chapter 1. Learn About Qubit States and Amplitudes — Qora</title>
 <style>
 :root {
     --bg: #ffffff;
@@ -246,6 +246,140 @@
   }
   .math-line + .math-line {
     margin-top: 4px;
+  }
+  .concept-flow {
+    display: grid;
+    gap: 16px;
+    margin: 20px 0 26px;
+  }
+  .concept-step {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  .concept-step.basis { border-top: 5px solid #6b7280; }
+  .concept-step.vector { border-top: 5px solid var(--plus); }
+  .concept-step.amplitude { border-top: 5px solid var(--good); }
+  .concept-body {
+    padding: 16px 18px 18px;
+  }
+  .concept-title {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin: 0 0 10px;
+  }
+  .concept-title h3 {
+    margin: 0;
+  }
+  .step-badge {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    color: var(--muted);
+    display: inline-flex;
+    font-size: .76rem;
+    font-weight: 900;
+    line-height: 1;
+    padding: 6px 10px;
+    white-space: nowrap;
+  }
+  .visual-grid {
+    display: grid;
+    gap: 10px;
+    margin-top: 12px;
+  }
+  .visual-grid.two {
+    grid-template-columns: 1fr;
+  }
+  @media (min-width: 720px) {
+    .visual-grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  .basis-tile,
+  .component-tile,
+  .amplitude-tile {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 13px 14px;
+  }
+  .basis-line {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: center;
+    min-height: 44px;
+  }
+  .basis-line .from {
+    color: var(--muted);
+    font-size: .9rem;
+    font-weight: 700;
+  }
+  .basis-line .arrow {
+    color: var(--accent);
+    font-weight: 900;
+  }
+  .tile-note {
+    color: var(--muted);
+    display: block;
+    font-size: .88rem;
+    margin-top: 6px;
+    text-align: center;
+  }
+  .component-equation {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: center;
+    margin-top: 12px;
+  }
+  .component-part,
+  .formula-part {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    font-weight: 900;
+    padding: 9px 12px;
+  }
+  .component-part.x { color: var(--plus); }
+  .component-part.y { color: var(--accent); }
+  .formula-part.zero { color: var(--plus); }
+  .formula-part.one { color: var(--good); }
+  .operator {
+    color: var(--muted);
+    font-weight: 900;
+  }
+  .formula-final {
+    background: #f2fbf7;
+    border: 1px solid #b8e5d2;
+    border-radius: 8px;
+    font-size: 1.04rem;
+    font-weight: 900;
+    margin-top: 12px;
+    padding: 13px 14px;
+    text-align: center;
+  }
+  .meaning-list {
+    display: grid;
+    gap: 8px;
+    margin-top: 12px;
+  }
+  .meaning-row {
+    align-items: center;
+    display: grid;
+    gap: 8px;
+    grid-template-columns: minmax(96px, auto) 1fr;
+  }
+  .meaning-row strong {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 6px 9px;
+    text-align: center;
   }
   .compare-grid,
   .summary-grid {
@@ -518,168 +652,187 @@
 
 <header class="hero">
   <div class="tag">Qora · Quantum Gate Documentation</div>
-  <h1>Chapter 1. What Is Inside a Qubit State?</h1>
-  <p>Let's first get a grip on qubit state notation and the amplitudes of measurement outcomes</p>
+  <h1>Chapter 1. Learn About Qubit States and Amplitudes</h1>
+  <p>First read what a qubit state stores before turning amplitudes into probabilities</p>
 </header>
 
 <div class="book-shell">
-    <aside class="side-nav" aria-label="Book contents">
-    <strong>Quantum Gates with Qora</strong>
+            <aside class="side-nav" aria-label="Table of contents">
+    <strong>Learning Quantum Gates with Qora</strong>
       <a href="index.html">Overview</a>
       <a href="intro.html">Introduction. Why Learn Quantum Gates with Qora?</a>
-      <a class="current" href="chapter-01.html">Chapter 1. What Is Inside a Qubit State?</a>
-      <a href="chapter-02.html">Chapter 2. How Are Amplitudes Connected to Probabilities?</a>
-      <a href="chapter-03.html">Chapter 3. What Are Superposition and Interference?</a>
-      <a href="chapter-04.html">Chapter 4. Is Superposition Just a &quot;State We Don&#39;t Know&quot;?</a>
-      <a href="chapter-05.html">Chapter 5. When Does Interference Appear?</a>
-      <a href="chapter-06.html">Chapter 6. Why Must Quantum Gates Be Reversible?</a>
-      <a href="chapter-07.html">Chapter 7. How Do We Read Qora Code?</a>
-      <a href="summary.html">Wrap-up. Let&#39;s Review What We Learned in Part 1</a>
-      <a href="chapter-08.html">Chapter 8. What Does the X Gate Flip?</a>
-      <a href="chapter-09.html">Chapter 9. How Does the H Gate Split Amplitudes?</a>
-      <a href="chapter-10.html">Chapter 10. What Does the Z Gate Change the Sign Of?</a>
-      <a href="chapter-11.html">Chapter 11. How Does the CNOT Gate Connect Two Qubits?</a>
-      <a href="chapter-12.html">Chapter 12. Let&#39;s Read One Small Circuit from Start to Finish</a>
+      <a class="current" href="chapter-01.html">Chapter 1. Learn About Qubit States and Amplitudes</a>
+      <a href="chapter-02.html">Chapter 2. How Are Amplitudes and Probabilities Connected?</a>
+      <a href="chapter-03.html">Chapter 3. Read the |0⟩ and |1⟩ States Directly</a>
+      <a href="chapter-04.html">Chapter 4. What Are Superposition and Interference?</a>
+      <a href="chapter-05.html">Chapter 5. Is Superposition Just a "State We Do Not Know"?</a>
+      <a href="chapter-06.html">Chapter 6. When Does Interference Appear?</a>
+      <a href="chapter-07.html">Chapter 7. How Do We Read a Two-Qubit State?</a>
+      <a href="chapter-08.html">Chapter 8. What Does Entanglement Mean?</a>
+      <a href="chapter-09.html">Chapter 9. Quantum Gates Must Be Reversible.</a>
+      <a href="chapter-10.html">Chapter 10. How Do We Read Qora Code?</a>
+      <a href="summary.html">Wrap-up. Review What We Learned in Part 1</a>
+      <a href="chapter-11.html">Chapter 11. What Does the X Gate Flip?</a>
+      <a href="chapter-12.html">Chapter 12. How Does the H Gate Split Amplitudes?</a>
+      <a href="chapter-13.html">Chapter 13. What Sign Does the Z Gate Change?</a>
+      <a href="chapter-14.html">Chapter 14. How Does the CNOT Gate Connect Two Qubits?</a>
+      <a href="chapter-15.html">Chapter 15. Read a Small Circuit All the Way Through</a>
     <div class="group">
       <a href="../index.html">Standalone H Gate Document</a>
     </div>
   </aside>
   <main class="article">
-    <div class="breadcrumb">Quantum Gates with Qora / Chapter 1</div>
+    <div class="breadcrumb">Learning Quantum Gates with Qora / Chapter 1. Learn About Qubit States and Amplitudes</div>
 <section id="part1" class="part">
     <span class="label">Part 1</span>
     <h2>Let's Get Ready to Read Quantum</h2>
     <p>
-      In Part 1, before diving into the gate explanations, we'll first build the shared vocabulary we need.<br>
-      This is not the place to cover all of quantum mechanics.<br>
-      We'll only pin down the concepts you absolutely need in order to read the explanations of the H gate, X gate, Z gate, and CNOT gate.
+      In Part 1, before we get into gate explanations, we'll first build the vocabulary we need.<br>
+      We will not try to hold all of quantum mechanics at once.<br>
+      Instead, we'll keep only the ideas needed to read the H, X, Z, and CNOT gate explanations.
     </p>
   </section>
-  <h2 id="qubit-state">Chapter 1. What Is Inside a Qubit State?</h2>
+
+  <h2 id="qubit-state">Chapter 1. Learn About Qubit States and Amplitudes</h2>
 
   <p>
-    The most standard way to describe a single qubit is to view its state as a vector.<br>
-    This vector has two reference directions, and those reference directions are usually called the <strong>computational basis</strong>.<br>
-    For a single qubit, the computational basis consists of two states: <code>|0⟩</code> and <code>|1⟩</code>.
+    A qubit state does not need to feel difficult from the first line.<br>
+    Let's first follow, in order, how a measurement outcome gets written as a state direction and why a number is attached in front of that direction.
   </p>
 
-  <p>
-    So a single-qubit state can be written like this.
-  </p>
+  <div class="concept-flow">
+    <section class="concept-step basis">
+      <div class="concept-body">
+        <div class="concept-title">
+          <span class="step-badge">Step 1</span>
+          <h3>Give each measurement outcome a state-direction name</h3>
+        </div>
+        <p>
+          When we measure one qubit, the result is either 0 or 1.<br>
+          We could write those outcomes as the plain numbers <code>0</code> and <code>1</code>, but then the notation only says “measurement outcome” and does not show that each outcome is also a basis direction of a state vector.<br>
+          So in quantum mechanics, to treat a one-qubit state as a vector, we write the basis state corresponding to measurement outcome 0 as <code>|0⟩</code>, and the basis state corresponding to measurement outcome 1 as <code>|1⟩</code>.
+        </p>
+        <div class="visual-grid two">
+          <div class="basis-tile">
+            <div class="basis-line">
+              <span class="from">measurement outcome 0</span>
+              <span class="arrow">→</span>
+              <code>|0⟩</code>
+            </div>
+            <span class="tile-note">state direction on the 0 side</span>
+          </div>
+          <div class="basis-tile">
+            <div class="basis-line">
+              <span class="from">measurement outcome 1</span>
+              <span class="arrow">→</span>
+              <code>|1⟩</code>
+            </div>
+            <span class="tile-note">state direction on the 1 side</span>
+          </div>
+        </div>
+        <p>
+          These two symbols, <code>|0⟩</code> and <code>|1⟩</code>, are called the <strong>computational basis</strong> for one qubit.
+        </p>
+      </div>
+    </section>
 
-  <div class="math mono">|ψ⟩ = α|0⟩ + β|1⟩</div>
+    <section class="concept-step vector">
+      <div class="concept-body">
+        <div class="concept-title">
+          <span class="step-badge">Step 2</span>
+          <h3>A number in front of a basis direction tells us the size of that component</h3>
+        </div>
+        <p>
+          We just called <code>|0⟩</code> and <code>|1⟩</code> basis directions of a state vector.<br>
+          If that still feels unfamiliar, first compare it with an ordinary vector on a plane.<br>
+          A plane vector can be written by separating its x-direction component and y-direction component.
+        </p>
+        <div class="component-equation mono">
+          <span class="component-part x">3·x-direction</span>
+          <span class="operator">+</span>
+          <span class="component-part y">2·y-direction</span>
+        </div>
+        <p>
+          Here, 3 is the coefficient of the x-direction component, and 2 is the coefficient of the y-direction component.<br>
+          In other words, when we write a vector by basis directions, each direction needs a number that tells us how much component sits in that direction.
+        </p>
+      </div>
+    </section>
+
+    <section class="concept-step amplitude">
+      <div class="concept-body">
+        <div class="concept-title">
+          <span class="step-badge">Step 3</span>
+          <h3>A qubit state is written by components along its basis directions too</h3>
+        </div>
+        <p>
+          In a qubit state, <code>|0⟩</code> and <code>|1⟩</code> play the role of basis directions.<br>
+          So we need a number in front of each direction, and in quantum mechanics that number is called an <strong>amplitude</strong>.
+        </p>
+        <div class="component-equation mono">
+          <span class="formula-part zero">α|0⟩</span>
+          <span class="operator">+</span>
+          <span class="formula-part one">β|1⟩</span>
+        </div>
+        <div class="meaning-list">
+          <div class="meaning-row">
+            <strong class="mono">α</strong>
+            <span>the amplitude that tells us how much <code>|0⟩</code>-direction component is in the state</span>
+          </div>
+          <div class="meaning-row">
+            <strong class="mono">β</strong>
+            <span>the amplitude that tells us how much <code>|1⟩</code>-direction component is in the state</span>
+          </div>
+        </div>
+        <div class="formula-final mono">|ψ⟩ = α|0⟩ + β|1⟩</div>
+        <p>
+          So this formula means that the qubit state contains the 0-side amplitude <span class="mono">α</span> and the 1-side amplitude <span class="mono">β</span> together.
+        </p>
+      </div>
+    </section>
+  </div>
 
   <p>
-    Here, <span class="mono">α</span> is the amplitude attached to measurement outcome 0, and <span class="mono">β</span> is the amplitude attached to measurement outcome 1.<br>
-    In other words, a qubit state does not hold a single answer like &ldquo;will it come out 0 or 1 later&rdquo; — it holds the full set of amplitudes attached to every possible measurement outcome.
+    Here, <code>|ψ⟩</code> is the symbol for the whole state of this qubit.<br>
+    <span class="mono">ψ</span> is the Greek letter <strong>psi</strong>, and <code>|ψ⟩</code> is usually read as <strong>ket psi</strong> or <strong>the psi state</strong>.<br>
+    In formal language, <code>|ψ⟩</code> is a <strong>state vector</strong> that holds both the amplitude in the <code>|0⟩</code> direction and the amplitude in the <code>|1⟩</code> direction.<br>
+    So a qubit state is not one answer such as “will 0 or 1 come out later”; it stores the whole set of amplitudes attached to the possible measurement outcomes.
   </p>
 
   <div class="call">
-    <span class="h"><code>|0⟩</code> and <code>|1⟩</code> are the computational basis states</span>
-    <code>|0⟩</code> is the state that is certain to give measurement outcome 0, and <code>|1⟩</code> is the state that is certain to give measurement outcome 1.<br>
-    Mathematically, <code>|0⟩</code> and <code>|1⟩</code> act as two mutually orthogonal reference vectors of the single-qubit state space.
+    <span class="h"><code>|0⟩</code> and <code>|1⟩</code> are computational-basis states</span>
+    <code>|0⟩</code> is the basis state that certainly gives measurement outcome 0, and <code>|1⟩</code> is the basis state that certainly gives measurement outcome 1.<br>
+    For now, it is enough to read them as the 0-side direction and the 1-side direction.<br>
+    Mathematically, <code>|0⟩</code> and <code>|1⟩</code> act as two mutually orthogonal basis vectors in the one-qubit state space.
   </div>
 
-  <h3>First, let's look at the <code>|0⟩</code> state</h3>
-
-  <p>
-    The <code>|0⟩</code> state is the state with <span class="mono">α = 1</span> and <span class="mono">β = 0</span>.<br>
-    All of the amplitude sits on measurement outcome 0, and there is no amplitude on measurement outcome 1.
-  </p>
-
-  <div class="panel">
-    <p>
-      It becomes clearer if we plug those values directly into the general form we just saw.
-    </p>
-    <div class="math mono">|ψ⟩ = α|0⟩ + β|1⟩</div>
-    <p>
-      In the <code>|0⟩</code> state, <span class="mono">α = 1</span> and <span class="mono">β = 0</span>, so the general form becomes:
-    </p>
-    <div class="math mono">|ψ⟩ = 1|0⟩ + 0|1⟩</div>
-    <p>
-      The term <code>0|1⟩</code> means there is no amplitude at all on the measurement outcome 1 side, so we can omit it.<br>
-      And in <code>1|0⟩</code>, the coefficient 1 is usually omitted, so we simply write <code>|0⟩</code>.
-    </p>
-    <div class="math mono">1|0⟩ + 0|1⟩ = |0⟩</div>
+  <div class="call why">
+    <span class="h">What we fixed in this chapter</span>
+    A one-qubit state is a state vector that contains both the <code>|0⟩</code>-direction component and the <code>|1⟩</code>-direction component.<br>
+    The numbers <span class="mono">α</span> and <span class="mono">β</span> are attached in front of those components, and in quantum mechanics these numbers are called amplitudes.
   </div>
-
-  <div class="panel">
-    <table>
-      <tr><th>Possible measurement outcome</th><th>Amplitude value</th><th>Probability when measured</th></tr>
-      <tr><td>Measurement outcome 0</td><td>1</td><td>100%</td></tr>
-      <tr><td>Measurement outcome 1</td><td>0</td><td>0%</td></tr>
-    </table>
-  </div>
-
-  <p>
-    If you measure this state, measurement outcome 0 always comes out.<br>
-    In Qora, when you prepare a fresh qubit, you can read it as starting in the <code>|0⟩</code> state by default.
-  </p>
 
   <div class="practice">
     <span class="practice-label">Try It in Qora</span>
-    <h3>Let's measure a qubit right after preparing it</h3>
+    <h3>Prepare one qubit</h3>
     <pre><code>operation Main() {
     // Prepare one qubit
     // Right after preparation, q[0] is in the |0⟩ state
-    // Amplitude of measurement outcome 0 = 1
-    // Amplitude of measurement outcome 1 = 0
+    // |0⟩-direction amplitude = 1
+    // |1⟩-direction amplitude = 0
     use q = Qubit[1];
-
-    // Measure q[0]
-    // In an ideal execution environment: measurement outcome 0
-    bit result = M(q[0]);
 }</code></pre>
   </div>
 
-  <h3>Now let's look at the <code>|1⟩</code> state</h3>
-
-  <p>
-    The <code>|1⟩</code> state is the state with <span class="mono">α = 0</span> and <span class="mono">β = 1</span>.<br>
-    There is no amplitude on measurement outcome 0, and all of the amplitude sits on measurement outcome 1.
-  </p>
-
-  <div class="panel">
-    <table>
-      <tr><th>Possible measurement outcome</th><th>Amplitude value</th><th>Probability when measured</th></tr>
-      <tr><td>Measurement outcome 0</td><td>0</td><td>0%</td></tr>
-      <tr><td>Measurement outcome 1</td><td>1</td><td>100%</td></tr>
-    </table>
+  <div class="call why">
+    <span class="h">What comes next</span>
+    In this chapter, we first pinned down what a qubit state and an amplitude are.<br>
+    In the next chapter, we'll see how to read amplitudes as measurement probabilities.
   </div>
-
-  <p>
-    In Qora, you can create the <code>|1⟩</code> state by applying an X gate
-    to a qubit prepared in the <code>|0⟩</code> state.<br>
-    We'll study the X gate in detail later,
-    but for now you can think of it as the gate that flips measurement outcome 0 and measurement outcome 1.
-  </p>
-
-  <div class="practice">
-    <span class="practice-label">Try It in Qora</span>
-    <h3>Let's create the <code>|1⟩</code> state with the X gate</h3>
-    <pre><code>operation Main() {
-    // Prepare one qubit
-    // Right after preparation, q[0] is in the |0⟩ state
-    use q = Qubit[1];
-
-    // Apply the X gate
-    // The |0⟩ state changes to the |1⟩ state
-    X(q[0]);
-
-    // In an ideal execution environment: measurement outcome 1
-    bit result = M(q[0]);
-}</code></pre>
-  </div>
-
-  <div class="call warn">
-    <span class="h"><code>|0⟩ + |1⟩</code> and <code>|01⟩</code>: notation that is easy to confuse</span>
-    <code>(|0⟩ + |1⟩) / √2</code> is a state in which a single qubit holds amplitudes for measurement outcome 0 and measurement outcome 1 at the same time.<br>
-    In contrast, <code>|01⟩</code> is basis-state notation used when there are two qubits. It means the two-qubit state where the first qubit is 0 and the second qubit is 1.
-  </div>
-    <nav class="page-nav" aria-label="Chapter navigation">
+                        <nav class="page-nav" aria-label="Chapter navigation">
     <a href="intro.html"><span class="k">Previous</span><span class="t">Introduction. Why Learn Quantum Gates with Qora?</span></a>
     <a class="home" href="index.html"><span class="k">Overview</span><span class="t">Back to the full table of contents</span></a>
-    <a href="chapter-02.html"><span class="k">Next</span><span class="t">Chapter 2. How Are Amplitudes Connected to Probabilities?</span></a>
+    <a href="chapter-02.html"><span class="k">Next</span><span class="t">Chapter 2. How Are Amplitudes and Probabilities Connected?</span></a>
   </nav>
     <footer>
       <p>Qora — a quantum toy language you build yourself</p>
@@ -689,3 +842,4 @@
 
 </body>
 </html>
+

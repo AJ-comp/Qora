@@ -519,27 +519,30 @@
 <header class="hero">
   <div class="tag">Qora · 양자 게이트 문서</div>
   <h1>개요. Qora로 배우는 양자 게이트</h1>
-  <p>전체 흐름을 먼저 보고, 각 장을 한 페이지씩 넘겨가며 읽어보자</p>
+  <p>Qora 코드와 양자 게이트 설명을 어떻게 함께 읽을지 잡아보자</p>
 </header>
 
 <div class="book-shell">
-    <aside class="side-nav" aria-label="책 차례">
+                        <aside class="side-nav" aria-label="책 차례">
     <strong>Qora로 배우는 양자 게이트</strong>
       <a class="current" href="index.html">개요</a>
       <a href="intro.html">들어가며. 왜 Qora로 양자 게이트를 배울까?</a>
-      <a href="chapter-01.html">1장. 큐비트 상태에는 무엇이 들어 있을까?</a>
+      <a href="chapter-01.html">1장. 큐비트 상태와 진폭에 대해 알아보자</a>
       <a href="chapter-02.html">2장. 진폭과 확률은 어떻게 연결될까?</a>
-      <a href="chapter-03.html">3장. 중첩은 무엇이고 간섭은 무엇일까?</a>
-      <a href="chapter-04.html">4장. 중첩은 그냥 &quot;모르는 상태&quot;일까?</a>
-      <a href="chapter-05.html">5장. 간섭은 언제 생길까?</a>
-      <a href="chapter-06.html">6장. 양자 게이트는 왜 되돌릴 수 있어야 할까?</a>
-      <a href="chapter-07.html">7장. Qora 코드는 어떻게 읽을까?</a>
+      <a href="chapter-03.html">3장. |0⟩ 상태와 |1⟩ 상태를 직접 읽어보자</a>
+      <a href="chapter-04.html">4장. 중첩은 무엇이고 간섭은 무엇일까?</a>
+      <a href="chapter-05.html">5장. 중첩은 그냥 "모르는 상태"일까?</a>
+      <a href="chapter-06.html">6장. 간섭은 언제 생길까?</a>
+      <a href="chapter-07.html">7장. 두 큐비트 상태는 어떻게 읽을까?</a>
+      <a href="chapter-08.html">8장. 얽힘은 무엇이 함께 묶인다는 뜻일까?</a>
+      <a href="chapter-09.html">9장. 양자 게이트는 되돌릴 수 있어야 한다.</a>
+      <a href="chapter-10.html">10장. Qora 코드는 어떻게 읽을까?</a>
       <a href="summary.html">정리. 1부에서 배운 것을 정리해보자</a>
-      <a href="chapter-08.html">8장. X 게이트는 무엇을 뒤집을까?</a>
-      <a href="chapter-09.html">9장. H 게이트는 진폭을 어떻게 나눌까?</a>
-      <a href="chapter-10.html">10장. Z 게이트는 무엇의 부호를 바꿀까?</a>
-      <a href="chapter-11.html">11장. CNOT 게이트는 두 큐비트를 어떻게 연결할까?</a>
-      <a href="chapter-12.html">12장. 작은 회로 하나를 끝까지 읽어보자</a>
+      <a href="chapter-11.html">11장. X 게이트는 무엇을 뒤집을까?</a>
+      <a href="chapter-12.html">12장. H 게이트는 진폭을 어떻게 나눌까?</a>
+      <a href="chapter-13.html">13장. Z 게이트는 무엇의 부호를 바꿀까?</a>
+      <a href="chapter-14.html">14장. CNOT 게이트는 두 큐비트를 어떻게 연결할까?</a>
+      <a href="chapter-15.html">15장. 작은 회로 하나를 끝까지 읽어보자</a>
     <div class="group">
       <a href="../index.html">H 게이트 단독 문서</a>
     </div>
@@ -575,10 +578,18 @@
     </div>
     <div class="point">
       <span class="marker">4단계</span>
-      <span><strong>게이트를 선형 변환으로 읽기</strong><br>X, H, Z, CNOT 같은 게이트가 상태 벡터의 진폭을 어떻게 바꾸는지 계산해요.</span>
+      <span><strong>두 큐비트 상태로 넓히기</strong><br>측정 결과값이 <code>00</code>, <code>01</code>, <code>10</code>, <code>11</code> 네 가지로 늘어날 때 상태 벡터가 어떤 진폭을 담는지 봐요.</span>
     </div>
     <div class="point">
       <span class="marker">5단계</span>
+      <span><strong>얽힘을 정석적으로 구분하기</strong><br>두 큐비트 전체 상태가 각 큐비트의 상태로 분리되지 않는 경우를 얽힘으로 읽어요.</span>
+    </div>
+    <div class="point">
+      <span class="marker">6단계</span>
+      <span><strong>게이트를 선형 변환으로 읽기</strong><br>X, H, Z, CNOT 같은 게이트가 상태 벡터의 진폭을 어떻게 바꾸는지 계산해요.</span>
+    </div>
+    <div class="point">
+      <span class="marker">7단계</span>
       <span><strong>작은 회로를 끝까지 읽기</strong><br>여러 게이트가 이어질 때 상태가 어떻게 변하고, 마지막 측정 확률이 어떻게 정해지는지 따라가봐요.</span>
     </div>
   </div>
@@ -589,28 +600,31 @@
       <tr><td>상태 벡터</td><td>큐비트가 어떤 진폭을 가지고 있는지 읽어요</td><td><code>use q = Qubit[1];</code></td></tr>
       <tr><td>유니터리 게이트</td><td>상태 벡터를 보존 가능한 방식으로 바꿔요</td><td><code>H(q[0]);</code>, <code>X(q[0]);</code></td></tr>
       <tr><td>측정</td><td>진폭의 절댓값 제곱으로 결과 확률을 얻어요</td><td><code>bit r = M(q[0]);</code></td></tr>
-      <tr><td>여러 큐비트</td><td>기저 상태 수가 늘어나고 게이트가 큐비트 사이의 관계를 만들어요</td><td><code>CNOT(q[0], q[1]);</code></td></tr>
+      <tr><td>여러 큐비트와 얽힘</td><td>기저 상태 수가 늘어나고, 전체 상태가 각 큐비트로 분리되지 않을 수도 있다는 점을 봐요</td><td><code>CNOT(q[0], q[1]);</code></td></tr>
     </table>
   </div>
 
   <h2>차례</h2>
-    <div class="overview-list">
+        <div class="overview-list">
     <a class="overview-item" href="intro.html"><span class="num">들어가며</span><span class="title">왜 Qora로 양자 게이트를 배울까?</span></a>
-    <a class="overview-item" href="chapter-01.html"><span class="num">1장</span><span class="title">큐비트 상태에는 무엇이 들어 있을까?</span></a>
+    <a class="overview-item" href="chapter-01.html"><span class="num">1장</span><span class="title">큐비트 상태와 진폭에 대해 알아보자</span></a>
     <a class="overview-item" href="chapter-02.html"><span class="num">2장</span><span class="title">진폭과 확률은 어떻게 연결될까?</span></a>
-    <a class="overview-item" href="chapter-03.html"><span class="num">3장</span><span class="title">중첩은 무엇이고 간섭은 무엇일까?</span></a>
-    <a class="overview-item" href="chapter-04.html"><span class="num">4장</span><span class="title">중첩은 그냥 &quot;모르는 상태&quot;일까?</span></a>
-    <a class="overview-item" href="chapter-05.html"><span class="num">5장</span><span class="title">간섭은 언제 생길까?</span></a>
-    <a class="overview-item" href="chapter-06.html"><span class="num">6장</span><span class="title">양자 게이트는 왜 되돌릴 수 있어야 할까?</span></a>
-    <a class="overview-item" href="chapter-07.html"><span class="num">7장</span><span class="title">Qora 코드는 어떻게 읽을까?</span></a>
+    <a class="overview-item" href="chapter-03.html"><span class="num">3장</span><span class="title">|0⟩ 상태와 |1⟩ 상태를 직접 읽어보자</span></a>
+    <a class="overview-item" href="chapter-04.html"><span class="num">4장</span><span class="title">중첩은 무엇이고 간섭은 무엇일까?</span></a>
+    <a class="overview-item" href="chapter-05.html"><span class="num">5장</span><span class="title">중첩은 그냥 "모르는 상태"일까?</span></a>
+    <a class="overview-item" href="chapter-06.html"><span class="num">6장</span><span class="title">간섭은 언제 생길까?</span></a>
+    <a class="overview-item" href="chapter-07.html"><span class="num">7장</span><span class="title">두 큐비트 상태는 어떻게 읽을까?</span></a>
+    <a class="overview-item" href="chapter-08.html"><span class="num">8장</span><span class="title">얽힘은 무엇이 함께 묶인다는 뜻일까?</span></a>
+    <a class="overview-item" href="chapter-09.html"><span class="num">9장</span><span class="title">양자 게이트는 되돌릴 수 있어야 한다.</span></a>
+    <a class="overview-item" href="chapter-10.html"><span class="num">10장</span><span class="title">Qora 코드는 어떻게 읽을까?</span></a>
     <a class="overview-item" href="summary.html"><span class="num">정리</span><span class="title">1부에서 배운 것을 정리해보자</span></a>
-    <a class="overview-item" href="chapter-08.html"><span class="num">8장</span><span class="title">X 게이트는 무엇을 뒤집을까?</span></a>
-    <a class="overview-item" href="chapter-09.html"><span class="num">9장</span><span class="title">H 게이트는 진폭을 어떻게 나눌까?</span></a>
-    <a class="overview-item" href="chapter-10.html"><span class="num">10장</span><span class="title">Z 게이트는 무엇의 부호를 바꿀까?</span></a>
-    <a class="overview-item" href="chapter-11.html"><span class="num">11장</span><span class="title">CNOT 게이트는 두 큐비트를 어떻게 연결할까?</span></a>
-    <a class="overview-item" href="chapter-12.html"><span class="num">12장</span><span class="title">작은 회로 하나를 끝까지 읽어보자</span></a>
+    <a class="overview-item" href="chapter-11.html"><span class="num">11장</span><span class="title">X 게이트는 무엇을 뒤집을까?</span></a>
+    <a class="overview-item" href="chapter-12.html"><span class="num">12장</span><span class="title">H 게이트는 진폭을 어떻게 나눌까?</span></a>
+    <a class="overview-item" href="chapter-13.html"><span class="num">13장</span><span class="title">Z 게이트는 무엇의 부호를 바꿀까?</span></a>
+    <a class="overview-item" href="chapter-14.html"><span class="num">14장</span><span class="title">CNOT 게이트는 두 큐비트를 어떻게 연결할까?</span></a>
+    <a class="overview-item" href="chapter-15.html"><span class="num">15장</span><span class="title">작은 회로 하나를 끝까지 읽어보자</span></a>
   </div>
-    <nav class="page-nav" aria-label="장 이동">
+        <nav class="page-nav" aria-label="장 이동">
     <span class="disabled"><span class="k">이전</span><span class="t">첫 페이지예요</span></span>
     <a class="home" href="index.html"><span class="k">개요</span><span class="t">전체 차례로 돌아가기</span></a>
     <a href="intro.html"><span class="k">다음</span><span class="t">들어가며. 왜 Qora로 양자 게이트를 배울까?</span></a>

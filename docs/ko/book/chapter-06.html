@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>6장. 양자 게이트는 왜 되돌릴 수 있어야 할까? — Qora</title>
+<title>6장. 간섭은 언제 생길까? - Qora</title>
 <style>
 :root {
     --bg: #ffffff;
@@ -269,6 +269,24 @@
   .card.plus { border-top: 5px solid var(--plus); }
   .card.minus { border-top: 5px solid var(--minus); }
   .card.accent { border-top: 5px solid var(--accent); }
+  .concept-figure {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    margin: 24px 0 32px;
+    padding: 12px;
+  }
+  .concept-figure img {
+    display: block;
+    width: 100%;
+    height: auto;
+    border-radius: 8px;
+  }
+  .concept-figure figcaption {
+    color: var(--muted);
+    font-size: .92rem;
+    margin: 10px 4px 2px;
+  }
   .tag-small {
     display: inline-block;
     background: var(--panel);
@@ -518,98 +536,133 @@
 
 <header class="hero">
   <div class="tag">Qora · 양자 게이트 문서</div>
-  <h1>6장. 양자 게이트는 왜 되돌릴 수 있어야 할까?</h1>
-  <p>서로 다른 입력 상태가 같은 출력 상태로 합쳐지면 왜 문제가 되는지 보자</p>
+  <h1>6장. 간섭은 언제 생길까?</h1>
+  <p>진폭 기여가 같은 측정 결과값에 모일 때 무슨 일이 생기는지 보자</p>
 </header>
 
 <div class="book-shell">
-    <aside class="side-nav" aria-label="책 차례">
+                        <aside class="side-nav" aria-label="책 차례">
     <strong>Qora로 배우는 양자 게이트</strong>
       <a href="index.html">개요</a>
       <a href="intro.html">들어가며. 왜 Qora로 양자 게이트를 배울까?</a>
-      <a href="chapter-01.html">1장. 큐비트 상태에는 무엇이 들어 있을까?</a>
+      <a href="chapter-01.html">1장. 큐비트 상태와 진폭에 대해 알아보자</a>
       <a href="chapter-02.html">2장. 진폭과 확률은 어떻게 연결될까?</a>
-      <a href="chapter-03.html">3장. 중첩은 무엇이고 간섭은 무엇일까?</a>
-      <a href="chapter-04.html">4장. 중첩은 그냥 &quot;모르는 상태&quot;일까?</a>
-      <a href="chapter-05.html">5장. 간섭은 언제 생길까?</a>
-      <a class="current" href="chapter-06.html">6장. 양자 게이트는 왜 되돌릴 수 있어야 할까?</a>
-      <a href="chapter-07.html">7장. Qora 코드는 어떻게 읽을까?</a>
+      <a href="chapter-03.html">3장. |0⟩ 상태와 |1⟩ 상태를 직접 읽어보자</a>
+      <a href="chapter-04.html">4장. 중첩은 무엇이고 간섭은 무엇일까?</a>
+      <a href="chapter-05.html">5장. 중첩은 그냥 "모르는 상태"일까?</a>
+      <a class="current" href="chapter-06.html">6장. 간섭은 언제 생길까?</a>
+      <a href="chapter-07.html">7장. 두 큐비트 상태는 어떻게 읽을까?</a>
+      <a href="chapter-08.html">8장. 얽힘은 무엇이 함께 묶인다는 뜻일까?</a>
+      <a href="chapter-09.html">9장. 양자 게이트는 되돌릴 수 있어야 한다.</a>
+      <a href="chapter-10.html">10장. Qora 코드는 어떻게 읽을까?</a>
       <a href="summary.html">정리. 1부에서 배운 것을 정리해보자</a>
-      <a href="chapter-08.html">8장. X 게이트는 무엇을 뒤집을까?</a>
-      <a href="chapter-09.html">9장. H 게이트는 진폭을 어떻게 나눌까?</a>
-      <a href="chapter-10.html">10장. Z 게이트는 무엇의 부호를 바꿀까?</a>
-      <a href="chapter-11.html">11장. CNOT 게이트는 두 큐비트를 어떻게 연결할까?</a>
-      <a href="chapter-12.html">12장. 작은 회로 하나를 끝까지 읽어보자</a>
+      <a href="chapter-11.html">11장. X 게이트는 무엇을 뒤집을까?</a>
+      <a href="chapter-12.html">12장. H 게이트는 진폭을 어떻게 나눌까?</a>
+      <a href="chapter-13.html">13장. Z 게이트는 무엇의 부호를 바꿀까?</a>
+      <a href="chapter-14.html">14장. CNOT 게이트는 두 큐비트를 어떻게 연결할까?</a>
+      <a href="chapter-15.html">15장. 작은 회로 하나를 끝까지 읽어보자</a>
     <div class="group">
       <a href="../index.html">H 게이트 단독 문서</a>
     </div>
   </aside>
   <main class="article">
     <div class="breadcrumb">Qora로 배우는 양자 게이트 / 6장</div>
-  <h2 id="reversible">6장. 양자 게이트는 왜 되돌릴 수 있어야 할까?</h2>
+  <h2 id="interference">6장. 간섭은 언제 생길까?</h2>
   <p>
-    양자 게이트는 상태 벡터에 작용하는 아무 선형 변환이나 될 수 없어요.<br>
-    표준 양자 회로에서 측정 전의 게이트는 <strong>유니터리 변환</strong>이어야 해요.<br>
-    유니터리 변환은 상태 벡터의 길이를 보존하고, 서로 다른 상태를 서로 구별 가능한 상태로 보내며, 역변환을 가져요.
+    간섭은 양자컴퓨팅에서 가장 중요한 개념 중 하나예요.<br>
+    정석적으로 말하면, 간섭은 같은 기저 상태에 대한 여러 진폭 기여가 더해진 뒤에 Born 규칙이 적용될 때 생겨요.<br>
+    즉 확률을 먼저 더하는 것이 아니라, <strong>진폭을 먼저 더하고 나중에 제곱</strong>해요.
   </p>
 
-  <div class="rule mono">U†U = I</div>
+  <div class="rule">같은 기저 상태에 도착한 진폭 기여들은 먼저 더해져요.</div>
 
   <p>
-    여기서 <span class="mono">U</span>는 게이트 행렬이고, <span class="mono">U†</span>는 그 행렬의 켤레전치예요.<br>
-    처음에는 기호가 낯설 수 있지만, 핵심은 간단해요. 유니터리 게이트는 상태의 전체 확률을 100%로 유지하고, 정보를 뭉개서 잃어버리지 않아요.
-  </p>
-
-  <div class="panel">
-    <table>
-      <tr><th>조건</th><th>뜻</th><th>왜 필요한가</th></tr>
-      <tr><td>길이 보존</td><td>상태 벡터의 전체 확률이 1로 유지돼요</td><td>측정 확률의 합이 항상 100%여야 해요</td></tr>
-      <tr><td>직교성 보존</td><td>서로 구별 가능한 입력 상태가 출력에서도 구별돼요</td><td>서로 다른 입력이 같은 출력으로 합쳐지면 안 돼요</td></tr>
-      <tr><td>역변환 존재</td><td>게이트를 거꾸로 되돌릴 수 있어요</td><td>측정 전의 양자 진화는 정보를 잃지 않아요</td></tr>
-    </table>
-  </div>
-
-  <p>
-    예를 들어 서로 다른 두 입력 상태가 같은 출력 상태로 합쳐지는 변환은 유니터리 변환이 아니에요.<br>
-    출력만 보고 입력을 되살릴 방법이 없고, 상태 공간의 서로 다른 방향을 하나로 눌러 버리기 때문이에요.
-  </p>
-
-  <h3>H 게이트의 마이너스 부호는 왜 필요할까?</h3>
-
-  <p>H 게이트는 <code>|0⟩</code> 상태와 <code>|1⟩</code> 상태를 다음처럼 바꿔요.</p>
-
-  <div class="math mono">
-    <div class="math-line">H 게이트(|0⟩) = (|0⟩ + |1⟩) / √2</div>
-    <div class="math-line">H 게이트(|1⟩) = (|0⟩ - |1⟩) / √2</div>
-  </div>
-
-  <p>
-    여기서 중요한 부분은 두 번째 줄의 마이너스 부호예요.<br>
-    이 부호 덕분에 두 출력 상태 <code>(|0⟩ + |1⟩) / √2</code>와 <code>(|0⟩ - |1⟩) / √2</code>가 서로 직교해요.
+    게이트는 상태 벡터에 선형적으로 작용해요.<br>
+    그래서 입력 상태가 여러 기저 상태의 합으로 되어 있으면, 게이트는 각 기저 성분을 따로 변환한 뒤 그 결과를 다시 더해요.<br>
+    이 과정에서 같은 출력 기저 상태로 모인 진폭 기여가 같은 부호와 위상을 가지면 보강되고, 반대 부호나 반대 위상을 가지면 상쇄돼요.
   </p>
 
   <div class="math mono">
-    <div class="math-line">H 게이트(|0⟩) = (|0⟩ + |1⟩) / √2</div>
-    <div class="math-line">H 게이트(|1⟩) = (|0⟩ + |1⟩) / √2</div>
+    <div class="math-line">입력: α|0⟩ + β|1⟩</div>
+    <div class="math-line">게이트 뒤: α·U|0⟩ + β·U|1⟩</div>
+  </div>
+
+  <div class="compare-grid">
+    <div class="card plus">
+      <span class="tag-small">보강 간섭</span>
+      <h4>같은 부호의 진폭 기여: 보강</h4>
+      <div class="math mono">+1/2 + +1/2 = +1</div>
+      <p>측정 결과값 0의 진폭이 커져요.</p>
+    </div>
+
+    <div class="card minus">
+      <span class="tag-small">상쇄 간섭</span>
+      <h4>반대 부호의 진폭 기여: 상쇄</h4>
+      <div class="math mono">+1/2 + -1/2 = 0</div>
+      <p>측정 결과값 1의 진폭이 사라져요.</p>
+    </div>
+  </div>
+
+  <h3>H 게이트를 두 번 적용하면 간섭이 어떻게 보일까?</h3>
+
+  <p>
+    <code>|0⟩</code> 상태에 H 게이트를 한 번 적용하면 <code>|0⟩</code> 성분과 <code>|1⟩</code> 성분이 모두 생겨요.<br>
+    여기에 H 게이트를 한 번 더 적용하면 두 성분이 각각 다시 <code>|0⟩</code>과 <code>|1⟩</code> 쪽으로 기여를 보내고, 같은 기저 상태로 도착한 기여들이 더해져요.
+  </p>
+
+  <div class="practice">
+    <span class="practice-label">Qora로 실습해보기</span>
+    <h3>H 게이트를 두 번 적용해보자</h3>
+    <pre><code>operation Main() {
+    // 큐비트 하나 준비
+    // 준비 직후 q[0]은 |0⟩ 상태
+    use q = Qubit[1];
+
+    // 첫 번째 H 게이트 적용
+    // 측정 결과값 0과 측정 결과값 1의 진폭이 모두 1/√2
+    H(q[0]);
+
+    // 두 번째 H 게이트 적용
+    // 측정 결과값 0의 진폭 기여는 보강
+    // 측정 결과값 1의 진폭 기여는 상쇄
+    H(q[0]);
+
+    // 이상적인 실행 환경: 측정 결과값 0
+    bit result = M(q[0]);
+}</code></pre>
+  </div>
+
+  <p>첫 번째 H 게이트 뒤에는 두 진폭이 남아 있어요.</p>
+
+  <div class="math mono">
+    <div class="math-line">측정 결과값 0의 진폭 = 1/√2</div>
+    <div class="math-line">측정 결과값 1의 진폭 = 1/√2</div>
   </div>
 
   <p>
-    마이너스 부호가 없다면 두 입력 상태 <code>|0⟩</code>와 <code>|1⟩</code>가 같은 출력 상태로 합쳐져요.<br>
-    그러면 출력 상태만 보고는 입력이 무엇이었는지 알 수 없고, 변환을 거꾸로 되돌릴 수도 없어요.<br>
-    따라서 그런 변환은 측정 전의 양자 게이트로 인정할 수 없어요.
+    두 번째 H 게이트를 적용하면 측정 결과값 0 쪽으로 도착한 진폭 기여는 이렇게 더해져요.
   </p>
 
-  <div class="call why">
-    <span class="h">여기서 핵심</span>
-    H 게이트의 마이너스 부호는 설명을 맞추기 위해 붙인 장식이 아니에요.<br>
-    H 게이트가 유니터리 게이트가 되려면 서로 다른 입력 기저 상태가 서로 직교하는 출력 상태로 가야 하고, 그 직교성을 만드는 핵심이 마이너스 부호예요.
-  </div>
+  <div class="math mono">+1/2 + +1/2 = +1</div>
 
-  <div class="rule mono">H 게이트(H 게이트(|0⟩)) = |0⟩</div>
-    <nav class="page-nav" aria-label="장 이동">
-    <a href="chapter-05.html"><span class="k">이전</span><span class="t">5장. 간섭은 언제 생길까?</span></a>
+  <p>
+    측정 결과값 1 쪽으로 도착한 진폭 기여도 같은 방식으로 계산해요.
+  </p>
+
+  <div class="math mono">+1/2 + -1/2 = 0</div>
+
+  <p>
+    그래서 최종 상태는 다시 <code>|0⟩</code> 상태로 돌아오게 돼요.<br>
+    이 계산은 11장에서 H 게이트의 변환 규칙을 놓고 더 자세히 다시 살펴봐요.
+  </p>
+  <figure class="concept-figure">
+    <img src="../../images/part1-quantum-concepts-overview-accurate.png" alt="큐비트 상태 벡터에서 진폭과 확률을 분리해 보여주고, 진폭이 H 게이트를 지나 출력 진폭과 확률로 이어지는 개요 그림">
+    <figcaption>여기까지 보면 그림의 흐름이 자연스럽게 이어져요. 확률 막대는 측정했을 때의 참고 정보이고, H 게이트가 실제로 바꾸는 것은 그 앞의 진폭 <span class="mono">α</span>, <span class="mono">β</span>예요.</figcaption>
+  </figure>
+                <nav class="page-nav" aria-label="장 이동">
+    <a href="chapter-05.html"><span class="k">이전</span><span class="t">5장. 중첩은 그냥 "모르는 상태"일까?</span></a>
     <a class="home" href="index.html"><span class="k">개요</span><span class="t">전체 차례로 돌아가기</span></a>
-    <a href="chapter-07.html"><span class="k">다음</span><span class="t">7장. Qora 코드는 어떻게 읽을까?</span></a>
+    <a href="chapter-07.html"><span class="k">다음</span><span class="t">7장. 두 큐비트 상태는 어떻게 읽을까?</span></a>
   </nav>
     <footer>
       <p>Qora — 직접 만드는 양자 토이 언어</p>

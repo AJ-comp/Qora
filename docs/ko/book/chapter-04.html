@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>4장. 중첩은 그냥 &quot;모르는 상태&quot;일까? — Qora</title>
+<title>4장. 중첩은 무엇이고 간섭은 무엇일까? - Qora</title>
 <style>
 :root {
     --bg: #ffffff;
@@ -162,6 +162,22 @@
     padding: 16px 18px;
     overflow-x: auto;
   }
+  .example-block {
+    display: block;
+    background: #fff;
+    border-left: 3px solid #c9d6ff;
+    border-radius: 0 7px 7px 0;
+    margin: 12px 0;
+    overflow-x: auto;
+    padding: 10px 12px;
+  }
+  .example-block .label {
+    display: block;
+    color: var(--muted);
+    font-size: .8rem;
+    font-weight: 900;
+    margin-bottom: 4px;
+  }
   .call {
     border-left: 4px solid var(--accent);
     background: #faf8ff;
@@ -269,6 +285,24 @@
   .card.plus { border-top: 5px solid var(--plus); }
   .card.minus { border-top: 5px solid var(--minus); }
   .card.accent { border-top: 5px solid var(--accent); }
+  .concept-figure {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    margin: 22px 0 30px;
+    padding: 12px;
+  }
+  .concept-figure img {
+    display: block;
+    width: 100%;
+    height: auto;
+    border-radius: 8px;
+  }
+  .concept-figure figcaption {
+    color: var(--muted);
+    font-size: .92rem;
+    margin: 10px 4px 2px;
+  }
   .tag-small {
     display: inline-block;
     background: var(--panel);
@@ -518,109 +552,183 @@
 
 <header class="hero">
   <div class="tag">Qora · 양자 게이트 문서</div>
-  <h1>4장. 중첩은 그냥 &quot;모르는 상태&quot;일까?</h1>
-  <p>중첩과 고전적인 모름이 어떻게 다른지 비교해보자</p>
+  <h1>4장. 중첩은 무엇이고 간섭은 무엇일까?</h1>
+  <p>중첩과 간섭이 왜 함께 등장하는지 먼저 흐름을 잡아보자</p>
 </header>
 
 <div class="book-shell">
-    <aside class="side-nav" aria-label="책 차례">
+                        <aside class="side-nav" aria-label="책 차례">
     <strong>Qora로 배우는 양자 게이트</strong>
       <a href="index.html">개요</a>
       <a href="intro.html">들어가며. 왜 Qora로 양자 게이트를 배울까?</a>
-      <a href="chapter-01.html">1장. 큐비트 상태에는 무엇이 들어 있을까?</a>
+      <a href="chapter-01.html">1장. 큐비트 상태와 진폭에 대해 알아보자</a>
       <a href="chapter-02.html">2장. 진폭과 확률은 어떻게 연결될까?</a>
-      <a href="chapter-03.html">3장. 중첩은 무엇이고 간섭은 무엇일까?</a>
-      <a class="current" href="chapter-04.html">4장. 중첩은 그냥 &quot;모르는 상태&quot;일까?</a>
-      <a href="chapter-05.html">5장. 간섭은 언제 생길까?</a>
-      <a href="chapter-06.html">6장. 양자 게이트는 왜 되돌릴 수 있어야 할까?</a>
-      <a href="chapter-07.html">7장. Qora 코드는 어떻게 읽을까?</a>
+      <a href="chapter-03.html">3장. |0⟩ 상태와 |1⟩ 상태를 직접 읽어보자</a>
+      <a class="current" href="chapter-04.html">4장. 중첩은 무엇이고 간섭은 무엇일까?</a>
+      <a href="chapter-05.html">5장. 중첩은 그냥 "모르는 상태"일까?</a>
+      <a href="chapter-06.html">6장. 간섭은 언제 생길까?</a>
+      <a href="chapter-07.html">7장. 두 큐비트 상태는 어떻게 읽을까?</a>
+      <a href="chapter-08.html">8장. 얽힘은 무엇이 함께 묶인다는 뜻일까?</a>
+      <a href="chapter-09.html">9장. 양자 게이트는 되돌릴 수 있어야 한다.</a>
+      <a href="chapter-10.html">10장. Qora 코드는 어떻게 읽을까?</a>
       <a href="summary.html">정리. 1부에서 배운 것을 정리해보자</a>
-      <a href="chapter-08.html">8장. X 게이트는 무엇을 뒤집을까?</a>
-      <a href="chapter-09.html">9장. H 게이트는 진폭을 어떻게 나눌까?</a>
-      <a href="chapter-10.html">10장. Z 게이트는 무엇의 부호를 바꿀까?</a>
-      <a href="chapter-11.html">11장. CNOT 게이트는 두 큐비트를 어떻게 연결할까?</a>
-      <a href="chapter-12.html">12장. 작은 회로 하나를 끝까지 읽어보자</a>
+      <a href="chapter-11.html">11장. X 게이트는 무엇을 뒤집을까?</a>
+      <a href="chapter-12.html">12장. H 게이트는 진폭을 어떻게 나눌까?</a>
+      <a href="chapter-13.html">13장. Z 게이트는 무엇의 부호를 바꿀까?</a>
+      <a href="chapter-14.html">14장. CNOT 게이트는 두 큐비트를 어떻게 연결할까?</a>
+      <a href="chapter-15.html">15장. 작은 회로 하나를 끝까지 읽어보자</a>
     <div class="group">
       <a href="../index.html">H 게이트 단독 문서</a>
     </div>
   </aside>
   <main class="article">
     <div class="breadcrumb">Qora로 배우는 양자 게이트 / 4장</div>
-  <h2 id="superposition">4장. 중첩은 그냥 &quot;모르는 상태&quot;일까?</h2>
+  <h2 id="superposition-interference-overview">4장. 중첩은 무엇이고 간섭은 무엇일까?</h2>
   <p>
-    중첩은 양자컴퓨팅을 배울 때 가장 많이 오해되는 말이에요.<br>
-    양자역학에서 중첩은 “결과를 아직 모르는 상태”를 뜻하지 않아요.<br>
-    정확히 말하면, 어떤 기준 상태들을 정했을 때 하나의 양자 상태가 그 기준 상태들 중 둘 이상에 0이 아닌 진폭을 가진 선형 결합으로 표현되면 그 기준에 대한 중첩 상태라고 불러요.
+    1장과 2장에서는 한 큐비트 상태를 <code>|0⟩</code> 방향의 진폭과 <code>|1⟩</code> 방향의 진폭으로 읽어봤어요.<br>
+    이제부터는 그 진폭이 한 곳에만 머무르지 않고, 여러 방향에 함께 놓였다가 다시 같은 측정 결과값 쪽으로 모이는 상황을 보게 될 거예요.<br>
+    여기서부터는 말이 조금 낯설 수 있어요. 그래도 지금은 중첩과 간섭을 완벽히 외우려고 하지 말고, 진폭이 “나뉜다”와 “다시 만난다”는 흐름만 먼저 잡아봐요.
   </p>
 
-  <p>
-    이 말이 조금 어렵게 들릴 수 있으니, 지금 예제에서는 기준 상태를 <code>|0⟩</code>와 <code>|1⟩</code>로 잡고 볼게요.<br>
-    아래 식은 <code>|0⟩</code> 쪽에도 진폭이 있고, <code>|1⟩</code> 쪽에도 진폭이 있는 상태예요.
-  </p>
+  <div class="call why">
+    이 장의 목표는 중첩과 간섭을 완전히 계산하는 것이 아니라, 두 개념이 왜 같이 등장하는지 먼저 잡는 거예요.<br>
+    먼저 아주 단순하게 말하면, 중첩은 <strong>진폭이 한 방향에만 있지 않고 여러 방향에 함께 놓인 상태</strong>예요.<br>
+    간섭은 <strong>그렇게 나뉘었던 진폭 기여가 같은 측정 결과값에서 다시 만나 서로 더해지거나 상쇄되는 현상</strong>이에요.
+  </div>
 
-  <div class="math mono">(|0⟩ + |1⟩) / √2</div>
+  <figure class="concept-figure">
+    <img src="../../images/superposition-interference-flow-ko-result-labeled.png" alt="하나의 진폭 흐름이 두 갈래로 나뉘었다가 다시 만나 한쪽 측정 결과값은 보강되고 다른 쪽 측정 결과값은 상쇄되는 모습">
+    <figcaption>진폭은 한 방향에만 머무르지 않고 여러 방향으로 나뉠 수 있어요. 나뉘었던 진폭 기여가 같은 측정 결과값에서 다시 만나면, 한쪽은 보강되고 다른 한쪽은 상쇄될 수 있어요.</figcaption>
+  </figure>
+  <h3>먼저 하나의 진폭이 어디에 놓여 있는지 보자</h3>
 
   <p>
-    이 표현은 1장에서 본 일반식 <code>|ψ⟩ = α|0⟩ + β|1⟩</code>와 다른 이야기가 아니에요.<br>
-    괄호 전체를 <span class="mono">√2</span>로 나눈다는 말은, 괄호 안의 각 항에 <span class="mono">1/√2</span>를 곱한다는 뜻이에요.
+    <code>|0⟩</code> 상태는 측정 결과값 0의 진폭이 1이고, 측정 결과값 1의 진폭이 0인 상태예요.<br>
+    다시 말해 상태의 모든 진폭이 <code>|0⟩</code> 방향에 놓여 있어요.
   </p>
 
   <div class="math mono">
-    <div class="math-line">(|0⟩ + |1⟩) / √2</div>
-    <div class="math-line">= (1/√2)(|0⟩ + |1⟩)</div>
-    <div class="math-line">= (1/√2)|0⟩ + (1/√2)|1⟩</div>
+    <div class="math-line">|0⟩ = 1|0⟩ + 0|1⟩</div>
   </div>
 
   <p>
-    그래서 이 상태는 일반식에 맞춰 보면 <span class="mono">α = 1/√2</span>, <span class="mono">β = 1/√2</span>인 상태예요.
+    이 상태를 바로 측정하면 측정 결과값 0이 100% 나와요.<br>
+    아직은 진폭이 나뉘어 있지 않으므로, 중첩이나 간섭을 이야기할 만한 상황이 아니에요.
   </p>
+
+  <h3>중첩은 진폭이 여러 기준 상태 방향에 함께 놓인 상황이에요</h3>
 
   <p>
-    위 상태는 <code>|0⟩</code> 방향의 진폭이 <span class="mono">1/√2</span>이고, <code>|1⟩</code> 방향의 진폭도 <span class="mono">1/√2</span>인 상태예요.
+    어떤 게이트는 한쪽에 모여 있던 진폭을 여러 기준 상태 방향으로 나눠 보내요.<br>
   </p>
 
-  <div class="call why">
-    이렇게 <code>|0⟩</code>와 <code>|1⟩</code> 두 기준 상태가 모두 하나의 상태 벡터를 이루는 데 참여하므로, 이 상태는 계산 기저에 대한 중첩 상태예요.
+  <div class="example-block">
+    <span class="label">예를 들어</span>
+    H 게이트를 <code>|0⟩</code> 상태에 적용하면, 상태는 아래처럼 바뀌어요.
+  </div>
+
+  <div class="math mono">
+    <div class="math-line">H|0⟩ = (1/√2)|0⟩ + (1/√2)|1⟩</div>
   </div>
 
   <p>
-    동전을 던진 뒤 손으로 덮어 두면, 동전은 이미 앞면이거나 뒷면으로 정해져 있고 우리는 그 결과를 모를 뿐이에요.<br>
-    하지만 양자 중첩은 그런 고전적인 무지가 아니에요. 측정 전 상태 벡터 자체가 <code>|0⟩</code> 성분과 <code>|1⟩</code> 성분을 함께 가지고 있어요.
+    여기서는 <code>|0⟩</code> 방향에도 진폭이 있고, <code>|1⟩</code> 방향에도 진폭이 있어요.<br>
+    이렇게 둘 이상의 기준 상태가 하나의 상태를 이루는 데 함께 참여하면, 그 상태를 중첩 상태라고 불러요.
   </p>
 
-  <div class="call why">
-    <span class="h">확률만 보면 상태를 다 알 수 없어요</span>
-    양자 상태에는 측정 확률뿐 아니라 진폭의 부호와 위상도 들어 있어요.<br>
-    이 정보는 바로 측정하면 사라져 보일 수 있지만, 다른 게이트를 지나면서 간섭을 만들기 때문에 실제 계산 결과에 영향을 줘요.
+  <div class="panel">
+    <table>
+      <tr><th>상태</th><th><code>|0⟩</code> 방향의 진폭</th><th><code>|1⟩</code> 방향의 진폭</th><th>읽는 방법</th></tr>
+      <tr><td><code>|0⟩</code></td><td><span class="mono">1</span></td><td><span class="mono">0</span></td><td>한 방향에만 진폭이 있어요</td></tr>
+      <tr><td><code>H|0⟩</code></td><td><span class="mono">1/√2</span></td><td><span class="mono">1/√2</span></td><td>두 방향에 진폭이 함께 있어요</td></tr>
+    </table>
   </div>
 
-  <h3>같은 50%처럼 보여도 정말 같은 상태일까?</h3>
+  <div class="call warn">
+    중첩은 “큐비트가 사실은 0 또는 1인데 우리가 아직 모른다”는 뜻이 아니에요.<br>
+    측정하기 전의 상태 자체가 여러 기준 상태 방향의 진폭을 함께 가지고 있다는 뜻이에요.
+  </div>
+
+  <h3>간섭은 나뉘었던 진폭 기여가 같은 측정 결과값에서 다시 만날 때 생겨요</h3>
+
+  <p>
+    중첩 상태에 게이트를 한 번 더 적용하면, 각 기준 상태에 있던 진폭이 다시 여러 측정 결과값 쪽으로 기여를 보내요.<br>
+    이때 서로 다른 출발점에서 온 진폭 기여가 같은 측정 결과값으로 도착할 수 있어요.
+  </p>
+
+  <div class="point-list">
+    <div class="point">
+      <span class="marker">1</span>
+      <span><code>|0⟩</code> 방향에 있던 진폭이 측정 결과값 0과 1 쪽으로 기여를 보내요.</span>
+    </div>
+    <div class="point">
+      <span class="marker">2</span>
+      <span><code>|1⟩</code> 방향에 있던 진폭도 측정 결과값 0과 1 쪽으로 기여를 보내요.</span>
+    </div>
+    <div class="point">
+      <span class="marker">3</span>
+      <span>같은 측정 결과값으로 온 진폭 기여들은 먼저 더해지고, 그 다음 절댓값 제곱을 통해 확률이 돼요.</span>
+    </div>
+  </div>
+
+  <p>
+    같은 부호와 같은 위상으로 온 진폭 기여는 서로 보강돼요.<br>
+    반대로 부호나 위상이 반대로 맞물린 진폭 기여는 서로 상쇄될 수 있어요.
+  </p>
+
+  <div class="compare-grid">
+    <div class="card good">
+      <span class="tag-small">보강 간섭</span>
+      <h4>진폭 기여가 같은 방향으로 더해져요</h4>
+      <div class="math mono">1/2 + 1/2 = 1</div>
+      <p>해당 측정 결과값의 진폭이 커지고, 측정 확률도 커져요.</p>
+    </div>
+
+    <div class="card warn">
+      <span class="tag-small">상쇄 간섭</span>
+      <h4>진폭 기여가 서로 지워요</h4>
+      <div class="math mono">1/2 - 1/2 = 0</div>
+      <p>해당 측정 결과값의 진폭이 사라지고, 측정 확률도 0이 돼요.</p>
+    </div>
+  </div>
+
+  <h3>H 게이트를 두 번 적용하면 어떤 일이 생길까?</h3>
+
+  <p>
+    앞으로 H 게이트를 자세히 볼 때, <code>|0⟩</code> 상태에 H 게이트를 한 번 적용하면 중첩 상태가 만들어지는 것을 계산할 거예요.<br>
+    그리고 같은 큐비트에 H 게이트를 한 번 더 적용하면, 진폭 기여가 보강되고 상쇄되어 다시 <code>|0⟩</code> 상태로 돌아오는 과정도 볼 거예요.
+  </p>
 
   <div class="compare-grid">
     <div class="card plus">
-      <span class="tag-small">상태 A</span>
-      <h4>측정 결과값 1의 진폭이 양수인 상태</h4>
-      <div class="math mono">(|0⟩ + |1⟩) / √2</div>
-      <p>바로 측정하면 측정 결과값 0과 1이 각각 50% 확률로 나와요.</p>
+      <span class="tag-small">중첩 생성</span>
+      <h4>첫 번째 H 게이트는 한 방향의 진폭을 두 방향으로 나눠요</h4>
+      <div class="math mono">
+        <div class="math-line">|0⟩ → H 게이트</div>
+        <div class="math-line">→ (1/√2)|0⟩ + (1/√2)|1⟩</div>
+      </div>
+      <p>이 단계에서 <code>|0⟩</code> 방향과 <code>|1⟩</code> 방향이 모두 상태 벡터에 참여해요.</p>
     </div>
 
-    <div class="card minus">
-      <span class="tag-small">상태 B</span>
-      <h4>측정 결과값 1의 진폭이 음수인 상태</h4>
-      <div class="math mono">(|0⟩ - |1⟩) / √2</div>
-      <p>바로 측정하면 이 상태 역시 측정 결과값 0과 1이 각각 50% 확률로 나와요.</p>
+    <div class="card good">
+      <span class="tag-small">간섭으로 되돌아감</span>
+      <h4>두 번째 H 게이트는 두 진폭 기여를 다시 만나게 해요</h4>
+      <div class="math mono">
+        <div class="math-line">(1/√2)|0⟩ + (1/√2)|1⟩</div>
+        <div class="math-line">→ H 게이트 → |0⟩</div>
+      </div>
+      <p>이 단계에서 <code>|0⟩</code> 쪽 진폭은 보강되고, <code>|1⟩</code> 쪽 진폭은 상쇄돼요.</p>
     </div>
   </div>
 
-  <p>
-    두 상태는 바로 측정하면 같은 확률을 보이지만, 같은 상태는 아니에요.<br>
-    측정 결과값 1의 진폭 부호가 다르고, 이 부호 차이가 다른 게이트를 한 번 더 적용할 때 결과 차이를 만들어요.<br>
-    이 차이를 정석적으로 말하면 두 상태는 서로 다른 상태 벡터이고, H 게이트 같은 변환을 다시 만나면 서로 다른 방향으로 이동해요.
-  </p>
-    <nav class="page-nav" aria-label="장 이동">
-    <a href="chapter-03.html"><span class="k">이전</span><span class="t">3장. 중첩은 무엇이고 간섭은 무엇일까?</span></a>
+  <div class="call why">
+    따라서 중첩과 간섭은 따로 외우는 단어가 아니에요.<br>
+    중첩은 진폭이 여러 기준 상태 방향에 놓인 상황이고, 간섭은 그 진폭 기여들이 같은 측정 결과값에서 다시 만날 때 생기는 계산 효과예요.
+  </div>
+                <nav class="page-nav" aria-label="장 이동">
+    <a href="chapter-03.html"><span class="k">이전</span><span class="t">3장. |0⟩ 상태와 |1⟩ 상태를 직접 읽어보자</span></a>
     <a class="home" href="index.html"><span class="k">개요</span><span class="t">전체 차례로 돌아가기</span></a>
-    <a href="chapter-05.html"><span class="k">다음</span><span class="t">5장. 간섭은 언제 생길까?</span></a>
+    <a href="chapter-05.html"><span class="k">다음</span><span class="t">5장. 중첩은 그냥 "모르는 상태"일까?</span></a>
   </nav>
     <footer>
       <p>Qora — 직접 만드는 양자 토이 언어</p>

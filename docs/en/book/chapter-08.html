@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Chapter 8. What Does the X Gate Flip? — Qora</title>
+<title>Chapter 8. What Does Entanglement Mean? — Qora</title>
 <style>
 :root {
     --bg: #ffffff;
@@ -154,24 +154,6 @@
     padding: 0;
     border: 0;
   }
-  .concept-figure {
-    background: #fff;
-    border: 1px solid var(--line);
-    border-radius: 10px;
-    margin: 22px 0 30px;
-    padding: 12px;
-  }
-  .concept-figure img {
-    display: block;
-    width: 100%;
-    height: auto;
-    border-radius: 8px;
-  }
-  .concept-figure figcaption {
-    color: var(--muted);
-    font-size: .92rem;
-    margin: 10px 4px 2px;
-  }
   .panel {
     background: var(--panel);
     border: 1px solid var(--line);
@@ -287,6 +269,24 @@
   .card.plus { border-top: 5px solid var(--plus); }
   .card.minus { border-top: 5px solid var(--minus); }
   .card.accent { border-top: 5px solid var(--accent); }
+  .concept-figure {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    margin: 24px 0 32px;
+    padding: 12px;
+  }
+  .concept-figure img {
+    display: block;
+    width: 100%;
+    height: auto;
+    border-radius: 8px;
+  }
+  .concept-figure figcaption {
+    color: var(--muted);
+    font-size: .92rem;
+    margin: 10px 4px 2px;
+  }
   .tag-small {
     display: inline-block;
     background: var(--panel);
@@ -536,103 +536,193 @@
 
 <header class="hero">
   <div class="tag">Qora · Quantum Gate Documentation</div>
-  <h1>Chapter 8. What Does the X Gate Flip?</h1>
-  <p>Let's see how the amplitudes at measurement outcomes 0 and 1 swap places</p>
+  <h1>Chapter 8. What Does Entanglement Mean?</h1>
+  <p>See why some two-qubit states cannot be separated</p>
 </header>
 
 <div class="book-shell">
-    <aside class="side-nav" aria-label="Book contents">
-    <strong>Quantum Gates with Qora</strong>
+            <aside class="side-nav" aria-label="Table of contents">
+    <strong>Learning Quantum Gates with Qora</strong>
       <a href="index.html">Overview</a>
       <a href="intro.html">Introduction. Why Learn Quantum Gates with Qora?</a>
-      <a href="chapter-01.html">Chapter 1. What Is Inside a Qubit State?</a>
-      <a href="chapter-02.html">Chapter 2. How Are Amplitudes Connected to Probabilities?</a>
-      <a href="chapter-03.html">Chapter 3. What Are Superposition and Interference?</a>
-      <a href="chapter-04.html">Chapter 4. Is Superposition Just a &quot;State We Don&#39;t Know&quot;?</a>
-      <a href="chapter-05.html">Chapter 5. When Does Interference Appear?</a>
-      <a href="chapter-06.html">Chapter 6. Why Must Quantum Gates Be Reversible?</a>
-      <a href="chapter-07.html">Chapter 7. How Do We Read Qora Code?</a>
-      <a href="summary.html">Wrap-up. Let&#39;s Review What We Learned in Part 1</a>
-      <a class="current" href="chapter-08.html">Chapter 8. What Does the X Gate Flip?</a>
-      <a href="chapter-09.html">Chapter 9. How Does the H Gate Split Amplitudes?</a>
-      <a href="chapter-10.html">Chapter 10. What Does the Z Gate Change the Sign Of?</a>
-      <a href="chapter-11.html">Chapter 11. How Does the CNOT Gate Connect Two Qubits?</a>
-      <a href="chapter-12.html">Chapter 12. Let&#39;s Read One Small Circuit from Start to Finish</a>
+      <a href="chapter-01.html">Chapter 1. Learn About Qubit States and Amplitudes</a>
+      <a href="chapter-02.html">Chapter 2. How Are Amplitudes and Probabilities Connected?</a>
+      <a href="chapter-03.html">Chapter 3. Read the |0⟩ and |1⟩ States Directly</a>
+      <a href="chapter-04.html">Chapter 4. What Are Superposition and Interference?</a>
+      <a href="chapter-05.html">Chapter 5. Is Superposition Just a "State We Do Not Know"?</a>
+      <a href="chapter-06.html">Chapter 6. When Does Interference Appear?</a>
+      <a href="chapter-07.html">Chapter 7. How Do We Read a Two-Qubit State?</a>
+      <a class="current" href="chapter-08.html">Chapter 8. What Does Entanglement Mean?</a>
+      <a href="chapter-09.html">Chapter 9. Quantum Gates Must Be Reversible.</a>
+      <a href="chapter-10.html">Chapter 10. How Do We Read Qora Code?</a>
+      <a href="summary.html">Wrap-up. Review What We Learned in Part 1</a>
+      <a href="chapter-11.html">Chapter 11. What Does the X Gate Flip?</a>
+      <a href="chapter-12.html">Chapter 12. How Does the H Gate Split Amplitudes?</a>
+      <a href="chapter-13.html">Chapter 13. What Sign Does the Z Gate Change?</a>
+      <a href="chapter-14.html">Chapter 14. How Does the CNOT Gate Connect Two Qubits?</a>
+      <a href="chapter-15.html">Chapter 15. Read a Small Circuit All the Way Through</a>
     <div class="group">
       <a href="../index.html">Standalone H Gate Document</a>
     </div>
   </aside>
   <main class="article">
-    <div class="breadcrumb">Quantum Gates with Qora / Chapter 8</div>
-<section id="part2" class="part">
-    <span class="label">Part 2</span>
-    <h2>Let's Read the Basic Quantum Gates One by One</h2>
-    <p>
-      In Part 1, we prepared everything we need: qubit states, amplitudes, probabilities, superposition, interference, reversible transformations, and how to read Qora code.<br>
-      From here on, we will take that preparation and read the actual gates one by one.<br>
-      The X gate swaps the positions of amplitudes, the H gate splits amplitudes and sends them along, the Z gate changes signs, and the CNOT gate creates a relationship between two qubits.
-    </p>
-  </section>
-  <figure class="concept-figure">
-    <img src="../../images/part2-gates-overview.png" alt="Overview diagram showing X, H, Z, and CNOT gates as amplitude swapping, amplitude splitting, sign change, and conditional flipping">
-    <figcaption>Part 2 reads the X, H, Z, and CNOT gates one by one, focusing on how they change amplitude positions, amplitude distribution, signs, and relationships between two qubits.</figcaption>
-  </figure>
-
-  <h2 id="x-gate">Chapter 8. What Does the X Gate Flip?</h2>
+    <div class="breadcrumb">Learning Quantum Gates with Qora / Chapter 8. What Does Entanglement Mean?</div>
+    <h2 id="entanglement">Chapter 8. What Does Entanglement Mean?</h2>
 
   <p>
-    The X gate is a good first gate to meet when working with a single qubit.<br>
-    That is because it feels like the classical NOT operation.<br>
-    In a quantum circuit, however, rather than saying it flips the measurement outcome itself, it is more accurate to read it as swapping the positions of the amplitude at measurement outcome 0 and the amplitude at measurement outcome 1.
+    Entanglement is one of the most famous ideas in quantum computing, but it is also one of the easiest to misunderstand at first.<br>
+    It is not best understood as two qubits mysteriously sending signals to each other.<br>
+    In the standard language, a two-qubit state is entangled when the whole state cannot be decomposed into two separate one-qubit states.
   </p>
 
-  <div class="rule">The X gate swaps the amplitude of measurement outcome 0 and the amplitude of measurement outcome 1.</div>
-
-  <div class="panel">
-    <table>
-      <tr><th>Input state</th><th>State after the X gate</th><th>What do we see when we measure?</th></tr>
-      <tr><td><code>|0⟩</code></td><td><code>|1⟩</code></td><td>We get measurement outcome 1</td></tr>
-      <tr><td><code>|1⟩</code></td><td><code>|0⟩</code></td><td>We get measurement outcome 0</td></tr>
-    </table>
+  <div class="call why">
+    <span class="h">The core idea is just this</span>
+    Some two-qubit states can be described as “the first qubit has this state, and the second qubit has that state.”<br>
+    Other states can only be described accurately by treating the two qubits as one shared state vector.<br>
+    Entanglement appears in that second situation.
   </div>
 
+  <figure class="concept-figure">
+    <img src="../../images/entanglement-overview.png" alt="Diagram comparing a separable two-qubit state with the entangled state (|00⟩ + |11⟩)/√2">
+    <figcaption>The left side shows a state that can be written as two separate qubit states. The right side shows an example where the two qubits are tied together as one shared state.</figcaption>
+  </figure>
+
+  <h3>Start with a separable state</h3>
+
   <p>
-    If we write a general single-qubit state with amplitude <span class="mono">a₀</span> at measurement outcome 0 and amplitude <span class="mono">a₁</span> at measurement outcome 1, the X gate swaps the two values.<br>
-    So the amplitude that was on the measurement outcome 0 side before the X gate moves to the measurement outcome 1 side afterward, and the amplitude that was on the measurement outcome 1 side before moves to the measurement outcome 0 side afterward.
+    If the first qubit is in state <code>α|0⟩ + β|1⟩</code> and the second qubit is in state <code>γ|0⟩ + δ|1⟩</code>, and we can say those two things separately, then the whole two-qubit state can be written like this.
   </p>
 
   <div class="math mono">
-    <div class="math-line">Before the X gate: amplitude of measurement outcome 0 = a₀, amplitude of measurement outcome 1 = a₁</div>
-    <div class="math-line">After the X gate: amplitude of measurement outcome 0 = a₁, amplitude of measurement outcome 1 = a₀</div>
+    <div class="math-line">(α|0⟩ + β|1⟩) ⊗ (γ|0⟩ + δ|1⟩)</div>
+  </div>
+
+  <p>
+    The symbol <span class="mono">⊗</span> is read as the <strong>tensor product</strong>.<br>
+    A tensor product combines two states into a state in a larger state space.<br>
+    For now, it is enough to read it as “write each qubit separately, then combine them.”<br>
+    This kind of state is called a separable state.
+  </p>
+
+  <p>
+    Expanded in the four two-qubit measurement outcomes, the same expression becomes this.<br>
+    An amplitude from the first qubit and an amplitude from the second qubit multiply together to form the amplitude of each two-bit outcome.
+  </p>
+
+  <div class="math mono">
+    <div class="math-line">(α|0⟩ + β|1⟩) ⊗ (γ|0⟩ + δ|1⟩)</div>
+    <div class="math-line">= αγ|00⟩ + αδ|01⟩ + βγ|10⟩ + βδ|11⟩</div>
+  </div>
+
+  <div class="panel">
+    <table>
+      <tr><th>Measurement outcome</th><th>Amplitude from the first qubit</th><th>Amplitude from the second qubit</th><th>Total amplitude</th></tr>
+      <tr><td><code>00</code></td><td><span class="mono">α</span></td><td><span class="mono">γ</span></td><td><span class="mono">αγ</span></td></tr>
+      <tr><td><code>01</code></td><td><span class="mono">α</span></td><td><span class="mono">δ</span></td><td><span class="mono">αδ</span></td></tr>
+      <tr><td><code>10</code></td><td><span class="mono">β</span></td><td><span class="mono">γ</span></td><td><span class="mono">βγ</span></td></tr>
+      <tr><td><code>11</code></td><td><span class="mono">β</span></td><td><span class="mono">δ</span></td><td><span class="mono">βδ</span></td></tr>
+    </table>
+  </div>
+
+  <div class="call why">
+    <span class="h">The key feature of a separable state</span>
+    The four amplitudes are not four values chosen independently.<br>
+    In a separable state, they come tied together as products of the two qubits' amplitudes: <span class="mono">αγ</span>, <span class="mono">αδ</span>, <span class="mono">βγ</span>, and <span class="mono">βδ</span>.
   </div>
 
   <div class="call warn">
-    <span class="h">The X gate does not change the number after measurement</span>
-    The X gate changes the amplitude arrangement of the qubit state before measurement.<br>
-    When we then measure, the measurement result follows the new amplitude arrangement.<br>
-    So we should read the X gate not as a “command that flips the result” but as a “gate that swaps the positions of the amplitudes attached to measurement outcomes 0 and 1.”
+    <span class="h">Superposition and entanglement are not the same idea</span>
+    The state above can be a superposition if several basis-state terms are present.<br>
+    But because the whole state can be written as <span class="mono">(α|0⟩ + β|1⟩) ⊗ (γ|0⟩ + δ|1⟩)</span>, separated into the states of the two qubits, it is not an entangled state.
   </div>
+
+  <h3>Now look at a state that cannot be built from that product pattern</h3>
+
+  <p>
+    For a separable state, the four amplitudes come from products such as <span class="mono">αγ</span>, <span class="mono">αδ</span>, <span class="mono">βγ</span>, and <span class="mono">βδ</span>.<br>
+    Now look at a representative two-qubit state that cannot be made in that product pattern.
+  </p>
+
+  <div class="math mono">(|00⟩ + |11⟩) / √2</div>
+
+  <p>
+    This state has only the <code>|00⟩</code> component and the <code>|11⟩</code> component.<br>
+    Measuring gives <code>00</code> or <code>11</code> with 50% probability each, while <code>01</code> and <code>10</code> never appear.<br>
+    So we should read the two-bit result as tied together, rather than as two unrelated random one-bit results.
+  </p>
+
+  <div class="panel">
+    <table>
+      <tr><th>Measurement outcome</th><th>Amplitude</th><th>Measurement probability</th></tr>
+      <tr><td><code>00</code></td><td><span class="mono">1/√2</span></td><td>50%</td></tr>
+      <tr><td><code>01</code></td><td><span class="mono">0</span></td><td>0%</td></tr>
+      <tr><td><code>10</code></td><td><span class="mono">0</span></td><td>0%</td></tr>
+      <tr><td><code>11</code></td><td><span class="mono">1/√2</span></td><td>50%</td></tr>
+    </table>
+  </div>
+
+  <div class="call why">
+    <span class="h">Why can this state not be made from the product pattern?</span>
+    In a separable state, the amplitude of <code>00</code> is <span class="mono">αγ</span>, and the amplitude of <code>11</code> is <span class="mono">βδ</span>.<br>
+    In the state above, the amplitudes of <code>00</code> and <code>11</code> are both nonzero, so <span class="mono">α</span>, <span class="mono">β</span>, <span class="mono">γ</span>, and <span class="mono">δ</span> would all have to be nonzero.<br>
+    Then the amplitude <span class="mono">αδ</span> of <code>01</code> and the amplitude <span class="mono">βγ</span> of <code>10</code> would also be nonzero.<br>
+    But in the state above, the amplitudes of <code>01</code> and <code>10</code> are exactly zero. That is why this state cannot be separated into the states of the two qubits, and why it is entangled.
+  </div>
+
+  <div class="compare-grid">
+    <div class="card plus">
+      <span class="tag-small">Separable state</span>
+      <h4>Each qubit can be described separately</h4>
+      <p>We can write the first qubit state and the second qubit state separately, then combine them into the whole state.</p>
+    </div>
+
+    <div class="card good">
+      <span class="tag-small">Entangled state</span>
+      <h4>The whole state comes first</h4>
+      <p>Looking at each qubit alone does not fully explain the relationship between the possible two-qubit measurement results.</p>
+    </div>
+  </div>
+
+  <div class="call warn">
+    <span class="h">Entanglement is not just two superpositions</span>
+    A qubit being in superposition and two qubits being entangled are different ideas.<br>
+    Superposition means several basis directions participate in one state vector, while entanglement means a multi-qubit state cannot be separated into individual qubit states.
+  </div>
+
+  <h3>We will study the CNOT gate later</h3>
+
+  <p>
+    Entangled states are often created by applying an H gate to one qubit and then applying a two-qubit gate such as CNOT.<br>
+    Here, we will not calculate the detailed CNOT rule yet. We only need the meaning of entanglement first.<br>
+    We return to the CNOT gate carefully in Chapter 13.
+  </p>
 
   <div class="practice">
-    <span class="practice-label">Try It in Qora</span>
-    <h3>Let's apply the X gate once</h3>
+    <span class="practice-label">Qora Preview</span>
+    <h3>First see the shape of an entangling circuit</h3>
     <pre><code>operation Main() {
-    // Prepare one qubit
-    // Right after preparation, q[0] is in the |0⟩ state
-    use q = Qubit[1];
+    // Prepare two qubits
+    // Starting state: |00⟩
+    use q = Qubit[2];
 
-    // Apply the X gate
-    // The |0⟩ state changes to the |1⟩ state
-    X(q[0]);
+    // Apply H to the first qubit
+    // A superposition appears on the first-qubit side
+    H(q[0]);
 
-    // Ideal execution environment: measurement outcome 1
-    bit result = M(q[0]);
+    // Connect the two qubits with CNOT
+    // We revisit the detailed rule in the CNOT chapter
+    CNOT(q[0], q[1]);
+
+    // In an ideal execution environment: 00 or 11 appears together
+    bit first = M(q[0]);
+    bit second = M(q[1]);
 }</code></pre>
   </div>
-    <nav class="page-nav" aria-label="Chapter navigation">
-    <a href="summary.html"><span class="k">Previous</span><span class="t">Wrap-up. Let&#39;s Review What We Learned in Part 1</span></a>
+
+                        <nav class="page-nav" aria-label="Chapter navigation">
+    <a href="chapter-07.html"><span class="k">Previous</span><span class="t">Chapter 7. How Do We Read a Two-Qubit State?</span></a>
     <a class="home" href="index.html"><span class="k">Overview</span><span class="t">Back to the full table of contents</span></a>
-    <a href="chapter-09.html"><span class="k">Next</span><span class="t">Chapter 9. How Does the H Gate Split Amplitudes?</span></a>
+    <a href="chapter-09.html"><span class="k">Next</span><span class="t">Chapter 9. Quantum Gates Must Be Reversible.</span></a>
   </nav>
     <footer>
       <p>Qora — a quantum toy language you build yourself</p>
@@ -642,3 +732,4 @@
 
 </body>
 </html>
+
