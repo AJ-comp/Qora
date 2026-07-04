@@ -97,20 +97,9 @@ public static class QoraValidator
                 : $"operations {string.Join(" -> ", cycle)} -> {cycle[0]} call each other recursively; OpenQASM defs cannot recurse",
                 opByName.TryGetValue(cycle[0], out var cyc) ? cyc.Span : null);
 
-        // QSEM023 (op vs op) — the mangling transform is not injective across dots-vs-underscores:
-        // `A.F` and `A__F` both emit as `A__F_`. Distinct names meeting at one def name would silently
-        // merge two operations, so it is rejected here (same-name duplicates are QSEM008/022 above).
-        var defsByMangled = new Dictionary<string, string>(); // mangled def name -> original op name
-        foreach (var clash in program.Operations.Where(o => o != entry)
-                     .GroupBy(o => NameMangler.Mangled(o.Name)))
-        {
-            var names = clash.Select(o => o.Name).Distinct().ToList();
-            if (names.Count > 1)
-                Add(errors, "QSEM023",
-                    $"operations {string.Join(" and ", names.Select(n => $"`{n}`"))} would both be emitted as `{clash.Key}` (namespace dots become `__` in the output); rename one",
-                    clash.Last().Span ?? clash.First().Span);
-            defsByMangled.TryAdd(clash.Key, names[0]);
-        }
+        // Name collisions in the emitted QASM (op vs op, or a declaration vs a def name) are NOT rejected:
+        // NameMangler auto-resolves them by appending `_` and records a `// Qora:` note in the output, so
+        // any validated program emits. (Same-source-name duplicates are still QSEM008/015/022 above.)
 
         foreach (var op in program.Operations)
         {
@@ -129,7 +118,7 @@ public static class QoraValidator
 
             // QSEM015 — parameters, `use` registers, and hoisted measure bits share one emitted scope.
             foreach (var dup in op.Params.GroupBy(p => p.Name).Where(g => g.Count() > 1))
-                Add(errors, "QSEM015", $"in `{op.Name}`: the parameter name `{dup.Key}` is used twice; each parameter needs a unique name",
+                Add(errors, "QSEM015", $"in `{op.DisplayName ?? op.Name}`: the parameter name `{dup.Key}` is used twice; each parameter needs a unique name",
                     dup.Skip(1).First().Span ?? dup.First().Span);
             var useNames = new Dictionary<string, QSpan?>();
             var measureBits = new Dictionary<string, QSpan?>();
@@ -138,37 +127,26 @@ public static class QoraValidator
             {
                 CheckShadowsConstant(p.Name, op.Name, "parameter", errors, p.Span);
                 if (useNames.ContainsKey(p.Name) || measureBits.ContainsKey(p.Name))
-                    Add(errors, "QSEM015", $"in `{op.Name}`: `{p.Name}` is declared more than once (parameter vs register/measure bit)", p.Span);
+                    Add(errors, "QSEM015", $"in `{op.DisplayName ?? op.Name}`: `{p.Name}` is declared more than once (parameter vs register/measure bit)", p.Span);
             }
             foreach (var clash in useNames.Keys.Intersect(measureBits.Keys))
-                Add(errors, "QSEM015", $"in `{op.Name}`: `{clash}` names both a qubit register and a measure bit; hoisting would merge them — rename one",
+                Add(errors, "QSEM015", $"in `{op.DisplayName ?? op.Name}`: `{clash}` names both a qubit register and a measure bit; hoisting would merge them — rename one",
                     measureBits[clash] ?? useNames[clash]);
 
             var scope = BuildScope(op, entry.Name, isEntry);
 
-            // QSEM023 (local vs def) — a declared name that lands on an emitted def's name breaks that
-            // name's meaning in the output. The entry op's declarations become QASM TOP-LEVEL globals —
-            // the same scope every def lives in, so any hit is illegal. Inside another def a local only
-            // breaks the defs that op actually CALLS (the call would resolve to the local instead).
-            var declared = scope.Registers.Keys.Concat(scope.SingleQubits).Concat(scope.Classicals);
-            if (isEntry)
+            // The symbolic size of a generic register (`n` in `Qubit[n] q`) is the substitution target of
+            // the Monomorphizer's whole-word textual rewrite; a param / register / loop variable / const /
+            // variable that reuses that name would be silently captured (out-of-range index or a silently
+            // wrong angle). Require the size symbol to be a unique name.
+            foreach (var sp in op.Params.Where(p => p.SizeParam is not null))
             {
-                foreach (var d in declared)
-                    if (defsByMangled.TryGetValue(NameMangler.Mangled(d), out var hit))
-                        Add(errors, "QSEM023",
-                            $"in `{op.Name}`: `{d}` collides with operation `{hit}` — the entry operation's declarations share the QASM top level with the emitted defs; rename one",
-                            scope.DeclSpans.GetValueOrDefault(d));
-            }
-            else
-            {
-                var called = new HashSet<string>();
-                CollectOpRefs(op.Body, ops, called);
-                var calledByMangled = called.ToDictionary(NameMangler.Mangled, c => c);
-                foreach (var d in declared)
-                    if (calledByMangled.TryGetValue(NameMangler.Mangled(d), out var hit))
-                        Add(errors, "QSEM023",
-                            $"in `{op.Name}`: `{d}` shadows operation `{hit}`, which this operation calls — the call would hit the local instead of the def; rename one",
-                            scope.DeclSpans.GetValueOrDefault(d));
+                var sym = sp.SizeParam!;
+                if (scope.Classicals.Contains(sym) || scope.Registers.ContainsKey(sym)
+                    || scope.SingleQubits.Contains(sym) || scope.SymbolicRegisters.Contains(sym))
+                    Add(errors, "QSEM015",
+                        $"in `{op.DisplayName ?? op.Name}`: `{sym}` is both the generic register size in `Qubit[{sym}] {sp.Name}` and a declared name (loop variable / const / parameter) — the size parameter needs a unique name",
+                        sp.Span);
             }
 
             Walk(op.Body, scope, ops, opByName, inverter, errors, inControlFlow: false);
@@ -182,6 +160,7 @@ public static class QoraValidator
         QOperation Op, string EntryName, bool IsEntry,
         Dictionary<string, int> Registers,       // register name -> size (sized qubit params + use)
         HashSet<string> SingleQubits,            // unsized qubit parameter names
+        HashSet<string> SymbolicRegisters,       // generic register params `Qubit[n] q` (size unknown until monomorphization)
         HashSet<string> Classicals,              // int/bit params + declared variables + loop vars
         Dictionary<string, QSpan?> DeclSpans,    // declared name -> its declaration's span (first wins)
         HashSet<string> Consts)                  // names declared `const` (immutable bindings)
@@ -193,6 +172,7 @@ public static class QoraValidator
     {
         var registers = new Dictionary<string, int>();
         var singles = new HashSet<string>();
+        var symbolic = new HashSet<string>();
         var classicals = new HashSet<string>();
         var declSpans = new Dictionary<string, QSpan?>();
         var consts = new HashSet<string>();
@@ -200,6 +180,7 @@ public static class QoraValidator
         foreach (var p in op.Params)
         {
             if (p.Type == QType.Qubit && p.RegisterSize is int n) registers[p.Name] = n;
+            else if (p.Type == QType.Qubit && p.SizeParam is not null) symbolic.Add(p.Name);  // Qubit[n] q
             else if (p.Type == QType.Qubit) singles.Add(p.Name);
             else classicals.Add(p.Name);
             declSpans.TryAdd(p.Name, p.Span);
@@ -220,7 +201,7 @@ public static class QoraValidator
                 }
         }
         Scan(op.Body);
-        return new Scope(op, entryName, isEntry, registers, singles, classicals, declSpans, consts);
+        return new Scope(op, entryName, isEntry, registers, singles, symbolic, classicals, declSpans, consts);
     }
 
     /// <summary>Collect `use` register names and measure-bit declaration names, with spans (for QSEM015).</summary>
@@ -242,7 +223,7 @@ public static class QoraValidator
     private static void Walk(IReadOnlyList<QStmt> stmts, Scope scope, HashSet<string> ops,
         Dictionary<string, QOperation> opByName, Inverter inverter, List<QoraError> errors, bool inControlFlow)
     {
-        var opName = scope.Op.Name;
+        var opName = scope.Op.DisplayName ?? scope.Op.Name;
 
         foreach (var stmt in stmts)
         {
@@ -295,6 +276,11 @@ public static class QoraValidator
                     Walk(i.Else, scope, ops, opByName, inverter, errors, inControlFlow: true);
                     break;
                 case QFor f:
+                    // A `for` bound is a plain expression; a call/measurement there has no OpenQASM lowering
+                    // (and only a call renders a `(` into the bound text). Reject it like other call
+                    // positions (QSEM005) instead of shipping invalid QASM.
+                    if (f.From.Contains('(') || f.To.Contains('('))
+                        Add(errors, "QSEM005", $"in `{opName}`: a `for` bound cannot contain a call or measurement; measure into a bit first and use a numeric or variable bound", f.Span);
                     CheckShadowsConstant(f.Var, opName, "loop variable", errors, f.Span);
                     Walk(f.Body, scope, ops, opByName, inverter, errors, inControlFlow: true);
                     break;
@@ -339,7 +325,7 @@ public static class QoraValidator
     private static void CheckGate(QGate g, Scope scope, HashSet<string> ops,
         Dictionary<string, QOperation> opByName, Inverter inverter, List<QoraError> errors)
     {
-        var opName = scope.Op.Name;
+        var opName = scope.Op.DisplayName ?? scope.Op.Name;
 
         // QSEM005 — calls inside gate arguments have no OpenQASM form.
         foreach (var arg in g.Args)
@@ -442,11 +428,12 @@ public static class QoraValidator
     /// </summary>
     private static void CheckCallSignature(QGate g, QOperation callee, Scope scope, List<QoraError> errors)
     {
-        var opName = scope.Op.Name;
+        var opName = scope.Op.DisplayName ?? scope.Op.Name;
+        var calleeName = callee.DisplayName ?? callee.Name;
 
         if (g.Args.Count != callee.Params.Count)
         {
-            Add(errors, "QSEM006", $"in `{opName}`: `{callee.Name}` expects {callee.Params.Count} argument(s) but got {g.Args.Count}", g.Span);
+            Add(errors, "QSEM006", $"in `{opName}`: `{calleeName}` expects {callee.Params.Count} argument(s) but got {g.Args.Count}", g.Span);
             return;
         }
 
@@ -458,22 +445,33 @@ public static class QoraValidator
             if (p.Type == QType.Qubit && p.RegisterSize is int need)
             {
                 if (arg is QQubitArg qa)
-                    Add(errors, "QSEM006", $"in `{opName}`: parameter `{p.Name}` of `{callee.Name}` is a register of {need} qubit(s), but `{qa.Reg}[{qa.Index}]` is a single qubit", g.Span);
+                    Add(errors, "QSEM006", $"in `{opName}`: parameter `{p.Name}` of `{calleeName}` is a register of {need} qubit(s), but `{qa.Reg}[{qa.Index}]` is a single qubit", g.Span);
                 else if (arg is QTextArg ta && scope.Registers.TryGetValue(ta.Text, out var have) && have != need)
-                    Add(errors, "QSEM006", $"in `{opName}`: parameter `{p.Name}` of `{callee.Name}` is a register of {need} qubit(s), but `{ta.Text}` has {have}", g.Span);
+                    Add(errors, "QSEM006", $"in `{opName}`: parameter `{p.Name}` of `{calleeName}` is a register of {need} qubit(s), but `{ta.Text}` has {have}", g.Span);
                 else if (arg is QTextArg tb && !scope.Registers.ContainsKey(tb.Text) && (scope.SingleQubits.Contains(tb.Text) || IsClassicalText(tb.Text, scope)))
-                    Add(errors, "QSEM006", $"in `{opName}`: parameter `{p.Name}` of `{callee.Name}` is a qubit register, but `{tb.Text}` is not one", g.Span);
+                    Add(errors, "QSEM006", $"in `{opName}`: parameter `{p.Name}` of `{calleeName}` is a qubit register, but `{tb.Text}` is not one", g.Span);
+            }
+            else if (p.Type == QType.Qubit && p.SizeParam is not null)
+            {
+                // generic register `Qubit[n]`: n binds from the argument's size, so the argument MUST be a
+                // known register — a concrete one, or the caller's own symbolic register (which becomes
+                // concrete when the caller is itself specialized). A single qubit, a classical value, or an
+                // unknown identifier cannot bind a size.
+                if (arg is QQubitArg qa)
+                    Add(errors, "QSEM006", $"in `{opName}`: parameter `{p.Name}` of `{calleeName}` is a qubit register, but `{qa.Reg}[{qa.Index}]` is a single qubit", g.Span);
+                else if (arg is QTextArg ta && !scope.Registers.ContainsKey(ta.Text) && !scope.SymbolicRegisters.Contains(ta.Text))
+                    Add(errors, "QSEM006", $"in `{opName}`: parameter `{p.Name}` of `{calleeName}` needs a qubit register to bind its size `{p.SizeParam}`, but `{ta.Text}` is not a known register", g.Span);
             }
             else if (p.Type == QType.Qubit)
             {
                 if (arg is QTextArg ta && (scope.Registers.ContainsKey(ta.Text) || IsClassicalText(ta.Text, scope)))
                     Add(errors, "QSEM006", scope.Registers.ContainsKey(ta.Text)
-                        ? $"in `{opName}`: parameter `{p.Name}` of `{callee.Name}` is a single qubit, but `{ta.Text}` is a whole register (pass `{ta.Text}[i]`)"
-                        : $"in `{opName}`: parameter `{p.Name}` of `{callee.Name}` is a qubit, but `{ta.Text}` is not one", g.Span);
+                        ? $"in `{opName}`: parameter `{p.Name}` of `{calleeName}` is a single qubit, but `{ta.Text}` is a whole register (pass `{ta.Text}[i]`)"
+                        : $"in `{opName}`: parameter `{p.Name}` of `{calleeName}` is a qubit, but `{ta.Text}` is not one", g.Span);
             }
             else if (IsQubitLike(arg, scope))
             {
-                Add(errors, "QSEM006", $"in `{opName}`: parameter `{p.Name}` of `{callee.Name}` is `{p.Type.ToString()!.ToLowerInvariant()}`, but a qubit was passed", g.Span);
+                Add(errors, "QSEM006", $"in `{opName}`: parameter `{p.Name}` of `{calleeName}` is `{p.Type.ToString()!.ToLowerInvariant()}`, but a qubit was passed", g.Span);
             }
         }
     }
@@ -483,7 +481,7 @@ public static class QoraValidator
     private static bool IsQubitLike(QArg arg, Scope scope) => arg switch
     {
         QQubitArg => true,
-        QTextArg t => scope.Registers.ContainsKey(t.Text) || scope.SingleQubits.Contains(t.Text),
+        QTextArg t => scope.Registers.ContainsKey(t.Text) || scope.SingleQubits.Contains(t.Text) || scope.SymbolicRegisters.Contains(t.Text),
         _ => false,
     };
 
@@ -501,7 +499,7 @@ public static class QoraValidator
     /// <summary>QSEM016 — literal index bounds against known register sizes; no indexing single qubits.</summary>
     private static void CheckQubitIndex(QQubitArg q, Scope scope, List<QoraError> errors, QSpan? span)
     {
-        var opName = scope.Op.Name;
+        var opName = scope.Op.DisplayName ?? scope.Op.Name;
         if (scope.SingleQubits.Contains(q.Reg))
         {
             Add(errors, "QSEM016", $"in `{opName}`: `{q.Reg}` is a single qubit and cannot be indexed (`{q.Reg}[{q.Index}]`)", span);
@@ -521,6 +519,7 @@ public static class QoraValidator
         QQubitArg q => (q.Reg, q.Index),
         QTextArg t when scope.Registers.ContainsKey(t.Text) => (t.Text, (string?)null),
         QTextArg t when scope.SingleQubits.Contains(t.Text) => (t.Text, (string?)null),
+        QTextArg t when scope.SymbolicRegisters.Contains(t.Text) => (t.Text, (string?)null),
         _ => null,
     };
 

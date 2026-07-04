@@ -806,6 +806,57 @@ function provideQoraCodeLenses(document) {
   return lenses;
 }
 
+// Import-path completion: inside `import "…"`, offer the sibling .qor files and folders so you pick
+// the file instead of typing it (like JS/TS import-path completion). The one import form is a quoted
+// relative path resolved against the importing file's directory, so completion only fires in that string.
+function provideImportPaths(document, position) {
+  const uptoCursor = document.lineAt(position).text.slice(0, position.character);
+  const m = /(?:^|\s)import\s+"/.exec(uptoCursor);
+  if (!m) return undefined;
+  const afterQuote = uptoCursor.slice(m.index + m[0].length);
+  if (afterQuote.includes('"')) return undefined;    // string already closed before the cursor
+  const typed = afterQuote;
+
+  const docPath = document.uri.scheme === 'file' ? document.uri.fsPath : undefined;
+  if (!docPath) return undefined;                    // unsaved buffer: no directory to resolve against
+  const baseDir = path.dirname(docPath);
+
+  // The typed text may include subdirectories: split into a dir part (to list) and a prefix (to filter).
+  const slash = typed.lastIndexOf('/');
+  const dirPart = slash >= 0 ? typed.slice(0, slash) : '';
+  const prefix = slash >= 0 ? typed.slice(slash + 1) : typed;
+  let listDir;
+  try { listDir = path.resolve(baseDir, dirPart); } catch { return undefined; }
+
+  let entries;
+  try { entries = fs.readdirSync(listDir, { withFileTypes: true }); }
+  catch { return undefined; }                        // folder doesn't exist yet — nothing to offer
+
+  // Replace only the segment after the last slash, so subdirectory navigation stays clean.
+  const replaceRange = new vscode.Range(position.translate(0, -prefix.length), position);
+  const self = path.basename(docPath);
+  const items = [];
+  for (const e of entries) {
+    if (e.name.startsWith('.')) continue;
+    if (e.isDirectory()) {
+      const it = new vscode.CompletionItem(e.name + '/', vscode.CompletionItemKind.Folder);
+      it.insertText = e.name + '/';
+      it.range = replaceRange;
+      it.sortText = '0' + e.name;                    // folders first
+      it.command = { command: 'editor.action.triggerSuggest', title: '' }; // keep completing into it
+      items.push(it);
+    } else if (e.isFile() && e.name.toLowerCase().endsWith('.qor')) {
+      if (dirPart === '' && e.name === self) continue; // importing yourself is just a cycle (QSEM021)
+      const it = new vscode.CompletionItem(e.name, vscode.CompletionItemKind.File);
+      it.insertText = e.name;
+      it.range = replaceRange;
+      it.sortText = '1' + e.name;
+      items.push(it);
+    }
+  }
+  return items;
+}
+
 function activate(context) {
   extRoot = context.extensionPath;   // used to locate the bundled per-platform binary
   extContext = context;              // globalStorage/globalState for the Run provisioning
@@ -825,6 +876,15 @@ function activate(context) {
     vscode.languages.registerCodeLensProvider('qora', {
       provideCodeLenses: provideQoraCodeLenses,
     })
+  );
+
+  // Path autocomplete inside `import "…"` — trigger on the opening quote and on `/` for subfolders.
+  context.subscriptions.push(
+    vscode.languages.registerCompletionItemProvider(
+      'qora',
+      { provideCompletionItems: provideImportPaths },
+      '"', '/'
+    )
   );
 
   diagnostics = vscode.languages.createDiagnosticCollection('qora');

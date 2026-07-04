@@ -3,7 +3,7 @@ namespace Qora.Ir;
 /// <summary>The compiler's version, stamped into emitted QASM for provenance.</summary>
 public static class QoraVersion
 {
-    public const string Value = "0.13";
+    public const string Value = "0.14";
 }
 
 /// <summary>
@@ -48,15 +48,14 @@ public sealed record QProgram(
 public sealed record QOpen(string Target, QSpan? Span = null);
 
 /// <summary>
-/// One <c>import</c> declaration. <see cref="IsPath"/> distinguishes the two surface forms:
-/// <c>import lib.gates;</c> (bare dotted name — dots map to directories, giving <c>lib/gates.qor</c>)
-/// vs <c>import "gates lib.qor";</c> (a literal relative path, for names an identifier can't spell).
-/// <see cref="Target"/> holds the name/path WITHOUT quotes.
+/// One <c>import</c> declaration. Qora has a single import form — a quoted relative path including
+/// the extension: <c>import "gates lib.qor";</c> or <c>import "lib/gates.qor";</c>.
+/// <see cref="Target"/> holds the path WITHOUT the surrounding quotes.
 /// </summary>
-public sealed record QImport(string Target, bool IsPath)
+public sealed record QImport(string Target)
 {
     /// <summary>The declaration as the user wrote it (for error messages).</summary>
-    public string Display => IsPath ? $"\"{Target}\"" : Target;
+    public string Display => $"\"{Target}\"";
 
     public QSpan? Span { get; init; }
 }
@@ -65,15 +64,30 @@ public sealed record QImport(string Target, bool IsPath)
 /// pass runs, <see cref="Name"/> is the FULLY-QUALIFIED name and this records the origin.</param>
 public sealed record QOperation(string Name, IReadOnlyList<QParam> Params, IReadOnlyList<QStmt> Body, string Namespace = "")
 {
+    /// <summary>
+    /// The name to SHOW in diagnostics, when it differs from the emitted <see cref="Name"/>. Null means
+    /// "use <see cref="Name"/>". <see cref="Passes.Monomorphizer"/> sets it to the original generic op
+    /// (so a size specialization <c>Foo__sz3</c> still reports errors as <c>Foo</c>). Emission always uses
+    /// <see cref="Name"/>; only user-facing messages consult this.
+    /// </summary>
+    public string? DisplayName { get; init; }
+
     /// <summary>Span of the operation's NAME token (op-level errors point here).</summary>
     public QSpan? Span { get; init; }
 }
 
-public enum QType { Qubit, Int, Bit }
+public enum QType { Qubit, Int, Bit, Float, Angle }
 
 /// <summary>A def parameter: a qubit, a sized qubit register (<see cref="RegisterSize"/> != null), or an int/bit.</summary>
 public sealed record QParam(string Name, QType Type, int? RegisterSize)
 {
+    /// <summary>
+    /// A generic register <c>Qubit[n] name</c>: the symbolic size symbol (e.g. <c>"n"</c>), bound to a
+    /// concrete size per call site by <see cref="Passes.Monomorphizer"/>. Null for concrete/non-register
+    /// params; while non-null, <see cref="RegisterSize"/> stays null until specialization fills it in.
+    /// </summary>
+    public string? SizeParam { get; init; }
+
     /// <summary>Span of the parameter's NAME token.</summary>
     public QSpan? Span { get; init; }
 }

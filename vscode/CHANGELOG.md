@@ -2,6 +2,16 @@
 
 All notable changes to the Qora Language extension.
 
+## 0.8.0
+
+- Bundles the **Qora v0.14** compiler: `float` / `angle` classical types, parameterized register sizes
+  `Qubit[n]` (monomorphized to a concrete copy per call site), name collisions that auto-resolve (with a
+  `// Qora:` note) instead of erroring, and whole-operation `Adjoint` compiled by a dedicated
+  inverse-synthesis pass.
+- **Import-path editing**: typing `import "…"` now completes sibling `.qor` files and folders (like
+  JS/TS import-path completion), `"` auto-closes, and an `import` snippet inserts the quoted-path form.
+  `import` / `namespace` / `open` keywords and string literals are now syntax-highlighted.
+
 ## 0.7.2
 
 - Fixed the Run setup dialog appearing several seconds late: the extension no longer spawns any

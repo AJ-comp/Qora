@@ -70,7 +70,7 @@ public static class ModuleLoader
         {
             foreach (var imp in imports)
             {
-                var rel = imp.IsPath ? imp.Target : imp.Target.Replace('.', Path.DirectorySeparatorChar) + ".qor";
+                var rel = imp.Target; // the literal relative path the user quoted (incl. extension)
                 string full;
                 try { full = Path.GetFullPath(Path.Combine(dir, rel)); }
                 catch (Exception)

@@ -1,112 +1,169 @@
 namespace Qora.Ir.Passes;
 
 /// <summary>
-/// The name-mangling pass (IR→IR): appends <c>_</c> to EVERY user-defined name — operations,
-/// parameters, registers, variables, loop variables, and identifier tokens inside rendered
-/// expressions — right before emission.
+/// Name mangling (IR→IR): maps every Qora name to a valid, collision-free OpenQASM identifier right
+/// before emission. A namespaced name flattens its dots (<c>MyLib.Bell</c> → <c>MyLib_Bell</c>); then,
+/// within each emission scope, any name that would collide — with a built-in gate/keyword, or with
+/// another emitted name — gets <c>_</c> appended until it is unique.
 ///
-/// Why: the emitted OpenQASM world has one flat global namespace already occupied by stdgates' gate
-/// names (<c>s</c>, <c>t</c>, <c>x</c>, …) and the language's keywords. No built-in ends with
-/// <c>_</c> and the transform is injective (<c>s</c>→<c>s_</c>, <c>s_</c>→<c>s__</c>), so a mangled
-/// user name can never collide with anything — no reserved-name list, no conditional renaming, no
-/// uniquify fallback. Synthesized inverse defs end in <c>adj</c> (never <c>_</c>), keeping the three
-/// name spaces (built-ins / mangled user names / generated names) structurally disjoint.
+/// A name collision is therefore NEVER a compile error: the pass resolves it automatically and records
+/// a note (surfaced as a <c>// Qora:</c> comment in the emitted QASM), so ANY validated program emits.
 ///
-/// What is NOT mangled: built-in gate/measurement names at call sites (they are the target world's own
-/// names) and the built-in constants <c>pi</c>/<c>tau</c>/<c>euler</c> inside expressions — which is
-/// also why the validator keeps declarations from shadowing those few names (the source-level meaning
-/// of a token must stay unambiguous; renaming output cannot fix a resolution ambiguity).
+/// Scopes mirror OpenQASM: the GLOBAL scope holds operation def names plus the entry op's top-level
+/// declarations (they share one flat namespace with stdgates); each def has its own LOCAL scope for
+/// parameters / variables / loop variables (names may freely repeat across different defs). A def-local
+/// is kept clear of every operation name too, so it can never shadow an operation the def calls. The
+/// entry op keeps its own name (its body is the QASM top level and nothing calls it).
 ///
-/// Runs AFTER validation (errors always show the user's original names) and before the emitter, which
-/// therefore stays a dumb printer. The stages view (<c>ast</c>/<c>ir</c>/<c>irInverse</c>) shows
-/// original names; only the QASM stage shows the mangled ones — making the "names get encoded at the
-/// boundary to a poorer world" idea (C++-style mangling) directly visible to learners.
+/// Built-in gate names at call sites and the constants <c>pi</c>/<c>tau</c>/<c>euler</c> in expressions
+/// are never mangled — they are the target world's own names. Runs AFTER validation (diagnostics show
+/// the user's original names) and before the emitter (which stays a dumb printer).
 /// </summary>
 public static class NameMangler
 {
     private static readonly HashSet<string> BuiltinConstants = new() { "pi", "tau", "euler" };
 
-    public static QProgram Mangle(QProgram program)
-    {
-        // The entry op keeps its name: it is never emitted as a def (its body becomes the QASM top
-        // level) and QSEM009 guarantees no call site references it — mangling it would only break the
-        // emitter's entry lookup. Resolve the entry exactly like the emitter does.
-        var entry = program.Operations.FirstOrDefault(o => o.Name == "Main") ?? program.Operations[0];
-        var ops = program.Operations.Where(o => o != entry).Select(o => o.Name).ToHashSet();
+    /// <summary>The mangled program plus one note per collision-driven rename (for the QASM header).</summary>
+    public sealed record Result(QProgram Program, IReadOnlyList<string> Notes);
 
-        return program with
-        {
-            Operations = program.Operations.Select(op => MangleOp(op, ops, keepName: op == entry)).ToList(),
-        };
+    public static Result Mangle(QProgram program)
+    {
+        var m = new Mangler();
+        var prog = m.Run(program);
+        return new Result(prog, m.Notes);
     }
 
-    /// <summary>
-    /// The mangling transform: dots in a fully-qualified name encode as <c>__</c> plus the trailing
-    /// <c>_</c> marker (<c>MyLib.Bell</c> → <c>MyLib__Bell_</c>), C++-style flattening. NOT injective
-    /// across dots-vs-underscores (<c>A.F</c> and <c>A__F</c> meet at <c>A__F_</c>) — the validator's
-    /// QSEM023 rejects any program where two names would actually meet, so the pipeline never emits one.
-    /// Public because that check needs the exact transform.
-    /// </summary>
-    public static string Mangled(string name) => name.Replace(".", "__") + "_";
-
-    private static string M(string name) => Mangled(name);
-
-    private static QOperation MangleOp(QOperation op, HashSet<string> ops, bool keepName) => new(
-        keepName ? op.Name : M(op.Name),
-        op.Params.Select(p => p with { Name = M(p.Name) }).ToList(),
-        MangleBody(op.Body, ops));
-
-    private static IReadOnlyList<QStmt> MangleBody(IReadOnlyList<QStmt> stmts, HashSet<string> ops) =>
-        stmts.Select(s => MangleStmt(s, ops)).ToList();
-
-    private static QStmt MangleStmt(QStmt s, HashSet<string> ops) => s switch
+    private sealed class Mangler
     {
-        QUse u => u with { Name = M(u.Name) },
-        QGate g => g with
+        public readonly List<string> Notes = new();
+        private HashSet<string> _opNames = new();
+        private readonly Dictionary<string, string> _opMap = new();   // op FQN -> emitted def name
+
+        public QProgram Run(QProgram program)
         {
-            // a call to a user operation follows the op's mangled name; built-in gates keep theirs.
-            Name = ops.Contains(g.Name) ? M(g.Name) : g.Name,
-            Args = g.Args.Select(MangleArg).ToList(),
-        },
-        QDecl d => d with { Name = M(d.Name), Value = MangleExpr(d.Value) },
-        QAssign a => a with { Name = M(a.Name), Value = MangleExpr(a.Value) },
-        QIf i => i with { Cond = MangleCond(i.Cond), Then = MangleBody(i.Then, ops), Else = MangleBody(i.Else, ops) },
-        QFor f => f with { Var = M(f.Var), Body = MangleBody(f.Body, ops) },   // bounds are numeric literals
-        QWhile w => w with { Cond = MangleCond(w.Cond), Body = MangleBody(w.Body, ops) },
-        QRepeat r => r with { Body = MangleBody(r.Body, ops), Until = MangleCond(r.Until) },
-        QConjugate c => c with { Within = MangleBody(c.Within, ops), Apply = MangleBody(c.Apply, ops) },
-        _ => s,
-    };
+            if (program.Operations.Count == 0) return program;
+            var entry = program.Operations.FirstOrDefault(o => o.Name == "Main") ?? program.Operations[0];
+            _opNames = program.Operations.Select(o => o.Name).ToHashSet();
 
-    private static QArg MangleArg(QArg arg) => arg switch
-    {
-        QQubitArg q => new QQubitArg(M(q.Reg), MangleIndex(q.Index)),
-        QTextArg t => t with { Text = MangleTokens(t.Text) },
-        _ => arg,
-    };
+            // GLOBAL scope: op def names + the entry op's top-level declarations. Assign op def names first
+            // (deterministic source order); the entry keeps its own name — it is never emitted as a def.
+            var global = new HashSet<string>(QoraGates.QasmReserved);
+            foreach (var o in program.Operations)
+                _opMap[o.Name] = o == entry ? o.Name : Fresh(o.Name, global, "operation");
 
-    private static QExpr MangleExpr(QExpr expr) => expr switch
-    {
-        QMeasure { Target: { } t } m => m with { Target = new QQubitArg(M(t.Reg), MangleIndex(t.Index)) },
-        QText t => t with { Text = MangleTokens(t.Text) },
-        _ => expr,
-    };
+            var outOps = new List<QOperation>(program.Operations.Count);
+            foreach (var o in program.Operations)
+                outOps.Add(MangleOp(o, o == entry, global));
+            return program with { Operations = outOps };
+        }
 
-    private static QCond MangleCond(QCond cond) => cond with { Text = MangleTokens(cond.Text) };
+        /// <summary>Append <c>_</c> to the dot-flattened name until it is free in <paramref name="scope"/>; note any rename.</summary>
+        private string Fresh(string qoraName, HashSet<string> scope, string kind)
+        {
+            var flat = qoraName.Replace(".", "_");
+            var name = flat;
+            while (scope.Contains(name)) name += "_";
+            scope.Add(name);
+            if (name != flat)
+                Notes.Add($"{kind} `{qoraName}` emitted as `{name}` (renamed to avoid a name collision)");
+            return name;
+        }
 
-    /// <summary>A qubit index is a numeric literal (kept) or a loop variable (mangled).</summary>
-    private static string MangleIndex(string index) =>
-        index.Length > 0 && index.All(char.IsDigit) ? index : M(index);
+        private QOperation MangleOp(QOperation op, bool isEntry, HashSet<string> global)
+        {
+            // Entry declarations live in the GLOBAL scope (top level). A non-entry def gets its own local
+            // scope, seeded with built-ins AND every operation name — so a local can never shadow a gate
+            // or an operation the def calls.
+            var scope = isEntry ? global : new HashSet<string>(QoraGates.QasmReserved.Concat(_opMap.Values));
+            var map = new Dictionary<string, string>();
 
-    /// <summary>
-    /// Rendered expression/condition text is space-joined tokens: mangle each identifier token except
-    /// the built-in constants; numbers and operators pass through.
-    /// </summary>
-    private static string MangleTokens(string text) =>
-        string.Join(" ", text.Split(' ').Select(tok =>
-            IsIdentifier(tok) && !BuiltinConstants.Contains(tok) ? M(tok) : tok));
+            foreach (var p in op.Params)
+                if (!map.ContainsKey(p.Name)) map[p.Name] = Fresh(p.Name, scope, "parameter");
+            CollectDecls(op.Body, scope, map);
 
-    private static bool IsIdentifier(string tok) =>
-        tok.Length > 0 && (char.IsLetter(tok[0]) || tok[0] == '_')
-                       && tok.All(c => char.IsLetterOrDigit(c) || c == '_');
+            return op with
+            {
+                Name = isEntry ? op.Name : _opMap[op.Name],
+                Params = op.Params.Select(p => p with { Name = map[p.Name] }).ToList(),
+                Body = MangleBody(op.Body, map),
+            };
+        }
+
+        /// <summary>Assign a fresh name to every identifier a body DECLARES (registers, variables, loop variables).</summary>
+        private void CollectDecls(IReadOnlyList<QStmt> stmts, HashSet<string> scope, Dictionary<string, string> map)
+        {
+            foreach (var s in stmts)
+                switch (s)
+                {
+                    case QUse u: if (!map.ContainsKey(u.Name)) map[u.Name] = Fresh(u.Name, scope, "register"); break;
+                    case QDecl d: if (!map.ContainsKey(d.Name)) map[d.Name] = Fresh(d.Name, scope, "variable"); break;
+                    case QFor f:
+                        if (!map.ContainsKey(f.Var)) map[f.Var] = Fresh(f.Var, scope, "loop variable");
+                        CollectDecls(f.Body, scope, map);
+                        break;
+                    case QIf i: CollectDecls(i.Then, scope, map); CollectDecls(i.Else, scope, map); break;
+                    case QWhile w: CollectDecls(w.Body, scope, map); break;
+                    case QRepeat r: CollectDecls(r.Body, scope, map); break;
+                    case QConjugate c: CollectDecls(c.Within, scope, map); CollectDecls(c.Apply, scope, map); break;
+                }
+        }
+
+        // --- body rewriting: `map` renames this def's locals; _opMap renames calls; built-ins stay ---
+
+        private IReadOnlyList<QStmt> MangleBody(IReadOnlyList<QStmt> stmts, Dictionary<string, string> map) =>
+            stmts.Select(s => MangleStmt(s, map)).ToList();
+
+        private static string L(string name, Dictionary<string, string> map) => map.TryGetValue(name, out var m) ? m : name;
+
+        private QStmt MangleStmt(QStmt s, Dictionary<string, string> map) => s switch
+        {
+            QUse u => u with { Name = L(u.Name, map) },
+            QGate g => g with
+            {
+                Name = _opNames.Contains(g.Name) ? _opMap[g.Name] : g.Name,
+                Args = g.Args.Select(a => MangleArg(a, map)).ToList(),
+            },
+            QDecl d => d with { Name = L(d.Name, map), Value = MangleExpr(d.Value, map) },
+            QAssign a => a with { Name = L(a.Name, map), Value = MangleExpr(a.Value, map) },
+            QIf i => i with { Cond = MangleCond(i.Cond, map), Then = MangleBody(i.Then, map), Else = MangleBody(i.Else, map) },
+            QFor f => f with { Var = L(f.Var, map), From = MangleTokens(f.From, map), To = MangleTokens(f.To, map), Body = MangleBody(f.Body, map) },
+            QWhile w => w with { Cond = MangleCond(w.Cond, map), Body = MangleBody(w.Body, map) },
+            QRepeat r => r with { Body = MangleBody(r.Body, map), Until = MangleCond(r.Until, map) },
+            QConjugate c => c with { Within = MangleBody(c.Within, map), Apply = MangleBody(c.Apply, map) },
+            _ => s,
+        };
+
+        private QArg MangleArg(QArg arg, Dictionary<string, string> map) => arg switch
+        {
+            QQubitArg q => new QQubitArg(L(q.Reg, map), MangleIndex(q.Index, map)),
+            QTextArg t => t with { Text = MangleTokens(t.Text, map) },
+            _ => arg,
+        };
+
+        private QExpr MangleExpr(QExpr expr, Dictionary<string, string> map) => expr switch
+        {
+            QMeasure { Target: { } t } mm => mm with { Target = new QQubitArg(L(t.Reg, map), MangleIndex(t.Index, map)) },
+            QText t => t with { Text = MangleTokens(t.Text, map) },
+            _ => expr,
+        };
+
+        private static QCond MangleCond(QCond cond, Dictionary<string, string> map) => cond with { Text = MangleTokens(cond.Text, map) };
+
+        /// <summary>A qubit index is a numeric literal (kept) or a loop variable (renamed via the local map).</summary>
+        private static string MangleIndex(string index, Dictionary<string, string> map) =>
+            index.Length > 0 && index.All(char.IsDigit) ? index : L(index, map);
+
+        /// <summary>
+        /// Rendered expression/condition text is space-joined tokens: rename each identifier token that this
+        /// def declares (via the local map); built-in constants, numbers, operators and anything not declared
+        /// locally pass through unchanged.
+        /// </summary>
+        private static string MangleTokens(string text, Dictionary<string, string> map) =>
+            string.Join(" ", text.Split(' ').Select(tok =>
+                IsIdentifier(tok) && !BuiltinConstants.Contains(tok) ? L(tok, map) : tok));
+
+        private static bool IsIdentifier(string tok) =>
+            tok.Length > 0 && (char.IsLetter(tok[0]) || tok[0] == '_')
+                           && tok.All(c => char.IsLetterOrDigit(c) || c == '_');
+    }
 }

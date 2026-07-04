@@ -4,6 +4,7 @@
   "scopeName": "source.qora",
   "patterns": [
     { "include": "#comments" },
+    { "include": "#strings" },
     { "include": "#keywords" },
     { "include": "#types" },
     { "include": "#gates" },
@@ -16,9 +17,17 @@
       "name": "comment.line.double-slash.qora",
       "match": "//.*$"
     },
+    "strings": {
+      "name": "string.quoted.double.qora",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        { "name": "constant.character.escape.qora", "match": "\\\\." }
+      ]
+    },
     "keywords": {
       "name": "keyword.control.qor",
-      "match": "\\b(operation|use|const|var|if|for|in|while|repeat|until)\\b"
+      "match": "\\b(import|namespace|open|operation|use|const|var|if|for|in|while|repeat|until)\\b"
     },
     "types": {
       "name": "storage.type.qor",

@@ -11,6 +11,44 @@ emitted as **OpenQASM 3.0**.
 > **Note:** Qora was renamed from **Ket** on 2026-07-01 (a "Ket" extension already existed). Versions
 > 0.1–0.7 below were authored under the old name.
 
+## 0.14 — 2026-07-05
+
+### Added
+- **`float` and `angle` classical types.** Operations take real-valued classical parameters
+  (`operation Turn(angle theta, Qubit q)`), and `var`/`const` bind them (`const angle t = tau / 8;`).
+  `float` is a general real; `angle` is its 2π-periodic, hardware-friendly cousin — both lower to
+  OpenQASM 3's `float` / `angle`. Types are carried, not yet enforced (a loose model that keeps the
+  teaching path frictionless; the executor owns the 2π wrap).
+- **Parameterized register sizes `Qubit[n]`.** An operation can be generic over its register width
+  (`operation Fanout(Qubit[n] q) { for i in 0..n-1 { H(q[i]); } }`); a new monomorphization pass
+  (`Ir/Passes/Monomorphizer.cs`) stamps out a concrete copy per call-site size (`Fanout__sz3` for a
+  3-qubit register) and re-validates once sizes are known — the Silq-family, C++-template-style route to
+  generics (versus Q#'s dynamic `Qubit[]`), and the foundation a future automatic-uncompute pass needs.
+- **Referential-integrity gate (`Ir/Passes/ReferentialCheck.cs`).** A post-mangle safety net proves
+  every emitted identifier resolves to a declaration / operation / built-in; a dangling name (a compiler
+  bug where a pass renamed a declaration but not one of its uses) now fails loudly as `QINTERNAL` instead
+  of shipping silently-broken QASM.
+
+### Changed
+- **A name collision never fails compilation.** The name mangler now renames a name ONLY when it would
+  actually collide — with an OpenQASM keyword, a stdgates gate, or another emitted name — appending `_`
+  until unique and recording a `// Qora:` note in the QASM header. Collisions are resolved at the source
+  (they can never surface as a compile error) and non-colliding names pass through unchanged (`q` stays
+  `q`), superseding 0.12's suffix-every-name scheme.
+- **Whole-operation `Adjoint` is now a real IR→IR pass.** A new `AdjointMaterializer`
+  (`Ir/Passes/AdjointMaterializer.cs`) runs before name mangling: it turns each `Adjoint Foo(...)` on a
+  user operation into an ordinary inverse-def op (`Foo__adj`, via the inversion kernel) and rewrites the
+  call to a plain call, closing the transitive set. Because the synthesized name is minted *before*
+  mangling, it flows through the same collision resolution as every other op — structurally closing the
+  emit-time seam where an inverse-def name could clash with a user name (previously patched in the
+  emitter). `QasmEmitter` is now a pure printer: it invents no names and inverts nothing.
+
+### Docs
+- New **compilation-pipeline architecture** page (en / ko / ja): source → parse → lower → the IR passes
+  → emit, each stage with what it does and every listing produced by the real compiler. The Adjoint
+  pipeline page was refreshed to the current collision-only mangling and the materialize-before-mangle
+  pass structure.
+
 ## 0.13 — 2026-07-03
 
 ### Changed

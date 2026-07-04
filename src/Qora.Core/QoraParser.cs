@@ -83,6 +83,7 @@ public static class QoraParser
         // loaded or partially resolved program would only add unknown-name noise on top.
         Ir.QProgram? expanded = null;
         Ir.QProgram? resolved = null;
+        Ir.QProgram? monoProgram = null;   // program after monomorphization — what actually gets emitted
         List<QoraError> semanticErrors;
         if (ir != null)
         {
@@ -96,12 +97,50 @@ public static class QoraParser
             {
                 var (res, resolveErrors) = Resolver.Resolve(merged);
                 resolved = res;
-                semanticErrors = resolveErrors.Count > 0 ? resolveErrors : QoraValidator.Validate(res);
+                if (resolveErrors.Count > 0)
+                {
+                    semanticErrors = resolveErrors;
+                }
+                else
+                {
+                    var baseErrors = QoraValidator.Validate(res);
+                    if (baseErrors.Count > 0)
+                    {
+                        semanticErrors = baseErrors;
+                    }
+                    else
+                    {
+                        // Monomorphization pins each generic register to a concrete size, so re-validate the
+                        // specialized program: size-dependent checks (index bounds, register-size matches)
+                        // can only run once sizes are known. No generics -> Run returns the same program and
+                        // there is nothing new to check.
+                        monoProgram = Monomorphizer.Run(res);
+                        semanticErrors = ReferenceEquals(monoProgram, res) ? baseErrors : QoraValidator.Validate(monoProgram);
+                    }
+                }
             }
         }
         else
         {
             semanticErrors = new List<QoraError>();
+        }
+
+        // emission runs on the MANGLED program; NameMangler auto-resolves any name collision by appending
+        // `_` and returns one note per rename, surfaced as a `// Qora:` comment in the emitted QASM.
+        string qasm = string.Empty;
+        if (monoProgram != null && semanticErrors.Count == 0)
+        {
+            // Materialize whole-op Adjoint into real inverse-def ops BEFORE mangling, so every synthesized
+            // name flows through the mangler's collision resolution (nothing is minted at emit time).
+            var materialized = AdjointMaterializer.Run(monoProgram);
+            var mangled = NameMangler.Mangle(materialized.Program);
+            // referential-integrity gate: after mangling, every used identifier must resolve to a
+            // declaration/op/built-in. A dangling reference here is a COMPILER bug (a name not renamed
+            // consistently) — fail loudly (QINTERNAL) instead of emitting silently-broken QASM.
+            var refErrors = ReferentialCheck.Verify(mangled.Program);
+            if (refErrors.Count > 0) semanticErrors = refErrors;
+            // both passes may rename to dodge a collision; surface every note in the QASM header.
+            else qasm = QasmEmitter.Emit(mangled.Program, materialized.Notes.Concat(mangled.Notes).ToList());
         }
 
         return new QoraParseResult
@@ -115,9 +154,7 @@ public static class QoraParser
             Ast = ast,
             AstText = ast?.ToTreeString() ?? string.Empty,
             Ir = resolved ?? expanded ?? ir,
-            // emission runs on the MANGLED program (every user name gets `_` — see NameMangler);
-            // everything user-facing before this point (errors, ast/ir stages) keeps original names.
-            Qasm = resolved != null && semanticErrors.Count == 0 ? QasmEmitter.Emit(NameMangler.Mangle(resolved)) : string.Empty,
+            Qasm = qasm,
             Errors = !result.Success
                 ? result.AllErrors.Select(ToQoraError).ToList()
                 : semanticErrors,

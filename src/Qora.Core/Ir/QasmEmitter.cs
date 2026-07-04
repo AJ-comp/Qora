@@ -3,21 +3,19 @@ using System.Text;
 namespace Qora.Ir;
 
 /// <summary>
-/// Lowers Qora IR (<see cref="QProgram"/>) to OpenQASM 3.0 — the final, text-producing pass.
+/// Lowers Qora IR (<see cref="QProgram"/>) to OpenQASM 3.0 — the final, text-producing pass, and a pure
+/// printer: it invents no names and inverts no bodies. Whole-operation <c>Adjoint</c> on a user op is
+/// already gone by now — <see cref="AdjointMaterializer"/> turned each into an ordinary call to a
+/// synthesized inverse def (a real op), so this emitter sees only plain defs and plain calls.
 ///
-/// Inversion is not done here: the whole-operation <c>Adjoint</c> feature runs on <see cref="Inverter"/>
-/// (a pure IR→IR pass), and this emitter just prints the inverse bodies it returns as ordinary
-/// statements. A call site <c>Adjoint Foo(args)</c> lowers to a call to the synthesized inverse def
-/// (named <c>Foo__adj</c>, uniquified if a user op already took that name), and one op's inverse body
-/// may itself call another's, so the set of needed inverse defs is closed transitively.
+/// OpenQASM requires declare-before-use for defs and has no forward declarations, so all defs are emitted
+/// in dependency (topological) order; on a call cycle — only reachable through forward recursion, which
+/// validation (QSEM011) already rejects — it falls back to the stable order.
 ///
-/// OpenQASM requires declare-before-use for defs and has no forward declarations, so all defs (forward
-/// and synthesized) are emitted in dependency (topological) order; on a call cycle — only reachable
-/// through forward recursion, which inversion already rejects — it falls back to the stable order.
-///
-/// Constructs OpenQASM cannot express are emitted as a visible <c>// Qora:</c> note instead of invalid
-/// text: gate modifiers on a def call (<c>Controlled Foo(...)</c> / non-invertible <c>Adjoint Foo</c>)
-/// and gate modifiers on <c>reset</c>.
+/// The functors that DO reach here are on BUILT-IN gates: <c>Adjoint H</c> → <c>inv @ h</c>,
+/// <c>Controlled X</c> → <c>ctrl @ x</c>. A functor left on a user op (which validation forbids — QSEM002
+/// for Controlled, and Adjoint is materialized away) is emitted as a visible <c>// Qora:</c> note rather
+/// than invalid text, as is a modifier on <c>reset</c> (a statement, not a gate).
 /// </summary>
 public static class QasmEmitter
 {
@@ -27,14 +25,11 @@ public static class QasmEmitter
         ["Controlled"] = "ctrl @ ",
     };
 
-    /// <summary>Everything statement emission needs to resolve a call site.</summary>
-    private sealed record Ctx(
-        HashSet<string> Ops,
-        Dictionary<string, IReadOnlyList<QStmt>> Adjointed,   // op name -> its inverse body
-        Dictionary<string, string> AdjNames,                  // op name -> unique inverse-def name
-        Dictionary<string, string> NotInvertible);            // op name -> why it has no inverse
+    /// <summary>Everything statement emission needs to resolve a call site: the set of user-op names
+    /// (so a call to one prints as a def call, not a stdgate). Inversion left no state to carry.</summary>
+    private sealed record Ctx(HashSet<string> Ops);
 
-    public static string Emit(QProgram? program)
+    public static string Emit(QProgram? program, IReadOnlyList<string>? notes = null)
     {
         if (program is null || program.Operations.Count == 0) return string.Empty;
 
@@ -45,61 +40,24 @@ public static class QasmEmitter
 
         var opByName = new Dictionary<string, QOperation>();
         foreach (var o in operations) opByName[o.Name] = o;
-
-        // Resolve every `Adjoint Foo(...)` reference to an inverse body (or a reason). One inverse body
-        // can reference further ops (`Bar(...)` inverts to `Adjoint Bar(...)`), so close the set with a
-        // worklist until no new names appear. adjOrder records discovery order for stable emission.
-        var inverter = new Inverter(operations);
-        var ctx = new Ctx(ops, new(), new(), new());
-        var adjOrder = new List<string>();
-
-        var seen = new HashSet<string>();
-        var worklist = new Queue<string>();
-        void Enqueue(IReadOnlyList<QStmt> body)
-        {
-            var refs = new HashSet<string>();
-            CollectAdjointRefs(body, ops, refs);
-            foreach (var r in refs) if (seen.Add(r)) worklist.Enqueue(r);
-        }
-
-        Enqueue(entry.Body);
-        foreach (var d in subroutines) Enqueue(d.Body);
-        while (worklist.Count > 0)
-        {
-            var name = worklist.Dequeue();
-            if (!opByName.ContainsKey(name)) continue;
-            if (inverter.TryInvertOperation(name, out var inverse, out var reason))
-            {
-                ctx.Adjointed[name] = inverse;
-                adjOrder.Add(name);
-                Enqueue(inverse);
-            }
-            else
-            {
-                ctx.NotInvertible[name] = reason;
-            }
-        }
-
-        // Unique inverse-def names: `Foo__adj` unless a user op (or an earlier synthesized name)
-        // already claimed it — then keep appending `_` until free.
-        foreach (var name in adjOrder)
-        {
-            var candidate = name + "__adj";
-            while (ops.Contains(candidate) || ctx.AdjNames.ContainsValue(candidate)) candidate += "_";
-            ctx.AdjNames[name] = candidate;
-        }
+        var ctx = new Ctx(ops);
 
         var sb = new StringBuilder();
         // provenance: emitted QASM files travel alone (papers, repos) — record which compiler made them.
         sb.AppendLine($"// generated by Qora v{QoraVersion.Value}");
+        // name collisions were auto-resolved by NameMangler; surface each rename here so a reader who sees
+        // an adjusted def name knows why (only present when a collision actually occurred).
+        if (notes is not null)
+            foreach (var note in notes) sb.AppendLine($"// Qora: {note}");
         sb.AppendLine("OPENQASM 3;");
         sb.AppendLine("include \"stdgates.inc\";");
 
-        foreach (var (kind, name) in OrderDefs(subroutines, adjOrder, entry.Name, opByName, ctx))
+        // Synthesized inverse defs are ordinary ops by this point (AdjointMaterializer), so every def is
+        // emitted the same way, in dependency order.
+        foreach (var name in OrderDefs(subroutines, entry.Name, opByName, ctx))
         {
             sb.AppendLine();
-            if (kind == DefKind.Forward) EmitDef(opByName[name], ctx, sb);
-            else EmitAdjDef(opByName[name], ctx.Adjointed[name], ctx, sb);
+            EmitDef(opByName[name], ctx, sb);
         }
 
         sb.AppendLine();
@@ -115,35 +73,26 @@ public static class QasmEmitter
 
     // --- def ordering (declare-before-use) ---
 
-    private enum DefKind { Forward, Adj }
-
     /// <summary>
-    /// Order all defs (forward subroutines + synthesized inverses) so every def appears before its
-    /// callers: Kahn's algorithm over the call graph, tie-broken by the stable order (subroutines in
-    /// source order, then inverse defs in discovery order). A cycle — possible only via forward
-    /// recursion, which OpenQASM cannot express anyway — falls back to appending the rest stably.
+    /// Order all defs so every def appears before its callers: Kahn's algorithm over the call graph,
+    /// tie-broken by the stable order (subroutines in source order, then synthesized inverse defs in
+    /// discovery order — the order <see cref="AdjointMaterializer"/> appended them). A cycle — possible
+    /// only via forward recursion, which OpenQASM cannot express anyway — falls back to appending stably.
     /// </summary>
-    private static List<(DefKind Kind, string Name)> OrderDefs(
-        List<QOperation> subroutines, List<string> adjOrder, string entryName,
-        Dictionary<string, QOperation> opByName, Ctx ctx)
+    private static List<string> OrderDefs(
+        List<QOperation> subroutines, string entryName, Dictionary<string, QOperation> opByName, Ctx ctx)
     {
-        var nodes = new List<(DefKind Kind, string Name)>();
-        foreach (var s in subroutines) nodes.Add((DefKind.Forward, s.Name));
-        foreach (var a in adjOrder) nodes.Add((DefKind.Adj, a));
-
-        var index = new Dictionary<(DefKind, string), int>();
+        var nodes = subroutines.Select(s => s.Name).ToList();
+        var index = new Dictionary<string, int>();
         for (int i = 0; i < nodes.Count; i++) index[nodes[i]] = i;
-
-        IReadOnlyList<QStmt> BodyOf((DefKind Kind, string Name) n) =>
-            n.Kind == DefKind.Forward ? opByName[n.Name].Body : ctx.Adjointed[n.Name];
 
         // edges: callee -> callers (a def depends on the defs it calls)
         var dependents = new Dictionary<int, List<int>>();
         var indegree = new int[nodes.Count];
         for (int i = 0; i < nodes.Count; i++)
         {
-            var deps = new HashSet<(DefKind, string)>();
-            CollectCallDeps(BodyOf(nodes[i]), entryName, ctx, deps);
+            var deps = new HashSet<string>();
+            CollectCallDeps(opByName[nodes[i]].Body, entryName, ctx, deps);
             foreach (var dep in deps)
             {
                 if (!index.TryGetValue(dep, out var j) || j == i) continue;
@@ -153,7 +102,7 @@ public static class QasmEmitter
             }
         }
 
-        var result = new List<(DefKind, string)>();
+        var result = new List<string>();
         var emitted = new bool[nodes.Count];
         while (result.Count < nodes.Count)
         {
@@ -172,24 +121,16 @@ public static class QasmEmitter
         return result;
     }
 
-    /// <summary>Collect which defs a body's call sites will reference, mirroring EmitStmtInline's resolution.</summary>
-    private static void CollectCallDeps(IReadOnlyList<QStmt> stmts, string entryName, Ctx ctx, HashSet<(DefKind, string)> into)
+    /// <summary>Collect which defs a body's call sites reference: every plain call to a user op (functors
+    /// on a user op never reach here — Adjoint is materialized away, Controlled is a validation error).</summary>
+    private static void CollectCallDeps(IReadOnlyList<QStmt> stmts, string entryName, Ctx ctx, HashSet<string> into)
     {
         foreach (var stmt in stmts)
         {
             switch (stmt)
             {
-                case QGate g when ctx.Ops.Contains(g.Name) && g.Name != entryName:
-                    if (g.Functors.FirstOrDefault() == "Adjoint")
-                    {
-                        if (ctx.Adjointed.ContainsKey(g.Name)) into.Add((DefKind.Adj, g.Name));
-                        // non-invertible -> a note, no call
-                    }
-                    else if (g.Functors.Count == 0)
-                    {
-                        into.Add((DefKind.Forward, g.Name));
-                    }
-                    // Controlled on a user op -> a note, no call
+                case QGate g when ctx.Ops.Contains(g.Name) && g.Name != entryName && g.Functors.Count == 0:
+                    into.Add(g.Name);
                     break;
                 case QIf i:
                     CollectCallDeps(i.Then, entryName, ctx, into);
@@ -225,18 +166,6 @@ public static class QasmEmitter
         sb.AppendLine($"def {op.Name}({ps}) {{");
         foreach (var line in decls.ToString().Split('\n'))
             if (line.Trim().Length > 0) sb.AppendLine($"  {line.TrimEnd()}");
-        sb.Append(body);
-        sb.AppendLine("}");
-    }
-
-    /// <summary>Print a synthesized inverse def: same signature as the original, body from <see cref="Inverter"/>.</summary>
-    private static void EmitAdjDef(QOperation op, IReadOnlyList<QStmt> inverse, Ctx ctx, StringBuilder sb)
-    {
-        var ps = string.Join(", ", op.Params.Select(EmitParam));
-        var body = new StringBuilder();
-        EmitStatements(inverse, body, 1, ctx, SeedVarTypes(op));
-
-        sb.AppendLine($"def {ctx.AdjNames[op.Name]}({ps}) {{");
         sb.Append(body);
         sb.AppendLine("}");
     }
@@ -351,15 +280,11 @@ public static class QasmEmitter
         var args = gate.Args.Select(RenderArg).ToList();
         var modifier = string.Concat(gate.Functors.Select(f => FunctorMods.TryGetValue(f, out var m) ? m : string.Empty));
 
-        // whole-operation Adjoint on a user op -> call the synthesized inverse def (or explain why not).
-        if (isUserOp && gate.Functors.FirstOrDefault() == "Adjoint")
-            return ctx.AdjNames.TryGetValue(name, out var adjName)
-                ? $"{adjName}({string.Join(", ", args)});"
-                : $"// Qora: Adjoint of `{name}` not supported yet ({Reason(ctx, name)})";
-
-        // any other functor on a user op has no lowering: OpenQASM gate modifiers apply to gates, not defs.
+        // A functor on a user op has no lowering (OpenQASM modifiers apply to gates, not defs) and does
+        // not occur in validated, materialized IR — whole-op Adjoint became a plain inverse-def call and
+        // Controlled on a user op is QSEM002. Kept as a visible note in case an unvalidated path reaches here.
         if (isUserOp && gate.Functors.Count > 0)
-            return $"// Qora: {gate.Functors[0]} of `{name}` not supported yet (OpenQASM cannot apply {FunctorMods[gate.Functors[0]].TrimEnd(' ', '@').Trim()} @ to a def)";
+            return $"// Qora: {gate.Functors[0]} of `{name}` has no OpenQASM lowering (a modifier cannot apply to a def)";
 
         // reset is a statement, not a gate — it takes no modifiers.
         if (gate.Functors.Count > 0 && MapGate(name) == "reset")
@@ -372,9 +297,6 @@ public static class QasmEmitter
             ? $"{modifier}{name}({string.Join(", ", args)});"
             : $"{modifier}{MapGate(name)} {string.Join(", ", args)};";
     }
-
-    private static string Reason(Ctx ctx, string name) =>
-        ctx.NotInvertible.TryGetValue(name, out var r) ? r : "body is not invertible";
 
     private static void EmitDecl(QDecl d, StringBuilder body, string pad, Dictionary<string, string> varTypes)
     {
@@ -399,7 +321,7 @@ public static class QasmEmitter
     private static string InferDefaultType(QExpr value, Dictionary<string, string> varTypes) =>
         value is QText t && t.Text.Split(' ').Any(tok =>
             tok is "pi" or "tau" or "euler" || tok.Contains('.')
-            || (varTypes.TryGetValue(tok, out var vt) && vt == "float"))
+            || (varTypes.TryGetValue(tok, out var vt) && (vt == "float" || vt == "angle")))
             ? "float" : "int";
 
     /// <summary>
@@ -413,6 +335,8 @@ public static class QasmEmitter
         foreach (var p in op.Params)
             if (p.Type == QType.Int) map[p.Name] = "int";
             else if (p.Type == QType.Bit) map[p.Name] = "bit";
+            else if (p.Type == QType.Float) map[p.Name] = "float";
+            else if (p.Type == QType.Angle) map[p.Name] = "angle";
 
         void Scan(IReadOnlyList<QStmt> stmts)
         {
@@ -440,6 +364,21 @@ public static class QasmEmitter
     private static string RewriteBitCond(string text, Dictionary<string, string> varTypes)
     {
         var toks = text.Split(' ');
+
+        // OpenQASM has no logical `!` on a classical scalar (it reads a bit/int/float as a numeric
+        // literal, not a bool): rewrite a negated classical value `! ( x )` to `x == 0` (a bit then
+        // becomes `x == false` via the loop below). Qora source keeps `!x`; only the emitted QASM changes
+        // — the same emit-time adjustment as `s == 1` -> `s == true`.
+        var neg = new List<string>(toks.Length);
+        for (var i = 0; i < toks.Length; i++)
+            if (toks[i] == "!" && i + 3 < toks.Length && toks[i + 1] == "(" && varTypes.ContainsKey(toks[i + 2]) && toks[i + 3] == ")")
+            {
+                neg.Add(toks[i + 2]); neg.Add("=="); neg.Add("0");
+                i += 3;
+            }
+            else neg.Add(toks[i]);
+        toks = neg.ToArray();
+
         for (var i = 0; i + 2 < toks.Length; i++)
         {
             if (toks[i + 1] is not ("==" or "!=")) continue;
@@ -455,6 +394,8 @@ public static class QasmEmitter
     {
         QType.Int => $"int {p.Name}",
         QType.Bit => $"bit {p.Name}",
+        QType.Float => $"float {p.Name}",
+        QType.Angle => $"angle {p.Name}",
         _ => p.RegisterSize is int n ? $"qubit[{n}] {p.Name}" : $"qubit {p.Name}",
     };
 
@@ -475,36 +416,5 @@ public static class QasmEmitter
     private static string MapGate(string name) =>
         QoraGates.Names.TryGetValue(name, out var qasm) ? qasm : name.ToLowerInvariant();
 
-    private static string? TypeName(QType? t) => t switch { QType.Int => "int", QType.Bit => "bit", _ => null };
-
-    /// <summary>Collect user-op names invoked under an <c>Adjoint</c> functor (recursing into control flow).</summary>
-    private static void CollectAdjointRefs(IReadOnlyList<QStmt> stmts, HashSet<string> ops, HashSet<string> into)
-    {
-        foreach (var stmt in stmts)
-        {
-            switch (stmt)
-            {
-                case QGate g when g.Functors.FirstOrDefault() == "Adjoint" && ops.Contains(g.Name):
-                    into.Add(g.Name);
-                    break;
-                case QIf i:
-                    CollectAdjointRefs(i.Then, ops, into);
-                    CollectAdjointRefs(i.Else, ops, into);
-                    break;
-                case QFor f:
-                    CollectAdjointRefs(f.Body, ops, into);
-                    break;
-                case QWhile w:
-                    CollectAdjointRefs(w.Body, ops, into);
-                    break;
-                case QRepeat r:
-                    CollectAdjointRefs(r.Body, ops, into);
-                    break;
-                case QConjugate c:
-                    CollectAdjointRefs(c.Within, ops, into);
-                    CollectAdjointRefs(c.Apply, ops, into);
-                    break;
-            }
-        }
-    }
+    private static string? TypeName(QType? t) => t switch { QType.Int => "int", QType.Bit => "bit", QType.Float => "float", QType.Angle => "angle", _ => null };
 }

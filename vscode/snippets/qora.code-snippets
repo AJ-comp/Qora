@@ -1,4 +1,9 @@
 {
+  "import (file)": {
+    "prefix": "import",
+    "body": ["import \"${1:file.qor}\";"],
+    "description": "파일 import — 따옴표 경로가 유일한 형태"
+  },
   "operation": {
     "prefix": "operation",
     "body": ["operation ${1:Name}(${2}) {", "\t$0", "}"],

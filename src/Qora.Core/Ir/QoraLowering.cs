@@ -13,7 +13,7 @@ namespace Qora.Ir;
 /// </summary>
 public static class QoraLowering
 {
-    private static readonly HashSet<string> TypeKeywords = new() { "int", "bit" };
+    private static readonly HashSet<string> TypeKeywords = new() { "int", "bit", "float", "angle" };
     private static readonly HashSet<string> FunctorNames = new() { "Adjoint", "Controlled" };
 
     // Spans are meaningful only for the ENTRY document (the editor contract's offsets). Imported files
@@ -37,13 +37,11 @@ public static class QoraLowering
                 case "Operation":
                     operations.Add(LowerOperation(item));
                     break;
-                // import lib.gates;  (bare dotted name)  /  import "path.qor";  (string path — the
-                // StringLit token keeps its quotes, which is how the two forms are told apart here).
+                // import "lib/gates.qor";  — the only import form: a quoted relative path. The StringLit
+                // token keeps its quotes, so trim them to recover the literal path.
                 case "Import":
-                    var target = QnameText(item);
-                    imports.Add((target.StartsWith('"')
-                        ? new QImport(target.Trim('"'), IsPath: true)
-                        : new QImport(target, IsPath: false)) with { Span = SpanOf(item) });
+                    var target = QnameText(item).Trim('"');
+                    imports.Add(new QImport(target) with { Span = SpanOf(item) });
                     break;
                 // namespace blocks lower for real: ops carry their namespace, opens are recorded
                 // per namespace (merged across blocks of the same name) for the resolver pass.
@@ -106,15 +104,23 @@ public static class QoraLowering
     private static QParam LowerParam(AstNonTerminal param)
     {
         var terms = param.Items.OfType<AstTerminal>().Select(t => t.ToString() ?? string.Empty).ToList();
-        var name = terms.FirstOrDefault(t => !TypeKeywords.Contains(t) && !IsNumber(t)) ?? string.Empty;
         var typeKw = terms.FirstOrDefault(t => TypeKeywords.Contains(t));
         var size = terms.FirstOrDefault(IsNumber);
+        // Identifiers that are neither a type keyword nor a number: the parameter name, plus — for a
+        // generic register `Qubit[n] q` — a leading size symbol. Source order puts the size symbol first
+        // and the name last, so the name is the LAST such identifier.
+        var idents = terms.Where(t => !TypeKeywords.Contains(t) && !IsNumber(t)).ToList();
+        var name = idents.Count > 0 ? idents[^1] : string.Empty;
         var span = SpanOf(param.Items.OfType<AstTerminal>().FirstOrDefault(t => (t.ToString() ?? "") == name));
 
         if (typeKw == "int") return new QParam(name, QType.Int, null) { Span = span };
         if (typeKw == "bit") return new QParam(name, QType.Bit, null) { Span = span };
-        if (size is not null) return new QParam(name, QType.Qubit, int.Parse(size)) { Span = span };
-        return new QParam(name, QType.Qubit, null) { Span = span };
+        if (typeKw == "float") return new QParam(name, QType.Float, null) { Span = span };
+        if (typeKw == "angle") return new QParam(name, QType.Angle, null) { Span = span };
+        if (size is not null) return new QParam(name, QType.Qubit, int.Parse(size)) { Span = span };   // Qubit[2] q
+        if (idents.Count >= 2)                                                                          // Qubit[n] q
+            return new QParam(name, QType.Qubit, null) { SizeParam = idents[0], Span = span };
+        return new QParam(name, QType.Qubit, null) { Span = span };                                     // Qubit q
     }
 
     private static QStmt LowerStmt(AstNonTerminal node) => node.Name switch
@@ -172,7 +178,7 @@ public static class QoraLowering
     private static QDecl LowerDecl(AstNonTerminal node, bool isConst)
     {
         var name = DeclName(node);
-        var type = DeclType(node) switch { "int" => (QType?)QType.Int, "bit" => QType.Bit, _ => null };
+        var type = DeclType(node) switch { "int" => (QType?)QType.Int, "bit" => QType.Bit, "float" => QType.Float, "angle" => QType.Angle, _ => null };
         return new QDecl(isConst, type, name, LowerExpr(ExprOf(node)));
     }
 
@@ -199,8 +205,13 @@ public static class QoraLowering
 
     private static QFor LowerFor(AstNonTerminal node)
     {
-        var f = node.Items.OfType<AstTerminal>().Select(t => t.ToString() ?? string.Empty).ToList();
-        return new QFor(At(f, 0), At(f, 1), At(f, 2), BodyStmts(node).Select(LowerSpanned).ToList());
+        // The loop variable is the first meaning terminal (for/in/braces are dropped). The two bounds are
+        // the direct "Expr" children — now full expressions (e.g. `0 .. n - 1`), rendered to text.
+        var loopVar = node.Items.OfType<AstTerminal>().FirstOrDefault()?.ToString() ?? string.Empty;
+        var bounds = node.Items.OfType<AstNonTerminal>().Where(n => n.Name == "Expr").ToList();
+        var from = bounds.Count > 0 ? RenderItems(bounds[0]) : "0";
+        var to = bounds.Count > 1 ? RenderItems(bounds[1]) : from;
+        return new QFor(loopVar, from, to, BodyStmts(node).Select(LowerSpanned).ToList());
     }
 
     // A decl/assign RHS. The only legal call form is a LONE call to the registered measurement
@@ -246,7 +257,9 @@ public static class QoraLowering
                 var (text, call) = RenderExpr(nt);
                 // Qora's `!expr` negates the whole expression, but the flat re-parsed QASM would bind
                 // `!` to the first token only (`! a + 1` -> (!a)+1) — parenthesize to keep the meaning.
-                parts.Add(negateNext ? $"({text})" : text);
+                // Pad the parens with spaces so every identifier stays a standalone space-delimited token
+                // (NameMangler renames only bare tokens; a glued `(s)` would leave the inner name un-mangled).
+                parts.Add(negateNext ? $"( {text} )" : text);
                 negateNext = false;
                 hasCall |= call;
             }
@@ -288,8 +301,10 @@ public static class QoraLowering
     private static IEnumerable<AstNonTerminal> Body(AstNonTerminal op) =>
         op.Items.OfType<AstNonTerminal>().Where(n => n.Name != "Param");
 
+    // Body statements are the block's nonterminal children, minus the "meta" nonterminals a statement
+    // header carries as direct children: a "Condition" (if/while/repeat) and the two "Expr" for-bounds.
     private static IEnumerable<AstNonTerminal> BodyStmts(AstNonTerminal node) =>
-        node.Items.OfType<AstNonTerminal>().Where(n => n.Name != "Condition");
+        node.Items.OfType<AstNonTerminal>().Where(n => n.Name != "Condition" && n.Name != "Expr");
 
     private static AstNonTerminal? CondOf(AstNonTerminal node) =>
         node.Items.OfType<AstNonTerminal>().FirstOrDefault(n => n.Name == "Condition");

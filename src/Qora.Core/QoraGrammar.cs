@@ -6,7 +6,7 @@ using Janglim.FrontEnd.RegularGrammar;
 namespace Qora;
 
 /// <summary>
-/// Qora v0.13 — a Q#/C#-flavored quantum language on the Janglim engine.
+/// Qora v0.14 — a Q#/C#-flavored quantum language on the Janglim engine.
 ///
 ///   operation Bell(Qubit[2] q) {       // a subroutine, with C#-style parameters
 ///       H(q[0]);
@@ -48,6 +48,14 @@ namespace Qora;
 /// spelling Qiskit's importer accepts), a provenance comment in emitted QASM, and the execution
 /// toolchain (Braket runner + two release-gate validators; Braket's local simulator runs the FULL
 /// language). Operations are still void (no return value yet).
+/// v0.14 adds: classical <c>float</c> and <c>angle</c> types (parameters and <c>var</c>/<c>const</c>);
+/// parameterized register sizes <c>Qubit[n]</c> specialized per call site by monomorphization
+/// (<c>Ir/Passes/Monomorphizer.cs</c>); name mangling that renames ONLY on a real collision — append
+/// <c>_</c>, auto-resolved, never an error, with a <c>// Qora:</c> note per rename (superseding v0.12's
+/// suffix-every-name scheme, so <c>q</c> stays <c>q</c> unless it clashes); whole-operation <c>Adjoint</c>
+/// materialized into a real inverse-def op BEFORE mangling (<c>Ir/Passes/AdjointMaterializer.cs</c>),
+/// leaving <c>QasmEmitter</c> a pure printer; and a post-mangle referential-integrity gate
+/// (<c>Ir/Passes/ReferentialCheck.cs</c>, QINTERNAL) that proves every emitted name resolves.
 /// </summary>
 public class QoraGrammar : Grammar
 {
@@ -77,6 +85,8 @@ public class QoraGrammar : Grammar
     // --- type keywords (meaning=TRUE so they stay in the AST; bWordPattern=false for keyword priority) ---
     public Terminal Int { get; } = new Terminal(TokenType.Keyword, "int", "int", true, false);
     public Terminal Bit { get; } = new Terminal(TokenType.Keyword, "bit", "bit", true, false);
+    public Terminal FloatType { get; } = new Terminal(TokenType.Keyword, "float", "float", true, false);
+    public Terminal AngleType { get; } = new Terminal(TokenType.Keyword, "angle", "angle", true, false);
 
     // Line comments: `//` to end of line. Value is a RAW regex — Janglim >=0.2.0-preview.3 uses a
     // comment terminal's Value verbatim (no \b wrapping), so "//.*$" wins the lexer's longest-match over
@@ -187,11 +197,10 @@ public class QoraGrammar : Grammar
         operationList.AddItem(topItem | operationList + topItem);
         topItem.AddItem(operation | importStmt | namespaceDecl);
 
-        // module system (in progress — parsed and surfaced, gated by the validator until resolution lands):
-        //   import gates_lib;        // bare module name -> gates_lib.qor (dots become directories later)
-        //   import "gates lib.qor";  // string path form (for names a bare identifier can't spell)
-        //   namespace Lib.Sub { open Other; operation Foo() { … } }
-        importStmt.AddItem(Import + qname + Semicolon, ImportM);
+        // module system — one import form only: a quoted relative path including the extension.
+        //   import "gates lib.qor";  // sibling file
+        //   import "lib/gates.qor";  // file in a subdirectory
+        //   namespace Lib.Sub { open Other; operation Foo() { … } }  // open = C#-`using` namespace visibility
         importStmt.AddItem(Import + StringLit + Semicolon, ImportM);
         namespaceDecl.AddItem(Namespace + qname + LBrace + nsItem.ZeroOrMore() + RBrace, NamespaceM);
         nsItem.AddItem(openStmt | operation);
@@ -203,9 +212,11 @@ public class QoraGrammar : Grammar
         operation.AddItem(Operation + Ident + LParen + paramList + RParen + LBrace + statement.ZeroOrMore() + RBrace, OperationM);
 
         paramList.AddItem(param + (Comma + param).ZeroOrMore());
-        // Qubit q  /  Qubit[2] q  /  int n  /  bit b   (Qubit keyword is dropped; a register keeps its size Num)
+        // Qubit q  /  Qubit[2] q  /  Qubit[n] q (generic register size)  /  int n  /  bit b  /  float theta  /  angle phi
+        //   (Qubit keyword is dropped; a concrete register keeps its size Num, a generic one its size Ident)
         param.AddItem(Qubit + Ident, ParamM);
         param.AddItem(Qubit + LBracket + Num + RBracket + Ident, ParamM);
+        param.AddItem(Qubit + LBracket + Ident + RBracket + Ident, ParamM);
         param.AddItem(typeName + Ident, ParamM);
 
         statement.AddItem(useStmt | gateStmt | constDecl | varDecl | assignStmt | ifStmt | forStmt | whileStmt | repeatStmt);
@@ -243,11 +254,12 @@ public class QoraGrammar : Grammar
         ifStmt.AddItem(If + LParen + condition + RParen + LBrace + statement.ZeroOrMore() + RBrace + Else + LBrace + statement.ZeroOrMore() + RBrace, IfM);
         ifStmt.AddItem(If + LParen + condition + RParen + LBrace + statement.ZeroOrMore() + RBrace + Else + ifStmt, IfM);
 
-        forStmt.AddItem(For + Ident + In + Num + DotDot + Num + LBrace + statement.ZeroOrMore() + RBrace, ForM);
+        // bounds are expressions so a loop can range over a generic register size: `for i in 0..n-1`.
+        forStmt.AddItem(For + Ident + In + expr + DotDot + expr + LBrace + statement.ZeroOrMore() + RBrace, ForM);
         whileStmt.AddItem(While + LParen + condition + RParen + LBrace + statement.ZeroOrMore() + RBrace, WhileM);
         repeatStmt.AddItem(Repeat + LBrace + statement.ZeroOrMore() + RBrace + Until + LParen + condition + RParen + Semicolon, RepeatM);
 
-        typeName.AddItem(Int | Bit);
+        typeName.AddItem(Int | Bit | FloatType | AngleType);
 
         // condition: a flat boolean expression joined by comparison/boolean operators. Flat on purpose —
         // the tokens emit in order and OpenQASM re-parses with its own precedence, so "a == 1 && b == 0"
