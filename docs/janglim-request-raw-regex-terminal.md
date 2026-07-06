@@ -9,8 +9,9 @@
 
 - 요청 프로젝트: **Qora** (Janglim NuGet 소비자)
 - 날짜: 2026-07-02
-- 우선순위: **낮음 / 비차단** — Qora 모듈 시스템 v1은 bare 이름 import(`import gates_lib;`)로 설계를
-  전환해 당장 막힌 것은 없음. Qora가 진짜 문자열 값(메시지·경로 등)을 도입하는 시점에 필요.
+- 우선순위: **낮음 / 비차단** — 당시에는 bare 이름 import로 우회할 수 있었지만, 현재 Qora는 문자열
+  경로 import(`import "gates_lib.qor";`)를 사용한다. 이 요청은 그 문자열 경로 import를 가능하게 만든
+  배경 기록이다.
 
 ## 배경
 

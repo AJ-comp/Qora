@@ -7,9 +7,10 @@ namespace Qora.Ir.Passes;
 ///
 /// Semantics (docs/namespaces-design.md, increment 3):
 /// <list type="bullet">
-///   <item><c>import lib.gates;</c> → <c>lib/gates.qor</c>, <c>import "a b.qor";</c> → that literal
-///         relative path — both resolved against the IMPORTING file's directory (the entry file uses
-///         <c>baseDir</c>), so a library's own imports keep working wherever it is imported from.</item>
+///   <item><c>import "lib/gates.qor";</c> and <c>import "a b.qor";</c> use the quoted relative path
+///         exactly as written, including the extension. Paths resolve against the IMPORTING file's
+///         directory (the entry file uses <c>baseDir</c>), so a library's own imports keep working
+///         wherever it is imported from.</item>
 ///   <item>Loading is transitive with diamond-sharing: each file loads once no matter how many import
 ///         paths reach it (paths are canonicalized; case-insensitive, matching Windows).</item>
 ///   <item>Cycles are an error (<b>QSEM021</b>, showing the chain); a missing/unreadable file is

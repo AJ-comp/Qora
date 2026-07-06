@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>컴파일 파이프라인 — 소스에서 OpenQASM까지 전 단계 — Qora</title>
+<title>Qora 핵심 설계 문서 — 컴파일 파이프라인 — Qora</title>
 <style>
   :root {
     --bg: #ffffff;
@@ -116,15 +116,30 @@
   }
   .flowline .st { color: var(--accent); }
   .stagehead { color: var(--muted); font-size: .82rem; letter-spacing:.08em; text-transform:uppercase; font-weight:700; }
+  .doc-meta {
+    border: 1px solid #dfe5f2; border-left: 5px solid var(--accent); border-radius: 8px;
+    background: #f8faff; padding: 18px 20px; margin: 24px 0;
+  }
+  .doc-meta .meta-title { font-weight: 800; color: #11203a; margin-bottom: 12px; }
+  .meta-grid {
+    display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 18px;
+    margin: 0;
+  }
+  .meta-grid div { min-width: 0; }
+  .meta-grid dt { color: var(--muted); font-size: .78rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+  .meta-grid dd { margin: 3px 0 0; }
+  @media (max-width: 720px) {
+    .meta-grid { grid-template-columns: 1fr; }
+  }
 </style>
 </head>
 <body>
 <div class="qora-lang-switch" style="position:sticky;top:0;z-index:99;text-align:right;padding:8px 16px;background:rgba(255,255,255,.92);backdrop-filter:blur(4px);border-bottom:1px solid #e6e8ee;font-size:13px;font-family:sans-serif;"><a href="../en/architecture.html" onclick="try{localStorage.setItem(&quot;qora-lang&quot;,&quot;en&quot;)}catch(e){}">English</a> · <strong>한국어</strong> · <a href="../ja/architecture.html" onclick="try{localStorage.setItem(&quot;qora-lang&quot;,&quot;ja&quot;)}catch(e){}">日本語</a></div>
 
 <header class="hero">
-  <div class="tag">Qora · 컴파일러 내부</div>
-  <h1>컴파일 파이프라인 — 소스에서 OpenQASM까지 전 단계</h1>
-  <p>파일 하나가 파싱·로워링·IR 패스·방출을 거쳐 흐르는 과정 — 각 단계가 무엇을, 어떤 순서로 하는지</p>
+  <div class="tag">Qora · 핵심 설계 문서</div>
+  <h1>Qora 컴파일 파이프라인 설계</h1>
+  <p>소스가 AST, Qora IR, 검증 패스, OpenQASM 방출까지 지나가는 기준 흐름</p>
 </header>
 
 <div class="wrap">
@@ -142,8 +157,8 @@
     <span class="st">─Parse─▶</span> AST
     <span class="st">─Lower─▶</span> Qora IR
     <span class="st">─Expand─▶</span> 병합
-    <span class="st">─Resolve─▶</span> 정규화 이름
-    <span class="st">─Validate─▶</span> (오류 시 STOP)
+    <span class="st">─Resolve─▶</span> 호출 대상 FQN
+    <span class="st">─Validate + Symbols─▶</span> (오류 시 STOP)
     <span class="st">─Monomorphize─▶</span> 특수화
     <span class="st">─Materialize Adjoint─▶</span> + 역연산 op
     <span class="st">─Mangle─▶</span> 충돌 없는 이름
@@ -151,10 +166,30 @@
     <span class="st">─Emit─▶</span> OpenQASM 3
   </div>
 
-  <nav class="doc-links" aria-label="다른 문서">
-    <a class="doc-link" href="index.html">H 게이트 문서로 돌아가기</a>
-    <a class="doc-link" href="adjoint-pipeline.html">Adjoint 파이프라인 자세히</a>
-    <a class="doc-link" href="book/index.html">양자 게이트 책 둘러보기</a>
+  <section class="doc-meta" aria-label="문서 정보">
+    <div class="meta-title">이 문서의 역할</div>
+    <dl class="meta-grid">
+      <div>
+        <dt>문서 성격</dt>
+        <dd>Qora 컴파일러 구조를 설명하는 기준 설계 문서예요.</dd>
+      </div>
+      <div>
+        <dt>다루는 범위</dt>
+        <dd>소스 텍스트가 AST, Qora IR, 검증된 IR, OpenQASM으로 바뀌는 전체 경로를 다뤄요.</dd>
+      </div>
+      <div>
+        <dt>읽는 사람</dt>
+        <dd>컴파일러 패스를 수정하거나 <code>--stages</code> 출력과 실제 방출 결과를 맞춰 봐야 하는 사람에게 필요해요.</dd>
+      </div>
+      <div>
+        <dt>핵심 계약</dt>
+        <dd>각 패스는 구조화된 IR을 입력으로 받고, 한 가지 책임만 수행한 뒤 다음 패스에 넘겨요.</dd>
+      </div>
+    </dl>
+  </section>
+
+  <nav class="doc-links" aria-label="관련 컴파일러 문서">
+    <a class="doc-link" href="adjoint-pipeline.html">Adjoint 역합성 동작 문서</a>
   </nav>
 
   <div class="toc">
@@ -164,7 +199,7 @@
       <li><a href="#s1">두 세계 — 엔진이 멈추고 Qora가 시작되는 곳</a></li>
       <li><a href="#s2">Parse — 소스에서 AST로 (엔진의 몫)</a></li>
       <li><a href="#s3">Lower — AST에서 Qora IR로 (경계를 넘다)</a></li>
-      <li><a href="#s4">Expand &amp; Resolve — 임포트와 정규화된 이름</a></li>
+      <li><a href="#s4">Expand &amp; Resolve — 임포트와 호출 대상 FQN</a></li>
       <li><a href="#s5">Validate — 의미 게이트</a></li>
       <li><a href="#s6">Monomorphize — 제네릭 레지스터의 특수화</a></li>
       <li><a href="#s7">Materialize Adjoint — 역연산을 진짜 op으로</a></li>
@@ -304,36 +339,39 @@ QOperation Main()
     IR 기반인 것도 같은 이유입니다: 패스들이 구조화된 노드를 읽고 쓰므로, 각 패스는 짧게 유지되고 틀리기 어렵습니다.
   </div>
 
-  <h2 id="s4"><span class="n">4</span>Expand &amp; Resolve — 임포트와 정규화된 이름</h2>
+  <h2 id="s4"><span class="n">4</span>Expand &amp; Resolve — 임포트와 호출 대상 FQN</h2>
 
   <p class="stagehead">패스: <code>ModuleLoader.Expand</code> → <code>Resolver.Resolve</code></p>
 
   <p>
-    <strong>Expand</strong>는 모듈 로더입니다. 파일에 <code>import "lib/prep.qora"</code>가 있었다면, 이
+    <strong>Expand</strong>는 모듈 로더입니다. 파일에 <code>import "lib/prep.qor"</code>가 있었다면, 이
     패스가 그 파일을 파싱·로워링하고 그 연산들을 하나의 <code>QProgram</code>으로 병합하여, 이후 모든 단계가
     하나의 평탄한 프로그램을 보게 합니다. (예제는 아무것도 임포트하지 않으므로 여기서는 아무 일도 하지 않지만 —
     파일 없음이 <code>QSEM020</code>, 임포트 순환이 <code>QSEM021</code>이 되는 곳입니다.)
   </p>
 
   <p>
-    이어 <strong>Resolve</strong>가 모든 단순 이름을 <strong>정규화된 이름(FQN)</strong>으로 바꿉니다.
+    이어 <strong>Resolve</strong>가 연산 정의와 연산 호출 대상을 <strong>정규화된 이름(FQN)</strong>으로 바꿉니다.
     <code>namespace Prep</code> 안의 연산 <code>Fanout</code>은 <code>Prep.Fanout</code>이 되고, 호출부
     <code>Prep.Fanout(reg)</code>가 그것을 가리키는지 확인됩니다. 그래서 위 IR 리스팅이 이미 <code>Fanout</code>이
-    아니라 <code>Prep.Fanout</code>으로 읽히는 것입니다. 어떤 이름이 모호했다면(<code>open</code>된 두
-    네임스페이스에서 보였다면) <code>QSEM018</code>이 되고, 알 수 없는 네임스페이스나 멤버는 <code>QSEM019</code>가
-    됩니다. 이제 이름은 파이프라인의 나머지가 신뢰할 수 있는 유일한 키입니다.
+    아니라 <code>Prep.Fanout</code>으로 읽히는 것입니다. 다만 여기서 모든 식별자를 처리하는 것은 아닙니다.
+    변수, 루프 변수, 큐비트 인덱스, 조건식 안의 이름은 다음 검증 단계의 심볼 테이블이 스코프 기준으로 확인합니다.
+    어떤 호출 이름이 모호했다면(<code>open</code>된 두 네임스페이스에서 보였다면) <code>QSEM018</code>이 되고,
+    알 수 없는 네임스페이스나 멤버는 <code>QSEM019</code>가 됩니다.
   </p>
 
   <h2 id="s5"><span class="n">5</span>Validate — 의미 게이트</h2>
 
-  <p class="stagehead">in: 해소된 IR &nbsp;·&nbsp; out: 오류 목록 (또는 없음) &nbsp;·&nbsp; 패스: <code>QoraValidator</code></p>
+  <p class="stagehead">in: 해소된 IR &nbsp;·&nbsp; out: 오류 목록 (또는 없음) &nbsp;·&nbsp; 패스: <code>QoraValidator</code> + <code>SymbolTableBuilder</code></p>
 
   <p>
     검증은 한 가지 질문에 답하는 패스입니다: <strong>이 프로그램은 OpenQASM이 표현할 수 있는 의미인가?</strong>
     IR 전체를 한 번 순회하며 <strong>모든 위반을 수집</strong>합니다(첫 오류에서 멈추지 않음). 그 결과는 단단한
     게이트입니다: <strong>오류가 하나라도 있으면 OpenQASM은 전혀 생성되지 않습니다</strong> — 그래서 깨진
-    프로그램이 조용히 "성공한 척"하며 틀린 회로를 돌려주는 일은 결코 없습니다. 모든 규칙에는 안정된 코드
-    (<code>QSEM001</code>–<code>QSEM024</code>)가 있어 에디터가 물결선을 붙일 수 있습니다. 그중 몇 가지:
+    프로그램이 조용히 "성공한 척"하며 틀린 회로를 돌려주는 일은 결코 없습니다. 이때 검증기는 통합 심볼 테이블도
+    만들어요. 파라미터, 레지스터, 측정 비트, 변수, 상수, 루프 변수가 어느 스코프에 사는지 기록하고,
+    각 이름이 어디에서 사용되는지도 함께 모읍니다. 모든 규칙에는 안정된 코드
+    (<code>QSEM001</code>–<code>QSEM025</code>)가 있어 에디터가 물결선을 붙일 수 있습니다. 그중 몇 가지:
   </p>
 
   <div class="panel">
@@ -345,12 +383,13 @@ QOperation Main()
       <tr><td><code>QSEM007</code></td><td>알 수 없는 게이트/연산 이름("혹시 …?" 힌트 포함)</td></tr>
       <tr><td><code>QSEM011</code></td><td>재귀 호출(OpenQASM def는 재귀 불가)</td></tr>
       <tr><td><code>QSEM016</code></td><td>레지스터 범위를 벗어난 리터럴 큐비트 인덱스</td></tr>
+      <tr><td><code>QSEM025</code></td><td>스코프 안에서 해소되지 않는 식별자 — 알 수 없는 이름 또는 선언 전에 사용된 고전 이름</td></tr>
     </table>
   </div>
 
   <div class="call why">
     <span class="h">왜 변환 패스들보다 먼저 검증하나?</span>
-    이후 모든 패스가 프로그램이 이미 온전하다고 가정할 수 있게 하기 때문입니다. 단형화기는 알 수 없는 이름을 결코
+    이후 모든 패스가 프로그램이 이미 온전하다고 가정할 수 있게 하기 때문입니다. 단형화기는 스코프에서 해소되지 않는 이름을 결코
     만나지 않고, adjoint 실체화기는 역연산 불가능한 <code>Adjoint</code>를 결코 만나지 않으며(QSEM001이 이미
     거부함), 이미터는 잘못된 호출을 결코 만나지 않습니다. 게이트가 모두의 앞에 서 있기에, 각 변환 패스는 단순해질
     수 있습니다.
@@ -483,9 +522,9 @@ r = measure reg[0];</code></pre>
       <tr><td>Parse</td><td><em>Janglim 엔진</em></td><td>소스 텍스트 → 구문 트리 (아직 의미 없음)</td></tr>
       <tr><td>Lower</td><td><code>QoraLowering</code></td><td>엔진 트리 → Qora IR (타입 노드; 함자를 데이터로)</td></tr>
       <tr><td>Expand</td><td><code>ModuleLoader</code></td><td>임포트 → 하나로 병합된 프로그램</td></tr>
-      <tr><td>Resolve</td><td><code>Resolver</code></td><td>단순 이름 → 정규화된 이름</td></tr>
-      <tr><td>Validate</td><td><code>QoraValidator</code></td><td>IR → 모든 의미 오류 (방출을 막는 단단한 게이트)</td></tr>
-      <tr><td>Monomorphize</td><td><code>Monomorphizer</code></td><td>제네릭 <code>Qubit[n]</code> → 구체적 크기 복사본, 이후 재검증</td></tr>
+      <tr><td>Resolve</td><td><code>Resolver</code></td><td>연산 호출 대상 → 정규화된 이름(FQN)</td></tr>
+      <tr><td>Validate</td><td><code>QoraValidator</code> + <code>SymbolTableBuilder</code></td><td>IR → 심볼 테이블 + 모든 의미 오류 (방출을 막는 단단한 게이트)</td></tr>
+      <tr><td>Monomorphize</td><td><code>Monomorphizer</code></td><td>제네릭 <code>Qubit[n]</code> → 구체적 크기 복사본, 바뀐 경우 재검증</td></tr>
       <tr><td>Materialize</td><td><code>AdjointMaterializer</code></td><td><code>Adjoint Foo</code> → 진짜 <code>Foo__adj</code> op + 평범한 호출</td></tr>
       <tr><td>Mangle</td><td><code>NameMangler</code></td><td>Qora 이름 → 충돌 없는 OpenQASM 식별자</td></tr>
       <tr><td>Check</td><td><code>ReferentialCheck</code></td><td>사용된 모든 이름이 해소되는지 검증 (아니면 <code>QINTERNAL</code>)</td></tr>
@@ -514,7 +553,7 @@ r = measure reg[0];</code></pre>
     (<code>qora --json --stages</code>).<br>
     소스, 파이프라인 순서대로: <code>QoraGrammar.cs</code> (문법) ·
     <code>Ir/QoraLowering.cs</code> (AST→IR) ·
-    <code>Ir/Passes/ModuleLoader.cs</code> · <code>Resolver.cs</code> · <code>QoraValidator.cs</code> ·
+    <code>Ir/Passes/ModuleLoader.cs</code> · <code>Resolver.cs</code> · <code>SymbolTable.cs</code> · <code>QoraValidator.cs</code> ·
     <code>Monomorphizer.cs</code> · <code>AdjointMaterializer.cs</code> · <code>NameMangler.cs</code> ·
     <code>ReferentialCheck.cs</code> · <code>Ir/Inverter.cs</code> (인버전 커널) ·
     <code>Ir/QasmEmitter.cs</code> (IR→OpenQASM).

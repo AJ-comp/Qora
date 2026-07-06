@@ -68,9 +68,9 @@ All notable changes to the Qora Language extension.
   parameter, failing `import`/`open` line, and so on.
 - Bundles the **Qora v0.12** compiler: the full module system - `namespace` / `open` / qualified calls
   (`MyLib.Bell(q)`) resolve for real (C#/Q#-style rules; ambiguity and unknown-name errors
-  QSEM018/019/022/023), and `import` loads real files: `import gates_lib;` reads `gates_lib.qor` next to
-  the importing file, `import lib.gates;` maps dots to directories, `import "a b.qor";` takes a
-  literal path. Missing files are QSEM020; import cycles are QSEM021 with the full chain shown.
+  QSEM018/019/022/023), and `import` loads real files: `import "gates_lib.qor";`,
+  `import "lib/gates.qor";`, and `import "a b.qor";` use quoted relative paths exactly as written,
+  including the extension. Missing files are QSEM020; import cycles are QSEM021 with the full chain shown.
 - The extension now passes the document's directory to the compiler (`--base-dir`), so imports
   resolve live while you type - including in unsaved buffers. Untitled documents report a clear
   error on `import`.

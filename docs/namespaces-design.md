@@ -16,19 +16,21 @@ automatic uncomputation) will reuse.
 ## Surface syntax
 
 ```qora
-import gates_lib;                  // bare module name -> gates_lib.qor, relative to this file
-                                    // (dots map to directories later: import lib.gates -> lib/gates.qor;
-                                    //  string paths hit a Janglim lexer limitation: -wrapped regexes
-                                    //  cannot match quote-delimited tokens)
+import "gates_lib.qor";            // quoted relative path, resolved from this file's directory
 
-namespace MyLib {                   // a file may declare namespaces; ops outside any namespace
+namespace MyLib                     // a file may declare namespaces; ops outside any namespace
+{
     open Qora.Intrinsic;            // (implicitly available) — see "builtins" below
     open OtherLib;                  // bring OtherLib's ops into unqualified scope
 
-    operation Bell(Qubit[2] q) { ... }
+    operation Bell(Qubit[2] q)
+    {
+        ...
+    }
 }
 
-operation Main() {                  // files without namespaces keep working (global namespace)
+operation Main()                    // files without namespaces keep working (global namespace)
+{
     use q = Qubit[2];
     MyLib.Bell(q);                  // qualified call
 }
@@ -81,23 +83,31 @@ ambiguous use is an error" — silent reinterpretation stays impossible:
 
 ## Lowering to OpenQASM (no module system there)
 
-Namespaces flatten by name mangling at emit, C++-style:
+Namespaces flatten by name mangling at emit:
 
-- `MyLib.Bell` → `def MyLib__Bell(...)`, resolved call sites emit the mangled name.
-- The existing uniquify machinery (built for `__adj` collisions) guards mangled-name collisions.
-- Global-namespace ops keep their plain names (zero diff for existing programs).
+- `MyLib.Bell` → `def MyLib_Bell(...)`, resolved call sites emit the mangled name.
+- If the flattened name collides with a keyword, stdgates gate, or another emitted name, `NameMangler`
+  appends `_` until the emitted identifier is unique and records a `// Qora:` note.
+- Global-namespace ops keep their plain names unless a real emitted-name collision forces a rename.
 
 ## Pipeline changes
 
 ```
 files ─parse each─▶ ASTs ─lower each─▶ QProgram fragments
-   ─merge + RESOLVE (new pass: symbol table, opens, qualification, ambiguity)─▶ resolved QProgram
-   ─validate (existing QSEM rules now consult resolution, + new codes below)─▶ invert ─▶ emit (mangled)
+   ─ModuleLoader merge─▶ merged QProgram
+   ─Resolver (namespace op table, opens, call-target FQNs, ambiguity)─▶ resolved QProgram
+   ─Validate + SymbolTableBuilder─▶ semantic errors or scoped symbols
+   ─Monomorphize─▶ concrete QProgram
+   ─AdjointMaterializer─▶ inverse ops
+   ─NameMangler─▶ collision-free emitted identifiers
+   ─ReferentialCheck─▶ final safety check
+   ─QasmEmitter─▶ OpenQASM 3
 ```
 
-- The resolver produces: a symbol table (namespace → op signatures) and, per call site, the resolved
-  fully-qualified target. Later passes stop matching raw name strings.
-- The same symbol table is the foundation the effect-analysis pass (qfree/mfree/const) will extend.
+- The resolver produces a namespace operation table and, per operation call site, the resolved
+  fully-qualified target. It does not resolve local variables, loop variables, indices, or condition names.
+- `SymbolTableBuilder` runs during validation and owns lexical scope: parameters, registers, measurement
+  bits, variables, constants, loop variables, and their use sites.
 
 New semantic codes:
 
@@ -108,7 +118,8 @@ New semantic codes:
 | QSEM020 | import file not found / unreadable |
 | QSEM021 | cyclic imports |
 | QSEM022 | duplicate operation name within one namespace (QSEM008 becomes per-namespace) |
-| QSEM023 | names that would collide in the EMITTED program: two op names meeting at one mangled def name (`A.F` vs `A__F` → `A__F_`); an entry-op declaration landing on a def name (entry locals are QASM top-level globals); a def-local shadowing an operation that def calls |
+| QSEM023 | reserved; emitted-name collisions are auto-renamed by `NameMangler` and surfaced as `// Qora:` notes |
+| QSEM025 | identifier not declared in scope here: an unknown name, or a classical name used before declaration |
 
 ## Tooling contract changes
 
@@ -122,17 +133,19 @@ New semantic codes:
 
 1. **Grammar + IR** — DONE: `namespace`/`open`/`import` statements, dotted qualified names; IR nodes carry the
    namespace; no resolution yet (single file, single namespace still works).
-2. **Resolver pass** — DONE (single file, multiple namespaces): `Resolver.cs` builds the symbol table,
+2. **Resolver pass** — DONE (single file, multiple namespaces): `Resolver.cs` builds the namespace operation table,
    runs the resolution algorithm above, and rewrites every op/callee name to its FQN; QSEM018 (ambiguous),
    QSEM019 (unknown namespace/member — including `open` of a nonexistent namespace), QSEM022 (duplicate
    within one namespace; global duplicates stay QSEM008). Pipeline: Lower → Resolve → Validate → Mangle →
-   Emit; resolver errors preempt validation. `NameMangler` encodes FQN dots as `__` (`MyLib.Bell` →
-   `MyLib__Bell_`); stages (`ast`/`ir`/`irInverse`) show original/FQN names, only QASM shows mangled ones.
+   Emit; resolver errors preempt validation. `NameMangler` encodes FQN dots as `_` (`MyLib.Bell` →
+   `MyLib_Bell`) and appends more `_` only on real emitted-name collisions; stages
+   (`ast`/`ir`/`irInverse`/`symbols`) show original/FQN names, only QASM shows mangled names.
    `import` remains QSEM099-gated until increment 3.
 3. **Multi-file** — DONE: `ModuleLoader.cs` expands the import graph into one merged program before
-   resolution. `import gates_lib;` → `gates_lib.qor` next to the importing file, `import lib.gates;` →
-   `lib/gates.qor`, `import "a b.qor";` → literal path. Transitive with diamond-sharing (canonicalized,
-   case-insensitive paths load once); QSEM020 missing/unreadable file, QSEM021 cycle (chain shown);
+   resolution. `import "gates_lib.qor";`, `import "lib/gates.qor";`, and `import "a b.qor";` all use
+   the quoted relative path exactly as written, including the extension. Transitive with diamond-sharing
+   (canonicalized, case-insensitive paths load once); QSEM020 missing/unreadable file, QSEM021 cycle
+   (chain shown);
    parse errors in an imported file surface with the file name prefixed, span -1. CLI: entry-file
    imports resolve next to the file; stdin takes `--base-dir` (extension passes the document's dir —
    imports resolve live in unsaved buffers). No file context ⇒ clear QSEM020 (playground stays
@@ -140,9 +153,7 @@ New semantic codes:
    namespaces merge across files, opens union per namespace.
 4. **Mangled emission + docs + adversarial review** — DONE. README×3 and the adjoint-pipeline doc×3
    now show real mangled output plus a namespaces/import tour section. The adversarial review found and
-   fixed three real bugs: (1) dot→`__` broke mangling injectivity — `A.F` vs `A__F` silently emitted
-   two `def A__F_`s, now QSEM023; (2) an entry-op local named like an operation emitted a top-level
-   global colliding with the def (`qubit[2] Bell_;` vs `def Bell_`), now QSEM023 (def-locals only
-   error when they shadow an op that def CALLS — plain shadowing stays legal, matching the QSEM013
-   relaxation philosophy); (3) `open` of a declared-but-empty namespace was a false QSEM019 — the
+   fixed three real bugs: (1) dot flattening could collide (`A.F` vs `A_F`), now auto-renamed by
+   `NameMangler` with a note; (2) an entry-op local named like an operation could collide with a top-level
+   def, now auto-renamed by the same emitted-scope machinery; (3) `open` of a declared-but-empty namespace was a false QSEM019 — the
    known-namespace set now includes every declared block, not just ones containing ops.

@@ -109,9 +109,9 @@ emitted as **OpenQASM 3.0**.
   `open` is not transitive. Duplicate operation names are now per-namespace: within one namespace
   **QSEM022**, in the global namespace still QSEM008 — the same simple name in two namespaces is fine.
 - **Multi-file programs.** `import` loads real files before resolution (`ModuleLoader.cs`):
-  `import gates_lib;` reads `gates_lib.qor` relative to the importing file, `import lib.gates;` maps
-  dots to directories (`lib/gates.qor`), `import "a b.qor";` takes a literal path. Loading is
-  transitive with diamond-sharing (each file loads once); a missing/unreadable file is **QSEM020**,
+  `import "gates_lib.qor";`, `import "lib/gates.qor";`, and `import "a b.qor";` all use the quoted
+  relative path exactly as written, including the extension. Loading is transitive with
+  diamond-sharing (each file loads once); a missing/unreadable file is **QSEM020**,
   an import cycle is **QSEM021** with the chain shown (`a.qor -> b.qor -> a.qor`). The CLI resolves
   imports next to the entry file; stdin input takes a new `--base-dir <dir>` flag (the VS Code
   extension passes the document's directory automatically). Without a file context, `import` reports
@@ -129,7 +129,7 @@ emitted as **OpenQASM 3.0**.
 ## 0.11 — 2026-07-03
 
 ### Added
-- **Module-system grammar (in progress).** `import gates_lib;` / `import "path.qor";`,
+- **Module-system grammar (in progress).** `import "path.qor";`,
   `namespace A.B { open C.D; … }`, and dotted qualified names now parse. Until the resolver pass lands
   they are gated with a clear QSEM099 error, so a namespaced program can never silently compile with
   global semantics. Design: `docs/namespaces-design.md` (resolution = local scope → own namespace →

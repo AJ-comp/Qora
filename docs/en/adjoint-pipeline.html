@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>The Adjoint Compilation Pipeline — From Source to OpenQASM — Qora</title>
+<title>Qora Core Behavior — Adjoint Synthesis Pipeline — Qora</title>
 <style>
   :root {
     --bg: #ffffff;
@@ -113,15 +113,30 @@
     overflow-x: auto; white-space: nowrap;
   }
   .flowline .st { color: var(--accent); }
+  .doc-meta {
+    border: 1px solid #dfe5f2; border-left: 5px solid var(--accent); border-radius: 8px;
+    background: #f8faff; padding: 18px 20px; margin: 24px 0;
+  }
+  .doc-meta .meta-title { font-weight: 800; color: #11203a; margin-bottom: 12px; }
+  .meta-grid {
+    display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 18px;
+    margin: 0;
+  }
+  .meta-grid div { min-width: 0; }
+  .meta-grid dt { color: var(--muted); font-size: .78rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+  .meta-grid dd { margin: 3px 0 0; }
+  @media (max-width: 720px) {
+    .meta-grid { grid-template-columns: 1fr; }
+  }
 </style>
 </head>
 <body>
 <div class="qora-lang-switch" style="position:sticky;top:0;z-index:99;text-align:right;padding:8px 16px;background:rgba(255,255,255,.92);backdrop-filter:blur(4px);border-bottom:1px solid #e6e8ee;font-size:13px;font-family:sans-serif;"><strong>English</strong> · <a href="../ko/adjoint-pipeline.html" onclick="try{localStorage.setItem(&quot;qora-lang&quot;,&quot;ko&quot;)}catch(e){}">한국어</a> · <a href="../ja/adjoint-pipeline.html" onclick="try{localStorage.setItem(&quot;qora-lang&quot;,&quot;ja&quot;)}catch(e){}">日本語</a></div>
 
 <header class="hero">
-  <div class="tag">Qora · Compiler Internals</div>
-  <h1>The Adjoint Compilation Pipeline — From Source to OpenQASM</h1>
-  <p>The complete journey of one example — gates, declarations, for, if, and nested calls — through four stages</p>
+  <div class="tag">Qora · Core Behavior Document</div>
+  <h1>The Adjoint Synthesis Pipeline</h1>
+  <p>How an Adjoint call becomes inverse IR, a synthesized def, and a normal OpenQASM call</p>
 </header>
 
 <div class="wrap">
@@ -138,14 +153,34 @@
     User code <span class="st">─Parse─▶</span> AST
     <span class="st">─Lowering─▶</span> QoraIR
     <span class="st">─Validate─▶</span> (STOP on error)
-    <span class="st">─Inverter─▶</span> inverse QoraIR
+    <span class="st">─AdjointMaterializer─▶</span> inverse ops
     <span class="st">─Emitter─▶</span> OpenQASM 3
   </div>
 
-  <nav class="doc-links" aria-label="Other documents">
-    <a class="doc-link" href="index.html">Back to the H gate document</a>
-    <a class="doc-link" href="architecture.html">The full compilation pipeline</a>
-    <a class="doc-link" href="book/index.html">Browse the quantum gate book by chapter</a>
+  <section class="doc-meta" aria-label="Document information">
+    <div class="meta-title">What this document is for</div>
+    <dl class="meta-grid">
+      <div>
+        <dt>Document type</dt>
+        <dd>The reference behavior document for how <code>Adjoint</code> works during compilation.</dd>
+      </div>
+      <div>
+        <dt>Input</dt>
+        <dd>Resolved and validated Qora IR containing an <code>Adjoint Foo(q)</code> call.</dd>
+      </div>
+      <div>
+        <dt>Output</dt>
+        <dd>A synthesized <code>Foo__adj</code> operation and a normal call to that operation.</dd>
+      </div>
+      <div>
+        <dt>Safety condition</dt>
+        <dd>Irreversible actions such as measurement or <code>Reset</code> are rejected during validation before emission.</dd>
+      </div>
+    </dl>
+  </section>
+
+  <nav class="doc-links" aria-label="Related compiler documents">
+    <a class="doc-link" href="architecture.html">Full compiler design</a>
   </nav>
 
   <div class="toc">
@@ -154,7 +189,7 @@
       <li><a href="#s1">The example program — one file with all five constructs</a></li>
       <li><a href="#s2">Stage 1. AST — the syntax tree the parser builds</a></li>
       <li><a href="#s3">Stage 2. QoraIR — the intermediate representation the compiler owns</a></li>
-      <li><a href="#s4">Stage 3. Inverter — synthesizing the inverse on the IR</a></li>
+      <li><a href="#s4">Stage 3. AdjointMaterializer — synthesizing inverse ops with the Inverter kernel</a></li>
       <li><a href="#s5">Stage 4. OpenQASM — emitting the inverse IR as-is</a></li>
       <li><a href="#s6">What gets inverted, and what gets rejected</a></li>
       <li><a href="#s7">One-page summary</a></li>
@@ -245,18 +280,20 @@ operation Main() {
     Because "is this gate inverted?" is expressed as a value rather than as text, the next stage can build the inverse simply by flipping that value.
   </p>
 
-  <h2 id="s4"><span class="n">4</span>Stage 3. Inverter — synthesizing the inverse on the IR</h2>
+  <h2 id="s4"><span class="n">4</span>Stage 3. AdjointMaterializer — synthesizing inverse ops with the Inverter kernel</h2>
 
   <p>
     Since <code>Main</code> contains <code>Adjoint Outer(...)</code>, the compiler needs the inverse of <code>Outer</code>.
-    The <strong>Inverter</strong> is a <strong>pure transformation pass that takes IR and returns inverse IR</strong>.
+    The top-level pass is <strong>AdjointMaterializer</strong>: it tracks which inverse operations are needed,
+    asks the <strong>Inverter</strong> kernel for their inverse bodies, and adds real operations such as
+    <code>Outer__adj</code> to the program.
     Its mathematical basis is a single fact:
   </p>
 
   <div class="rule">(U₁ · U₂ · ⋯ · Uₙ)† &nbsp;=&nbsp; Uₙ† · ⋯ · U₂† · U₁†<br>
   <span style="font-weight:400; font-size:.92rem;">— reverse the order, and take the inverse (dagger) of each</span></div>
 
-  <p>The inverse IR of <code>Outer</code> that the Inverter actually returned:</p>
+  <p>The inverse IR of <code>Outer</code> that the Inverter kernel actually returned:</p>
 
 <pre><code>QDecl(const=False, type=Int, name=k, value=2)     <span class="cm">← ① declaration: order kept, stays first</span>
 QIf(cond="b == 1")                                <span class="cm">← ⑤ if: condition kept, only the branch body inverted</span>
@@ -310,7 +347,7 @@ QGate(functors=[<span class="hl">Adjoint</span>], name=Inner, args=[q])         
     (Two passes run right before emission. First, <strong>adjoint materialization</strong> turns
     <code>Adjoint Outer</code> into a real inverse-def op — this is where <code>Inner__adj</code> and
     <code>Outer__adj</code> come from, and why they are ordinary defs below. Then the <strong>name
-    mangler</strong> makes every name safe for OpenQASM, renaming a name <strong>only when it would
+    mangler</strong> makes emitted names safe for OpenQASM, renaming a name <strong>only when it would
     actually collide</strong> with a keyword, a stdgates gate, or another name — appending <code>_</code>
     and leaving a <code>// Qora:</code> note. None of the names here collide, so they pass through unchanged.
     Errors and the stages view always keep your original names.)
@@ -405,7 +442,7 @@ Outer(q, r);
     User code <span class="st">─Parse─▶</span> AST (no trace of the inverse)
     <span class="st">─Lowering─▶</span> QoraIR (functors as data)
     <span class="st">─Validate─▶</span> STOP on semantic errors
-    <span class="st">─Inverter─▶</span> inverse QoraIR (toggle·swap·reverse)
+    <span class="st">─AdjointMaterializer─▶</span> inverse ops (Inverter kernel: toggle·swap·reverse)
     <span class="st">─Emitter─▶</span> OpenQASM (__adj defs + call replacement)
   </div>
 
@@ -421,7 +458,7 @@ Outer(q, r);
     <span class="h">What this structure opens up next — automatic uncomputation</span>
     Temporary (ancilla) qubits must be <strong>returned to their original state with the inverse</strong> after use,
     or interference gets contaminated. Right now the inverse is synthesized only when the user explicitly writes
-    <code>Adjoint</code>, but by reusing this very Inverter, the compiler can
+    <code>Adjoint</code>, but by reusing this very Inverter kernel, the compiler can
     <strong>find the point where a temporary qubit is no longer used and inject the inverse automatically</strong>.
     That is the Silq-style automatic uncomputation Qora is heading toward.
   </div>
@@ -433,7 +470,8 @@ Outer(q, r);
     Related source: <code>src/Qora.Core/Ir/QoraIr.cs</code> (IR definitions) ·
     <code>Ir/QoraLowering.cs</code> (AST→IR) ·
     <code>Ir/QoraValidator.cs</code> (semantic validation pass) ·
-    <code>Ir/Inverter.cs</code> (inverse-synthesis pass) ·
+    <code>Ir/Passes/AdjointMaterializer.cs</code> (inverse-op materialization pass) ·
+    <code>Ir/Inverter.cs</code> (inverse-synthesis kernel) ·
     <code>Ir/QasmEmitter.cs</code> (IR→OpenQASM)
   </p>
 

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Adjoint 컴파일 파이프라인 — 소스에서 OpenQASM까지 — Qora</title>
+<title>Qora 핵심 동작 문서 — Adjoint 역합성 파이프라인 — Qora</title>
 <style>
   :root {
     --bg: #ffffff;
@@ -113,15 +113,30 @@
     overflow-x: auto; white-space: nowrap;
   }
   .flowline .st { color: var(--accent); }
+  .doc-meta {
+    border: 1px solid #dfe5f2; border-left: 5px solid var(--accent); border-radius: 8px;
+    background: #f8faff; padding: 18px 20px; margin: 24px 0;
+  }
+  .doc-meta .meta-title { font-weight: 800; color: #11203a; margin-bottom: 12px; }
+  .meta-grid {
+    display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 18px;
+    margin: 0;
+  }
+  .meta-grid div { min-width: 0; }
+  .meta-grid dt { color: var(--muted); font-size: .78rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+  .meta-grid dd { margin: 3px 0 0; }
+  @media (max-width: 720px) {
+    .meta-grid { grid-template-columns: 1fr; }
+  }
 </style>
 </head>
 <body>
 <div class="qora-lang-switch" style="position:sticky;top:0;z-index:99;text-align:right;padding:8px 16px;background:rgba(255,255,255,.92);backdrop-filter:blur(4px);border-bottom:1px solid #e6e8ee;font-size:13px;font-family:sans-serif;"><a href="../en/adjoint-pipeline.html" onclick="try{localStorage.setItem(&quot;qora-lang&quot;,&quot;en&quot;)}catch(e){}">English</a> · <strong>한국어</strong> · <a href="../ja/adjoint-pipeline.html" onclick="try{localStorage.setItem(&quot;qora-lang&quot;,&quot;ja&quot;)}catch(e){}">日本語</a></div>
 
 <header class="hero">
-  <div class="tag">Qora · 컴파일러 내부</div>
-  <h1>Adjoint 컴파일 파이프라인 — 소스에서 OpenQASM까지</h1>
-  <p>게이트·선언·for·if·중첩 호출이 든 예제 하나가 4단계를 통과하는 과정 전부</p>
+  <div class="tag">Qora · 핵심 동작 문서</div>
+  <h1>Adjoint 역합성 파이프라인</h1>
+  <p>Adjoint 호출이 역연산 IR, 합성 def, OpenQASM 호출로 바뀌는 동작 흐름</p>
 </header>
 
 <div class="wrap">
@@ -138,14 +153,34 @@
     사용자 코드 <span class="st">─파싱─▶</span> AST
     <span class="st">─Lowering─▶</span> QoraIR
     <span class="st">─검증─▶</span> (에러면 STOP)
-    <span class="st">─Inverter─▶</span> 역 QoraIR
+    <span class="st">─AdjointMaterializer─▶</span> 역연산 op
     <span class="st">─Emitter─▶</span> OpenQASM 3
   </div>
 
-  <nav class="doc-links" aria-label="다른 문서">
-    <a class="doc-link" href="index.html">H 게이트 문서로 돌아가기</a>
-    <a class="doc-link" href="architecture.html">전체 컴파일 파이프라인</a>
-    <a class="doc-link" href="book/index.html">양자 게이트 장별 문서 보기</a>
+  <section class="doc-meta" aria-label="문서 정보">
+    <div class="meta-title">이 문서의 역할</div>
+    <dl class="meta-grid">
+      <div>
+        <dt>문서 성격</dt>
+        <dd><code>Adjoint</code>가 실제 컴파일 과정에서 어떻게 동작하는지 설명하는 기준 동작 문서예요.</dd>
+      </div>
+      <div>
+        <dt>입력</dt>
+        <dd><code>Adjoint Foo(q)</code> 호출이 들어 있는 해소·검증된 Qora IR이에요.</dd>
+      </div>
+      <div>
+        <dt>출력</dt>
+        <dd>합성된 <code>Foo__adj</code> 연산과 그 연산을 부르는 일반 호출이에요.</dd>
+      </div>
+      <div>
+        <dt>안전 조건</dt>
+        <dd>측정이나 <code>Reset</code>처럼 되돌릴 수 없는 동작은 방출 전에 검증 단계에서 막아요.</dd>
+      </div>
+    </dl>
+  </section>
+
+  <nav class="doc-links" aria-label="관련 컴파일러 문서">
+    <a class="doc-link" href="architecture.html">전체 컴파일 설계</a>
   </nav>
 
   <div class="toc">
@@ -154,7 +189,7 @@
       <li><a href="#s1">예제 프로그램 — 다섯 구조를 전부 담은 코드</a></li>
       <li><a href="#s2">1단계. AST — 파서가 만드는 문법 트리</a></li>
       <li><a href="#s3">2단계. QoraIR — 컴파일러가 소유하는 중간 표현</a></li>
-      <li><a href="#s4">3단계. Inverter — 역연산을 IR 위에서 합성한다</a></li>
+      <li><a href="#s4">3단계. AdjointMaterializer — Inverter 커널로 역연산 op을 합성한다</a></li>
       <li><a href="#s5">4단계. OpenQASM — 역 IR을 그대로 출력한다</a></li>
       <li><a href="#s6">무엇이 역전되고, 무엇이 거부되는가</a></li>
       <li><a href="#s7">한 장 요약</a></li>
@@ -244,18 +279,19 @@ operation Main() {
     "이 게이트가 역인가"가 텍스트가 아니라 값으로 표현되기 때문에, 다음 단계에서 이 값을 뒤집는 것만으로 역을 만들 수 있어요.
   </p>
 
-  <h2 id="s4"><span class="n">4</span>3단계. Inverter — 역연산을 IR 위에서 합성한다</h2>
+  <h2 id="s4"><span class="n">4</span>3단계. AdjointMaterializer — Inverter 커널로 역연산 op을 합성한다</h2>
 
   <p>
     <code>Main</code>에 <code>Adjoint Outer(...)</code>가 있으니 컴파일러는 <code>Outer</code>의 역이 필요해요.
-    <strong>Inverter</strong>는 IR을 받아서 <strong>역 IR을 돌려주는 순수 변환 패스</strong>예요.
+    실제 최상위 패스는 <strong>AdjointMaterializer</strong>예요. 이 패스가 필요한 역연산을 추적하고,
+    <strong>Inverter</strong> 커널로 역방향 몸통을 만든 뒤 <code>Outer__adj</code> 같은 진짜 op으로 프로그램에 추가해요.
     수학적 근거는 하나예요:
   </p>
 
   <div class="rule">(U₁ · U₂ · ⋯ · Uₙ)† &nbsp;=&nbsp; Uₙ† · ⋯ · U₂† · U₁†<br>
   <span style="font-weight:400; font-size:.92rem;">— 순서를 뒤집고, 각각을 역(dagger)으로</span></div>
 
-  <p>Inverter가 실제로 돌려준 <code>Outer</code>의 역 IR:</p>
+  <p>Inverter 커널이 실제로 돌려준 <code>Outer</code>의 역 IR:</p>
 
 <pre><code>QDecl(const=False, type=Int, name=k, value=2)     <span class="cm">← ① 선언: 순서 유지, 맨 앞</span>
 QIf(cond="b == 1")                                <span class="cm">← ⑤ if: 조건 유지, 분기 내부만 역전</span>
@@ -307,8 +343,8 @@ QGate(functors=[<span class="hl">Adjoint</span>], name=Inner, args=[q])         
   <p>
     (방출 직전에 패스 두 개가 돕니다. 먼저 <strong>adjoint 실체화</strong>가 <code>Adjoint Outer</code>를
     진짜 역방향 def op으로 바꿉니다 — 아래의 <code>Inner__adj</code>·<code>Outer__adj</code>가 여기서
-    나오며, 그래서 그것들이 평범한 def인 것입니다. 그다음 <strong>네임 맹글러</strong>가 모든 이름을
-    OpenQASM에 안전하게 만드는데, 키워드·stdgates 게이트·다른 이름과 <strong>실제로 충돌할 때만</strong>
+    나오며, 그래서 그것들이 평범한 def인 것입니다. 그다음 <strong>네임 맹글러</strong>가 방출할 이름을
+    OpenQASM에 안전하게 맞추는데, 키워드·stdgates 게이트·다른 이름과 <strong>실제로 충돌할 때만</strong>
     이름을 바꿉니다 — <code>_</code>를 붙이고 <code>// Qora:</code> 노트를 남깁니다. 여기 이름들은 아무것도
     충돌하지 않으므로 그대로 통과합니다. 에러와 컴파일 단계 뷰는 언제나 원래 이름을 유지합니다.)
   </p>
@@ -402,7 +438,7 @@ Outer(q, r);
     사용자 코드 <span class="st">─파싱─▶</span> AST(역의 흔적 없음)
     <span class="st">─Lowering─▶</span> QoraIR(함자가 데이터)
     <span class="st">─검증─▶</span> 의미 에러면 STOP
-    <span class="st">─Inverter─▶</span> 역 QoraIR(토글·스왑·역순)
+    <span class="st">─AdjointMaterializer─▶</span> 역연산 op(Inverter 커널: 토글·스왑·역순)
     <span class="st">─Emitter─▶</span> OpenQASM(__adj def + 호출 치환)
   </div>
 
@@ -417,7 +453,7 @@ Outer(q, r);
   <div class="call why">
     <span class="h">이 구조가 다음에 여는 것 — 자동 uncomputation</span>
     임시(보조) 큐비트는 쓰고 나서 <strong>역연산으로 되돌려 놓아야</strong> 간섭이 오염되지 않아요.
-    지금은 사용자가 <code>Adjoint</code>라고 명시할 때만 역을 합성하지만, 이 Inverter를 그대로 재사용하면
+    지금은 사용자가 <code>Adjoint</code>라고 명시할 때만 역을 합성하지만, 이 Inverter 커널을 그대로 재사용하면
     컴파일러가 <strong>임시 큐비트가 더 이상 쓰이지 않는 지점을 찾아 역연산을 자동으로 주입</strong>할 수 있어요.
     그게 Qora가 향해 가는 Silq식 자동 uncomputation이에요.
   </div>
@@ -429,7 +465,8 @@ Outer(q, r);
     관련 소스: <code>src/Qora.Core/Ir/QoraIr.cs</code>(IR 정의) ·
     <code>Ir/QoraLowering.cs</code>(AST→IR) ·
     <code>Ir/QoraValidator.cs</code>(의미 검증 패스) ·
-    <code>Ir/Inverter.cs</code>(역합성 패스) ·
+    <code>Ir/Passes/AdjointMaterializer.cs</code>(역연산 op 실체화 패스) ·
+    <code>Ir/Inverter.cs</code>(역합성 커널) ·
     <code>Ir/QasmEmitter.cs</code>(IR→OpenQASM)
   </p>
 
