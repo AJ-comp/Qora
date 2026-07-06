@@ -95,6 +95,11 @@ public static class QoraParser
             }
             else
             {
+                // Desugar a measurement written inside a condition (`if (M(q[i]) == v)`) into the two-step
+                // form OpenQASM needs (`bit t = M(q[i]); if (t == v)`). Runs before resolution/validation, so
+                // everything downstream sees only the lowered form.
+                merged = MeasureConditionLowering.Run(merged);
+                expanded = merged;
                 var (res, resolveErrors) = Resolver.Resolve(merged);
                 resolved = res;
                 if (resolveErrors.Count > 0)
@@ -139,8 +144,10 @@ public static class QoraParser
             // consistently) — fail loudly (QINTERNAL) instead of emitting silently-broken QASM.
             var refErrors = ReferentialCheck.Verify(mangled.Program);
             if (refErrors.Count > 0) semanticErrors = refErrors;
-            // both passes may rename to dodge a collision; surface every note in the QASM header.
-            else qasm = QasmEmitter.Emit(mangled.Program, materialized.Notes.Concat(mangled.Notes).ToList());
+            // both passes may rename to dodge a collision; surface every note in the QASM header. The final
+            // OpenQASM target-lowering (e.g. demoting a runtime `const` to a plain var — OQ3 `const` is
+            // compile-time only) runs right before emission, adapting the IR to OpenQASM's specifics.
+            else qasm = QasmEmitter.Emit(OpenQasmLowering.Run(mangled.Program), materialized.Notes.Concat(mangled.Notes).ToList());
         }
 
         return new QoraParseResult

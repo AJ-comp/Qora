@@ -173,8 +173,15 @@ public static class QasmEmitter
     private static void HoistDecls(IReadOnlyList<QStmt> stmts, StringBuilder decls) =>
         HoistDecls(stmts, decls, new HashSet<string>());
 
-    // Hoisted declarations are deduplicated by name: the same measure-bit declared in both branches of
-    // an if/else must become ONE top-level declaration (QASM scopes are flat; a duplicate is invalid).
+    // Qubit registers AND measure bits are hoisted to the top of the def body. Registers because `use` is
+    // entry-top-level only (QSEM012); measure bits because OpenQASM importers (e.g. Qiskit) accept only
+    // GLOBAL classical declarations, not local ones inside a control-flow block — so a measure written deep
+    // in an `if`/`for`/`repeat` emits its `bit r;` here at the top and just an `r = measure …;` assignment
+    // in place (see EmitDecl). This is purely an EMISSION shape: the source language keeps measure bits
+    // block-scoped (a use outside the declaring block is QSEM025). Hoisted names are deduplicated by name —
+    // the same measure bit declared in both branches of an if/else must become ONE top-level `bit r;`
+    // (QASM's top scope is flat). The symbol table guarantees no two hoisted names (register/param/measure
+    // bit) collide across enclosing scopes, so the flattening here is always sound.
     private static void HoistDecls(IReadOnlyList<QStmt> stmts, StringBuilder decls, HashSet<string> seen)
     {
         foreach (var stmt in stmts)
@@ -302,6 +309,9 @@ public static class QasmEmitter
     {
         if (d.Value is QMeasure)
         {
+            // The `bit r;` declaration is hoisted to the top of the def body (HoistDecls) for OpenQASM
+            // importer compatibility; here we emit only the assignment, in place. Source-level block scoping
+            // is enforced separately by the symbol table (out-of-block use = QSEM025).
             body.AppendLine($"{pad}{d.Name} = {RenderExpr(d.Value)};");
             return;
         }
@@ -313,45 +323,46 @@ public static class QasmEmitter
     }
 
     /// <summary>
-    /// The default type of an untyped `var`/`const`: `float` when the initializer is real-valued — a
-    /// float literal, a built-in constant, or a variable already known to be float (so floatness
-    /// propagates: `var a = pi; var b = a / 2;` makes `b` a float too). `int t = pi / 4;` would be an
-    /// invalid narrowing in the emitted QASM.
+    /// The emitted type of an untyped `var`/`const`, inferred from its initializer using the type map (which
+    /// the symbol table seeds, so a referenced name's type — including a bit — is known):
+    /// <list type="bullet">
+    ///   <item><b>float</b> — a real-valued initializer: a float literal, a built-in constant, or a name
+    ///         already known float/angle (so floatness propagates: `var a = pi; var b = a / 2;`). `int t = pi
+    ///         / 4;` would be an invalid narrowing.</item>
+    ///   <item><b>bit</b> — a lone bit reference (`var x = r;` where `r` is a bit); emitting `int x = r;`
+    ///         would be a wrong-typed (bit→int) declaration.</item>
+    ///   <item><b>int</b> — everything else (the default).</item>
+    /// </list>
     /// </summary>
-    private static string InferDefaultType(QExpr value, Dictionary<string, string> varTypes) =>
-        value is QText t && t.Text.Split(' ').Any(tok =>
-            tok is "pi" or "tau" or "euler" || tok.Contains('.')
-            || (varTypes.TryGetValue(tok, out var vt) && (vt == "float" || vt == "angle")))
-            ? "float" : "int";
+    private static string InferDefaultType(QExpr value, Dictionary<string, string> varTypes)
+    {
+        if (value is not QText t) return "int";
+        var tokens = t.Text.Split(' ');
+        if (tokens.Any(tok => tok is "pi" or "tau" or "euler" || tok.Contains('.')
+                              || (varTypes.TryGetValue(tok, out var vt) && vt is "float" or "angle")))
+            return "float";
+        if (tokens.Length == 1 && varTypes.TryGetValue(tokens[0], out var t0) && t0 == "bit")
+            return "bit";
+        return "int";
+    }
 
     /// <summary>
-    /// Seed the per-op variable-type map: classical parameters, plus every measure-bit / bit-typed
-    /// declaration anywhere in the body (pre-scanned so a condition emitted before its declaration
-    /// line still knows the name is a bit — declarations are hoisted anyway).
+    /// The per-op map of every classical name to its emitted type. It is derived from the ONE source of
+    /// name→type — the symbol table — rather than re-scanned by hand, so NO declaration kind can be missed:
+    /// parameters, <c>use</c> registers, vars, consts, measure bits AND loop variables all carry their type
+    /// there (a hand-rolled scan previously forgot loop variables, so `!i` emitted an invalid `! ( i )`).
+    /// Qubits and untyped <c>var</c>s are absent — a qubit is never a classical value, and an untyped var's
+    /// type is inferred at its declaration by <see cref="InferDefaultType"/> and added then. It is a flat
+    /// whole-op superset, so bit-typed rendering (`r == 1` → `r == true`) and the classical `!x` → `x == 0`
+    /// rewrite are consistent wherever the name resolves; block scoping guarantees no use before declaration.
     /// </summary>
     private static Dictionary<string, string> SeedVarTypes(QOperation op)
     {
+        var sink = new List<QoraError>();                 // types only — any diagnostics are the validator's job
+        var root = Passes.SymbolTableBuilder.Build(op, sink);
         var map = new Dictionary<string, string>();
-        foreach (var p in op.Params)
-            if (p.Type == QType.Int) map[p.Name] = "int";
-            else if (p.Type == QType.Bit) map[p.Name] = "bit";
-            else if (p.Type == QType.Float) map[p.Name] = "float";
-            else if (p.Type == QType.Angle) map[p.Name] = "angle";
-
-        void Scan(IReadOnlyList<QStmt> stmts)
-        {
-            foreach (var s in stmts)
-                switch (s)
-                {
-                    case QDecl d when d.Value is QMeasure || d.Type == QType.Bit: map.TryAdd(d.Name, "bit"); break;
-                    case QIf i: Scan(i.Then); Scan(i.Else); break;
-                    case QFor f: Scan(f.Body); break;
-                    case QWhile w: Scan(w.Body); break;
-                    case QRepeat r: Scan(r.Body); break;
-                    case QConjugate c: Scan(c.Within); Scan(c.Apply); break;
-                }
-        }
-        Scan(op.Body);
+        foreach (var s in root.AllSymbols())
+            if (TypeName(s.Type) is { } t) map[s.Name] = t;   // Int/Bit/Float/Angle; Qubit and untyped → null → skipped
         return map;
     }
 

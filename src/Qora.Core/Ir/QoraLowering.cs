@@ -117,7 +117,7 @@ public static class QoraLowering
         if (typeKw == "bit") return new QParam(name, QType.Bit, null) { Span = span };
         if (typeKw == "float") return new QParam(name, QType.Float, null) { Span = span };
         if (typeKw == "angle") return new QParam(name, QType.Angle, null) { Span = span };
-        if (size is not null) return new QParam(name, QType.Qubit, int.Parse(size)) { Span = span };   // Qubit[2] q
+        if (size is not null) return new QParam(name, QType.Qubit, Count(size)) { Span = span };       // Qubit[2] q
         if (idents.Count >= 2)                                                                          // Qubit[n] q
             return new QParam(name, QType.Qubit, null) { SizeParam = idents[0], Span = span };
         return new QParam(name, QType.Qubit, null) { Span = span };                                     // Qubit q
@@ -125,7 +125,7 @@ public static class QoraLowering
 
     private static QStmt LowerStmt(AstNonTerminal node) => node.Name switch
     {
-        "Use" => new QUse(Child(node, 0), int.Parse(Child(node, 1))),
+        "Use" => new QUse(Child(node, 0), Count(Child(node, 1))),
         "Gate" => LowerGate(node),
         "ConstDecl" => LowerDecl(node, isConst: true),
         "VarDecl" => LowerDecl(node, isConst: false),
@@ -136,6 +136,11 @@ public static class QoraLowering
         "Repeat" => new QRepeat(BodyStmts(node).Select(LowerSpanned).ToList(), LowerCondition(CondOf(node))),
         _ => new QGate(new List<string>(), node.Name, new List<QArg>()), // defensive: unknown node -> inert
     };
+
+    /// <summary>Parse a register size (a grammar-guaranteed number). Returns <c>-1</c> when the value does
+    /// not fit in a 32-bit int — an absurd size like <c>Qubit[99999999999]</c> — so the validator rejects it
+    /// cleanly (QSEM016) instead of <c>int.Parse</c> throwing and crashing the compiler.</summary>
+    private static int Count(string s) => int.TryParse(s, out var n) ? n : -1;
 
     private static QGate LowerGate(AstNonTerminal node)
     {

@@ -3,7 +3,7 @@ namespace Qora.Ir;
 /// <summary>The compiler's version, stamped into emitted QASM for provenance.</summary>
 public static class QoraVersion
 {
-    public const string Value = "0.14";
+    public const string Value = "0.15";
 }
 
 /// <summary>
@@ -62,7 +62,7 @@ public sealed record QImport(string Target)
 
 /// <param name="Namespace">The namespace the op was declared in ("" = global). After the resolver
 /// pass runs, <see cref="Name"/> is the FULLY-QUALIFIED name and this records the origin.</param>
-public sealed record QOperation(string Name, IReadOnlyList<QParam> Params, IReadOnlyList<QStmt> Body, string Namespace = "")
+public sealed record QOperation(string Name, IReadOnlyList<QParam> Params, IReadOnlyList<QStmt> Body, string Namespace = "") : ICallableSig
 {
     /// <summary>
     /// The name to SHOW in diagnostics, when it differs from the emitted <see cref="Name"/>. Null means
@@ -72,14 +72,55 @@ public sealed record QOperation(string Name, IReadOnlyList<QParam> Params, IRead
     /// </summary>
     public string? DisplayName { get; init; }
 
+    /// <summary>The name a call-site error shows for this callee (the generic origin, not a specialization).</summary>
+    public string CalleeName => DisplayName ?? Name;
+
+    bool ICallableSig.IsBuiltin => false;
+
+    /// <summary>The signature IS the parameter list — <see cref="QParam"/> already implements
+    /// <see cref="IParamSpec"/>, so this is a covariant view, not a second copy.</summary>
+    IReadOnlyList<IParamSpec> ICallableSig.Params => Params;
+
     /// <summary>Span of the operation's NAME token (op-level errors point here).</summary>
     public QSpan? Span { get; init; }
 }
 
 public enum QType { Qubit, Int, Bit, Float, Angle }
 
-/// <summary>A def parameter: a qubit, a sized qubit register (<see cref="RegisterSize"/> != null), or an int/bit.</summary>
-public sealed record QParam(string Name, QType Type, int? RegisterSize)
+/// <summary>
+/// One parameter slot of a CALLABLE — a built-in gate or a user operation — reduced to exactly what a
+/// call-site kind check needs. <see cref="Type"/> <c>== Qubit</c> is a QUBIT slot (shaped by
+/// <see cref="RegisterSize"/> / <see cref="SizeParam"/> / <see cref="QubitBroadcast"/>); any other
+/// <see cref="Type"/> is a VALUE slot expecting a classical of that type (an angle for a rotation, an
+/// int/bit/float for a classical parameter). A qubit passed to a value slot — or a value to a qubit slot —
+/// is QSEM006.
+/// </summary>
+public interface IParamSpec
+{
+    string Name { get; }
+    QType Type { get; }
+    int? RegisterSize { get; }   // qubit slot: exact register size (null ⇒ single qubit, unless QubitBroadcast)
+    string? SizeParam { get; }   // qubit slot: symbolic (generic) register size
+    bool QubitBroadcast { get; } // qubit slot: accepts ANY qubit shape (built-in gates broadcast; ops are strict)
+}
+
+/// <summary>
+/// A callable's signature: its ordered parameter slots. BOTH user operations (<see cref="QOperation"/>)
+/// and built-in gates (<see cref="QoraGates.SigOf"/>) expose one, so a SINGLE call-site check
+/// (<c>CheckCall</c>) serves both without knowing which it is. The signature is not a stored second copy —
+/// it is a view over the same <see cref="QParam"/>s / <see cref="GateInfo"/> the rest of the pipeline uses,
+/// so it can never drift from the source.
+/// </summary>
+public interface ICallableSig
+{
+    string CalleeName { get; }                 // name to show in diagnostics
+    IReadOnlyList<IParamSpec> Params { get; }
+    bool IsBuiltin { get; }                     // gate vs user op — consulted ONLY for message phrasing, not the check
+}
+
+/// <summary>A def parameter: a qubit, a sized qubit register (<see cref="RegisterSize"/> != null), or an int/bit.
+/// It IS its own signature slot (<see cref="IParamSpec"/>) — user-op qubit params are strict (no broadcast).</summary>
+public sealed record QParam(string Name, QType Type, int? RegisterSize) : IParamSpec
 {
     /// <summary>
     /// A generic register <c>Qubit[n] name</c>: the symbolic size symbol (e.g. <c>"n"</c>), bound to a
@@ -87,6 +128,9 @@ public sealed record QParam(string Name, QType Type, int? RegisterSize)
     /// params; while non-null, <see cref="RegisterSize"/> stays null until specialization fills it in.
     /// </summary>
     public string? SizeParam { get; init; }
+
+    /// <summary>A user-operation qubit parameter matches its declared shape exactly — no register broadcast.</summary>
+    public bool QubitBroadcast => false;
 
     /// <summary>Span of the parameter's NAME token.</summary>
     public QSpan? Span { get; init; }
@@ -182,6 +226,21 @@ public sealed record QCond(string Text, bool HasCall = false);
 /// <param name="Unitary">False for reset-like operations — they cannot take functors or be inverted.</param>
 public sealed record GateInfo(string QasmName, int Arity, bool AngleFirst = false, bool Unitary = true);
 
+/// <summary>One parameter slot of a built-in gate, derived from its <see cref="GateInfo"/>. A rotation's
+/// leading angle is a value slot (<see cref="QType.Angle"/>); every qubit slot broadcasts (a whole register
+/// applies the gate element-wise), so <see cref="QubitBroadcast"/> is true.</summary>
+public sealed record GateParam(string Name, QType Type, bool QubitBroadcast = false) : IParamSpec
+{
+    public int? RegisterSize => null;
+    public string? SizeParam => null;
+}
+
+/// <summary>A built-in gate's signature (see <see cref="QoraGates.SigOf"/>).</summary>
+public sealed record GateSig(string CalleeName, IReadOnlyList<IParamSpec> Params) : ICallableSig
+{
+    public bool IsBuiltin => true;
+}
+
 /// <summary>
 /// Qora's built-in gate registry. THE single source of truth: to add a built-in, add ONE entry here —
 /// the emitter's name mapping, the validator's arity/unitarity checks, the inverter's irreversibility
@@ -204,6 +263,23 @@ public static class QoraGates
 
     // --- derived views (do NOT edit these; edit Gates above) ---
 
+    /// <summary>
+    /// The call signature of a built-in gate, derived from its <see cref="GateInfo"/>: a rotation exposes a
+    /// leading angle value slot then broadcasting qubit slots, a plain gate exposes only qubit slots.
+    /// <paramref name="extraControls"/> adds that many leading qubit slots for a <c>Controlled</c> functor.
+    /// Returns null for an unknown gate name. This is what makes a built-in an <see cref="ICallableSig"/>,
+    /// so the one call-site check treats it exactly like a user operation.
+    /// </summary>
+    public static ICallableSig? SigOf(string name, int extraControls = 0)
+    {
+        if (!Gates.TryGetValue(name, out var g)) return null;
+        var slots = new List<IParamSpec>();
+        var qubitSlots = g.Arity + extraControls - (g.AngleFirst ? 1 : 0);
+        if (g.AngleFirst) slots.Add(new GateParam("angle", QType.Angle));
+        for (var i = 0; i < qubitSlots; i++) slots.Add(new GateParam($"q{i}", QType.Qubit, QubitBroadcast: true));
+        return new GateSig(name, slots);
+    }
+
     /// <summary>Qora gate name → OpenQASM gate name.</summary>
     public static readonly IReadOnlyDictionary<string, string> Names =
         Gates.ToDictionary(kv => kv.Key, kv => kv.Value.QasmName);
@@ -211,10 +287,6 @@ public static class QoraGates
     /// <summary>Rotation gates take an angle first: <c>Rx(θ, q)</c> → <c>rx(θ) q;</c>.</summary>
     public static readonly IReadOnlySet<string> Rotations =
         Gates.Where(kv => kv.Value.AngleFirst).Select(kv => kv.Key).ToHashSet();
-
-    /// <summary>Expected argument count per gate; a <c>Controlled</c> functor adds one.</summary>
-    public static readonly IReadOnlyDictionary<string, int> Arity =
-        Gates.ToDictionary(kv => kv.Key, kv => kv.Value.Arity);
 
     /// <summary>Non-unitary built-ins (reset-like): no functors, never invertible.</summary>
     public static readonly IReadOnlySet<string> NonUnitary =

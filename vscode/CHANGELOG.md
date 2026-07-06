@@ -2,6 +2,24 @@
 
 All notable changes to the Qora Language extension.
 
+## 0.9.0
+
+- Bundles the **Qora v0.15** compiler — a correctness & ergonomics release:
+  - **Measure inside a condition**: `if (M(q[0]) == 1) { … }` (and `while` / `repeat … until`) now
+    works, Q#-style. The compiler lowers it to a hoisted `bit` that is tested in the condition, so it
+    emits valid OpenQASM.
+  - **Measure bits are block-scoped**, like `var`/`const`: a bit measured inside a branch is scoped to
+    that branch, and using it after the block is a clear error — consistent, safer scoping.
+  - **`const` accepts any immutable value** — a literal, a runtime variable, or a measurement (Q#-`let`
+    style) — and always emits valid OpenQASM. A runtime-bound `const` (`const c = x;`) is emitted as a
+    plain variable that is still never reassigned, instead of an invalid compile-time `const`.
+  - **Hardening** — these no longer emit invalid OpenQASM or crash the compiler; each is a precise
+    diagnostic now: a qubit used where a classical value belongs (`if (q == 1)`, `Rx(pi/q)`, `0..q`),
+    assigning to a qubit (`q = 5`), `!` on a loop variable, `var x = <bit>` mis-typed as an `int`, an
+    argument of the wrong kind to a gate or operation, and a register size or index too large to
+    represent (`Qubit[99999999999]`).
+  - Backed by a new 129-case compiler unit-test suite (`tests/Qora.Tests`).
+
 ## 0.8.0
 
 - Bundles the **Qora v0.14** compiler: `float` / `angle` classical types, parameterized register sizes

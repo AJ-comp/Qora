@@ -13,7 +13,9 @@ namespace Qora.Ir.Passes;
 ///   <item><b>QSEM002</b> — <c>Controlled Foo</c> on a user operation (no <c>ctrl @</c> on defs).</item>
 ///   <item><b>QSEM003</b> — a functor on <c>Reset</c>/<c>ResetAll</c> (reset is a statement, not a gate).</item>
 ///   <item><b>QSEM004</b> — a bare measurement statement (only assignment forms exist).</item>
-///   <item><b>QSEM005</b> — a call inside an expression (condition, arithmetic, argument, non-measure value).</item>
+///   <item><b>QSEM005</b> — a call inside an expression (arithmetic, argument, non-measure value, or a
+///         non-measurement call in a condition). A MEASUREMENT in a condition is NOT rejected — it is
+///         lowered to a bit by <see cref="MeasureConditionLowering"/> before this pass runs.</item>
 ///   <item><b>QSEM006</b> — wrong arguments for a callee: count for built-ins (+1 under <c>Controlled</c>)
 ///         and user operations, argument KIND per slot (a qubit where an angle belongs and vice versa,
 ///         a number/classical where a qubit belongs), and qubit shape/size against user-op signatures.</item>
@@ -30,25 +32,38 @@ namespace Qora.Ir.Passes;
 ///         built-ins), or declaring the reserved <c>Qora.Intrinsic</c> namespace (raised by the
 ///         <see cref="Resolver"/>). Inside a namespace, gate names ARE allowed (Q#-style) — an
 ///         ambiguous use is QSEM018, qualified by <c>MyLib.H(…)</c> / <c>Qora.Intrinsic.H(…)</c>.
-///         Every other name is free — the <see cref="NameMangler"/> pass appends <c>_</c> to all user
-///         names at emission, so target-world collisions (stdgates, keywords) are structurally
-///         impossible.</item>
+///         Every other name is free — the <see cref="NameMangler"/> pass renames emitted identifiers
+///         only when they collide with target-world names (stdgates, keywords) or another emitted name.</item>
 ///   <item><b>QSEM014</b> — the same qubit (or overlapping register/element) passed twice to one gate.</item>
-///   <item><b>QSEM015</b> — duplicate declared names inside one operation: parameters, <c>use</c>
-///         registers, and hoisted measure bits share one scope and must not collide.</item>
-///   <item><b>QSEM016</b> — a literal qubit index out of the register's range, or indexing a
-///         single-qubit parameter.</item>
+///   <item><b>QSEM015</b> — duplicate declared names within one scope: parameters and <c>use</c>
+///         registers seed the top-level scope; measure bits, vars, consts and loop variables are
+///         block-scoped. Every declaration flows through the symbol table's one insertion door, which
+///         rejects any same-scope collision.</item>
+///   <item><b>QSEM016</b> — a literal qubit index out of the register's range, indexing a single-qubit
+///         parameter, or a register size that is not a positive 32-bit int (a huge <c>Qubit[99999999999]</c>
+///         that overflows, or <c>Qubit[0]</c>) — caught cleanly rather than crashing the parser.</item>
 ///   <item><b>QSEM017</b> — a measurement assigned to a non-<c>bit</c> declaration.</item>
 ///   <item><b>QSEM022</b> — the same operation name defined more than once WITHIN one namespace
 ///         (namespaced twin of QSEM008; the same simple name in two different namespaces is fine).</item>
 ///   <item><b>QSEM024</b> — assignment to a <c>const</c> name. <c>const</c> is an immutable BINDING
 ///         (JS/Q#-let style): the initializer may be any value — a measurement result included — but
 ///         the name can never be assigned again; use <c>var</c>/<c>bit</c> for mutable ones.</item>
-///   <item><b>QSEM023</b> — names that would COLLIDE IN THE EMITTED PROGRAM: two distinct operation
-///         names meeting at one mangled def name (`A.F` vs `A__F` → `A__F_`), an entry-op declaration
-///         landing on a def's name (entry locals are QASM top-level globals), or a def-local shadowing
-///         an operation that def calls. Mangling makes user-vs-QASM collisions impossible; this rule
-///         closes the remaining user-vs-user seams.</item>
+///   <item><b>QSEM025</b> — a name referenced but not resolvable in scope at that point: an unknown
+///         identifier, or a block-scoped name (measure bit, var, const, loop variable) used before its
+///         declaration. Only <c>use</c> registers are HOISTED, so they alone may be referenced before their
+///         textual line. Raised by <see cref="SymbolTableBuilder"/> as every expression identifier is
+///         resolved against the unified symbol table (pi/tau/euler/true/false and the symbolic register size
+///         are exempt).</item>
+///   <item><b>QSEM026</b> — a qubit used where a CLASSICAL is required: inside a condition
+///         (<c>if (q == 1)</c>), a range bound (<c>0..q</c>), an arithmetic initializer/assignment
+///         (<c>var x = q + 1</c>) — raised by <see cref="SymbolTableBuilder"/> — buried in a rotation
+///         angle / classical argument expression (<c>Rx(pi / q, …)</c>) — raised by <c>CheckCall</c> — or as
+///         an assignment TARGET (<c>q = 5;</c>, a qubit is not an assignable classical variable). A qubit has
+///         no numeric value, so any of these would emit invalid QASM. (A whole qubit passed straight into a
+///         value slot, e.g. <c>Rx(q, …)</c>, is the argument-KIND error QSEM006.)</item>
+///   <item><b>QSEM023</b> — reserved. Emitted-name collisions are no longer rejected here; the
+///         <see cref="NameMangler"/> pass auto-renames colliding emitted identifiers and records a
+///         <c>// Qora:</c> note.</item>
 /// </list>
 /// Earlier pipeline steps own the remaining codes, and each step's errors preempt this validator:
 /// QSEM020 (import file not found/unreadable) and QSEM021 (cyclic imports) come from
@@ -103,229 +118,156 @@ public static class QoraValidator
 
         foreach (var op in program.Operations)
         {
-            var isEntry = op == entry;
-
             // QSEM013 — names whose MEANING cannot be disambiguated stay reserved: the measurement
             // family and pi/tau/euler (expression-position tokens the resolver never sees), and
             // built-in GATE names in the GLOBAL namespace only — a global op has no qualifier, so a
             // gate-named one could never be referenced. Inside a namespace a gate name is legal
             // (Q#-style): the resolver makes any ambiguous USE an explicit QSEM018, never a silent pick.
             var simpleName = Simple(op.Name);
-            if (QoraGates.MeasureLike.Contains(simpleName) || IsBuiltinConstant(simpleName))
+            if (QoraGates.MeasureLike.Contains(simpleName) || SymbolTableBuilder.IsReservedName(simpleName))
                 Add(errors, "QSEM013", $"operation name `{simpleName}` shadows the built-in `{simpleName}`; choose another name", op.Span);
             else if (!op.Name.Contains('.') && QoraGates.Names.ContainsKey(simpleName))
                 Add(errors, "QSEM013", $"global operation `{simpleName}` shadows the built-in gate `{simpleName}` (the global namespace shares one scope with the built-ins, so it has no qualifier to disambiguate with); move it into a namespace or rename it", op.Span);
 
-            // QSEM015 — parameters, `use` registers, and hoisted measure bits share one emitted scope.
-            foreach (var dup in op.Params.GroupBy(p => p.Name).Where(g => g.Count() > 1))
-                Add(errors, "QSEM015", $"in `{op.DisplayName ?? op.Name}`: the parameter name `{dup.Key}` is used twice; each parameter needs a unique name",
-                    dup.Skip(1).First().Span ?? dup.First().Span);
-            var useNames = new Dictionary<string, QSpan?>();
-            var measureBits = new Dictionary<string, QSpan?>();
-            CollectScopedNames(op.Body, useNames, measureBits);
+            // QSEM016 — a sized qubit parameter `Qubit[N] q` whose N is not a positive int (0, or -1 from an
+            // int overflow like `Qubit[99999999999] q`). A symbolic size `Qubit[n] q` has RegisterSize null.
             foreach (var p in op.Params)
-            {
-                CheckShadowsConstant(p.Name, op.Name, "parameter", errors, p.Span);
-                if (useNames.ContainsKey(p.Name) || measureBits.ContainsKey(p.Name))
-                    Add(errors, "QSEM015", $"in `{op.DisplayName ?? op.Name}`: `{p.Name}` is declared more than once (parameter vs register/measure bit)", p.Span);
-            }
-            foreach (var clash in useNames.Keys.Intersect(measureBits.Keys))
-                Add(errors, "QSEM015", $"in `{op.DisplayName ?? op.Name}`: `{clash}` names both a qubit register and a measure bit; hoisting would merge them — rename one",
-                    measureBits[clash] ?? useNames[clash]);
+                if (p.Type == QType.Qubit && p.RegisterSize is int rs && rs < 1)
+                    Add(errors, "QSEM016", $"in `{op.DisplayName ?? op.Name}`: parameter `{p.Name}` has an invalid register size; it must be a whole number from 1 to {int.MaxValue}", p.Span);
 
-            var scope = BuildScope(op, entry.Name, isEntry);
+            // The unified symbol table IS the scope model: a nested scope tree in which every name carries
+            // its kind / type / register size. Building it reports EVERY same-scope collision the emitter
+            // cannot tolerate (QSEM015) through the single `Declare` insertion door — parameters and `use`
+            // registers at the root, block-scoped measure bits / vars / consts / loop vars in their block
+            // alike — so there are no parallel duplicate-name checks out here. `scopeOf` maps each body list
+            // to its scope so the walk below resolves every operand with correct nesting. Nothing re-derives it.
+            var scopeOf = new Dictionary<IReadOnlyList<QStmt>, Scope>();
+            var root = SymbolTableBuilder.Build(op, errors, scopeOf);
 
-            // The symbolic size of a generic register (`n` in `Qubit[n] q`) is the substitution target of
-            // the Monomorphizer's whole-word textual rewrite; a param / register / loop variable / const /
-            // variable that reuses that name would be silently captured (out-of-range index or a silently
-            // wrong angle). Require the size symbol to be a unique name.
-            foreach (var sp in op.Params.Where(p => p.SizeParam is not null))
-            {
-                var sym = sp.SizeParam!;
-                if (scope.Classicals.Contains(sym) || scope.Registers.ContainsKey(sym)
-                    || scope.SingleQubits.Contains(sym) || scope.SymbolicRegisters.Contains(sym))
-                    Add(errors, "QSEM015",
-                        $"in `{op.DisplayName ?? op.Name}`: `{sym}` is both the generic register size in `Qubit[{sym}] {sp.Name}` and a declared name (loop variable / const / parameter) — the size parameter needs a unique name",
-                        sp.Span);
-            }
-
-            Walk(op.Body, scope, ops, opByName, inverter, errors, inControlFlow: false);
+            var ctx = new Ctx(op, entry.Name, ops, opByName, inverter, errors, scopeOf);
+            Walk(op.Body, root, ctx, inControlFlow: false);
         }
 
         return errors;
     }
 
-    /// <summary>What the walk needs to know about the operation it is inside.</summary>
-    private sealed record Scope(
-        QOperation Op, string EntryName, bool IsEntry,
-        Dictionary<string, int> Registers,       // register name -> size (sized qubit params + use)
-        HashSet<string> SingleQubits,            // unsized qubit parameter names
-        HashSet<string> SymbolicRegisters,       // generic register params `Qubit[n] q` (size unknown until monomorphization)
-        HashSet<string> Classicals,              // int/bit params + declared variables + loop vars
-        Dictionary<string, QSpan?> DeclSpans,    // declared name -> its declaration's span (first wins)
-        HashSet<string> Consts)                  // names declared `const` (immutable bindings)
+    /// <summary>Everything the per-operation walk needs beyond the current lexical <see cref="Scope"/> (the
+    /// unified symbol table): the operation, the entry name (for `use` placement), the callable sets, and
+    /// <c>ScopeOf</c> — the body-list → scope map the symbol table produced, so recursing into a branch/loop
+    /// resolves names in the right nested scope.</summary>
+    private sealed record Ctx(
+        QOperation Op, string EntryName, HashSet<string> Ops, Dictionary<string, QOperation> OpByName,
+        Inverter Inverter, List<QoraError> Errors,
+        IReadOnlyDictionary<IReadOnlyList<QStmt>, Scope> ScopeOf);
+
+    private static void Walk(IReadOnlyList<QStmt> stmts, Scope scope, Ctx ctx, bool inControlFlow)
     {
-        public HashSet<string> UseNames { get; } = new();
-    }
-
-    private static Scope BuildScope(QOperation op, string entryName, bool isEntry)
-    {
-        var registers = new Dictionary<string, int>();
-        var singles = new HashSet<string>();
-        var symbolic = new HashSet<string>();
-        var classicals = new HashSet<string>();
-        var declSpans = new Dictionary<string, QSpan?>();
-        var consts = new HashSet<string>();
-
-        foreach (var p in op.Params)
-        {
-            if (p.Type == QType.Qubit && p.RegisterSize is int n) registers[p.Name] = n;
-            else if (p.Type == QType.Qubit && p.SizeParam is not null) symbolic.Add(p.Name);  // Qubit[n] q
-            else if (p.Type == QType.Qubit) singles.Add(p.Name);
-            else classicals.Add(p.Name);
-            declSpans.TryAdd(p.Name, p.Span);
-        }
-
-        void Scan(IReadOnlyList<QStmt> stmts)
-        {
-            foreach (var s in stmts)
-                switch (s)
-                {
-                    case QUse u: registers.TryAdd(u.Name, u.Size); declSpans.TryAdd(u.Name, u.Span); break;
-                    case QDecl d: classicals.Add(d.Name); declSpans.TryAdd(d.Name, d.Span); if (d.IsConst) consts.Add(d.Name); break;
-                    case QFor f: classicals.Add(f.Var); declSpans.TryAdd(f.Var, f.Span); Scan(f.Body); break;
-                    case QIf i: Scan(i.Then); Scan(i.Else); break;
-                    case QWhile w: Scan(w.Body); break;
-                    case QRepeat r: Scan(r.Body); break;
-                    case QConjugate c: Scan(c.Within); Scan(c.Apply); break;
-                }
-        }
-        Scan(op.Body);
-        return new Scope(op, entryName, isEntry, registers, singles, symbolic, classicals, declSpans, consts);
-    }
-
-    /// <summary>Collect `use` register names and measure-bit declaration names, with spans (for QSEM015).</summary>
-    private static void CollectScopedNames(IReadOnlyList<QStmt> stmts, Dictionary<string, QSpan?> useNames, Dictionary<string, QSpan?> measureBits)
-    {
-        foreach (var s in stmts)
-            switch (s)
-            {
-                case QUse u: useNames.TryAdd(u.Name, u.Span); break;
-                case QDecl { Value: QMeasure } d: measureBits.TryAdd(d.Name, d.Span); break;
-                case QIf i: CollectScopedNames(i.Then, useNames, measureBits); CollectScopedNames(i.Else, useNames, measureBits); break;
-                case QFor f: CollectScopedNames(f.Body, useNames, measureBits); break;
-                case QWhile w: CollectScopedNames(w.Body, useNames, measureBits); break;
-                case QRepeat r: CollectScopedNames(r.Body, useNames, measureBits); break;
-                case QConjugate c: CollectScopedNames(c.Within, useNames, measureBits); CollectScopedNames(c.Apply, useNames, measureBits); break;
-            }
-    }
-
-    private static void Walk(IReadOnlyList<QStmt> stmts, Scope scope, HashSet<string> ops,
-        Dictionary<string, QOperation> opByName, Inverter inverter, List<QoraError> errors, bool inControlFlow)
-    {
-        var opName = scope.Op.DisplayName ?? scope.Op.Name;
+        var opName = ctx.Op.DisplayName ?? ctx.Op.Name;
+        Scope Child(IReadOnlyList<QStmt> body) => ctx.ScopeOf.TryGetValue(body, out var s) ? s : scope;
 
         foreach (var stmt in stmts)
         {
             switch (stmt)
             {
                 case QGate g:
-                    CheckGate(g, scope, ops, opByName, inverter, errors);
+                    CheckGate(g, scope, ctx);
                     break;
 
-                // QSEM012 / QSEM015 — `use` only at the top level of the entry op, each name once.
+                // QSEM012 — `use` only at the top level of the entry op. A duplicate register name is
+                // QSEM015, but that is caught by the symbol table's `Declare` door (registers seed the root),
+                // so it is not re-checked here.
                 case QUse u:
-                    if (opName != scope.EntryName)
-                        Add(errors, "QSEM012", $"in `{opName}`: `use {u.Name} = Qubit[{u.Size}];` is not supported inside an operation; allocate in `{scope.EntryName}` and pass the qubits as a parameter", u.Span);
+                    if (u.Size < 1)   // 0, or -1 from a size that overflowed a 32-bit int (`Qubit[99999999999]`)
+                        Add(ctx.Errors, "QSEM016", $"in `{opName}`: `use {u.Name} = Qubit[…];` has an invalid register size; it must be a whole number from 1 to {int.MaxValue}", u.Span);
+                    if (opName != ctx.EntryName)
+                        Add(ctx.Errors, "QSEM012", $"in `{opName}`: `use {u.Name} = Qubit[{u.Size}];` is not supported inside an operation; allocate in `{ctx.EntryName}` and pass the qubits as a parameter", u.Span);
                     else if (inControlFlow)
-                        Add(errors, "QSEM012", $"in `{opName}`: `use {u.Name} = ...` inside a loop or branch is not supported; allocate once at the top level", u.Span);
-                    else if (!scope.UseNames.Add(u.Name))
-                        Add(errors, "QSEM015", $"in `{opName}`: the register name `{u.Name}` is used twice; each `use` needs a unique name", u.Span);
-                    CheckShadowsConstant(u.Name, opName, "register", errors, u.Span);
+                        Add(ctx.Errors, "QSEM012", $"in `{opName}`: `use {u.Name} = ...` inside a loop or branch is not supported; allocate once at the top level", u.Span);
                     break;
 
                 case QDecl d:
                     if (d.Value is QText { HasCall: true })
-                        Add(errors, "QSEM005", $"in `{opName}`: the initializer of `{d.Name}` contains a call; only the lone form `bit r = M(q[i]);` is supported", d.Span);
+                        Add(ctx.Errors, "QSEM005", $"in `{opName}`: the initializer of `{d.Name}` contains a call; only the lone form `bit r = M(q[i]);` is supported", d.Span);
                     if (d.Value is QMeasure dm)
                     {
                         // QSEM017 — measure results are bits; QSEM016 — validate the measured index.
                         if (d.Type is not null && d.Type != QType.Bit)
-                            Add(errors, "QSEM017", $"in `{opName}`: `{d.Name}` is declared `{d.Type.ToString()!.ToLowerInvariant()}` but a measurement result is a `bit`", d.Span);
-                        if (dm.Target is not null) CheckQubitIndex(dm.Target, scope, errors, d.Span);
+                            Add(ctx.Errors, "QSEM017", $"in `{opName}`: `{d.Name}` is declared `{d.Type.ToString()!.ToLowerInvariant()}` but a measurement result is a `bit`", d.Span);
+                        if (dm.Target is not null) CheckQubitIndex(dm.Target, scope, opName, ctx.Errors, d.Span);
                     }
-                    CheckShadowsConstant(d.Name, opName, "variable", errors, d.Span);
                     break;
 
                 case QAssign a:
-                    // QSEM024 — `const` is an IMMUTABLE BINDING (JS/Q#-let style): it may hold any
-                    // value, including a measurement result, but can never be assigned again.
-                    if (scope.Consts.Contains(a.Name))
-                        Add(errors, "QSEM024", a.Value is QMeasure
+                    // The assignment TARGET's kind, resolved once. `a.Name` is also recorded as a use by the
+                    // symbol table, so an unknown target is QSEM025 there.
+                    var target = scope.Lookup(a.Name);
+                    // QSEM024 — `const` is an IMMUTABLE BINDING (JS/Q#-let style): it may hold any value,
+                    // including a measurement result, but can never be assigned again. The symbol table
+                    // resolves `a.Name` to its nearest binding, so a local `var` shadowing an outer `const`
+                    // is correctly mutable here.
+                    if (target?.IsConst == true)
+                        Add(ctx.Errors, "QSEM024", a.Value is QMeasure
                             ? $"in `{opName}`: `{a.Name}` is `const` and cannot be measured into again; declare it as `bit {a.Name} = ...` if it should be re-measured"
                             : $"in `{opName}`: `{a.Name}` is `const` and cannot be reassigned; declare it with `var` if it needs to change", a.Span);
+                    // QSEM026 — a qubit register is not an assignable classical variable; assigning to it
+                    // (`q = 5;`) would emit invalid QASM. A qubit's state changes only through gates/measurement.
+                    else if (target is { Type: QType.Qubit })
+                        Add(ctx.Errors, "QSEM026", $"in `{opName}`: `{a.Name}` is a qubit and cannot be assigned to — a qubit is not a classical variable; change its state with a gate or measurement", a.Span);
+                    // QSEM017 — a measurement result is a `bit`; assigning it to a non-bit classical is the
+                    // same type error as declaring `int r = M(...)`.
+                    else if (a.Value is QMeasure && target is { Type: { } tt } && tt != QType.Bit)
+                        Add(ctx.Errors, "QSEM017", $"in `{opName}`: `{a.Name}` is `{tt.ToString()!.ToLowerInvariant()}` but a measurement result is a `bit`", a.Span);
                     if (a.Value is QText { HasCall: true })
-                        Add(errors, "QSEM005", $"in `{opName}`: the value assigned to `{a.Name}` contains a call; only the lone form `{a.Name} = M(q[i]);` is supported", a.Span);
+                        Add(ctx.Errors, "QSEM005", $"in `{opName}`: the value assigned to `{a.Name}` contains a call; only the lone form `{a.Name} = M(q[i]);` is supported", a.Span);
                     if (a.Value is QMeasure am && am.Target is not null)
-                        CheckQubitIndex(am.Target, scope, errors, a.Span);
+                        CheckQubitIndex(am.Target, scope, opName, ctx.Errors, a.Span);
                     break;
 
                 case QIf i:
-                    CheckCondition(i.Cond, opName, errors, i.Span);
-                    Walk(i.Then, scope, ops, opByName, inverter, errors, inControlFlow: true);
-                    Walk(i.Else, scope, ops, opByName, inverter, errors, inControlFlow: true);
+                    CheckCondition(i.Cond, opName, ctx.Errors, i.Span);
+                    Walk(i.Then, Child(i.Then), ctx, inControlFlow: true);
+                    Walk(i.Else, Child(i.Else), ctx, inControlFlow: true);
                     break;
                 case QFor f:
                     // A `for` bound is a plain expression; a call/measurement there has no OpenQASM lowering
                     // (and only a call renders a `(` into the bound text). Reject it like other call
                     // positions (QSEM005) instead of shipping invalid QASM.
                     if (f.From.Contains('(') || f.To.Contains('('))
-                        Add(errors, "QSEM005", $"in `{opName}`: a `for` bound cannot contain a call or measurement; measure into a bit first and use a numeric or variable bound", f.Span);
-                    CheckShadowsConstant(f.Var, opName, "loop variable", errors, f.Span);
-                    Walk(f.Body, scope, ops, opByName, inverter, errors, inControlFlow: true);
+                        Add(ctx.Errors, "QSEM005", $"in `{opName}`: a `for` bound cannot contain a call or measurement; measure into a bit first and use a numeric or variable bound", f.Span);
+                    Walk(f.Body, Child(f.Body), ctx, inControlFlow: true);
                     break;
                 case QWhile w:
-                    CheckCondition(w.Cond, opName, errors, w.Span);
-                    Walk(w.Body, scope, ops, opByName, inverter, errors, inControlFlow: true);
+                    CheckCondition(w.Cond, opName, ctx.Errors, w.Span);
+                    Walk(w.Body, Child(w.Body), ctx, inControlFlow: true);
                     break;
                 case QRepeat r:
-                    Walk(r.Body, scope, ops, opByName, inverter, errors, inControlFlow: true);
-                    CheckCondition(r.Until, opName, errors, r.Span);
+                    Walk(r.Body, Child(r.Body), ctx, inControlFlow: true);
+                    CheckCondition(r.Until, opName, ctx.Errors, r.Span);
                     break;
                 case QConjugate c:
-                    Walk(c.Within, scope, ops, opByName, inverter, errors, inControlFlow);
-                    Walk(c.Apply, scope, ops, opByName, inverter, errors, inControlFlow);
+                    Walk(c.Within, Child(c.Within), ctx, inControlFlow);
+                    Walk(c.Apply, Child(c.Apply), ctx, inControlFlow);
                     break;
             }
         }
     }
 
-    // QSEM013 — the only names a declaration may not take are the built-in constants: an expression
-    // token `pi` must always mean THE pi (the mangler leaves those tokens alone, so a user `pi` would
-    // be irrecoverably ambiguous in expressions). All other collisions are emission-side and vanish
-    // under the NameMangler pass.
-    private static bool IsBuiltinConstant(string name) => name is "pi" or "tau" or "euler";
-
     /// <summary>The simple (last) segment of a possibly fully-qualified name.</summary>
     private static string Simple(string name) => name.Contains('.') ? name[(name.LastIndexOf('.') + 1)..] : name;
 
-    private static void CheckShadowsConstant(string name, string opName, string kind, List<QoraError> errors, QSpan? span)
-    {
-        if (IsBuiltinConstant(name))
-            Add(errors, "QSEM013", $"in `{opName}`: {kind} name `{name}` shadows the built-in constant `{name}`; choose another name", span);
-    }
-
-    // QSEM005 — OpenQASM has no measurement expressions: a condition cannot measure.
+    // QSEM005 — a measurement in a condition IS allowed (MeasureConditionLowering hoists it to a bit before
+    // validation), so a call still here is a non-measurement one (a user op) — which has no place in a
+    // condition. OpenQASM has no call/measurement EXPRESSIONS; only `M(q[i])` is lowered for you.
     private static void CheckCondition(QCond cond, string opName, List<QoraError> errors, QSpan? span)
     {
         if (cond.HasCall)
-            Add(errors, "QSEM005", $"in `{opName}`: a condition cannot contain a measurement; measure into a bit first (`bit r = M(q[i]);`) and test the bit", span);
+            Add(errors, "QSEM005", $"in `{opName}`: a condition cannot call an operation; only a measurement `M(q[i])` is allowed here (it is lowered to a bit automatically)", span);
     }
 
-    private static void CheckGate(QGate g, Scope scope, HashSet<string> ops,
-        Dictionary<string, QOperation> opByName, Inverter inverter, List<QoraError> errors)
+    private static void CheckGate(QGate g, Scope scope, Ctx ctx)
     {
-        var opName = scope.Op.DisplayName ?? scope.Op.Name;
+        var opName = ctx.Op.DisplayName ?? ctx.Op.Name;
+        var errors = ctx.Errors;
 
         // QSEM005 — calls inside gate arguments have no OpenQASM form.
         foreach (var arg in g.Args)
@@ -335,7 +277,7 @@ public static class QoraValidator
         // QSEM016 — literal indices must fit their register; a single qubit cannot be indexed.
         foreach (var arg in g.Args)
             if (arg is QQubitArg qa)
-                CheckQubitIndex(qa, scope, errors, g.Span);
+                CheckQubitIndex(qa, scope, opName, errors, g.Span);
 
         // QSEM014 — the same qubit twice in one gate. Whole registers count: `CNOT(q, q)` broadcasts to
         // duplicate operands, and `CNOT(q, q[0])` overlaps the register with its own element.
@@ -347,20 +289,20 @@ public static class QoraValidator
                 Add(errors, "QSEM014", $"in `{opName}`: `{g.Name}` receives the register `{whole}` and one of its own qubits; operands must not overlap", g.Span);
 
         // QSEM009 — the entry op is emitted as the QASM top level, not as a def: nothing can call it.
-        if (g.Name == scope.EntryName)
+        if (g.Name == ctx.EntryName)
         {
-            Add(errors, "QSEM009", $"in `{opName}`: the entry operation `{scope.EntryName}` cannot be called (its body is the program's top level, not a def)", g.Span);
+            Add(errors, "QSEM009", $"in `{opName}`: the entry operation `{ctx.EntryName}` cannot be called (its body is the program's top level, not a def)", g.Span);
             return;
         }
 
         // QSEM004 — measurement only exists in the assignment forms.
-        if (!ops.Contains(g.Name) && QoraGates.MeasureLike.Contains(g.Name))
+        if (!ctx.Ops.Contains(g.Name) && QoraGates.MeasureLike.Contains(g.Name))
         {
             Add(errors, "QSEM004", $"in `{opName}`: a bare measurement statement is not supported: assign the result instead: `bit r = {QoraGates.Measurement}(q[i]);`", g.Span);
             return;
         }
 
-        if (ops.Contains(g.Name))
+        if (ctx.Ops.Contains(g.Name))
         {
             // QSEM002 — OpenQASM gate modifiers apply to gates only, never to def subroutine calls.
             if (g.Functors.Contains("Controlled"))
@@ -370,22 +312,23 @@ public static class QoraValidator
             }
 
             // QSEM001 — Adjoint on a user operation compiles to a synthesized inverse def, which must exist.
-            if (g.Functors.FirstOrDefault() == "Adjoint" && !inverter.TryInvertOperation(g.Name, out _, out var reason))
+            if (g.Functors.FirstOrDefault() == "Adjoint" && !ctx.Inverter.TryInvertOperation(g.Name, out _, out var reason))
             {
                 Add(errors, "QSEM001", $"in `{opName}`: `Adjoint {g.Name}` cannot be compiled: {reason}", g.Span);
                 return;
             }
 
-            // QSEM006 — a def call must match the def's signature (an Adjoint call shares it).
-            if (opByName.TryGetValue(g.Name, out var callee))
-                CheckCallSignature(g, callee, scope, errors);
+            // QSEM006 — a def call must match the def's signature (an Adjoint call shares it). A user op IS
+            // an ICallableSig, so the one CheckCall a built-in gate uses validates it too.
+            if (ctx.OpByName.TryGetValue(g.Name, out var callee))
+                CheckCall(callee, g.Args, "", scope, opName, errors, g.Span);
             return;
         }
 
         // QSEM007 — not a user op and not a known built-in: a typo would otherwise emit an undefined gate.
         if (!QoraGates.Names.ContainsKey(g.Name))
         {
-            var hint = QoraGates.Names.Keys.Concat(ops).FirstOrDefault(k => string.Equals(k, g.Name, StringComparison.OrdinalIgnoreCase));
+            var hint = QoraGates.Names.Keys.Concat(ctx.Ops).FirstOrDefault(k => string.Equals(k, g.Name, StringComparison.OrdinalIgnoreCase));
             Add(errors, "QSEM007", $"in `{opName}`: `{g.Name}` is not a known gate or operation" + (hint is null ? string.Empty : $" (did you mean `{hint}`?)"), g.Span);
             return;
         }
@@ -397,117 +340,152 @@ public static class QoraValidator
             return;
         }
 
-        // QSEM006 — built-ins: argument count, then argument KIND per slot (only when the count fits,
-        // so the slots line up). Rotations take the angle first; every other slot is a qubit.
-        if (QoraGates.Arity.TryGetValue(g.Name, out var baseArity))
-        {
-            var expected = baseArity + (g.Functors.Contains("Controlled") ? 1 : 0);
-            if (g.Args.Count != expected)
-            {
-                Add(errors, "QSEM006", $"in `{opName}`: `{(g.Functors.Count > 0 ? string.Join(" ", g.Functors) + " " : "")}{g.Name}` expects {expected} argument(s) but got {g.Args.Count}", g.Span);
-                return;
-            }
-
-            var qubitStart = 0;
-            if (QoraGates.Rotations.Contains(g.Name))
-            {
-                qubitStart = 1;
-                if (IsQubitLike(g.Args[0], scope))
-                    Add(errors, "QSEM006", $"in `{opName}`: the first argument of `{g.Name}` is the rotation angle, but a qubit was passed (write `{g.Name}(angle, qubit)`)", g.Span);
-            }
-            for (var i = qubitStart; i < g.Args.Count; i++)
-                if (IsDefinitelyNotQubit(g.Args[i], scope))
-                    Add(errors, "QSEM006", $"in `{opName}`: argument {i + 1} of `{g.Name}` must be a qubit (like `q[0]`), not a number or classical value", g.Span);
-        }
+        // QSEM006 — a built-in gate is an ICallableSig too: QoraGates.SigOf derives its slots from GateInfo
+        // (a rotation exposes a leading angle value slot; every qubit slot broadcasts), and a Controlled
+        // functor adds one leading qubit slot. So the SAME CheckCall validates count + per-slot kind.
+        var gateSig = QoraGates.SigOf(g.Name, g.Functors.Contains("Controlled") ? 1 : 0);
+        if (gateSig is not null)
+            CheckCall(gateSig, g.Args, g.Functors.Count > 0 ? string.Join(" ", g.Functors) + " " : "", scope, opName, errors, g.Span);
     }
 
     /// <summary>
-    /// QSEM006 for user-operation calls: arity, then per-slot qubit shape/size — a sized qubit param
-    /// needs a register of that size, an unsized one a single qubit, a classical one no qubit at all.
-    /// Identifiers the caller's scope does not know are left alone (no symbol table for classicals yet).
+    /// QSEM006 for ANY call — a built-in gate or a user operation — against its <see cref="ICallableSig"/>:
+    /// argument count, then per-slot KIND. A VALUE slot (a rotation angle, or a classical parameter) rejects
+    /// a qubit. A QUBIT slot rejects a classical, and — for a user op — checks exact shape/size: a sized
+    /// register needs that many qubits, a single-qubit param one qubit, a generic <c>Qubit[n]</c> a known
+    /// register to bind <c>n</c>. A built-in gate's qubit slots broadcast (a whole register applies
+    /// element-wise), so they only require "is a qubit". The check reads the slot spec, never whether the
+    /// callee is a gate or an op; only message wording consults <see cref="ICallableSig.IsBuiltin"/>.
+    /// Identifiers the caller's scope does not resolve are left alone (treated as not-provably-wrong).
     /// </summary>
-    private static void CheckCallSignature(QGate g, QOperation callee, Scope scope, List<QoraError> errors)
+    private static void CheckCall(ICallableSig sig, IReadOnlyList<QArg> args, string functorPrefix,
+        Scope scope, string opName, List<QoraError> errors, QSpan? span)
     {
-        var opName = scope.Op.DisplayName ?? scope.Op.Name;
-        var calleeName = callee.DisplayName ?? callee.Name;
+        var calleeName = sig.CalleeName;
 
-        if (g.Args.Count != callee.Params.Count)
+        if (args.Count != sig.Params.Count)
         {
-            Add(errors, "QSEM006", $"in `{opName}`: `{calleeName}` expects {callee.Params.Count} argument(s) but got {g.Args.Count}", g.Span);
+            Add(errors, "QSEM006", $"in `{opName}`: `{functorPrefix}{calleeName}` expects {sig.Params.Count} argument(s) but got {args.Count}", span);
             return;
         }
 
-        for (int i = 0; i < callee.Params.Count; i++)
+        for (var i = 0; i < sig.Params.Count; i++)
         {
-            var p = callee.Params[i];
-            var arg = g.Args[i];
+            var p = sig.Params[i];
+            var arg = args[i];
+            var argSym = arg is QTextArg at ? scope.Lookup(at.Text) : null;   // a text arg's resolved symbol (null for `reg[i]`)
 
-            if (p.Type == QType.Qubit && p.RegisterSize is int need)
+            if (p.Type != QType.Qubit)
+            {
+                // VALUE slot (rotation angle, or classical param): a qubit here is wrong. Three forms — the
+                // whole argument IS a qubit, OR an INDEXED reference `name[i]` (Qora has no classical arrays,
+                // so `name[i]` is only ever a qubit-reference form — never a scalar value), both QSEM006; OR
+                // a qubit is buried inside a classical expression like `pi / q` (QSEM026, the arg-position D).
+                if (IsQubitLike(arg, scope) || arg is QQubitArg)
+                    Add(errors, "QSEM006", sig.IsBuiltin
+                        ? $"in `{opName}`: the first argument of `{calleeName}` is the rotation angle, but a qubit was passed (write `{calleeName}(angle, qubit)`)"
+                        : $"in `{opName}`: parameter `{p.Name}` of `{calleeName}` is `{p.Type.ToString()!.ToLowerInvariant()}`, but a qubit was passed", span);
+                else if (arg is QTextArg vt && FirstQubitIn(vt.Text, scope) is { } qn)
+                    Add(errors, "QSEM026", $"in `{opName}`: `{qn}` is a qubit, but `{vt.Text}` is used as a classical value ({(sig.IsBuiltin ? "the rotation angle" : $"the `{p.Name}` argument")} of `{calleeName}`) — a qubit has no numeric value", span);
+            }
+            else if (p.QubitBroadcast)
+            {
+                // built-in gate qubit slot: any qubit shape (a whole register broadcasts element-wise).
+                if (IsDefinitelyNotQubit(arg, scope))
+                    Add(errors, "QSEM006", $"in `{opName}`: argument {i + 1} of `{calleeName}` must be a qubit (like `q[0]`), not a number or classical value", span);
+            }
+            else if (p.RegisterSize is int need)
             {
                 if (arg is QQubitArg qa)
-                    Add(errors, "QSEM006", $"in `{opName}`: parameter `{p.Name}` of `{calleeName}` is a register of {need} qubit(s), but `{qa.Reg}[{qa.Index}]` is a single qubit", g.Span);
-                else if (arg is QTextArg ta && scope.Registers.TryGetValue(ta.Text, out var have) && have != need)
-                    Add(errors, "QSEM006", $"in `{opName}`: parameter `{p.Name}` of `{calleeName}` is a register of {need} qubit(s), but `{ta.Text}` has {have}", g.Span);
-                else if (arg is QTextArg tb && !scope.Registers.ContainsKey(tb.Text) && (scope.SingleQubits.Contains(tb.Text) || IsClassicalText(tb.Text, scope)))
-                    Add(errors, "QSEM006", $"in `{opName}`: parameter `{p.Name}` of `{calleeName}` is a qubit register, but `{tb.Text}` is not one", g.Span);
+                    Add(errors, "QSEM006", $"in `{opName}`: parameter `{p.Name}` of `{calleeName}` is a register of {need} qubit(s), but `{qa.Reg}[{qa.Index}]` is a single qubit", span);
+                else if (arg is QTextArg ta && IsSizedRegister(argSym, out var have) && have != need)
+                    Add(errors, "QSEM006", $"in `{opName}`: parameter `{p.Name}` of `{calleeName}` is a register of {need} qubit(s), but `{ta.Text}` has {have}", span);
+                else if (arg is QTextArg tb && !IsSizedRegister(argSym, out _) && (IsSingleQubit(argSym) || IsClassicalText(tb.Text, scope)))
+                    Add(errors, "QSEM006", $"in `{opName}`: parameter `{p.Name}` of `{calleeName}` is a qubit register, but `{tb.Text}` is not one", span);
             }
-            else if (p.Type == QType.Qubit && p.SizeParam is not null)
+            else if (p.SizeParam is not null)
             {
                 // generic register `Qubit[n]`: n binds from the argument's size, so the argument MUST be a
                 // known register — a concrete one, or the caller's own symbolic register (which becomes
                 // concrete when the caller is itself specialized). A single qubit, a classical value, or an
                 // unknown identifier cannot bind a size.
                 if (arg is QQubitArg qa)
-                    Add(errors, "QSEM006", $"in `{opName}`: parameter `{p.Name}` of `{calleeName}` is a qubit register, but `{qa.Reg}[{qa.Index}]` is a single qubit", g.Span);
-                else if (arg is QTextArg ta && !scope.Registers.ContainsKey(ta.Text) && !scope.SymbolicRegisters.Contains(ta.Text))
-                    Add(errors, "QSEM006", $"in `{opName}`: parameter `{p.Name}` of `{calleeName}` needs a qubit register to bind its size `{p.SizeParam}`, but `{ta.Text}` is not a known register", g.Span);
+                    Add(errors, "QSEM006", $"in `{opName}`: parameter `{p.Name}` of `{calleeName}` is a qubit register, but `{qa.Reg}[{qa.Index}]` is a single qubit", span);
+                else if (arg is QTextArg ta && !IsSizedRegister(argSym, out _) && !IsSymbolicRegister(argSym))
+                    Add(errors, "QSEM006", $"in `{opName}`: parameter `{p.Name}` of `{calleeName}` needs a qubit register to bind its size `{p.SizeParam}`, but `{ta.Text}` is not a known register", span);
             }
-            else if (p.Type == QType.Qubit)
+            else
             {
-                if (arg is QTextArg ta && (scope.Registers.ContainsKey(ta.Text) || IsClassicalText(ta.Text, scope)))
-                    Add(errors, "QSEM006", scope.Registers.ContainsKey(ta.Text)
+                // single-qubit slot (user op)
+                if (arg is QTextArg ta && (IsSizedRegister(argSym, out _) || IsClassicalText(ta.Text, scope)))
+                    Add(errors, "QSEM006", IsSizedRegister(argSym, out _)
                         ? $"in `{opName}`: parameter `{p.Name}` of `{calleeName}` is a single qubit, but `{ta.Text}` is a whole register (pass `{ta.Text}[i]`)"
-                        : $"in `{opName}`: parameter `{p.Name}` of `{calleeName}` is a qubit, but `{ta.Text}` is not one", g.Span);
-            }
-            else if (IsQubitLike(arg, scope))
-            {
-                Add(errors, "QSEM006", $"in `{opName}`: parameter `{p.Name}` of `{calleeName}` is `{p.Type.ToString()!.ToLowerInvariant()}`, but a qubit was passed", g.Span);
+                        : $"in `{opName}`: parameter `{p.Name}` of `{calleeName}` is a qubit, but `{ta.Text}` is not one", span);
             }
         }
     }
 
-    // --- argument classification helpers ---
+    // --- qubit-shape queries over the unified symbol table ---
+    // Every classification the walk needs is a query on the resolved Symbol: Type says qubit-or-not,
+    // RegisterSize / SizeParam say sized-register / symbolic-register / single-qubit. There is NO second
+    // scope model — a name means whatever `scope.Lookup` resolves it to at this lexical point.
+
+    private static bool IsQubit(Symbol? s) => s?.Type == QType.Qubit;
+
+    private static bool IsSizedRegister(Symbol? s, out int size)
+    {
+        if (s is { Type: QType.Qubit, RegisterSize: int n } && n >= 1) { size = n; return true; }   // an invalid size (0, or -1 from an int overflow) is not a usable sized register
+        size = 0;
+        return false;
+    }
+
+    private static bool IsSymbolicRegister(Symbol? s) => s is { Type: QType.Qubit, SizeParam: not null };
+    private static bool IsSingleQubit(Symbol? s) => s is { Type: QType.Qubit, RegisterSize: null, SizeParam: null };
 
     private static bool IsQubitLike(QArg arg, Scope scope) => arg switch
     {
-        QQubitArg => true,
-        QTextArg t => scope.Registers.ContainsKey(t.Text) || scope.SingleQubits.Contains(t.Text) || scope.SymbolicRegisters.Contains(t.Text),
+        QQubitArg q => IsQubit(scope.Lookup(q.Reg)),
+        QTextArg t => IsQubit(scope.Lookup(t.Text)),
         _ => false,
     };
 
-    /// <summary>True only when the argument provably cannot denote a qubit (numbers, expressions, known classicals).</summary>
-    private static bool IsDefinitelyNotQubit(QArg arg, Scope scope) =>
-        arg is QTextArg t && !scope.Registers.ContainsKey(t.Text) && !scope.SingleQubits.Contains(t.Text)
-                          && IsClassicalText(t.Text, scope);
+    /// <summary>The first identifier inside a value expression that resolves to a qubit, or null — finds a
+    /// qubit smuggled into a classical position (<c>pi / q</c>) that the whole-argument <see cref="IsQubitLike"/>
+    /// check misses. Shares the symbol table's tokenizer so both see identifiers identically (QSEM026).</summary>
+    private static string? FirstQubitIn(string text, Scope scope) =>
+        SymbolTableBuilder.Identifiers(text).FirstOrDefault(n => IsQubit(scope.Lookup(n)));
+
+    /// <summary>True only when the argument provably cannot denote a qubit: a number/expression, or a name
+    /// that resolves to a known non-qubit (a classical value, or a register hidden by a local of the same name).</summary>
+    private static bool IsDefinitelyNotQubit(QArg arg, Scope scope) => arg switch
+    {
+        QQubitArg q => scope.Lookup(q.Reg) is { Type: { } t } && t != QType.Qubit,   // `a[0]` where a resolves to an int
+        QTextArg t => IsClassicalText(t.Text, scope),
+        _ => false,
+    };
 
     private static bool IsClassicalText(string text, Scope scope) =>
-        text.Contains(' ')                                   // any operator expression: `pi / 2`, `a + 1`
-        || (text.Length > 0 && char.IsDigit(text[0]))        // numeric literal
+        text.Contains(' ')                                              // any operator expression: `pi / 2`, `a + 1`
+        || (text.Length > 0 && char.IsDigit(text[0]))                  // numeric literal
         || text is "pi" or "tau" or "euler"
-        || scope.Classicals.Contains(text);                  // declared variable / int/bit param / loop var
+        || (scope.Lookup(text) is { Type: { } t } && t != QType.Qubit); // a name that resolves to a non-qubit
 
     /// <summary>QSEM016 — literal index bounds against known register sizes; no indexing single qubits.</summary>
-    private static void CheckQubitIndex(QQubitArg q, Scope scope, List<QoraError> errors, QSpan? span)
+    private static void CheckQubitIndex(QQubitArg q, Scope scope, string opName, List<QoraError> errors, QSpan? span)
     {
-        var opName = scope.Op.DisplayName ?? scope.Op.Name;
-        if (scope.SingleQubits.Contains(q.Reg))
+        var sym = scope.Lookup(q.Reg);
+        // QSEM016 — an index must be a classical value; a qubit used as an index (`q[n]` where n is a
+        // register) would emit invalid QASM. The symbol table resolves the index name to its actual kind.
+        if (scope.Lookup(q.Index) is { Type: QType.Qubit })
+            Add(errors, "QSEM016", $"in `{opName}`: `{q.Reg}[{q.Index}]` uses the qubit `{q.Index}` as an index; an index must be a classical value", span);
+        if (IsSingleQubit(sym))
         {
             Add(errors, "QSEM016", $"in `{opName}`: `{q.Reg}` is a single qubit and cannot be indexed (`{q.Reg}[{q.Index}]`)", span);
             return;
         }
-        if (scope.Registers.TryGetValue(q.Reg, out var size)
+        if (IsSizedRegister(sym, out var size)
             && q.Index.Length > 0 && q.Index.All(char.IsDigit)
-            && int.Parse(q.Index) >= size)
+            && (!int.TryParse(q.Index, out var idx) || idx >= size))   // an index too big for int is, a fortiori, out of range — parse safely, don't crash
         {
             Add(errors, "QSEM016", $"in `{opName}`: index `{q.Reg}[{q.Index}]` is out of range; `{q.Reg}` has {size} qubit(s) (valid: 0..{size - 1})", span);
         }
@@ -517,9 +495,7 @@ public static class QoraValidator
     private static (string Reg, string? Index)? QubitRefOf(QArg arg, Scope scope) => arg switch
     {
         QQubitArg q => (q.Reg, q.Index),
-        QTextArg t when scope.Registers.ContainsKey(t.Text) => (t.Text, (string?)null),
-        QTextArg t when scope.SingleQubits.Contains(t.Text) => (t.Text, (string?)null),
-        QTextArg t when scope.SymbolicRegisters.Contains(t.Text) => (t.Text, (string?)null),
+        QTextArg t when IsQubit(scope.Lookup(t.Text)) => (t.Text, (string?)null),
         _ => null,
     };
 

@@ -4,4 +4,7 @@
     <Project Path="src/Qora.Playground/Qora.Playground.csproj" />
     <Project Path="src/Qora/Qora.csproj" />
   </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Qora.Tests/Qora.Tests.csproj" />
+  </Folder>
 </Solution>
