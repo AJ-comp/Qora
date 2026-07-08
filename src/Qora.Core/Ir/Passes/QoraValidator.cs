@@ -76,12 +76,19 @@ namespace Qora.Ir.Passes;
 /// </summary>
 public static class QoraValidator
 {
-    public static List<QoraError> Validate(QProgram? program)
+    public static List<QoraError> Validate(QProgram? program) => Validate(program, out _);
+
+    /// <summary>Validate AND keep what validation proved: the scope trees built per operation are collected
+    /// into a <see cref="SemanticModel"/> (Id-keyed side table) instead of being discarded, so later stages
+    /// consume the validation-time facts rather than re-deriving them.</summary>
+    public static List<QoraError> Validate(QProgram? program, out SemanticModel? model)
     {
+        model = null;
         var errors = new List<QoraError>();
         if (program is null) return errors;
 
         if (program.Operations.Count == 0) return errors;
+        model = new SemanticModel();
 
         var ops = program.Operations.Select(o => o.Name).ToHashSet();
         var opByName = new Dictionary<string, QOperation>();
@@ -143,6 +150,7 @@ public static class QoraValidator
             // to its scope so the walk below resolves every operand with correct nesting. Nothing re-derives it.
             var scopeOf = new Dictionary<IReadOnlyList<QStmt>, Scope>();
             var root = SymbolTableBuilder.Build(op, errors, scopeOf);
+            model.AddOperation(op, root);
 
             var ctx = new Ctx(op, entry.Name, ops, opByName, inverter, errors, scopeOf);
             Walk(op.Body, root, ctx, inControlFlow: false);

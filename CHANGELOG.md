@@ -11,6 +11,58 @@ emitted as **OpenQASM 3.0**.
 > **Note:** Qora was renamed from **Ket** on 2026-07-01 (a "Ket" extension already existed). Versions
 > 0.1–0.7 below were authored under the old name.
 
+## 0.16 — 2026-07-08
+
+### Added
+- **`within/apply` conjugation in the IR (`QConjugate` + `Ir/Passes/ConjugationLowering.cs`).** The
+  compute–act–uncompute pattern (U V U†) is now a first-class IR construct: the lowering pass flattens
+  each conjugation into the `within` statements, the `apply` statements, and a synthesized inverse of
+  `within` — installed *before* `AdjointMaterializer`, so every synthesized `Adjoint` becomes a real
+  inverse def that flows through the mangler's collision resolution. A `within` block that cannot be
+  inverted (measurement, assignment, `use`, `while`/`repeat`) is a clean, span-carrying **QSEM027**, and
+  emission is gated — an uncompute is never silently dropped. No surface syntax yet (that is the next
+  step); this is the foundation the automatic-uncomputation ladder builds on.
+- **Stable node identity + a persistent semantic model.** Every IR statement, operation, and parameter
+  now carries an `Id` minted at construction and preserved through `with` rewrites (C# record semantics:
+  `new` = fresh identity, `with` = same node, edited). The symbol table built at the final validation is
+  no longer discarded and rebuilt per consumer — it is packaged as an Id-keyed **`SemanticModel`**
+  side table (`Ir/Passes/SemanticModel.cs`) and carried to the end of the pipeline, Roslyn-SemanticModel
+  / rust-analyzer-AstId style: build once, query everywhere. The emitter's variable-type seeding and the
+  `--stages` symbols view now consume the model instead of re-deriving it, which joins a node's FINAL
+  (post-mangling) name to its validation-time facts by Id. Subtree-copying passes (`Monomorphizer`,
+  `ConjugationLowering`, `AdjointMaterializer`) re-mint Ids via a new **`ReId`** helper, recording
+  `DerivedFrom` lineage so a copied statement still resolves to its source's symbol. This model is the
+  designated result store for the upcoming effect analysis (qfree / liveness).
+- **Id-uniqueness safety net.** `ReferentialCheck` now sweeps the whole final tree for duplicate node
+  Ids — a pass that copies a subtree without `ReId` fails loudly as `QINTERNAL` instead of silently
+  corrupting every Id-keyed table.
+- **`--stages` reports `symbols`** — the validation-time symbol table (scopes, kinds, types, const
+  values, use counts), rendered from the persisted model.
+
+### Tests
+- +11 cases (conjugation lowering; node identity, lineage, and pipeline-wide Id uniqueness) → 140 total.
+  The refactor is observably invisible: demo QASM and every `--stages` field are byte-identical to 0.15.
+
+## 0.15 — 2026-07-06
+
+### Added
+- **Measurement inside a condition**: `if (M(q[0]) == 1)` (and `while` / `repeat … until`) now works,
+  Q#-style — a new `Ir/Passes/MeasureConditionLowering.cs` hoists the measurement into a `bit` and
+  tests that, so the emitted OpenQASM is valid.
+- **Measure bits are block-scoped** like `var`/`const`; using one after its block is **QSEM025**.
+- **`const` accepts any immutable value** (literal, runtime variable, measurement — Q#-`let` style).
+  A runtime-bound `const` is emitted as a plain never-reassigned variable by a new OpenQASM
+  target-lowering pass (`Ir/Passes/OpenQasmLowering.cs`), since OQ3 `const` is compile-time only.
+- **Unified per-slot argument-kind checking** for built-in gates AND user operations via one
+  `ICallableSig` signature.
+- **Hardening** — each of these is now a precise diagnostic instead of invalid QASM or a crash: a qubit
+  in a classical-value position or as an assignment target (**QSEM026**), `!` on any classical value
+  including loop variables, `var x = <bit>` inferred as `bit` (not `int`), and an oversized register
+  size/index (clean QSEM016 instead of an `int.Parse` crash).
+
+### Tests
+- New `tests/Qora.Tests` xUnit project: 129 cases over the whole front end.
+
 ## 0.14 — 2026-07-05
 
 ### Added

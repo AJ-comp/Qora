@@ -24,6 +24,8 @@ public static class ReferentialCheck
         if (program.Operations.Count == 0) return errors;
         var opNames = program.Operations.Select(o => o.Name).ToHashSet();
 
+        CheckIdUniqueness(program, errors);
+
         foreach (var op in program.Operations)
         {
             // this op's in-scope declared names (mangled). Since NameMangler renames any user name that
@@ -35,6 +37,46 @@ public static class ReferentialCheck
             CheckBody(op.Body, op.Name, declared, opNames, errors);
         }
         return errors;
+    }
+
+    /// <summary>
+    /// Sweep every op / param / statement in the final program and flag any <see cref="QNodeIds">node
+    /// Id</see> that appears twice. A duplicate means a pass duplicated a subtree with <c>with</c> and
+    /// installed the copy without <see cref="ReId"/> — which would silently corrupt every side table
+    /// keyed by Id (the <see cref="SymbolTableBuilder"/>-derived semantic model first among them).
+    /// </summary>
+    private static void CheckIdUniqueness(QProgram program, List<QoraError> errors)
+    {
+        var seen = new HashSet<int>();
+        void Visit(int id, QSpan? span)
+        {
+            if (!seen.Add(id))
+                errors.Add(new QoraError(
+                    $"internal compiler error: duplicate node id {id} — a pass copied a subtree without ReId — please report this",
+                    "QINTERNAL", span?.Start ?? -1, span?.End ?? -1));
+        }
+        void Walk(IReadOnlyList<QStmt> stmts)
+        {
+            foreach (var s in stmts)
+            {
+                Visit(s.Id, s.Span);
+                switch (s)
+                {
+                    case QIf i: Walk(i.Then); Walk(i.Else); break;
+                    case QFor f: Walk(f.Body); break;
+                    case QWhile w: Walk(w.Body); break;
+                    case QRepeat r: Walk(r.Body); break;
+                    case QConjugate c: Walk(c.Within); Walk(c.Apply); break;
+                }
+            }
+        }
+        Visit(program.Id, null);
+        foreach (var op in program.Operations)
+        {
+            Visit(op.Id, op.Span);
+            foreach (var p in op.Params) Visit(p.Id, op.Span);
+            Walk(op.Body);
+        }
     }
 
     private static void CollectDecls(IReadOnlyList<QStmt> stmts, HashSet<string> into)
@@ -89,8 +131,13 @@ public static class ReferentialCheck
                     CheckTokens(r.Until.Text, opName, known, errors, r.Span);
                     break;
                 case QConjugate c:
-                    CheckBody(c.Within, opName, known, opNames, errors);
-                    CheckBody(c.Apply, opName, known, opNames, errors);
+                    // ConjugationLowering flattens every QConjugate into straight-line gates + a synthesized
+                    // inverse BEFORE mangling. One surviving to here means that pass was skipped or a later
+                    // pass minted a fresh conjugation — a compiler bug, not a user error. Fail loudly rather
+                    // than silently dropping its gates at emission (the emitter has no QConjugate case).
+                    errors.Add(new QoraError(
+                        $"internal compiler error: in `{opName}`, a within/apply block reached emission un-flattened (ConjugationLowering did not run) — please report this",
+                        "QINTERNAL", c.Span?.Start ?? -1, c.Span?.End ?? -1));
                     break;
             }
     }

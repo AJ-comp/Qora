@@ -2,6 +2,21 @@
 
 All notable changes to the Qora Language extension.
 
+## 0.10.0
+
+- Bundles the **Qora v0.16** compiler — an architecture release:
+  - **Stable node identity + persistent semantic model**: the symbol table built at validation is now
+    carried through the whole pipeline as an Id-keyed side table (Roslyn-SemanticModel style) instead
+    of being rebuilt per consumer, and a new Id-uniqueness safety net fails loudly (`QINTERNAL`) on any
+    compiler bug that would corrupt it. Groundwork for effect analysis / automatic uncomputation.
+  - **`within/apply` conjugation in the IR**: compute–act–uncompute (U V U†) flattening with a
+    synthesized inverse, gated by a clean **QSEM027** when the `within` block cannot be inverted.
+    (IR-level only for now — surface syntax comes next.)
+  - Compiler test suite grew to 140 cases; emitted QASM is byte-identical to v0.15.
+- **Compilation-stages panel: new symbol-table column.** "Show compilation stages" now renders the
+  validation-time symbol table (scopes, kinds, types, const values, use counts) between the IR and
+  inverse-IR columns, straight from the compiler's persisted semantic model.
+
 ## 0.9.0
 
 - Bundles the **Qora v0.15** compiler — a correctness & ergonomics release:

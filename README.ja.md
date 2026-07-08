@@ -273,18 +273,31 @@ python tools/run_braket.py yourfile.qor --shots 1000
 
 正式な段階別の説明は  **[Qora コンパイルパイプライン設計](https://aj-comp.github.io/Qora/ja/architecture.html)** にあります。
 
-要約すると、Qora はパーサーが作った AST を自分の IR に移し、その IR の上で名前解決、検証、
-特殊化、逆合成、名前整理、出力を順番に進めます。
+コンパイラとは、あなたが書いたコードを、量子コンピュータが実際に実行できる標準形式（**OpenQASM 3**）へ
+翻訳するプログラムです。Qora はそれを一気にやらず、それぞれが 1 つの仕事だけをする小さなステップに分けて行います。
 
-| グループ | 段階 | 出力 | 役割 |
-|---|---|---|---|
-| 1. 読み取る | ソース → AST | エンジン AST | Janglim がソーステキストを構文木に変えます |
-| 2. Qora が所有する | AST → Qora IR | 型付き IR | `QoraLowering` がパーサーの木を Qora 専用の構造へ移します |
-| 3. 名前を解決する | import ロード → 統合 → 名前解決 | FQN IR | 複数ファイルを統合し、すべての呼び出し先を完全修飾名に固定します |
-| 4. 意味を検証する | 検証 | エラー一覧またはクリーンな IR | 問題があればすべてのエラーを集めて、ここで停止します |
-| 5. 変換する | ジェネリック特殊化 → adjoint 実体化 | 出力準備済み IR | `Qubit[n]` を実際のサイズにし、`Adjoint` 呼び出しを合成された逆演算へ変えます |
-| 6. 出力を準備する | 名前マングリング → 参照検査 | OpenQASM 安全 IR | OpenQASM の名前衝突を避け、すべての参照が解決されているか確認します |
-| 7. 出力する | OpenQASM 出力 | OpenQASM 3 | 最後のエミッタが、決定済みの IR をテキストとして出力します |
+まず最初に、あなたのコードを内部で扱いやすい形へ移します。これを **IR（中間表現）** と呼びます — コンパイラが
+あなたのプログラムを自分なりに整理して書き留めた「作業用メモ」のようなものです。元のテキストを読み直す代わりに
+この IR を作り変えていくので、以降の各ステップは単純で間違えにくくなります。
+
+その後、この IR の上で名前を確認し、規則違反を検査し、必要な変換を施し、最後に OpenQASM のテキストとして
+書き出します。下の表の各行が、その 1 ステップずつです:
+
+| ステージ | パス | 入力 | 出力 | 何をするか |
+|---|---|---|---|---|
+| Parse | *Janglim エンジン* | ソーステキスト | AST | あなたが書いたソースコードを、コンパイラが扱える構文木に変えます（形だけで、まだ意味はありません）。 |
+| Lower | `QoraLowering` | AST | `QProgram` (IR) | そのパーサーの木を Qora 独自のデータ構造（IR）に組み直します。以降のすべてはこの IR の上で動きます。 |
+| Expand | `ModuleLoader` | `QProgram` (IR) | `QProgram` (IR) | `import` で取り込んだ複数の `.qor` ファイルを 1 つのプログラムに統合します。以降は 1 ファイルだけ見れば済みます。 |
+| Desugar measure | `MeasureConditionLowering` | `QProgram` (IR) | `QProgram` (IR) | `if (M(q[0]) == 1)` のように条件の中で直接行う測定を、「まず `bit` に測定して、その `bit` を検査する」形に書き換えます（OpenQASM は条件の中で測定できないため）。 |
+| Resolve | `Resolver` | `QProgram` (IR) | `QProgram` (IR) | `Bell(q)` のような短い呼び出しが実際どの演算を指すのかを突き止め、完全な名前（例: `GatesLib.Bell`）に固定します。 |
+| Validate | `QoraValidator` + `SymbolTableBuilder` | `QProgram` (IR) | `QProgram` (IR)（またはエラー一覧） | プログラムが量子コンピュータに本当に実行できる内容かをすべて検査し、誤りがあればすべてのエラーを集めて報告し、ここで停止します（OpenQASM は出力されません）。 |
+| Monomorphize | `Monomorphizer` | `QProgram` (IR) | `QProgram` (IR) | `Qubit[n]` のようにサイズ未定の演算を、呼び出しごとの実際のサイズに合わせて具体的なコピーとして生成します（C++ テンプレートや Rust ジェネリックと同じ方式です）。 |
+| Flatten conjugation | `ConjugationLowering` | `QProgram` (IR) | `QProgram` (IR) | within/apply（計算・使用・打ち消し）のまとまりを普通のゲート列へ展開し、末尾に `within` の逆演算を自動で付けて一時量子ビットを片づけます。 |
+| Materialize | `AdjointMaterializer` | `QProgram` (IR) | `QProgram` (IR) | `Adjoint Foo`（「Foo を逆に実行」）を、実際に存在する逆関数 `Foo__adj` に作り上げます（本体を逆順にし、各ゲートを逆にします）。 |
+| Mangle | `NameMangler` | `QProgram` (IR) | `QProgram` (IR) | ユーザーが付けた名前が OpenQASM のキーワードやゲート名と衝突する場合、安全な名前に変えます（衝突したときだけ `_` を付与）。名前空間のドットも下線に平坦化します（`MyLib.Bell` → `MyLib_Bell`）。 |
+| Check | `ReferentialCheck` | `QProgram` (IR) | `QProgram` (IR)（またはエラー一覧） | 最後の安全網です: プログラムが使うすべての名前が実際に宣言されたものを指しているか確認し、食い違えば（ユーザーの誤りではなくコンパイラのバグなので）大きくエラーにします。 |
+| Target-lower | `OpenQasmLowering` | `QProgram` (IR) | `QProgram` (IR) | Qora では有効でも OpenQASM の規則に合わない箇所を調整します — 例えば実行時の値を持つ `const` を普通の変数に変えます。 |
+| Emit | `QasmEmitter` | `QProgram` (IR) | OpenQASM テキスト | ここまでで決定済みの IR を、最後に OpenQASM 3 のテキストとして書き出します。もう何も判断しない「純粋なプリンタ」です。 |
 
 - **型付き IR**(`src/Qora.Core/Ir/`)はコンパイラが最後まで所有します; パースエンジンは lowering の
   境界で止まります。
@@ -294,8 +307,9 @@ python tools/run_braket.py yourfile.qor --shots 1000
   キーワード、stdgates のゲート名、またはすでに出力された別の名前と衝突するときだけ `_` を付けます。
   エラーとコンパイル段階ビューは元の名前/FQNを保ち、QASM だけが衝突しない名前を表示します。
 - **adjoint 実体化器**は純粋な IR→IR インバータを使い、全演算 `Adjoint` 呼び出しを合成された
-  逆演算へ変換してから名前マングリングへ渡します。将来、自動 uncomputation を注入するパスも
-  この機構をそのまま再利用します。
+  逆演算へ変換してから名前マングリングへ渡します。同じインバータはすでに **conjugation lowering** を
+  支えており、`within`/`apply`(compute · apply · uncompute)ノードをゲート列へ平坦化します —
+  自動 uncomputation へ向かう道のりで最初に実装された部分であり、残るのはそれを注入する解析だけです。
 
 ## リポジトリ構成
 

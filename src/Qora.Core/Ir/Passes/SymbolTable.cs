@@ -8,8 +8,9 @@ public enum SymbolKind { Parameter, Register, MeasureBit, Var, Const, LoopVar }
 
 /// <summary>One place a name is used (a gate operand, a measurement target, an angle argument, …).
 /// <see cref="Order"/> is a pre-order index over the operation's statements — monotonic in program order,
-/// so the LAST use of a register is its liveness "death point" in straight-line code.</summary>
-public sealed record UseSite(int Order, string Detail);
+/// so the LAST use of a register is its liveness "death point" in straight-line code. <see cref="NodeId"/>
+/// is the using statement's stable <see cref="QStmt.Id"/>, tying the use back to the exact IR node.</summary>
+public sealed record UseSite(int Order, string Detail, int NodeId);
 
 /// <summary>One declared name and everything the compiler knows about it. <see cref="Uses"/> accumulates as
 /// the table is built. This is the single per-symbol record every semantic pass reads — duplicate/shadow
@@ -22,14 +23,15 @@ public sealed class Symbol
     public bool IsConst { get; }
     public string? ConstValue { get; }          // a const's initializer text (for folding); null for var/measure/register
     public QSpan? DeclSpan { get; }
+    public int DeclNodeId { get; }              // stable Id of the declaring node (QParam / QUse / QDecl / QFor)
     public int? RegisterSize { get; }           // concrete qubit count: `use q = Qubit[N]` and sized qubit params; null otherwise
     public string? SizeParam { get; }           // symbolic register size name: `Qubit[n] q` (unknown until monomorphization); null otherwise
     public List<UseSite> Uses { get; } = new();
 
     public Symbol(string name, SymbolKind kind, QType? type = null, bool isConst = false, string? constValue = null,
-        QSpan? declSpan = null, int? registerSize = null, string? sizeParam = null)
-        => (Name, Kind, Type, IsConst, ConstValue, DeclSpan, RegisterSize, SizeParam)
-         = (name, kind, type, isConst, constValue, declSpan, registerSize, sizeParam);
+        QSpan? declSpan = null, int? registerSize = null, string? sizeParam = null, int declNodeId = 0)
+        => (Name, Kind, Type, IsConst, ConstValue, DeclSpan, RegisterSize, SizeParam, DeclNodeId)
+         = (name, kind, type, isConst, constValue, declSpan, registerSize, sizeParam, declNodeId);
 }
 
 /// <summary>
@@ -106,14 +108,15 @@ public static class SymbolTableBuilder
         foreach (var p in op.Params)
             Declare(root, new Symbol(p.Name, SymbolKind.Parameter, p.Type, declSpan: p.Span,
                 registerSize: p.Type == QType.Qubit ? p.RegisterSize : null,
-                sizeParam: p.Type == QType.Qubit ? p.SizeParam : null));
+                sizeParam: p.Type == QType.Qubit ? p.SizeParam : null,
+                declNodeId: p.Id));
 
         void SeedRegisters(IReadOnlyList<QStmt> stmts)
         {
             foreach (var s in stmts)
                 switch (s)
                 {
-                    case QUse u: Declare(root, new Symbol(u.Name, SymbolKind.Register, QType.Qubit, declSpan: u.Span, registerSize: u.Size)); break;
+                    case QUse u: Declare(root, new Symbol(u.Name, SymbolKind.Register, QType.Qubit, declSpan: u.Span, registerSize: u.Size, declNodeId: u.Id)); break;
                     case QIf i: SeedRegisters(i.Then); SeedRegisters(i.Else); break;
                     case QFor f: SeedRegisters(f.Body); break;
                     case QWhile w: SeedRegisters(w.Body); break;
@@ -131,14 +134,16 @@ public static class SymbolTableBuilder
             .Select(p => p.SizeParam!)
             .ToHashSet();
 
-        // Resolve a referenced name. Found → record a use. Not found → it is neither a hoisted name
-        // (registers/measure bits seed the root) nor an in-scope classical, so it is an unknown name OR a
-        // classical used before its declaration: QSEM025. Expression literals (pi/tau/euler/true/false) and
-        // the symbolic register size are legitimate non-symbols and never error.
+        // Resolve a referenced name. Found → record a use (tagged with the using statement's node Id). Not
+        // found → it is neither a hoisted name (registers/measure bits seed the root) nor an in-scope
+        // classical, so it is an unknown name OR a classical used before its declaration: QSEM025.
+        // Expression literals (pi/tau/euler/true/false) and the symbolic register size are legitimate
+        // non-symbols and never error.
+        var currentStmtId = 0;   // set by Walk to the statement being visited, so uses carry their node Id
         void Record(Scope scope, string name, string detail, QSpan? span)
         {
             var sym = scope.Lookup(name);
-            if (sym is not null) sym.Uses.Add(new UseSite(order, detail));
+            if (sym is not null) sym.Uses.Add(new UseSite(order, detail, currentStmtId));
             else if (!IsReservedName(name) && !sizeParams.Contains(name))
                 Add(errors, "QSEM025", $"in `{opName}`: `{name}` is not declared in scope here — an unknown name, or a name used before its declaration", span);
         }
@@ -170,6 +175,7 @@ public static class SymbolTableBuilder
             foreach (var s in stmts)
             {
                 order++;
+                currentStmtId = s.Id;
                 switch (s)
                 {
                     case QGate g:
@@ -203,12 +209,12 @@ public static class SymbolTableBuilder
                         // may reuse a name — they dedup into one emitted bit and never coexist.)
                         if (scope.Parent?.Lookup(md.Name) is { Kind: SymbolKind.Register or SymbolKind.Parameter or SymbolKind.MeasureBit } encl)
                             Add(errors, "QSEM015", $"in `{opName}`: measure bit `{md.Name}` reuses the name of an enclosing {KindLabel(encl.Kind)}; a measured result is emitted as one top-level `bit {md.Name};`, so its name must be unique across the operation's registers, parameters and measure bits — rename one", md.Span);
-                        Declare(scope, new Symbol(md.Name, SymbolKind.MeasureBit, QType.Bit, isConst: md.IsConst, declSpan: md.Span));
+                        Declare(scope, new Symbol(md.Name, SymbolKind.MeasureBit, QType.Bit, isConst: md.IsConst, declSpan: md.Span, declNodeId: md.Id));
                         break;
                     case QDecl d:
                         if (d.Value is QText dv) RecordExpr(scope, dv.Text, $"init {d.Name} = {dv.Text}", d.Span, classicalOnly: true);  // an initializer is a classical value
                         Declare(scope, new Symbol(d.Name, d.IsConst ? SymbolKind.Const : SymbolKind.Var, d.Type,
-                            d.IsConst, d.IsConst && d.Value is QText qt ? qt.Text : null, d.Span));
+                            d.IsConst, d.IsConst && d.Value is QText qt ? qt.Text : null, d.Span, declNodeId: d.Id));
                         break;
                     case QAssign { Value: QMeasure { Target: { } at } } ma:
                         Record(scope, at.Reg, $"measure @ {at.Reg}[{at.Index}]", ma.Span);
@@ -223,7 +229,7 @@ public static class SymbolTableBuilder
                         RecordExpr(scope, f.To, $"for bound {f.To}", f.Span, classicalOnly: true);
                         RecordExpr(scope, f.Step, $"for step {f.Step}", f.Span, classicalOnly: true);
                         var loop = new Scope(scope);                                                        // …then the loop var gets its own scope
-                        Declare(loop, new Symbol(f.Var, SymbolKind.LoopVar, QType.Int, declSpan: f.Span));
+                        Declare(loop, new Symbol(f.Var, SymbolKind.LoopVar, QType.Int, declSpan: f.Span, declNodeId: f.Id));
                         Walk(f.Body, new Scope(loop));                                                      // body is a CHILD of the loop-var scope
                         break;
                     case QIf i:
@@ -240,6 +246,7 @@ public static class SymbolTableBuilder
                     case QRepeat r:
                         var repeatBody = new Scope(scope);
                         Walk(r.Body, repeatBody);
+                        currentStmtId = r.Id;   // the nested Walk moved it; the until belongs to the repeat itself
                         RecordExpr(repeatBody, r.Until.Text, $"until ({r.Until.Text})", r.Span, classicalOnly: true);  // until runs AFTER the body, so it sees body-local names
                         break;
                     case QConjugate c:
@@ -315,8 +322,11 @@ public static class SymbolTableBuilder
 
     // --- debug rendering (the --stages view) ---
 
-    /// <summary>Render the symbol table of every operation as text (for the <c>--stages</c> debug view).</summary>
-    public static string Format(QProgram? program)
+    /// <summary>Render the symbol table of every operation as text (for the <c>--stages</c> debug view).
+    /// With a <see cref="SemanticModel"/>, each operation's scope tree is READ from the model (the one
+    /// validation built) instead of rebuilt; an op the model has not seen — e.g. a still-generic op when
+    /// the model was built post-monomorphization — falls back to a rebuild. Same output either way.</summary>
+    public static string Format(QProgram? program, SemanticModel? model = null)
     {
         if (program is null || program.Operations.Count == 0) return string.Empty;
         var sb = new StringBuilder();
@@ -324,7 +334,7 @@ public static class SymbolTableBuilder
         foreach (var op in program.Operations)
         {
             sb.AppendLine($"{op.DisplayName ?? op.Name}:");
-            var root = Build(op, sink);
+            var root = model?.FindRootScope(op.Id) ?? Build(op, sink);
             PrintScope(root, sb, 1);
         }
         return sb.ToString().TrimEnd();

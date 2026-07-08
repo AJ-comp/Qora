@@ -26,7 +26,7 @@ public static class AdjointMaterializer
     /// user name (surfaced as a <c>// Qora:</c> comment, alongside the mangler's own rename notes).</summary>
     public sealed record Result(QProgram Program, IReadOnlyList<string> Notes);
 
-    public static Result Run(QProgram program)
+    public static Result Run(QProgram program, SemanticModel? model = null)
     {
         if (program.Operations.Count == 0) return new Result(program, Array.Empty<string>());
 
@@ -86,12 +86,15 @@ public static class AdjointMaterializer
             // emitted identifier, mirroring the mangler). No note when the canonical name was free.
             if (adjName[name] != name + "__adj")
                 notes.Add($"inverse of `{orig.DisplayName ?? orig.Name}` emitted as `{Flat(adjName[name])}` (the name `{Flat(name)}__adj` was already taken)");
-            result.Add(orig with
+            // ReId: the synthesized op is a `with`-copy of the forward op — its op Id, every param Id and
+            // every body statement Id would otherwise duplicate the forward definition's. This runs AFTER
+            // the semantic model, so each fresh Id's lineage back to the forward node is recorded.
+            result.Add(ReId.Run(orig with
             {
                 Name = adjName[name],
                 DisplayName = "Adjoint " + (orig.DisplayName ?? orig.Name),
                 Body = RewriteAdjointCalls(adjBody[name], adjName, opNames),
-            });
+            }, model is null ? null : model.RecordDerivation));
         }
         return new Result(program with { Operations = result }, notes);
     }

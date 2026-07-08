@@ -274,18 +274,33 @@ The language is auto-detected from your browser, English is used as the fallback
 
 The canonical stage-by-stage version is  **[Qora Compilation Pipeline Design](https://aj-comp.github.io/Qora/en/architecture.html)**.
 
-In short, Qora moves the parser's AST into its own IR, then performs name resolution, validation,
-specialization, inverse synthesis, name cleanup, and emission on that IR.
+A compiler is a program that translates the code you wrote into a standard form a quantum computer can
+actually run — here, **OpenQASM 3**. Qora doesn't do that in one leap; it splits the work into small steps,
+each doing exactly one job.
 
-| Group | Stage | Output | Role |
-|---|---|---|---|
-| 1. Read | Source → AST | Engine AST | Janglim turns source text into a syntax tree |
-| 2. Own the program | AST → Qora IR | Typed IR | `QoraLowering` rebuilds the parser tree as Qora-owned structures |
-| 3. Resolve names | Load imports → merge → resolve names | FQN IR | Merge files and pin every call target to a fully-qualified name |
-| 4. Validate meaning | Validation | Error list or clean IR | Collect every error and stop here if anything is wrong |
-| 5. Transform | Specialize generics → materialize Adjoint | Emit-ready IR | Turn `Qubit[n]` into concrete sizes and `Adjoint` calls into synthesized inverse ops |
-| 6. Prepare emission | Mangle names → check references | OpenQASM-safe IR | Avoid OpenQASM name collisions and verify every reference still resolves |
-| 7. Print | Emit OpenQASM | OpenQASM 3 | The final emitter prints the already-decided IR as text |
+The very first thing it does is move your code into a form that's convenient to work on internally, called
+the **IR** (intermediate representation) — think of it as the compiler's own tidy notebook copy of your
+program. Because it reshapes this IR instead of re-reading your text, every later step stays simple and hard
+to get wrong.
+
+It then checks names, catches rule violations, and applies the transformations it needs on that IR, and
+finally prints the result out as OpenQASM text. Each row below is one of those steps:
+
+| Stage | Pass | Input | Output | What it does |
+|---|---|---|---|---|
+| Parse | *Janglim engine* | source text | AST | Turns the source code you wrote into a syntax tree the compiler can work with — shape only, no meaning yet. |
+| Lower | `QoraLowering` | AST | `QProgram` (IR) | Rebuilds that parser tree as Qora's own data structures (the IR); every later step works on this. |
+| Expand | `ModuleLoader` | `QProgram` (IR) | `QProgram` (IR) | Reads every `.qor` file pulled in by `import` and merges them into one program, so later steps see a single file. |
+| Desugar measure | `MeasureConditionLowering` | `QProgram` (IR) | `QProgram` (IR) | Rewrites a measurement taken directly inside a condition — `if (M(q[0]) == 1)` — into "measure into a `bit` first, then test that `bit`", because OpenQASM can't measure inside a condition. |
+| Resolve | `Resolver` | `QProgram` (IR) | `QProgram` (IR) | Works out which operation a short call like `Bell(q)` really means, and pins it to its full name (e.g. `GatesLib.Bell`). |
+| Validate | `QoraValidator` + `SymbolTableBuilder` | `QProgram` (IR) | `QProgram` (IR) or errors | Checks the whole program is something a quantum computer can actually do; if anything is wrong it reports every error and stops here (no OpenQASM is produced). |
+| Monomorphize | `Monomorphizer` | `QProgram` (IR) | `QProgram` (IR) | Stamps out a concrete copy of a size-generic operation (`Qubit[n]`) for the actual size each call uses — like a C++ template or a Rust generic. |
+| Flatten conjugation | `ConjugationLowering` | `QProgram` (IR) | `QProgram` (IR) | Unfolds a within/apply (compute · use · uncompute) block into plain gates, auto-adding the reverse of `within` at the end to clean up the temporary qubit. |
+| Materialize | `AdjointMaterializer` | `QProgram` (IR) | `QProgram` (IR) | Turns `Adjoint Foo` ("run Foo backwards") into a real inverse operation `Foo__adj` — its body reversed and each gate inverted. |
+| Mangle | `NameMangler` | `QProgram` (IR) | `QProgram` (IR) | Renames anything that would clash with an OpenQASM keyword or gate name to a safe form (adds `_` only on a real clash), and flattens namespace dots (`MyLib.Bell` → `MyLib_Bell`). |
+| Check | `ReferentialCheck` | `QProgram` (IR) | `QProgram` (IR) or errors | A final safety net: confirms every name the program uses points at something really declared; a mismatch means a compiler bug, so it fails loudly. |
+| Target-lower | `OpenQasmLowering` | `QProgram` (IR) | `QProgram` (IR) | Adjusts the few things that are valid in Qora but not in OpenQASM — for example, a `const` holding a runtime value becomes a plain variable. |
+| Emit | `QasmEmitter` | `QProgram` (IR) | OpenQASM text | Prints the now-finished IR out as OpenQASM 3 text; it makes no more decisions — a pure printer. |
 
 - The **typed IR** (`src/Qora.Core/Ir/`) is owned end-to-end by the compiler; the parse engine stops
   at the lowering boundary.
@@ -295,8 +310,9 @@ specialization, inverse synthesis, name cleanup, and emission on that IR.
   an emitted identifier would otherwise collide with a keyword, stdgates gate, or another emitted name.
   Errors and the stages view keep your original/FQN names; only the QASM sees the collision-safe form.
 - The **adjoint materializer** uses a pure IR→IR inverter to turn whole-operation `Adjoint` calls into
-  synthesized inverse operations before names are mangled; the same machinery is what a future pass
-  will reuse to inject automatic uncomputation.
+  synthesized inverse operations before names are mangled. That same inverter already backs
+  **conjugation lowering**, which flattens a `within`/`apply` (compute · apply · uncompute) node into gates —
+  the first landed piece on the road to automatic uncomputation; what remains is the analysis that injects it.
 
 ## Repository layout
 

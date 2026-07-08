@@ -157,12 +157,15 @@
     <span class="st">─Parse─▶</span> AST
     <span class="st">─Lower─▶</span> Qora IR
     <span class="st">─Expand─▶</span> merged
+    <span class="st">─Desugar measure─▶</span>
     <span class="st">─Resolve─▶</span> callee FQNs
     <span class="st">─Validate + Symbols─▶</span> (STOP on error)
     <span class="st">─Monomorphize─▶</span> specialized
+    <span class="st">─Flatten within/apply─▶</span>
     <span class="st">─Materialize Adjoint─▶</span> + inverse ops
     <span class="st">─Mangle─▶</span> collision-free
     <span class="st">─Check─▶</span>
+    <span class="st">─Target-lower─▶</span>
     <span class="st">─Emit─▶</span> OpenQASM 3
   </div>
 
@@ -352,6 +355,25 @@ QOperation Main()
   </p>
 
   <p>
+    Between the two, one small desugaring runs — <strong>MeasureConditionLowering</strong>. OpenQASM has no
+    measurement <em>inside</em> a condition, so <code>if (M(q[0]) == 1)</code> is rewritten into the two-step
+    form OpenQASM needs: the measurement is pulled out into a hoisted <code>bit</code>, which the condition then
+    tests. A <code>while</code> re-measures at the end of each iteration, and <code>repeat … until</code> at the
+    body's end. Everything downstream then sees only plain bit conditions:
+  </p>
+
+<pre><code>operation Main() {
+    use q = Qubit[2];
+    <span class="hl">if (M(q[0]) == 1)</span> { X(q[1]); }
+}
+                       <span class="cm">↓ MeasureConditionLowering</span>
+qubit[2] q;
+<span class="add">bit __m0;</span>
+<span class="add">__m0 = measure q[0];</span>          <span class="cm">← the measurement, hoisted out of the condition</span>
+<span class="add">if (__m0 == true)</span> { x q[1]; }
+</code></pre>
+
+  <p>
     <strong>Resolve</strong> then turns operation definitions and operation call targets into
     <strong>fully-qualified names (FQNs)</strong>. Inside <code>namespace Prep</code>, the operation
     <code>Fanout</code> becomes <code>Prep.Fanout</code>, and the call site <code>Prep.Fanout(reg)</code>
@@ -423,6 +445,31 @@ QOperation Main()
 
   <p class="stagehead">in: specialized IR &nbsp;·&nbsp; out: IR with synthesized inverse ops &nbsp;·&nbsp; pass: <code>AdjointMaterializer</code></p>
 
+  <h3>Run just before it — flatten <code>within/apply</code> (<code>ConjugationLowering</code>)</h3>
+
+  <p>
+    Qora's IR has one synthetic node with no surface syntax: <code>QConjugate</code>, the <em>within/apply</em>
+    (conjugation) form meaning "run <em>within</em>, then <em>apply</em>, then the inverse of <em>within</em>" —
+    the compute · use · uncompute sandwich. Only <em>within</em> is reversed, so its effect (a temporary
+    ancilla setup) is undone while <em>apply</em>'s effect survives. <code>ConjugationLowering</code> flattens
+    the node into ordinary gates, reusing the same inversion kernel to synthesize the trailing inverse:
+  </p>
+
+<pre><code>QConjugate(within=[X(a[0])], apply=[CNOT(a[0], d[0])])
+                       <span class="cm">↓ ConjugationLowering  ( within ++ apply ++ inverse-of-within )</span>
+x a[0];                <span class="cm">← within (compute)</span>
+cx a[0], d[0];         <span class="cm">← apply   (use)</span>
+<span class="add">inv @ x a[0];</span>          <span class="cm">← synthesized inverse of within (uncompute)</span>
+</code></pre>
+
+  <p>
+    Ordering is the reason it runs <em>here</em>, right before the materializer: if the synthesized inverse
+    calls a user operation (<code>Adjoint Foo</code>), that must still become a real <code>Foo__adj</code> op —
+    which only happens because the materializer runs <em>after</em> this pass. Today nothing produces a
+    <code>QConjugate</code> from source, so for an ordinary program this pass is a no-op; it is the emit path
+    the upcoming <strong>automatic uncomputation</strong> will feed (see the closing note).
+  </p>
+
   <p>
     Our <code>Main</code> contains <code>Adjoint Prep.Fanout(reg)</code>. This pass turns that whole-operation
     adjoint into an <strong>ordinary operation</strong>. Using the inversion kernel (<code>Inverter</code>),
@@ -483,7 +530,30 @@ QOperation Main()
 
   <h2 id="s9"><span class="n">9</span>Emit — the dumb printer to OpenQASM 3</h2>
 
-  <p class="stagehead">in: mangled IR &nbsp;·&nbsp; out: OpenQASM 3 text &nbsp;·&nbsp; pass: <code>QasmEmitter</code></p>
+  <p class="stagehead">in: mangled IR &nbsp;·&nbsp; out: OpenQASM 3 text &nbsp;·&nbsp; pass: <code>OpenQasmLowering</code> → <code>QasmEmitter</code></p>
+
+  <h3>Run just before it — target-lower for OpenQASM (<code>OpenQasmLowering</code>)</h3>
+
+  <p>
+    One last IR→IR step runs before the printer — <strong>OpenQasmLowering</strong>, the OpenQASM-specific
+    target lowering. Qora's <code>const</code> is an immutable <em>binding</em> that may hold any value
+    (Q#-<code>let</code> style), but OpenQASM's <code>const</code> demands a compile-time-constant initializer.
+    So a runtime-bound <code>const c = n;</code> is demoted to a plain <code>int c = n;</code> for emission —
+    still never reassigned, so nothing about its immutability is lost:
+  </p>
+
+<pre><code>int n = 2;
+<span class="hl">const c = n;</span>          <span class="cm">← Qora const: an immutable binding, any value</span>
+                   <span class="cm">↓ OpenQasmLowering</span>
+int n = 2;
+<span class="add">int c = n;</span>            <span class="cm">← plain int (OpenQASM const must be compile-time)</span>
+</code></pre>
+
+  <p>
+    This is the <strong>first per-target lowering pass</strong> — where IR that is correct for Qora is adjusted
+    to a specific backend's rules. A future QIR target would add its own lowering here without touching any pass
+    above it.
+  </p>
 
   <p>
     The last pass is deliberately the <strong>least clever</strong>: it invents no names and inverts nothing —
@@ -531,12 +601,15 @@ r = measure reg[0];</code></pre>
       <tr><td>Parse</td><td><em>Janglim engine</em></td><td>source text → syntax tree (no meaning yet)</td></tr>
       <tr><td>Lower</td><td><code>QoraLowering</code></td><td>engine tree → Qora IR (typed nodes; functors as data)</td></tr>
       <tr><td>Expand</td><td><code>ModuleLoader</code></td><td>imports → one merged program</td></tr>
+      <tr><td>Desugar measure</td><td><code>MeasureConditionLowering</code></td><td>a measurement inside a condition → a hoisted <code>bit</code>, assigned then tested</td></tr>
       <tr><td>Resolve</td><td><code>Resolver</code></td><td>operation call targets → fully-qualified names</td></tr>
       <tr><td>Validate</td><td><code>QoraValidator</code> + <code>SymbolTableBuilder</code></td><td>IR → symbol tables + every semantic error (a hard gate on emission)</td></tr>
       <tr><td>Monomorphize</td><td><code>Monomorphizer</code></td><td>generic <code>Qubit[n]</code> → concrete-size copies, then re-validate if changed</td></tr>
+      <tr><td>Flatten conjugation</td><td><code>ConjugationLowering</code></td><td><code>within/apply</code> (<code>QConjugate</code>) → <code>compute; apply;</code> + synthesized inverse of <code>within</code></td></tr>
       <tr><td>Materialize</td><td><code>AdjointMaterializer</code></td><td><code>Adjoint Foo</code> → a real <code>Foo__adj</code> op + a plain call</td></tr>
       <tr><td>Mangle</td><td><code>NameMangler</code></td><td>Qora names → collision-free OpenQASM identifiers</td></tr>
       <tr><td>Check</td><td><code>ReferentialCheck</code></td><td>verifies every used name resolves (else <code>QINTERNAL</code>)</td></tr>
+      <tr><td>Target-lower</td><td><code>OpenQasmLowering</code></td><td>OpenQASM-specific adjustments (e.g. a runtime <code>const</code> → a plain <code>int</code>/<code>float</code>)</td></tr>
       <tr><td>Emit</td><td><code>QasmEmitter</code></td><td>final IR → OpenQASM 3 text (a pure printer)</td></tr>
     </table>
   </div>
@@ -550,10 +623,13 @@ r = measure reg[0];</code></pre>
 
   <div class="call why">
     <span class="h">Where this is heading — automatic uncomputation</span>
-    The same inversion kernel the adjoint materializer uses will be reused by a future pass that
-    <strong>finds where a temporary qubit is no longer needed and injects its inverse automatically</strong> —
-    Silq-style automatic uncomputation. Because inverse synthesis is already a materialize-before-mangle pass,
-    that new pass slots into the same line without disturbing anything downstream.
+    Silq-style automatic uncomputation — <strong>finding where a temporary qubit is no longer needed and
+    injecting its inverse automatically</strong> — is what these passes are built toward. The first piece is
+    already in place: <code>ConjugationLowering</code> flattens a <code>within/apply</code> node into
+    compute · apply · uncompute and emits it, so the whole downstream path (inverse synthesis →
+    <code>__adj</code> closure → mangling → QASM) is proven end to end. What remains is the analysis that
+    <em>produces</em> that node on its own — liveness (when a temporary dies) plus effect analysis (whether it
+    can be safely reversed) — after which a small injector emits the <code>QConjugate</code> at each death point.
   </div>
 
   <hr>
@@ -563,10 +639,10 @@ r = measure reg[0];</code></pre>
     real Qora compiler (<code>qora --json --stages</code>).<br>
     Source, in pipeline order: <code>QoraGrammar.cs</code> (grammar) ·
     <code>Ir/QoraLowering.cs</code> (AST→IR) ·
-    <code>Ir/Passes/ModuleLoader.cs</code> · <code>Resolver.cs</code> · <code>SymbolTable.cs</code> · <code>QoraValidator.cs</code> ·
-    <code>Monomorphizer.cs</code> · <code>AdjointMaterializer.cs</code> · <code>NameMangler.cs</code> ·
+    <code>Ir/Passes/ModuleLoader.cs</code> · <code>MeasureConditionLowering.cs</code> · <code>Resolver.cs</code> · <code>SymbolTable.cs</code> · <code>QoraValidator.cs</code> ·
+    <code>Monomorphizer.cs</code> · <code>ConjugationLowering.cs</code> · <code>AdjointMaterializer.cs</code> · <code>NameMangler.cs</code> ·
     <code>ReferentialCheck.cs</code> · <code>Ir/Inverter.cs</code> (inversion kernel) ·
-    <code>Ir/QasmEmitter.cs</code> (IR→OpenQASM).
+    <code>OpenQasmLowering.cs</code> · <code>Ir/QasmEmitter.cs</code> (IR→OpenQASM).
   </p>
 
 </div>

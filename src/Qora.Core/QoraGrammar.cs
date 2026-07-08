@@ -38,13 +38,13 @@ namespace Qora;
 /// raw-regex StringLiteral token).
 /// v0.12 adds: the module system for real — namespaces/opens/qualified calls resolve
 /// (<c>Ir/Passes/Resolver.cs</c>, QSEM018/019/022), <c>import</c> loads files (<c>Ir/Passes/ModuleLoader.cs</c>,
-/// QSEM020/021, CLI <c>--base-dir</c>), and emission name-mangles every user name
-/// (<c>Ir/Passes/NameMangler.cs</c>: <c>q</c>→<c>q_</c>, <c>MyLib.Bell</c>→<c>MyLib__Bell_</c>).
+/// QSEM020/021, CLI <c>--base-dir</c>), and emission name mangling was introduced
+/// (<c>Ir/Passes/NameMangler.cs</c>; current behavior is collision-only, see v0.14 below).
 /// Built-in gate names relaxed Q#-style: a NAMESPACED op may reuse one (ambiguous use ⇒ QSEM018,
 /// qualify via <c>L.Rx</c> / <c>Qora.Intrinsic.Rx</c>); measurement family + pi/tau/euler + global
 /// gate-named ops stay reserved (QSEM013).
 /// v0.13 adds: `const` enforced as an immutable binding (QSEM024 on reassignment; measurement
-/// initializers allowed, Q#-let style), bit conditions emitted as bool literals (`r_ == true` — the
+/// initializers allowed, Q#-let style), bit conditions emitted as bool literals (`r == true` — the
 /// spelling Qiskit's importer accepts), a provenance comment in emitted QASM, and the execution
 /// toolchain (Braket runner + two release-gate validators; Braket's local simulator runs the FULL
 /// language). Operations are still void (no return value yet).

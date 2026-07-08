@@ -269,24 +269,37 @@ python tools/run_braket.py yourfile.qor --shots 1000
 
 단계별 정식 설명은  **[Qora 컴파일 파이프라인 설계](https://aj-comp.github.io/Qora/ko/architecture.html)** 문서에 있습니다.
 
-간단히 말하면 Qora는 파서가 만든 AST를 자기 IR로 옮긴 뒤, 그 IR 위에서 이름 해소, 검증, 특수화,
-역합성, 이름 정리, 출력을 차례로 진행합니다.
+컴파일러는 당신이 쓴 코드를, 양자 컴퓨터가 실제로 실행할 수 있는 표준 형식(**OpenQASM 3**)으로 번역하는
+프로그램입니다. Qora는 이 번역을 한 번에 하지 않고, 각자 딱 한 가지 일만 하는 작은 단계 여러 개로 나눠서 합니다.
 
-| 묶음 | 단계 | 산출물 | 역할 |
-|---|---|---|---|
-| 1. 읽기 | 소스 → AST | 엔진 AST | Janglim 파서가 소스 텍스트를 문법 트리로 변환 |
-| 2. 프로그램 넘겨받기 | AST → Qora IR | 타입 있는 IR | `QoraLowering`이 파서 트리를 Qora 전용 구조로 재구성 |
-| 3. 이름 해소 | import 로드 → 병합 → 이름 해소 | FQN IR | 여러 파일을 합치고 모든 호출 대상을 완전한 이름으로 확정 |
-| 4. 의미 검증 | 검증 | 에러 목록 또는 깨끗한 IR | 문제가 있으면 모든 에러를 모아서 보고한 뒤 중단 |
-| 5. 변환 | 제네릭 특수화 → adjoint 실체화 | 출력 준비 IR | `Qubit[n]`을 구체적인 크기로 만들고, `Adjoint` 호출을 합성된 역연산으로 변환 |
-| 6. 출력 준비 | 이름 맹글링 → 참조 검사 | OpenQASM 안전 IR | OpenQASM 이름 충돌을 피하고 모든 참조가 남아 있는지 확인 |
-| 7. 출력 | OpenQASM 출력 | OpenQASM 3 | 결정이 끝난 IR을 마지막 이미터가 텍스트로 출력 |
+가장 먼저, 당신의 코드를 컴파일러가 내부에서 다루기 좋은 형태로 옮깁니다. 이걸 **IR(내부 표현)** 이라고
+부르는데, 컴파일러가 당신 프로그램을 자기 방식으로 깔끔하게 정리해 적어둔 "작업용 메모"라고 생각하면 됩니다.
+원본 텍스트를 다시 읽는 대신 이 IR만 이리저리 손보기 때문에, 이후 단계들이 훨씬 단순하고 실수하기 어려워집니다.
+
+그다음 이 IR 위에서 이름을 확인하고, 규칙 위반을 검사하고, 필요한 변형을 가한 뒤, 맨 마지막에 OpenQASM
+텍스트로 뽑아냅니다. 아래 표의 각 줄이 그 단계 하나하나입니다:
+
+| 단계 | 패스 | 입력 | 출력 | 하는 일 |
+|---|---|---|---|---|
+| Parse | *Janglim 엔진* | 소스 텍스트 | AST | 사람이 쓴 소스 코드를 컴파일러가 다룰 수 있는 문법 트리로 바꿉니다 (모양만 파악하고, 아직 의미는 없습니다). |
+| Lower | `QoraLowering` | AST | `QProgram` (IR) | 그 파서 트리를 Qora 자체 자료구조(IR)로 다시 짓습니다. 이후 모든 단계는 이 IR 위에서 이뤄집니다. |
+| Expand | `ModuleLoader` | `QProgram` (IR) | `QProgram` (IR) | `import`로 끌어온 여러 `.qor` 파일을 하나의 프로그램으로 합칩니다. 이후 단계는 파일 하나만 보면 됩니다. |
+| Desugar measure | `MeasureConditionLowering` | `QProgram` (IR) | `QProgram` (IR) | `if (M(q[0]) == 1)`처럼 조건 안에서 바로 하는 측정을, "측정을 `bit`에 먼저 저장한 뒤 그 `bit`을 검사"하는 형태로 바꿉니다 (OpenQASM은 조건 안에서 측정을 못 하기 때문입니다). |
+| Resolve | `Resolver` | `QProgram` (IR) | `QProgram` (IR) | `Bell(q)`처럼 짧게 부른 이름이 실제로 어느 연산인지 알아내, 완전한 이름(예: `GatesLib.Bell`)으로 못 박습니다. |
+| Validate | `QoraValidator` + `SymbolTableBuilder` | `QProgram` (IR) | `QProgram` (IR) 또는 오류 목록 | 프로그램이 양자 컴퓨터가 정말로 할 수 있는 일인지 전부 검사하고, 틀린 게 있으면 모든 오류를 모아 보고한 뒤 여기서 멈춥니다 (OpenQASM은 안 만들어집니다). |
+| Monomorphize | `Monomorphizer` | `QProgram` (IR) | `QProgram` (IR) | `Qubit[n]`처럼 크기가 미정인 연산을, 호출할 때 실제 쓰인 크기에 맞춰 구체적인 복사본으로 찍어냅니다 (C++ 템플릿·Rust 제네릭과 같은 방식입니다). |
+| Flatten conjugation | `ConjugationLowering` | `QProgram` (IR) | `QProgram` (IR) | within/apply(계산 · 사용 · 되돌림) 묶음을 평범한 게이트 나열로 풀고, 끝에 `within`의 역연산을 자동으로 붙여 임시 큐비트를 청소합니다. |
+| Materialize | `AdjointMaterializer` | `QProgram` (IR) | `QProgram` (IR) | `Adjoint Foo`("Foo를 거꾸로 실행")를 실제로 존재하는 역함수 `Foo__adj`로 만듭니다 (몸통을 역순으로 뒤집고 각 게이트를 역으로 바꿉니다). |
+| Mangle | `NameMangler` | `QProgram` (IR) | `QProgram` (IR) | 사용자가 지은 이름이 OpenQASM 키워드·게이트 이름과 부딪히면 안전한 이름으로 바꿉니다 (부딪힐 때만 `_`를 붙임). 네임스페이스의 점도 밑줄로 폅니다 (`MyLib.Bell` → `MyLib_Bell`). |
+| Check | `ReferentialCheck` | `QProgram` (IR) | `QProgram` (IR) 또는 오류 목록 | 마지막 안전망입니다: 프로그램이 쓰는 모든 이름이 실제 선언된 것을 가리키는지 확인하고, 어긋나면 (사용자 잘못이 아니라 컴파일러 버그이므로) 크게 오류를 냅니다. |
+| Target-lower | `OpenQasmLowering` | `QProgram` (IR) | `QProgram` (IR) | Qora에선 되지만 OpenQASM 규칙엔 안 맞는 부분을 조정합니다 — 예를 들어 런타임 값을 담은 `const`를 평범한 변수로 바꿉니다. |
+| Emit | `QasmEmitter` | `QProgram` (IR) | OpenQASM 텍스트 | 여기까지 다 정해진 IR을 마지막으로 OpenQASM 3 텍스트로 그대로 찍어냅니다. 더는 아무 판단도 하지 않는 "순수 출력기"입니다. |
 
 - **타입 있는 IR**(`src/Qora.Core/Ir/`)은 처음부터 끝까지 컴파일러가 소유하며, 파서 엔진은 lowering 경계에서 역할을 마칩니다.
 - **모듈 로더**는 `import` 그래프 전체를 하나의 프로그램으로 병합합니다.<br>그 뒤 **리졸버**가 연산 호출 대상을 완전한 이름(FQN)으로 고정하고, 이후 모든 호출부는 딱 하나의 연산을 가리킵니다.<br>네임스페이스를 쓰는 다른 프로그래밍 언어들처럼 모호하면 에러가 나며, 자세한 내용은 [설계 문서](docs/namespaces-design.md)에 있습니다.
 - **검증기**(QSEM001–025)는 수집형입니다.<br>한 번의 컴파일에서 인자 종류와 개수, 레지스터 크기, 인덱스 범위, 예약 이름, 재귀 호출, 잘못 놓인 `use`, 선언되지 않았거나 선언 전에 사용한 식별자, 되돌릴 수 없는 `Adjoint` 대상까지 한꺼번에 보고합니다.<br>또한 검증기가 사용하는 통합 심볼 테이블도 컴파일 단계 뷰에 같이 나옵니다.
 - **네임 맹글러**는 네임스페이스의 점을 평탄화하고(`MyLib.Bell` → `MyLib_Bell`), 출력되는 식별자가 키워드·stdgates 게이트 이름·이미 출력된 다른 이름과 부딪힐 때만 `_`를 덧붙입니다. 따라서 에러와 컴파일 단계 뷰는 원래 이름/FQN을 유지하고, 충돌을 피한 이름은 QASM에서만 보입니다.
-- **Adjoint 실체화기**는 순수 IR→IR 인버터를 사용해 전체 사용자 정의 연산의 `Adjoint` 호출을 합성된 역연산으로 바꾼 뒤 이름 맹글링 단계로 넘깁니다. 나중에 자동 uncomputation을 주입할 패스도 이 구조를 그대로 재사용합니다.
+- **Adjoint 실체화기**는 순수 IR→IR 인버터를 사용해 전체 사용자 정의 연산의 `Adjoint` 호출을 합성된 역연산으로 바꾼 뒤 이름 맹글링 단계로 넘깁니다. 바로 그 인버터가 이미 **켤레 lowering**을 뒷받침합니다. 켤레 lowering은 `within`/`apply` (compute · apply · uncompute) 노드를 게이트로 평탄화하며, 자동 uncomputation으로 가는 길에서 가장 먼저 자리 잡은 조각입니다. 남은 것은 그것을 주입하는 분석입니다.
 
 ## 저장소 구조
 

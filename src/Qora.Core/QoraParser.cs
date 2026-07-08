@@ -42,6 +42,9 @@ public sealed class QoraParseResult
     public string Qasm { get; init; } = string.Empty;
     /// <summary>Parse errors, each carrying a source span (see <see cref="QoraError"/>); empty on success.</summary>
     public IReadOnlyList<QoraError> Errors { get; init; } = new List<QoraError>();
+    /// <summary>The persistent semantic side table built at the final validation (null when validation never
+    /// ran or failed earlier) — Id-keyed symbol/scope facts carried through the rest of the pipeline.</summary>
+    public Ir.Passes.SemanticModel? Semantics { get; init; }
 }
 
 /// <summary>
@@ -84,6 +87,7 @@ public static class QoraParser
         Ir.QProgram? expanded = null;
         Ir.QProgram? resolved = null;
         Ir.QProgram? monoProgram = null;   // program after monomorphization — what actually gets emitted
+        Ir.Passes.SemanticModel? semantics = null;   // side table from the FINAL validation (post-monomorphize)
         List<QoraError> semanticErrors;
         if (ir != null)
         {
@@ -108,7 +112,7 @@ public static class QoraParser
                 }
                 else
                 {
-                    var baseErrors = QoraValidator.Validate(res);
+                    var baseErrors = QoraValidator.Validate(res, out var baseModel);
                     if (baseErrors.Count > 0)
                     {
                         semanticErrors = baseErrors;
@@ -118,9 +122,18 @@ public static class QoraParser
                         // Monomorphization pins each generic register to a concrete size, so re-validate the
                         // specialized program: size-dependent checks (index bounds, register-size matches)
                         // can only run once sizes are known. No generics -> Run returns the same program and
-                        // there is nothing new to check.
+                        // there is nothing new to check. Whichever Validate ran LAST owns the semantic model
+                        // — its scope trees describe the program the rest of the pipeline actually consumes.
                         monoProgram = Monomorphizer.Run(res);
-                        semanticErrors = ReferenceEquals(monoProgram, res) ? baseErrors : QoraValidator.Validate(monoProgram);
+                        if (ReferenceEquals(monoProgram, res))
+                        {
+                            semanticErrors = baseErrors;
+                            semantics = baseModel;
+                        }
+                        else
+                        {
+                            semanticErrors = QoraValidator.Validate(monoProgram, out semantics);
+                        }
                     }
                 }
             }
@@ -135,19 +148,31 @@ public static class QoraParser
         string qasm = string.Empty;
         if (monoProgram != null && semanticErrors.Count == 0)
         {
-            // Materialize whole-op Adjoint into real inverse-def ops BEFORE mangling, so every synthesized
-            // name flows through the mangler's collision resolution (nothing is minted at emit time).
-            var materialized = AdjointMaterializer.Run(monoProgram);
-            var mangled = NameMangler.Mangle(materialized.Program);
-            // referential-integrity gate: after mangling, every used identifier must resolve to a
-            // declaration/op/built-in. A dangling reference here is a COMPILER bug (a name not renamed
-            // consistently) — fail loudly (QINTERNAL) instead of emitting silently-broken QASM.
-            var refErrors = ReferentialCheck.Verify(mangled.Program);
-            if (refErrors.Count > 0) semanticErrors = refErrors;
-            // both passes may rename to dodge a collision; surface every note in the QASM header. The final
-            // OpenQASM target-lowering (e.g. demoting a runtime `const` to a plain var — OQ3 `const` is
-            // compile-time only) runs right before emission, adapting the IR to OpenQASM's specifics.
-            else qasm = QasmEmitter.Emit(OpenQasmLowering.Run(mangled.Program), materialized.Notes.Concat(mangled.Notes).ToList());
+            // Flatten within/apply conjugations (QConjugate) into straight-line gates + a synthesized inverse
+            // of the `within` block, BEFORE AdjointMaterializer — so a reversal's `Adjoint Foo` becomes a real
+            // Foo__adj that the mangler then owns (nothing minted at emit time). A within block with no inverse
+            // is a clean QSEM027 here; emission is skipped rather than dropping the uncompute silently.
+            var (conjugated, conjErrors) = ConjugationLowering.Run(monoProgram, semantics);
+            if (conjErrors.Count > 0)
+            {
+                semanticErrors = conjErrors;
+            }
+            else
+            {
+                // Materialize whole-op Adjoint into real inverse-def ops BEFORE mangling, so every synthesized
+                // name flows through the mangler's collision resolution (nothing is minted at emit time).
+                var materialized = AdjointMaterializer.Run(conjugated, semantics);
+                var mangled = NameMangler.Mangle(materialized.Program);
+                // referential-integrity gate: after mangling, every used identifier must resolve to a
+                // declaration/op/built-in. A dangling reference here is a COMPILER bug (a name not renamed
+                // consistently) — fail loudly (QINTERNAL) instead of emitting silently-broken QASM.
+                var refErrors = ReferentialCheck.Verify(mangled.Program);
+                if (refErrors.Count > 0) semanticErrors = refErrors;
+                // both passes may rename to dodge a collision; surface every note in the QASM header. The final
+                // OpenQASM target-lowering (e.g. demoting a runtime `const` to a plain var — OQ3 `const` is
+                // compile-time only) runs right before emission, adapting the IR to OpenQASM's specifics.
+                else qasm = QasmEmitter.Emit(OpenQasmLowering.Run(mangled.Program), materialized.Notes.Concat(mangled.Notes).ToList(), semantics);
+            }
         }
 
         return new QoraParseResult
@@ -162,6 +187,7 @@ public static class QoraParser
             AstText = ast?.ToTreeString() ?? string.Empty,
             Ir = resolved ?? expanded ?? ir,
             Qasm = qasm,
+            Semantics = semantics,
             Errors = !result.Success
                 ? result.AllErrors.Select(ToQoraError).ToList()
                 : semanticErrors,

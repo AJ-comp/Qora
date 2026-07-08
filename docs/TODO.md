@@ -38,9 +38,9 @@ Rx/Ry/Rz), measurement (`bit r = M(q)`), classical vars (const/var/int/bit) + re
 ## 🟡 MEDIUM — gateway features (bigger work)
 
 - **Module system + namespaces** ⚛️ — ✅ SHIPPED in v0.12 (2026-07-03): `namespace` / `open` /
-  qualified names resolve (Resolver.cs, QSEM018/019/022/023), `import` loads real multi-file programs
+  qualified call targets resolve (Resolver.cs, QSEM018/019/022), `import` loads real multi-file programs
   (ModuleLoader.cs, QSEM020/021, CLI `--base-dir`, extension passes the document dir), and emission
-  name-mangles every user name (`MyLib.Bell` → `MyLib__Bell_`). The symbol-table machinery the
+  flattens namespace names (`MyLib.Bell` → `MyLib_Bell`) while auto-renaming only real collisions. The symbol-table machinery the
   effect-analysis step needs now exists. The QSEM013 follow-up also shipped: built-in gate names are
   relaxed Q#-style ("declaration allowed, ambiguous use is an error") with the built-ins living in the
   implicit `Qora.Intrinsic` namespace; the measurement family, `pi`/`tau`/`euler`, and global

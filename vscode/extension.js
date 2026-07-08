@@ -746,13 +746,14 @@ function stagesHtml(fileName, result) {
         background: var(--vscode-textCodeBlock-background); padding: 10px; border-radius: 6px; }
 </style></head><body>
   <div class="file">${escapeHtml(fileName)} — 저장하면 갱신돼요</div>
-  <div class="flow">소스 → 파싱 → AST → Lowering → QoraIR → (Inverter → 역 IR) → Emitter → OpenQASM</div>
+  <div class="flow">소스 → 파싱 → AST → Lowering → QoraIR → 심벌테이블(Validator) → (Inverter → 역 IR) → Emitter → OpenQASM</div>
   ${banner}
   <main>
     ${stageColumn('1. AST (파서 출력)', result.ast)}
     ${stageColumn('2. QoraIR (Lowering)', result.ir)}
-    ${stageColumn('3. 역 IR (Inverter가 합성)', result.irInverse)}
-    ${stageColumn('4. OpenQASM 3 (Emitter)', result.qasm)}
+    ${stageColumn('3. 심벌테이블 (Validator)', result.symbols)}
+    ${stageColumn('4. 역 IR (Inverter가 합성)', result.irInverse)}
+    ${stageColumn('5. OpenQASM 3 (Emitter)', result.qasm)}
   </main>
 </body></html>`;
 }

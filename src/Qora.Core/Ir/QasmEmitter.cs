@@ -29,7 +29,7 @@ public static class QasmEmitter
     /// (so a call to one prints as a def call, not a stdgate). Inversion left no state to carry.</summary>
     private sealed record Ctx(HashSet<string> Ops);
 
-    public static string Emit(QProgram? program, IReadOnlyList<string>? notes = null)
+    public static string Emit(QProgram? program, IReadOnlyList<string>? notes = null, Passes.SemanticModel? model = null)
     {
         if (program is null || program.Operations.Count == 0) return string.Empty;
 
@@ -57,14 +57,14 @@ public static class QasmEmitter
         foreach (var name in OrderDefs(subroutines, entry.Name, opByName, ctx))
         {
             sb.AppendLine();
-            EmitDef(opByName[name], ctx, sb);
+            EmitDef(opByName[name], ctx, sb, model);
         }
 
         sb.AppendLine();
         var decls = new StringBuilder();
         HoistDecls(entry.Body, decls);
         var body = new StringBuilder();
-        EmitStatements(entry.Body, body, 0, ctx, SeedVarTypes(entry));
+        EmitStatements(entry.Body, body, 0, ctx, SeedVarTypes(entry, model));
         sb.Append(decls);
         sb.Append(body);
 
@@ -155,13 +155,13 @@ public static class QasmEmitter
 
     // --- def emission ---
 
-    private static void EmitDef(QOperation op, Ctx ctx, StringBuilder sb)
+    private static void EmitDef(QOperation op, Ctx ctx, StringBuilder sb, Passes.SemanticModel? model)
     {
         var ps = string.Join(", ", op.Params.Select(EmitParam));
         var decls = new StringBuilder();
         HoistDecls(op.Body, decls);
         var body = new StringBuilder();
-        EmitStatements(op.Body, body, 1, ctx, SeedVarTypes(op));
+        EmitStatements(op.Body, body, 1, ctx, SeedVarTypes(op, model));
 
         sb.AppendLine($"def {op.Name}({ps}) {{");
         foreach (var line in decls.ToString().Split('\n'))
@@ -206,6 +206,14 @@ public static class QasmEmitter
                     break;
                 case QRepeat r:
                     HoistDecls(r.Body, decls, seen);
+                    break;
+                case QConjugate c:
+                    // Defensive only — ConjugationLowering removes every QConjugate before emission. If one
+                    // somehow survived, still hoist any declarations nested inside it rather than losing them
+                    // (ReferentialCheck raises the QINTERNAL that actually blocks this output). NOT a blanket
+                    // `default:` — this switch deliberately lets gates/assigns/classical decls fall through.
+                    HoistDecls(c.Within, decls, seen);
+                    HoistDecls(c.Apply, decls, seen);
                     break;
             }
         }
@@ -256,6 +264,14 @@ public static class QasmEmitter
                     EmitStatements(r.Body, body, indent + 1, ctx, varTypes);
                     body.AppendLine($"{pad}  if ({RewriteBitCond(r.Until.Text, varTypes)}) {{ break; }}");
                     body.AppendLine($"{pad}}}");
+                    break;
+
+                default:
+                    // Defense in depth: every real QStmt has a case above, and an un-flattened QConjugate is
+                    // already turned into a QINTERNAL error by ReferentialCheck (which gates this emission),
+                    // so this is unreachable in a successful compile. Still, emit a VISIBLE marker rather than
+                    // silently dropping a statement — a silent drop was the original latent bug.
+                    body.AppendLine($"{pad}// Qora: internal error — unhandled {stmt.GetType().Name} reached the emitter");
                     break;
             }
         }
@@ -355,15 +371,52 @@ public static class QasmEmitter
     /// type is inferred at its declaration by <see cref="InferDefaultType"/> and added then. It is a flat
     /// whole-op superset, so bit-typed rendering (`r == 1` → `r == true`) and the classical `!x` → `x == 0`
     /// rewrite are consistent wherever the name resolves; block scoping guarantees no use before declaration.
+    ///
+    /// With a <see cref="Passes.SemanticModel"/> the map is READ, not rebuilt: each declaring node's CURRENT
+    /// (post-mangling) name is paired with its validation-time type through the node's stable Id — the exact
+    /// current-name ↔ proven-type join a rebuild cannot express (a rebuild sees mangled names only). The
+    /// walk mirrors the scope tree's <see cref="Passes.Scope.AllSymbols"/> order (this level's declarations,
+    /// then nested blocks in program order) so shadowed names resolve to the same final entry either way.
+    /// Without a model (standalone <see cref="Emit"/> call), the old full rebuild remains as the fallback.
     /// </summary>
-    private static Dictionary<string, string> SeedVarTypes(QOperation op)
+    private static Dictionary<string, string> SeedVarTypes(QOperation op, Passes.SemanticModel? model)
     {
+        if (model is not null && model.FindRootScope(op.Id) is not null)
+        {
+            var map = new Dictionary<string, string>();
+            var complete = true;
+            void AddNamed(string currentName, int nodeId)
+            {
+                var sym = model.FindSymbol(nodeId);
+                if (sym is null) { complete = false; return; }
+                if (TypeName(sym.Type) is { } t) map[currentName] = t;
+            }
+            void Level(IReadOnlyList<QStmt> stmts)
+            {
+                foreach (var s in stmts) if (s is QDecl d) AddNamed(d.Name, d.Id);
+                foreach (var s in stmts)
+                    switch (s)
+                    {
+                        case QFor f: AddNamed(f.Var, f.Id); Level(f.Body); break;
+                        case QIf i: Level(i.Then); Level(i.Else); break;
+                        case QWhile w: Level(w.Body); break;
+                        case QRepeat r: Level(r.Body); break;
+                        case QConjugate c: Level(c.Within); Level(c.Apply); break;
+                    }
+            }
+            foreach (var p in op.Params) AddNamed(p.Name, p.Id);
+            Level(op.Body);
+            if (complete) return map;
+            // a node the model has never seen (no Id hit, no derivation chain) — fall through to a rebuild
+            // rather than emit from a partial map.
+        }
+
         var sink = new List<QoraError>();                 // types only — any diagnostics are the validator's job
         var root = Passes.SymbolTableBuilder.Build(op, sink);
-        var map = new Dictionary<string, string>();
+        var rebuilt = new Dictionary<string, string>();
         foreach (var s in root.AllSymbols())
-            if (TypeName(s.Type) is { } t) map[s.Name] = t;   // Int/Bit/Float/Angle; Qubit and untyped → null → skipped
-        return map;
+            if (TypeName(s.Type) is { } t) rebuilt[s.Name] = t;   // Int/Bit/Float/Angle; Qubit and untyped → null → skipped
+        return rebuilt;
     }
 
     /// <summary>

@@ -105,11 +105,12 @@ public static class Monomorphizer
 
         QOperation Specialize(QOperation callee, Dictionary<string, int> bindings, string specName)
         {
-            // params: each generic register gets its concrete size; the size symbol is gone.
+            // params: each generic register gets its concrete size; the size symbol is gone. Every param
+            // is re-minted (fresh Id) — sibling specializations of one generic would otherwise share Ids.
             var newParams = callee.Params
                 .Select(p => p.SizeParam is not null && bindings.TryGetValue(p.SizeParam, out var k)
-                    ? p with { RegisterSize = k, SizeParam = null }
-                    : p)
+                    ? p with { Id = QNodeIds.Next(), RegisterSize = k, SizeParam = null }
+                    : p with { Id = QNodeIds.Next() })
                 .ToList();
 
             // body: substitute every size symbol with its value, then rewrite nested generic calls using
@@ -122,7 +123,9 @@ public static class Monomorphizer
                 if (p.Type == QType.Qubit && p.RegisterSize is int rs) regs[p.Name] = rs;
 
             // Diagnostics on the specialization should read as the original op (`Foo`), not `Foo__sz3`.
-            return new QOperation(specName, newParams, Rewrite(body, regs), callee.Namespace)
+            // ReId: the rewritten body is a `with`-copy of the generic body, so sibling specializations
+            // would share statement Ids. No lineage recording — this runs BEFORE the semantic model.
+            return new QOperation(specName, newParams, ReId.Run(Rewrite(body, regs)), callee.Namespace)
             {
                 Span = callee.Span,
                 DisplayName = callee.DisplayName ?? callee.Name,

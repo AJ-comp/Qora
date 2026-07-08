@@ -3,7 +3,7 @@ namespace Qora.Ir;
 /// <summary>The compiler's version, stamped into emitted QASM for provenance.</summary>
 public static class QoraVersion
 {
-    public const string Value = "0.15";
+    public const string Value = "0.16";
 }
 
 /// <summary>
@@ -13,6 +13,24 @@ public static class QoraVersion
 /// nodes (inverse bodies, uncompute injections).
 /// </summary>
 public readonly record struct QSpan(int Start, int End);
+
+/// <summary>
+/// Issues the stable node identity every identity-bearing IR record stamps at construction
+/// (<c>public int Id { get; init; } = QNodeIds.Next();</c>). C# record semantics do the rest: a
+/// property initializer runs only in the constructor, and a <c>with</c> expression CLONES fields —
+/// so <c>new</c> mints a fresh Id while every pass rewrite via <c>with</c> inherits the Id for free.
+/// That inherited Id is what lets side tables (the <see cref="Passes.SemanticModel"/>) keyed by Id
+/// survive the whole pipeline while node CONTENT (names, sizes) keeps changing underneath.
+/// The counter is global and monotonic across compilations — only uniqueness WITHIN one program
+/// matters, and a process-wide counter avoids threading an allocator through all of lowering.
+/// A pass that COPIES a subtree into a second tree position must re-mint Ids via <see cref="ReId"/>;
+/// <see cref="Passes.ReferentialCheck"/> fails loudly on any duplicate that slips through.
+/// </summary>
+public static class QNodeIds
+{
+    private static int _next;
+    public static int Next() => System.Threading.Interlocked.Increment(ref _next);
+}
 
 /// <summary>
 /// Qora's own intermediate representation (IR): a strongly-typed, immutable tree that the compiler
@@ -42,7 +60,11 @@ public readonly record struct QSpan(int Start, int End);
 public sealed record QProgram(
     IReadOnlyList<QOperation> Operations,
     IReadOnlyList<QImport>? Imports = null,
-    IReadOnlyDictionary<string, IReadOnlyList<QOpen>>? Opens = null);
+    IReadOnlyDictionary<string, IReadOnlyList<QOpen>>? Opens = null)
+{
+    /// <summary>Stable node identity (see <see cref="QNodeIds"/>): fresh at <c>new</c>, inherited by <c>with</c>.</summary>
+    public int Id { get; init; } = QNodeIds.Next();
+}
 
 /// <summary>One <c>open Target;</c> directive inside a namespace block.</summary>
 public sealed record QOpen(string Target, QSpan? Span = null);
@@ -64,6 +86,9 @@ public sealed record QImport(string Target)
 /// pass runs, <see cref="Name"/> is the FULLY-QUALIFIED name and this records the origin.</param>
 public sealed record QOperation(string Name, IReadOnlyList<QParam> Params, IReadOnlyList<QStmt> Body, string Namespace = "") : ICallableSig
 {
+    /// <summary>Stable node identity (see <see cref="QNodeIds"/>): fresh at <c>new</c>, inherited by <c>with</c>.</summary>
+    public int Id { get; init; } = QNodeIds.Next();
+
     /// <summary>
     /// The name to SHOW in diagnostics, when it differs from the emitted <see cref="Name"/>. Null means
     /// "use <see cref="Name"/>". <see cref="Passes.Monomorphizer"/> sets it to the original generic op
@@ -122,6 +147,9 @@ public interface ICallableSig
 /// It IS its own signature slot (<see cref="IParamSpec"/>) — user-op qubit params are strict (no broadcast).</summary>
 public sealed record QParam(string Name, QType Type, int? RegisterSize) : IParamSpec
 {
+    /// <summary>Stable node identity (see <see cref="QNodeIds"/>): fresh at <c>new</c>, inherited by <c>with</c>.</summary>
+    public int Id { get; init; } = QNodeIds.Next();
+
     /// <summary>
     /// A generic register <c>Qubit[n] name</c>: the symbolic size symbol (e.g. <c>"n"</c>), bound to a
     /// concrete size per call site by <see cref="Passes.Monomorphizer"/>. Null for concrete/non-register
@@ -140,6 +168,9 @@ public sealed record QParam(string Name, QType Type, int? RegisterSize) : IParam
 
 public abstract record QStmt
 {
+    /// <summary>Stable node identity (see <see cref="QNodeIds"/>): fresh at <c>new</c>, inherited by <c>with</c>.</summary>
+    public int Id { get; init; } = QNodeIds.Next();
+
     /// <summary>Span of the whole statement in the entry document (see <see cref="QSpan"/>).</summary>
     public QSpan? Span { get; init; }
 }

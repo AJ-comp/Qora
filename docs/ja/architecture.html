@@ -157,12 +157,15 @@
     <span class="st">─Parse─▶</span> AST
     <span class="st">─Lower─▶</span> Qora IR
     <span class="st">─Expand─▶</span> 統合
+    <span class="st">─Desugar measure─▶</span>
     <span class="st">─Resolve─▶</span> 呼び出し先 FQN
     <span class="st">─Validate + Symbols─▶</span> (エラーで STOP)
     <span class="st">─Monomorphize─▶</span> 特殊化
+    <span class="st">─Flatten within/apply─▶</span>
     <span class="st">─Materialize Adjoint─▶</span> + 逆演算 op
     <span class="st">─Mangle─▶</span> 衝突しない名前
     <span class="st">─Check─▶</span>
+    <span class="st">─Target-lower─▶</span>
     <span class="st">─Emit─▶</span> OpenQASM 3
   </div>
 
@@ -350,6 +353,25 @@ QOperation Main()
   </p>
 
   <p>
+    Expand と Resolve のあいだで、小さな脱糖（desugaring）が 1 つ走ります — <strong>MeasureConditionLowering</strong>
+    です。OpenQASM には条件<em>の中</em>での測定がないので、<code>if (M(q[0]) == 1)</code> は OpenQASM が必要とする
+    2 段階の形へ書き換えられます: 測定は巻き上げられた <code>bit</code> へ引き出され、条件はそれを検査します。
+    <code>while</code> は各反復の末尾で、<code>repeat … until</code> は本体の末尾で再測定します。以降のすべては、
+    こうして素朴なビット条件だけを見ることになります:
+  </p>
+
+<pre><code>operation Main() {
+    use q = Qubit[2];
+    <span class="hl">if (M(q[0]) == 1)</span> { X(q[1]); }
+}
+                       <span class="cm">↓ MeasureConditionLowering</span>
+qubit[2] q;
+<span class="add">bit __m0;</span>
+<span class="add">__m0 = measure q[0];</span>          <span class="cm">← 条件の外へ巻き上げられた測定</span>
+<span class="add">if (__m0 == true)</span> { x q[1]; }
+</code></pre>
+
+  <p>
     続いて <strong>Resolve</strong> が演算定義と演算呼び出し先を<strong>完全修飾名（FQN）</strong>に変えます。
     <code>namespace Prep</code> 内の演算 <code>Fanout</code> は <code>Prep.Fanout</code> になり、呼び出し側
     <code>Prep.Fanout(reg)</code> がそれを指しているか確認されます。だから上の IR リスティングがすでに
@@ -420,6 +442,32 @@ QOperation Main()
 
   <p class="stagehead">in: 特殊化された IR &nbsp;·&nbsp; out: 合成された逆演算 op を持つ IR &nbsp;·&nbsp; パス: <code>AdjointMaterializer</code></p>
 
+  <h3>直前に走る — <code>within/apply</code> を平坦化（<code>ConjugationLowering</code>）</h3>
+
+  <p>
+    Qora の IR には、表層構文を持たない合成ノードが 1 つあります: <code>QConjugate</code> — <em>within/apply</em>
+    （共役; conjugation）形式で、「<em>within</em> を実行し、次に <em>apply</em>、最後に <em>within</em> の逆演算を
+    実行する」ことを意味します — compute · use · uncompute のサンドイッチです。反転されるのは <em>within</em> だけ
+    なので、その効果（一時的な補助ビット（アンシラ）の準備）は取り消され、一方で <em>apply</em> の効果は残ります。
+    <code>ConjugationLowering</code> はそのノードを普通のゲートへ平坦化し、末尾の逆演算を合成するために同じ反転
+    カーネルを再利用します:
+  </p>
+
+<pre><code>QConjugate(within=[X(a[0])], apply=[CNOT(a[0], d[0])])
+                       <span class="cm">↓ ConjugationLowering  ( within ++ apply ++ inverse-of-within )</span>
+x a[0];                <span class="cm">← within (compute)</span>
+cx a[0], d[0];         <span class="cm">← apply   (use)</span>
+<span class="add">inv @ x a[0];</span>          <span class="cm">← 合成された within の逆演算 (uncompute)</span>
+</code></pre>
+
+  <p>
+    このパスが<em>ここ</em>、実体化器の直前で走る理由は順序です: 合成された逆演算がユーザ演算
+    （<code>Adjoint Foo</code>）を呼ぶ場合、それはやはり本物の <code>Foo__adj</code> op にならなければならず —
+    それは実体化器がこのパスの<em>後</em>に走るからこそ起こります。今日、ソースから <code>QConjugate</code> を
+    生み出すものは何もないので、普通のプログラムではこのパスは何もしません（no-op）; これは、来たる
+    <strong>自動アンコンピュテーション</strong>が供給する出力経路です（末尾のノートを参照）。
+  </p>
+
   <p>
     例の <code>Main</code> には <code>Adjoint Prep.Fanout(reg)</code> があります。このパスはその演算全体の adjoint を
     <strong>普通の演算</strong>に変えます。反転カーネル（<code>Inverter</code>）を使って逆演算の本体を計算し —
@@ -476,7 +524,30 @@ QOperation Main()
 
   <h2 id="s9"><span class="n">9</span>Emit — OpenQASM 3 へ出す単純なプリンタ</h2>
 
-  <p class="stagehead">in: マングル済み IR &nbsp;·&nbsp; out: OpenQASM 3 テキスト &nbsp;·&nbsp; パス: <code>QasmEmitter</code></p>
+  <p class="stagehead">in: マングル済み IR &nbsp;·&nbsp; out: OpenQASM 3 テキスト &nbsp;·&nbsp; パス: <code>OpenQasmLowering</code> → <code>QasmEmitter</code></p>
+
+  <h3>直前に走る — OpenQASM 向けターゲットローワリング（<code>OpenQasmLowering</code>）</h3>
+
+  <p>
+    プリンタの前に、最後の IR→IR ステップが 1 つ走ります — <strong>OpenQasmLowering</strong>、OpenQASM 固有の
+    ターゲットローワリングです。Qora の <code>const</code> は任意の値を保持しうる不変の<em>束縛</em>（Q# の
+    <code>let</code> 流）ですが、OpenQASM の <code>const</code> はコンパイル時定数の初期化子を要求します。そのため
+    実行時に束縛される <code>const c = n;</code> は、出力のために普通の <code>int c = n;</code> へ格下げされます —
+    それでも再代入されることはないので、その不変性は何も失われません:
+  </p>
+
+<pre><code>int n = 2;
+<span class="hl">const c = n;</span>          <span class="cm">← Qora の const: 不変の束縛、任意の値</span>
+                   <span class="cm">↓ OpenQasmLowering</span>
+int n = 2;
+<span class="add">int c = n;</span>            <span class="cm">← 普通の int（OpenQASM の const はコンパイル時定数でなければならない）</span>
+</code></pre>
+
+  <p>
+    これは<strong>最初のターゲット別ローワリングパス</strong>です — Qora にとって正しい IR が、特定のバックエンドの
+    規則に合わせて調整される場所です。将来の QIR ターゲットは、上位のどのパスにも触れることなく、ここに独自の
+    ローワリングを追加することになります。
+  </p>
 
   <p>
     最後のパスは意図的に<strong>最も賢くありません</strong>: 名前をひねり出しもせず、何も反転しません — あらゆる
@@ -523,12 +594,15 @@ r = measure reg[0];</code></pre>
       <tr><td>Parse</td><td><em>Janglim エンジン</em></td><td>ソーステキスト → 構文木（まだ意味なし）</td></tr>
       <tr><td>Lower</td><td><code>QoraLowering</code></td><td>エンジンの木 → Qora IR（型付きノード; ファンクタをデータに）</td></tr>
       <tr><td>Expand</td><td><code>ModuleLoader</code></td><td>インポート → 1 つに統合されたプログラム</td></tr>
+      <tr><td>Desugar measure</td><td><code>MeasureConditionLowering</code></td><td>条件の中の測定 → 巻き上げた <code>bit</code>、代入してから検査</td></tr>
       <tr><td>Resolve</td><td><code>Resolver</code></td><td>演算呼び出し先 → 完全修飾名(FQN)</td></tr>
       <tr><td>Validate</td><td><code>QoraValidator</code> + <code>SymbolTableBuilder</code></td><td>IR → シンボルテーブル + すべての意味エラー（出力を止める固いゲート）</td></tr>
       <tr><td>Monomorphize</td><td><code>Monomorphizer</code></td><td>ジェネリック <code>Qubit[n]</code> → 具体サイズのコピー、変化した場合に再検証</td></tr>
+      <tr><td>Flatten conjugation</td><td><code>ConjugationLowering</code></td><td><code>within/apply</code>（<code>QConjugate</code>） → <code>compute; apply;</code> + <code>within</code> の合成された逆演算</td></tr>
       <tr><td>Materialize</td><td><code>AdjointMaterializer</code></td><td><code>Adjoint Foo</code> → 本物の <code>Foo__adj</code> op + 普通の呼び出し</td></tr>
       <tr><td>Mangle</td><td><code>NameMangler</code></td><td>Qora 名 → 衝突しない OpenQASM 識別子</td></tr>
       <tr><td>Check</td><td><code>ReferentialCheck</code></td><td>使われるすべての名前が解決されるか検証（さもなくば <code>QINTERNAL</code>）</td></tr>
+      <tr><td>Target-lower</td><td><code>OpenQasmLowering</code></td><td>OpenQASM 固有の調整（例: 実行時の <code>const</code> → 普通の <code>int</code>/<code>float</code>）</td></tr>
       <tr><td>Emit</td><td><code>QasmEmitter</code></td><td>最終 IR → OpenQASM 3 テキスト（純粋なプリンタ）</td></tr>
     </table>
   </div>
@@ -542,10 +616,12 @@ r = measure reg[0];</code></pre>
 
   <div class="call why">
     <span class="h">この先が向かう場所 — 自動アンコンピュテーション</span>
-    adjoint 実体化器が使うまさにその反転カーネルは、<strong>一時的な量子ビットがもう不要になる地点を見つけ、その
-    逆演算を自動的に注入する</strong>将来のパスによって再利用されます — Silq 流の自動アンコンピュテーションです。
-    逆演算の合成はすでにマングリング前の実体化パスなので、その新しいパスは下流の何も乱すことなく、同じ一直線に
-    はまり込みます。
+    Silq 流の自動アンコンピュテーション — <strong>一時的な量子ビットがもう不要になる地点を見つけ、その逆演算を
+    自動的に注入する</strong> — こそ、これらのパスが目指して作られているものです。最初のピースはすでに揃っています:
+    <code>ConjugationLowering</code> が <code>within/apply</code> ノードを compute · apply · uncompute へ平坦化して
+    出力するので、下流の経路全体（逆演算の合成 → <code>__adj</code> の閉包 → マングリング → QASM）が端から端まで
+    実証されています。残るのは、そのノードを自ら<em>生み出す</em>解析です — ライブネス（一時変数がいつ死ぬか）と
+    効果解析（安全に反転できるか） — その後、小さなインジェクタが各死亡地点で <code>QConjugate</code> を出力します。
   </div>
 
   <hr>
@@ -555,10 +631,10 @@ r = measure reg[0];</code></pre>
     得たものです（<code>qora --json --stages</code>）。<br>
     ソース、パイプライン順: <code>QoraGrammar.cs</code>（文法） ·
     <code>Ir/QoraLowering.cs</code>（AST→IR） ·
-    <code>Ir/Passes/ModuleLoader.cs</code> · <code>Resolver.cs</code> · <code>SymbolTable.cs</code> · <code>QoraValidator.cs</code> ·
-    <code>Monomorphizer.cs</code> · <code>AdjointMaterializer.cs</code> · <code>NameMangler.cs</code> ·
+    <code>Ir/Passes/ModuleLoader.cs</code> · <code>MeasureConditionLowering.cs</code> · <code>Resolver.cs</code> · <code>SymbolTable.cs</code> · <code>QoraValidator.cs</code> ·
+    <code>Monomorphizer.cs</code> · <code>ConjugationLowering.cs</code> · <code>AdjointMaterializer.cs</code> · <code>NameMangler.cs</code> ·
     <code>ReferentialCheck.cs</code> · <code>Ir/Inverter.cs</code>（反転カーネル） ·
-    <code>Ir/QasmEmitter.cs</code>（IR→OpenQASM）。
+    <code>OpenQasmLowering.cs</code> · <code>Ir/QasmEmitter.cs</code>（IR→OpenQASM）。
   </p>
 
 </div>
