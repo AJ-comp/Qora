@@ -148,6 +148,11 @@ public static class QoraParser
         string qasm = string.Empty;
         if (monoProgram != null && semanticErrors.Count == 0)
         {
+            // Effect analysis (pure, model-only): per-statement qubit touched/modified sets recorded on
+            // the final SemanticModel — the seed data for the auto-uncompute ladder. Runs here, before
+            // any tree-copying pass, so every recorded Id is one the model itself knows.
+            if (semantics is not null) EffectAnalysis.Run(monoProgram, semantics);
+
             // Flatten within/apply conjugations (QConjugate) into straight-line gates + a synthesized inverse
             // of the `within` block, BEFORE AdjointMaterializer — so a reversal's `Adjoint Foo` becomes a real
             // Foo__adj that the mangler then owns (nothing minted at emit time). A within block with no inverse
@@ -162,7 +167,7 @@ public static class QoraParser
                 // Materialize whole-op Adjoint into real inverse-def ops BEFORE mangling, so every synthesized
                 // name flows through the mangler's collision resolution (nothing is minted at emit time).
                 var materialized = AdjointMaterializer.Run(conjugated, semantics);
-                var mangled = NameMangler.Mangle(materialized.Program);
+                var mangled = NameMangler.Mangle(materialized.Program, semantics);
                 // referential-integrity gate: after mangling, every used identifier must resolve to a
                 // declaration/op/built-in. A dangling reference here is a COMPILER bug (a name not renamed
                 // consistently) — fail loudly (QINTERNAL) instead of emitting silently-broken QASM.

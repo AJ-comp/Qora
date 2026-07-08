@@ -3,7 +3,7 @@ namespace Qora.Ir;
 /// <summary>The compiler's version, stamped into emitted QASM for provenance.</summary>
 public static class QoraVersion
 {
-    public const string Value = "0.16";
+    public const string Value = "0.17";
 }
 
 /// <summary>
@@ -255,7 +255,13 @@ public sealed record QCond(string Text, bool HasCall = false);
 /// <param name="Arity">Expected argument count, angle included; <c>Controlled</c> adds one on top.</param>
 /// <param name="AngleFirst">Parametrized rotation form: <c>Rx(θ, q)</c> → <c>rx(θ) q;</c>.</param>
 /// <param name="Unitary">False for reset-like operations — they cannot take functors or be inverted.</param>
-public sealed record GateInfo(string QasmName, int Arity, bool AngleFirst = false, bool Unitary = true);
+/// <param name="Controls">How many LEADING qubit slots are controls: they steer the gate but their own
+/// computational-basis value never changes (effect analysis marks them touched, not modified).</param>
+/// <param name="Diagonal">Diagonal in the computational basis: targets keep their 0/1 value, only the
+/// phase may change. CAUTION for later passes: phase kickback (e.g. CZ) still entangles — diagonal-only
+/// contact does NOT make a qubit safely discardable.</param>
+public sealed record GateInfo(string QasmName, int Arity, bool AngleFirst = false, bool Unitary = true,
+    int Controls = 0, bool Diagonal = false);
 
 /// <summary>One parameter slot of a built-in gate, derived from its <see cref="GateInfo"/>. A rotation's
 /// leading angle is a value slot (<see cref="QType.Angle"/>); every qubit slot broadcasts (a whole register
@@ -281,13 +287,17 @@ public static class QoraGates
 {
     public static readonly IReadOnlyDictionary<string, GateInfo> Gates = new Dictionary<string, GateInfo>
     {
-        ["H"] = new("h", 1), ["X"] = new("x", 1), ["Y"] = new("y", 1), ["Z"] = new("z", 1),
-        ["S"] = new("s", 1), ["T"] = new("t", 1),
-        ["CNOT"] = new("cx", 2), ["CX"] = new("cx", 2), ["CY"] = new("cy", 2), ["CZ"] = new("cz", 2),
-        ["SWAP"] = new("swap", 2), ["CCX"] = new("ccx", 3),
+        ["H"] = new("h", 1), ["X"] = new("x", 1), ["Y"] = new("y", 1),
+        ["Z"] = new("z", 1, Diagonal: true),
+        ["S"] = new("s", 1, Diagonal: true), ["T"] = new("t", 1, Diagonal: true),
+        ["CNOT"] = new("cx", 2, Controls: 1), ["CX"] = new("cx", 2, Controls: 1),
+        // CY is NOT diagonal: Y flips the target's basis value (only the control slot is value-preserving).
+        ["CY"] = new("cy", 2, Controls: 1),
+        ["CZ"] = new("cz", 2, Controls: 1, Diagonal: true),
+        ["SWAP"] = new("swap", 2), ["CCX"] = new("ccx", 3, Controls: 2),
         ["Rx"] = new("rx", 2, AngleFirst: true),
         ["Ry"] = new("ry", 2, AngleFirst: true),
-        ["Rz"] = new("rz", 2, AngleFirst: true),
+        ["Rz"] = new("rz", 2, AngleFirst: true, Diagonal: true),
         ["Reset"] = new("reset", 1, Unitary: false),
         ["ResetAll"] = new("reset", 1, Unitary: false),
     };

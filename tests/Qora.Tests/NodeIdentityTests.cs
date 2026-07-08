@@ -96,6 +96,111 @@ public class NodeIdentityTests
         Assert.Equal(SymbolTableBuilder.Format(r.Ir), SymbolTableBuilder.Format(r.Ir, r.Semantics));
     }
 
+    // --- 4c. the two name domains, each with ONE home: Symbol.SourceName keeps the user's spelling
+    //         forever (diagnostics, symbol views), while the emitted (post-mangling) name is the
+    //         mangler's own fact recorded on the model. `x` collides with the stdgates gate x → x_;
+    //         `q` doesn't collide and is still recorded, because a null FindEmittedName must mean
+    //         "the mangler never saw this node", never "unchanged". ---
+
+    [Fact]
+    public void ManglerRecordsEmittedNamesAndSourceNameStaysUserSpelling()
+    {
+        var r = QoraParser.Parse("operation Main(){ use q=Qubit[1]; const int x = 1; H(q[0]); }");
+        Assert.True(r.Success, string.Join(" | ", r.Errors));
+        Assert.NotNull(r.Semantics);
+
+        var decl = r.Ir!.Operations.SelectMany(o => o.Body).OfType<QDecl>().Single(d => d.Name == "x");
+        var use = r.Ir!.Operations.SelectMany(o => o.Body).OfType<QUse>().Single();
+
+        var sym = r.Semantics!.FindSymbol(decl.Id);
+        Assert.Equal("x", sym!.SourceName);                          // source domain: frozen user spelling
+        Assert.Equal("x_", r.Semantics.FindEmittedName(decl.Id));    // emitted domain: renamed past the gate x
+        Assert.Equal("q", r.Semantics.FindEmittedName(use.Id));      // an unchanged name is recorded too
+        Assert.Contains("x_", r.Qasm);                               // and the QASM really uses the emitted name
+    }
+
+    // --- 4d. the record deliberately sits OUTSIDE CollectDecls' ContainsKey guard: same-name decls in
+    //         disjoint sibling blocks share ONE map entry (they dedup into one emitted name), but every
+    //         declaring NODE must still get its own emitted-name fact — a null on the second sibling
+    //         would read as "the mangler never saw this node", i.e. a compiler bug. ---
+
+    [Fact]
+    public void SiblingSameNameDeclsEachGetTheirOwnEmittedNameFact()
+    {
+        var r = QoraParser.Parse(
+            "operation Main(){ use q=Qubit[2]; for i in 0..1 { H(q[i]); } for i in 0..1 { X(q[i]); } }");
+        Assert.True(r.Success, string.Join(" | ", r.Errors));
+
+        var fors = r.Ir!.Operations.Single().Body.OfType<QFor>().ToList();
+        Assert.Equal(2, fors.Count);
+        Assert.Equal("i", r.Semantics!.FindEmittedName(fors[0].Id));
+        Assert.Equal("i", r.Semantics.FindEmittedName(fors[1].Id));   // the guard-shared entry still records node 2
+    }
+
+    // --- 4e. the parameter and operation record sites (separate code from CollectDecls): a def-local
+    //         param colliding with the stdgates gate x lands as x_ on the PARAM node, and both op nodes
+    //         carry their def names — the entry keeps its own name yet is still recorded. ---
+
+    [Fact]
+    public void ParameterAndOperationNodesCarryEmittedNameFacts()
+    {
+        var r = QoraParser.Parse(
+            "operation Foo(Qubit[1] x){ H(x[0]); }\noperation Main(){ use q=Qubit[1]; Foo(q); }");
+        Assert.True(r.Success, string.Join(" | ", r.Errors));
+
+        var foo = r.Ir!.Operations.Single(o => o.Name == "Foo");
+        var main = r.Ir.Operations.Single(o => o.Name == "Main");
+        Assert.Equal("x_", r.Semantics!.FindEmittedName(foo.Params.Single().Id));
+        Assert.Equal("Foo", r.Semantics.FindEmittedName(foo.Id));
+        Assert.Equal("Main", r.Semantics.FindEmittedName(main.Id));
+        Assert.Contains("def Foo(qubit[1] x_)", r.Qasm);
+    }
+
+    // --- 4f. unit-level Mangle: a namespaced op's DOT-FLATTENED def name lands on the op node's Id, and
+    //         null-before / non-null-after pins the "null means the mangler has not seen this node,
+    //         never 'unchanged'" half of the FindEmittedName contract. ---
+
+    [Fact]
+    public void MangleFlattensNamespacedOpNameOntoOpNodeAndNullMeansNotYetMangled()
+    {
+        var bell = new QOperation("MyLib.Bell", new List<QParam>(), new List<QStmt>());
+        var main = new QOperation("Main", new List<QParam>(), new List<QStmt>
+        {
+            new QUse("a", 1), Gate("H", Q("a", 0)),
+        });
+        var program = new QProgram(new List<QOperation> { bell, main });
+        var model = new SemanticModel();
+
+        Assert.Null(model.FindEmittedName(bell.Id));                    // before mangling: never seen
+        NameMangler.Mangle(program, model);
+        Assert.Equal("MyLib_Bell", model.FindEmittedName(bell.Id));     // dots flatten onto the op node
+        Assert.Equal("Main", model.FindEmittedName(main.Id));           // entry keeps its name, still recorded
+    }
+
+    // --- 4g. operations are symbols too: FindSymbol(op.Id) resolves to an Operation-kind symbol whose
+    //         SourceName is the op name, and whose Uses accrue one entry per call site across all callers.
+    //         An uncalled entry op has zero uses. ---
+
+    [Fact]
+    public void OperationIsASymbolWithOneUsePerCallSite()
+    {
+        var r = QoraParser.Parse(
+            "operation Foo(Qubit[1] q){ H(q[0]); }\n" +
+            "operation Main(){ use a=Qubit[1]; use b=Qubit[1]; Foo(a); Foo(b); }");
+        Assert.True(r.Success, string.Join(" | ", r.Errors));
+
+        var foo = r.Ir!.Operations.Single(o => o.Name == "Foo");
+        var main = r.Ir.Operations.Single(o => o.Name == "Main");
+
+        var fooSym = r.Semantics!.FindSymbol(foo.Id);
+        Assert.NotNull(fooSym);
+        Assert.Equal(SymbolKind.Operation, fooSym!.Kind);
+        Assert.Equal("Foo", fooSym.SourceName);
+        Assert.Equal(2, fooSym.Uses.Count);                          // called from Main twice
+
+        Assert.Empty(r.Semantics.FindSymbol(main.Id)!.Uses);         // the entry op is never called
+    }
+
     // --- 5. ConjugationLowering installs the inverse NEXT TO the originals in the same body: the copies
     //        must carry fresh Ids (else every Id-keyed table sees each within-statement twice), and the
     //        DerivedFrom chain must resolve a copy's Id back to the source statement's symbol. ---

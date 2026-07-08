@@ -2,6 +2,17 @@
 
 All notable changes to the Qora Language extension.
 
+## 0.11.0
+
+- Bundles the **Qora v0.17** compiler:
+  - **Effect analysis**: a new pass computes, per statement, which qubits are *touched* vs *modified*
+    (controls and diagonal-gate targets are touched but not modified), stored on the semantic model —
+    the use/def groundwork for automatic uncomputation.
+  - **Operations are first-class symbols** in one connected symbol table: an op resolves as a symbol
+    with its call sites, the compilation-stages symbols view now lists operations, and using an operation
+    as a value gives a precise error (QSEM028) instead of a misleading "not declared".
+  - Compiler test suite grew to 163 cases.
+
 ## 0.10.0
 
 - Bundles the **Qora v0.16** compiler — an architecture release:

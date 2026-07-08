@@ -4,7 +4,7 @@ using System.Text;
 namespace Qora.Ir.Passes;
 
 /// <summary>What a declared name IS.</summary>
-public enum SymbolKind { Parameter, Register, MeasureBit, Var, Const, LoopVar }
+public enum SymbolKind { Parameter, Register, MeasureBit, Var, Const, LoopVar, Operation }
 
 /// <summary>One place a name is used (a gate operand, a measurement target, an angle argument, …).
 /// <see cref="Order"/> is a pre-order index over the operation's statements — monotonic in program order,
@@ -17,7 +17,13 @@ public sealed record UseSite(int Order, string Detail, int NodeId);
 /// checking (declaration), liveness (uses), constant folding (const value), effect analysis (kind/type).</summary>
 public sealed class Symbol
 {
-    public string Name { get; }
+    /// <summary>The name AS WRITTEN IN SOURCE — the user's own spelling, frozen at validation and correct
+    /// forever for diagnostics and symbol views. This is deliberately NOT the emitted name: after
+    /// <see cref="NameMangler"/> runs, the QASM name of this declaration lives in
+    /// <see cref="SemanticModel.FindEmittedName"/>. Two name domains, each with exactly one home.
+    /// (Only the validation-built, model-held table carries this guarantee: a table REBUILT on demand over
+    /// a later tree — the emitter's model-less fallback — sees that tree's spellings as its "source".)</summary>
+    public string SourceName { get; }
     public SymbolKind Kind { get; }
     public QType? Type { get; }                 // Int / Float / Angle / Bit / Qubit (null if unknown)
     public bool IsConst { get; }
@@ -30,7 +36,7 @@ public sealed class Symbol
 
     public Symbol(string name, SymbolKind kind, QType? type = null, bool isConst = false, string? constValue = null,
         QSpan? declSpan = null, int? registerSize = null, string? sizeParam = null, int declNodeId = 0)
-        => (Name, Kind, Type, IsConst, ConstValue, DeclSpan, RegisterSize, SizeParam, DeclNodeId)
+        => (SourceName, Kind, Type, IsConst, ConstValue, DeclSpan, RegisterSize, SizeParam, DeclNodeId)
          = (name, kind, type, isConst, constValue, declSpan, registerSize, sizeParam, declNodeId);
 }
 
@@ -61,7 +67,7 @@ public sealed class Scope
     /// this. Returns false if a same-name symbol already exists in THIS scope; the caller turns that into
     /// QSEM015. Centralizing insertion here means every declaration (params, registers, measure bits, vars,
     /// consts, loop vars) is duplicate-checked by the same rule — no direct write can slip a collision past.</summary>
-    public bool TryAdd(Symbol sym) => _symbols.TryAdd(sym.Name, sym);
+    public bool TryAdd(Symbol sym) => _symbols.TryAdd(sym.SourceName, sym);
 }
 
 /// <summary>
@@ -80,11 +86,28 @@ public sealed class Scope
 /// </summary>
 public static class SymbolTableBuilder
 {
+    /// <summary>Build the PROGRAM scope: the top-level symbol table whose entries are the operation symbols
+    /// (one per op, kind <see cref="SymbolKind.Operation"/>, keyed by the op's declaring node Id). They go
+    /// in through <see cref="Scope.TryAdd"/> — the SAME single insertion door every parameter, register and
+    /// variable uses — so an operation is a symbol exactly like any other name, just at the program layer.
+    /// A duplicate op name (already reported QSEM008/QSEM022) simply loses the TryAdd; that program does not
+    /// emit anyway. Each operation's <see cref="Build"/> scope is a CHILD of this one, making it the true
+    /// root of the whole symbol table: a name resolves up the chain to an operation, and Record rejects that
+    /// as a value (QSEM028) — an operation may only be called, never used in an expression.</summary>
+    public static Scope BuildProgramScope(QProgram program)
+    {
+        var scope = new Scope();
+        foreach (var op in program.Operations)
+            scope.TryAdd(new Symbol(op.Name, SymbolKind.Operation, declSpan: op.Span, declNodeId: op.Id));
+        return scope;
+    }
+
     public static Scope Build(QOperation op, List<QoraError> errors,
-        Dictionary<IReadOnlyList<QStmt>, Scope>? scopeIndex = null)
+        Dictionary<IReadOnlyList<QStmt>, Scope>? scopeIndex = null,
+        Scope? programScope = null)
     {
         var opName = op.DisplayName ?? op.Name;
-        var root = new Scope();
+        var root = new Scope(programScope);   // the op body's table is a CHILD of the program table, so a name resolves up to an operation (rejected as a value by Record). Null programScope (standalone Build) → parentless, unchanged.
         var order = 0;
         var reported026 = new HashSet<(int, int)>();   // QSEM026 spans already flagged — one per statement span (a `for`'s From/To share a span; a condition names a qubit twice), so the diagnostic isn't duplicated
 
@@ -95,10 +118,10 @@ public static class SymbolTableBuilder
         void Declare(Scope target, Symbol sym)
         {
             if (target.TryAdd(sym)) return;
-            var existing = target.LookupLocal(sym.Name)!;   // TryAdd failed ⇒ a same-name symbol is already here
+            var existing = target.LookupLocal(sym.SourceName)!;   // TryAdd failed ⇒ a same-name symbol is already here
             Add(errors, "QSEM015", existing.Kind == sym.Kind
-                ? $"in `{opName}`: the {KindLabel(sym.Kind)} name `{sym.Name}` is declared more than once; each name must be unique within its scope"
-                : $"in `{opName}`: `{sym.Name}` is declared as both a {KindLabel(existing.Kind)} and a {KindLabel(sym.Kind)} in the same scope; rename one", sym.DeclSpan);
+                ? $"in `{opName}`: the {KindLabel(sym.Kind)} name `{sym.SourceName}` is declared more than once; each name must be unique within its scope"
+                : $"in `{opName}`: `{sym.SourceName}` is declared as both a {KindLabel(existing.Kind)} and a {KindLabel(sym.Kind)} in the same scope; rename one", sym.DeclSpan);
         }
 
         // Parameters + the HOISTED `use` registers share one emitted top-level scope, so they seed the ROOT
@@ -142,9 +165,19 @@ public static class SymbolTableBuilder
         var currentStmtId = 0;   // set by Walk to the statement being visited, so uses carry their node Id
         void Record(Scope scope, string name, string detail, QSpan? span)
         {
+            // pi/tau/euler/true/false and the symbolic register size `n` are legitimate NON-symbols — they
+            // mean something in an expression but are never declared — so they are exempt from resolution
+            // ENTIRELY, checked BEFORE the lookup. This matters now that the scope chain reaches the program
+            // table: a size param `n` may collide with an `operation n`, and the exemption must win over the
+            // operation-kind branch below (else a valid generic body is wrongly rejected).
+            if (IsReservedName(name) || sizeParams.Contains(name)) return;
             var sym = scope.Lookup(name);
-            if (sym is not null) sym.Uses.Add(new UseSite(order, detail, currentStmtId));
-            else if (!IsReservedName(name) && !sizeParams.Contains(name))
+            // An operation resolves up the scope chain but is NOT a value: it can only be called (the QGate
+            // path records those uses), never referenced in an expression or used as an assignment target.
+            if (sym is { Kind: SymbolKind.Operation })
+                Add(errors, "QSEM028", $"in `{opName}`: `{name}` is an operation, not a value — it can only be called (`{name}(…)`)", span);
+            else if (sym is not null) sym.Uses.Add(new UseSite(order, detail, currentStmtId));
+            else
                 Add(errors, "QSEM025", $"in `{opName}`: `{name}` is not declared in scope here — an unknown name, or a name used before its declaration", span);
         }
 
@@ -179,6 +212,12 @@ public static class SymbolTableBuilder
                 switch (s)
                 {
                     case QGate g:
+                        // an operation CALL (not a built-in gate) records a use on the callee's operation
+                        // symbol — its "used-where", accumulated across every caller. The callee is looked up
+                        // in the PROGRAM scope by name (the same symbol-table lookup any name uses); a
+                        // built-in gate (H, X…) is not there → skipped. Functored calls (Adjoint Foo) name Foo.
+                        if (programScope?.LookupLocal(g.Name) is { Kind: SymbolKind.Operation } callee)
+                            callee.Uses.Add(new UseSite(order, $"call @ {g.Name}", g.Id));
                         foreach (var a in g.Args)
                             switch (a)
                             {
@@ -267,14 +306,14 @@ public static class SymbolTableBuilder
         //     Monomorphizer's whole-word textual substitution (silently corrupting `pi` in angle expressions);
         //   - a generic register size must not collide with any other declared name.
         foreach (var sym in root.AllSymbols())
-            if (IsReservedName(sym.Name))
-                Add(errors, "QSEM013", $"in `{opName}`: {KindLabel(sym.Kind)} name `{sym.Name}` shadows the built-in `{sym.Name}`; choose another name", sym.DeclSpan);
+            if (IsReservedName(sym.SourceName))
+                Add(errors, "QSEM013", $"in `{opName}`: {KindLabel(sym.Kind)} name `{sym.SourceName}` shadows the built-in `{sym.SourceName}`; choose another name", sym.DeclSpan);
         foreach (var p in op.Params)
             if (p.Type == QType.Qubit && p.SizeParam is { } spName)
             {
                 if (IsReservedName(spName))
                     Add(errors, "QSEM013", $"in `{opName}`: the generic register size `{spName}` shadows the built-in `{spName}`; choose another name", p.Span);
-                if (root.AllSymbols().Any(s => s.Name == spName))
+                if (root.AllSymbols().Any(s => s.SourceName == spName))
                     Add(errors, "QSEM015", $"in `{opName}`: `{spName}` is both the generic register size in `Qubit[{spName}] {p.Name}` and a declared name — the size parameter needs a unique name", p.Span);
             }
 
@@ -298,6 +337,7 @@ public static class SymbolTableBuilder
         SymbolKind.MeasureBit => "measure bit",
         SymbolKind.Const => "const",
         SymbolKind.LoopVar => "loop variable",
+        SymbolKind.Operation => "operation",
         _ => "variable",
     };
 
@@ -323,17 +363,21 @@ public static class SymbolTableBuilder
     // --- debug rendering (the --stages view) ---
 
     /// <summary>Render the symbol table of every operation as text (for the <c>--stages</c> debug view).
-    /// With a <see cref="SemanticModel"/>, each operation's scope tree is READ from the model (the one
-    /// validation built) instead of rebuilt; an op the model has not seen — e.g. a still-generic op when
-    /// the model was built post-monomorphization — falls back to a rebuild. Same output either way.</summary>
+    /// Each op is shown as its own <see cref="SymbolKind.Operation"/> symbol line, then its scope tree
+    /// indented beneath. With a <see cref="SemanticModel"/>, the op symbols and each op's scope tree are
+    /// READ from the model (the one validation built); an op the model has not seen — e.g. a still-generic
+    /// op when the model was built post-monomorphization — falls back to a rebuild. Same output either way
+    /// (operation call-site uses live on the model only, so they are not part of this view).</summary>
     public static string Format(QProgram? program, SemanticModel? model = null)
     {
         if (program is null || program.Operations.Count == 0) return string.Empty;
         var sb = new StringBuilder();
         var sink = new List<QoraError>();                 // formatting must not surface errors
+        var programScope = model?.ProgramScope ?? BuildProgramScope(program);   // op symbols: from the model, or rebuilt
         foreach (var op in program.Operations)
         {
-            sb.AppendLine($"{op.DisplayName ?? op.Name}:");
+            var kind = (programScope.LookupLocal(op.Name)?.Kind ?? SymbolKind.Operation).ToString().ToLowerInvariant();
+            sb.AppendLine($"{op.DisplayName ?? op.Name}: {kind}");
             var root = model?.FindRootScope(op.Id) ?? Build(op, sink);
             PrintScope(root, sb, 1);
         }
@@ -351,7 +395,7 @@ public static class SymbolTableBuilder
             var uses = sym.Uses.Count == 0
                 ? "no uses"
                 : $"uses [{string.Join(", ", sym.Uses.Select(u => u.Order))}] last @ {sym.Uses[^1].Order}";
-            sb.AppendLine($"{pad}{sym.Name}: {kind} {type}{val}  ({uses})");
+            sb.AppendLine($"{pad}{sym.SourceName}: {kind} {type}{val}  ({uses})");
         }
         foreach (var child in scope.Children) PrintScope(child, sb, depth + 1);
     }

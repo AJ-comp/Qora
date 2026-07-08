@@ -26,9 +26,14 @@ public static class NameMangler
     /// <summary>The mangled program plus one note per collision-driven rename (for the QASM header).</summary>
     public sealed record Result(QProgram Program, IReadOnlyList<string> Notes);
 
-    public static Result Mangle(QProgram program)
+    /// <summary>Mangle every name, recording each declaration's emitted name into <paramref name="model"/>
+    /// (<see cref="SemanticModel.RecordEmittedName"/>) — this pass is the single producer of the
+    /// source-name → emitted-name fact. The parameter has NO default on purpose: a caller that has no
+    /// model (a test on a bare program) must say so explicitly with null, so the model can never be
+    /// forgotten silently on the compile path.</summary>
+    public static Result Mangle(QProgram program, SemanticModel? model)
     {
-        var m = new Mangler();
+        var m = new Mangler(model);
         var prog = m.Run(program);
         return new Result(prog, m.Notes);
     }
@@ -36,8 +41,11 @@ public static class NameMangler
     private sealed class Mangler
     {
         public readonly List<string> Notes = new();
+        private readonly SemanticModel? _model;
         private HashSet<string> _opNames = new();
         private readonly Dictionary<string, string> _opMap = new();   // op FQN -> emitted def name
+
+        public Mangler(SemanticModel? model) => _model = model;
 
         public QProgram Run(QProgram program)
         {
@@ -49,7 +57,10 @@ public static class NameMangler
             // (deterministic source order); the entry keeps its own name — it is never emitted as a def.
             var global = new HashSet<string>(QoraGates.QasmReserved);
             foreach (var o in program.Operations)
+            {
                 _opMap[o.Name] = o == entry ? o.Name : Fresh(o.Name, global, "operation");
+                _model?.RecordEmittedName(o.Id, _opMap[o.Name]);
+            }
 
             var outOps = new List<QOperation>(program.Operations.Count);
             foreach (var o in program.Operations)
@@ -78,7 +89,10 @@ public static class NameMangler
             var map = new Dictionary<string, string>();
 
             foreach (var p in op.Params)
+            {
                 if (!map.ContainsKey(p.Name)) map[p.Name] = Fresh(p.Name, scope, "parameter");
+                _model?.RecordEmittedName(p.Id, map[p.Name]);
+            }
             CollectDecls(op.Body, scope, map);
 
             return op with
@@ -89,16 +103,26 @@ public static class NameMangler
             };
         }
 
-        /// <summary>Assign a fresh name to every identifier a body DECLARES (registers, variables, loop variables).</summary>
+        /// <summary>Assign a fresh name to every identifier a body DECLARES (registers, variables, loop
+        /// variables), recording each declaring node's emitted name into the model. The record sits OUTSIDE
+        /// the ContainsKey guard on purpose: same-name declarations in disjoint sibling blocks share one map
+        /// entry, but every declaring NODE still gets its own emitted-name fact.</summary>
         private void CollectDecls(IReadOnlyList<QStmt> stmts, HashSet<string> scope, Dictionary<string, string> map)
         {
             foreach (var s in stmts)
                 switch (s)
                 {
-                    case QUse u: if (!map.ContainsKey(u.Name)) map[u.Name] = Fresh(u.Name, scope, "register"); break;
-                    case QDecl d: if (!map.ContainsKey(d.Name)) map[d.Name] = Fresh(d.Name, scope, "variable"); break;
+                    case QUse u:
+                        if (!map.ContainsKey(u.Name)) map[u.Name] = Fresh(u.Name, scope, "register");
+                        _model?.RecordEmittedName(u.Id, map[u.Name]);
+                        break;
+                    case QDecl d:
+                        if (!map.ContainsKey(d.Name)) map[d.Name] = Fresh(d.Name, scope, "variable");
+                        _model?.RecordEmittedName(d.Id, map[d.Name]);
+                        break;
                     case QFor f:
                         if (!map.ContainsKey(f.Var)) map[f.Var] = Fresh(f.Var, scope, "loop variable");
+                        _model?.RecordEmittedName(f.Id, map[f.Var]);
                         CollectDecls(f.Body, scope, map);
                         break;
                     case QIf i: CollectDecls(i.Then, scope, map); CollectDecls(i.Else, scope, map); break;

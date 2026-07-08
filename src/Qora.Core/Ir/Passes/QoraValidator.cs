@@ -64,6 +64,10 @@ namespace Qora.Ir.Passes;
 ///   <item><b>QSEM023</b> — reserved. Emitted-name collisions are no longer rejected here; the
 ///         <see cref="NameMangler"/> pass auto-renames colliding emitted identifiers and records a
 ///         <c>// Qora:</c> note.</item>
+///   <item><b>QSEM028</b> — an operation name used as a VALUE (<c>var x = Foo</c>, or an op name in any
+///         expression / argument / index slot). An operation can only be CALLED (<c>Foo(…)</c>); it has no
+///         value. Raised by <see cref="SymbolTableBuilder"/> when an expression identifier resolves — up the
+///         scope chain to the program-level table — to an operation symbol.</item>
 /// </list>
 /// Earlier pipeline steps own the remaining codes, and each step's errors preempt this validator:
 /// QSEM020 (import file not found/unreadable) and QSEM021 (cyclic imports) come from
@@ -92,7 +96,9 @@ public static class QoraValidator
 
         var ops = program.Operations.Select(o => o.Name).ToHashSet();
         var opByName = new Dictionary<string, QOperation>();
+
         foreach (var o in program.Operations) opByName.TryAdd(o.Name, o);
+        
         var inverter = new Inverter(program.Operations);
         var entry = program.Operations.FirstOrDefault(o => o.Name == "Main") ?? program.Operations[0];
 
@@ -123,6 +129,13 @@ public static class QoraValidator
         // NameMangler auto-resolves them by appending `_` and records a `// Qora:` note in the output, so
         // any validated program emits. (Same-source-name duplicates are still QSEM008/015/022 above.)
 
+        // Operations are symbols too, at the PROGRAM layer: the top-level symbol table whose entries are the
+        // ops. They enter through Scope.TryAdd — the SAME insertion door every parameter / register /
+        // variable uses — so nothing registers a symbol by a side path. Built BEFORE the per-op walk so
+        // forward calls resolve, and handed to each Build so a call records a UseSite on its callee.
+        var programScope = SymbolTableBuilder.BuildProgramScope(program);
+        model.SetProgramScope(programScope);
+
         foreach (var op in program.Operations)
         {
             // QSEM013 — names whose MEANING cannot be disambiguated stay reserved: the measurement
@@ -149,7 +162,7 @@ public static class QoraValidator
             // alike — so there are no parallel duplicate-name checks out here. `scopeOf` maps each body list
             // to its scope so the walk below resolves every operand with correct nesting. Nothing re-derives it.
             var scopeOf = new Dictionary<IReadOnlyList<QStmt>, Scope>();
-            var root = SymbolTableBuilder.Build(op, errors, scopeOf);
+            var root = SymbolTableBuilder.Build(op, errors, scopeOf, programScope);
             model.AddOperation(op, root);
 
             var ctx = new Ctx(op, entry.Name, ops, opByName, inverter, errors, scopeOf);

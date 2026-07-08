@@ -415,7 +415,7 @@ public static class QasmEmitter
         var root = Passes.SymbolTableBuilder.Build(op, sink);
         var rebuilt = new Dictionary<string, string>();
         foreach (var s in root.AllSymbols())
-            if (TypeName(s.Type) is { } t) rebuilt[s.Name] = t;   // Int/Bit/Float/Angle; Qubit and untyped → null → skipped
+            if (TypeName(s.Type) is { } t) rebuilt[s.SourceName] = t;   // Int/Bit/Float/Angle; Qubit and untyped → null → skipped; the rebuild ran over the CURRENT tree, so its "source" IS the mangled program
         return rebuilt;
     }
 

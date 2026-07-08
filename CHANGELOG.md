@@ -11,6 +11,37 @@ emitted as **OpenQASM 3.0**.
 > **Note:** Qora was renamed from **Ket** on 2026-07-01 (a "Ket" extension already existed). Versions
 > 0.1–0.7 below were authored under the old name.
 
+## 0.17 — 2026-07-09
+
+### Added
+- **Effect analysis — rung ① of the automatic-uncomputation ladder (`Ir/Passes/EffectAnalysis.cs`).**
+  A pure, diagnostics-free pass over validated, monomorphized IR computes, for every statement, which
+  qubits it *touched* (any operand, controls included) and which it *modified* (computational-basis value
+  may change), plus a per-operation summary over the formal qubit parameters (with an `Irreversible` flag
+  when the body measures or resets). Results are stored on the `SemanticModel` keyed by stable node Id, so
+  tree-copying passes still find them through the `DerivedFrom` chain. The gate table now records
+  `Controls` (leading control slots — steered, never value-changed) and `Diagonal` (phase-only gates —
+  targets keep their 0/1 value), so controls and diagonal targets are correctly *touched but not
+  modified*. This is the use/def foundation the liveness / qfree rungs build on.
+- **Operations are first-class symbols in one connected symbol table.** An operation is now a
+  program-level symbol (kind `Operation`), inserted through the *same* single `Scope.TryAdd` door every
+  parameter / register / variable uses — no side path. The program scope is the parent of each
+  operation's body scope, so the whole program is one connected symbol-table tree: `FindSymbol(op.Id)`
+  resolves an operation, its `Uses` accrue one entry per call site, and the `--stages` symbols view shows
+  each op as an `operation`. Using an operation name as a *value* (`var x = Foo`, `Foo = 5`, an op in any
+  expression / argument slot) is now the precise **QSEM028** ("an operation, not a value — it can only be
+  called"), replacing the misleading "not declared" it produced before.
+- **Both name domains are explicit on the semantic model.** A declaration's *source* name (what the user
+  wrote, frozen at validation — `Symbol.SourceName`) and its *emitted* name (what the QASM says, recorded
+  by `NameMangler` — `SemanticModel.FindEmittedName`) now each have exactly one home, joined by stable
+  node Id. `Symbol.Name` was renamed to `SourceName` so every read states which domain it means, and the
+  mangler records the emitted name for every declaration (renamed or not) — so a null lookup means "the
+  mangler has not seen this node", never "unchanged".
+
+### Tests
+- +23 cases (effect analysis; emitted-name recording; operation-as-symbol + use sites; QSEM028;
+  size-param/op-name collision) → 163 total.
+
 ## 0.16 — 2026-07-08
 
 ### Added

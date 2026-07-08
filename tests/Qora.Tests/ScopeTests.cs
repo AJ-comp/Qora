@@ -24,6 +24,13 @@ public class ScopeTests
     public void RejectsUnresolvedName(string source) => Compiler.Rejects(source, "QSEM025");
 
     [Theory]
+    // an operation is a symbol at the program layer, but NOT a value: it resolves up the scope chain yet
+    // can only be CALLED, never referenced in an expression / argument / index.
+    [InlineData("operation Foo(Qubit[1] q){ H(q[0]); }\noperation Main(){ use a=Qubit[1]; int x = Foo; }")]        // op as an initializer value
+    [InlineData("operation Foo(Qubit[1] q){ H(q[0]); }\noperation Main(){ use a=Qubit[1]; Foo(a); int y = Foo + 1; }")] // op inside an arithmetic expression
+    public void RejectsOperationUsedAsValue(string source) => Compiler.Rejects(source, "QSEM028");
+
+    [Theory]
     // nested shadowing of a BLOCK-SCOPED classical is allowed (C++/Q#/Silq-style):
     [InlineData("operation Main(){ use q=Qubit[1]; int x=0; if(x==0){ int x=1; Rx(0.5, q[0]); } }")]
     // a `use` register may be forward-referenced (registers are hoisted):
@@ -33,5 +40,8 @@ public class ScopeTests
     // the same measure-bit name in disjoint if/else branches is fine (they never coexist):
     [InlineData("operation Main(){ use q=Qubit[2]; bit c=M(q[0]); if(c==1){ bit r=M(q[1]); if(r==1){X(q[0]);} } else { bit r=M(q[0]); if(r==1){X(q[1]);} } }")]
     [InlineData("operation Main(){ use q=Qubit[2]; bit r0=M(q[0]); bit r1=M(q[1]); }")] // distinct measure bits
+    // a generic size param `n` may collide with an OPERATION named `n`: the size param is a non-symbol,
+    // exempt from resolution, so its use in a bound/index is NOT read as the operation (no false QSEM028).
+    [InlineData("operation n(Qubit[1] q){ H(q[0]); }\noperation Foo(Qubit[n] q){ for i in 0..n-1 { H(q[i]); } }\noperation Main(){ use a=Qubit[2]; Foo(a); }")]
     public void AcceptsValidScoping(string source) => Compiler.Accepts(source);
 }
