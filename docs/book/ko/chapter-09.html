@@ -1,0 +1,668 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>9장. 양자 게이트는 되돌릴 수 있어야 한다. - Qora</title>
+<style>
+:root {
+    --bg: #ffffff;
+    --ink: #1f2430;
+    --muted: #5b6472;
+    --line: #e6e8ee;
+    --panel: #f7f8fb;
+    --accent: #6b3fd4;
+    --plus: #1457d6;
+    --minus: #d62b39;
+    --good: #11875b;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo",
+      "Malgun Gothic", "Noto Sans KR", "Segoe UI Symbol", "Cambria Math", sans-serif;
+    line-height: 1.78;
+    font-size: 17px;
+    word-break: keep-all;
+  }
+  header.hero {
+    padding: 64px 20px 42px;
+    text-align: center;
+    border-bottom: 1px solid var(--line);
+    background: linear-gradient(180deg, #faf9ff, #ffffff);
+  }
+  .tag {
+    display: inline-block;
+    color: var(--accent);
+    font-size: .78rem;
+    font-weight: 800;
+    letter-spacing: .12em;
+    margin-bottom: 14px;
+    text-transform: uppercase;
+  }
+  h1 {
+    margin: 0 0 10px;
+    font-size: 2.15rem;
+    line-height: 1.25;
+  }
+  header.hero p {
+    margin: 0;
+    color: var(--muted);
+    font-size: 1.05rem;
+  }
+  .wrap {
+    max-width: 860px;
+    margin: 0 auto;
+    padding: 0 20px 120px;
+  }
+  h2 {
+    margin: 58px 0 14px;
+    padding-top: 14px;
+    border-top: 2px solid var(--line);
+    font-size: 1.52rem;
+    line-height: 1.45;
+  }
+  h3 {
+    margin: 34px 0 10px;
+    font-size: 1.18rem;
+    line-height: 1.45;
+  }
+  h4 {
+    margin: 0 0 8px;
+    font-size: 1.03rem;
+    line-height: 1.45;
+  }
+  p { margin: 14px 0; }
+  .card p {
+    max-width: 68ch;
+  }
+  strong { color: #11203a; }
+  code,
+  .mono {
+    font-family: "SF Mono", "JetBrains Mono", "D2Coding", Consolas, "Segoe UI Symbol", monospace;
+  }
+  code {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    padding: 1px 6px;
+    font-size: .9em;
+  }
+  .nowrap {
+    white-space: nowrap;
+  }
+  .lead {
+    margin-top: 28px;
+    font-size: 1.08rem;
+  }
+  .toc {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    margin: 26px 0;
+    padding: 16px 18px;
+  }
+  .toc strong { display: block; margin-bottom: 6px; }
+  .toc ol { margin: 0; padding-left: 22px; }
+  .toc a {
+    color: var(--ink);
+    text-decoration: none;
+  }
+  .toc a:hover { color: var(--accent); }
+  .doc-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin: 20px 0 28px;
+  }
+  .doc-link {
+    align-items: center;
+    background: #f6f9ff;
+    border: 1px solid #cddcff;
+    border-radius: 999px;
+    color: #1745b5;
+    display: inline-flex;
+    font-weight: 800;
+    gap: 8px;
+    padding: 8px 14px;
+    text-decoration: none;
+  }
+  .doc-link:hover {
+    background: #eef4ff;
+    border-color: #9bb8ff;
+  }
+  .part {
+    margin: 52px 0 18px;
+    padding: 18px 20px;
+    border-radius: 10px;
+    background: #f3efff;
+    border: 1px solid #e2d8ff;
+  }
+  .part .label {
+    display: inline-block;
+    color: var(--accent);
+    font-size: .78rem;
+    font-weight: 900;
+    letter-spacing: .08em;
+    margin-bottom: 8px;
+  }
+  .part h2 {
+    margin: 0 0 8px;
+    padding: 0;
+    border: 0;
+  }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    margin: 18px 0;
+    padding: 16px 18px;
+    overflow-x: auto;
+  }
+  .example-block {
+    display: block;
+    background: #fff;
+    border-left: 3px solid #c9d6ff;
+    border-radius: 0 7px 7px 0;
+    margin: 12px 0;
+    overflow-x: auto;
+    padding: 10px 12px;
+  }
+  .example-block .label {
+    display: block;
+    color: var(--muted);
+    font-size: .8rem;
+    font-weight: 900;
+    margin-bottom: 4px;
+  }
+  .call {
+    border-left: 4px solid var(--accent);
+    background: #faf8ff;
+    border-radius: 0 8px 8px 0;
+    margin: 20px 0;
+    padding: 14px 18px;
+  }
+  .call.why {
+    border-color: var(--good);
+    background: #f2fbf7;
+  }
+  .call.warn {
+    border-color: #e6a417;
+    background: #fff9ec;
+  }
+  .call .h {
+    display: block;
+    font-weight: 800;
+    margin-bottom: 4px;
+  }
+  .point-list {
+    display: grid;
+    gap: 10px;
+    margin: 14px 0 22px;
+  }
+  .point {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 10px;
+    align-items: start;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 11px 13px;
+  }
+  .point .marker {
+    color: var(--accent);
+    font-weight: 900;
+    white-space: nowrap;
+  }
+  .rule {
+    background: #f3efff;
+    border: 1px solid #e2d8ff;
+    border-radius: 10px;
+    color: #1a1140;
+    font-size: 1.08rem;
+    font-weight: 800;
+    margin: 20px 0;
+    padding: 16px;
+    text-align: center;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+  th,
+  td {
+    border-bottom: 1px solid var(--line);
+    padding: 9px 12px;
+    text-align: center;
+    white-space: nowrap;
+  }
+  th {
+    color: var(--muted);
+    font-size: .82rem;
+    font-weight: 700;
+  }
+  td:first-child,
+  th:first-child {
+    text-align: left;
+    font-weight: 700;
+  }
+  tr:last-child td { border-bottom: 0; }
+  .math {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    font-weight: 800;
+    margin: 14px 0;
+    padding: 12px 14px;
+    text-align: center;
+  }
+  .math-line + .math-line {
+    margin-top: 4px;
+  }
+  .compare-grid,
+  .summary-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 14px;
+    margin: 16px 0 22px;
+  }
+  @media (min-width: 760px) {
+    .compare-grid,
+    .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  .card {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 15px 16px;
+  }
+  .card.good { border-top: 5px solid var(--good); }
+  .card.warn { border-top: 5px solid #e6a417; }
+  .card.plus { border-top: 5px solid var(--plus); }
+  .card.minus { border-top: 5px solid var(--minus); }
+  .card.accent { border-top: 5px solid var(--accent); }
+  .tag-small {
+    display: inline-block;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    color: var(--muted);
+    font-size: .76rem;
+    font-weight: 900;
+    margin-bottom: 8px;
+    padding: 2px 9px;
+  }
+  .practice {
+    background: #f8fbff;
+    border: 1px solid #cfe0ff;
+    border-left: 8px solid var(--plus);
+    border-radius: 8px;
+    margin: 28px 0 34px;
+    padding: 18px;
+  }
+  .practice .practice-label {
+    display: inline-block;
+    color: var(--plus);
+    background: #edf4ff;
+    border: 1px solid #cfe0ff;
+    border-radius: 999px;
+    font-size: .78rem;
+    font-weight: 900;
+    margin-bottom: 10px;
+    padding: 3px 11px;
+  }
+  .practice h3 { margin-top: 0; }
+  pre {
+    background: #111827;
+    border-radius: 8px;
+    color: #eef4ff;
+    font-size: .88rem;
+    line-height: 1.55;
+    margin: 12px 0 0;
+    overflow-x: auto;
+    padding: 14px 15px;
+  }
+  pre code {
+    background: transparent;
+    border: 0;
+    color: inherit;
+    padding: 0;
+  }
+  .next {
+    background: #f2fbf7;
+    border: 1px solid #b8e5d2;
+    border-radius: 10px;
+    margin-top: 42px;
+    padding: 16px 18px;
+  }
+  .chapter-nav {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 10px;
+    margin: 34px 0 46px;
+  }
+  @media (min-width: 680px) {
+    .chapter-nav { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  .chapter-nav a {
+    display: block;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 12px 14px;
+    text-decoration: none;
+    color: var(--ink);
+    background: #fff;
+  }
+  .chapter-nav a:hover {
+    border-color: #c9d6ff;
+    background: #f8fbff;
+  }
+  .chapter-nav .k {
+    display: block;
+    color: var(--muted);
+    font-size: .78rem;
+    font-weight: 900;
+    margin-bottom: 3px;
+  }
+  .chapter-nav .t {
+    display: block;
+    font-weight: 900;
+  }
+  .chapter-nav .disabled {
+    background: var(--panel);
+    color: var(--muted);
+  }
+  footer {
+    border-top: 1px solid var(--line);
+    color: var(--muted);
+    font-size: .9rem;
+    margin-top: 60px;
+    padding-top: 24px;
+    text-align: center;
+  }
+  .book-shell {
+    display: grid;
+    gap: 44px;
+    grid-template-columns: 300px minmax(0, 1060px);
+    margin: 0 auto;
+    max-width: 1600px;
+    padding: 0 24px 120px;
+  }
+  .side-nav {
+    align-self: start;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    margin-top: 28px;
+    max-height: calc(100vh - 36px);
+    overflow: auto;
+    padding: 14px;
+    position: sticky;
+    top: 18px;
+  }
+  .side-nav strong {
+    display: block;
+    font-size: .9rem;
+    margin: 0 0 8px;
+  }
+  .side-nav a {
+    border-radius: 7px;
+    color: var(--ink);
+    display: block;
+    font-size: .94rem;
+    line-height: 1.35;
+    padding: 7px 8px;
+    text-decoration: none;
+  }
+  .side-nav a:hover,
+  .side-nav a.current {
+    background: #eef4ff;
+    color: #1745b5;
+    font-weight: 800;
+  }
+  .side-nav .group {
+    border-top: 1px solid var(--line);
+    margin-top: 10px;
+    padding-top: 10px;
+  }
+  .article {
+    min-width: 0;
+    padding-bottom: 120px;
+  }
+  .article > h2:first-child,
+  .article > .part:first-child + h2 {
+    margin-top: 28px;
+  }
+  .breadcrumb {
+    color: var(--muted);
+    font-size: .9rem;
+    font-weight: 700;
+    margin: 26px 0 0;
+  }
+  .overview-list {
+    display: grid;
+    gap: 10px;
+    margin: 18px 0 28px;
+  }
+  .overview-item {
+    align-items: baseline;
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    color: var(--ink);
+    display: grid;
+    gap: 8px;
+    grid-template-columns: 92px minmax(0, 1fr);
+    padding: 12px 14px;
+    text-decoration: none;
+  }
+  .overview-item:hover {
+    border-color: #c9d6ff;
+    background: #f8fbff;
+  }
+  .overview-item .num {
+    color: var(--accent);
+    font-size: .86rem;
+    font-weight: 900;
+  }
+  .overview-item .title {
+    font-weight: 900;
+  }
+  .page-nav {
+    display: grid;
+    gap: 12px;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    margin-top: 46px;
+  }
+  .page-nav > a,
+  .page-nav > span {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    color: var(--ink);
+    min-height: 78px;
+    padding: 13px 14px;
+    text-decoration: none;
+  }
+  .page-nav a:hover {
+    border-color: #c9d6ff;
+    background: #f8fbff;
+  }
+  .page-nav .k {
+    color: var(--muted);
+    display: block;
+    font-size: .78rem;
+    font-weight: 900;
+    margin-bottom: 4px;
+  }
+  .page-nav .t {
+    display: block;
+    font-weight: 900;
+    line-height: 1.35;
+  }
+  .page-nav .disabled {
+    background: var(--panel);
+    color: var(--muted);
+  }
+  .page-nav .home {
+    text-align: center;
+  }
+  @media (max-width: 860px) {
+    .book-shell {
+      display: block;
+      padding: 0 18px 90px;
+    }
+    .side-nav {
+      max-height: none;
+      position: static;
+    }
+    .page-nav {
+      grid-template-columns: 1fr;
+    }
+    .overview-item {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>
+</head>
+<body>
+<div class="qora-lang-switch" style="position:sticky;top:0;z-index:99;text-align:right;padding:8px 16px;background:rgba(255,255,255,.92);backdrop-filter:blur(4px);border-bottom:1px solid #e6e8ee;font-size:13px;font-family:sans-serif;"><a href="../en/chapter-09.html" onclick="try{localStorage.setItem(&quot;qora-lang&quot;,&quot;en&quot;)}catch(e){}">English</a> · <strong>한국어</strong> · <a href="../ja/chapter-09.html" onclick="try{localStorage.setItem(&quot;qora-lang&quot;,&quot;ja&quot;)}catch(e){}">日本語</a></div>
+
+<header class="hero">
+  <div class="tag">Qora · 양자 게이트 문서</div>
+  <h1>9장. 양자 게이트는 되돌릴 수 있어야 한다.</h1>
+  <p>양자 게이트를 되돌릴 수 있는 변환으로 보는 이유를 잡아보자</p>
+</header>
+
+<div class="book-shell">
+                        <aside class="side-nav" aria-label="책 차례">
+    <strong>Qora로 배우는 양자 게이트</strong>
+      <a href="index.html">개요</a>
+      <a href="intro.html">들어가며. 왜 Qora로 양자 게이트를 배울까?</a>
+      <a href="chapter-01.html">1장. 큐비트 상태와 진폭에 대해 알아보자</a>
+      <a href="chapter-02.html">2장. 진폭과 확률은 어떻게 연결될까?</a>
+      <a href="chapter-03.html">3장. |0⟩ 상태와 |1⟩ 상태를 직접 읽어보자</a>
+      <a href="chapter-04.html">4장. 중첩은 무엇이고 간섭은 무엇일까?</a>
+      <a href="chapter-05.html">5장. 중첩은 그냥 "모르는 상태"일까?</a>
+      <a href="chapter-06.html">6장. 간섭은 언제 생길까?</a>
+      <a href="chapter-07.html">7장. 두 큐비트 상태는 어떻게 읽을까?</a>
+      <a href="chapter-08.html">8장. 얽힘은 무엇이 함께 묶인다는 뜻일까?</a>
+      <a class="current" href="chapter-09.html">9장. 양자 게이트는 되돌릴 수 있어야 한다.</a>
+      <a href="chapter-10.html">10장. Qora 코드는 어떻게 읽을까?</a>
+      <a href="summary.html">정리. 1부에서 배운 것을 정리해보자</a>
+      <a href="chapter-11.html">11장. X 게이트는 무엇을 뒤집을까?</a>
+      <a href="chapter-12.html">12장. H 게이트는 진폭을 어떻게 나눌까?</a>
+      <a href="chapter-13.html">13장. Z 게이트는 무엇의 부호를 바꿀까?</a>
+      <a href="chapter-14.html">14장. CNOT 게이트는 두 큐비트를 어떻게 연결할까?</a>
+      <a href="chapter-15.html">15장. 작은 회로 하나를 끝까지 읽어보자</a>
+  </aside>
+  <main class="article">
+    <div class="breadcrumb">Qora로 배우는 양자 게이트 / 9장</div>
+  <h2 id="reversible-gates">9장. 양자 게이트는 되돌릴 수 있어야 한다.</h2>
+  <p>
+    앞장까지는 게이트가 큐비트 상태의 진폭을 바꾸는 모습을 봤어요.<br>
+    그런데 상태를 바꾸는 규칙이라고 해서 아무 규칙이나 양자 게이트가 될 수 있는 것은 아니에요.<br>
+    먼저 가장 중요한 조건부터 잡아볼게요. 측정 전의 양자 게이트는 정보를 뭉개서 잃어버리면 안 돼요.
+  </p>
+
+  <div class="point-list">
+    <div class="point">
+      <span class="marker">1단계</span>
+      <span>
+        <strong>서로 다른 입력은 서로 다른 출력으로 가야 해요. <span class="mono">(직교성 보존)</span></strong><br>
+        두 입력 상태가 같은 출력 상태로 합쳐지면, 출력만 보고 원래 입력을 되살릴 방법이 없어져요.<br>
+        <span class="example-block">
+          <span class="label">예를 들어</span>
+          더하기 결과만 남기는 규칙을 생각해봐요.<br>
+          <span class="mono">(2, 3)</span>도 <span class="mono">5</span>로 가고, <span class="mono">(3, 2)</span>도 <span class="mono">5</span>로 가고, <span class="mono">(1, 4)</span>도 <span class="mono">5</span>로 가요.<br>
+          출력 <span class="mono">5</span>만 보면 원래 입력이 <span class="mono">(2, 3)</span>이었는지, <span class="mono">(3, 2)</span>였는지, <span class="mono">(1, 4)</span>였는지 알 수 없어요.<br>
+          여러 입력이 하나의 출력으로 합쳐졌기 때문이에요.
+        </span>
+      </span>
+    </div>
+    <div class="point">
+      <span class="marker">2단계</span>
+      <span>
+        <strong>전체 확률은 계속 100%로 남아야 해요. <span class="mono">(길이 보존)</span></strong><br>
+        상태 벡터의 길이가 달라지면, 측정 확률의 합도 맞지 않게 돼요.<br>
+        <span class="example-block">
+          <span class="label">예를 들어</span>
+          어떤 규칙이 <span class="mono">|0⟩</span>을 <span class="mono">|0⟩ + |1⟩</span>로 보낸다고 해볼게요.<br>
+          그러면 측정 결과값 0의 확률은 <span class="mono">|1|² = 1</span>이고, 측정 결과값 1의 확률도 <span class="mono">|1|² = 1</span>이에요.<br>
+          전체 확률이 <span class="mono">1 + 1 = 2</span>, 즉 200%가 되어버려요.<br>
+          그래서 진폭을 두 방향으로 보낼 때는 <span class="mono">(1/√2)|0⟩ + (1/√2)|1⟩</span>처럼 전체 확률이 100%로 남도록 크기를 맞춰야 해요.
+        </span>
+      </span>
+    </div>
+    <div class="point">
+      <span class="marker">3단계</span>
+      <span>
+        <strong>거꾸로 되돌릴 수 있어야 해요. <span class="mono">(역변환 존재)</span></strong><br>
+        측정 전의 양자 게이트는 상태를 지워서 새 상태로 덮어쓰는 명령이 아니에요.<br>
+        상태 벡터를 상태 공간 안에서 움직인 뒤, 반대 변환을 적용하면 원래 상태로 돌아올 수 있어야 해요.<br>
+        <span class="example-block">
+          <span class="label">예시</span>
+          가장 단순한 예로 두 상태를 서로 바꾸는 뒤집기 규칙을 생각해봐요.<br>
+          이 규칙은 <span class="mono">|0⟩</span>을 <span class="mono">|1⟩</span>로 보내고, <span class="mono">|1⟩</span>을 <span class="mono">|0⟩</span>으로 보내요.<br>
+          같은 규칙을 한 번 더 적용하면 <span class="mono">|0⟩</span>은 <span class="mono">|1⟩</span>을 거쳐 다시 <span class="mono">|0⟩</span>으로 돌아오고, <span class="mono">|1⟩</span>은 <span class="mono">|0⟩</span>을 거쳐 다시 <span class="mono">|1⟩</span>로 돌아와요.<br>
+          나중에 이 뒤집기 규칙을 <strong>X 게이트</strong>라고 부를 거예요.
+        </span>
+      </span>
+    </div>
+  </div>
+
+  <p>
+    방금 세 단계는 모두 같은 이야기로 이어져요.<br>
+    측정 전의 양자 게이트는 입력 상태를 잃어버리지 않고, 전체 확률을 보존하면서, 다시 거꾸로 따라갈 수 있어야 해요.<br>
+    그래서 측정 전의 양자 게이트는 서로 다른 입력 상태를 서로 구별 가능한 출력 상태로 보내야 해요.
+  </p>
+
+  <p>
+    이 조건을 수학적으로 정리하면 <strong>유니터리 변환</strong>이라는 말이 나와요.<br>
+    표준 양자 회로에서 측정 전의 게이트는 유니터리 변환이어야 하고, 그 조건을 식으로 쓰면 아래처럼 적어요.
+  </p>
+
+  <div class="rule mono">U†U = I</div>
+
+  <p>
+    여기서 <span class="mono">U</span>는 게이트 행렬이고, <span class="mono">U†</span>는 그 행렬의 켤레전치예요.<br>
+    기호는 낯설 수 있지만, 지금은 “게이트를 적용한 뒤 다시 거꾸로 되돌릴 수 있다”는 뜻으로 읽으면 충분해요.
+  </p>
+
+  <div class="panel">
+    <table>
+      <tr><th>조건</th><th>뜻</th><th>왜 필요한가</th></tr>
+      <tr><td>길이 보존</td><td>상태 벡터의 전체 확률이 1로 유지돼요</td><td>측정 확률의 합이 항상 100%여야 해요</td></tr>
+      <tr><td>직교성 보존</td><td>서로 구별 가능한 입력 상태가 출력에서도 구별돼요</td><td>서로 다른 입력이 같은 출력으로 합쳐지면 안 돼요</td></tr>
+      <tr><td>역변환 존재</td><td>게이트를 거꾸로 되돌릴 수 있어요</td><td>측정 전의 양자 진화는 정보를 잃지 않아요</td></tr>
+    </table>
+  </div>
+
+  <div class="call why">
+    <span class="h">여기서 잡고 갈 핵심</span>
+    측정 전의 양자 게이트는 서로 다른 입력 상태를 하나의 출력 상태로 뭉개면 안 돼요.<br>
+    또 전체 확률이 100%로 유지되도록 상태 벡터의 길이를 보존해야 해요.<br>
+    그래서 양자 게이트는 되돌릴 수 있는 변환, 즉 유니터리 변환으로 다뤄요.
+  </div>
+
+  <p>
+    이 원칙은 뒤에서 H 게이트를 볼 때 다시 중요해져요.<br>
+    특히 H 게이트의 마이너스 부호가 왜 필요한지는, 바로 이 “서로 다른 입력 상태가 같은 출력 상태로 합쳐지면 안 된다”는 조건으로 설명할 거예요.
+  </p>
+                <nav class="page-nav" aria-label="장 이동">
+    <a href="chapter-08.html"><span class="k">이전</span><span class="t">8장. 얽힘은 무엇이 함께 묶인다는 뜻일까?</span></a>
+    <a class="home" href="index.html"><span class="k">개요</span><span class="t">전체 차례로 돌아가기</span></a>
+    <a href="chapter-10.html"><span class="k">다음</span><span class="t">10장. Qora 코드는 어떻게 읽을까?</span></a>
+  </nav>
+    <footer>
+      <p>Qora — 직접 만드는 양자 토이 언어</p>
+    </footer>
+  </main>
+</div>
+
+</body>
+</html>

@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Qora 핵심 설계 문서 — 컴파일 파이프라인 — Qora</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --ink: #1f2430;
+    --muted: #5b6472;
+    --line: #e6e8ee;
+    --panel: #f7f8fb;
+    --plus: #1457d6;
+    --minus: #d62b39;
+    --accent: #6b3fd4;
+    --good: #11875b;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo",
+      "Malgun Gothic", "Noto Sans KR", "Segoe UI Symbol", "Cambria Math", sans-serif;
+    line-height: 1.75;
+    font-size: 17px;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 0 20px 120px; }
+  header.hero {
+    padding: 64px 20px 40px;
+    text-align: center;
+    border-bottom: 1px solid var(--line);
+    background: linear-gradient(180deg, #faf9ff, #ffffff);
+  }
+  header.hero h1 { font-size: 2.0rem; margin: 0 0 10px; letter-spacing: -0.5px; }
+  header.hero p { color: var(--muted); margin: 0; font-size: 1.05rem; }
+  .tag { display:inline-block; font-size:.78rem; letter-spacing:.12em; text-transform:uppercase;
+         color: var(--accent); font-weight:700; margin-bottom:14px; }
+  h2 {
+    margin: 56px 0 14px; font-size: 1.45rem; letter-spacing: -0.3px;
+    padding-top: 14px; border-top: 2px solid var(--line);
+  }
+  h2 .n {
+    display:inline-flex; align-items:center; justify-content:center;
+    width: 1.7em; height: 1.7em; border-radius: 50%;
+    background: var(--accent); color:#fff; font-size: .82rem; font-weight:700;
+    margin-right: 10px; vertical-align: middle;
+  }
+  h3 { margin: 30px 0 8px; font-size: 1.12rem; }
+  p { margin: 14px 0; }
+  strong { color: #11203a; }
+  .lead { font-size: 1.08rem; }
+  code, .mono, pre {
+    font-family: "SF Mono", "JetBrains Mono", "D2Coding", Consolas, "Segoe UI Symbol", monospace;
+  }
+  code {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 5px;
+    padding: 1px 6px; font-size: .9em;
+  }
+  pre {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 16px 18px; margin: 18px 0; overflow-x: auto;
+    font-size: .88rem; line-height: 1.55;
+  }
+  pre code { background: none; border: none; padding: 0; font-size: inherit; }
+  pre .cm { color: var(--muted); }            /* comments/auxiliary marks */
+  pre .hl { color: var(--accent); font-weight: 700; }   /* key emphasis */
+  pre .add { color: var(--good); font-weight: 700; }    /* synthesized/newly created */
+  .panel {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 16px 18px; margin: 18px 0; overflow-x: auto;
+  }
+  table.amp { border-collapse: collapse; width: 100%; }
+  table.amp th, table.amp td {
+    padding: 9px 12px; text-align: left; border-bottom: 1px solid var(--line);
+    vertical-align: top;
+  }
+  table.amp th { font-size: .82rem; color: var(--muted); font-weight: 600; }
+  table.amp tr:last-child td { border-bottom: none; }
+  table.amp code { white-space: nowrap; }
+  .call {
+    border-left: 4px solid var(--accent); background: #faf8ff;
+    padding: 14px 18px; border-radius: 0 8px 8px 0; margin: 20px 0;
+  }
+  .call.why { border-color: var(--good); background: #f2fbf7; }
+  .call.warn { border-color: #e6a417; background: #fff9ec; }
+  .call .h { font-weight: 700; display:block; margin-bottom: 4px; }
+  .call p { margin: 8px 0 0; }
+  .rule {
+    text-align:center; font-size: 1.05rem; font-weight: 700; color:#1a1140;
+    background: #f3efff; border:1px solid #e2d8ff; border-radius: 10px;
+    padding: 16px; margin: 20px 0;
+  }
+  .toc {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 16px 22px; margin: 26px 0;
+  }
+  .toc ol { margin: 8px 0 0; padding-left: 20px; }
+  .toc a { color: var(--ink); text-decoration: none; }
+  .toc a:hover { color: var(--accent); }
+  .doc-links { margin: 20px 0 6px; }
+  .doc-link {
+    display:inline-block; background:#f3efff; border:1px solid #e2d8ff; color: var(--accent);
+    font-weight:700; text-decoration:none; border-radius:999px; padding:7px 18px; font-size:.95rem;
+    margin: 0 6px 6px 0;
+  }
+  .doc-link:hover { background:#e9e1ff; }
+  hr { border:none; border-top:1px solid var(--line); margin: 40px 0; }
+  .flowline {
+    text-align:center; font-weight:700; color:#1a1140;
+    background:#f3efff; border:1px solid #e2d8ff; border-radius:10px;
+    padding: 14px 10px; margin: 20px 0; font-size: .95rem;
+    overflow-x: auto; white-space: nowrap;
+  }
+  .flowline .st { color: var(--accent); }
+  .stagehead { color: var(--muted); font-size: .82rem; letter-spacing:.08em; text-transform:uppercase; font-weight:700; }
+  .doc-meta {
+    border: 1px solid #dfe5f2; border-left: 5px solid var(--accent); border-radius: 8px;
+    background: #f8faff; padding: 18px 20px; margin: 24px 0;
+  }
+  .doc-meta .meta-title { font-weight: 800; color: #11203a; margin-bottom: 12px; }
+  .meta-grid {
+    display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 18px;
+    margin: 0;
+  }
+  .meta-grid div { min-width: 0; }
+  .meta-grid dt { color: var(--muted); font-size: .78rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+  .meta-grid dd { margin: 3px 0 0; }
+  @media (max-width: 720px) {
+    .meta-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="qora-lang-switch" style="position:sticky;top:0;z-index:99;text-align:right;padding:8px 16px;background:rgba(255,255,255,.92);backdrop-filter:blur(4px);border-bottom:1px solid #e6e8ee;font-size:13px;font-family:sans-serif;"><a href="../en/index.html" onclick="try{localStorage.setItem(&quot;qora-lang&quot;,&quot;en&quot;)}catch(e){}">English</a> · <strong>한국어</strong> · <a href="../ja/index.html" onclick="try{localStorage.setItem(&quot;qora-lang&quot;,&quot;ja&quot;)}catch(e){}">日本語</a></div>
+
+<header class="hero">
+  <div class="tag">Qora · 핵심 설계 문서</div>
+  <h1>Qora 컴파일 파이프라인 설계</h1>
+  <p>소스가 AST, Qora IR, 검증 패스, OpenQASM 방출까지 지나가는 기준 흐름</p>
+</header>
+
+<div class="wrap">
+
+  <p class="lead">
+    Qora는 파서 엔진(Janglim) 위에 얹힌 얇은 프런트엔드와, 그 위에 <strong>Qora가 전적으로 소유하는
+    멀티패스 미들엔드</strong>로 이루어져 있습니다. 컴파일은 작고 단일 목적을 가진 패스들의 일직선입니다.
+    각 패스는 한 형태의 프로그램을 받아 딱 한 가지 일만 하고, 조금 더 완성된 프로그램을 다음 패스에 넘깁니다 —
+    마지막 패스가 OpenQASM 3을 출력할 때까지요. 이 문서는 그 일직선을 처음부터 끝까지 한 단계씩 따라가며,
+    아래의 모든 AST·IR·QASM 리스팅에 <strong>실제 컴파일러 출력</strong>을 사용합니다.
+  </p>
+
+  <div class="flowline">
+    소스
+    <span class="st">─Parse─▶</span> AST
+    <span class="st">─Lower─▶</span> Qora IR
+    <span class="st">─Expand─▶</span> 병합
+    <span class="st">─Desugar measure─▶</span>
+    <span class="st">─Resolve─▶</span> 호출 대상 FQN
+    <span class="st">─Validate + Symbols─▶</span> (오류 시 STOP)
+    <span class="st">─Monomorphize─▶</span> 특수화
+    <span class="st">─Flatten within/apply─▶</span>
+    <span class="st">─Materialize Adjoint─▶</span> + 역연산 op
+    <span class="st">─Mangle─▶</span> 충돌 없는 이름
+    <span class="st">─Check─▶</span>
+    <span class="st">─Target-lower─▶</span>
+    <span class="st">─Emit─▶</span> OpenQASM 3
+  </div>
+
+  <section class="doc-meta" aria-label="문서 정보">
+    <div class="meta-title">이 문서의 역할</div>
+    <dl class="meta-grid">
+      <div>
+        <dt>문서 성격</dt>
+        <dd>Qora 컴파일러 구조를 설명하는 기준 설계 문서예요.</dd>
+      </div>
+      <div>
+        <dt>다루는 범위</dt>
+        <dd>소스 텍스트가 AST, Qora IR, 검증된 IR, OpenQASM으로 바뀌는 전체 경로를 다뤄요.</dd>
+      </div>
+      <div>
+        <dt>읽는 사람</dt>
+        <dd>컴파일러 패스를 수정하거나 <code>--stages</code> 출력과 실제 방출 결과를 맞춰 봐야 하는 사람에게 필요해요.</dd>
+      </div>
+      <div>
+        <dt>핵심 계약</dt>
+        <dd>각 패스는 구조화된 IR을 입력으로 받고, 한 가지 책임만 수행한 뒤 다음 패스에 넘겨요.</dd>
+      </div>
+    </dl>
+  </section>
+
+  <nav class="doc-links" aria-label="관련 컴파일러 문서">
+    <a class="doc-link" href="datasheet.html">컴파일러 데이터시트 — 파이프라인·패스·IR·자동 uncomputation</a>
+    <a class="doc-link" href="adjoint-pipeline.html">Adjoint 역합성 동작 문서</a>
+    <a class="doc-link" href="hadamard.html">H 게이트를 화살표로 이해하기</a>
+  </nav>
+
+  <div class="toc">
+    <strong>목차</strong>
+    <ol>
+      <li><a href="#s0">예제 — 모든 패스를 건드리는 파일 하나</a></li>
+      <li><a href="#s1">두 세계 — 엔진이 멈추고 Qora가 시작되는 곳</a></li>
+      <li><a href="#s2">Parse — 소스에서 AST로 (엔진의 몫)</a></li>
+      <li><a href="#s3">Lower — AST에서 Qora IR로 (경계를 넘다)</a></li>
+      <li><a href="#s4">Expand &amp; Resolve — 임포트와 호출 대상 FQN</a></li>
+      <li><a href="#s5">Validate — 의미 게이트</a></li>
+      <li><a href="#s6">Monomorphize — 제네릭 레지스터의 특수화</a></li>
+      <li><a href="#s7">Materialize Adjoint — 역연산을 진짜 op으로</a></li>
+      <li><a href="#s8">Mangle &amp; Check — 충돌 없는 이름, 그리고 검증</a></li>
+      <li><a href="#s9">Emit — OpenQASM 3로 내보내는 단순 출력기</a></li>
+      <li><a href="#s10">전체 파이프라인 한눈에</a></li>
+    </ol>
+  </div>
+
+  <h2 id="s0"><span class="n">0</span>예제 — 모든 패스를 건드리는 파일 하나</h2>
+
+  <p>
+    모든 단계가 실제로 일하는 모습을 보기 위해, <strong>네임스페이스</strong>와
+    <strong>제네릭 레지스터</strong>(<code>Qubit[n]</code>), 호출, 그리고 <strong>Adjoint</strong>를
+    한 프로그램에 담았습니다:
+  </p>
+
+<pre><code>namespace Prep {
+    operation Fanout(Qubit[n] q) {       <span class="cm">// 제네릭: n은 나중에, 호출부마다 정해짐</span>
+        for i in 0..n-1 { H(q[i]); }
+    }
+}
+
+operation Main() {
+    use reg = Qubit[3];
+    Prep.Fanout(reg);                    <span class="cm">// 네임스페이스를 넘나드는 호출</span>
+    <span class="hl">Adjoint Prep.Fanout(reg);</span>            <span class="cm">// 되돌리기 — 컴파일러가 역연산을 합성</span>
+    bit r = M(reg[0]);
+}</code></pre>
+
+  <p>
+    이름 세 개가 패스들을 지나며 어떻게 변하는지 보세요. <code>Fanout</code>은 네임스페이스를 얻고
+    (<code>Prep.Fanout</code>), 구체적 크기를 얻고(<code>Prep.Fanout__sz3</code>), 역연산 쌍둥이를 얻고
+    (<code>Prep.Fanout__sz3__adj</code>), 마지막으로 OpenQASM용으로 평탄화됩니다(<code>Prep_Fanout__sz3</code>).
+    이 각 변화가 바로 아래의 한 패스씩입니다.
+  </p>
+
+  <h2 id="s1"><span class="n">1</span>두 세계 — 엔진이 멈추고 Qora가 시작되는 곳</h2>
+
+  <p>
+    컴파일러 전체에 경계는 정확히 하나뿐입니다. <strong>왼쪽에는 Janglim 파서 엔진</strong>이 있습니다 —
+    문법·렉서, 그리고 텍스트를 구문 트리로 바꾸는 일을 소유합니다. <strong>오른쪽에는 Qora</strong>가 있습니다 —
+    프로그램에 의미를 부여하고, 검사하고, 변환하고, 출력하는 모든 패스가 여기 있습니다. 두 세계는 함수 하나에서
+    만납니다 — <em>로워링(lowering)</em> — 이 함수는 엔진의 트리를 딱 한 번 읽고 다시는 돌아보지 않습니다.
+  </p>
+
+  <div class="rule">
+    소스&nbsp;→&nbsp;AST&nbsp;&nbsp;<span style="color:var(--muted)">│ 엔진 (Janglim)</span><br>
+    <span style="color:var(--muted)">Qora │</span>&nbsp;&nbsp;IR&nbsp;→&nbsp;⋯&nbsp;→&nbsp;OpenQASM
+  </div>
+
+  <div class="call why">
+    <span class="h">왜 경계를 이렇게 뚜렷이 유지하나?</span>
+    Qora가 다뤄야 할 모든 것 — 타입, 역연산, 제네릭, 이름 안전성 — 은 엔진의 트리가 아니라
+    <strong>Qora 자신의 IR</strong> 위에서 처리됩니다. 그래서 엔진은 양자에 대해 아무것도 모르는 범용 파서로
+    남을 수 있고, Qora는 문법을 건드리지 않고도 기능(새 패스)을 추가할 수 있습니다. 엔진에 의존하는 유일한
+    지점은 로워링이며, 나머지 컴파일러는 파서를 통째로 교체해도 살아남습니다.
+  </div>
+
+  <h2 id="s2"><span class="n">2</span>Parse — 소스에서 AST로 (엔진의 몫)</h2>
+
+  <p class="stagehead">in: 소스 텍스트 &nbsp;·&nbsp; out: 구문 트리 &nbsp;·&nbsp; 담당: Janglim 엔진</p>
+
+  <p>
+    엔진은 Qora 문법으로부터 렉서와 LALR 파서를 만든 뒤, 소스를 <strong>파스 트리</strong>로 바꿉니다.
+    이 단계에는 <strong>아무 의미가 없습니다</strong> — <code>Adjoint</code>는 호출 옆에 붙은 토큰일 뿐이고,
+    <code>Prep.Fanout</code>은 토큰 세 개(<code>Prep</code>, <code>.</code>, <code>Fanout</code>)이며,
+    호출과 게이트는 똑같이 생겼습니다. 예제의 실제 트리:
+  </p>
+
+<pre><code>Nonterminal : Program
+  Nonterminal : Namespace
+    Terminal : Prep
+    Nonterminal : Operation
+      Terminal : Fanout
+      Nonterminal : Param
+        Terminal : n                    <span class="cm">← 제네릭 크기 심볼</span>
+        Terminal : q
+      Nonterminal : For
+        Terminal : i
+        Nonterminal : Expr ( 0 )
+        Nonterminal : Expr ( n - 1 )
+        Nonterminal : Gate
+          Terminal : H
+          Nonterminal : Qubit ( q , i )
+  Nonterminal : Operation
+    Terminal : Main
+    Nonterminal : Use ( reg , 3 )
+    Nonterminal : Gate                  <span class="cm">← 호출도 다른 모든 것처럼 Gate로 태깅됨</span>
+      Terminal : Prep
+      Terminal : .
+      Terminal : Fanout
+      Nonterminal : Expr ( reg )
+    Nonterminal : Gate
+      <span class="hl">Terminal : Adjoint</span>              <span class="cm">← 함자는 그저 앞에 붙은 토큰</span>
+      Terminal : Prep
+      Terminal : .
+      Terminal : Fanout
+      Nonterminal : Expr ( reg )
+    Nonterminal : VarDecl
+      Terminal : bit
+      Terminal : r
+      Nonterminal : Expr → Call ( M , Qubit ( reg , 0 ) )</code></pre>
+
+  <div class="call">
+    <span class="h">이 트리는 한 번 읽힌 뒤 다시는 손대지 않습니다</span>
+    이후 모든 단계는 이 트리가 아니라 IR 위에서 작동합니다. <code>Prep.Fanout__sz3</code>나 <code>__adj</code>
+    같은 이름은 아직 존재하지 않습니다 — 전부 이 뒤에서 태어납니다.
+  </div>
+
+  <h2 id="s3"><span class="n">3</span>Lower — AST에서 Qora IR로 (경계를 넘다)</h2>
+
+  <p class="stagehead">in: 엔진 AST &nbsp;·&nbsp; out: <code>QProgram</code> (Qora IR) &nbsp;·&nbsp; 패스: <code>QoraLowering</code></p>
+
+  <p>
+    로워링은 엔진의 트리를 <strong>한 번</strong> 순회하며 Qora 자신의 IR로 다시 세웁니다 — 강타입 레코드의
+    계층입니다(<code>QOperation</code>, <code>QGate</code>, <code>QFor</code>, <code>QIf</code>,
+    <code>QDecl</code>, <code>QUse</code>, <code>QMeasure</code>, …). 가장 중요한 변화 둘: 문자열 토큰이
+    <strong>타입이 있는 노드</strong>가 되고, 함자가 <strong>노드 위의 데이터</strong>가 됩니다
+    (<code>functors=[Adjoint]</code>). 예제의 IR:
+  </p>
+
+<pre><code>QOperation Prep.Fanout(Qubit q)
+  QFor(i in 0..n - 1)
+    QGate(functors=[], name=H, args=[q[i]])
+
+QOperation Main()
+  QUse(name=reg, size=3)
+  QGate(functors=[],        name=Prep.Fanout, args=[reg])
+  QGate(functors=[<span class="hl">Adjoint</span>], name=Prep.Fanout, args=[reg])
+  QDecl(const=False, type=Bit, name=r, value=QMeasure(reg[0]))</code></pre>
+
+  <div class="call why">
+    <span class="h">왜 함자를 데이터로 바꾸나?</span>
+    "이 호출이 역연산인가?"가 이제 다시 파싱할 토큰이 아니라 <em>값</em>(<code>functors=[Adjoint]</code>)이므로,
+    이후 패스는 그 값을 뒤집기만 하면 역연산을 만들 수 있습니다 — 문자열 수술이 필요 없습니다. 미들엔드 전체가
+    IR 기반인 것도 같은 이유입니다: 패스들이 구조화된 노드를 읽고 쓰므로, 각 패스는 짧게 유지되고 틀리기 어렵습니다.
+  </div>
+
+  <h2 id="s4"><span class="n">4</span>Expand &amp; Resolve — 임포트와 호출 대상 FQN</h2>
+
+  <p class="stagehead">패스: <code>ModuleLoader.Expand</code> → <code>Resolver.Resolve</code></p>
+
+  <p>
+    <strong>Expand</strong>는 모듈 로더입니다. 파일에 <code>import "lib/prep.qor"</code>가 있었다면, 이
+    패스가 그 파일을 파싱·로워링하고 그 연산들을 하나의 <code>QProgram</code>으로 병합하여, 이후 모든 단계가
+    하나의 평탄한 프로그램을 보게 합니다. (예제는 아무것도 임포트하지 않으므로 여기서는 아무 일도 하지 않지만 —
+    파일 없음이 <code>QSEM020</code>, 임포트 순환이 <code>QSEM021</code>이 되는 곳입니다.)
+  </p>
+
+  <p>
+    이 둘 사이에서 작은 디슈가링(desugaring) 하나가 돕니다 — <strong>MeasureConditionLowering</strong>.
+    OpenQASM에는 조건 <em>안의</em> 측정이 없으므로, <code>if (M(q[0]) == 1)</code>은 OpenQASM이 필요로 하는
+    두 단계 형태로 다시 쓰입니다: 측정이 끌어올려진 <code>bit</code>으로 빠져나오고, 그 뒤 조건이 그 비트를
+    검사합니다. <code>while</code>은 매 반복 끝마다 다시 측정하고, <code>repeat … until</code>은 몸통 끝에서
+    다시 측정합니다. 그러면 이후 모든 단계는 평범한 비트 조건만 보게 됩니다:
+  </p>
+
+<pre><code>operation Main() {
+    use q = Qubit[2];
+    <span class="hl">if (M(q[0]) == 1)</span> { X(q[1]); }
+}
+                       <span class="cm">↓ MeasureConditionLowering</span>
+qubit[2] q;
+<span class="add">bit __m0;</span>
+<span class="add">__m0 = measure q[0];</span>          <span class="cm">← 조건에서 끌어올려진 측정</span>
+<span class="add">if (__m0 == true)</span> { x q[1]; }
+</code></pre>
+
+  <p>
+    이어 <strong>Resolve</strong>가 연산 정의와 연산 호출 대상을 <strong>정규화된 이름(FQN)</strong>으로 바꿉니다.
+    <code>namespace Prep</code> 안의 연산 <code>Fanout</code>은 <code>Prep.Fanout</code>이 되고, 호출부
+    <code>Prep.Fanout(reg)</code>가 그것을 가리키는지 확인됩니다. 그래서 위 IR 리스팅이 이미 <code>Fanout</code>이
+    아니라 <code>Prep.Fanout</code>으로 읽히는 것입니다. 다만 여기서 모든 식별자를 처리하는 것은 아닙니다.
+    변수, 루프 변수, 큐비트 인덱스, 조건식 안의 이름은 다음 검증 단계의 심볼 테이블이 스코프 기준으로 확인합니다.
+    어떤 호출 이름이 모호했다면(<code>open</code>된 두 네임스페이스에서 보였다면) <code>QSEM018</code>이 되고,
+    알 수 없는 네임스페이스나 멤버는 <code>QSEM019</code>가 됩니다.
+  </p>
+
+  <h2 id="s5"><span class="n">5</span>Validate — 의미 게이트</h2>
+
+  <p class="stagehead">in: 해소된 IR &nbsp;·&nbsp; out: 오류 목록 (또는 없음) &nbsp;·&nbsp; 패스: <code>QoraValidator</code> + <code>SymbolTableBuilder</code></p>
+
+  <p>
+    검증은 한 가지 질문에 답하는 패스입니다: <strong>이 프로그램은 OpenQASM이 표현할 수 있는 의미인가?</strong>
+    IR 전체를 한 번 순회하며 <strong>모든 위반을 수집</strong>합니다(첫 오류에서 멈추지 않음). 그 결과는 단단한
+    게이트입니다: <strong>오류가 하나라도 있으면 OpenQASM은 전혀 생성되지 않습니다</strong> — 그래서 깨진
+    프로그램이 조용히 "성공한 척"하며 틀린 회로를 돌려주는 일은 결코 없습니다. 이때 검증기는 통합 심볼 테이블도
+    만들어요. 파라미터, 레지스터, 측정 비트, 변수, 상수, 루프 변수가 어느 스코프에 사는지 기록하고,
+    각 이름이 어디에서 사용되는지도 함께 모읍니다. 모든 규칙에는 안정된 코드
+    (<code>QSEM001</code>–<code>QSEM025</code>)가 있어 에디터가 물결선을 붙일 수 있습니다. 그중 몇 가지:
+  </p>
+
+  <div class="panel">
+    <table class="amp">
+      <tr><th>코드</th><th>거부하는 것</th></tr>
+      <tr><td><code>QSEM001</code></td><td>역연산이 없는 <code>Foo</code>에 대한 <code>Adjoint Foo</code>(측정·리셋·<code>while</code> 루프 등) — 사유는 인버터에서 연쇄됨</td></tr>
+      <tr><td><code>QSEM002</code></td><td>유저 op에 대한 <code>Controlled Foo</code>(OpenQASM에는 def용 <code>ctrl @</code>가 없음)</td></tr>
+      <tr><td><code>QSEM006</code></td><td>시그니처와 맞지 않는 인자의 호출 — 개수, 종류(큐비트 vs 각도), 또는 레지스터 크기</td></tr>
+      <tr><td><code>QSEM007</code></td><td>알 수 없는 게이트/연산 이름("혹시 …?" 힌트 포함)</td></tr>
+      <tr><td><code>QSEM011</code></td><td>재귀 호출(OpenQASM def는 재귀 불가)</td></tr>
+      <tr><td><code>QSEM016</code></td><td>레지스터 범위를 벗어난 리터럴 큐비트 인덱스</td></tr>
+      <tr><td><code>QSEM025</code></td><td>스코프 안에서 해소되지 않는 식별자 — 알 수 없는 이름 또는 선언 전에 사용된 고전 이름</td></tr>
+    </table>
+  </div>
+
+  <div class="call why">
+    <span class="h">왜 변환 패스들보다 먼저 검증하나?</span>
+    이후 모든 패스가 프로그램이 이미 온전하다고 가정할 수 있게 하기 때문입니다. 단형화기는 스코프에서 해소되지 않는 이름을 결코
+    만나지 않고, adjoint 실체화기는 역연산 불가능한 <code>Adjoint</code>를 결코 만나지 않으며(QSEM001이 이미
+    거부함), 이미터는 잘못된 호출을 결코 만나지 않습니다. 게이트가 모두의 앞에 서 있기에, 각 변환 패스는 단순해질
+    수 있습니다.
+  </div>
+
+  <h2 id="s6"><span class="n">6</span>Monomorphize — 제네릭 레지스터의 특수화</h2>
+
+  <p class="stagehead">in: 검증된 IR &nbsp;·&nbsp; out: 구체적 크기의 op을 가진 IR &nbsp;·&nbsp; 패스: <code>Monomorphizer</code></p>
+
+  <p>
+    <code>Fanout(Qubit[n] q)</code>는 제네릭입니다: <code>n</code>은 호출이 정해주기 전까지 미지수입니다.
+    단형화기(monomorphizer)는 C++ 템플릿이나 Rust 제네릭처럼 작동합니다 — 각 호출부마다 <code>n</code>을 실제
+    레지스터 크기로 치환한 <strong>구체적 복사본을 찍어내고</strong>, 그 복사본을 가리키도록 호출을 다시 씁니다.
+    예제의 호출은 <code>reg</code>(큐비트 3개)를 넘기므로:
+  </p>
+
+  <div class="rule">
+    <code>Prep.Fanout(Qubit[n])</code> &nbsp;+&nbsp; 크기 3 레지스터로의 호출
+    &nbsp;⟶&nbsp; <code>Prep.Fanout__sz3(Qubit[3])</code>
+  </div>
+
+  <p>
+    이제 크기가 구체적이므로, 프로그램은 <strong>두 번째로 검증</strong>됩니다: <code>n</code>이 숫자여야만
+    의미가 있는 검사 — 인덱스 범위, 레지스터 크기 일치 — 가 비로소 대조할 대상을 갖습니다. 이 패스 이후에는
+    제네릭 연산이 남지 않습니다.
+  </p>
+
+  <h2 id="s7"><span class="n">7</span>Materialize Adjoint — 역연산을 진짜 op으로</h2>
+
+  <p class="stagehead">in: 특수화된 IR &nbsp;·&nbsp; out: 합성된 역연산 op을 가진 IR &nbsp;·&nbsp; 패스: <code>AdjointMaterializer</code></p>
+
+  <h3>그 직전에 도는 패스 — <code>within/apply</code> 평탄화(<code>ConjugationLowering</code>)</h3>
+
+  <p>
+    Qora IR에는 표면 문법이 없는 합성 노드가 하나 있습니다: <code>QConjugate</code>, 즉 <em>within/apply</em>
+    (켤레, conjugation) 형태로 "<em>within</em>을 실행하고, 그다음 <em>apply</em>, 그다음 <em>within</em>의
+    역연산"을 뜻합니다 — 계산 · 사용 · 언컴퓨트 샌드위치죠. <em>within</em>만 뒤집히므로, 그 효과(임시 보조
+    큐비트 설정)는 되돌려지고 <em>apply</em>의 효과는 살아남습니다. <code>ConjugationLowering</code>은 이 노드를
+    평범한 게이트들로 평탄화하며, 뒤따르는 역연산을 합성하기 위해 같은 인버전 커널을 재사용합니다:
+  </p>
+
+<pre><code>QConjugate(within=[X(a[0])], apply=[CNOT(a[0], d[0])])
+                       <span class="cm">↓ ConjugationLowering  ( within ++ apply ++ inverse-of-within )</span>
+x a[0];                <span class="cm">← within (계산)</span>
+cx a[0], d[0];         <span class="cm">← apply   (사용)</span>
+<span class="add">inv @ x a[0];</span>          <span class="cm">← 합성된 within의 역연산 (언컴퓨트)</span>
+</code></pre>
+
+  <p>
+    이 패스가 <em>여기서</em>, 실체화기 바로 앞에서 도는 이유는 순서 때문입니다: 합성된 역연산이 유저 연산
+    (<code>Adjoint Foo</code>)을 호출하면, 그것도 여전히 진짜 <code>Foo__adj</code> op이 되어야 하는데 — 이는
+    실체화기가 이 패스 <em>뒤에</em> 돌기 때문에만 일어납니다. 아직은 소스에서 <code>QConjugate</code>를
+    만들어내는 것이 없으므로, 평범한 프로그램에서 이 패스는 아무 일도 하지 않습니다; 이것은 다가오는
+    <strong>자동 언컴퓨테이션</strong>이 공급할 방출 경로입니다(맺음말 참고).
+  </p>
+
+  <p>
+    예제의 <code>Main</code>에는 <code>Adjoint Prep.Fanout(reg)</code>가 있습니다. 이 패스는 그 연산 전체의
+    adjoint를 <strong>평범한 연산</strong>으로 바꿉니다. 인버전 커널(<code>Inverter</code>)을 써서 역연산 몸통을
+    계산하고 — <strong>문장을 역순으로 뒤집고, 각 게이트에 dagger를 취해</strong> — 그것을 <code>Prep.Fanout__sz3__adj</code>라는
+    이름의 진짜 op으로 프로그램에 추가한 뒤, 호출을 평범한 <code>Prep.Fanout__sz3__adj(reg)</code>로 다시 씁니다.
+    H 게이트 팬아웃의 역연산은 각 <code>H</code>에 dagger를 취한 역방향 루프입니다:
+  </p>
+
+  <div class="rule">(U₁ · U₂ · ⋯ · Uₙ)† &nbsp;=&nbsp; Uₙ† · ⋯ · U₂† · U₁†</div>
+
+  <p>
+    이 수요는 <strong>전이적</strong>입니다: 역연산 몸통이 <code>Adjoint Bar</code>를 호출하면 <code>Bar</code>의
+    역연산도 실체화되고, 그 집합이 닫힐 때까지 이어집니다. <em>내장</em> 게이트에 대한 adjoint(<code>Adjoint H</code>)는
+    건드리지 않습니다 — 그것은 방출 시점에 <code>inv @ h</code>가 됩니다. 여기서는 오직 유저 연산만 실체화됩니다.
+  </p>
+
+  <div class="call why">
+    <span class="h">왜 이름 붙이기 전에 실체화하나 (방출 시점이 아니라)?</span>
+    합성된 역연산 def는 최종 QASM이 다른 모든 전역 이름(예컨대 <code>Prep.Fanout__sz3__adj</code>라는 유저
+    레지스터)과 충돌하지 않게 지켜야 할 <strong>이름</strong>입니다. 이름 맹글러가 돌기 전에 — 진짜 op으로 —
+    여기서 만들면, 그 역연산은 다른 모든 연산과 <em>같은</em> 충돌 해소를 거치므로, 생성된 이름이 이름 붙이기
+    이후에 태어나는 일이 결코 없습니다. 단형화기가 쓰는 것과 같은 수법입니다: <strong>생성된 op은 맹글링 전에
+    실체화</strong>하고, 이미터는 이름을 지어낼 필요가 전혀 없습니다.
+  </div>
+
+  <h2 id="s8"><span class="n">8</span>Mangle &amp; Check — 충돌 없는 이름, 그리고 검증</h2>
+
+  <p class="stagehead">패스: <code>NameMangler</code> → <code>ReferentialCheck</code></p>
+
+  <p>
+    <strong>Mangle</strong>은 모든 Qora 이름을 유효하고 충돌 없는 OpenQASM 식별자로 대응시킵니다. 두 가지가
+    일어납니다: 네임스페이스가 붙은 이름은 <strong>점을 평탄화</strong>하고(<code>Prep.Fanout__sz3</code> →
+    <code>Prep_Fanout__sz3</code>), 충돌할 이름 — OpenQASM 키워드, stdgates 게이트명, 또는 이미 방출된 다른
+    이름과 — 은 유일해질 때까지 <code>_</code>를 덧붙입니다. 따라서 충돌은 <strong>결코 컴파일 오류가 아닙니다</strong>:
+    자동으로 해소되고, 이름이 조정되었음을 독자가 알 수 있도록 <code>// Qora:</code> 노트가 QASM 헤더에 기록됩니다.
+  </p>
+
+  <div class="call">
+    <span class="h">이름은 OpenQASM을 그대로 본뜬 스코프에 산다</span>
+    연산 이름과 엔트리 op의 최상위 선언은 하나의 전역 스코프를 공유하고(stdgates처럼), 각 def는 파라미터·변수를
+    위한 자신의 로컬 스코프를 갖습니다. 그래서 (게이트 <code>s</code>와 부딪히는) <code>s</code>라는 변수는
+    <code>s_</code>로 방출되지만, 같은 이름이 다른 def 안에서는 자유롭게 다시 나타날 수 있습니다.
+  </div>
+
+  <p>
+    <strong>Check</strong>(참조 무결성 게이트)는 맹글링 직후에 도는 안전망입니다: 프로그램이 <strong>사용하는 모든
+    식별자가 선언된 무언가로 해소되는지</strong> 확인합니다 — 파라미터·레지스터·변수·연산·내장. 여기서 매달린
+    참조는 어떤 패스가 선언은 개명했지만 그 사용처 하나는 개명하지 않았다는 뜻 — <em>컴파일러</em> 버그 — 이므로,
+    조용히 깨진 QASM으로 방출하는 대신 <code>QINTERNAL</code>로 요란하게 보고됩니다. 올바른 컴파일러에서는 결코
+    발동하지 않습니다; 그 부류의 버그를 아예 출하하지 못하게 하려고 존재합니다.
+  </p>
+
+  <h2 id="s9"><span class="n">9</span>Emit — OpenQASM 3로 내보내는 단순 출력기</h2>
+
+  <p class="stagehead">in: 맹글된 IR &nbsp;·&nbsp; out: OpenQASM 3 텍스트 &nbsp;·&nbsp; 패스: <code>OpenQasmLowering</code> → <code>QasmEmitter</code></p>
+
+  <h3>그 직전에 도는 패스 — OpenQASM용 타깃 로워링(<code>OpenQasmLowering</code>)</h3>
+
+  <p>
+    출력기 앞에서 마지막 IR→IR 단계 하나가 돕니다 — <strong>OpenQasmLowering</strong>, OpenQASM 특화 타깃
+    로워링입니다. Qora의 <code>const</code>는 어떤 값이든 담을 수 있는 불변 <em>바인딩</em>이지만(Q#의
+    <code>let</code> 방식), OpenQASM의 <code>const</code>는 컴파일 타임 상수 초기값을 요구합니다. 그래서
+    런타임에 묶이는 <code>const c = n;</code>은 방출 시 평범한 <code>int c = n;</code>으로 강등됩니다 —
+    여전히 재대입되지 않으므로, 불변성은 조금도 잃지 않습니다:
+  </p>
+
+<pre><code>int n = 2;
+<span class="hl">const c = n;</span>          <span class="cm">← Qora const: 불변 바인딩, 어떤 값이든</span>
+                   <span class="cm">↓ OpenQasmLowering</span>
+int n = 2;
+<span class="add">int c = n;</span>            <span class="cm">← 평범한 int (OpenQASM const는 컴파일 타임이어야 함)</span>
+</code></pre>
+
+  <p>
+    이것이 <strong>첫 타깃별 로워링 패스</strong>입니다 — Qora에게는 올바른 IR을 특정 백엔드의 규칙에 맞게
+    조정하는 곳이죠. 미래의 QIR 타깃이라면 위쪽 어떤 패스도 건드리지 않고 여기에 자신만의 로워링을 추가할
+    것입니다.
+  </p>
+
+  <p>
+    마지막 패스는 의도적으로 <strong>가장 덜 영리합니다</strong>: 이름을 지어내지도, 무엇을 역연산하지도 않습니다 —
+    모든 변환은 이미 앞에서 일어났습니다. 그저 각 연산을 <code>def</code>로, 엔트리 op을 최상위 몸통으로 출력할
+    뿐입니다. 유일한 실제 잡무는 <strong>순서 잡기</strong>입니다: OpenQASM에는 전방 선언이 없으므로, def들은
+    호출 의존(위상 정렬) 순서로 방출됩니다 — 그래서 <code>Prep_Fanout__sz3__adj</code>는 그것이 필요로 하는
+    것보다 앞서지 않고, 모든 def는 사용되기 전에 선언됩니다. 예제의 완전한 출력:
+  </p>
+
+<pre><code>// generated by Qora v0.18
+OPENQASM 3;
+include "stdgates.inc";
+
+def <span class="hl">Prep_Fanout__sz3</span>(qubit[3] q) {      <span class="cm">← 네임스페이스 + 특수화 + 평탄화</span>
+  for int i in [0:3 - 1] {
+    h q[i];
+  }
+}
+
+<span class="add">def Prep_Fanout__sz3__adj(qubit[3] q) {</span>  <span class="cm">← 합성된 역연산 (소스에 없던 것)</span>
+<span class="add">  for int i in [3 - 1:-1:0] {</span>            <span class="cm">← 역방향 루프</span>
+<span class="add">    inv @ h q[i];</span>                         <span class="cm">← dagger된 게이트</span>
+<span class="add">  }</span>
+<span class="add">}</span>
+
+qubit[3] reg;
+bit r;
+Prep_Fanout__sz3(reg);
+<span class="hl">Prep_Fanout__sz3__adj(reg);</span>              <span class="cm">← Adjoint Prep.Fanout(reg)가 이 호출이 됨</span>
+r = measure reg[0];</code></pre>
+
+  <div class="call why">
+    <span class="h">왜 이미터를 이렇게 단순하게 두나?</span>
+    출력만 하는 출력기는 신뢰하기 쉽기 때문입니다. 역연산·특수화·이름 붙이기가 모두 각자의 패스에 살면, 마지막
+    텍스트 생성 단계에는 내릴 결정이 하나도 남지 않습니다 — 그래서 그것이 쓰는 OpenQASM은 건네받은 IR 그대로,
+    문자 하나까지 똑같습니다.
+  </div>
+
+  <h2 id="s10"><span class="n">10</span>전체 파이프라인 한눈에</h2>
+
+  <div class="panel">
+    <table class="amp">
+      <tr><th>단계</th><th>패스</th><th>무엇을 무엇으로</th></tr>
+      <tr><td>Parse</td><td><em>Janglim 엔진</em></td><td>소스 텍스트 → 구문 트리 (아직 의미 없음)</td></tr>
+      <tr><td>Lower</td><td><code>QoraLowering</code></td><td>엔진 트리 → Qora IR (타입 노드; 함자를 데이터로)</td></tr>
+      <tr><td>Expand</td><td><code>ModuleLoader</code></td><td>임포트 → 하나로 병합된 프로그램</td></tr>
+      <tr><td>Desugar measure</td><td><code>MeasureConditionLowering</code></td><td>조건 안의 측정 → 끌어올린 <code>bit</code>, 대입 후 검사</td></tr>
+      <tr><td>Resolve</td><td><code>Resolver</code></td><td>연산 호출 대상 → 정규화된 이름(FQN)</td></tr>
+      <tr><td>Validate</td><td><code>QoraValidator</code> + <code>SymbolTableBuilder</code></td><td>IR → 심볼 테이블 + 모든 의미 오류 (방출을 막는 단단한 게이트)</td></tr>
+      <tr><td>Monomorphize</td><td><code>Monomorphizer</code></td><td>제네릭 <code>Qubit[n]</code> → 구체적 크기 복사본, 바뀐 경우 재검증</td></tr>
+      <tr><td>Flatten conjugation</td><td><code>ConjugationLowering</code></td><td><code>within/apply</code> (<code>QConjugate</code>) → <code>compute; apply;</code> + 합성된 <code>within</code>의 역연산</td></tr>
+      <tr><td>Materialize</td><td><code>AdjointMaterializer</code></td><td><code>Adjoint Foo</code> → 진짜 <code>Foo__adj</code> op + 평범한 호출</td></tr>
+      <tr><td>Mangle</td><td><code>NameMangler</code></td><td>Qora 이름 → 충돌 없는 OpenQASM 식별자</td></tr>
+      <tr><td>Check</td><td><code>ReferentialCheck</code></td><td>사용된 모든 이름이 해소되는지 검증 (아니면 <code>QINTERNAL</code>)</td></tr>
+      <tr><td>Target-lower</td><td><code>OpenQasmLowering</code></td><td>OpenQASM 특화 조정(예: 런타임 <code>const</code> → 평범한 <code>int</code>/<code>float</code>)</td></tr>
+      <tr><td>Emit</td><td><code>QasmEmitter</code></td><td>최종 IR → OpenQASM 3 텍스트 (순수 출력기)</td></tr>
+    </table>
+  </div>
+
+  <p>
+    이 형태는 의도된 것입니다: 엔진과의 <strong>경계 하나</strong>, 그다음 <strong>각자 IR에 한 가지 일만 하는
+    작은 패스들</strong>의 일직선, 그리고 그 앞에 선 검증 게이트 덕분에 이후 모든 것이 단순해질 수 있습니다.
+    언어 기능을 추가하는 것은 보통 한 패스를 추가하거나 확장하는 일이지 — 컴파일러를 다시 쓰는 일이 아니며 —
+    끝의 출력 전용 이미터는 여러분이 얻는 OpenQASM이 패스들이 만든 IR 그대로임을 뜻합니다.
+  </p>
+
+  <div class="call why">
+    <span class="h">이것이 향하는 곳 — 자동 언컴퓨테이션</span>
+    Silq식 자동 언컴퓨테이션 — <strong>임시 큐비트가 더 이상 필요 없어지는 지점을 찾아 그 역연산을 자동으로
+    주입하는 것</strong> — 이야말로 이 패스들이 향해 온 목표입니다. 첫 조각은 이미 자리를 잡았습니다:
+    <code>ConjugationLowering</code>이 <code>within/apply</code> 노드를 계산 · apply · 언컴퓨트로 평탄화해
+    방출하므로, 이후의 경로 전체(역연산 합성 → <code>__adj</code> 닫힘 → 맹글링 → QASM)가 처음부터 끝까지
+    검증되어 있습니다. 남은 것은 그 노드를 스스로 <em>만들어내는</em> 분석입니다 — 라이브니스(임시 큐비트가
+    언제 죽는지)와 효과 분석(안전하게 되돌릴 수 있는지) — 그다음 작은 주입기가 각 소멸 지점에서
+    <code>QConjugate</code>를 방출합니다.
+  </div>
+
+  <hr>
+
+  <p style="color:var(--muted); font-size:.92rem;">
+    이 문서의 모든 AST·IR·OpenQASM 리스팅은 위 예제를 실제 Qora 컴파일러로 컴파일해 얻은 것입니다
+    (<code>qora --json --stages</code>).<br>
+    소스, 파이프라인 순서대로: <code>QoraGrammar.cs</code> (문법) ·
+    <code>Ir/QoraLowering.cs</code> (AST→IR) ·
+    <code>Ir/Passes/ModuleLoader.cs</code> · <code>MeasureConditionLowering.cs</code> · <code>Resolver.cs</code> · <code>SymbolTable.cs</code> · <code>QoraValidator.cs</code> ·
+    <code>Monomorphizer.cs</code> · <code>ConjugationLowering.cs</code> · <code>AdjointMaterializer.cs</code> · <code>NameMangler.cs</code> ·
+    <code>ReferentialCheck.cs</code> · <code>Ir/Inverter.cs</code> (인버전 커널) ·
+    <code>OpenQasmLowering.cs</code> · <code>Ir/QasmEmitter.cs</code> (IR→OpenQASM).
+  </p>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Qora コア動作文書 — Adjoint 逆合成パイプライン — Qora</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --ink: #1f2430;
+    --muted: #5b6472;
+    --line: #e6e8ee;
+    --panel: #f7f8fb;
+    --plus: #1457d6;
+    --minus: #d62b39;
+    --accent: #6b3fd4;
+    --good: #11875b;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo",
+      "Malgun Gothic", "Noto Sans KR", "Segoe UI Symbol", "Cambria Math", sans-serif;
+    line-height: 1.75;
+    font-size: 17px;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 0 20px 120px; }
+  header.hero {
+    padding: 64px 20px 40px;
+    text-align: center;
+    border-bottom: 1px solid var(--line);
+    background: linear-gradient(180deg, #faf9ff, #ffffff);
+  }
+  header.hero h1 { font-size: 2.0rem; margin: 0 0 10px; letter-spacing: -0.5px; }
+  header.hero p { color: var(--muted); margin: 0; font-size: 1.05rem; }
+  .tag { display:inline-block; font-size:.78rem; letter-spacing:.12em; text-transform:uppercase;
+         color: var(--accent); font-weight:700; margin-bottom:14px; }
+  h2 {
+    margin: 56px 0 14px; font-size: 1.45rem; letter-spacing: -0.3px;
+    padding-top: 14px; border-top: 2px solid var(--line);
+  }
+  h2 .n {
+    display:inline-flex; align-items:center; justify-content:center;
+    width: 1.7em; height: 1.7em; border-radius: 50%;
+    background: var(--accent); color:#fff; font-size: .82rem; font-weight:700;
+    margin-right: 10px; vertical-align: middle;
+  }
+  h3 { margin: 30px 0 8px; font-size: 1.12rem; }
+  p { margin: 14px 0; }
+  strong { color: #11203a; }
+  .lead { font-size: 1.08rem; }
+  code, .mono, pre {
+    font-family: "SF Mono", "JetBrains Mono", "D2Coding", Consolas, "Segoe UI Symbol", monospace;
+  }
+  code {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 5px;
+    padding: 1px 6px; font-size: .9em;
+  }
+  pre {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 16px 18px; margin: 18px 0; overflow-x: auto;
+    font-size: .88rem; line-height: 1.55;
+  }
+  pre code { background: none; border: none; padding: 0; font-size: inherit; }
+  pre .cm { color: var(--muted); }            /* コメント/補助表示 */
+  pre .hl { color: var(--accent); font-weight: 700; }   /* 重要な強調 */
+  pre .add { color: var(--good); font-weight: 700; }    /* 合成/新しく生まれたもの */
+  .panel {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 16px 18px; margin: 18px 0; overflow-x: auto;
+  }
+  table.amp { border-collapse: collapse; width: 100%; }
+  table.amp th, table.amp td {
+    padding: 9px 12px; text-align: left; border-bottom: 1px solid var(--line);
+  }
+  table.amp th { font-size: .82rem; color: var(--muted); font-weight: 600; }
+  table.amp tr:last-child td { border-bottom: none; }
+  table.amp code { white-space: nowrap; }
+  .call {
+    border-left: 4px solid var(--accent); background: #faf8ff;
+    padding: 14px 18px; border-radius: 0 8px 8px 0; margin: 20px 0;
+  }
+  .call.why { border-color: var(--good); background: #f2fbf7; }
+  .call.warn { border-color: #e6a417; background: #fff9ec; }
+  .call .h { font-weight: 700; display:block; margin-bottom: 4px; }
+  .call p { margin: 8px 0 0; }
+  .rule {
+    text-align:center; font-size: 1.05rem; font-weight: 700; color:#1a1140;
+    background: #f3efff; border:1px solid #e2d8ff; border-radius: 10px;
+    padding: 16px; margin: 20px 0;
+  }
+  .toc {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 16px 22px; margin: 26px 0;
+  }
+  .toc ol { margin: 8px 0 0; padding-left: 20px; }
+  .toc a { color: var(--ink); text-decoration: none; }
+  .toc a:hover { color: var(--accent); }
+  .doc-links { margin: 20px 0 6px; }
+  .doc-link {
+    display:inline-block; background:#f3efff; border:1px solid #e2d8ff; color: var(--accent);
+    font-weight:700; text-decoration:none; border-radius:999px; padding:7px 18px; font-size:.95rem;
+  }
+  .doc-link:hover { background:#e9e1ff; }
+  hr { border:none; border-top:1px solid var(--line); margin: 40px 0; }
+  .flowline {
+    text-align:center; font-weight:700; color:#1a1140;
+    background:#f3efff; border:1px solid #e2d8ff; border-radius:10px;
+    padding: 14px 10px; margin: 20px 0; font-size: .98rem;
+    overflow-x: auto; white-space: nowrap;
+  }
+  .flowline .st { color: var(--accent); }
+  .doc-meta {
+    border: 1px solid #dfe5f2; border-left: 5px solid var(--accent); border-radius: 8px;
+    background: #f8faff; padding: 18px 20px; margin: 24px 0;
+  }
+  .doc-meta .meta-title { font-weight: 800; color: #11203a; margin-bottom: 12px; }
+  .meta-grid {
+    display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 18px;
+    margin: 0;
+  }
+  .meta-grid div { min-width: 0; }
+  .meta-grid dt { color: var(--muted); font-size: .78rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+  .meta-grid dd { margin: 3px 0 0; }
+  @media (max-width: 720px) {
+    .meta-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="qora-lang-switch" style="position:sticky;top:0;z-index:99;text-align:right;padding:8px 16px;background:rgba(255,255,255,.92);backdrop-filter:blur(4px);border-bottom:1px solid #e6e8ee;font-size:13px;font-family:sans-serif;"><a href="../en/adjoint-pipeline.html" onclick="try{localStorage.setItem(&quot;qora-lang&quot;,&quot;en&quot;)}catch(e){}">English</a> · <a href="../ko/adjoint-pipeline.html" onclick="try{localStorage.setItem(&quot;qora-lang&quot;,&quot;ko&quot;)}catch(e){}">한국어</a> · <strong>日本語</strong></div>
+
+<header class="hero">
+  <div class="tag">Qora · コア動作文書</div>
+  <h1>Adjoint 逆合成パイプライン</h1>
+  <p>Adjoint 呼び出しが逆 IR、合成 def、OpenQASM 呼び出しへ変わる動作フロー</p>
+</header>
+
+<div class="wrap">
+
+  <p class="lead">
+    Qora で <code>Adjoint Foo(q)</code> と書くと、コンパイラは <strong>Foo の逆演算を行う
+    サブルーチン(<code>Foo__adj</code>)を自動的に合成</strong>し、その呼び出しに置き換えます。
+    この文書では、それが正確にどこで、どの順序で起こるのかを、
+    <strong>実際のコンパイラ出力</strong>で一段階ずつたどっていきます。
+    以下に登場する AST・IR・OpenQASM は、すべてこの例を実際にコンパイルして得られた結果です。
+  </p>
+
+  <div class="flowline">
+    ユーザーコード <span class="st">─パース─▶</span> AST
+    <span class="st">─Lowering─▶</span> QoraIR
+    <span class="st">─検証─▶</span> (エラーなら STOP)
+    <span class="st">─AdjointMaterializer─▶</span> 逆演算 op
+    <span class="st">─Emitter─▶</span> OpenQASM 3
+  </div>
+
+  <section class="doc-meta" aria-label="文書情報">
+    <div class="meta-title">この文書の役割</div>
+    <dl class="meta-grid">
+      <div>
+        <dt>文書種別</dt>
+        <dd><code>Adjoint</code> がコンパイル中にどう動くかを説明する基準動作文書です。</dd>
+      </div>
+      <div>
+        <dt>入力</dt>
+        <dd><code>Adjoint Foo(q)</code> 呼び出しを含む、解決済み・検証済みの Qora IR です。</dd>
+      </div>
+      <div>
+        <dt>出力</dt>
+        <dd>合成された <code>Foo__adj</code> 演算と、その演算を呼ぶ通常の呼び出しです。</dd>
+      </div>
+      <div>
+        <dt>安全条件</dt>
+        <dd>測定や <code>Reset</code> のような不可逆な動作は、出力前の検証段階で拒否します。</dd>
+      </div>
+    </dl>
+  </section>
+
+  <nav class="doc-links" aria-label="関連するコンパイラ文書">
+    <a class="doc-link" href="index.html">全体コンパイラ設計</a>
+  </nav>
+
+  <div class="toc">
+    <strong>目次</strong>
+    <ol>
+      <li><a href="#s1">サンプルプログラム — 5 つの構造をすべて含むコード</a></li>
+      <li><a href="#s2">ステップ 1. AST — パーサーが作る構文木</a></li>
+      <li><a href="#s3">ステップ 2. QoraIR — コンパイラが所有する中間表現</a></li>
+      <li><a href="#s4">ステップ 3. AdjointMaterializer — Inverter カーネルで逆演算 op を合成する</a></li>
+      <li><a href="#s5">ステップ 4. OpenQASM — 逆 IR をそのまま出力する</a></li>
+      <li><a href="#s6">何が逆転され、何が拒否されるのか</a></li>
+      <li><a href="#s7">1 ページ要約</a></li>
+    </ol>
+  </div>
+
+  <h2 id="s1"><span class="n">1</span>サンプルプログラム — 5 つの構造をすべて含むコード</h2>
+
+  <p>
+    逆演算の合成がサポートする 5 つの静的構造 —
+    <strong>ゲート、古典宣言、for ループ、if 分岐、ネスト呼び出し</strong> — を 1 つのプログラムにすべて詰め込みました。
+  </p>
+
+<pre><code>operation Inner(Qubit[2] q) {          <span class="cm">// ネスト呼び出しの対象</span>
+    H(q[0]);
+    T(q[1]);
+}
+
+operation Outer(Qubit[2] q, bit b) {
+    int k = 2;                         <span class="cm">// ① 古典宣言</span>
+    Inner(q);                          <span class="cm">// ② ネスト呼び出し</span>
+    Rx(pi/k, q[0]);                    <span class="cm">// ③ ゲート(宣言値を角度として使用)</span>
+    for i in 0..1 {                    <span class="cm">// ④ for ループ</span>
+        X(q[i]);
+    }
+    if (b == 1) {                      <span class="cm">// ⑤ if 分岐</span>
+        Z(q[0]);
+        Adjoint S(q[0]);               <span class="cm">//    ファンクタが既に付いたゲート</span>
+    }
+}
+
+operation Main() {
+    use q = Qubit[2];
+    bit r = M(q[0]);
+    Outer(q, r);
+    <span class="hl">Adjoint Outer(q, r);</span>               <span class="cm">// ★ この 1 行が逆合成の全体を引き起こす</span>
+}</code></pre>
+
+  <h2 id="s2"><span class="n">2</span>ステップ 1. AST — パーサーが作る構文木</h2>
+
+  <p>
+    パーサー(Janglim エンジン)はソースを構文木に変換します。この段階には<strong>「逆」の痕跡がまったくありません。</strong>
+    <code>Adjoint Outer(q, r)</code> も、単なる「Adjoint トークンが付いた呼び出し文」の 1 つにすぎません。
+    <code>Outer</code> の部分木だけを見ると:
+  </p>
+
+<pre><code>Operation
+├─ "Outer"
+├─ Param(2, q)   Param(bit, b)
+├─ VarDecl(int, k, Expr: 2)              <span class="cm">← int k = 2;</span>
+├─ Gate("Inner", Expr: q)                <span class="cm">← 呼び出しもゲートも同じ Gate タグ</span>
+├─ Gate("Rx", Expr: pi / k, Qubit(q,0))
+├─ For(i, 0, 1)
+│   └─ Gate("X", Qubit(q,i))
+└─ If
+    ├─ Condition(b == 1)
+    ├─ Gate("Z", Qubit(q,0))
+    └─ Gate(<span class="hl">"Adjoint"</span>, "S", Qubit(q,0))  <span class="cm">← ファンクタは子トークン</span></code></pre>
+
+  <div class="call">
+    <span class="h">この木は以後、決して修正されません</span>
+    後続の段階はこの木を<strong>読むだけ</strong>です。<code>Outer__adj</code> のようなものは
+    この時点では存在すらせず、ステップ 4 で新しく作られます。
+  </div>
+
+  <h2 id="s3"><span class="n">3</span>ステップ 2. QoraIR — コンパイラが所有する中間表現</h2>
+
+  <p>
+    Lowering(<code>QoraLowering</code>)が、エンジンの AST を <strong>Qora 自身の IR</strong>(<code>QProgram</code>)へ一度変換します。
+    ここからは文字列タグの代わりに<strong>強い型付けのノード</strong>(<code>QGate</code>、<code>QFor</code>、<code>QIf</code>、…)として扱います。
+    <code>Outer</code> の IR:
+  </p>
+
+<pre><code>QOperation Outer(Qubit[2] q, Bit b)
+  QDecl(const=False, type=Int, name=k, value=2)
+  QGate(functors=[],        name=Inner, args=[q])
+  QGate(functors=[],        name=Rx,    args=[pi / k, q[0]])
+  QFor(i in 0..1)
+    QGate(functors=[],      name=X,     args=[q[i]])
+  QIf(cond="b == 1")
+    then:
+      QGate(functors=[],        name=Z, args=[q[0]])
+      QGate(functors=[<span class="hl">Adjoint</span>], name=S, args=[q[0]])</code></pre>
+
+  <p>
+    注目すべき点:ファンクタが <code>functors=[Adjoint]</code> のように<strong>ノードのデータ</strong>になりました。
+    「このゲートは逆か」がテキストではなく値として表現されるため、次の段階ではこの値を反転するだけで逆を作れます。
+  </p>
+
+  <h2 id="s4"><span class="n">4</span>ステップ 3. AdjointMaterializer — Inverter カーネルで逆演算 op を合成する</h2>
+
+  <p>
+    <code>Main</code> に <code>Adjoint Outer(...)</code> があるので、コンパイラには <code>Outer</code> の逆が必要です。
+    実際の最上位パスは <strong>AdjointMaterializer</strong> です。このパスが必要な逆演算を追跡し、
+    <strong>Inverter</strong> カーネルで逆向きの本体を作ってから、<code>Outer__adj</code> のような本物の op としてプログラムに追加します。
+    数学的な根拠はただ 1 つです:
+  </p>
+
+  <div class="rule">(U₁ · U₂ · ⋯ · Uₙ)† &nbsp;=&nbsp; Uₙ† · ⋯ · U₂† · U₁†<br>
+  <span style="font-weight:400; font-size:.92rem;">— 順序を反転し、それぞれを逆(dagger)に</span></div>
+
+  <p>Inverter カーネルが実際に返した <code>Outer</code> の逆 IR:</p>
+
+<pre><code>QDecl(const=False, type=Int, name=k, value=2)     <span class="cm">← ① 宣言:順序を維持、先頭に</span>
+QIf(cond="b == 1")                                <span class="cm">← ⑤ if:条件を維持、分岐の内部だけ逆転</span>
+  then:
+    QGate(functors=[],        name=S, args=[q[0]])   <span class="cm">← Adjoint S → S(ファンクタが外れる)</span>
+    QGate(functors=[<span class="hl">Adjoint</span>], name=Z, args=[q[0]])   <span class="cm">← Z → Adjoint Z</span>
+QFor(i in <span class="hl">1..0, step=-1</span>)                          <span class="cm">← ④ for:範囲をスワップ + 逆方向</span>
+  QGate(functors=[<span class="hl">Adjoint</span>], name=X, args=[q[i]])
+QGate(functors=[<span class="hl">Adjoint</span>], name=Rx, args=[pi / k, q[0]])  <span class="cm">← ③ 逆回転</span>
+QGate(functors=[<span class="hl">Adjoint</span>], name=Inner, args=[q])          <span class="cm">← ② Inner → Adjoint Inner(推移的)</span></code></pre>
+
+  <h3>構造別の逆転規則</h3>
+
+  <div class="panel">
+    <table class="amp">
+      <tr><th>構造</th><th>順方向</th><th>逆方向</th><th>規則</th></tr>
+      <tr><td>ゲート</td><td><code>X</code></td><td><code>Adjoint X</code></td><td>Adjoint ファンクタをトグル</td></tr>
+      <tr><td>既に Adjoint のゲート</td><td><code>Adjoint S</code></td><td><code>S</code></td><td>逆の逆 = 元どおり</td></tr>
+      <tr><td>古典宣言</td><td><code>int k = 2;</code></td><td><code>int k = 2;</code>(先頭)</td><td>単一代入なので位置は無関係 — 反転しない</td></tr>
+      <tr><td>for ループ</td><td><code>for i in 0..1</code></td><td><code>for i in 1..0, step −1</code></td><td>逆方向の走査 + 本体の逆転</td></tr>
+      <tr><td>if 分岐</td><td><code>if (b == 1) { … }</code></td><td>条件はそのまま、本体だけ逆転</td><td>条件が読む値は本体内で変わらないため安全</td></tr>
+      <tr><td>ネスト呼び出し</td><td><code>Inner(q)</code></td><td><code>Adjoint Inner(q)</code></td><td>対象 op の逆も<strong>推移的に</strong>要求される</td></tr>
+      <tr><td>文の順序</td><td>①②③④⑤</td><td>① の次に ⑤④③②</td><td>量子文だけ逆順</td></tr>
+    </table>
+  </div>
+
+  <div class="call why">
+    <span class="h">なぜ宣言は反転しないのでしょうか?</span>
+    <code>int k = 2;</code> のような古典計算には「逆」というものがありません。さらに Qora は逆合成の対象内での
+    変数の再代入を拒否するため、宣言された値は最後まで同じ値のままです。そのため宣言をそのまま先頭に置いておけば、
+    逆方向のゲート(<code>inv @ rx(pi / k)</code>)は順方向と<strong>まったく同じ角度</strong>を読み取ります。
+  </div>
+
+  <div class="call">
+    <span class="h">推移的な合成 — ソースにない逆も自動で</span>
+    <code>Outer</code> の逆が <code>Adjoint Inner</code> を呼ぶことになったので、<code>Inner</code> の逆も必要になりました。
+    ソースのどこにも <code>Adjoint Inner</code> と書いたことはありませんが、コンパイラが必要性を追跡して
+    <code>Inner__adj</code> まで作ります。この要求は呼び出しの連鎖に沿って続いていきます(推移的閉包)。
+  </div>
+
+  <h2 id="s5"><span class="n">5</span>ステップ 4. OpenQASM — 逆 IR をそのまま出力する</h2>
+
+  <p>
+    最後に Emitter(<code>QasmEmitter</code>)が IR を OpenQASM 3 のテキストとして出力します。
+    逆 IR は特別なところのない普通の IR なので、<strong>通常の文とまったく同じ経路で出力</strong>されます。
+    全体の出力:
+  </p>
+
+  <p>
+    (出力の直前に 2 つのパスが走ります。まず <strong>adjoint 実体化</strong>が <code>Adjoint Outer</code> を
+    本物の逆方向 def op に変えます — 以下の <code>Inner__adj</code>・<code>Outer__adj</code> はここから生まれ、
+    だからそれらが普通の def なのです。次に <strong>ネームマングラー</strong>が出力名を OpenQASM に
+    安全な形へ合わせますが、キーワード・stdgates のゲート・他の名前と<strong>実際に衝突するときだけ</strong>名前を
+    変えます — <code>_</code> を付け、<code>// Qora:</code> ノートを残します。ここの名前はどれも衝突しないので
+    そのまま通ります。エラーとコンパイル段階ビューは常に元の名前を保ちます。)
+  </p>
+
+<pre><code>// generated by Qora v0.18
+OPENQASM 3;
+include "stdgates.inc";
+
+def Inner(qubit[2] q) {
+  h q[0];
+  t q[1];
+}
+
+def Outer(qubit[2] q, bit b) {
+  int k = 2;
+  Inner(q);
+  rx(pi / k) q[0];
+  for int i in [0:1] {
+    x q[i];
+  }
+  if (b == true) {
+    z q[0];
+    inv @ s q[0];
+  }
+}
+
+<span class="add">def Inner__adj(qubit[2] q) {</span>             <span class="cm">← ソースになかった def — 推移的に合成された</span>
+<span class="add">  inv @ t q[1];</span>
+<span class="add">  inv @ h q[0];</span>
+<span class="add">}</span>
+
+<span class="add">def Outer__adj(qubit[2] q, bit b) {</span>      <span class="cm">← Adjoint Outer が呼ぶ逆方向の def</span>
+<span class="add">  int k = 2;</span>                             <span class="cm">← ① 宣言を維持</span>
+<span class="add">  if (b == true) {</span>                          <span class="cm">← ⑤ 条件を維持、内部だけ逆</span>
+<span class="add">    s q[0];</span>
+<span class="add">    inv @ z q[0];</span>
+<span class="add">  }</span>
+<span class="add">  for int i in [1:-1:0] {</span>                <span class="cm">← ④ 逆方向のループ(1, 0 の順)</span>
+<span class="add">    inv @ x q[i];</span>
+<span class="add">  }</span>
+<span class="add">  inv @ rx(pi / k) q[0];</span>                 <span class="cm">← ③ 逆回転</span>
+<span class="add">  Inner__adj(q);</span>                         <span class="cm">← ② 合成された逆 def の呼び出し</span>
+<span class="add">}</span>
+
+qubit[2] q;
+bit r;
+r = measure q[0];
+Outer(q, r);
+<span class="hl">Outer__adj(q, r);</span>                        <span class="cm">← Adjoint Outer(q, r) がこれに置換される</span></code></pre>
+
+  <div class="call">
+    <span class="h">def の順序にも規則があります</span>
+    OpenQASM では<strong>宣言した後にしか使用</strong>できません(宣言してから使用)。そのため Emitter は、
+    すべての def(順方向 + 合成)を<strong>呼び出しの依存順(トポロジカルソート)</strong>で配置します —
+    <code>Inner__adj</code> が、それを呼ぶ <code>Outer__adj</code> より必ず先に現れる理由です。
+  </div>
+
+  <h2 id="s6"><span class="n">6</span>何が逆転され、何が拒否されるのか</h2>
+
+  <p>
+    逆を作れない op に <code>Adjoint</code> を適用すると<strong>コンパイルエラー</strong>になります。
+    変換(Emit)の前に<strong>検証パス</strong>が IR 全体を一巡して意味エラーを<strong>すべて収集</strong>し、
+    1 つでもあれば OpenQASM をまったく生成しません — 誤ったプログラムが「成功したふり」をして
+    間違った回路を黙って出力することがないようにするためです。拒否の理由は 2 種類あります。
+  </p>
+
+  <div class="panel">
+    <table class="amp">
+      <tr><th>構造</th><th>判定</th><th>理由</th></tr>
+      <tr><td>ゲート · for · if · 宣言 · ネスト呼び出し</td><td>✅ 逆転をサポート</td><td>この文書の 4 段階の規則</td></tr>
+      <tr><td>測定(<code>M</code>)· <code>Reset</code></td><td>❌ 恒久的に拒否</td><td><strong>物理的に非可逆</strong> — 測定は状態を収縮させ、情報を捨てる</td></tr>
+      <tr><td>変数の再代入(<code>k = k + 1;</code>)</td><td>❌ 現時点では拒否</td><td>古典状態の時間的な流れの追跡が必要(効果分析の段階で)</td></tr>
+      <tr><td><code>while</code> · <code>repeat</code></td><td>❌ 現時点では拒否</td><td>繰り返し回数をコンパイル時に知ることができない</td></tr>
+      <tr><td><code>use</code>(ローカルキュービット)</td><td>❌ 現時点では拒否</td><td>補助キュービットの後始末 = <strong>自動 uncomputation</strong> の役割</td></tr>
+      <tr><td>再帰呼び出し</td><td>❌ 拒否</td><td>逆も再帰になり、終了を保証できない</td></tr>
+    </table>
+  </div>
+
+  <div class="call warn">
+    <span class="h">エラーの理由は呼び出しの連鎖に沿って伝播します</span>
+    <p><code>Caller</code> が測定を行う <code>Meas</code> を呼ぶと、<code>Adjoint Caller(q)</code> は次のようなコンパイルエラーになります:</p>
+    <p><code>[QSEM001] in `Main`: `Adjoint Caller` cannot be compiled: it calls `Meas`,
+    which cannot be inverted (it measures a qubit, and measurement is irreversible)</code></p>
+    <p>括弧のチェーンをたどれば、根本原因(<code>Meas</code> の測定)まで読み取れます。
+    エラーは最初の発見で止まらず、<strong>1 回のコンパイルですべて</strong>報告されます。</p>
+  </div>
+
+  <h2 id="s7"><span class="n">7</span>1 ページ要約</h2>
+
+  <div class="flowline">
+    ユーザーコード <span class="st">─パース─▶</span> AST(逆の痕跡なし)
+    <span class="st">─Lowering─▶</span> QoraIR(ファンクタがデータ)
+    <span class="st">─検証─▶</span> 意味エラーなら STOP
+    <span class="st">─AdjointMaterializer─▶</span> 逆演算 op(Inverter カーネル: トグル・スワップ・逆順)
+    <span class="st">─Emitter─▶</span> OpenQASM(__adj def + 呼び出し置換)
+  </div>
+
+  <p>
+    <strong><code>Adjoint Foo(q)</code> の 1 行</strong>がすること:コンパイラが ① Foo の逆が必要であることを追跡し、
+    ② IR 上で「逆順 + ゲートごとの逆」として逆 IR を合成し(必要なら Foo が呼ぶ op たちの逆まで推移的に)、
+    ③ <code>Foo__adj</code> という def として出力した後、④ 呼び出し箇所を <code>Foo__adj(q)</code> に置き換えます。
+    ユーザーは逆方向のコードを 1 行も書いていませんが、最終的な OpenQASM には完全な逆演算が入っています —
+    C# の <code>async</code> がステートマシンを代わりに作ってくれるのと同じ方式の<strong>コンパイル時コード合成</strong>です。
+  </p>
+
+  <div class="call why">
+    <span class="h">この構造が次に開くもの — 自動 uncomputation</span>
+    一時的な(補助)キュービットは、使い終えたら<strong>逆演算で元に戻しておかないと</strong>干渉が汚染されてしまいます。
+    今はユーザーが <code>Adjoint</code> と明示したときだけ逆を合成しますが、この Inverter カーネルをそのまま再利用すれば、
+    コンパイラが<strong>一時キュービットがもう使われなくなる地点を見つけて、逆演算を自動的に注入</strong>できます。
+    それが Qora の目指す Silq 式の自動 uncomputation です。
+  </div>
+
+  <hr>
+
+  <p style="color:var(--muted); font-size:.92rem;">
+    この文書の AST · QoraIR · OpenQASM の出力は、すべて上の例を実際の Qora コンパイラでコンパイルして得られた結果です。<br>
+    関連ソース:<code>src/Qora.Core/Ir/QoraIr.cs</code>(IR 定義)·
+    <code>Ir/QoraLowering.cs</code>(AST→IR)·
+    <code>Ir/QoraValidator.cs</code>(意味検証パス)·
+    <code>Ir/Passes/AdjointMaterializer.cs</code>(逆演算 op 実体化パス)·
+    <code>Ir/Inverter.cs</code>(逆合成カーネル)·
+    <code>Ir/QasmEmitter.cs</code>(IR→OpenQASM)
+  </p>
+
+</div>
+</body>
+</html>

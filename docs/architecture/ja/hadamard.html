@@ -1,0 +1,1283 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hゲートを矢印で理解する — Qora</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --ink: #1f2430;
+    --muted: #5b6472;
+    --line: #e6e8ee;
+    --panel: #f7f8fb;
+    --plus: #1457d6;   /* + : 右、青 */
+    --minus: #d62b39;  /* − : 左、赤 */
+    --accent: #6b3fd4;
+    --good: #11875b;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo",
+      "Malgun Gothic", "Noto Sans KR", "Segoe UI Symbol", "Cambria Math", sans-serif;
+    line-height: 1.75;
+    font-size: 17px;
+  }
+  .wrap { max-width: 820px; margin: 0 auto; padding: 0 20px 120px; }
+  header.hero {
+    padding: 64px 20px 40px;
+    text-align: center;
+    border-bottom: 1px solid var(--line);
+    background: linear-gradient(180deg, #faf9ff, #ffffff);
+  }
+  header.hero h1 { font-size: 2.1rem; margin: 0 0 10px; letter-spacing: -0.5px; }
+  header.hero p { color: var(--muted); margin: 0; font-size: 1.05rem; }
+  .tag { display:inline-block; font-size:.78rem; letter-spacing:.12em; text-transform:uppercase;
+         color: var(--accent); font-weight:700; margin-bottom:14px; }
+  h2 {
+    margin: 56px 0 14px; font-size: 1.5rem; letter-spacing: -0.3px;
+    padding-top: 14px; border-top: 2px solid var(--line);
+  }
+  h2 .n {
+    display:inline-flex; align-items:center; justify-content:center;
+    width: 1.7em; height: 1.7em; border-radius: 50%;
+    background: var(--accent); color:#fff; font-size: .82rem; font-weight:700;
+    margin-right: 10px; vertical-align: middle;
+  }
+  h3 { margin: 30px 0 8px; font-size: 1.12rem; }
+  h4 { margin: 0 0 10px; font-size: 1.02rem; line-height: 1.45; }
+  p { margin: 14px 0; }
+  strong { color: #11203a; }
+  .lead { font-size: 1.08rem; }
+  code, .mono {
+    font-family: "SF Mono", "JetBrains Mono", "D2Coding", Consolas, "Segoe UI Symbol", monospace;
+  }
+  code {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 5px;
+    padding: 1px 6px; font-size: .9em;
+  }
+  /* 矢印の表（振幅パネル） */
+  .panel {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 16px 18px; margin: 18px 0; overflow-x: auto;
+  }
+  .panel.mono { white-space: nowrap; }
+  table.amp { border-collapse: collapse; width: 100%; font-family: inherit; }
+  table.amp th, table.amp td {
+    padding: 9px 12px; text-align: center; border-bottom: 1px solid var(--line);
+    white-space: nowrap;
+  }
+  table.amp th { font-size: .82rem; color: var(--muted); font-weight: 600; }
+  table.amp td:first-child, table.amp th:first-child { text-align: left; font-weight: 600; }
+  table.amp tr:last-child td { border-bottom: none; }
+  .arrow-r { color: var(--plus); font-weight: 700; }   /* ▶ + 右 */
+  .arrow-l { color: var(--minus); font-weight: 700; }  /* ◀ − 左 */
+  .zero { color: var(--muted); }
+  /* コールアウト */
+  .call {
+    border-left: 4px solid var(--accent); background: #faf8ff;
+    padding: 14px 18px; border-radius: 0 8px 8px 0; margin: 20px 0;
+  }
+  .call.why { border-color: var(--good); background: #f2fbf7; }
+  .call.warn { border-color: #e6a417; background: #fff9ec; }
+  .call .h { font-weight: 700; display:block; margin-bottom: 4px; }
+  .call p { margin: 8px 0 0; }
+  .rule {
+    text-align:center; font-size: 1.1rem; font-weight: 700; color:#1a1140;
+    background: #f3efff; border:1px solid #e2d8ff; border-radius: 10px;
+    padding: 16px; margin: 20px 0;
+  }
+  .step { display:flex; gap:14px; margin:16px 0; }
+  .step .num {
+    flex: 0 0 auto; width: 30px; height: 30px; border-radius: 50%;
+    background: var(--accent); color:#fff; font-weight:700; font-size:.9rem;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .step .body { flex: 1 1 auto; }
+  .step .body p { margin: 0 0 6px; }
+  hr { border:none; border-top:1px solid var(--line); margin: 40px 0; }
+  .math { text-align:center; font-size:1.05rem; margin: 16px 0; }
+  .contrib-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 10px;
+    margin: 10px 0 4px;
+  }
+  @media (min-width: 680px) {
+    .contrib-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  .contrib {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 11px 12px;
+  }
+  .contrib .label {
+    display: block;
+    color: var(--muted);
+    font-size: .82rem;
+    font-weight: 700;
+    margin-bottom: 4px;
+  }
+  .contrib .value {
+    display: block;
+    font-size: 1.05rem;
+    font-weight: 800;
+  }
+  .walkthrough {
+    display: grid;
+    gap: 16px;
+    margin: 18px 0 24px;
+  }
+  .mini-step {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: #fff;
+    padding: 16px 18px;
+  }
+  .mini-step .step-label {
+    display: inline-block;
+    color: #fff;
+    background: var(--accent);
+    border-radius: 999px;
+    padding: 3px 11px;
+    font-size: .78rem;
+    font-weight: 800;
+    margin-bottom: 10px;
+  }
+  .mini-step p { margin: 8px 0 12px; }
+  .mini-step table.amp { margin-top: 10px; }
+  table.amp .expr {
+    text-align: left;
+    white-space: normal;
+    line-height: 1.55;
+  }
+  table.amp .result-cell {
+    font-weight: 800;
+    color: #172033;
+  }
+  table.amp.grouped-map {
+    border-collapse: separate;
+    border-spacing: 0;
+  }
+  table.amp.grouped-map .group-zero {
+    background: #f7fbff;
+    border-left: 4px solid var(--plus);
+    border-right: 4px solid var(--plus);
+  }
+  table.amp.grouped-map .group-one {
+    background: #f6fcf8;
+    border-left: 4px solid var(--good);
+    border-right: 4px solid var(--good);
+  }
+  table.amp.grouped-map .group-head {
+    border-top-width: 4px;
+    border-top-style: solid;
+    font-weight: 800;
+  }
+  table.amp.grouped-map .group-zero.group-head {
+    border-top-color: var(--plus);
+    border-radius: 8px 8px 0 0;
+  }
+  table.amp.grouped-map .group-one.group-head {
+    border-top-color: var(--good);
+    border-radius: 8px 8px 0 0;
+  }
+  table.amp.grouped-map .group-last {
+    border-bottom-width: 4px;
+    border-bottom-style: solid;
+    border-radius: 0 0 8px 8px;
+  }
+  table.amp.grouped-map .group-zero.group-last { border-bottom-color: var(--plus); }
+  table.amp.grouped-map .group-one.group-last { border-bottom-color: var(--good); }
+  table.amp.grouped-map .map-formula {
+    font-size: 1.04rem;
+    font-weight: 800;
+  }
+  .key-rule {
+    display: grid;
+    gap: 8px;
+    background: #fff4f4;
+    border: 2px solid #f0b7bd;
+    border-left: 8px solid var(--minus);
+    border-radius: 8px;
+    padding: 16px 18px;
+    margin: 18px 0 20px;
+  }
+  .key-rule .label {
+    color: var(--minus);
+    font-size: .78rem;
+    font-weight: 900;
+    letter-spacing: .08em;
+  }
+  .key-rule .main {
+    color: #1d2330;
+    font-size: 1.18rem;
+    font-weight: 900;
+    line-height: 1.45;
+  }
+  .key-rule .sub {
+    color: var(--muted);
+    font-size: .96rem;
+  }
+  .return-rule {
+    display: grid;
+    gap: 8px;
+    background: #f2fbf7;
+    border: 2px solid #b8e5d2;
+    border-left: 8px solid var(--good);
+    border-radius: 8px;
+    padding: 16px 18px;
+    margin: 18px 0 20px;
+  }
+  .return-rule .label {
+    color: var(--good);
+    font-size: .78rem;
+    font-weight: 900;
+    letter-spacing: .08em;
+  }
+  .return-rule .main {
+    color: #163322;
+    font-size: 1.14rem;
+    font-weight: 900;
+    line-height: 1.45;
+  }
+  .return-rule .sub {
+    color: var(--muted);
+    font-size: .96rem;
+  }
+  .compare-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 14px;
+    margin: 16px 0 22px;
+  }
+  @media (min-width: 760px) {
+    .compare-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  .compare-card {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 15px 16px;
+  }
+  .compare-card.bad { border-top: 5px solid #e6a417; }
+  .compare-card.good { border-top: 5px solid var(--good); }
+  .compare-card h4 { margin-bottom: 12px; }
+  .state-lines {
+    display: grid;
+    gap: 8px;
+    margin: 10px 0;
+  }
+  .state-line {
+    display: grid;
+    gap: 4px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    padding: 10px 12px;
+  }
+  .state-line .from {
+    color: var(--muted);
+    font-size: .82rem;
+    font-weight: 700;
+  }
+  .state-line .to {
+    color: #172033;
+    font-size: 1rem;
+    font-weight: 800;
+  }
+  .state-line.diff {
+    border-color: #f0b7bd;
+    background: #fff8f8;
+  }
+  .diff-mark {
+    color: var(--minus);
+    font-weight: 900;
+    background: #ffe8eb;
+    border: 1px solid #f3b6bd;
+    border-radius: 5px;
+    padding: 0 5px;
+  }
+  .diff-mark.was {
+    color: #9a6200;
+    background: #fff2d8;
+    border-color: #edc36d;
+  }
+  .impact {
+    color: var(--muted);
+    font-size: .94rem;
+    margin: 10px 0 0;
+  }
+  .interference-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 14px;
+    margin: 12px 0 4px;
+  }
+  @media (min-width: 760px) {
+    .interference-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  .interference-card {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 15px 16px;
+  }
+  .interference-card.keep { border-top: 5px solid var(--plus); }
+  .interference-card.cancel { border-top: 5px solid var(--minus); }
+  .interference-card .target {
+    color: var(--muted);
+    font-size: .82rem;
+    font-weight: 800;
+    margin-bottom: 8px;
+  }
+  .interference-card .sum {
+    font-size: 1.2rem;
+    font-weight: 900;
+    margin: 6px 0;
+  }
+  .interference-card .meaning {
+    color: #172033;
+    font-weight: 800;
+    margin-top: 8px;
+  }
+  .interference-card.keep .meaning { color: var(--plus); }
+  .interference-card.cancel .meaning { color: var(--minus); }
+  .interference-card .sum strong {
+    font-size: 1.24em;
+    color: #111827;
+  }
+  .evidence-grid,
+  .summary-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 14px;
+    margin: 16px 0 22px;
+  }
+  @media (min-width: 760px) {
+    .evidence-grid,
+    .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .summary-card.wide { grid-column: 1 / -1; }
+  }
+  .evidence-card,
+  .summary-card {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 15px 16px;
+  }
+  .evidence-card.convention { border-top: 5px solid #8a93a6; }
+  .evidence-card.physics { border-top: 5px solid var(--good); }
+  .evidence-card.slit { border-top: 5px solid var(--plus); }
+  .evidence-card.circuit { border-top: 5px solid var(--accent); }
+  .summary-card { border-top: 5px solid var(--accent); }
+  .summary-card.minus { border-top-color: var(--minus); }
+  .summary-card.interference { border-top-color: var(--plus); }
+  .summary-card.physics { border-top-color: var(--good); }
+  .summary-tag {
+    display: inline-block;
+    color: var(--muted);
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 2px 9px;
+    font-size: .76rem;
+    font-weight: 900;
+    margin-bottom: 8px;
+  }
+  .evidence-card h4,
+  .summary-card h4 {
+    margin-bottom: 8px;
+  }
+  .evidence-card p,
+  .summary-card p {
+    margin: 8px 0 0;
+  }
+  .formula-box {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    padding: 10px 12px;
+    margin-top: 10px;
+    font-weight: 800;
+    color: #172033;
+  }
+  .practice {
+    background: #f8fbff;
+    border: 1px solid #cfe0ff;
+    border-left: 8px solid var(--plus);
+    border-radius: 8px;
+    padding: 18px;
+    margin: 30px 0 34px;
+  }
+  .practice .practice-label {
+    display: inline-block;
+    color: var(--plus);
+    background: #edf4ff;
+    border: 1px solid #cfe0ff;
+    border-radius: 999px;
+    padding: 3px 11px;
+    font-size: .78rem;
+    font-weight: 900;
+    margin-bottom: 10px;
+  }
+  .practice h3 {
+    margin-top: 0;
+  }
+  .practice-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 18px;
+    margin-top: 14px;
+  }
+  .code-sample {
+    min-width: 0;
+  }
+  .code-sample .caption {
+    color: var(--muted);
+    font-size: .82rem;
+    font-weight: 900;
+    margin-bottom: 6px;
+  }
+  .code-sample pre {
+    background: #111827;
+    color: #eef4ff;
+    border-radius: 8px;
+    margin: 0;
+    padding: 14px 15px;
+    overflow-x: auto;
+    line-height: 1.5;
+    font-size: .86rem;
+  }
+  .code-sample pre code {
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+    color: inherit;
+    padding: 0;
+    font-size: inherit;
+  }
+  .practice .check {
+    margin: 14px 0 0;
+    color: var(--muted);
+    font-size: .96rem;
+  }
+  .rule .summary-line {
+    display: block;
+    margin: 4px 0;
+  }
+  .rule .summary-detail {
+    color: var(--muted);
+    font-size: .96rem;
+    font-weight: 700;
+  }
+  .toc { background: var(--panel); border:1px solid var(--line); border-radius:10px;
+         padding: 14px 18px; margin: 26px 0; }
+  .toc ol { margin: 6px 0 0; padding-left: 22px; }
+  .toc a { color: var(--ink); text-decoration: none; }
+  .toc a:hover { color: var(--accent); }
+  .doc-links { display:flex; flex-wrap:wrap; gap:10px; margin: 20px 0 28px; }
+  .doc-link { display:inline-flex; align-items:center; gap:8px; border:1px solid #cddcff;
+              background:#f6f9ff; color:#1745b5; border-radius:999px; padding:8px 14px;
+              font-weight:800; text-decoration:none; }
+  .doc-link:hover { border-color:#9bb8ff; background:#eef4ff; }
+  footer { text-align:center; color:var(--muted); font-size:.9rem; margin-top: 60px;
+           padding-top: 24px; border-top:1px solid var(--line); }
+  .legend { font-size:.9rem; color:var(--muted); margin: 6px 0 0; }
+  /* 表 → 表の間の遷移（下矢印 + 演算ラベル） */
+  .flow { text-align:center; margin: 6px 0; }
+  .flow .down { font-size: 1.8rem; color: var(--accent); line-height: 1; }
+  .flow .op { display:inline-block; text-align:left; background:#f3efff; border:1px solid #e2d8ff;
+              border-radius: 12px; padding: 12px 20px; margin-top: 2px; min-width: 320px; }
+  .flow .op .name { display:block; font-weight:800; color:var(--accent); margin-bottom:8px; }
+  .flow .op .st { margin: 5px 0; color:#2a2350; font-size:.96rem; }
+  .flow .op .st b { display:inline-block; width:1.4em; color:var(--accent); }
+  .cap { display:inline-block; font-size:.92rem; font-weight:800; letter-spacing:.02em;
+         color:#fff; background:#8a93a6; border-radius:999px; padding:4px 16px; margin: 0 0 14px; }
+  .cap.after { background: var(--plus); }   /* Hゲート適用後 = 青で強調 */
+</style>
+</head>
+<body>
+<div class="qora-lang-switch" style="position:sticky;top:0;z-index:99;text-align:right;padding:8px 16px;background:rgba(255,255,255,.92);backdrop-filter:blur(4px);border-bottom:1px solid #e6e8ee;font-size:13px;font-family:sans-serif;"><a href="../en/hadamard.html" onclick="try{localStorage.setItem(&quot;qora-lang&quot;,&quot;en&quot;)}catch(e){}">English</a> · <a href="../ko/index.html" onclick="try{localStorage.setItem(&quot;qora-lang&quot;,&quot;ko&quot;)}catch(e){}">한국어</a> · <strong>日本語</strong></div>
+
+<header class="hero">
+  <div class="tag">Qora · 量子の基礎</div>
+  <h1>Hゲートを矢印で理解する</h1>
+  <p>キュービットの状態・振幅・干渉を一歩ずつ明確に説明します</p>
+</header>
+
+<div class="wrap">
+
+  <p class="lead">
+    この文書では、量子ゲートの中で最も基本となる<strong>Hゲート（アダマールゲート）</strong>を、
+    複雑な行列式の代わりに<strong>「振幅を表す矢印」</strong>で説明します。
+    特に、<code>|0⟩</code> 状態にHゲートを2回適用するとなぜ再び <code>|0⟩</code> 状態に戻るのかを、
+    可能な測定値0と1の振幅を一歩ずつ実際に足し合わせて確認します。
+  </p>
+
+  <nav class="doc-links" aria-label="他の文書">
+    <a class="doc-link" href="index.html">コンパイルパイプライン — ソースからOpenQASMまでの全ステージ</a>
+    <a class="doc-link" href="adjoint-pipeline.html">Adjointコンパイルパイプライン — ソースからOpenQASMまで</a>
+  </nav>
+
+  <div class="toc">
+    <strong>目次</strong>
+    <ol>
+      <li><a href="#s1">キュービットの状態は可能な測定値ごとに振幅を持つ</a></li>
+      <li><a href="#s2">Hゲートを1回適用すると、1つのキュービットが2つの測定値の振幅を持つ</a></li>
+      <li><a href="#s3">なぜ振幅は1/√2なのか？ — 振幅を2乗してはじめて確率になる</a></li>
+      <li><a href="#s4">Hゲートの正確な振幅変換規則</a></li>
+      <li><a href="#s5">なぜ「測定値1から来て測定値1へ向かう項」にマイナス符号が付くのか</a></li>
+      <li><a href="#s6">Hゲートを2回適用すると、干渉によって <code>|0⟩</code> 状態がよみがえる</a></li>
+      <li><a href="#s7">振幅と干渉は実際の物理なのか、それとも表記上の約束なのか？</a></li>
+      <li><a href="#s8">1ページまとめ</a></li>
+    </ol>
+  </div>
+
+  <!-- ===================== 1 ===================== -->
+  <h2 id="s1"><span class="n">1</span>キュービットの状態は可能な測定値ごとに振幅を持つ</h2>
+
+  <p>
+    1つのキュービットを測定すると、<strong>測定値は0または1</strong>のどちらかになります。
+    測定する前のキュービットの状態には、<strong>可能な測定値0と可能な測定値1のそれぞれに振幅</strong>が付いています。
+    この文書では、各測定値の振幅を矢印で描きます。矢印の<strong>長さ</strong>は振幅の大きさで、
+    矢印の向き（右/左）は振幅の符号（+/−）です。
+  </p>
+
+  <p>最も単純なキュービットの状態である <code>|0⟩</code> 状態から見てみましょう。<code>|0⟩</code> 状態では、測定値0の振幅は1で、測定値1の振幅は0です。</p>
+
+  <div class="panel">
+    <table class="amp">
+      <tr><th>可能な測定値</th><th>振幅の矢印</th><th>振幅の値</th></tr>
+      <tr><td>0</td><td><span class="arrow-r">───▶</span></td><td>1（フル）</td></tr>
+      <tr><td>1</td><td><span class="zero">·</span></td><td>0（なし）</td></tr>
+    </table>
+    <p class="legend">測定値0の振幅が1で、測定値1の振幅が0であるキュービットの状態を <code>|0⟩</code> と呼びます。</p>
+  </div>
+
+  <div class="rule">各測定値に付いた振幅の長さを<strong>2乗した値</strong> = その測定値が出る<strong>確率</strong></div>
+
+  <p>
+    そのため、<code>|0⟩</code> 状態を測定すると、測定値0が出る確率は 1² = <strong>100%</strong> で、
+    測定値1が出る確率は 0² = <strong>0%</strong> です。
+    つまり<strong>測定値は必ず0</strong>になります。振幅の向きと符号は第2節から使うので、第1節では振幅の長さだけを見れば十分です。
+  </p>
+
+  <!-- ===================== 2 ===================== -->
+  <h2 id="s2"><span class="n">2</span>Hゲートを1回適用すると、1つのキュービットが2つの測定値の振幅を持つ</h2>
+
+  <p>
+    Hゲートは、測定値0に集まっていた振幅を、そのまま測定値0だけに置いておきません。
+    Hゲートは、測定値0に集まっていた振幅を<strong>測定値0へ向かう振幅の寄与</strong>と
+    <strong>測定値1へ向かう振幅の寄与</strong>に分けて送ります。
+    <code>|0⟩</code> 状態にHゲートを適用すると、測定値0にあった振幅1が、
+    測定値0の振幅 1/√2 と測定値1の振幅 1/√2 に変わります。
+  </p>
+
+  <div class="call warn">
+    <span class="h"><code>|01⟩</code> 状態になるわけではありません</span>
+    <code>|0⟩</code> 状態にHゲートを適用した結果は、
+    <strong>1つのキュービット</strong>が測定値0と測定値1に対する振幅を同時に持つ状態です。
+    数式で書くと <code>(|0⟩ + |1⟩) / √2</code> です。
+    <code>|01⟩</code> は<strong>2つのキュービット</strong>があるときに使う状態の表記です。
+  </div>
+
+  <div class="panel">
+    <table class="amp">
+      <tr><th>可能な測定値</th><th>Hゲート適用前の振幅</th><th>Hゲート適用後の振幅</th><th>Hゲート適用後の測定確率</th></tr>
+      <tr><td>0</td><td><span class="arrow-r">───▶</span> 1</td><td><span class="arrow-r">──▶</span> 1/√2 ≈ 0.707</td><td>50%</td></tr>
+      <tr><td>1</td><td><span class="zero">· 0</span></td><td><span class="arrow-r">──▶</span> 1/√2 ≈ 0.707</td><td>50%</td></tr>
+    </table>
+  </div>
+
+  <p>
+    Hゲートを適用した後は、測定値0の振幅の矢印が短くなります。振幅の長さが1から 1/√2（約0.707）に減ります。
+    同時に、Hゲートを適用する前は0だった測定値1の振幅も、1/√2 として新しく生まれます。
+    したがって、Hゲートを適用した後にキュービットを測定すると、測定値0が出る確率も50%、測定値1が出る確率も50%になります。
+  </p>
+
+  <!-- ===================== 3 ===================== -->
+  <h2 id="s3"><span class="n">3</span>なぜ振幅は1/√2なのか？ — 振幅を2乗してはじめて確率になる</h2>
+
+  <p>
+    測定値0と測定値1がそれぞれ50%の確率で出るなら、振幅もそれぞれ1/2であるように見えるかもしれません。
+    しかし、Hゲートを適用した後の振幅は<strong>1/2ではなく1/√2</strong>です。
+    理由は、<strong>確率 = 振幅²</strong>という規則と、<strong>すべての測定値の確率を足すと1</strong>という規則が
+    同時に成り立たなければならないからです。
+  </p>
+
+  <p>もし測定値0の振幅と測定値1の振幅を両方とも1にすると：</p>
+  <div class="math mono">1² + 1² = 2 = 200% &nbsp; ❌（確率が200%になることはあり得ない）</div>
+
+  <p>そこで、測定値0の振幅と測定値1の振幅を両方とも√2で割って、全体の確率が100%になるようにします：</p>
+  <div class="math mono">(1/√2)² + (1/√2)² = ½ + ½ = 1 = 100% &nbsp; ✓</div>
+
+  <div class="call why">
+    <span class="h">振幅 ↔ 確率（同じ規則、2つの向き）</span>
+    <strong>確率 = 振幅²</strong> なら、逆に <strong>振幅 = √確率</strong> です。
+    （面積 = 辺² ↔ 辺 = √面積 と同じ1つの式です。）
+    そのため、量子状態には「確率の平方根」である振幅を書き、キュービットを測定するときは振幅を2乗して確率を計算します。
+  </div>
+
+  <p style="text-align:center; margin:24px 0 6px;"><strong>図で見る — 振幅は正方形の「辺」、確率は正方形の「面積」</strong></p>
+  <div class="panel" style="text-align:center;">
+    <svg viewBox="0 0 480 196" width="100%" style="max-width:460px; height:auto;" role="img" aria-label="振幅は辺、確率は面積">
+      <!-- 左：振幅 1（面積 100%） -->
+      <rect x="46" y="22" width="130" height="130" fill="#dbe7fb" stroke="#1457d6" stroke-width="2"/>
+      <text x="111" y="84" text-anchor="middle" font-size="15" fill="#12315f" font-weight="700">面積 = 100%</text>
+      <text x="111" y="104" text-anchor="middle" font-size="12.5" fill="#12315f">(= 1²)</text>
+      <text x="111" y="174" text-anchor="middle" font-size="13" fill="#1457d6" font-weight="700">辺（振幅）= 1</text>
+      <!-- 矢印 + Hゲート -->
+      <text x="240" y="84" text-anchor="middle" font-size="30" fill="#6b3fd4">→</text>
+      <text x="240" y="110" text-anchor="middle" font-size="13" fill="#6b3fd4" font-weight="800">Hゲート</text>
+      <!-- 右：振幅 1/√2（面積 50%） — 底辺をそろえる -->
+      <rect x="308" y="60" width="92" height="92" fill="#dbe7fb" stroke="#1457d6" stroke-width="2"/>
+      <text x="354" y="102" text-anchor="middle" font-size="14" fill="#12315f" font-weight="700">面積 = 50%</text>
+      <text x="354" y="120" text-anchor="middle" font-size="11.5" fill="#12315f">(= (1/√2)²)</text>
+      <text x="354" y="174" text-anchor="middle" font-size="13" fill="#1457d6" font-weight="700">辺 = 1/√2 ≈ 0.707</text>
+    </svg>
+    <p class="legend">
+      面積（確率）を<strong>半分（100% → 50%）</strong>に減らすと、
+      辺（振幅）は<strong>半分（0.5）ではなく1/√2（≈0.707）</strong>に縮みます。
+      正方形の面積は辺の<strong>2乗</strong>だからです。
+      そのため、Hゲートを適用した後の振幅は1/2ではなく<strong>1/√2</strong>です。
+    </p>
+  </div>
+
+  <div class="call why">
+    <span class="h">これはたとえ話ではなく、実際の物理法則です</span>
+    波（光・音）では、<strong>強さ</strong>（光の明るさ・音の大きさ）は<strong>振幅の2乗</strong>に比例します。<br>
+    そのため、光の明るさを半分にするには、振幅を0.5倍ではなく<strong>0.707倍（1/√2）</strong>に下げる必要があります。この1/√2という数は、Hゲートに現れる1/√2と同じ数です。<br><br>
+    量子力学の確率も同じ2乗の規則を使います — <strong>|振幅|² = 確率</strong>。この2乗の規則が<strong>ボルンの規則（Born rule）</strong>です。<br>
+    だからこそ、量子でも「振幅（amplitude）」という言葉を使います。<br><br>
+    （2乗されるのは<strong>振幅</strong>です。周波数は別の軸なので — 光の色、音の高さ — 確率には入りません。）
+  </div>
+
+  <!-- ===================== 4 ===================== -->
+  <h2 id="s4"><span class="n">4</span>Hゲートの正確な振幅変換規則</h2>
+
+  <p>Hゲートが振幅を変える仕組みは、まず大きな規則として眺め、続いて4つのステップに分けて計算してみることができます。</p>
+
+  <div class="rule">① 各入力振幅を測定値0側と測定値1側の<u>振幅の寄与</u>に分けて送る &nbsp;→&nbsp; ② 各振幅の寄与に符号と<u>1/√2</u>を掛けたあと、同じ測定値どうしで足し合わせる</div>
+
+  <p><strong><code>|0⟩</code> 状態、つまり測定値0の振幅が1で測定値1の振幅が0の状態</strong>にHゲートを適用するとどうなるかを見てみましょう。</p>
+
+  <div class="panel">
+    <p class="cap">Hゲート適用前</p>
+    <table class="amp">
+      <tr><th>可能な測定値</th><th>振幅の矢印</th><th>振幅の値</th><th>測定確率（=振幅²）</th></tr>
+      <tr><td>0</td><td><span class="arrow-r">───▶</span></td><td>1</td><td>100%</td></tr>
+      <tr><td>1</td><td><span class="zero">·</span></td><td>0</td><td>0%</td></tr>
+    </table>
+  </div>
+
+  <div class="flow">
+    <div class="down">↓</div>
+    <div class="op">
+      <span class="name">Hゲート</span>
+      <div class="st"><b>①</b> <strong>測定値0の入力振幅1</strong>を測定値0側と1側の振幅の寄与に分けて送る</div>
+      <div class="st"><b>②</b> 各振幅の寄与に<strong>×1/√2</strong>を適用する → 1/√2, 1/√2</div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <p class="cap after">Hゲート適用後</p>
+    <table class="amp">
+      <tr><th>可能な測定値</th><th>振幅の矢印</th><th>振幅の値</th><th>測定確率（=振幅²）</th></tr>
+      <tr><td>0</td><td><span class="arrow-r">──▶</span></td><td>1/√2 ≈ 0.707</td><td>50%</td></tr>
+      <tr><td>1</td><td><span class="arrow-r">──▶</span></td><td>1/√2 ≈ 0.707</td><td>50%</td></tr>
+    </table>
+    <p class="legend">
+      測定値0の振幅の矢印は1から1/√2へと<strong>短くなり</strong>、
+      振幅のなかった測定値1には1/√2の振幅が<strong>新しく生まれます</strong>。
+      測定値0の振幅の減少と測定値1の振幅の生成が、
+      <code>|0⟩</code> 状態にHゲートを適用したときの変化です。
+    </p>
+  </div>
+
+  <h3>どの入力振幅がどの測定値の振幅に寄与するのか？</h3>
+
+  <div class="walkthrough">
+    <div class="mini-step">
+      <span class="step-label">ステップ1</span>
+      <h4>Hゲート適用前の2つの振幅に名前を付けます</h4>
+      <p>
+        Hゲートは入力状態の片方の振幅だけを使うわけではありません。
+        適用前の測定値0の振幅と適用前の測定値1の振幅の両方を使います。
+      </p>
+      <table class="amp">
+        <tr><th>記号</th><th>意味</th><th><code>|0⟩</code> 状態での値</th></tr>
+        <tr>
+          <td class="mono"><strong>a₀</strong></td>
+          <td class="expr">Hゲート適用前の測定値0の振幅</td>
+          <td class="result-cell">1</td>
+        </tr>
+        <tr>
+          <td class="mono"><strong>a₁</strong></td>
+          <td class="expr">Hゲート適用前の測定値1の振幅</td>
+          <td class="result-cell">0</td>
+        </tr>
+      </table>
+    </div>
+
+    <div class="mini-step">
+      <span class="step-label">ステップ2</span>
+      <h4>各入力振幅が2つの測定値へ振幅の寄与を送ります</h4>
+      <p>
+        適用前の測定値0の振幅も測定値0と1へ寄与を送り、
+        適用前の測定値1の振幅も測定値0と1へ寄与を送ります。
+        そのため、全部で4つの振幅の寄与が生まれます。
+      </p>
+      <table class="amp grouped-map">
+        <tr>
+          <th>出発する入力振幅</th>
+          <th class="group-zero group-head">測定値0へ向かう寄与</th>
+          <th class="group-one group-head">測定値1へ向かう寄与</th>
+        </tr>
+        <tr>
+          <td class="expr">適用前の測定値0の振幅 <span class="mono">(a₀)</span></td>
+          <td class="mono group-zero"><span class="arrow-r map-formula">+ a₀ × 1/√2</span></td>
+          <td class="mono group-one"><span class="arrow-r map-formula">+ a₀ × 1/√2</span></td>
+        </tr>
+        <tr>
+          <td class="expr">適用前の測定値1の振幅 <span class="mono">(a₁)</span></td>
+          <td class="mono group-zero group-last"><span class="arrow-r map-formula">+ a₁ × 1/√2</span></td>
+          <td class="mono group-one group-last"><span class="arrow-l map-formula">− a₁ × 1/√2</span></td>
+        </tr>
+      </table>
+    </div>
+
+    <div class="mini-step">
+      <span class="step-label">ステップ3</span>
+      <h4>同じ測定値に到着した振幅の寄与どうしを足します</h4>
+      <p>
+        測定値0に到着した2つの振幅の寄与を足すと、Hゲート適用後の測定値0の振幅になります。
+        測定値1に到着した2つの振幅の寄与を足すと、Hゲート適用後の測定値1の振幅になります。
+      </p>
+      <table class="amp">
+        <tr><th>Hゲート適用後の振幅</th><th>足し合わせる振幅の寄与</th><th>一般式</th></tr>
+        <tr>
+          <td class="expr">測定値0の振幅</td>
+          <td class="expr">0から来た寄与 + 1から来た寄与</td>
+          <td class="mono">a₀ × 1/√2 + a₁ × 1/√2</td>
+        </tr>
+        <tr>
+          <td class="expr">測定値1の振幅</td>
+          <td class="expr">0から来た寄与 + 1から来た寄与</td>
+          <td class="mono">a₀ × 1/√2 + a₁ × <span class="arrow-l">(−1/√2)</span></td>
+        </tr>
+      </table>
+    </div>
+
+    <div class="mini-step">
+      <span class="step-label">ステップ4</span>
+      <h4><code>|0⟩</code> 状態の実際の振幅の値を代入します</h4>
+      <p>
+        <code>|0⟩</code> 状態では <span class="mono">a₀ = 1</span> で <span class="mono">a₁ = 0</span> です。
+        したがって、ステップ1で名前を付けた2つの振幅の値をステップ3の一般式に入れればよいのです。
+      </p>
+      <table class="amp">
+        <tr><th>計算対象</th><th>代入式</th><th>結果</th></tr>
+        <tr>
+          <td class="expr">Hゲート適用後の測定値0の振幅</td>
+          <td class="mono">1 × 1/√2 + 0 × 1/√2</td>
+          <td class="result-cell">1/√2</td>
+        </tr>
+        <tr>
+          <td class="expr">Hゲート適用後の測定値1の振幅</td>
+          <td class="mono">1 × 1/√2 + 0 × <span class="arrow-l">(−1/√2)</span></td>
+          <td class="result-cell">1/√2</td>
+        </tr>
+      </table>
+    </div>
+  </div>
+
+  <h3>符号の規則 — 4つの振幅移動の組み合わせのうち、1つの組み合わせだけにマイナスが付く</h3>
+  <p>
+    Hゲートの変換式でHゲート適用後の測定値1の振幅を計算するとき、
+    <strong>適用前の測定値1の振幅にだけ −1/√2</strong> が掛けられます。
+    マイナス符号が付く位置は、
+    <strong>どの測定値から来た振幅がどの測定値へ向かうか</strong>で決まります。
+  </p>
+
+  <div class="key-rule" role="note" aria-label="Hゲートの符号規則の核心">
+    <span class="label">核心となる符号規則</span>
+    <span class="main">
+      4つの振幅移動の組み合わせのうち、
+      <strong>測定値1から来て測定値1へ向かう組み合わせ</strong>にだけマイナス符号が付きます。
+    </span>
+    <span class="sub">
+      この組み合わせを短く書くと <strong>1 → 1 項</strong>です。
+      「適用前も1側の振幅で、適用後も1側の振幅として寄与する」という意味です。
+    </span>
+  </div>
+
+  <div class="panel">
+    <table class="amp">
+      <tr><th>Hゲート適用前の振幅</th><th>測定値0へ向かう振幅の寄与</th><th>測定値1へ向かう振幅の寄与</th></tr>
+      <tr><td><strong>測定値0の振幅</strong></td><td><span class="arrow-r">+ ▶ 1/√2</span></td><td><span class="arrow-r">+ ▶ 1/√2</span></td></tr>
+      <tr><td><strong>測定値1の振幅</strong></td><td><span class="arrow-r">+ ▶ 1/√2</span></td><td><span class="arrow-l">− ◀ 1/√2</span></td></tr>
+    </table>
+    <p class="legend">測定値0へ向かう振幅の寄与は常に正です。測定値1へ向かう振幅の寄与は、適用前の振幅が測定値0から来たなら正で、適用前の振幅が測定値1から来たなら負です。</p>
+  </div>
+
+  <!-- ===================== 5 ===================== -->
+  <h2 id="s5"><span class="n">5</span>なぜ測定値1から来て測定値1へ向かう項にマイナス符号が付くのか</h2>
+
+  <div class="walkthrough">
+    <div class="mini-step">
+      <span class="step-label">ステップ1</span>
+      <h4>量子ゲートは入力の情報を失ってはいけません</h4>
+      <p>
+        Hゲートも量子ゲートなので、必ず元に戻せる（可逆である）必要があります。
+        元に戻せるということは、<strong>異なる入力状態が同じ出力状態に合流してはいけない</strong>という意味です。
+      </p>
+    </div>
+
+    <div class="mini-step">
+      <span class="step-label">ステップ2</span>
+      <h4>マイナス符号がないと、2つの入力状態が同じ出力状態に合流してしまいます</h4>
+      <p>
+        Hゲートからマイナス符号を取り除いてしまうと、
+        <code>|0⟩</code> 状態と <code>|1⟩</code> 状態が同じ出力状態へ行ってしまいます。
+      </p>
+
+      <div class="compare-grid">
+        <div class="compare-card bad">
+          <h4>マイナス符号がない場合</h4>
+          <div class="state-lines mono">
+            <div class="state-line">
+              <span class="from">入力 <code>|0⟩</code></span>
+              <span class="to">(<code>|0⟩</code> + <code>|1⟩</code>) / √2</span>
+            </div>
+            <div class="state-line diff">
+              <span class="from">入力 <code>|1⟩</code></span>
+              <span class="to">(<code>|0⟩</code> <span class="diff-mark was">+</span> <code>|1⟩</code>) / √2</span>
+            </div>
+          </div>
+          <p class="impact">2つの入力状態が同じ出力状態になります。出力だけを見ても、元の入力が何だったのか分かりません。</p>
+        </div>
+
+        <div class="compare-card good">
+          <h4>マイナス符号がある場合</h4>
+          <div class="state-lines mono">
+            <div class="state-line">
+              <span class="from">入力 <code>|0⟩</code></span>
+              <span class="to">(<code>|0⟩</code> + <code>|1⟩</code>) / √2 = <code>|+⟩</code></span>
+            </div>
+            <div class="state-line diff">
+              <span class="from">入力 <code>|1⟩</code></span>
+              <span class="to">(<code>|0⟩</code> <span class="diff-mark">−</span> <code>|1⟩</code>) / √2 = <code>|−⟩</code></span>
+            </div>
+          </div>
+          <p class="impact">2つの出力状態は互いに直交します。互いに完全に区別できる2つの状態として残ります。</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="mini-step">
+      <span class="step-label">ステップ3</span>
+      <h4>マイナス符号は出力状態を区別できるようにするために必要です</h4>
+      <p>
+        Hゲートを <code>|0⟩</code> 状態に適用した結果と、
+        Hゲートを <code>|1⟩</code> 状態に適用した結果は、
+        単に少し違う程度ではなく、<strong>完全に区別できる2つの方向（直交）</strong>でなければなりません。
+      </p>
+      <p>
+        2つの出力状態の直交性を作り出しているのが、
+        <strong>測定値1から来て測定値1へ向かう項のマイナス符号</strong>です。
+      </p>
+    </div>
+
+    <div class="mini-step">
+      <span class="step-label">ステップ4</span>
+      <h4>現在の表記では、マイナス符号は測定値1から来て測定値1へ向かう項に置かれます</h4>
+      <p>
+        Hゲートを <code>|0⟩</code> 状態に適用した結果を
+        <code>(|0⟩+|1⟩)/√2</code> と書き、
+        測定値0へ向かう振幅の寄与は正にしておくという表記上の約束を決めます。
+      </p>
+      <p>
+        この約束のもとで、Hゲートを <code>|1⟩</code> 状態に適用した結果が
+        <code>Hゲート(|0⟩)</code> と直交するためには、
+        測定値1側の項が反対の符号でなければなりません。
+      </p>
+    </div>
+  </div>
+
+  <div class="key-rule" role="note" aria-label="測定値1から来て測定値1へ向かう項のマイナス符号が必要な理由">
+    <span class="label">核心</span>
+    <span class="main">マイナス符号は勝手に入れた記号ではなく、Hゲートが元に戻せるために必要な符号です。</span>
+    <span class="sub">
+      現在の表記上の約束では、その符号は
+      <strong>測定値1から来て測定値1へ向かう項</strong>に置かれます。
+      この符号のおかげで、Hゲートを2回適用すると最初の状態に戻ります。
+    </span>
+  </div>
+
+  <!-- ===================== 6 ===================== -->
+  <h2 id="s6"><span class="n">6</span>Hゲートを2回適用すると、干渉によって <code>|0⟩</code> 状態がよみがえる</h2>
+
+  <p>
+    <code>|0⟩</code> 状態にHゲートを続けて2回適用すると、キュービットの状態は<strong>再び <code>|0⟩</code> 状態に戻ります。</strong>
+    古典的な50/50のコイン投げなら、「ランダム化の過程を2回通してもやはり50/50のまま」と考えるかもしれません。
+    しかし、Hゲートはコイン投げではなく、振幅を足し合わせる量子ゲートです。なぜ再び <code>|0⟩</code> 状態になるのか、振幅を実際に足してみましょう。
+  </p>
+
+  <div class="return-rule" role="note" aria-label="Hゲートを2回適用すると再び |0⟩ 状態になる核心">
+    <span class="label">元に戻る仕組みの核心</span>
+    <span class="main">
+      第4節のHゲートの振幅変換式を、1回目のHゲート適用後の状態に
+      そのままもう一度適用すればよいのです。
+    </span>
+    <span class="sub">
+      代入すると、測定値0の振幅は強め合って+1になり、
+      測定値1の振幅は打ち消し合って0になります。
+    </span>
+  </div>
+
+  <div class="walkthrough">
+    <div class="mini-step">
+      <span class="step-label">ステップ1</span>
+      <h4>1回目のHゲート適用後の振幅を、2回目のHゲートの入力として置きます</h4>
+      <p>
+        第4節で、Hゲート変換式の入力振幅に
+        <span class="mono">a₀</span> と <span class="mono">a₁</span> という名前を付けました。
+        2回目のHゲートを適用するときは、1回目のHゲートが作った振幅が
+        そのまま <span class="mono">a₀</span> と <span class="mono">a₁</span> になります。
+      </p>
+      <table class="amp">
+        <tr><th>記号</th><th>2回目のHゲート適用前の意味</th><th>値</th></tr>
+        <tr>
+          <td class="mono"><strong>a₀</strong></td>
+          <td class="expr">1回目のHゲート適用後の測定値0の振幅</td>
+          <td class="result-cell">1/√2</td>
+        </tr>
+        <tr>
+          <td class="mono"><strong>a₁</strong></td>
+          <td class="expr">1回目のHゲート適用後の測定値1の振幅</td>
+          <td class="result-cell">1/√2</td>
+        </tr>
+      </table>
+    </div>
+
+    <div class="mini-step">
+      <span class="step-label">ステップ2</span>
+      <h4>第4節のHゲートの振幅変換式をそのままもう一度使います</h4>
+      <p>
+        新しい規則を追加で覚えるわけではありません。
+        第4節で作った一般式に <span class="mono">a₀ = 1/√2</span> と
+        <span class="mono">a₁ = 1/√2</span> を代入すればよいのです。
+      </p>
+      <table class="amp">
+        <tr><th>2回目のHゲート適用後の振幅</th><th>第4節の一般式</th><th>代入式</th></tr>
+        <tr>
+          <td class="expr">測定値0の振幅</td>
+          <td class="mono">a₀ × 1/√2 + a₁ × 1/√2</td>
+          <td class="mono">(1/√2) × 1/√2 + (1/√2) × 1/√2</td>
+        </tr>
+        <tr>
+          <td class="expr">測定値1の振幅</td>
+          <td class="mono">a₀ × 1/√2 + a₁ × <span class="arrow-l">(−1/√2)</span></td>
+          <td class="mono">(1/√2) × 1/√2 + (1/√2) × <span class="arrow-l">(−1/√2)</span></td>
+        </tr>
+      </table>
+    </div>
+
+    <div class="mini-step">
+      <span class="step-label">ステップ3</span>
+      <h4>代入式の値を計算すると、元に戻る様子がすぐに見えます</h4>
+      <p>
+        <span class="mono">(1/√2) × (1/√2) = 1/2</span> なので、
+        2回目のHゲート適用後の2つの振幅は次のように計算されます。
+      </p>
+      <div class="interference-grid">
+        <div class="interference-card keep">
+          <div class="target">測定値0に到着した振幅の寄与</div>
+          <div class="sum mono">
+            <span class="arrow-r">+1/2</span> + <span class="arrow-r">+1/2</span> = <strong>+1</strong>
+          </div>
+          <div class="meaning">同じ符号なので、強め合う干渉が起こります。</div>
+          <p class="impact">
+            測定値0の振幅は生き残ります。
+            測定確率は100%です。
+          </p>
+        </div>
+
+        <div class="interference-card cancel">
+          <div class="target">測定値1に到着した振幅の寄与</div>
+          <div class="sum mono">
+            <span class="arrow-r">+1/2</span> + <span class="arrow-l">−1/2</span> = <strong>0</strong>
+          </div>
+          <div class="meaning">反対の符号なので、打ち消し合う干渉が起こります。</div>
+          <p class="impact">
+            測定値1の振幅は消えます。
+            測定確率は0%です。
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="rule">
+    <span class="summary-line">Hゲート(Hゲート(<code>|0⟩</code>)) = <code>|0⟩</code></span>
+    <span class="summary-line">2回目のHゲート適用の結果</span>
+    <span class="summary-line summary-detail">
+      測定値0の振幅 = +1（測定確率 100%）
+    </span>
+    <span class="summary-line summary-detail">
+      測定値1の振幅 = 0（測定確率 0%）
+    </span>
+    <span class="summary-line">したがって再び <code>|0⟩</code> 状態</span>
+  </div>
+
+  <div class="call">
+    <span class="h">なぜ2回目のHゲート適用後の測定結果は50/50ではなく0に確定するのか</span>
+    <p>
+      測定値1に到着する振幅の寄与は2つあります。
+      <code>|0⟩</code> 成分から来た振幅の寄与は+1/2で、
+      <code>|1⟩</code> 成分から来た振幅の寄与は−1/2です。
+    </p>
+    <p>
+      測定値1に到着する2つの振幅の寄与は、
+      <strong>符号が反対なので足すと0になります。</strong>
+      測定値1の振幅が0になる現象が<strong>打ち消し合う干渉</strong>です。
+    </p>
+    <p>
+      同時に、測定値0に到着する2つの振幅の寄与は
+      +1/2と+1/2なので、足すと+1になります。
+    </p>
+    <p>
+      測定値1側の <code>−1/2</code> は、まさに第4節の
+      <strong>「測定値1から来て測定値1へ向かう項には−が付く」</strong>という
+      規則から出てきたものです。
+    </p>
+  </div>
+
+  <div class="call warn">
+    <span class="h">もしマイナスがなかったら？</span>
+    <p>
+      測定値1の振幅は +1/2 + 1/2 = +1 となり、
+      <strong>打ち消されなかった</strong>はずです。
+    </p>
+    <p>
+      同時に測定値0の振幅も+1になり、
+      2つの測定値の確率を足すと1を超える、有効でない変換になってしまいます。
+    </p>
+    <p>
+      測定値1から来て測定値1へ向かう項のマイナス符号が、
+      測定値1の振幅を打ち消し、全体の確率が1に保たれるようにしています。
+    </p>
+  </div>
+
+  <div class="practice" role="note" aria-label="Qora言語でHゲートを2回適用する実習">
+    <span class="practice-label">Qoraで実習してみる</span>
+    <h3>Hゲートを2回適用する回路をQoraで書いてみます</h3>
+    <p>
+      以下のQoraコードは、キュービットを1つ準備した後、同じキュービットにHゲートを2回適用して測定します。
+      この文書で計算した <strong>Hゲート(Hゲート(<code>|0⟩</code>)) = <code>|0⟩</code></strong> の回路です。
+    </p>
+
+    <div class="practice-grid">
+      <div class="code-sample">
+        <div class="caption">Qoraコード</div>
+        <pre><code>operation Main() {
+    // キュービットを1つ準備します。
+    // 準備直後の q[0] は |0⟩ 状態です。
+    // 測定値0の振幅 = 1、測定値1の振幅 = 0 です。
+    use q = Qubit[1];
+
+    // 1回目のHゲートを q[0] に適用します。
+    // |0⟩ 状態が (|0⟩ + |1⟩) / √2 状態に変わります。
+    // 測定値0の振幅 = 1/√2 です。
+    // 測定値1の振幅 = 1/√2 です。
+    H(q[0]);
+
+    // 2回目のHゲートを同じ q[0] にもう一度適用します。
+    // 測定値0の振幅 = +1/2 + +1/2 = +1 です。
+    // 測定値1の振幅 = +1/2 + -1/2 = 0 です。
+    H(q[0]);
+
+    // 2回目のHゲート適用後の q[0] を測定します。
+    // 測定値0が出る確率 = 100% です。
+    // 測定値1が出る確率 = 0% です。
+    bit result = M(q[0]);
+}</code></pre>
+      </div>
+    </div>
+
+    <p class="check">
+      確認すべき点は、<span class="mono">H(q[0]);</span> が2回連続で現れることです。
+      理想的な実行環境では、2回目のHゲート適用後に測定値0が100%出ます。
+      Qoraコードの <span class="mono">//</span> コメントは実行に影響を与えません。
+    </p>
+  </div>
+
+  <!-- ===================== 7 ===================== -->
+  <h2 id="s7"><span class="n">7</span>振幅と干渉は実際の物理なのか、それとも表記上の約束なのか？</h2>
+
+  <p>
+    この文書の矢印計算は、単に<strong>「こう定義しよう」</strong>と決めた表記遊びではありません。
+    自然界で実際に観測される振幅の強め合いと打ち消し合いを、数式に写し取ったものです。
+    振幅と干渉は勝手に発明した仕掛けではなく、実験結果を説明するために必要な物理概念です。
+  </p>
+
+  <div class="evidence-grid">
+    <div class="evidence-card convention">
+      <span class="summary-tag">表記上の約束</span>
+      <h4>人が決めた部分</h4>
+      <p>
+        <strong>「Hゲート」</strong>という名前、
+        振幅の正と負を右向き・左向きの矢印で描く方式、
+        <code>|0⟩</code> や <code>|1⟩</code> のような表記は、人が決めた約束です。
+      </p>
+    </div>
+
+    <div class="evidence-card physics">
+      <span class="summary-tag">実際の物理</span>
+      <h4>実験で確認される部分</h4>
+      <p>
+        振幅の寄与が互いに強め合ったり打ち消し合ったりする現象、
+        Hゲートを2回適用すると <code>|0⟩</code> 状態が再び <code>|0⟩</code> 状態に戻る現象は、
+        表記上の約束ではなく、実験結果を説明する物理の内容です。
+      </p>
+    </div>
+  </div>
+
+  <h3>どのような現象で確認されるのか？</h3>
+
+  <div class="evidence-grid">
+    <div class="evidence-card slit">
+      <span class="summary-tag">証拠1</span>
+      <h4>二重スリットの干渉縞</h4>
+      <p>
+        電子や光子を2つのスリットに<strong>1個ずつ</strong>送っても、スクリーンには
+        <strong>明るい縞と暗い縞</strong>が積み上がっていきます。
+      </p>
+      <p>
+        暗い縞ができる位置は、スクリーンのその位置に到着した振幅の寄与どうしが
+        打ち消し合った地点です。
+      </p>
+      <div class="formula-box">
+        強め合う干渉 → 明るい縞<br>
+        打ち消し合う干渉 → 暗い縞
+      </div>
+    </div>
+
+    <div class="evidence-card circuit">
+      <span class="summary-tag">証拠2</span>
+      <h4>Hゲートを2回適用する回路</h4>
+      <p>
+        理想的な量子回路や量子シミュレータでは、<code>|0⟩</code> 状態に
+        Hゲートを2回適用して測定すると、<strong>測定値0が100%</strong>出ます。
+      </p>
+      <p>
+        実際の量子コンピュータの装置でも、ノイズのために結果が少しにじむだけで、
+        測定値0が測定値1より圧倒的に多く出ます。
+      </p>
+      <div class="formula-box mono">
+        <code>|0⟩</code> → Hゲート → <code>(|0⟩ + |1⟩) / √2</code> → Hゲート → <code>|0⟩</code>
+      </div>
+    </div>
+  </div>
+
+  <div class="call why">
+    <span class="h">なぜ「本物」だと言えるのか</span>
+    <p>
+      キュービットが単なる50/50のコインなら、Hゲートを2回適用する過程は
+      「ランダム化の過程を2回通すこと」と同じはずで、
+      最終的な測定確率もやはり50/50になるはずです。
+    </p>
+    <p>
+      ところが、理想的なHゲート2回適用の回路は再び <code>|0⟩</code> 状態に戻ります。
+      この結果は、コインにはない<strong>「符号付きの振幅の寄与どうしが打ち消し合うこと」</strong>を
+      計算に入れてはじめて説明できます。
+    </p>
+    <p>
+      だからこそ、振幅の符号と干渉は単なる言葉遊びではなく、
+      実験を説明するのに必要な物理量なのです。
+    </p>
+  </div>
+
+  <p>
+    さらに深く「なぜ自然はこのような量子の規則に従うのか」まで問い始めると、現在の理論の基本公準にまで下りていくことになりますが、
+    Hゲートの振幅変換規則が実験結果を説明し予測するという事実は、繰り返し確認されています。
+  </p>
+
+  <!-- ===================== 8 ===================== -->
+  <h2 id="s8"><span class="n">8</span>1ページまとめ</h2>
+
+  <div class="summary-grid">
+    <div class="summary-card">
+      <span class="summary-tag">状態</span>
+      <h4>キュービットの状態は確率そのものではなく振幅で表現します</h4>
+      <p>
+        1つのキュービットの状態は、可能な測定値0と1のそれぞれに付いた
+        <strong>振幅</strong>で表現します。
+      </p>
+      <div class="formula-box">測定確率 = 振幅の長さ²</div>
+    </div>
+
+    <div class="summary-card">
+      <span class="summary-tag">正規化</span>
+      <h4>確率の合計は必ず1でなければなりません</h4>
+      <p>
+        2つの測定値の確率が50%と50%なら、
+        各測定値の振幅は1/2ではなく<strong>1/√2</strong>です。
+      </p>
+      <div class="formula-box mono">(1/√2)² + (1/√2)² = 1</div>
+    </div>
+
+    <div class="summary-card minus">
+      <span class="summary-tag">Hゲート</span>
+      <h4>Hゲートは入力振幅を2つの測定値に分けて送ります</h4>
+      <p>
+        各入力振幅は、測定値0側と測定値1側の振幅の寄与になります。
+        同じ測定値に到着した振幅の寄与どうしは足し合わせます。
+      </p>
+      <div class="formula-box">
+        測定値1から来て測定値1へ向かう項だけが <strong class="arrow-l">−</strong> です。
+      </div>
+    </div>
+
+    <div class="summary-card interference">
+      <span class="summary-tag">Hゲート2回</span>
+      <h4>同じ変換式をもう一度適用すると元の状態に戻ります</h4>
+      <p>
+        1回目のHゲートの後は <span class="mono">a₀ = 1/√2</span>、
+        <span class="mono">a₁ = 1/√2</span> です。
+        この値をHゲートの変換式にもう一度入れればよいのです。
+      </p>
+      <div class="formula-box mono">
+        測定値0側: +1/2 + +1/2 = +1<br>
+        測定値1側: +1/2 + −1/2 = 0
+      </div>
+    </div>
+
+    <div class="summary-card physics wide">
+      <span class="summary-tag">実際の物理</span>
+      <h4>振幅と干渉は計算上の飾りではなく、実験結果を説明する物理概念です</h4>
+      <p>
+        二重スリットの明るい縞と暗い縞、Hゲートを2回適用すると再び <code>|0⟩</code> 状態に戻る回路の結果は、
+        振幅の強め合う干渉と打ち消し合う干渉を取り入れてはじめて説明できます。
+      </p>
+    </div>
+  </div>
+
+  <div class="rule" style="margin-top:28px">
+    量子アルゴリズムの核心的なアイデア = 振幅の<strong>打ち消し合う干渉と強め合う干渉</strong>を設計すること —<br>
+    望まない測定値の振幅は打ち消されるようにし、望む測定値の振幅は強め合うようにする過程です。
+  </div>
+
+  <footer>
+    <p>Qora — 自分で作る量子トイ言語 · Hゲートノート</p>
+  </footer>
+
+</div>
+</body>
+</html>

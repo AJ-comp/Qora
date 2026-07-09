@@ -1,0 +1,748 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>第12章. Hゲートは振幅をどう分けるのか？ — Qora</title>
+<style>
+:root {
+    --bg: #ffffff;
+    --ink: #1f2430;
+    --muted: #5b6472;
+    --line: #e6e8ee;
+    --panel: #f7f8fb;
+    --accent: #6b3fd4;
+    --plus: #1457d6;
+    --minus: #d62b39;
+    --good: #11875b;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo",
+      "Malgun Gothic", "Noto Sans KR", "Segoe UI Symbol", "Cambria Math", sans-serif;
+    line-height: 1.78;
+    font-size: 17px;
+    word-break: keep-all;
+  }
+  header.hero {
+    padding: 64px 20px 42px;
+    text-align: center;
+    border-bottom: 1px solid var(--line);
+    background: linear-gradient(180deg, #faf9ff, #ffffff);
+  }
+  .tag {
+    display: inline-block;
+    color: var(--accent);
+    font-size: .78rem;
+    font-weight: 800;
+    letter-spacing: .12em;
+    margin-bottom: 14px;
+    text-transform: uppercase;
+  }
+  h1 {
+    margin: 0 0 10px;
+    font-size: 2.15rem;
+    line-height: 1.25;
+  }
+  header.hero p {
+    margin: 0;
+    color: var(--muted);
+    font-size: 1.05rem;
+  }
+  .wrap {
+    max-width: 860px;
+    margin: 0 auto;
+    padding: 0 20px 120px;
+  }
+  h2 {
+    margin: 58px 0 14px;
+    padding-top: 14px;
+    border-top: 2px solid var(--line);
+    font-size: 1.52rem;
+    line-height: 1.45;
+  }
+  h3 {
+    margin: 34px 0 10px;
+    font-size: 1.18rem;
+    line-height: 1.45;
+  }
+  h4 {
+    margin: 0 0 8px;
+    font-size: 1.03rem;
+    line-height: 1.45;
+  }
+  p { margin: 14px 0; }
+  .card p {
+    max-width: 68ch;
+  }
+  strong { color: #11203a; }
+  code,
+  .mono {
+    font-family: "SF Mono", "JetBrains Mono", "D2Coding", Consolas, "Segoe UI Symbol", monospace;
+  }
+  code {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    padding: 1px 6px;
+    font-size: .9em;
+  }
+  .nowrap {
+    white-space: nowrap;
+  }
+  .lead {
+    margin-top: 28px;
+    font-size: 1.08rem;
+  }
+  .toc {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    margin: 26px 0;
+    padding: 16px 18px;
+  }
+  .toc strong { display: block; margin-bottom: 6px; }
+  .toc ol { margin: 0; padding-left: 22px; }
+  .toc a {
+    color: var(--ink);
+    text-decoration: none;
+  }
+  .toc a:hover { color: var(--accent); }
+  .doc-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin: 20px 0 28px;
+  }
+  .doc-link {
+    align-items: center;
+    background: #f6f9ff;
+    border: 1px solid #cddcff;
+    border-radius: 999px;
+    color: #1745b5;
+    display: inline-flex;
+    font-weight: 800;
+    gap: 8px;
+    padding: 8px 14px;
+    text-decoration: none;
+  }
+  .doc-link:hover {
+    background: #eef4ff;
+    border-color: #9bb8ff;
+  }
+  .part {
+    margin: 52px 0 18px;
+    padding: 18px 20px;
+    border-radius: 10px;
+    background: #f3efff;
+    border: 1px solid #e2d8ff;
+  }
+  .part .label {
+    display: inline-block;
+    color: var(--accent);
+    font-size: .78rem;
+    font-weight: 900;
+    letter-spacing: .08em;
+    margin-bottom: 8px;
+  }
+  .part h2 {
+    margin: 0 0 8px;
+    padding: 0;
+    border: 0;
+  }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    margin: 18px 0;
+    padding: 16px 18px;
+    overflow-x: auto;
+  }
+  .call {
+    border-left: 4px solid var(--accent);
+    background: #faf8ff;
+    border-radius: 0 8px 8px 0;
+    margin: 20px 0;
+    padding: 14px 18px;
+  }
+  .call.why {
+    border-color: var(--good);
+    background: #f2fbf7;
+  }
+  .call.warn {
+    border-color: #e6a417;
+    background: #fff9ec;
+  }
+  .call .h {
+    display: block;
+    font-weight: 800;
+    margin-bottom: 4px;
+  }
+  .point-list {
+    display: grid;
+    gap: 10px;
+    margin: 14px 0 22px;
+  }
+  .point {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 10px;
+    align-items: start;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 11px 13px;
+  }
+  .point .marker {
+    color: var(--accent);
+    font-weight: 900;
+    white-space: nowrap;
+  }
+  .rule {
+    background: #f3efff;
+    border: 1px solid #e2d8ff;
+    border-radius: 10px;
+    color: #1a1140;
+    font-size: 1.08rem;
+    font-weight: 800;
+    margin: 20px 0;
+    padding: 16px;
+    text-align: center;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+  th,
+  td {
+    border-bottom: 1px solid var(--line);
+    padding: 9px 12px;
+    text-align: center;
+    white-space: nowrap;
+  }
+  th {
+    color: var(--muted);
+    font-size: .82rem;
+    font-weight: 700;
+  }
+  td:first-child,
+  th:first-child {
+    text-align: left;
+    font-weight: 700;
+  }
+  tr:last-child td { border-bottom: 0; }
+  .math {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    font-weight: 800;
+    margin: 14px 0;
+    padding: 12px 14px;
+    text-align: center;
+  }
+  .math-line + .math-line {
+    margin-top: 4px;
+  }
+  .compare-grid,
+  .summary-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 14px;
+    margin: 16px 0 22px;
+  }
+  @media (min-width: 760px) {
+    .compare-grid,
+    .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  .card {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 15px 16px;
+  }
+  .card.good { border-top: 5px solid var(--good); }
+  .card.warn { border-top: 5px solid #e6a417; }
+  .card.plus { border-top: 5px solid var(--plus); }
+  .card.minus { border-top: 5px solid var(--minus); }
+  .card.accent { border-top: 5px solid var(--accent); }
+  .tag-small {
+    display: inline-block;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    color: var(--muted);
+    font-size: .76rem;
+    font-weight: 900;
+    margin-bottom: 8px;
+    padding: 2px 9px;
+  }
+  .practice {
+    background: #f8fbff;
+    border: 1px solid #cfe0ff;
+    border-left: 8px solid var(--plus);
+    border-radius: 8px;
+    margin: 28px 0 34px;
+    padding: 18px;
+  }
+  .practice .practice-label {
+    display: inline-block;
+    color: var(--plus);
+    background: #edf4ff;
+    border: 1px solid #cfe0ff;
+    border-radius: 999px;
+    font-size: .78rem;
+    font-weight: 900;
+    margin-bottom: 10px;
+    padding: 3px 11px;
+  }
+  .practice h3 { margin-top: 0; }
+  pre {
+    background: #111827;
+    border-radius: 8px;
+    color: #eef4ff;
+    font-size: .88rem;
+    line-height: 1.55;
+    margin: 12px 0 0;
+    overflow-x: auto;
+    padding: 14px 15px;
+  }
+  pre code {
+    background: transparent;
+    border: 0;
+    color: inherit;
+    padding: 0;
+  }
+  .next {
+    background: #f2fbf7;
+    border: 1px solid #b8e5d2;
+    border-radius: 10px;
+    margin-top: 42px;
+    padding: 16px 18px;
+  }
+  .chapter-nav {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 10px;
+    margin: 34px 0 46px;
+  }
+  @media (min-width: 680px) {
+    .chapter-nav { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  .chapter-nav a {
+    display: block;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 12px 14px;
+    text-decoration: none;
+    color: var(--ink);
+    background: #fff;
+  }
+  .chapter-nav a:hover {
+    border-color: #c9d6ff;
+    background: #f8fbff;
+  }
+  .chapter-nav .k {
+    display: block;
+    color: var(--muted);
+    font-size: .78rem;
+    font-weight: 900;
+    margin-bottom: 3px;
+  }
+  .chapter-nav .t {
+    display: block;
+    font-weight: 900;
+  }
+  .chapter-nav .disabled {
+    background: var(--panel);
+    color: var(--muted);
+  }
+  footer {
+    border-top: 1px solid var(--line);
+    color: var(--muted);
+    font-size: .9rem;
+    margin-top: 60px;
+    padding-top: 24px;
+    text-align: center;
+  }
+  .book-shell {
+    display: grid;
+    gap: 44px;
+    grid-template-columns: 300px minmax(0, 1060px);
+    margin: 0 auto;
+    max-width: 1600px;
+    padding: 0 24px 120px;
+  }
+  .side-nav {
+    align-self: start;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    margin-top: 28px;
+    max-height: calc(100vh - 36px);
+    overflow: auto;
+    padding: 14px;
+    position: sticky;
+    top: 18px;
+  }
+  .side-nav strong {
+    display: block;
+    font-size: .9rem;
+    margin: 0 0 8px;
+  }
+  .side-nav a {
+    border-radius: 7px;
+    color: var(--ink);
+    display: block;
+    font-size: .94rem;
+    line-height: 1.35;
+    padding: 7px 8px;
+    text-decoration: none;
+  }
+  .side-nav a:hover,
+  .side-nav a.current {
+    background: #eef4ff;
+    color: #1745b5;
+    font-weight: 800;
+  }
+  .side-nav .group {
+    border-top: 1px solid var(--line);
+    margin-top: 10px;
+    padding-top: 10px;
+  }
+  .article {
+    min-width: 0;
+    padding-bottom: 120px;
+  }
+  .article > h2:first-child,
+  .article > .part:first-child + h2 {
+    margin-top: 28px;
+  }
+  .breadcrumb {
+    color: var(--muted);
+    font-size: .9rem;
+    font-weight: 700;
+    margin: 26px 0 0;
+  }
+  .overview-list {
+    display: grid;
+    gap: 10px;
+    margin: 18px 0 28px;
+  }
+  .overview-item {
+    align-items: baseline;
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    color: var(--ink);
+    display: grid;
+    gap: 8px;
+    grid-template-columns: 92px minmax(0, 1fr);
+    padding: 12px 14px;
+    text-decoration: none;
+  }
+  .overview-item:hover {
+    border-color: #c9d6ff;
+    background: #f8fbff;
+  }
+  .overview-item .num {
+    color: var(--accent);
+    font-size: .86rem;
+    font-weight: 900;
+  }
+  .overview-item .title {
+    font-weight: 900;
+  }
+  .page-nav {
+    display: grid;
+    gap: 12px;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    margin-top: 46px;
+  }
+  .page-nav > a,
+  .page-nav > span {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    color: var(--ink);
+    min-height: 78px;
+    padding: 13px 14px;
+    text-decoration: none;
+  }
+  .page-nav a:hover {
+    border-color: #c9d6ff;
+    background: #f8fbff;
+  }
+  .page-nav .k {
+    color: var(--muted);
+    display: block;
+    font-size: .78rem;
+    font-weight: 900;
+    margin-bottom: 4px;
+  }
+  .page-nav .t {
+    display: block;
+    font-weight: 900;
+    line-height: 1.35;
+  }
+  .page-nav .disabled {
+    background: var(--panel);
+    color: var(--muted);
+  }
+  .page-nav .home {
+    text-align: center;
+  }
+  @media (max-width: 860px) {
+    .book-shell {
+      display: block;
+      padding: 0 18px 90px;
+    }
+    .side-nav {
+      max-height: none;
+      position: static;
+    }
+    .page-nav {
+      grid-template-columns: 1fr;
+    }
+    .overview-item {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>
+</head>
+<body>
+<div class="qora-lang-switch" style="position:sticky;top:0;z-index:99;text-align:right;padding:8px 16px;background:rgba(255,255,255,.92);backdrop-filter:blur(4px);border-bottom:1px solid #e6e8ee;font-size:13px;font-family:sans-serif;"><a href="../en/chapter-12.html" onclick="try{localStorage.setItem(&quot;qora-lang&quot;,&quot;en&quot;)}catch(e){}">English</a> · <a href="../ko/chapter-12.html" onclick="try{localStorage.setItem(&quot;qora-lang&quot;,&quot;ko&quot;)}catch(e){}">한국어</a> · <strong>日本語</strong></div>
+
+<header class="hero">
+  <div class="tag">Qora · 量子ゲート文書</div>
+  <h1>第12章. Hゲートは振幅をどう分けるのか？</h1>
+  <p>片側にあった振幅が2つの測定結果へ分かれる様子を見る</p>
+</header>
+
+<div class="book-shell">
+            <aside class="side-nav" aria-label="目次">
+    <strong>Qoraで学ぶ量子ゲート</strong>
+      <a href="index.html">概要</a>
+      <a href="intro.html">はじめに。なぜQoraで量子ゲートを学ぶのか？</a>
+      <a href="chapter-01.html">第1章. キュービット状態と振幅について見ていこう</a>
+      <a href="chapter-02.html">第2章. 振幅と確率はどうつながるのか？</a>
+      <a href="chapter-03.html">第3章. |0⟩状態と|1⟩状態を直接読んでみよう</a>
+      <a href="chapter-04.html">第4章. 重ね合わせと干渉とは何だろう？</a>
+      <a href="chapter-05.html">第5章. 重ね合わせはただの「わからない状態」なのか？</a>
+      <a href="chapter-06.html">第6章. 干渉はいつ生まれるのか？</a>
+      <a href="chapter-07.html">第7章. 2つのキュービットの状態はどう読むのか？</a>
+      <a href="chapter-08.html">第8章. 量子もつれでは何が一緒に結びつくのか？</a>
+      <a href="chapter-09.html">第9章. 量子ゲートは元に戻せなければならない</a>
+      <a href="chapter-10.html">第10章. Qoraコードはどう読むのか？</a>
+      <a href="summary.html">まとめ。第1部で学んだことを整理してみよう</a>
+      <a href="chapter-11.html">第11章. Xゲートは何を反転させるのか？</a>
+      <a class="current" href="chapter-12.html">第12章. Hゲートは振幅をどう分けるのか？</a>
+      <a href="chapter-13.html">第13章. Zゲートは何の符号を変えるのか？</a>
+      <a href="chapter-14.html">第14章. CNOTゲートは2つのキュービットをどうつなぐのか？</a>
+      <a href="chapter-15.html">第15章. 小さな回路を最後まで読んでみよう</a>
+  </aside>
+  <main class="article">
+    <div class="breadcrumb">Qoraで学ぶ量子ゲート / 第12章. Hゲートは振幅をどう分けるのか？</div>
+<h2 id="h-gate">第12章. Hゲートは振幅をどう分けるのか？</h2>
+
+  <p>
+    Hゲートは、片方の基底状態に集まっていた振幅を2つの基底状態の方へ分けて送るゲートです。<br>
+    正式には、1キュービットの状態ベクトルに下の行列を掛けるユニタリ変換として定義します。
+  </p>
+
+  <div class="math mono">
+    <div class="math-line">H = 1/√2 · [[1, 1], [1, -1]]</div>
+  </div>
+
+  <p>
+    この行列は <code>|0⟩</code> と <code>|1⟩</code> を次の2つの状態に送ります。
+  </p>
+
+  <div class="math mono">
+    <div class="math-line">H|0⟩ = (|0⟩ + |1⟩) / √2</div>
+    <div class="math-line">H|1⟩ = (|0⟩ - |1⟩) / √2</div>
+  </div>
+
+  <p>
+    最初の式だけを見ると、Hゲートは単に「0を半々の確率にする」だけのように見えるかもしれません。<br>
+    しかし核心は確率ではなく振幅です。Hゲートは入力の振幅を2つの出力基底状態へ分けて送り、同じ出力基底状態に届いた振幅の寄与を足し合わせます。
+  </p>
+
+  <div class="panel">
+    <table>
+      <tr><th>入力基底状態</th><th>Hゲート適用後の状態</th><th>すぐに測定すると</th></tr>
+      <tr><td><code>|0⟩</code></td><td><code>(|0⟩ + |1⟩) / √2</code></td><td>0と1がそれぞれ50%</td></tr>
+      <tr><td><code>|1⟩</code></td><td><code>(|0⟩ - |1⟩) / √2</code></td><td>0と1がそれぞれ50%</td></tr>
+    </table>
+  </div>
+
+  <h3>Hゲートの正確な振幅変換ルール</h3>
+
+  <p>
+    適用前の状態を <code>|ψ⟩ = a₀|0⟩ + a₁|1⟩</code> としてみましょう。<br>
+    Hゲートは <code>a₀</code> だけを単独で見たり、<code>a₁</code> だけを単独で見たりはしません。<br>
+    2つの入力振幅がどちらも適用後の <code>|0⟩</code> 成分と <code>|1⟩</code> 成分に寄与し、同じ成分に届いた寄与が足し合わされます。
+  </p>
+
+  <div class="math mono">
+    <div class="math-line">H(a₀|0⟩ + a₁|1⟩) = ((a₀ + a₁)|0⟩ + (a₀ - a₁)|1⟩) / √2</div>
+  </div>
+
+  <div class="panel">
+    <table>
+      <tr><th>出発する入力振幅</th><th><code>|0⟩</code> へ向かう寄与</th><th><code>|1⟩</code> へ向かう寄与</th></tr>
+      <tr><td>適用前の <code>|0⟩</code> の振幅 <span class="mono">a₀</span></td><td><span class="mono">+ a₀ × 1/√2</span></td><td><span class="mono">+ a₀ × 1/√2</span></td></tr>
+      <tr><td>適用前の <code>|1⟩</code> の振幅 <span class="mono">a₁</span></td><td><span class="mono">+ a₁ × 1/√2</span></td><td><span class="mono">- a₁ × 1/√2</span></td></tr>
+    </table>
+  </div>
+
+  <div class="call warn">
+    <span class="h">マイナス符号が付く位置</span>
+    4つの入力・出力の組み合わせのうち、<strong>適用前の <code>|1⟩</code> の振幅が適用後の <code>|1⟩</code> 成分へ向かう寄与</strong>にだけマイナス符号が付きます。<br>
+    いきなり「1→1 の項」と言うと曖昧なので、本書では「適用前の <code>|1⟩</code> から来て適用後の <code>|1⟩</code> へ向かう振幅の寄与」とかみ砕いた言い方で呼ぶことにします。
+  </div>
+
+  <h3><code>|0⟩</code> 状態にHゲートを適用してみよう</h3>
+
+  <p>
+    <code>|0⟩</code> 状態は <span class="mono">a₀ = 1</span>、<span class="mono">a₁ = 0</span> の状態です。<br>
+    この値をHゲートの変換ルールに入れると、適用後の <code>|0⟩</code> 成分と <code>|1⟩</code> 成分はどちらも <span class="mono">1/√2</span> になります。
+  </p>
+
+  <div class="math mono">
+    <div class="math-line">適用後の |0⟩ の振幅 = 1 × 1/√2 + 0 × 1/√2 = 1/√2</div>
+    <div class="math-line">適用後の |1⟩ の振幅 = 1 × 1/√2 + 0 × (-1/√2) = 1/√2</div>
+  </div>
+
+  <p>
+    そのため <code>H|0⟩</code> は <code>(|0⟩ + |1⟩) / √2</code> になり、すぐに測定すると0と1がそれぞれ50%の確率で出ます。<br>
+    ここまでが、よく「Hゲートが重ね合わせを作る」と言われる部分です。
+  </p>
+
+  <h3>なぜマイナス符号が必要なのか？</h3>
+
+  <p>
+    第9章では、量子ゲートは元に戻せなければならないと見ました。<br>
+    この条件をHゲートに当てはめると、<code>|0⟩</code> 入力と <code>|1⟩</code> 入力が同じ出力状態に合流してはいけません。<br>
+    異なる2つの入力状態は、Hゲートを通ったあとも互いに区別できる2つの出力状態として残る必要があります。
+  </p>
+
+  <p>
+    ここで、上で見たHゲートの変換ルールをもう一度見ます。<br>
+    4つの振幅の寄与のうち、<strong>適用前の <code>|1⟩</code> から来て適用後の <code>|1⟩</code> へ向かう振幅の寄与</strong>にだけマイナス符号が付きます。<br>
+    短く言えば、<strong>1から来て1へ向かう寄与</strong>、つまり <strong>1 → 1 の寄与</strong>です。
+  </p>
+
+  <div class="call warn">
+    <span class="h">ここでの <code>1 → 1</code> の意味</span>
+    <code>1 → 1</code> は、適用前には <code>|1⟩</code> 方向の振幅で、適用後にも <code>|1⟩</code> 方向の振幅として寄与する、という意味です。<br>
+    数字の1を数字の1に変えるという意味ではなく、<strong>振幅がどの方向から来て、どの方向へ向かうのか</strong>を示す言い方です。
+  </div>
+
+  <div class="compare-grid">
+    <div class="card warn">
+      <span class="tag-small">マイナス符号がなければ</span>
+      <h4>2つの入力が同じ出力に合流します</h4>
+      <div class="math mono">
+        <div class="math-line">H|0⟩ = (|0⟩ + |1⟩) / √2</div>
+        <div class="math-line">H|1⟩ = (|0⟩ + |1⟩) / √2</div>
+      </div>
+      <p>
+        出力がどちらも <code>(|0⟩ + |1⟩) / √2</code> になります。<br>
+        そうなると、出力状態だけを見ても元の入力が <code>|0⟩</code> だったのか <code>|1⟩</code> だったのか復元できません。
+      </p>
+    </div>
+
+    <div class="card good">
+      <span class="tag-small">マイナス符号があれば</span>
+      <h4>2つの入力は互いに区別できる出力として残ります</h4>
+      <div class="math mono">
+        <div class="math-line">H|0⟩ = (|0⟩ + |1⟩) / √2</div>
+        <div class="math-line">H|1⟩ = (|0⟩ - |1⟩) / √2</div>
+      </div>
+      <p>
+        2つの出力状態は同じ状態ではありません。<br>
+        片方は <code>|0⟩</code> 方向と <code>|1⟩</code> 方向が同じ符号で、もう片方は <code>|1⟩</code> 方向だけが反対符号です。
+      </p>
+    </div>
+  </div>
+
+  <p>
+    2つの出力状態が本当に区別できるかどうかは、どれくらい重なっているかを計算すると確認できます。<br>
+    この重なりの計算は、正式には<strong>内積</strong>と呼びます。<br>
+    今の例では振幅がすべて実数なので、同じ方向の振幅どうしを掛けてから足す、と考えれば大丈夫です。
+  </p>
+
+  <div class="math mono">
+    <div class="math-line">重なり = (1/√2 × 1/√2) + (1/√2 × -1/√2)</div>
+    <div class="math-line">= 1/2 - 1/2 = 0</div>
+  </div>
+
+  <p>
+    重なりが0の状態を、正式には<strong>直交する状態</strong>と呼びます。<br>
+    つまりHゲートのマイナス符号は、式の見た目を整えるための記号ではなく、<code>|0⟩</code> 入力の出力と <code>|1⟩</code> 入力の出力を直交させるために必要な符号です。
+  </p>
+
+  <div class="call why">
+    <span class="h">ここがポイント</span>
+    Hゲートが元に戻せる量子ゲートであるためには、異なる入力状態が同じ出力状態に合流してはいけません。<br>
+    標準的なHゲートの表記では、この条件を満たすためのマイナス符号が、<strong>適用前の <code>|1⟩</code> から来て適用後の <code>|1⟩</code> へ向かう振幅の寄与</strong>に置かれます。
+  </div>
+
+  <h3>Hゲートを2回適用するとなぜ元に戻るのか？</h3>
+
+  <p>
+    <code>|0⟩</code> 状態から始めると、1回目のHゲートの後の状態は <code>(|0⟩ + |1⟩) / √2</code> です。<br>
+    したがって2回目のHゲートを適用する直前は <span class="mono">a₀ = 1/√2</span>、<span class="mono">a₁ = 1/√2</span> です。<br>
+    この値を同じ変換ルールにもう一度入れれば終わりです。
+  </p>
+
+  <div class="math mono">
+    <div class="math-line">2回目のHの後の |0⟩ の振幅 = (1/√2) × 1/√2 + (1/√2) × 1/√2 = 1/2 + 1/2 = 1</div>
+    <div class="math-line">2回目のHの後の |1⟩ の振幅 = (1/√2) × 1/√2 + (1/√2) × (-1/√2) = 1/2 - 1/2 = 0</div>
+  </div>
+
+  <div class="rule mono">Hゲート(Hゲート(|0⟩)) = |0⟩</div>
+
+  <p>
+    この計算では、<code>|0⟩</code> 成分へ向かう2つの振幅の寄与は強め合い、<code>|1⟩</code> 成分へ向かう2つの振幅の寄与は打ち消し合います。<br>
+    そのためHゲートを2回適用しても「ランダムが2回起きてまた0になる」のではなく、振幅の強め合いと打ち消し合いによって、正確に最初の状態に戻ります。
+  </p>
+
+  <div class="practice">
+    <span class="practice-label">Qoraで実習してみよう</span>
+    <h3>Hゲートを2回適用してみよう</h3>
+    <pre><code>operation Main() {
+    // キュービットを1つ準備
+    // 準備直後の q[0] は |0⟩ 状態
+    use q = Qubit[1];
+
+    // 1回目のHゲートを適用
+    // 振幅が測定値 0 と 1 に分かれる
+    H(q[0]);
+
+    // 2回目のHゲートを適用
+    // 強め合いと打ち消し合いが起きて再び |0⟩ 状態になる
+    H(q[0]);
+
+    // 理想的な実行環境: 測定値 0
+    bit result = M(q[0]);
+}</code></pre>
+  </div>
+                        <nav class="page-nav" aria-label="章の移動">
+    <a href="chapter-11.html"><span class="k">前へ</span><span class="t">第11章. Xゲートは何を反転させるのか？</span></a>
+    <a class="home" href="index.html"><span class="k">概要</span><span class="t">全体の目次へ戻る</span></a>
+    <a href="chapter-13.html"><span class="k">次へ</span><span class="t">第13章. Zゲートは何の符号を変えるのか？</span></a>
+  </nav>
+    <footer>
+      <p>Qora — 自分で作る量子トイ言語</p>
+    </footer>
+  </main>
+</div>
+
+</body>
+</html>
+

@@ -2,6 +2,25 @@
 
 All notable changes to the Qora Language extension.
 
+## 0.12.0
+
+- Bundles the **Qora v0.18** compiler — internal analysis infrastructure only, no new surface syntax:
+  - **Qubit-event analysis model**: effect analysis (rung ① of the auto-uncompute ladder) now records,
+    per operation, a program-ordered stream of `QubitEvent`s — one per qubit that a *leaf* statement
+    (gate / measurement / `use`) touches, tagged **Read** (a control or diagonal-gate target, value
+    preserved), **Write** (a target / reset / register birth), or **Measure**. The per-qubit timeline
+    and the per-statement entanglement grouping are both read off this one stream, replacing the old
+    per-statement touched/modified side table.
+  - **Liveness as a query (rung ②)**: a new derived `LiveRange(op, qubit)` returns the birth→last-use
+    events bracketing a qubit's life (min/max program order), subsumption-aware so a whole-register
+    effect answers an element query and vice versa — computed on demand, nothing stored. The last use
+    (a final control *Read* counts) is the death point the injection rung will hang an uncompute off.
+  - **Defensive fail-loud locks**: spots that used to silently under-approximate — an unknown callee,
+    a mismatched argument/parameter count, an indexed effect collapsed onto a single-qubit binding, a
+    non-`Adjoint` functor on a user-op call — now throw an internal error, since each is already
+    guaranteed impossible on clean IR by an earlier validation pass (QSEM002 / 006 / 007 / 016).
+  - Compiler test suite grew to 168 cases.
+
 ## 0.11.0
 
 - Bundles the **Qora v0.17** compiler:

@@ -1,0 +1,842 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>第1章. キュービット状態と振幅について見ていこう — Qora</title>
+<style>
+:root {
+    --bg: #ffffff;
+    --ink: #1f2430;
+    --muted: #5b6472;
+    --line: #e6e8ee;
+    --panel: #f7f8fb;
+    --accent: #6b3fd4;
+    --plus: #1457d6;
+    --minus: #d62b39;
+    --good: #11875b;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo",
+      "Malgun Gothic", "Noto Sans KR", "Segoe UI Symbol", "Cambria Math", sans-serif;
+    line-height: 1.78;
+    font-size: 17px;
+    word-break: keep-all;
+  }
+  header.hero {
+    padding: 64px 20px 42px;
+    text-align: center;
+    border-bottom: 1px solid var(--line);
+    background: linear-gradient(180deg, #faf9ff, #ffffff);
+  }
+  .tag {
+    display: inline-block;
+    color: var(--accent);
+    font-size: .78rem;
+    font-weight: 800;
+    letter-spacing: .12em;
+    margin-bottom: 14px;
+    text-transform: uppercase;
+  }
+  h1 {
+    margin: 0 0 10px;
+    font-size: 2.15rem;
+    line-height: 1.25;
+  }
+  header.hero p {
+    margin: 0;
+    color: var(--muted);
+    font-size: 1.05rem;
+  }
+  .wrap {
+    max-width: 860px;
+    margin: 0 auto;
+    padding: 0 20px 120px;
+  }
+  h2 {
+    margin: 58px 0 14px;
+    padding-top: 14px;
+    border-top: 2px solid var(--line);
+    font-size: 1.52rem;
+    line-height: 1.45;
+  }
+  h3 {
+    margin: 34px 0 10px;
+    font-size: 1.18rem;
+    line-height: 1.45;
+  }
+  h4 {
+    margin: 0 0 8px;
+    font-size: 1.03rem;
+    line-height: 1.45;
+  }
+  p { margin: 14px 0; }
+  .card p {
+    max-width: 68ch;
+  }
+  strong { color: #11203a; }
+  code,
+  .mono {
+    font-family: "SF Mono", "JetBrains Mono", "D2Coding", Consolas, "Segoe UI Symbol", monospace;
+  }
+  code {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    padding: 1px 6px;
+    font-size: .9em;
+  }
+  .nowrap {
+    white-space: nowrap;
+  }
+  .lead {
+    margin-top: 28px;
+    font-size: 1.08rem;
+  }
+  .toc {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    margin: 26px 0;
+    padding: 16px 18px;
+  }
+  .toc strong { display: block; margin-bottom: 6px; }
+  .toc ol { margin: 0; padding-left: 22px; }
+  .toc a {
+    color: var(--ink);
+    text-decoration: none;
+  }
+  .toc a:hover { color: var(--accent); }
+  .doc-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin: 20px 0 28px;
+  }
+  .doc-link {
+    align-items: center;
+    background: #f6f9ff;
+    border: 1px solid #cddcff;
+    border-radius: 999px;
+    color: #1745b5;
+    display: inline-flex;
+    font-weight: 800;
+    gap: 8px;
+    padding: 8px 14px;
+    text-decoration: none;
+  }
+  .doc-link:hover {
+    background: #eef4ff;
+    border-color: #9bb8ff;
+  }
+  .part {
+    margin: 52px 0 18px;
+    padding: 18px 20px;
+    border-radius: 10px;
+    background: #f3efff;
+    border: 1px solid #e2d8ff;
+  }
+  .part .label {
+    display: inline-block;
+    color: var(--accent);
+    font-size: .78rem;
+    font-weight: 900;
+    letter-spacing: .08em;
+    margin-bottom: 8px;
+  }
+  .part h2 {
+    margin: 0 0 8px;
+    padding: 0;
+    border: 0;
+  }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    margin: 18px 0;
+    padding: 16px 18px;
+    overflow-x: auto;
+  }
+  .call {
+    border-left: 4px solid var(--accent);
+    background: #faf8ff;
+    border-radius: 0 8px 8px 0;
+    margin: 20px 0;
+    padding: 14px 18px;
+  }
+  .call.why {
+    border-color: var(--good);
+    background: #f2fbf7;
+  }
+  .call.warn {
+    border-color: #e6a417;
+    background: #fff9ec;
+  }
+  .call .h {
+    display: block;
+    font-weight: 800;
+    margin-bottom: 4px;
+  }
+  .point-list {
+    display: grid;
+    gap: 10px;
+    margin: 14px 0 22px;
+  }
+  .point {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 10px;
+    align-items: start;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 11px 13px;
+  }
+  .point .marker {
+    color: var(--accent);
+    font-weight: 900;
+    white-space: nowrap;
+  }
+  .rule {
+    background: #f3efff;
+    border: 1px solid #e2d8ff;
+    border-radius: 10px;
+    color: #1a1140;
+    font-size: 1.08rem;
+    font-weight: 800;
+    margin: 20px 0;
+    padding: 16px;
+    text-align: center;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+  th,
+  td {
+    border-bottom: 1px solid var(--line);
+    padding: 9px 12px;
+    text-align: center;
+    white-space: nowrap;
+  }
+  th {
+    color: var(--muted);
+    font-size: .82rem;
+    font-weight: 700;
+  }
+  td:first-child,
+  th:first-child {
+    text-align: left;
+    font-weight: 700;
+  }
+  tr:last-child td { border-bottom: 0; }
+  .math {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    font-weight: 800;
+    margin: 14px 0;
+    padding: 12px 14px;
+    text-align: center;
+  }
+  .math-line + .math-line {
+    margin-top: 4px;
+  }
+  .concept-flow {
+    display: grid;
+    gap: 16px;
+    margin: 20px 0 26px;
+  }
+  .concept-step {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  .concept-step.basis { border-top: 5px solid #6b7280; }
+  .concept-step.vector { border-top: 5px solid var(--plus); }
+  .concept-step.amplitude { border-top: 5px solid var(--good); }
+  .concept-body {
+    padding: 16px 18px 18px;
+  }
+  .concept-title {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin: 0 0 10px;
+  }
+  .concept-title h3 {
+    margin: 0;
+  }
+  .step-badge {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    color: var(--muted);
+    display: inline-flex;
+    font-size: .76rem;
+    font-weight: 900;
+    line-height: 1;
+    padding: 6px 10px;
+    white-space: nowrap;
+  }
+  .visual-grid {
+    display: grid;
+    gap: 10px;
+    margin-top: 12px;
+  }
+  .visual-grid.two {
+    grid-template-columns: 1fr;
+  }
+  @media (min-width: 720px) {
+    .visual-grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  .basis-tile,
+  .component-tile,
+  .amplitude-tile {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 13px 14px;
+  }
+  .basis-line {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: center;
+    min-height: 44px;
+  }
+  .basis-line .from {
+    color: var(--muted);
+    font-size: .9rem;
+    font-weight: 700;
+  }
+  .basis-line .arrow {
+    color: var(--accent);
+    font-weight: 900;
+  }
+  .tile-note {
+    color: var(--muted);
+    display: block;
+    font-size: .88rem;
+    margin-top: 6px;
+    text-align: center;
+  }
+  .component-equation {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: center;
+    margin-top: 12px;
+  }
+  .component-part,
+  .formula-part {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    font-weight: 900;
+    padding: 9px 12px;
+  }
+  .component-part.x { color: var(--plus); }
+  .component-part.y { color: var(--accent); }
+  .formula-part.zero { color: var(--plus); }
+  .formula-part.one { color: var(--good); }
+  .operator {
+    color: var(--muted);
+    font-weight: 900;
+  }
+  .formula-final {
+    background: #f2fbf7;
+    border: 1px solid #b8e5d2;
+    border-radius: 8px;
+    font-size: 1.04rem;
+    font-weight: 900;
+    margin-top: 12px;
+    padding: 13px 14px;
+    text-align: center;
+  }
+  .meaning-list {
+    display: grid;
+    gap: 8px;
+    margin-top: 12px;
+  }
+  .meaning-row {
+    align-items: center;
+    display: grid;
+    gap: 8px;
+    grid-template-columns: minmax(96px, auto) 1fr;
+  }
+  .meaning-row strong {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 6px 9px;
+    text-align: center;
+  }
+  .compare-grid,
+  .summary-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 14px;
+    margin: 16px 0 22px;
+  }
+  @media (min-width: 760px) {
+    .compare-grid,
+    .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  .card {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 15px 16px;
+  }
+  .card.good { border-top: 5px solid var(--good); }
+  .card.warn { border-top: 5px solid #e6a417; }
+  .card.plus { border-top: 5px solid var(--plus); }
+  .card.minus { border-top: 5px solid var(--minus); }
+  .card.accent { border-top: 5px solid var(--accent); }
+  .tag-small {
+    display: inline-block;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    color: var(--muted);
+    font-size: .76rem;
+    font-weight: 900;
+    margin-bottom: 8px;
+    padding: 2px 9px;
+  }
+  .practice {
+    background: #f8fbff;
+    border: 1px solid #cfe0ff;
+    border-left: 8px solid var(--plus);
+    border-radius: 8px;
+    margin: 28px 0 34px;
+    padding: 18px;
+  }
+  .practice .practice-label {
+    display: inline-block;
+    color: var(--plus);
+    background: #edf4ff;
+    border: 1px solid #cfe0ff;
+    border-radius: 999px;
+    font-size: .78rem;
+    font-weight: 900;
+    margin-bottom: 10px;
+    padding: 3px 11px;
+  }
+  .practice h3 { margin-top: 0; }
+  pre {
+    background: #111827;
+    border-radius: 8px;
+    color: #eef4ff;
+    font-size: .88rem;
+    line-height: 1.55;
+    margin: 12px 0 0;
+    overflow-x: auto;
+    padding: 14px 15px;
+  }
+  pre code {
+    background: transparent;
+    border: 0;
+    color: inherit;
+    padding: 0;
+  }
+  .next {
+    background: #f2fbf7;
+    border: 1px solid #b8e5d2;
+    border-radius: 10px;
+    margin-top: 42px;
+    padding: 16px 18px;
+  }
+  .chapter-nav {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 10px;
+    margin: 34px 0 46px;
+  }
+  @media (min-width: 680px) {
+    .chapter-nav { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  .chapter-nav a {
+    display: block;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 12px 14px;
+    text-decoration: none;
+    color: var(--ink);
+    background: #fff;
+  }
+  .chapter-nav a:hover {
+    border-color: #c9d6ff;
+    background: #f8fbff;
+  }
+  .chapter-nav .k {
+    display: block;
+    color: var(--muted);
+    font-size: .78rem;
+    font-weight: 900;
+    margin-bottom: 3px;
+  }
+  .chapter-nav .t {
+    display: block;
+    font-weight: 900;
+  }
+  .chapter-nav .disabled {
+    background: var(--panel);
+    color: var(--muted);
+  }
+  footer {
+    border-top: 1px solid var(--line);
+    color: var(--muted);
+    font-size: .9rem;
+    margin-top: 60px;
+    padding-top: 24px;
+    text-align: center;
+  }
+  .book-shell {
+    display: grid;
+    gap: 44px;
+    grid-template-columns: 300px minmax(0, 1060px);
+    margin: 0 auto;
+    max-width: 1600px;
+    padding: 0 24px 120px;
+  }
+  .side-nav {
+    align-self: start;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    margin-top: 28px;
+    max-height: calc(100vh - 36px);
+    overflow: auto;
+    padding: 14px;
+    position: sticky;
+    top: 18px;
+  }
+  .side-nav strong {
+    display: block;
+    font-size: .9rem;
+    margin: 0 0 8px;
+  }
+  .side-nav a {
+    border-radius: 7px;
+    color: var(--ink);
+    display: block;
+    font-size: .94rem;
+    line-height: 1.35;
+    padding: 7px 8px;
+    text-decoration: none;
+  }
+  .side-nav a:hover,
+  .side-nav a.current {
+    background: #eef4ff;
+    color: #1745b5;
+    font-weight: 800;
+  }
+  .side-nav .group {
+    border-top: 1px solid var(--line);
+    margin-top: 10px;
+    padding-top: 10px;
+  }
+  .article {
+    min-width: 0;
+    padding-bottom: 120px;
+  }
+  .article > h2:first-child,
+  .article > .part:first-child + h2 {
+    margin-top: 28px;
+  }
+  .breadcrumb {
+    color: var(--muted);
+    font-size: .9rem;
+    font-weight: 700;
+    margin: 26px 0 0;
+  }
+  .overview-list {
+    display: grid;
+    gap: 10px;
+    margin: 18px 0 28px;
+  }
+  .overview-item {
+    align-items: baseline;
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    color: var(--ink);
+    display: grid;
+    gap: 8px;
+    grid-template-columns: 92px minmax(0, 1fr);
+    padding: 12px 14px;
+    text-decoration: none;
+  }
+  .overview-item:hover {
+    border-color: #c9d6ff;
+    background: #f8fbff;
+  }
+  .overview-item .num {
+    color: var(--accent);
+    font-size: .86rem;
+    font-weight: 900;
+  }
+  .overview-item .title {
+    font-weight: 900;
+  }
+  .page-nav {
+    display: grid;
+    gap: 12px;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    margin-top: 46px;
+  }
+  .page-nav > a,
+  .page-nav > span {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    color: var(--ink);
+    min-height: 78px;
+    padding: 13px 14px;
+    text-decoration: none;
+  }
+  .page-nav a:hover {
+    border-color: #c9d6ff;
+    background: #f8fbff;
+  }
+  .page-nav .k {
+    color: var(--muted);
+    display: block;
+    font-size: .78rem;
+    font-weight: 900;
+    margin-bottom: 4px;
+  }
+  .page-nav .t {
+    display: block;
+    font-weight: 900;
+    line-height: 1.35;
+  }
+  .page-nav .disabled {
+    background: var(--panel);
+    color: var(--muted);
+  }
+  .page-nav .home {
+    text-align: center;
+  }
+  @media (max-width: 860px) {
+    .book-shell {
+      display: block;
+      padding: 0 18px 90px;
+    }
+    .side-nav {
+      max-height: none;
+      position: static;
+    }
+    .page-nav {
+      grid-template-columns: 1fr;
+    }
+    .overview-item {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>
+</head>
+<body>
+<div class="qora-lang-switch" style="position:sticky;top:0;z-index:99;text-align:right;padding:8px 16px;background:rgba(255,255,255,.92);backdrop-filter:blur(4px);border-bottom:1px solid #e6e8ee;font-size:13px;font-family:sans-serif;"><a href="../en/chapter-01.html" onclick="try{localStorage.setItem(&quot;qora-lang&quot;,&quot;en&quot;)}catch(e){}">English</a> · <a href="../ko/chapter-01.html" onclick="try{localStorage.setItem(&quot;qora-lang&quot;,&quot;ko&quot;)}catch(e){}">한국어</a> · <strong>日本語</strong></div>
+
+<header class="hero">
+  <div class="tag">Qora · 量子ゲート文書</div>
+  <h1>第1章. キュービット状態と振幅について見ていこう</h1>
+  <p>確率へ進む前に、キュービット状態が何を持つのかを読む</p>
+</header>
+
+<div class="book-shell">
+            <aside class="side-nav" aria-label="目次">
+    <strong>Qoraで学ぶ量子ゲート</strong>
+      <a href="index.html">概要</a>
+      <a href="intro.html">はじめに。なぜQoraで量子ゲートを学ぶのか？</a>
+      <a class="current" href="chapter-01.html">第1章. キュービット状態と振幅について見ていこう</a>
+      <a href="chapter-02.html">第2章. 振幅と確率はどうつながるのか？</a>
+      <a href="chapter-03.html">第3章. |0⟩状態と|1⟩状態を直接読んでみよう</a>
+      <a href="chapter-04.html">第4章. 重ね合わせと干渉とは何だろう？</a>
+      <a href="chapter-05.html">第5章. 重ね合わせはただの「わからない状態」なのか？</a>
+      <a href="chapter-06.html">第6章. 干渉はいつ生まれるのか？</a>
+      <a href="chapter-07.html">第7章. 2つのキュービットの状態はどう読むのか？</a>
+      <a href="chapter-08.html">第8章. 量子もつれでは何が一緒に結びつくのか？</a>
+      <a href="chapter-09.html">第9章. 量子ゲートは元に戻せなければならない</a>
+      <a href="chapter-10.html">第10章. Qoraコードはどう読むのか？</a>
+      <a href="summary.html">まとめ。第1部で学んだことを整理してみよう</a>
+      <a href="chapter-11.html">第11章. Xゲートは何を反転させるのか？</a>
+      <a href="chapter-12.html">第12章. Hゲートは振幅をどう分けるのか？</a>
+      <a href="chapter-13.html">第13章. Zゲートは何の符号を変えるのか？</a>
+      <a href="chapter-14.html">第14章. CNOTゲートは2つのキュービットをどうつなぐのか？</a>
+      <a href="chapter-15.html">第15章. 小さな回路を最後まで読んでみよう</a>
+  </aside>
+  <main class="article">
+    <div class="breadcrumb">Qoraで学ぶ量子ゲート / 第1章. キュービット状態と振幅について見ていこう</div>
+<section id="part1" class="part">
+    <span class="label">第1部</span>
+    <h2>量子を読むための準備をしよう</h2>
+    <p>
+      第1部では、ゲートの説明に入る前に必要な言葉を先に整えます。<br>
+      量子力学全体を一度につかもうとはしません。<br>
+      Hゲート、Xゲート、Zゲート、CNOTゲートの説明を読むために必要な考え方だけを、順番に押さえていきます。
+    </p>
+  </section>
+
+  <h2 id="qubit-state">第1章. キュービット状態と振幅について見ていこう</h2>
+
+  <p>
+    キュービット状態を最初から難しく考える必要はありません。<br>
+    まずは「測定結果をどう状態の方向として書くのか」「その方向の前にどうして数が付くのか」を順番に見ていきます。
+  </p>
+
+  <div class="concept-flow">
+    <section class="concept-step basis">
+      <div class="concept-body">
+        <div class="concept-title">
+          <span class="step-badge">1段階</span>
+          <h3>測定結果に状態方向の名前を付けます</h3>
+        </div>
+        <p>
+          1つのキュービットを測定すると、結果は0または1になります。<br>
+          この結果をただの数字 <code>0</code>、<code>1</code> と書くこともできそうですが、それだけでは「測定結果」という意味は見えても、状態ベクトルの基準方向だという意味は見えにくくなります。<br>
+          そこで量子力学では、1キュービット状態をベクトルとして扱えるように、測定結果0に対応する基底状態を <code>|0⟩</code> と書き、測定結果1に対応する基底状態を <code>|1⟩</code> と書きます。
+        </p>
+        <div class="visual-grid two">
+          <div class="basis-tile">
+            <div class="basis-line">
+              <span class="from">測定結果0</span>
+              <span class="arrow">→</span>
+              <code>|0⟩</code>
+            </div>
+            <span class="tile-note">0側の状態方向</span>
+          </div>
+          <div class="basis-tile">
+            <div class="basis-line">
+              <span class="from">測定結果1</span>
+              <span class="arrow">→</span>
+              <code>|1⟩</code>
+            </div>
+            <span class="tile-note">1側の状態方向</span>
+          </div>
+        </div>
+        <p>
+          この2つの記号 <code>|0⟩</code> と <code>|1⟩</code> を、1キュービットの<strong>計算基底</strong>と呼びます。
+        </p>
+      </div>
+    </section>
+
+    <section class="concept-step vector">
+      <div class="concept-body">
+        <div class="concept-title">
+          <span class="step-badge">2段階</span>
+          <h3>基準方向の前には、その成分の大きさを表す数が付きます</h3>
+        </div>
+        <p>
+          先ほど <code>|0⟩</code> と <code>|1⟩</code> を状態ベクトルの基準方向と呼びました。<br>
+          まだ少しなじみにくいので、まずは平面上のふつうのベクトルと同じ構造を見てみましょう。<br>
+          平面ベクトルは、x軸方向の成分とy軸方向の成分に分けて書けます。
+        </p>
+        <div class="component-equation mono">
+          <span class="component-part x">3·x方向</span>
+          <span class="operator">+</span>
+          <span class="component-part y">2·y方向</span>
+        </div>
+        <p>
+          ここで3はx軸方向成分の係数で、2はy軸方向成分の係数です。<br>
+          つまりベクトルを基準方向ごとに分けて書くには、それぞれの方向の前に「その方向の成分がどれだけあるか」を表す数が付きます。
+        </p>
+      </div>
+    </section>
+
+    <section class="concept-step amplitude">
+      <div class="concept-body">
+        <div class="concept-title">
+          <span class="step-badge">3段階</span>
+          <h3>キュービット状態も基準方向ごとの成分として書きます</h3>
+        </div>
+        <p>
+          キュービット状態では、<code>|0⟩</code> と <code>|1⟩</code> が基準方向の役割を持ちます。<br>
+          そのため各方向の前に数が必要になり、量子力学ではその数を<strong>振幅</strong>と呼びます。
+        </p>
+        <div class="component-equation mono">
+          <span class="formula-part zero">α|0⟩</span>
+          <span class="operator">+</span>
+          <span class="formula-part one">β|1⟩</span>
+        </div>
+        <div class="meaning-list">
+          <div class="meaning-row">
+            <strong class="mono">α</strong>
+            <span><code>|0⟩</code> 方向の成分がどれだけ入っているかを表す振幅です。</span>
+          </div>
+          <div class="meaning-row">
+            <strong class="mono">β</strong>
+            <span><code>|1⟩</code> 方向の成分がどれだけ入っているかを表す振幅です。</span>
+          </div>
+        </div>
+        <div class="formula-final mono">|ψ⟩ = α|0⟩ + β|1⟩</div>
+        <p>
+          したがってこの式は、「このキュービット状態には0側の振幅 <span class="mono">α</span> と1側の振幅 <span class="mono">β</span> が一緒に入っている」という意味です。
+        </p>
+      </div>
+    </section>
+  </div>
+
+  <p>
+    ここで <code>|ψ⟩</code> は、このキュービットの状態全体を表す記号です。<br>
+    <span class="mono">ψ</span> はギリシャ文字の<strong>プサイ</strong>で、<code>|ψ⟩</code> はふつう<strong>ケット・プサイ</strong>または<strong>プサイ状態</strong>と読みます。<br>
+    正式には、<code>|ψ⟩</code> は <code>|0⟩</code> 方向の振幅と <code>|1⟩</code> 方向の振幅を一緒に含む<strong>状態ベクトル</strong>です。<br>
+    つまりキュービット状態は、「あとで0が出るのか1が出るのか」という答え1つではなく、可能な測定結果ごとに付いた振幅全体を持っています。
+  </p>
+
+  <div class="call">
+    <span class="h"><code>|0⟩</code> と <code>|1⟩</code> は計算基底状態です</span>
+    <code>|0⟩</code> は測定すると必ず測定結果0が出る基底状態で、<code>|1⟩</code> は測定すると必ず測定結果1が出る基底状態です。<br>
+    今はこの2つを「0側の方向」と「1側の方向」と読めれば十分です。<br>
+    数学的には、<code>|0⟩</code> と <code>|1⟩</code> は1キュービット状態空間の互いに直交する2つの基準ベクトルとして働きます。
+  </div>
+
+  <div class="call why">
+    <span class="h">この章で押さえたこと</span>
+    1キュービット状態は、<code>|0⟩</code> 方向の成分と <code>|1⟩</code> 方向の成分を一緒に持つ状態ベクトルです。<br>
+    そして <span class="mono">α</span> と <span class="mono">β</span> は各方向成分の前に付く数で、量子力学ではこの数を振幅と呼びます。
+  </div>
+
+  <div class="practice">
+    <span class="practice-label">Qoraで試してみよう</span>
+    <h3>キュービットを1つ準備してみよう</h3>
+    <pre><code>operation Main() {
+    // キュービットを1つ準備
+    // 準備直後の q[0] は |0⟩ 状態
+    // |0⟩ 方向の振幅 = 1
+    // |1⟩ 方向の振幅 = 0
+    use q = Qubit[1];
+}</code></pre>
+  </div>
+
+  <div class="call why">
+    <span class="h">次の章で見ること</span>
+    この章では、キュービット状態と振幅が何かを先に押さえました。<br>
+    次の章では、振幅を測定確率としてどう読むのかを見ていきます。
+  </div>
+                        <nav class="page-nav" aria-label="章の移動">
+    <a href="intro.html"><span class="k">前へ</span><span class="t">はじめに。なぜQoraで量子ゲートを学ぶのか？</span></a>
+    <a class="home" href="index.html"><span class="k">概要</span><span class="t">全体の目次へ戻る</span></a>
+    <a href="chapter-02.html"><span class="k">次へ</span><span class="t">第2章. 振幅と確率はどうつながるのか？</span></a>
+  </nav>
+    <footer>
+      <p>Qora — 自分で作る量子トイ言語</p>
+    </footer>
+  </main>
+</div>
+
+</body>
+</html>
+

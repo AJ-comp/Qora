@@ -11,6 +11,60 @@ emitted as **OpenQASM 3.0**.
 > **Note:** Qora was renamed from **Ket** on 2026-07-01 (a "Ket" extension already existed). Versions
 > 0.1–0.7 below were authored under the old name.
 
+## 0.18 — 2026-07-09
+
+### Changed
+- **Rung ① of the automatic-uncomputation ladder now stores a per-operation, program-ordered
+  *qubit-event stream* instead of per-statement touched/modified sets (`Ir/Passes/EffectAnalysis.cs`,
+  `Ir/Passes/SemanticModel.cs`).** The old `StmtEffects(Touched, Modified)` record and its
+  statement-Id-keyed `SemanticModel.AddEffects` / `FindEffects` map are gone. In their place, effect
+  analysis emits, for every *leaf* statement (a gate, a measurement, or a `use`), one
+  `QubitEvent(QubitRef, QubitEventKind, Order, StmtId)` per qubit operand — `Read` (a control or
+  diagonal-gate target: basis value preserved), `Write` (a target / reset / register birth: value may
+  change), or `Measure` (collapsed, irreversible) — collected into one ordered stream per operation and
+  stored keyed by `op.Id`. `Order` is a per-operation program-order index; all events of one statement
+  share that statement's `Order` and `StmtId`. The two views the later rungs need are both *read off*
+  this single stream: a statement's old touched/modified sets by filtering on `StmtId`, and the qubits
+  that interacted at a statement (its entanglement edge) by grouping on it. Containers
+  (`if` / `for` / `while` / `repeat` / `within…apply`) emit no events of their own — their leaf children
+  carry the precise per-gate detail. This is rung ① in its final storage form; the per-statement record
+  was an interim shape.
+- **Rung ② liveness is now a *derived query*, not a stored pass (`SemanticModel.LiveRange`).**
+  `LiveRange(opId, qubit)` returns the `[Birth, Death]` events bracketing a qubit's life inside an
+  operation — birth is its earliest event by `Order` (a `use` register's birth `Write`, or a parameter's
+  first use); death is its latest event of *any* kind (a final control `Read` counts — the qubit still
+  holds a value to be cleaned after it). It is computed on demand as min/max `Order` over the event
+  stream, storing nothing, and is subsumption-aware through a new `QubitRef.Overlaps` (a whole-register
+  effect `{q}` and an element `{q[0]}` overlap both ways). Death is the point after which the future
+  *inject* rung may place an uncompute.
+- **Previously-silent under-approximations in effect analysis are now loud invariant checks.** The branch
+  that used to `return` empty effects for a name that is neither a user operation nor a built-in gate now
+  throws (empty effects would make the statement look like it touches nothing). Three positional-projection
+  invariants the earlier validation passes already guarantee now throw `InvalidOperationException` rather
+  than silently mis-mapping or dropping effects: a user-op call carrying a non-`Adjoint` functor (QSEM002),
+  a call whose argument count differs from its parameter count (QSEM006), and an indexed effect leaking
+  into a single-qubit binding (QSEM016).
+
+### Docs
+- **Documentation reorganized into two separated tracks, plus a new compiler datasheet.** The per-language
+  pages now live under two trees — `docs/architecture/{lang}/` (the pipeline overview, the H-gate intro,
+  and the `Adjoint`-pipeline walkthrough) and `docs/book/{lang}/` (the 15-chapter learning book) — with
+  **no cross-links between them**; the README is the only gateway into each, reached through the top-level
+  `architecture.html` / `book/` landing redirects. A new **compiler datasheet**
+  (`docs/architecture/ko/datasheet.html`, Korean-only for now) puts the whole pipeline, the pass catalog,
+  the IR node reference, the persistent `SemanticModel`, the symbol table and the two name domains, effect
+  analysis and the qubit-event model, the automatic-uncomputation ladder, the QSEM diagnostics, and the
+  version history on one page. The pre-localization flat redirect stubs under `docs/` were removed and the
+  README docs section was condensed from four standalone links to the two tracks.
+
+### Tests
+- +5 cases — `QubitRef.Overlaps` subsumption in both directions; entanglement-edge grouping by `StmtId`;
+  and `LiveRange` birth-to-last-use, a death that is a final control `Read`, and a null range for an unused
+  qubit — all in `EffectAnalysisTests.cs`, whose existing cases were rewritten to query the event stream →
+  168 total. This is internal analysis infrastructure: the `QubitEvent` stream feeds no pass yet, so there
+  is no new surface syntax and emission is unchanged — demo QASM is byte-identical to 0.17 apart from the
+  version-stamp comment.
+
 ## 0.17 — 2026-07-09
 
 ### Added

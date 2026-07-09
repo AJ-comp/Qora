@@ -20,13 +20,13 @@
         if (p.indexOf('en') === 0) { lang = 'en'; break; }
       }
     }
-    location.replace(lang + '/' + location.search + location.hash);
+    location.replace('architecture/' + lang + '/index.html' + location.search + location.hash);
   })();
 </script>
 </head>
 <body>
 <noscript>
-  <p><a href="en/">English</a> · <a href="ko/">한국어</a> · <a href="ja/">日本語</a></p>
+  <p><a href="architecture/en/index.html">English</a> · <a href="architecture/ko/index.html">한국어</a> · <a href="architecture/ja/index.html">日本語</a></p>
 </noscript>
 </body>
 </html>

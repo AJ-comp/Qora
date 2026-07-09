@@ -8,18 +8,32 @@ namespace Qora.Ir.Passes;
 public readonly record struct QubitRef(string Reg, int? Index)
 {
     public override string ToString() => Index is int i ? $"{Reg}[{i}]" : Reg;
+
+    /// <summary>Do these two references name overlapping physical qubit(s)? True when they share a register
+    /// AND either side is the WHOLE register (null index) or they name the same element. This is the
+    /// subsumption rule that lets a whole-register effect <c>{q}</c> cover an element query <c>{q[0]}</c> —
+    /// and, symmetrically, lets an element effect <c>{q[0]}</c> answer a whole-register query <c>{q}</c>
+    /// (any part of q being touched means q, as a whole, is touched).</summary>
+    public bool Overlaps(QubitRef other) =>
+        Reg == other.Reg && (Index is null || other.Index is null || Index == other.Index);
 }
 
+/// <summary>The role a qubit plays at one statement: <see cref="Read"/> — referenced but its
+/// computational-basis value is preserved (a control, or a diagonal-gate target); <see cref="Write"/> —
+/// its value may change (a gate target, a reset, or a <c>use</c> register's birth into |0…0⟩);
+/// <see cref="Measure"/> — collapsed by a measurement (irreversible).</summary>
+public enum QubitEventKind { Read, Write, Measure }
+
 /// <summary>
-/// What one statement does to qubits (use/def in dataflow terms).
-/// <see cref="Touched"/> is every qubit operand the statement references, controls included;
-/// <see cref="Modified"/> only those whose COMPUTATIONAL-BASIS value may change — control slots and
-/// diagonal-gate targets are touched but not modified (their 0/1 value is preserved; a possible phase
-/// change is tracked by <see cref="GateInfo.Diagonal"/> on the gate table, not here).
+/// One qubit event: a single LEAF statement's action on ONE qubit, in the operation's program order — the
+/// use/def stream rung ② (liveness) and rung ③ (qfree) consume. <see cref="Order"/> is a per-operation
+/// program-order index (the largest Order on a qubit = its last use = its liveness death point).
+/// <see cref="StmtId"/> is the leaf statement's stable Id, so events sharing a StmtId are the qubits that
+/// interacted AT that statement — entanglement edges are read off by grouping on it. Only leaf statements
+/// (gates, measurements, <c>use</c>) emit events; containers hold none of their own — their children carry
+/// the precise per-gate detail.
 /// </summary>
-public sealed record StmtEffects(
-    IReadOnlySet<QubitRef> Touched,
-    IReadOnlySet<QubitRef> Modified);
+public sealed record QubitEvent(QubitRef Qubit, QubitEventKind Kind, int Order, int StmtId);
 
 /// <summary>
 /// One operation's effect on its FORMAL qubit parameters (locals allocated by <c>use</c> are op-private
@@ -39,7 +53,7 @@ public sealed record OpEffectSummary(
 /// Id, and passes that COPY subtrees (<see cref="ConjugationLowering"/>, <see cref="AdjointMaterializer"/>)
 /// register each copy's lineage through <see cref="RecordDerivation"/>, so a lookup on a copied node walks
 /// the derivation chain back to the node the model actually saw. <see cref="EffectAnalysis"/> stores its
-/// per-statement and per-operation qubit effects here too, and <see cref="NameMangler"/> records each
+/// per-operation qubit-event stream (the use/def timeline) and per-operation summary here too, and <see cref="NameMangler"/> records each
 /// declaration's EMITTED name — so the model holds both name domains explicitly: the SOURCE name (what the
 /// user wrote, <see cref="Symbol.SourceName"/>, frozen at validation) and the emitted name (what the QASM
 /// says, <see cref="FindEmittedName"/>, written at mangling). Each fact has exactly ONE producer pass;
@@ -50,7 +64,7 @@ public sealed class SemanticModel
     private readonly Dictionary<int, Scope> _rootScopeByOp = new();     // QOperation.Id → root scope
     private readonly Dictionary<int, Symbol> _symbolByDeclId = new();   // declaring node Id → Symbol
     private readonly Dictionary<int, int> _derivedFrom = new();         // copied node Id → source node Id
-    private readonly Dictionary<int, StmtEffects> _effectsByStmtId = new();        // QStmt.Id → effects
+    private readonly Dictionary<int, IReadOnlyList<QubitEvent>> _qubitEventsByOp = new(); // QOperation.Id → program-ordered qubit-event stream
     private readonly Dictionary<int, OpEffectSummary> _effectSummaryByOpId = new(); // QOperation.Id → summary
     private readonly Dictionary<int, string> _emittedNameByDeclId = new(); // declaring node Id → emitted (post-mangling) name
     private Scope? _programScope;   // the top-level symbol table: one Operation symbol per op
@@ -75,7 +89,9 @@ public sealed class SemanticModel
             if (sym.DeclNodeId != 0) _symbolByDeclId[sym.DeclNodeId] = sym;
     }
 
-    internal void AddEffects(int stmtId, StmtEffects fx) => _effectsByStmtId[stmtId] = fx;
+    /// <summary>Store an operation's qubit-event stream — its leaf statements' reads/writes/measures in
+    /// program order, keyed by <c>op.Id</c>. The single producer is <see cref="EffectAnalysis"/>.</summary>
+    internal void AddQubitEvents(int opId, IReadOnlyList<QubitEvent> events) => _qubitEventsByOp[opId] = events;
     internal void AddOpEffects(int opId, OpEffectSummary s) => _effectSummaryByOpId[opId] = s;
 
     /// <summary>Register that node <paramref name="freshId"/> is a copy of <paramref name="sourceId"/>.
@@ -95,8 +111,31 @@ public sealed class SemanticModel
     /// <summary>The root scope of this operation (or of the operation it was derived from), if any.</summary>
     public Scope? FindRootScope(int opId) => Resolve(opId, _rootScopeByOp);
 
-    /// <summary>The qubit effects of this statement (or of the statement it was copied from), if any.</summary>
-    public StmtEffects? FindEffects(int stmtId) => Resolve(stmtId, _effectsByStmtId);
+    /// <summary>This operation's qubit-event stream (leaf reads/writes/measures in program order), or an
+    /// empty list if the model never analyzed this op. Keyed by <c>op.Id</c> directly — events are emitted
+    /// pre-copy, so no derivation walk is needed (the ladder analyzes the program before any injection).</summary>
+    public IReadOnlyList<QubitEvent> QubitEvents(int opId) =>
+        _qubitEventsByOp.TryGetValue(opId, out var e) ? e : System.Array.Empty<QubitEvent>();
+
+    /// <summary>Rung ② liveness, DERIVED (nothing stored): the <c>[Birth, Death]</c> events bracketing
+    /// <paramref name="q"/>'s life inside operation <paramref name="opId"/>. Birth is its earliest event
+    /// (Order-min — a <c>use</c> register's birth <see cref="QubitEventKind.Write"/>, or a parameter's first
+    /// use); Death is its latest event (Order-max — its LAST use, of ANY kind: a final control Read counts,
+    /// since the qubit still holds a value that must be cleaned after it). Death is the point after which
+    /// rung ④ may inject an uncompute. Null when the qubit has no events in the op (never used).
+    /// Subsumption-aware via <see cref="QubitRef.Overlaps"/> (a whole-register birth covers an element
+    /// query). This is just min/max over rung ①'s Order — liveness is a query, not a stored pass.</summary>
+    public (QubitEvent Birth, QubitEvent Death)? LiveRange(int opId, QubitRef q)
+    {
+        QubitEvent? birth = null, death = null;
+        foreach (var e in QubitEvents(opId))
+        {
+            if (!e.Qubit.Overlaps(q)) continue;
+            if (birth is null || e.Order < birth.Order) birth = e;
+            if (death is null || e.Order > death.Order) death = e;
+        }
+        return birth is null ? null : (birth, death!);
+    }
 
     /// <summary>This operation's effect summary (or its derivation source's), if any.</summary>
     public OpEffectSummary? FindOpEffects(int opId) => Resolve(opId, _effectSummaryByOpId);
