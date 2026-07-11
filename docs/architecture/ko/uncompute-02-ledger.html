@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>상태를 읽는 법 — 장부 모델 — 자동 uncomputation 코스 2/11 — Qora</title>
+<style>
+  :root {
+    --bg: #ffffff; --ink: #1f2430; --muted: #5b6472; --line: #e6e8ee; --panel: #f7f8fb;
+    --plus: #1457d6; --minus: #d62b39; --accent: #6b3fd4; --good: #11875b; --amber: #b5810a;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo",
+      "Malgun Gothic", "Noto Sans KR", "Segoe UI Symbol", "Cambria Math", sans-serif;
+    line-height: 1.7; font-size: 16.5px;
+  }
+  .wrap { max-width: 940px; margin: 0 auto; padding: 0 20px 120px; }
+  header.hero {
+    padding: 60px 20px 36px; text-align: center; border-bottom: 1px solid var(--line);
+    background: linear-gradient(180deg, #faf9ff, #ffffff);
+  }
+  header.hero h1 { font-size: 2.0rem; margin: 0 0 10px; letter-spacing: -0.5px; }
+  header.hero p { color: var(--muted); margin: 0; font-size: 1.02rem; }
+  .tag { display:inline-block; font-size:.78rem; letter-spacing:.12em; text-transform:uppercase;
+         color: var(--accent); font-weight:700; margin-bottom:14px; }
+  h2 { margin: 54px 0 12px; font-size: 1.42rem; letter-spacing: -0.3px;
+       padding-top: 14px; border-top: 2px solid var(--line); }
+  h2 .n { display:inline-flex; align-items:center; justify-content:center;
+    width: 1.7em; height: 1.7em; border-radius: 50%;
+    background: var(--accent); color:#fff; font-size: .8rem; font-weight:700;
+    margin-right: 10px; vertical-align: middle; }
+  h3 { margin: 30px 0 8px; font-size: 1.1rem; }
+  p { margin: 12px 0; }
+  strong { color: #11203a; }
+  .lead { font-size: 1.05rem; }
+  code, .mono, pre {
+    font-family: "SF Mono", "JetBrains Mono", "D2Coding", Consolas, "Segoe UI Symbol", monospace;
+  }
+  code { background: var(--panel); border: 1px solid var(--line); border-radius: 5px; padding: 1px 6px; font-size: .9em; }
+  pre { background: #111827; color: #eef4ff; border-radius: 10px; padding: 15px 17px; margin: 16px 0;
+        overflow-x: auto; font-size: .86rem; line-height: 1.55; }
+  pre code { background: none; border: none; padding: 0; font-size: inherit; color: inherit; }
+  pre .cm { color: #8ba0c7; }
+  pre .hl { color: #c4a7ff; font-weight: 700; }
+  pre .add { color: #7fe0b0; font-weight: 700; }
+  pre .rd { color: #ff9db0; font-weight: 700; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+           padding: 14px 16px; margin: 16px 0; overflow-x: auto; }
+  table.spec { border-collapse: collapse; width: 100%; font-size: .92rem; }
+  table.spec th, table.spec td { padding: 8px 11px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: top; }
+  table.spec th { font-size: .78rem; color: var(--muted); font-weight: 700; text-transform: uppercase; letter-spacing:.05em; background:#fbfbfe; }
+  table.spec tr:last-child td { border-bottom: none; }
+  table.spec code { white-space: nowrap; }
+  table.spec td.k { white-space: nowrap; font-weight: 700; color:#1a2740; }
+  .call { border-left: 4px solid var(--accent); background: #faf8ff;
+          padding: 13px 17px; border-radius: 0 8px 8px 0; margin: 18px 0; }
+  .call.why { border-color: var(--good); background: #f2fbf7; }
+  .call.warn { border-color: #e6a417; background: #fff9ec; }
+  .call .h { font-weight: 700; display:block; margin-bottom: 4px; }
+  .call p { margin: 8px 0 0; }
+  .rule { text-align:center; font-size: 1.02rem; font-weight: 700; color:#1a1140;
+          background: #f3efff; border:1px solid #e2d8ff; border-radius: 10px; padding: 15px; margin: 20px 0; }
+  .toc { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 20px; margin: 24px 0; }
+  .toc ol { margin: 6px 0 0; padding-left: 20px; columns: 2; column-gap: 30px; }
+  .toc a { color: var(--ink); text-decoration: none; }
+  .toc a:hover { color: var(--accent); }
+  .doc-links { display:flex; flex-wrap:wrap; gap:10px; margin: 18px 0 6px; }
+  .doc-link { display:inline-flex; align-items:center; gap:8px; border:1px solid #cddcff;
+              background:#f6f9ff; color:#1745b5; border-radius:999px; padding:7px 15px; font-weight:700; text-decoration:none; font-size:.92rem; }
+  .doc-link:hover { border-color:#9bb8ff; background:#eef4ff; }
+  .doc-meta { border: 1px solid #dfe5f2; border-left: 5px solid var(--accent); border-radius: 8px;
+              background: #f8faff; padding: 16px 18px; margin: 22px 0; }
+  .doc-meta .meta-title { font-weight: 800; color: #11203a; margin-bottom: 12px; }
+  .meta-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 18px; margin: 0; }
+  .meta-grid dt { color: var(--muted); font-size: .74rem; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; }
+  .meta-grid dd { margin: 3px 0 0; }
+  footer { text-align:center; color:var(--muted); font-size:.9rem; margin-top: 60px; padding-top: 24px; border-top:1px solid var(--line); }
+  /* datasheet-specific */
+  .pipe { display:flex; flex-direction:column; gap:0; margin: 18px 0; }
+  .pipe .stg { display:flex; align-items:center; gap:12px; }
+  .pipe .box { flex:1; background:#fff; border:1px solid var(--line); border-radius:8px; padding:9px 13px; font-size:.92rem; }
+  .pipe .box b { color:#1a2740; }
+  .pipe .box .d { color:var(--muted); font-size:.85rem; }
+  .pipe .box.key { border-color:#c9b6f4; background:#faf7ff; }
+  .pipe .arr { text-align:center; color:var(--accent); font-size:1.2rem; line-height:1; margin:5px 0; }
+  .ladder { display:grid; gap:10px; margin:18px 0; }
+  .rung { display:grid; grid-template-columns:auto 1fr; gap:14px; align-items:start;
+          border:1px solid var(--line); border-radius:10px; padding:13px 16px; background:#fff; }
+  .rung .rn { width:38px; height:38px; border-radius:8px; background:var(--accent); color:#fff;
+              font-weight:800; display:flex; align-items:center; justify-content:center; font-size:1.05rem; }
+  .rung.done { border-left:5px solid var(--good); }
+  .rung.done .rn { background:var(--good); }
+  .rung .rt { font-weight:800; color:#1a2740; }
+  .rung .rd { color:var(--muted); font-size:.92rem; margin-top:2px; }
+  .rung .st { display:inline-block; font-size:.72rem; font-weight:800; border-radius:999px; padding:2px 9px; margin-left:8px; vertical-align:middle; }
+  .rung .st.ok { background:#e4f7ee; color:var(--good); }
+  .rung .st.next { background:#f3efff; color:var(--accent); }
+  .badge { display:inline-block; font-size:.72rem; font-weight:800; border-radius:5px; padding:1px 7px; }
+  .badge.r { background:#eef4ff; color:var(--plus); }
+  .badge.w { background:#fdeef0; color:var(--minus); }
+  .badge.m { background:#f3efff; color:var(--accent); }
+  .grid2 { display:grid; grid-template-columns:1fr; gap:14px; margin:16px 0; }
+  @media (min-width:740px){ .grid2 { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+  .card { background:#fff; border:1px solid var(--line); border-radius:8px; padding:14px 16px; }
+  .card.good { border-top:4px solid var(--good); }
+  .card.bad { border-top:4px solid var(--minus); }
+  .card h4 { margin:0 0 8px; font-size:1rem; }
+  @media (max-width: 720px) { .meta-grid, .toc ol { grid-template-columns: 1fr; columns:1; } }
+</style>
+</head>
+<body>
+<div class="qora-lang-switch" style="position:sticky;top:0;z-index:99;text-align:right;padding:8px 16px;background:rgba(255,255,255,.92);backdrop-filter:blur(4px);border-bottom:1px solid #e6e8ee;font-size:13px;font-family:sans-serif;"><a href="../en/index.html">English</a> · <strong>한국어</strong> · <a href="../ja/index.html">日本語</a></div>
+
+<header class="hero">
+  <div class="tag">Qora · 자동 uncomputation 코스 · 2/11</div>
+  <h1>2. 상태를 읽는 법 — 장부 모델</h1>
+  <p>가지와 계수 — 이후 모든 판정을 설명하는 단 하나의 틀</p>
+</header>
+
+<div class="wrap">
+
+  <nav class="doc-links" aria-label="코스 내비게이션">
+    <a class="doc-link" href="uncompute-01-ancilla.html">← 1. 앤실라와 청소 후보 — 용어와 판별</a>
+    <a class="doc-link" href="datasheet.html#s8">코스 목차</a>
+    <a class="doc-link" href="uncompute-03-gates.html">3. 게이트는 장부를 어떻게 편집하는가 →</a>
+  </nav>
+  <p>
+    이후 장들의 모든 판정("이 게이트는 왜 위험한가")은 상태를 읽는 틀 하나로 설명됩니다.
+    기계 전체의 상태를 <strong>장부 한 권</strong>이라고 생각하십시오. 장부의 <strong>한 줄(가지)</strong>은
+    "모든 큐빗의 값 조합 하나 + 그 조합의 계수 한 칸"입니다. 예를 들어 상태
+    <code>(|0,0⟩ + |1,1⟩)/√2</code>(표기 |b,a⟩)를 장부로 쓰면 다음과 같습니다.
+  </p>
+  <div class="panel">
+    <table class="spec">
+      <tr><th>줄(가지)</th><th>b 값</th><th>a 값</th><th>계수</th></tr>
+      <tr><td class="k">1행</td><td>0</td><td>0</td><td>1/√2</td></tr>
+      <tr><td class="k">2행</td><td>1</td><td>1</td><td>1/√2</td></tr>
+    </table>
+  </div>
+  <p>
+    줄에는 <strong>모든 큐빗의 값이 한 세트</strong>로 적혀 있습니다. 그러니 가지는 특정 큐빗이나 레지스터가
+    아니라 "기계 전체의 값 조합 하나"입니다. 그리고 계수 칸은 <strong>줄마다 하나뿐</strong>입니다 —
+    "b의 계수 칸", "a의 계수 칸"이 따로 있지 않습니다.
+  </p>
+  <div class="call">
+    <span class="h">위상(계수)은 줄의 속성이지, 한 큐빗의 소유물이 아닙니다</span>
+    <p>수식으로 보면 <code>i·(|0⟩<sub>b</sub> ⊗ |1⟩<sub>a</sub>) = (i|0⟩<sub>b</sub>) ⊗ |1⟩<sub>a</sub> = |0⟩<sub>b</sub> ⊗ (i|1⟩<sub>a</sub>)</code> —
+    곱셈이므로 i를 어느 쪽에 붙여 읽어도 같습니다. "이 i가 b의 것이냐 a의 것이냐"는 답이 없는 질문이고,
+    물리적 사실은 "이 조합(줄)의 계수가 i다" 하나뿐입니다. 이 사실이 <a href="uncompute-05-y-gate.html">5장</a>의 Y 문제를 만듭니다.</p>
+  </div>
+  <div class="call why">
+    <span class="h">전역 위상 vs 상대 위상 — 위험의 기준</span>
+    <p>계수에 붙는 부호가 <strong>모든 줄에 똑같이</strong> 붙으면(전역 위상) 물리적으로 아무 의미가 없습니다 —
+    측정으로 절대 구분할 수 없습니다. 반면 <strong>줄마다 다르게</strong> 붙으면(상대 위상) 나중에 H 같은
+    간섭 게이트가 그 부호 차이를 측정 확률의 차이로 바꿔 읽습니다. 위험한 것은 "위상이 있다"가 아니라
+    <strong>"줄마다 다르게 붙었다"</strong>입니다.</p>
+  </div>
+
+  <nav class="doc-links" aria-label="코스 내비게이션">
+    <a class="doc-link" href="uncompute-01-ancilla.html">← 1. 앤실라와 청소 후보 — 용어와 판별</a>
+    <a class="doc-link" href="datasheet.html#s8">코스 목차</a>
+    <a class="doc-link" href="uncompute-03-gates.html">3. 게이트는 장부를 어떻게 편집하는가 →</a>
+  </nav>
+
+  <footer>
+    자동 uncomputation 코스 2/11 · <a href="datasheet.html#s8">코스 목차</a> ·
+    <a href="datasheet.html">컴파일러 데이터시트</a>
+  </footer>
+
+</div>
+</body>
+</html>

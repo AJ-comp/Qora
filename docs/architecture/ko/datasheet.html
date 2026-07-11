@@ -123,10 +123,10 @@
 <div class="wrap">
 
   <p class="lead">
-    이 문서는 Qora 컴파일러의 <strong>내부 구조를 한 장에 정리한 레퍼런스</strong>다.
-    컴파일 파이프라인의 각 단계, 패스 목록, IR 노드, 지속 <code>SemanticModel</code>의 사이드테이블,
-    그리고 그 위에 얹히는 <strong>자동 uncomputation 사다리</strong>를 표와 도식으로 정리한다.
-    개념적 배경이 필요한 부분은 아래 관련 문서로 연결한다.
+    이 문서는 Qora 컴파일러의 <strong>내부 구조를 정리한 레퍼런스</strong>입니다.
+    1–7장은 컴파일 파이프라인·패스·IR·<code>SemanticModel</code>을 다룹니다.
+    <strong>자동 uncomputation</strong>의 개념은 책처럼 넘겨 읽는
+    <a href="#s8">별도의 11개 장 코스</a>로 분리되어 있습니다.
   </p>
 
   <section class="doc-meta" aria-label="문서 정보">
@@ -157,23 +157,19 @@
       <li><a href="#s5">심벌테이블 & 이름의 두 도메인</a></li>
       <li><a href="#s6">효과분석 & 큐빗이벤트 (rung ①)</a></li>
       <li><a href="#s7">자동 uncomputation 사다리</a></li>
-      <li><a href="#s8">ancilla와 uncompute — 왜, 무엇을</a></li>
-      <li><a href="#s9">상태를 읽는 법 — 장부 모델</a></li>
-      <li><a href="#s10">qfree — 어떤 쓰기를 되돌릴 수 있나 (그리고 Y 사건)</a></li>
-      <li><a href="#s11">주입기의 실체 — 붙여넣기 기계, 루프, 담요</a></li>
-      <li><a href="#s12">왜 정적 컴파일인가 — 두 개의 런타임과 언어 지형</a></li>
-      <li><a href="#s13">진단 코드 (QSEM)</a></li>
-      <li><a href="#s14">버전 히스토리</a></li>
+      <li><a href="#s8">자동 uncomputation — 개념 코스 (별도 11개 장)</a></li>
+      <li><a href="#s9">진단 코드 (QSEM)</a></li>
+      <li><a href="#s10">버전 히스토리</a></li>
     </ol>
   </div>
 
   <!-- ============ 1 ============ -->
   <h2 id="s1"><span class="n">1</span>컴파일 파이프라인</h2>
   <p>
-    이 절은 소스 한 줄이 OpenQASM으로 출력되기까지 거치는 단계를 보여준다.
-    검증은 방출을 통제하는 <strong>게이트</strong>다.
-    의미 에러가 하나라도 있으면 방출은 실행되지 않고, 컴파일러는 발견한 모든 위반을 보고한다.
-    <strong>SemanticModel은 마지막 검증(모노모피제이션 후)에서 한 번 만들어지며</strong> 파이프라인 끝까지 재사용된다.
+    이 장은 소스 한 줄이 OpenQASM으로 출력되기까지 거치는 단계를 보여줍니다.
+    검증은 방출을 통제하는 <strong>게이트</strong>입니다.
+    의미 에러가 하나라도 있으면 방출은 실행되지 않고, 컴파일러는 발견한 모든 위반을 보고합니다.
+    <strong>SemanticModel은 마지막 검증(모노모피제이션 후)에서 한 번 만들어지며</strong> 파이프라인 끝까지 재사용됩니다.
   </p>
 
   <div class="pipe">
@@ -197,13 +193,13 @@
   <div class="call">
     <span class="h">두 번 검증하는 이유</span>
     모노모피제이션이 제네릭 레지스터 크기를 확정하므로, 크기 의존 검사(인덱스 범위·레지스터 크기 일치)는 크기가
-    정해진 뒤에야 정확하게 실행될 수 있다. 그래서 검증은 <strong>기저 IR에서 1회, 특수화 후 1회</strong> 수행되며,
-    <strong>마지막 검증 결과가 SemanticModel을 소유</strong>한다.
+    정해진 뒤에야 정확하게 실행될 수 있습니다. 그래서 검증은 <strong>기저 IR에서 1회, 특수화 후 1회</strong> 수행되며,
+    <strong>마지막 검증 결과가 SemanticModel을 소유</strong>합니다.
   </div>
 
   <!-- ============ 2 ============ -->
   <h2 id="s2"><span class="n">2</span>패스 카탈로그</h2>
-  <p>각 패스는 IR을 읽거나 IR→IR로 변환한다. 방출 단계에서는 <code>QasmEmitter</code>가 순수 프린터 역할만 맡는다.</p>
+  <p>각 패스는 IR을 읽거나 IR→IR로 변환합니다. 방출 단계에서는 <code>QasmEmitter</code>가 순수 프린터 역할만 맡습니다.</p>
 
   <div class="panel">
     <table class="spec">
@@ -228,10 +224,10 @@
   <!-- ============ 3 ============ -->
   <h2 id="s3"><span class="n">3</span>IR 노드 레퍼런스</h2>
   <p>
-    IR은 봉인된 record 계층이다. 모든 문장·연산·파라미터는 생성 시점에 <strong>안정 <code>Id</code></strong>를 갖는다.
-    <code>with</code> 재작성은 같은 노드를 편집하는 방식이므로 Id를 상속하고, <code>new</code>는 다른 노드를 만드는 방식이므로 새 Id를 발급한다.
-    복제 패스는 <code>ReId</code>로 새 Id를 찍고 <code>DerivedFrom</code> 계보를 남긴다. 이것이 Id-키 사이드테이블이
-    복사본에서도 원본을 되짚게 하는 근거다.
+    IR은 봉인된 record 계층입니다. 모든 문장·연산·파라미터는 생성 시점에 <strong>안정 <code>Id</code></strong>를 가집니다.
+    <code>with</code> 재작성은 같은 노드를 편집하는 방식이므로 Id를 상속하고, <code>new</code>는 다른 노드를 만드는 방식이므로 새 Id를 발급합니다.
+    복제 패스는 <code>ReId</code>로 새 Id를 찍고 <code>DerivedFrom</code> 계보를 남깁니다. 이것이 Id-키 사이드테이블이
+    복사본에서도 원본을 되짚게 하는 근거입니다.
   </p>
 
   <div class="panel">
@@ -251,17 +247,17 @@
   </div>
 
   <div class="call warn">
-    <span class="h">within/apply는 의도적으로 표면 문법이 없다</span>
-    <code>QConjugate</code>는 <strong>자동 주입기(rung ④)만 생성</strong>하는 내부 노드다. 사용자는 ancilla만 작성하고,
-    켤레(compute–act–uncompute) 구조는 컴파일러가 자동으로 만든다 (Silq식 완전 자동).
+    <span class="h">within/apply는 의도적으로 표면 문법이 없습니다</span>
+    <code>QConjugate</code>는 <strong>자동 주입기(rung ④)만 생성</strong>하는 내부 노드입니다. 사용자는 앤실라만 작성하고,
+    켤레(compute–act–uncompute) 구조는 컴파일러가 자동으로 만듭니다 (Silq식 완전 자동).
   </div>
 
   <!-- ============ 4 ============ -->
   <h2 id="s4"><span class="n">4</span>SemanticModel — 지속 사이드테이블</h2>
   <p>
-    검증이 증명한 사실은 버리지 않고 <strong>안정 Id를 키로 한 사이드테이블</strong>에 담아 파이프라인 끝까지 전달한다
-    (Roslyn SemanticModel / rust-analyzer AstId 방식). 설계 원칙은 <strong>SSOT</strong>다.
-    각 사실은 <strong>정확히 하나의 생산자 패스</strong>가 만들며, 한번 기록된 사실은 <strong>추가만 하고 덮어쓰지 않는다</strong>.
+    검증이 증명한 사실은 버리지 않고 <strong>안정 Id를 키로 한 사이드테이블</strong>에 담아 파이프라인 끝까지 전달합니다
+    (Roslyn SemanticModel / rust-analyzer AstId 방식). 설계 원칙은 <strong>SSOT</strong>입니다.
+    각 사실은 <strong>정확히 하나의 생산자 패스</strong>가 만들며, 한번 기록된 사실은 <strong>추가만 하고 덮어쓰지 않습니다</strong>.
   </p>
 
   <div class="panel">
@@ -279,43 +275,45 @@
   </div>
 
   <div class="call why">
-    <span class="h">SSOT — 동기화 누락을 구조로 막는다</span>
-    조회가 복사본 노드에서 실패하면 <code>Resolve</code>가 <code>DerivedFrom</code> 계보를 따라 원본까지 올라간다.
-    같은 사실을 두 군데 넣지 않으므로(예: 방출이름은 별도 테이블, 소스이름은 Symbol) 동기화 코드가 필요하지 않다.
-    따라서 동기화 누락이라는 실패 모드 자체가 사라진다.
+    <span class="h">SSOT — 동기화 누락을 구조로 막습니다</span>
+    조회가 복사본 노드에서 실패하면 <code>Resolve</code>가 <code>DerivedFrom</code> 계보를 따라 원본까지 올라갑니다.
+    같은 사실을 두 군데 넣지 않으므로(예: 방출이름은 별도 테이블, 소스이름은 Symbol) 동기화 코드가 필요하지 않습니다.
+    따라서 동기화 누락이라는 실패 모드 자체가 사라집니다.
   </div>
 
   <!-- ============ 5 ============ -->
   <h2 id="s5"><span class="n">5</span>심벌테이블 & 이름의 두 도메인</h2>
   <p>
-    <strong>스코프 하나 = 심벌테이블 하나</strong>(<code>이름 → Symbol</code> 맵 + 부모 링크). 이것들이 부모–자식으로 엮여
-    스코프 트리를 이룬다. <strong>연산(op)도 심벌</strong>이다.
-    연산은 프로그램 최상위 스코프에 들어가며, 파라미터·레지스터·변수와 <strong>같은 단일 삽입 문</strong>(<code>Scope.TryAdd</code>)으로 등록된다.
+    <strong>스코프 하나 = 심벌테이블 하나</strong>(<code>이름 → Symbol</code> 맵 + 부모 링크)이며, 이것들이 부모–자식으로 엮여
+    스코프 트리를 이룹니다. <strong>연산(op)도 심벌</strong>입니다.
+    연산은 프로그램 최상위 스코프에 들어가며, 파라미터·레지스터·변수와 <strong>같은 단일 삽입 문</strong>(<code>Scope.TryAdd</code>)으로 등록됩니다.
   </p>
   <p><code>SymbolKind</code> = Parameter · Register · MeasureBit · Var · Const · LoopVar · <strong>Operation</strong>.</p>
 
   <div class="grid2">
     <div class="card">
       <h4>소스 이름 (Symbol.SourceName)</h4>
-      <p>사용자가 쓴 표기다. 검증 시점에 고정되어 <strong>영구 불변</strong>으로 남는다. 진단·<code>--stages</code> 심벌 뷰는 이 이름을 사용한다.</p>
+      <p>사용자가 쓴 표기입니다. 검증 시점에 고정되어 <strong>영구 불변</strong>으로 남습니다. 진단·<code>--stages</code> 심벌 뷰는 이 이름을 사용합니다.</p>
     </div>
     <div class="card">
       <h4>방출 이름 (FindEmittedName)</h4>
-      <p>맹글링 후 QASM에 나가는 이름이다. <strong>NameMangler가 기록</strong>한다. null이면 "맹글러가 아직 처리하지 않음"을 뜻하며, "무변경"을 뜻하지 않는다.</p>
+      <p>맹글링 후 QASM에 나가는 이름입니다. <strong>NameMangler가 기록</strong>합니다. null이면 "맹글러가 아직 처리하지 않음"을 뜻하며, "무변경"을 뜻하지 않습니다.</p>
     </div>
   </div>
   <p>
-    같은 선언에 대해 두 이름은 <strong>각자 한 곳</strong>에 저장되고 노드 Id로 조인된다. 그래서
-    <code>var x = Foo</code>처럼 연산을 값으로 쓰면 정확히 <strong>QSEM028</strong>로 거부된다.
-    op이 스코프에 심벌로 있으므로 "Foo는 연산이라 값이 아니다"라고 정확히 진단할 수 있다.
+    같은 선언에 대해 두 이름은 <strong>각자 한 곳</strong>에 저장되고 노드 Id로 조인됩니다. 그래서
+    <code>var x = Foo</code>처럼 연산을 값으로 쓰면 정확히 <strong>QSEM028</strong>로 거부됩니다.
+    연산이 스코프에 심벌로 있으므로 "Foo는 연산이라 값이 아니다"라고 정확히 진단할 수 있습니다.
   </p>
 
   <!-- ============ 6 ============ -->
   <h2 id="s6"><span class="n">6</span>효과분석 & 큐빗이벤트 (rung ①)</h2>
   <p>
     효과분석은 <strong>리프 문장(게이트·측정·<code>use</code>)마다 큐빗당 이벤트 하나</strong>를 방출해,
-    각 연산의 <strong>프로그램 순서 use/def 스트림</strong>을 만든다. 컨테이너(for/if)는 자기 이벤트를 만들지 않고
-    자식 리프가 정밀 detail을 가진다.
+    각 연산의 <strong>프로그램 순서 use/def 스트림</strong>을 만듭니다. 컨테이너(for/if)는 자기 이벤트를 만들지 않고
+    자식 리프가 정밀한 세부를 가집니다. 레지스터의 탄생(<code>use</code>)은 방출기의 선언 호이스팅과 동일하게
+    <strong>스트림 맨 앞에 기록</strong>되므로, 게이트가 텍스트상 자기 레지스터의 <code>use</code>보다 앞에 와도
+    올바르게 분석됩니다.
   </p>
 
   <div class="panel">
@@ -328,46 +326,43 @@
   </div>
 
   <p>
-    <code>QubitEvent(Qubit, Kind, Order, StmtId, Irreversible, CreatesSuperposition, NodeId)</code> —
-    <code>Irreversible</code>은 역연산이 없는 접촉(reset·비가역 호출의 <em>쓰기</em>에만),
-    <code>CreatesSuperposition</code>은 중첩을 만드는 쓰기(H/Rx/Ry, 호출로 전이 전파),
-    <code>NodeId</code>는 <strong>큐빗그래프</strong>(값 버전의 족보 DAG — 쓰기·측정은 그 이벤트가 태어나게 한 노드와 1:1, 읽기는 읽힌 당시의 현재 버전)로 가는 열쇠다.
-    역할 분담: <strong>이벤트 = 시간·역할·플래그 / 그래프 = 관계(버전·부모) / IR = 구조(컨테이너)</strong> — 한 사실 한 집.
-    하나의 스트림에서 <strong>두 뷰가 유도</strong>된다.
+    <code>QubitEvent(Qubit, Kind, Order, StmtId, Irreversible, NonQfree, NodeId)</code> —
+    <code>Irreversible</code>은 역연산이 없는 접촉(reset·비가역 호출의 <em>쓰기</em>에만) 표시이고,
+    <code>NonQfree</code>는 자동 청소를 불가능하게 만드는 쓰기(H·Rx·Ry의 중첩 생성 또는 Y·CY의 위상 치환 —
+    코스 <a href="uncompute-04-qfree.html">4장</a>·<a href="uncompute-05-y-gate.html">5장</a>에서 설명, 호출을 통해 전이 전파) 표시이며,
+    <code>NodeId</code>는 <strong>큐빗그래프</strong>(값 버전의 족보 DAG — 쓰기·측정은 그 이벤트가 태어나게 한 노드와 1:1, 읽기는 읽힌 당시의 현재 버전)로 가는 열쇠입니다.
+    역할 분담은 <strong>이벤트 = 시간·역할·플래그 / 그래프 = 관계(버전·부모) / IR = 구조(컨테이너)</strong> — 한 사실 한 집입니다.
+    하나의 스트림에서 <strong>두 뷰가 유도</strong>됩니다.
   </p>
 
   <div class="grid2">
     <div class="card">
       <h4>큐빗별 타임라인 → liveness</h4>
-      <p>큐빗 <code>q</code>로 필터(Overlaps) → <strong>Order 최소 = 탄생, 최대 = 마지막 사용(사망점)</strong>.
-      <code>LiveRange</code>는 이 min/max 조회 결과일 뿐이며 별도로 저장하지 않는다.</p>
+      <p>큐빗 <code>q</code>로 필터(Overlaps)하면 <strong>Order 최소 = 탄생, 최대 = 마지막 사용(사망점)</strong>입니다.
+      <code>LiveRange</code>는 이 min/max 조회 결과일 뿐이며 별도로 저장하지 않습니다.</p>
     </div>
     <div class="card">
       <h4>StmtId로 그룹핑 → 얽힘</h4>
-      <p>같은 <code>StmtId</code>를 공유하는 이벤트 = 그 문장에서 <strong>상호작용한 큐빗들</strong>.
-      여기서 얽힘 엣지가 읽힌다.</p>
+      <p>같은 <code>StmtId</code>를 공유하는 이벤트 = 그 문장에서 <strong>상호작용한 큐빗들</strong>입니다.
+      여기서 얽힘 엣지가 읽힙니다.</p>
     </div>
   </div>
 
   <div class="call">
-    <span class="h">얽힘 두 종류 — 값 vs 위상 (검증으로 확정된 사실)</span>
-    <p><strong>값얽힘</strong>: 0/1 값이 바뀜 (CNOT·CCX) — 그 문장에 "쓰기(Write)"가 있다.
-    <strong>위상얽힘</strong>: 값은 그대로, 부호만 — 두 큐빗 이상이 한 문장(StmtId)을 공유하며 이벤트가
-    <strong>전부 읽기(all-Read)</strong>일 때 (CZ, Controlled S/T/Z/Rz). 단독 S·T·Z·Rz는 국소 위상일 뿐 —
-    1-큐빗 그룹은 얽힘 엣지를 만들지 않는다. 즉 둘 다 StmtId 그룹핑에서 유도되며 별도 추적이 필요 없다.
-    그리고 상태벡터 검증(적대검증 5라운드 퍼저)으로 확정된 되돌림 안전성 — 두 종류의 "쓰기"가 되돌림을 막는다:
-    <strong>중첩을 만든 쓰기(H·Rx·Ry)</strong>, 그리고 <strong>기저의존 위상을 실은 치환 쓰기(Y·CY)</strong>
-    — Y는 0→1에 +i, 1→0에 −i를 실어, 타깃이 <em>얽혀</em> 있으면 그 위상이 생존자 분기 사이의 <em>상대</em>
-    위상이 되고 주입된 역연산이 이를 벗겨내 하류 측정을 뒤집는다(Silq가 Y를 qfree에서 뺀 이유; "Y는 안전, Silq보다
-    넓다"던 우리의 이전 주장은 검증으로 반증됨). 반면 <strong>대각 위상 게이트(Z·S·T·CZ)는 안전</strong> —
-    값을 쓰지 않아(all-Read) qfree 쓰기 자체가 아니므로 uncompute를 방해하지 않는다.</p>
+    <span class="h">얽힘 두 종류 — 값 vs 위상</span>
+    <p><strong>값얽힘</strong>은 0/1 값이 바뀌는 상호작용(CNOT·CCX)으로, 그 문장에 쓰기(Write) 이벤트가 있습니다.
+    <strong>위상얽힘</strong>은 값은 그대로 두고 부호만 새기는 상호작용으로, 두 큐빗 이상이 한 문장(StmtId)을
+    공유하며 이벤트가 <strong>전부 읽기(all-Read)</strong>일 때입니다 (CZ, Controlled S/T/Z/Rz).
+    단독 S·T·Z·Rz는 국소 위상일 뿐이어서 1-큐빗 그룹은 얽힘 엣지를 만들지 않습니다.
+    두 종류 모두 StmtId 그룹핑에서 유도되므로 별도 추적이 필요 없습니다.
+    되돌림 안전성과의 관계는 개념 코스 <a href="uncompute-02-ledger.html">2장</a>–<a href="uncompute-05-y-gate.html">5장</a>에서 장부 모델로 자세히 설명합니다.</p>
   </div>
 
   <!-- ============ 7 ============ -->
   <h2 id="s7"><span class="n">7</span>자동 uncomputation 사다리</h2>
   <p>
-    목표는 <strong>사용자가 작성하지 않은 정리(uncompute) 코드를 컴파일러가 자동으로 끼워 넣는 것</strong>이다.
-    사다리는 아래→위로 의존하는 4단 구조이며, rung ①·②는 이미 이 데이터시트의 6절 자료구조 위에서 <strong>조회</strong>로 끝난다.
+    목표는 <strong>사용자가 작성하지 않은 정리(uncompute) 코드를 컴파일러가 자동으로 끼워 넣는 것</strong>입니다.
+    사다리는 아래→위로 의존하는 4단 구조이며, rung ①·②는 6장의 자료구조 위에서 <strong>조회</strong>로 끝납니다.
   </p>
 
   <div class="ladder">
@@ -385,316 +380,54 @@
       <div class="rn">③</div>
       <div><span class="rt">되돌림 안전 판정 — <code>IsSafelyUncomputable</code></span><span class="st ok">구현됨 (조회)</span>
         <div class="rd"><code>UncomputeSafety(op, q)</code> = 전제 + 4-clause 판정 + 사유·범인 문장.
-        <strong>전제(1단 위임)</strong>: 안전 질문은 청소 후보에게만 — 측정 여부는 1단(청소 대상인가)의 판결이라
-        여기서 재판정하지 않고 그대로 전달(Measured = 출력으로 승격 / NotACleanupCandidate = 앤실라 아님).
-        조항: 비가역 접촉 없음(Irreversible) · <strong>비-qfree 쓰기 없음</strong>(NonQfreeWrite —
-        중첩 생성 H·Rx·Ry <em>또는</em> 기저의존 위상치환 Y·CY) · 컨테이너 안 쓰기 없음(ContainedWrite — if는
-        조건부, 루프는 반복이라 직선 역연산이 실행을 못 미러링) · 재료 생존(CoWrittenPartner — SWAP류 동시쓰기,
-        그리고 원소 쿼리에서 q보다 넓은 담요 쓰기는 차단하되 <em>use 탄생만 면제</em>(유일한 무부모 쓰기 노드로
-        생성 시 QINTERNAL로 강제) / SourceDied — 그래프에 기록된 부모(재료)가 청소 지점까지 그 값 그대로여야 하며,
-        컨테이너 안에서 죽으면 검사 구간이 최외곽 컨테이너 끝까지 연장). 적대검증 5라운드(표적 4 + 열거 퍼저)가
-        직전 수정마다 결함을 찾아내며 다듬은 조건 — 최신 수정분은 차기 라운드 검증 대기.</div></div>
+        <strong>전제</strong>: 안전 질문은 청소 후보에게만 던집니다 — 측정 여부는 코스 <a href="uncompute-01-ancilla.html">1장</a>의 판별(청소 대상인가)의
+        판결이므로 여기서 재판정하지 않고 그대로 전달합니다.
+        조항: 비가역 접촉 없음(Irreversible) · 비-qfree 쓰기 없음(NonQfreeWrite — 코스 <a href="uncompute-04-qfree.html">4</a>·<a href="uncompute-05-y-gate.html">5장</a>) ·
+        컨테이너 안 쓰기 없음(ContainedWrite — 코스 <a href="uncompute-07-loops.html">7장</a>) · 재료 생존(CoWrittenPartner/SourceDied —
+        그래프에 기록된 부모(재료)가 청소 지점까지 그 값 그대로여야 하며, 컨테이너 안에서 죽으면
+        검사 구간이 최외곽 컨테이너 끝까지 연장됩니다).</div></div>
     </div>
     <div class="rung">
       <div class="rn">④</div>
       <div><span class="rt">자동 주입</span><span class="st next">다음</span>
-        <div class="rd">확정된 언어 규칙(B): <strong>측정 안 한 use 레지스터는 스코프 끝에 |0⟩로 반납된다</strong> —
-        선포·버전 경계, 못 치우면 조용한 스킵이 아니라 <strong>컴파일 에러</strong>. 주입 지점 = 사망점,
-        컨테이너 안에서 죽으면 최외곽 컨테이너 직후. 역연산 커널은 이미 존재 → <a href="adjoint-pipeline.html">역합성 파이프라인</a>.</div></div>
+        <div class="rd">언어 규칙: <strong>측정하지 않은 use 레지스터는 스코프 끝에 |0⟩로 반납됩니다</strong> —
+        자동으로 치울 수 없으면 조용히 넘어가지 않고 <strong>컴파일 에러</strong>가 됩니다. 주입 지점은 사망점,
+        컨테이너 안에서 죽으면 최외곽 컨테이너 직후입니다. 역연산 커널은 이미 존재합니다 → <a href="adjoint-pipeline.html">역합성 파이프라인</a>.</div></div>
     </div>
   </div>
 
   <div class="rule">
-    사다리의 핵심: <strong>측정으로 고정되지 않은 유도값은 전부 되돌려 |0⟩로 정리한다.</strong>
+    사다리의 핵심: <strong>측정으로 고정되지 않은 유도값은 전부 되돌려 |0⟩로 정리합니다.</strong>
   </div>
 
   <!-- ============ 8 ============ -->
-  <h2 id="s8"><span class="n">8</span>ancilla와 uncompute — 왜, 무엇을</h2>
+  <h2 id="s8"><span class="n">8</span>자동 uncomputation — 개념 코스 (별도 11개 장)</h2>
   <p>
-    <strong>ancilla</strong>는 계산 중간에 잠깐 쓰는 보조 큐빗(연습장)이다. 정의는 <strong>탄생</strong> 기준
-    하나: <code>use</code>로 만든(= 이 연산 소유, |0⟩로 시작하는) 지역 작업공간 큐빗 — 문헌 표준(Q# <code>use</code>,
-    Quipper <code>with_ancilla</code>, Qiskit <code>AncillaRegister</code>)과 동일하다. |0⟩로 태어나 데이터와
-    얽혔다가, 다 쓰면 <strong>다시 |0⟩로 되돌려</strong> 반납해야 한다. 되돌리지 않으면 얽힌 쓰레기가 최종 결과를
-    오염시킨다. 여기서 용어 하나 더: 앤실라 중 <strong>측정된 것은 출력으로 승격</strong>되어(값이 배달됨 —
-    지연측정 원리상 출력 와이어) 청소 대상에서 빠지고, <strong>측정되지 않은 앤실라만 "청소 후보"</strong>다.
-    한 개념 = 한 용어: <em>앤실라(탄생) / 청소 후보(측정 안 된 앤실라) / safe(rung ③ 통과한 후보)</em>.
+    자동 uncomputation의 개념은 <strong>책처럼 넘겨 읽는 별도의 코스</strong>로 분리되어 있습니다.
+    각 장은 A4 1–2쪽 분량이며, 페이지마다 이전/다음 장으로 이동하는 링크가 있습니다.
+    1장부터 순서대로 읽으면 기초(용어·상태 모델)에서 시작해 판정·주입·한계·지형까지 이어집니다.
   </p>
-
-<pre><code><span class="cm">// a AND b AND c 일 때만 d 뒤집기 — 3중 컨트롤 게이트가 없어서 t를 중간값으로 사용</span>
-CCX(a, b, t);   <span class="cm">// ① compute: t = a AND b        (t = 다리, 정체는 a&amp;b)</span>
-CCX(t, c, d);   <span class="cm">// ② action:  d 뒤집음 (t AND c)  ← t의 마지막 사용 = 사망점</span>
-<span class="add">CCX(a, b, t);</span>   <span class="cm">// ③ uncompute: t → |0⟩ (rung ④가 자동 주입할 줄)</span></code></pre>
-
-  <h3>무엇이 uncompute 대상인가 — 큐빗마다 질문 2개</h3>
-  <div class="grid2">
-    <div class="card">
-      <h4>A. 프로그램이 만든 값인가?</h4>
-      <p>게이트의 <strong>타깃(Write)</strong>으로 값이 바뀐 적이 있으면 프로그램이 만든 값이다. 이 경우에는 되돌릴 레시피가 있다. 반대로 <strong>읽기만</strong> 했다면 입력(root)이므로 되돌릴 대상이 아니다.</p>
-    </div>
-    <div class="card">
-      <h4>B. 결과로 필요한가?</h4>
-      <p><strong>측정된 값</strong>은 출력이므로 유지한다. 또한 <strong>측정된 값과 얽혀</strong> 있어서 되돌리면 출력이 틀어지는 값도 유지한다. 둘 다 아니라면 정리 대상이다.</p>
-    </div>
-  </div>
-  <div class="rule">uncompute 대상 = <strong>A "프로그램이 만든 값" + B "결과에 필요하지 않은 값"</strong></div>
-
   <div class="panel">
     <table class="spec">
-      <tr><th>필터 (구조)</th><th>제외 대상</th><th>근거</th></tr>
-      <tr><td class="k">1. 파라미터</td><td>제외</td><td>호출자 입력 — 현재 연산이 만든 값이 아니다</td></tr>
-      <tr><td class="k">2. def 없음(읽기만)</td><td>제외</td><td>순수 입력(root) — 되돌릴 레시피 없음</td></tr>
-      <tr><td class="k">3. 측정됨</td><td>제외</td><td>출력으로 승격 — 값이 배달됨(앤실라로 태어난 건 변함없으나 청소 대상 아님)</td></tr>
-      <tr><td class="k">4. 남은 것</td><td><strong>청소 후보</strong></td><td>측정되지 않은 앤실라 → rung ③이 안전성 최종 판정</td></tr>
+      <tr><th>장</th><th>제목</th><th>다루는 것</th></tr>
+      <tr><td class="k">1</td><td><a href="uncompute-01-ancilla.html">앤실라와 청소 후보 — 용어와 판별</a></td><td>use로 만든 지역 작업공간, 측정과 승격, 판별 사다리</td></tr>
+      <tr><td class="k">2</td><td><a href="uncompute-02-ledger.html">상태를 읽는 법 — 장부 모델</a></td><td>가지와 계수 — 이후 모든 판정을 설명하는 틀</td></tr>
+      <tr><td class="k">3</td><td><a href="uncompute-03-gates.html">게이트는 장부를 어떻게 편집하는가</a></td><td>값 칸 · 계수 칸 · 줄 쪼개기 — 편집의 세 종류</td></tr>
+      <tr><td class="k">4</td><td><a href="uncompute-04-qfree.html">청소의 계약과 qfree</a></td><td>되돌릴 수 있는 쓰기의 조건</td></tr>
+      <tr><td class="k">5</td><td><a href="uncompute-05-y-gate.html">Y·CY가 차단되는 이유 — 위상 도장</a></td><td>값에 따라 달라지는 위상 도장과 얽힘</td></tr>
+      <tr><td class="k">6</td><td><a href="uncompute-06-injector.html">주입기 — 문장 붙여넣기 기계</a></td><td>자동 청소가 실제로 하는 일</td></tr>
+      <tr><td class="k">7</td><td><a href="uncompute-07-loops.html">루프와 호출 — 왜 판정이 갈리는가</a></td><td>문장 구조가 판정을 가르는 이유</td></tr>
+      <tr><td class="k">8</td><td><a href="uncompute-08-blanket.html">담요 문제 — 질의 폭과 문장 폭</a></td><td>레지스터 통짜 쓰기와 원소 질문의 충돌</td></tr>
+      <tr><td class="k">9</td><td><a href="uncompute-09-limits.html">차단의 두 종류</a></td><td>에러의 지도 — 물리의 벽과 구현의 여지</td></tr>
+      <tr><td class="k">10</td><td><a href="uncompute-10-two-runtimes.html">왜 정적 컴파일인가 — 두 개의 런타임</a></td><td>호스트와 QPU — 인터프리터가 들어갈 수 없는 곳</td></tr>
+      <tr><td class="k">11</td><td><a href="uncompute-11-landscape.html">언어 지형 속의 Qora</a></td><td>2026년의 도구들과 Qora의 자리</td></tr>
     </table>
   </div>
-
-  <div class="call why">
-    <span class="h">t는 되돌릴 수 있고 a,b,c는 되돌릴 수 없는 이유</span>
-    <p><code>t</code>를 되돌리는 <code>CCX(a,b,t)</code>는 a,b,t만 변경하고 측정된 <code>d</code>를 <strong>변경하지 않는다</strong>. 따라서 안전하다.
-    반면 준비된 입력 <code>a</code>를 되돌리려면 측정된 <code>d</code>와 얽힌 a를 변경하게 되어 결과가 틀어진다. 따라서 불가능하다.
-    즉 판정 기준은 "얽혔는가"가 아니라 <strong>"되돌려도 측정된 것이 보존되는가"</strong>(rung ③)다.</p>
-  </div>
-  <p>
-    여기까지가 "무엇을 치우는가"다. 이어지는 네 절이 나머지를 기초부터 답한다:
-    <a href="#s9">9절</a> 상태를 읽는 장부 모델 → <a href="#s10">10절</a> 어떤 쓰기가 되돌려지는가(qfree)와
-    Y 사건 → <a href="#s11">11절</a> 주입기가 실제로 하는 일과 루프·담요의 한계 →
-    <a href="#s12">12절</a> 이 설계가 서 있는 자리(두 런타임과 언어 지형).
-  </p>
+  <p><a class="doc-link" href="uncompute-01-ancilla.html">코스 1장부터 읽기 →</a></p>
 
   <!-- ============ 9 ============ -->
-  <h2 id="s9"><span class="n">9</span>상태를 읽는 법 — 장부 모델</h2>
-  <p>
-    rung ③의 판정 조건들("이 게이트는 왜 위험한가")을 이해하려면 양자 상태를 읽는 틀이 하나 필요하다.
-    이 절의 <strong>장부 모델</strong> 하나로 뒤 절의 모든 판정이 설명된다.
-  </p>
-  <p>
-    기계 전체의 상태는 <strong>장부 한 권</strong>이다. 장부의 <strong>한 줄(=가지)</strong>은
-    "모든 큐빗의 값 조합 하나 + 그 조합의 계수 한 칸"이다. 예를 들어 상태
-    <code>(|0,0⟩ + |1,1⟩)/√2</code> (표기: |b,a⟩)를 장부로 쓰면:
-  </p>
-  <div class="panel">
-    <table class="spec">
-      <tr><th>줄(가지)</th><th>b 값</th><th>a 값</th><th>계수</th></tr>
-      <tr><td class="k">1행</td><td>0</td><td>0</td><td>1/√2</td></tr>
-      <tr><td class="k">2행</td><td>1</td><td>1</td><td>1/√2</td></tr>
-    </table>
-  </div>
-  <div class="call">
-    <span class="h">계수 칸은 줄마다 하나 — "a의 계수"라는 것은 없다</span>
-    <p>수식으로 <code>i·(|0⟩_b ⊗ |1⟩_a) = (i|0⟩_b) ⊗ |1⟩_a = |0⟩_b ⊗ (i|1⟩_a)</code> —
-    곱셈이라 i를 어디에 붙여 읽어도 같다. 즉 <strong>위상(계수)은 특정 큐빗의 소유물이 아니라 줄(조합 전체)의
-    속성</strong>이다. 이 사실이 뒤 절의 Y 사건을 만든다.</p>
-  </div>
-  <p>게이트는 전부 <strong>장부 편집 연산</strong>으로 읽을 수 있다:</p>
-  <div class="panel">
-    <table class="spec">
-      <tr><th>게이트</th><th>장부에 하는 일</th><th>예</th></tr>
-      <tr><td class="k">X</td><td>각 줄에서 해당 <strong>값 칸만</strong> 뒤집기</td><td>줄 (b=0,a=0) → (b=0,a=1), 계수 불변</td></tr>
-      <tr><td class="k">CNOT</td><td>컨트롤 칸이 1인 줄에서만 타깃 값 칸 뒤집기</td><td>값 칸만, 계수 불변</td></tr>
-      <tr><td class="k">Z·S·T·CZ</td><td>값 칸은 안 건드리고 <strong>계수에만</strong> 부호/위상 곱하기</td><td>a=1인 줄의 계수에 −1 (Z)</td></tr>
-      <tr><td class="k">H</td><td><strong>줄을 두 줄로 쪼개기</strong> (한 값 → 두 값의 중첩)</td><td>1줄 장부 → 2줄 장부</td></tr>
-      <tr><td class="k">Y</td><td>값 칸 뒤집기 <strong>+ 뒤집은 값에 따라 다른 도장</strong>을 그 줄 계수에</td><td>0→1이면 +i, 1→0이면 −i</td></tr>
-      <tr><td class="k">M (측정)</td><td>한 값으로 <strong>줄들을 삭제</strong>하고 결과를 bit로 배달</td><td>비가역</td></tr>
-    </table>
-  </div>
-  <div class="call why">
-    <span class="h">전역 위상 vs 상대 위상 — 위험의 기준</span>
-    <p>계수에 붙는 부호가 <strong>모든 줄에 똑같이</strong> 붙으면(전역 위상) 물리적으로 아무 의미가 없다 —
-    측정으로 절대 구분 불가. <strong>줄마다 다르게</strong> 붙으면(상대 위상) 나중에 H 같은 간섭 게이트가
-    그 부호 차이를 측정 확률 차이로 바꿔 읽는다. 위험한 것은 "위상이 있다"가 아니라
-    <strong>"줄마다 다르게 붙었다"</strong>이다.</p>
-  </div>
-
-  <!-- ============ 10 ============ -->
-  <h2 id="s10"><span class="n">10</span>qfree — 어떤 쓰기를 되돌릴 수 있나 (그리고 Y 사건)</h2>
-  <p>
-    자동 청소의 계약: <strong>"앤실라만 |0⟩로 빼내고, 생존자들의 장부는 부호 하나까지 그대로 둔다."</strong>
-    이 계약을 지킬 수 있는 쓰기가 어떤 것인지가 rung ③의 2번 조항(qfree)이고, 장부 모델로 완전히 분류된다:
-  </p>
-  <div class="panel">
-    <table class="spec">
-      <tr><th>쓰기가 장부에 한 짓</th><th>게이트</th><th>판정</th><th>이유</th></tr>
-      <tr><td class="k">값 칸만 고침</td><td>X, CNOT, CCX, SWAP</td><td>✅ 청소 가능</td><td>역연산도 값 칸만 도로 고침 — 계수 무접촉</td></tr>
-      <tr><td class="k">값 안 씀 + 계수만</td><td>Z, S, T, CZ</td><td>✅ 애초에 쓰기 아님(읽기)</td><td>청소할 것 자체가 없음 — Grover 오라클(위상 킥백)이 사는 이유</td></tr>
-      <tr><td class="k">값 칸 + <strong>값의존 도장</strong></td><td><strong>Y, CY</strong></td><td>❌ 차단 (NonQfreeWrite)</td><td>얽힌 타깃이면 도장이 상대 위상이 됨 — 아래 사건</td></tr>
-      <tr><td class="k">줄 쪼개기 (중첩 생성)</td><td>H, Rx, Ry</td><td>❌ 차단 (NonQfreeWrite)</td><td>생존자가 기록한 뒤엔 쪼개진 줄을 도로 못 접음</td></tr>
-    </table>
-  </div>
-
-  <h3>Y 사건 — 상태벡터가 반증한 판정 버그 (적대검증 5차)</h3>
-  <p>
-    초기 설계는 "Y는 치환이고 정확한 역연산을 주입하니 안전 — Silq보다 넓다"고 봤다.
-    <strong>열거 퍼저가 상태벡터로 반증했다.</strong> 반례와 전체 트레이스 (표기 |b,a⟩):
-  </p>
-<pre><code>use a = Qubit[1];  use b = Qubit[1];
-H(b[0]);  CNOT(b[0], a[0]);  Y(a[0]);  H(b[0]);  bit m = M(b[0]);</code></pre>
-  <div class="panel">
-    <table class="spec">
-      <tr><th>단계</th><th>장부</th><th>설명</th></tr>
-      <tr><td class="k">H(b)</td><td>(|0,0⟩ + |1,0⟩)/√2</td><td>b 중첩 — 줄 2개</td></tr>
-      <tr><td class="k">CNOT(b,a)</td><td>(|0,0⟩ + |1,1⟩)/√2</td><td><strong>a가 b와 얽힘</strong> — 줄마다 a 값이 다름</td></tr>
-      <tr><td class="k">Y(a)</td><td>(<strong>+i</strong>|0,1⟩ <strong>−i</strong>|1,0⟩)/√2</td><td>줄1은 a=0을 뒤집어 +i, 줄2는 a=1을 뒤집어 −i — <strong>줄마다 다른 도장 = 상대 위상</strong></td></tr>
-    </table>
-  </div>
-  <p>a의 사망점(여기)에서 세 갈래를 비교하면:</p>
-  <div class="panel">
-    <table class="spec">
-      <tr><th>갈래</th><th>이후 H(b); M(b)의 결과</th></tr>
-      <tr><td class="k">① 청소 안 함</td><td>m = 0/1 각 50%</td></tr>
-      <tr><td class="k">② 계약이 약속한 상태 (a만 |0⟩로, 부호 유지)</td><td>b가 |−⟩ → <strong>m=1 확률 100%</strong></td></tr>
-      <tr><td class="k">③ 실제 역연산 주입 (Y†; CNOT†)</td><td>도장을 도로 걷어가 b가 |+⟩ → <strong>m=0 확률 100%</strong></td></tr>
-    </table>
-  </div>
-  <div class="call warn">
-    <span class="h">②≠③ — 계약 위반. 그래서 Y·CY는 차단이다</span>
-    <p>a는 세 갈래 모두 문제없이 |0⟩로 돌아온다. 깨진 것은 <strong>생존자 b의 부호</strong>다.
-    Y의 도장은 a 개인 소유가 아니라 줄(조합)의 공동 소유라서, 역연산이 도장을 회수하는 순간
-    b의 재산을 건드린 것이 된다. 정해진 기저값 위의 Y는 도장이 전역 위상이라 진짜 안전하지만
-    (그 정밀화는 TODO #15), 일괄 차단이 건전한 최소 수정이다. <strong>Silq도 같은 이유로 Y를
-    qfree에서 제외</strong>하며, Classiq은 반대 거래를 택했다 — Y를 허용하는 대신 살아있는 후보와
-    접촉한 생존자에게 비치환 연산을 금지(의존성 수갑). 같은 위험을 다른 자리에서 막는 것.</p>
-  </div>
-
-  <!-- ============ 11 ============ -->
-  <h2 id="s11"><span class="n">11</span>주입기의 실체 — 붙여넣기 기계, 루프, 담요</h2>
-  <p>
-    rung ④(주입기)의 모델은 단순하다: <strong>"앤실라를 쓴 문장들의 목록을 가져와, 각 문장의 역을,
-    역순으로, 사망점에 한 번씩 붙여넣는다."</strong> 카탈로그: <code>X→X</code>, <code>CNOT→CNOT</code>,
-    <code>호출→Adjoint 호출</code>. 판정(rung ③)의 여러 조항은 이 모델이 성립하는 경우만 safe로
-    통과시키는 울타리다.
-  </p>
-
-  <h3>같은 계산, 갈리는 판정 — 루프의 붙여넣기 문제</h3>
-  <div class="grid2">
-    <div class="card bad">
-      <h4>벌거벗은 루프 — ❌ 차단 (ContainedWrite)</h4>
-<pre><code>use a = Qubit[3];
-for i in 0..2 { X(a[i]); }
-<span class="cm">// 붙여넣기 시도:</span>
-<span class="cm">// X(a[i]);  ← i가 루프 밖엔 없음 (성립 불가)</span>
-<span class="cm">// 게다가 문장 1개 ≠ 실행 3번</span></code></pre>
-      <p><code>for</code>는 "문장"이 아니라 문장을 감싼 비계다 — 카탈로그에 "for의 역" 항목이 없고,
-      알맹이 <code>X(a[i])</code>는 비계 밖으로 꺼내는 순간 의미를 잃는다.</p>
-    </div>
-    <div class="card good">
-      <h4>연산으로 감싼 같은 루프 — ✅ safe</h4>
-<pre><code>operation Flip(Qubit[3] p){
-  for i in 0..2 { X(p[i]); }
-}
-use a = Qubit[3];
-Flip(a);
-<span class="add">Adjoint Flip(a);</span>  <span class="cm">// 붙여넣기 성립 — 한 문장</span></code></pre>
-      <p><code>Flip(a)</code>는 어엿한 문장 하나 = 실행도 한 번. 역도 문장 하나로 존재하고,
-      내부 루프는 <code>Adjoint Flip</code> 안에서 알아서 거꾸로 돈다.</p>
-    </div>
-  </div>
-  <div class="call why">
-    <span class="h">호출 경계의 복합 역변환 — callee 안의 루프가 문제없는 이유</span>
-    <p>호출을 원자 단위로 통째 뒤집으면 내부의 반복이 <strong>뒤집힌 단위 안에서 그대로 미러링</strong>된다.
-    이것이 Classiq이 "몸통이 전부 치환인 복합문은 그 자체로 하나의 치환"이라는 규칙으로 일반화한
-    <strong>복합 역변환</strong>이고, Qora는 호출 경계에서 이미 암묵적으로 수행한다. 벌거벗은
-    루프/if로의 일반화(#11 — 루프 역방향 재건축 또는 컴파일러가 임시 연산으로 감싸는 outlining)는
-    실증된 설계도가 있는 공사 항목이다. 단 <strong>측정 bit 조건의 if</strong>는 감싸도 치환이 아니라서
-    "역변환 시점에 조건이 같다"는 증명(고전 bit 흐름, 갭 #11)이 별도로 필요하다.</p>
-  </div>
-
-  <h3>담요 문제 — 질의 폭 vs 문장 폭</h3>
-  <p>
-    문장이 레지스터 전체를 한 덩어리로 쓰는 경우(브로드캐스트 <code>X(a)</code>, 불투명 호출,
-    동적 인덱스 루프)를 <strong>담요 쓰기</strong>라 부른다. 문제의 본질은 mismatch 하나다:
-    <strong>역연산의 폭은 문장 폭인데, 질문의 폭이 원소면 문장을 원소로 썰 수 없다.</strong>
-  </p>
-  <div class="grid2">
-    <div class="card good">
-      <h4>담요 + 전원 스크래치 — ✅ 문제없음</h4>
-<pre><code>operation Bcast(Qubit[2] p){ for i in 0..1 { X(p[i]); } }
-use a = Qubit[2];
-Bcast(a);            <span class="cm">// 아무도 측정 안 함</span>
-<span class="cm">// → a: cleanup candidate — safe</span></code></pre>
-      <p>질의 폭(레지스터 전체) = 역연산 폭(문장 전체). 썰 필요가 없으니 썰기 문제도 없다.</p>
-    </div>
-    <div class="card bad">
-      <h4>담요 + 운명 혼합 — ❌ 원소가 막힘</h4>
-<pre><code>use a = Qubit[2];
-Bcast(a);
-bit c = M(a[0]);     <span class="cm">// a[0]만 측정</span>
-<span class="cm">// → a[1] blocked: statement-wide write of `a`</span></code></pre>
-      <p>a[1]만 치워야 하는데 <code>Adjoint Bcast(a)</code>는 a[0]까지 되쓴다(측정값 훼손).
-      원소 질의에 담요 쓰기 = 차단.</p>
-    </div>
-  </div>
-  <p>혼합 케이스에서 에러를 받은 사용자의 수정 경로 4가지:</p>
-  <div class="panel">
-    <table class="spec">
-      <tr><th>수정</th><th>코드</th><th>의미</th></tr>
-      <tr><td class="k">① 구조 변경 (추천)</td><td><code>Flip(a[0]); Flip(a[1]);</code> 원소별 호출, 또는 운명별 레지스터 분리</td><td>정밀한 역사 → 컴파일러가 자동으로 치움</td></tr>
-      <tr><td class="k">② 측정</td><td><code>bit d = M(a[1]);</code></td><td>출력으로 승격 — 반납 의무 소멸</td></tr>
-      <tr><td class="k">③ 명시 Reset</td><td><code>Reset(a[1]);</code></td><td>비가역 지우기를 코드로 선언 (얽힌 큐빗엔 주의)</td></tr>
-      <tr><td class="k">④ 직접 역연산</td><td><code>X(a[1]);</code></td><td>본인의 의미론 — 컴파일러가 "반납됨"으로 인정하는 방식은 rung ④ 설계 항목</td></tr>
-    </table>
-  </div>
-
-  <h3>벽의 분류 — 물리인가, 공사인가</h3>
-  <div class="panel">
-    <table class="spec">
-      <tr><th>벽</th><th>성격</th><th>비고</th></tr>
-      <tr><td class="k">벌거벗은 루프 (몸통 치환뿐)</td><td>🔧 공사 빚</td><td>복합 역변환/outlining — Classiq 실증, 설계도 확보</td></tr>
-      <tr><td class="k">정적 담요 (리터럴 루프·브로드캐스트·정적 callee)</td><td>🔧 공사 빚</td><td>정적 전개(#13)로 정밀 이벤트화 — 에러가 자동청소로 전환</td></tr>
-      <tr><td class="k">측정 bit 조건의 if</td><td>🔧+🧱 반반</td><td>역변환은 공사 가능, 조건 보존 증명(#11)이 추가 필요</td></tr>
-      <tr><td class="k">H·Rx·Ry 스크래치</td><td>🧱 물리</td><td>모든 언어가 에러 (Silq 동일)</td></tr>
-      <tr><td class="k">얽힌 타깃 위의 Y·CY</td><td>🧱 물리</td><td>상태벡터로 증명 — 정답이 존재하지 않음</td></tr>
-      <tr><td class="k">측정된 값</td><td>🧱 물리</td><td>붕괴에 유니터리 역 없음</td></tr>
-      <tr><td class="k">런타임 의존 값 (동적 인덱스·경계)</td><td>🧱 정적 컴파일러 공통 숙명</td><td>출구는 셋뿐: 에러(Qora)/표현 금지(Classiq)/보증 포기</td></tr>
-    </table>
-  </div>
-  <div class="rule">🧱 물리 벽 = 언어가 사용자에게 물어야 마땅한 질문 · 🔧 공사 빚 = 갚을수록 에러가 자동 청소로 바뀜</div>
-
-  <!-- ============ 12 ============ -->
-  <h2 id="s12"><span class="n">12</span>왜 정적 컴파일인가 — 두 개의 런타임과 언어 지형</h2>
-  <p>양자 프로그램의 "런타임"은 하나가 아니라 둘이며, 이 분리가 언어 설계 전체를 결정한다.</p>
-  <div class="panel">
-    <table class="spec">
-      <tr><th></th><th>호스트 런타임</th><th>QPU 런타임</th></tr>
-      <tr><td class="k">장소</td><td>노트북/서버 CPU — Python이 사는 곳</td><td>코히어런스 창 안 — 회로가 실행되는 곳</td></tr>
-      <tr><td class="k">시간 규모</td><td>밀리초</td><td><strong>마이크로초</strong></td></tr>
-      <tr><td class="k">인터프리터 입장</td><td>가능</td><td><strong>물리적으로 불가</strong> (백만 배 느림)</td></tr>
-    </table>
-  </div>
-  <p>
-    "측정 결과가 1이면 같은 코히어런스 창 안에서 X" 같은 <strong>회로 내 반응 로직</strong>은 컴파일돼서
-    QPU 옆 제어장치에 미리 가 있어야만 존재할 수 있다. 오류정정 시대(=하드웨어가 커지는 방향)는
-    모든 논리 연산에 이 반응(실시간 신드롬 디코딩+fixup)을 요구하므로, <strong>하드웨어가 클수록
-    컴파일은 선택이 아니라 물리적 강제</strong>가 된다. 시뮬레이터에서는 두 런타임이 한 프로세스라
-    인터프리터가 실행 중에도 전지(全知)였다 — Silq의 우아함이 성립하는 조건이 정확히 이것이고,
-    실기계로 가는 순간 그 동일성이 깨지며 담요 문제 같은 "컴파일 타임에 모름" 문제가 태어난다.
-  </p>
-  <div class="call">
-    <span class="h">지형 (2026-07 팩트체크 확정)</span>
-    <p><strong>Qiskit/Cirq</strong>: Python이 회로를 조립(언어 아님, 보증 없음 — 현재 최대 점유).
-    <strong>Silq</strong>: 진짜 언어 + 자동 uncompute, 그러나 인터프리터 — 실기계 경로 없음.
-    <strong>CUDA-Q</strong>(NVIDIA): 컴파일러 인프라(MLIR→QIR) + GPU 시뮬 + 하드웨어 연결 — 언어들이 올라타는 기반.
-    <strong>Guppy</strong>(Quantinuum, 2025): 정적 컴파일+선형 타입(누수·복제를 컴파일 에러로), 실시간 제어 축의 최전선 — 자동 uncompute는 명시적 future work.
-    <strong>Classiq Qmod</strong>(2026): 추론 자동 uncompute를 상용 출하한 유일 시스템 — 자동화 축의 최전선.
-    신규 스택 전부가 정적 컴파일 방향이며, 보증을 약속한 시스템은 전부 <strong>"자동으로 못 하면
-    컴파일 에러 + 명시적 탈출구"</strong> 구조로 수렴했다.</p>
-  </div>
-  <div class="panel">
-    <table class="spec">
-      <tr><th>축</th><th>Qora</th><th>Classiq (같은 축의 상용 선두)</th></tr>
-      <tr><td class="k">앤실라 식별</td><td>추론 (주석·표기 없음)</td><td>추론 — 동일 접근</td></tr>
-      <tr><td class="k">청소 메커니즘</td><td>역연산 주입 (동일)</td><td>역연산 주입 + 합성 엔진 배치</td></tr>
-      <tr><td class="k">루프/if 청소</td><td>차단 (공사 예정 — 그들의 답안지 확보)</td><td>✅ 복합 역변환</td></tr>
-      <tr><td class="k">원소 정밀도</td><td>✅ per-element 판정·보고</td><td>배열=한 덩어리, 사용자가 수동 분할</td></tr>
-      <tr><td class="k">Y·CY</td><td>차단 (위상 소거 없음)</td><td>허용하되 생존자에 수갑 — 다른 거래</td></tr>
-      <tr><td class="k">탈출구</td><td>등재안: 증인 기반 명시 forget</td><td><code>free</code> = 무검증 undefined behavior</td></tr>
-      <tr><td class="k">유통</td><td>공개, 교육 지향, QASM 투명</td><td>상용 클로즈드, 합성 서버측</td></tr>
-    </table>
-  </div>
-  <div class="rule">Qora의 좌표: <strong>노선(정적 컴파일 · QASM 타깃 · 자동 안전 의미론) = 대세 정합 · 형태(독립 언어) = 비주류 · 벽들 = 업계 공통</strong></div>
-
-  <!-- ============ 13 ============ -->
-  <h2 id="s13"><span class="n">13</span>진단 코드 (QSEM)</h2>
-  <p>검증은 수집형(조기중단 없음)이므로 위반을 전부 보고한다. 코드는 에디터 툴링용 안정 식별자다.</p>
+  <h2 id="s9"><span class="n">9</span>진단 코드 (QSEM)</h2>
+  <p>검증은 수집형(조기중단 없음)이므로 위반을 전부 보고합니다. 코드는 에디터 툴링용 안정 식별자입니다.</p>
   <div class="panel">
     <table class="spec">
       <tr><th>코드</th><th>의미</th></tr>
@@ -714,8 +447,8 @@ bit c = M(a[0]);     <span class="cm">// a[0]만 측정</span>
     </table>
   </div>
 
-  <!-- ============ 14 ============ -->
-  <h2 id="s14"><span class="n">14</span>버전 히스토리</h2>
+  <!-- ============ 10 ============ -->
+  <h2 id="s10"><span class="n">10</span>버전 히스토리</h2>
   <div class="panel">
     <table class="spec">
       <tr><th>버전</th><th>핵심</th></tr>
@@ -726,7 +459,7 @@ bit c = M(a[0]);     <span class="cm">// a[0]만 측정</span>
       <tr><td class="k">v0.16</td><td>within/apply IR 켤레, 안정 노드 Id + 지속 SemanticModel</td></tr>
       <tr><td class="k">v0.17</td><td>효과분석(touched/modified), 연산을 1급 심벌로(연결 스코프), 소스/방출 이름 도메인 분리</td></tr>
       <tr><td class="k">v0.18</td><td>큐빗이벤트 스트림으로 저장 통일, <strong>rung ② liveness</strong>(<code>LiveRange</code> 조회)</td></tr>
-      <tr><td class="k">이후 (워킹트리)</td><td><strong>rung ③ 안전판정</strong>(4-clause + 사유·범인; qfree 기준이 Y·CY 위상치환까지 차단하도록 교정 — Silq 정렬), <strong>큐빗그래프</strong>(값 족보 DAG, 이벤트와 동시 기록 + 반증 가능한 상시 일치성 스윕), 반납 의미론 (B) 확정(스코프 끝 |0⟩ 반납, 못 치우면 에러), 적대검증 5라운드(표적 4 + 퍼저) 반영</td></tr>
+      <tr><td class="k">이후 (워킹트리)</td><td><strong>rung ③ 안전판정</strong>(4-clause + 사유·범인, 비-qfree 기준에 Y·CY 위상치환 포함), <strong>큐빗그래프</strong>(값 족보 DAG, 이벤트와 동시 기록 + 상시 일치성 스윕), 반납 규칙(스코프 끝 |0⟩ 반납, 못 치우면 에러), 앤실라/청소 후보 용어 체계와 원소별 리포트</td></tr>
     </table>
   </div>
 

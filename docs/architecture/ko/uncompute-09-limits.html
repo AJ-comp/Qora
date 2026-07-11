@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>차단의 두 종류 — 원리적 한계와 보수적 거부 — 자동 uncomputation 코스 9/11 — Qora</title>
+<style>
+  :root {
+    --bg: #ffffff; --ink: #1f2430; --muted: #5b6472; --line: #e6e8ee; --panel: #f7f8fb;
+    --plus: #1457d6; --minus: #d62b39; --accent: #6b3fd4; --good: #11875b; --amber: #b5810a;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo",
+      "Malgun Gothic", "Noto Sans KR", "Segoe UI Symbol", "Cambria Math", sans-serif;
+    line-height: 1.7; font-size: 16.5px;
+  }
+  .wrap { max-width: 940px; margin: 0 auto; padding: 0 20px 120px; }
+  header.hero {
+    padding: 60px 20px 36px; text-align: center; border-bottom: 1px solid var(--line);
+    background: linear-gradient(180deg, #faf9ff, #ffffff);
+  }
+  header.hero h1 { font-size: 2.0rem; margin: 0 0 10px; letter-spacing: -0.5px; }
+  header.hero p { color: var(--muted); margin: 0; font-size: 1.02rem; }
+  .tag { display:inline-block; font-size:.78rem; letter-spacing:.12em; text-transform:uppercase;
+         color: var(--accent); font-weight:700; margin-bottom:14px; }
+  h2 { margin: 54px 0 12px; font-size: 1.42rem; letter-spacing: -0.3px;
+       padding-top: 14px; border-top: 2px solid var(--line); }
+  h2 .n { display:inline-flex; align-items:center; justify-content:center;
+    width: 1.7em; height: 1.7em; border-radius: 50%;
+    background: var(--accent); color:#fff; font-size: .8rem; font-weight:700;
+    margin-right: 10px; vertical-align: middle; }
+  h3 { margin: 30px 0 8px; font-size: 1.1rem; }
+  p { margin: 12px 0; }
+  strong { color: #11203a; }
+  .lead { font-size: 1.05rem; }
+  code, .mono, pre {
+    font-family: "SF Mono", "JetBrains Mono", "D2Coding", Consolas, "Segoe UI Symbol", monospace;
+  }
+  code { background: var(--panel); border: 1px solid var(--line); border-radius: 5px; padding: 1px 6px; font-size: .9em; }
+  pre { background: #111827; color: #eef4ff; border-radius: 10px; padding: 15px 17px; margin: 16px 0;
+        overflow-x: auto; font-size: .86rem; line-height: 1.55; }
+  pre code { background: none; border: none; padding: 0; font-size: inherit; color: inherit; }
+  pre .cm { color: #8ba0c7; }
+  pre .hl { color: #c4a7ff; font-weight: 700; }
+  pre .add { color: #7fe0b0; font-weight: 700; }
+  pre .rd { color: #ff9db0; font-weight: 700; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+           padding: 14px 16px; margin: 16px 0; overflow-x: auto; }
+  table.spec { border-collapse: collapse; width: 100%; font-size: .92rem; }
+  table.spec th, table.spec td { padding: 8px 11px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: top; }
+  table.spec th { font-size: .78rem; color: var(--muted); font-weight: 700; text-transform: uppercase; letter-spacing:.05em; background:#fbfbfe; }
+  table.spec tr:last-child td { border-bottom: none; }
+  table.spec code { white-space: nowrap; }
+  table.spec td.k { white-space: nowrap; font-weight: 700; color:#1a2740; }
+  .call { border-left: 4px solid var(--accent); background: #faf8ff;
+          padding: 13px 17px; border-radius: 0 8px 8px 0; margin: 18px 0; }
+  .call.why { border-color: var(--good); background: #f2fbf7; }
+  .call.warn { border-color: #e6a417; background: #fff9ec; }
+  .call .h { font-weight: 700; display:block; margin-bottom: 4px; }
+  .call p { margin: 8px 0 0; }
+  .rule { text-align:center; font-size: 1.02rem; font-weight: 700; color:#1a1140;
+          background: #f3efff; border:1px solid #e2d8ff; border-radius: 10px; padding: 15px; margin: 20px 0; }
+  .toc { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 20px; margin: 24px 0; }
+  .toc ol { margin: 6px 0 0; padding-left: 20px; columns: 2; column-gap: 30px; }
+  .toc a { color: var(--ink); text-decoration: none; }
+  .toc a:hover { color: var(--accent); }
+  .doc-links { display:flex; flex-wrap:wrap; gap:10px; margin: 18px 0 6px; }
+  .doc-link { display:inline-flex; align-items:center; gap:8px; border:1px solid #cddcff;
+              background:#f6f9ff; color:#1745b5; border-radius:999px; padding:7px 15px; font-weight:700; text-decoration:none; font-size:.92rem; }
+  .doc-link:hover { border-color:#9bb8ff; background:#eef4ff; }
+  .doc-meta { border: 1px solid #dfe5f2; border-left: 5px solid var(--accent); border-radius: 8px;
+              background: #f8faff; padding: 16px 18px; margin: 22px 0; }
+  .doc-meta .meta-title { font-weight: 800; color: #11203a; margin-bottom: 12px; }
+  .meta-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 18px; margin: 0; }
+  .meta-grid dt { color: var(--muted); font-size: .74rem; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; }
+  .meta-grid dd { margin: 3px 0 0; }
+  footer { text-align:center; color:var(--muted); font-size:.9rem; margin-top: 60px; padding-top: 24px; border-top:1px solid var(--line); }
+  /* datasheet-specific */
+  .pipe { display:flex; flex-direction:column; gap:0; margin: 18px 0; }
+  .pipe .stg { display:flex; align-items:center; gap:12px; }
+  .pipe .box { flex:1; background:#fff; border:1px solid var(--line); border-radius:8px; padding:9px 13px; font-size:.92rem; }
+  .pipe .box b { color:#1a2740; }
+  .pipe .box .d { color:var(--muted); font-size:.85rem; }
+  .pipe .box.key { border-color:#c9b6f4; background:#faf7ff; }
+  .pipe .arr { text-align:center; color:var(--accent); font-size:1.2rem; line-height:1; margin:5px 0; }
+  .ladder { display:grid; gap:10px; margin:18px 0; }
+  .rung { display:grid; grid-template-columns:auto 1fr; gap:14px; align-items:start;
+          border:1px solid var(--line); border-radius:10px; padding:13px 16px; background:#fff; }
+  .rung .rn { width:38px; height:38px; border-radius:8px; background:var(--accent); color:#fff;
+              font-weight:800; display:flex; align-items:center; justify-content:center; font-size:1.05rem; }
+  .rung.done { border-left:5px solid var(--good); }
+  .rung.done .rn { background:var(--good); }
+  .rung .rt { font-weight:800; color:#1a2740; }
+  .rung .rd { color:var(--muted); font-size:.92rem; margin-top:2px; }
+  .rung .st { display:inline-block; font-size:.72rem; font-weight:800; border-radius:999px; padding:2px 9px; margin-left:8px; vertical-align:middle; }
+  .rung .st.ok { background:#e4f7ee; color:var(--good); }
+  .rung .st.next { background:#f3efff; color:var(--accent); }
+  .badge { display:inline-block; font-size:.72rem; font-weight:800; border-radius:5px; padding:1px 7px; }
+  .badge.r { background:#eef4ff; color:var(--plus); }
+  .badge.w { background:#fdeef0; color:var(--minus); }
+  .badge.m { background:#f3efff; color:var(--accent); }
+  .grid2 { display:grid; grid-template-columns:1fr; gap:14px; margin:16px 0; }
+  @media (min-width:740px){ .grid2 { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+  .card { background:#fff; border:1px solid var(--line); border-radius:8px; padding:14px 16px; }
+  .card.good { border-top:4px solid var(--good); }
+  .card.bad { border-top:4px solid var(--minus); }
+  .card h4 { margin:0 0 8px; font-size:1rem; }
+  @media (max-width: 720px) { .meta-grid, .toc ol { grid-template-columns: 1fr; columns:1; } }
+</style>
+</head>
+<body>
+<div class="qora-lang-switch" style="position:sticky;top:0;z-index:99;text-align:right;padding:8px 16px;background:rgba(255,255,255,.92);backdrop-filter:blur(4px);border-bottom:1px solid #e6e8ee;font-size:13px;font-family:sans-serif;"><a href="../en/index.html">English</a> · <strong>한국어</strong> · <a href="../ja/index.html">日本語</a></div>
+
+<header class="hero">
+  <div class="tag">Qora · 자동 uncomputation 코스 · 9/11</div>
+  <h1>9. 차단의 두 종류 — 원리적 한계와 보수적 거부</h1>
+  <p>에러의 지도 — 물리의 벽과 구현의 여지</p>
+</header>
+
+<div class="wrap">
+
+  <nav class="doc-links" aria-label="코스 내비게이션">
+    <a class="doc-link" href="uncompute-08-blanket.html">← 8. 담요 문제 — 질의 폭과 문장 폭</a>
+    <a class="doc-link" href="datasheet.html#s8">코스 목차</a>
+    <a class="doc-link" href="uncompute-10-two-runtimes.html">10. 왜 정적 컴파일인가 — 두 개의 런타임 →</a>
+  </nav>
+  <p>
+    컴파일 에러로 이어지는 차단에는 성격이 다른 두 종류가 있습니다.
+    <strong>원리적 한계</strong>는 어떤 컴파일러도 넘을 수 없는 벽이고,
+    <strong>보수적 거부</strong>는 현재 구현이 아직 다루지 않아 거부하는 것으로 향후 완화가 계획되어 있습니다.
+  </p>
+  <div class="panel">
+    <table class="spec">
+      <tr><th>차단</th><th>성격</th><th>설명</th></tr>
+      <tr><td class="k">H·Rx·Ry 스크래치</td><td>🧱 원리적 한계</td><td>줄을 쪼갠 뒤 생존자가 기록하면 도로 접을 수 없습니다 — 모든 언어가 동일하게 거부합니다</td></tr>
+      <tr><td class="k">얽힌 타깃 위의 Y·CY</td><td>🧱 원리적 한계</td><td><a href="uncompute-05-y-gate.html">5장</a> — 계약을 지키는 청소가 존재하지 않습니다</td></tr>
+      <tr><td class="k">측정된 값</td><td>🧱 원리적 한계</td><td>붕괴에는 유니터리 역이 없습니다 (측정된 앤실라는 애초에 청소 대상이 아니라 출력)</td></tr>
+      <tr><td class="k">런타임 의존 값 (동적 인덱스·경계)</td><td>🧱 정적 컴파일의 숙명</td><td>컴파일 타임에 회로를 확정하는 모든 언어의 공통 한계 — <a href="uncompute-10-two-runtimes.html">10장</a></td></tr>
+      <tr><td class="k">벌거벗은 루프 (몸통이 값 편집뿐)</td><td>🔧 보수적 거부</td><td>복합문 통째 역변환으로 완화 예정 (지금은 연산으로 감싸면 통과 — <a href="uncompute-07-loops.html">7장</a>)</td></tr>
+      <tr><td class="k">정적 담요 (리터럴 경계 루프·브로드캐스트)</td><td>🔧 보수적 거부</td><td>정적 전개로 원소별 정밀 기록이 가능해지면 자동 청소로 전환됩니다</td></tr>
+      <tr><td class="k">확정 기저값 위의 Y</td><td>🔧 보수적 거부</td><td>얽히지 않았음을 그래프로 증명하면 재허용 가능합니다 (<a href="uncompute-05-y-gate.html">5장</a>)</td></tr>
+      <tr><td class="k">측정 bit 조건의 if 안 쓰기</td><td>🔧+🧱 혼합</td><td>역변환 자체는 가능하나 "조건이 변하지 않았다"는 증명이 추가로 필요합니다</td></tr>
+    </table>
+  </div>
+  <div class="rule">🧱 원리적 한계 = 언어가 사용자에게 물어야 마땅한 질문 · 🔧 보수적 거부 = 완화될수록 에러가 자동 청소로 바뀝니다</div>
+  <p>
+    에러가 나는 것이 설계 결함이 아닌 이유가 여기 있습니다. 대안은 둘뿐인데 —
+    조용히 건너뛰면 "반납된다"는 언어 규칙이 거짓이 되고, 억지로 주입하면 결과가 바뀝니다(<a href="uncompute-05-y-gate.html">5장</a>).
+    자동으로 보증할 수 없는 것을 소리 내어 알리고 사용자에게 선택지를 주는 것(<a href="uncompute-08-blanket.html">8장</a>의 수정 경로)이
+    유일하게 정직한 동작입니다.
+  </p>
+
+  <nav class="doc-links" aria-label="코스 내비게이션">
+    <a class="doc-link" href="uncompute-08-blanket.html">← 8. 담요 문제 — 질의 폭과 문장 폭</a>
+    <a class="doc-link" href="datasheet.html#s8">코스 목차</a>
+    <a class="doc-link" href="uncompute-10-two-runtimes.html">10. 왜 정적 컴파일인가 — 두 개의 런타임 →</a>
+  </nav>
+
+  <footer>
+    자동 uncomputation 코스 9/11 · <a href="datasheet.html#s8">코스 목차</a> ·
+    <a href="datasheet.html">컴파일러 데이터시트</a>
+  </footer>
+
+</div>
+</body>
+</html>

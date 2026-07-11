@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>게이트는 장부를 어떻게 편집하는가 — 자동 uncomputation 코스 3/11 — Qora</title>
+<style>
+  :root {
+    --bg: #ffffff; --ink: #1f2430; --muted: #5b6472; --line: #e6e8ee; --panel: #f7f8fb;
+    --plus: #1457d6; --minus: #d62b39; --accent: #6b3fd4; --good: #11875b; --amber: #b5810a;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo",
+      "Malgun Gothic", "Noto Sans KR", "Segoe UI Symbol", "Cambria Math", sans-serif;
+    line-height: 1.7; font-size: 16.5px;
+  }
+  .wrap { max-width: 940px; margin: 0 auto; padding: 0 20px 120px; }
+  header.hero {
+    padding: 60px 20px 36px; text-align: center; border-bottom: 1px solid var(--line);
+    background: linear-gradient(180deg, #faf9ff, #ffffff);
+  }
+  header.hero h1 { font-size: 2.0rem; margin: 0 0 10px; letter-spacing: -0.5px; }
+  header.hero p { color: var(--muted); margin: 0; font-size: 1.02rem; }
+  .tag { display:inline-block; font-size:.78rem; letter-spacing:.12em; text-transform:uppercase;
+         color: var(--accent); font-weight:700; margin-bottom:14px; }
+  h2 { margin: 54px 0 12px; font-size: 1.42rem; letter-spacing: -0.3px;
+       padding-top: 14px; border-top: 2px solid var(--line); }
+  h2 .n { display:inline-flex; align-items:center; justify-content:center;
+    width: 1.7em; height: 1.7em; border-radius: 50%;
+    background: var(--accent); color:#fff; font-size: .8rem; font-weight:700;
+    margin-right: 10px; vertical-align: middle; }
+  h3 { margin: 30px 0 8px; font-size: 1.1rem; }
+  p { margin: 12px 0; }
+  strong { color: #11203a; }
+  .lead { font-size: 1.05rem; }
+  code, .mono, pre {
+    font-family: "SF Mono", "JetBrains Mono", "D2Coding", Consolas, "Segoe UI Symbol", monospace;
+  }
+  code { background: var(--panel); border: 1px solid var(--line); border-radius: 5px; padding: 1px 6px; font-size: .9em; }
+  pre { background: #111827; color: #eef4ff; border-radius: 10px; padding: 15px 17px; margin: 16px 0;
+        overflow-x: auto; font-size: .86rem; line-height: 1.55; }
+  pre code { background: none; border: none; padding: 0; font-size: inherit; color: inherit; }
+  pre .cm { color: #8ba0c7; }
+  pre .hl { color: #c4a7ff; font-weight: 700; }
+  pre .add { color: #7fe0b0; font-weight: 700; }
+  pre .rd { color: #ff9db0; font-weight: 700; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+           padding: 14px 16px; margin: 16px 0; overflow-x: auto; }
+  table.spec { border-collapse: collapse; width: 100%; font-size: .92rem; }
+  table.spec th, table.spec td { padding: 8px 11px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: top; }
+  table.spec th { font-size: .78rem; color: var(--muted); font-weight: 700; text-transform: uppercase; letter-spacing:.05em; background:#fbfbfe; }
+  table.spec tr:last-child td { border-bottom: none; }
+  table.spec code { white-space: nowrap; }
+  table.spec td.k { white-space: nowrap; font-weight: 700; color:#1a2740; }
+  .call { border-left: 4px solid var(--accent); background: #faf8ff;
+          padding: 13px 17px; border-radius: 0 8px 8px 0; margin: 18px 0; }
+  .call.why { border-color: var(--good); background: #f2fbf7; }
+  .call.warn { border-color: #e6a417; background: #fff9ec; }
+  .call .h { font-weight: 700; display:block; margin-bottom: 4px; }
+  .call p { margin: 8px 0 0; }
+  .rule { text-align:center; font-size: 1.02rem; font-weight: 700; color:#1a1140;
+          background: #f3efff; border:1px solid #e2d8ff; border-radius: 10px; padding: 15px; margin: 20px 0; }
+  .toc { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 20px; margin: 24px 0; }
+  .toc ol { margin: 6px 0 0; padding-left: 20px; columns: 2; column-gap: 30px; }
+  .toc a { color: var(--ink); text-decoration: none; }
+  .toc a:hover { color: var(--accent); }
+  .doc-links { display:flex; flex-wrap:wrap; gap:10px; margin: 18px 0 6px; }
+  .doc-link { display:inline-flex; align-items:center; gap:8px; border:1px solid #cddcff;
+              background:#f6f9ff; color:#1745b5; border-radius:999px; padding:7px 15px; font-weight:700; text-decoration:none; font-size:.92rem; }
+  .doc-link:hover { border-color:#9bb8ff; background:#eef4ff; }
+  .doc-meta { border: 1px solid #dfe5f2; border-left: 5px solid var(--accent); border-radius: 8px;
+              background: #f8faff; padding: 16px 18px; margin: 22px 0; }
+  .doc-meta .meta-title { font-weight: 800; color: #11203a; margin-bottom: 12px; }
+  .meta-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 18px; margin: 0; }
+  .meta-grid dt { color: var(--muted); font-size: .74rem; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; }
+  .meta-grid dd { margin: 3px 0 0; }
+  footer { text-align:center; color:var(--muted); font-size:.9rem; margin-top: 60px; padding-top: 24px; border-top:1px solid var(--line); }
+  /* datasheet-specific */
+  .pipe { display:flex; flex-direction:column; gap:0; margin: 18px 0; }
+  .pipe .stg { display:flex; align-items:center; gap:12px; }
+  .pipe .box { flex:1; background:#fff; border:1px solid var(--line); border-radius:8px; padding:9px 13px; font-size:.92rem; }
+  .pipe .box b { color:#1a2740; }
+  .pipe .box .d { color:var(--muted); font-size:.85rem; }
+  .pipe .box.key { border-color:#c9b6f4; background:#faf7ff; }
+  .pipe .arr { text-align:center; color:var(--accent); font-size:1.2rem; line-height:1; margin:5px 0; }
+  .ladder { display:grid; gap:10px; margin:18px 0; }
+  .rung { display:grid; grid-template-columns:auto 1fr; gap:14px; align-items:start;
+          border:1px solid var(--line); border-radius:10px; padding:13px 16px; background:#fff; }
+  .rung .rn { width:38px; height:38px; border-radius:8px; background:var(--accent); color:#fff;
+              font-weight:800; display:flex; align-items:center; justify-content:center; font-size:1.05rem; }
+  .rung.done { border-left:5px solid var(--good); }
+  .rung.done .rn { background:var(--good); }
+  .rung .rt { font-weight:800; color:#1a2740; }
+  .rung .rd { color:var(--muted); font-size:.92rem; margin-top:2px; }
+  .rung .st { display:inline-block; font-size:.72rem; font-weight:800; border-radius:999px; padding:2px 9px; margin-left:8px; vertical-align:middle; }
+  .rung .st.ok { background:#e4f7ee; color:var(--good); }
+  .rung .st.next { background:#f3efff; color:var(--accent); }
+  .badge { display:inline-block; font-size:.72rem; font-weight:800; border-radius:5px; padding:1px 7px; }
+  .badge.r { background:#eef4ff; color:var(--plus); }
+  .badge.w { background:#fdeef0; color:var(--minus); }
+  .badge.m { background:#f3efff; color:var(--accent); }
+  .grid2 { display:grid; grid-template-columns:1fr; gap:14px; margin:16px 0; }
+  @media (min-width:740px){ .grid2 { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+  .card { background:#fff; border:1px solid var(--line); border-radius:8px; padding:14px 16px; }
+  .card.good { border-top:4px solid var(--good); }
+  .card.bad { border-top:4px solid var(--minus); }
+  .card h4 { margin:0 0 8px; font-size:1rem; }
+  @media (max-width: 720px) { .meta-grid, .toc ol { grid-template-columns: 1fr; columns:1; } }
+</style>
+</head>
+<body>
+<div class="qora-lang-switch" style="position:sticky;top:0;z-index:99;text-align:right;padding:8px 16px;background:rgba(255,255,255,.92);backdrop-filter:blur(4px);border-bottom:1px solid #e6e8ee;font-size:13px;font-family:sans-serif;"><a href="../en/index.html">English</a> · <strong>한국어</strong> · <a href="../ja/index.html">日本語</a></div>
+
+<header class="hero">
+  <div class="tag">Qora · 자동 uncomputation 코스 · 3/11</div>
+  <h1>3. 게이트는 장부를 어떻게 편집하는가</h1>
+  <p>값 칸 · 계수 칸 · 줄 쪼개기 — 편집의 세 종류</p>
+</header>
+
+<div class="wrap">
+
+  <nav class="doc-links" aria-label="코스 내비게이션">
+    <a class="doc-link" href="uncompute-02-ledger.html">← 2. 상태를 읽는 법 — 장부 모델</a>
+    <a class="doc-link" href="datasheet.html#s8">코스 목차</a>
+    <a class="doc-link" href="uncompute-04-qfree.html">4. 청소의 계약과 qfree →</a>
+  </nav>
+  <p>모든 게이트는 장부 편집 연산으로 읽을 수 있습니다. 편집의 종류가 게이트의 안전성을 결정합니다.</p>
+  <div class="panel">
+    <table class="spec">
+      <tr><th>게이트</th><th>장부에 하는 일</th><th>비고</th></tr>
+      <tr><td class="k">X</td><td>각 줄에서 해당 <strong>값 칸만</strong> 뒤집기</td><td>계수 무접촉</td></tr>
+      <tr><td class="k">CNOT · CCX · SWAP</td><td>조건에 따라 값 칸 뒤집기/맞바꾸기</td><td>값 칸만, 계수 무접촉</td></tr>
+      <tr><td class="k">Z · S · T · CZ · Rz</td><td>값 칸은 안 건드리고 <strong>계수에만</strong> 위상 곱하기</td><td>효과분석에서는 읽기(Read)로 기록</td></tr>
+      <tr><td class="k">H · Rx · Ry</td><td><strong>줄을 두 줄로 쪼개기</strong> (하나의 값 → 두 값의 중첩)</td><td>1줄 장부 → 2줄 장부</td></tr>
+      <tr><td class="k">Y · CY</td><td>값 칸 뒤집기 <strong>+ 뒤집은 값에 따라 다른 도장</strong>을 그 줄 계수에</td><td>0→1이면 +i, 1→0이면 −i</td></tr>
+      <tr><td class="k">M (측정)</td><td>한 값으로 <strong>줄들을 삭제</strong>하고 결과를 bit로 배달</td><td>비가역</td></tr>
+      <tr><td class="k">Reset</td><td>값을 강제로 |0⟩ (이력 소실)</td><td>비가역</td></tr>
+    </table>
+  </div>
+
+  <h3>예제 — 장부의 진화를 단계별로</h3>
+<pre><code>use b = Qubit[1];  use a = Qubit[1];
+H(b[0]);           <span class="cm">// ① 줄 쪼개기</span>
+CNOT(b[0], a[0]);  <span class="cm">// ② 조건부 값 편집</span>
+Z(a[0]);           <span class="cm">// ③ 계수 편집</span></code></pre>
+  <div class="panel">
+    <table class="spec">
+      <tr><th>시점</th><th>장부 (|b,a⟩)</th><th>일어난 편집</th></tr>
+      <tr><td class="k">시작</td><td>|0,0⟩ ×1</td><td>줄 하나</td></tr>
+      <tr><td class="k">① H(b)</td><td>|0,0⟩ ×1/√2 · |1,0⟩ ×1/√2</td><td>줄이 둘로 쪼개짐</td></tr>
+      <tr><td class="k">② CNOT(b,a)</td><td>|0,0⟩ ×1/√2 · |1,1⟩ ×1/√2</td><td>b=1인 줄에서만 a 값 칸 뒤집힘 — <strong>얽힘 탄생</strong> (줄마다 a 값이 다름)</td></tr>
+      <tr><td class="k">③ Z(a)</td><td>|0,0⟩ ×1/√2 · |1,1⟩ ×<strong>−</strong>1/√2</td><td>a=1인 줄의 계수에만 −1 — 값 칸 무접촉 (읽기)</td></tr>
+    </table>
+  </div>
+  <p>
+    ②가 곧 "얽힘"의 장부적 정의입니다: <strong>줄마다 어떤 큐빗의 값이 달라서, 장부를 큐빗별 곱으로
+    쪼갤 수 없는 상태</strong>. ③처럼 값 칸을 건드리지 않는 편집은 효과분석에서 읽기(Read)로 기록되며,
+    그 이유는 다음 장에서 분명해집니다.
+  </p>
+
+  <nav class="doc-links" aria-label="코스 내비게이션">
+    <a class="doc-link" href="uncompute-02-ledger.html">← 2. 상태를 읽는 법 — 장부 모델</a>
+    <a class="doc-link" href="datasheet.html#s8">코스 목차</a>
+    <a class="doc-link" href="uncompute-04-qfree.html">4. 청소의 계약과 qfree →</a>
+  </nav>
+
+  <footer>
+    자동 uncomputation 코스 3/11 · <a href="datasheet.html#s8">코스 목차</a> ·
+    <a href="datasheet.html">컴파일러 데이터시트</a>
+  </footer>
+
+</div>
+</body>
+</html>

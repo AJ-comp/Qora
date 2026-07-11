@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>언어 지형 속의 Qora — 자동 uncomputation 코스 11/11 — Qora</title>
+<style>
+  :root {
+    --bg: #ffffff; --ink: #1f2430; --muted: #5b6472; --line: #e6e8ee; --panel: #f7f8fb;
+    --plus: #1457d6; --minus: #d62b39; --accent: #6b3fd4; --good: #11875b; --amber: #b5810a;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo",
+      "Malgun Gothic", "Noto Sans KR", "Segoe UI Symbol", "Cambria Math", sans-serif;
+    line-height: 1.7; font-size: 16.5px;
+  }
+  .wrap { max-width: 940px; margin: 0 auto; padding: 0 20px 120px; }
+  header.hero {
+    padding: 60px 20px 36px; text-align: center; border-bottom: 1px solid var(--line);
+    background: linear-gradient(180deg, #faf9ff, #ffffff);
+  }
+  header.hero h1 { font-size: 2.0rem; margin: 0 0 10px; letter-spacing: -0.5px; }
+  header.hero p { color: var(--muted); margin: 0; font-size: 1.02rem; }
+  .tag { display:inline-block; font-size:.78rem; letter-spacing:.12em; text-transform:uppercase;
+         color: var(--accent); font-weight:700; margin-bottom:14px; }
+  h2 { margin: 54px 0 12px; font-size: 1.42rem; letter-spacing: -0.3px;
+       padding-top: 14px; border-top: 2px solid var(--line); }
+  h2 .n { display:inline-flex; align-items:center; justify-content:center;
+    width: 1.7em; height: 1.7em; border-radius: 50%;
+    background: var(--accent); color:#fff; font-size: .8rem; font-weight:700;
+    margin-right: 10px; vertical-align: middle; }
+  h3 { margin: 30px 0 8px; font-size: 1.1rem; }
+  p { margin: 12px 0; }
+  strong { color: #11203a; }
+  .lead { font-size: 1.05rem; }
+  code, .mono, pre {
+    font-family: "SF Mono", "JetBrains Mono", "D2Coding", Consolas, "Segoe UI Symbol", monospace;
+  }
+  code { background: var(--panel); border: 1px solid var(--line); border-radius: 5px; padding: 1px 6px; font-size: .9em; }
+  pre { background: #111827; color: #eef4ff; border-radius: 10px; padding: 15px 17px; margin: 16px 0;
+        overflow-x: auto; font-size: .86rem; line-height: 1.55; }
+  pre code { background: none; border: none; padding: 0; font-size: inherit; color: inherit; }
+  pre .cm { color: #8ba0c7; }
+  pre .hl { color: #c4a7ff; font-weight: 700; }
+  pre .add { color: #7fe0b0; font-weight: 700; }
+  pre .rd { color: #ff9db0; font-weight: 700; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+           padding: 14px 16px; margin: 16px 0; overflow-x: auto; }
+  table.spec { border-collapse: collapse; width: 100%; font-size: .92rem; }
+  table.spec th, table.spec td { padding: 8px 11px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: top; }
+  table.spec th { font-size: .78rem; color: var(--muted); font-weight: 700; text-transform: uppercase; letter-spacing:.05em; background:#fbfbfe; }
+  table.spec tr:last-child td { border-bottom: none; }
+  table.spec code { white-space: nowrap; }
+  table.spec td.k { white-space: nowrap; font-weight: 700; color:#1a2740; }
+  .call { border-left: 4px solid var(--accent); background: #faf8ff;
+          padding: 13px 17px; border-radius: 0 8px 8px 0; margin: 18px 0; }
+  .call.why { border-color: var(--good); background: #f2fbf7; }
+  .call.warn { border-color: #e6a417; background: #fff9ec; }
+  .call .h { font-weight: 700; display:block; margin-bottom: 4px; }
+  .call p { margin: 8px 0 0; }
+  .rule { text-align:center; font-size: 1.02rem; font-weight: 700; color:#1a1140;
+          background: #f3efff; border:1px solid #e2d8ff; border-radius: 10px; padding: 15px; margin: 20px 0; }
+  .toc { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 20px; margin: 24px 0; }
+  .toc ol { margin: 6px 0 0; padding-left: 20px; columns: 2; column-gap: 30px; }
+  .toc a { color: var(--ink); text-decoration: none; }
+  .toc a:hover { color: var(--accent); }
+  .doc-links { display:flex; flex-wrap:wrap; gap:10px; margin: 18px 0 6px; }
+  .doc-link { display:inline-flex; align-items:center; gap:8px; border:1px solid #cddcff;
+              background:#f6f9ff; color:#1745b5; border-radius:999px; padding:7px 15px; font-weight:700; text-decoration:none; font-size:.92rem; }
+  .doc-link:hover { border-color:#9bb8ff; background:#eef4ff; }
+  .doc-meta { border: 1px solid #dfe5f2; border-left: 5px solid var(--accent); border-radius: 8px;
+              background: #f8faff; padding: 16px 18px; margin: 22px 0; }
+  .doc-meta .meta-title { font-weight: 800; color: #11203a; margin-bottom: 12px; }
+  .meta-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 18px; margin: 0; }
+  .meta-grid dt { color: var(--muted); font-size: .74rem; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; }
+  .meta-grid dd { margin: 3px 0 0; }
+  footer { text-align:center; color:var(--muted); font-size:.9rem; margin-top: 60px; padding-top: 24px; border-top:1px solid var(--line); }
+  /* datasheet-specific */
+  .pipe { display:flex; flex-direction:column; gap:0; margin: 18px 0; }
+  .pipe .stg { display:flex; align-items:center; gap:12px; }
+  .pipe .box { flex:1; background:#fff; border:1px solid var(--line); border-radius:8px; padding:9px 13px; font-size:.92rem; }
+  .pipe .box b { color:#1a2740; }
+  .pipe .box .d { color:var(--muted); font-size:.85rem; }
+  .pipe .box.key { border-color:#c9b6f4; background:#faf7ff; }
+  .pipe .arr { text-align:center; color:var(--accent); font-size:1.2rem; line-height:1; margin:5px 0; }
+  .ladder { display:grid; gap:10px; margin:18px 0; }
+  .rung { display:grid; grid-template-columns:auto 1fr; gap:14px; align-items:start;
+          border:1px solid var(--line); border-radius:10px; padding:13px 16px; background:#fff; }
+  .rung .rn { width:38px; height:38px; border-radius:8px; background:var(--accent); color:#fff;
+              font-weight:800; display:flex; align-items:center; justify-content:center; font-size:1.05rem; }
+  .rung.done { border-left:5px solid var(--good); }
+  .rung.done .rn { background:var(--good); }
+  .rung .rt { font-weight:800; color:#1a2740; }
+  .rung .rd { color:var(--muted); font-size:.92rem; margin-top:2px; }
+  .rung .st { display:inline-block; font-size:.72rem; font-weight:800; border-radius:999px; padding:2px 9px; margin-left:8px; vertical-align:middle; }
+  .rung .st.ok { background:#e4f7ee; color:var(--good); }
+  .rung .st.next { background:#f3efff; color:var(--accent); }
+  .badge { display:inline-block; font-size:.72rem; font-weight:800; border-radius:5px; padding:1px 7px; }
+  .badge.r { background:#eef4ff; color:var(--plus); }
+  .badge.w { background:#fdeef0; color:var(--minus); }
+  .badge.m { background:#f3efff; color:var(--accent); }
+  .grid2 { display:grid; grid-template-columns:1fr; gap:14px; margin:16px 0; }
+  @media (min-width:740px){ .grid2 { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+  .card { background:#fff; border:1px solid var(--line); border-radius:8px; padding:14px 16px; }
+  .card.good { border-top:4px solid var(--good); }
+  .card.bad { border-top:4px solid var(--minus); }
+  .card h4 { margin:0 0 8px; font-size:1rem; }
+  @media (max-width: 720px) { .meta-grid, .toc ol { grid-template-columns: 1fr; columns:1; } }
+</style>
+</head>
+<body>
+<div class="qora-lang-switch" style="position:sticky;top:0;z-index:99;text-align:right;padding:8px 16px;background:rgba(255,255,255,.92);backdrop-filter:blur(4px);border-bottom:1px solid #e6e8ee;font-size:13px;font-family:sans-serif;"><a href="../en/index.html">English</a> · <strong>한국어</strong> · <a href="../ja/index.html">日本語</a></div>
+
+<header class="hero">
+  <div class="tag">Qora · 자동 uncomputation 코스 · 11/11</div>
+  <h1>11. 언어 지형 속의 Qora</h1>
+  <p>2026년의 도구들과 Qora의 자리</p>
+</header>
+
+<div class="wrap">
+
+  <nav class="doc-links" aria-label="코스 내비게이션">
+    <a class="doc-link" href="uncompute-10-two-runtimes.html">← 10. 왜 정적 컴파일인가 — 두 개의 런타임</a>
+    <a class="doc-link" href="datasheet.html#s8">코스 목차</a>
+  </nav>
+  <p>2026년 현재 양자 프로그래밍 도구들은 크게 세 층으로 나뉩니다.</p>
+  <div class="panel">
+    <table class="spec">
+      <tr><th>도구</th><th>방식</th><th>특징</th></tr>
+      <tr><td class="k">Qiskit · Cirq</td><td>Python이 회로를 조립</td><td>최대 생태계 — 다만 언어가 아니어서 컴파일 타임 보증이 없습니다</td></tr>
+      <tr><td class="k">Silq</td><td>인터프리터 언어</td><td>자동 uncomputation의 원조 — 다만 실기계 실행 경로가 없습니다</td></tr>
+      <tr><td class="k">CUDA-Q (NVIDIA)</td><td>컴파일러 인프라 (MLIR→QIR)</td><td>언어가 아니라 언어들이 올라타는 기반 + GPU 시뮬레이터</td></tr>
+      <tr><td class="k">Guppy (Quantinuum)</td><td>정적 컴파일, 선형 타입</td><td>큐빗 누수·복제를 컴파일 에러로 강제 — 청소는 사용자 몫</td></tr>
+      <tr><td class="k">Classiq Qmod</td><td>정적 컴파일 + 합성</td><td>추론 기반 자동 uncomputation을 상용화 — 클로즈드 플랫폼</td></tr>
+      <tr><td class="k"><strong>Qora</strong></td><td>정적 컴파일 (AOT → OpenQASM 3)</td><td>주석 없는 추론 + 자동 청소 + 못 치우면 명시적 에러 — 공개 구현, 교육 지향</td></tr>
+    </table>
+  </div>
+  <p>
+    정적 컴파일 언어들이 공유하는 구조가 하나 있습니다: <strong>자동으로 보증할 수 없는 것은 컴파일
+    에러로 알리고, 명시적 탈출구를 제공한다</strong> — Silq의 <code>forget</code>, Classiq의
+    <code>free</code>/<code>within-apply</code>, Guppy의 명시적 discard가 그것이며, Qora의 언어 규칙
+    (측정하지 않은 레지스터의 |0⟩ 반납, 위반은 에러)도 같은 구조입니다.
+  </p>
+  <div class="panel">
+    <table class="spec">
+      <tr><th>비교 항목</th><th>Qora</th><th>Classiq Qmod (같은 접근의 상용 시스템)</th></tr>
+      <tr><td class="k">앤실라 식별</td><td>추론 (주석·표기 불필요)</td><td>추론 — 같은 접근</td></tr>
+      <tr><td class="k">청소 메커니즘</td><td>역연산 주입</td><td>역연산 주입 + 합성 엔진이 배치 결정</td></tr>
+      <tr><td class="k">루프/조건문의 청소</td><td>보수적 거부 (<a href="uncompute-07-loops.html">7</a>·<a href="uncompute-09-limits.html">9장</a> — 완화 예정)</td><td>복합문 통째 역변환으로 지원</td></tr>
+      <tr><td class="k">원소 단위 정밀도</td><td>원소별 판정·리포트 지원</td><td>배열은 수명상 한 덩어리 — 사용자가 수동 분할</td></tr>
+      <tr><td class="k">Y·CY 취급</td><td>차단 (<a href="uncompute-05-y-gate.html">5장</a>)</td><td>허용하되 얽힌 상대에게 비치환 연산 금지 — 다른 방식의 방어</td></tr>
+      <tr><td class="k">동적 값 (인덱스·경계)</td><td>에러</td><td>문법으로 금지 (컴파일 타임 전용)</td></tr>
+    </table>
+  </div>
+  <p>
+    두 시스템이 독립적으로 거의 같은 규칙 집합(비치환 쓰기 금지, 재료 보존, 순환 의존 금지)에
+    도달했다는 사실은, 이 규칙들이 특정 구현의 취향이 아니라 <strong>정적 컴파일 + 자동 청소라는
+    문제 자체의 형태</strong>임을 보여줍니다.
+  </p>
+
+  <nav class="doc-links" aria-label="코스 내비게이션">
+    <a class="doc-link" href="uncompute-10-two-runtimes.html">← 10. 왜 정적 컴파일인가 — 두 개의 런타임</a>
+    <a class="doc-link" href="datasheet.html#s8">코스 목차</a>
+  </nav>
+
+  <footer>
+    자동 uncomputation 코스 11/11 · <a href="datasheet.html#s8">코스 목차</a> ·
+    <a href="datasheet.html">컴파일러 데이터시트</a>
+  </footer>
+
+</div>
+</body>
+</html>
