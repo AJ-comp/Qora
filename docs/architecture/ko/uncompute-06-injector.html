@@ -128,13 +128,33 @@
     <a class="doc-link" href="uncompute-07-loops.html">7. 루프와 호출 — 왜 판정이 갈리는가 →</a>
   </nav>
   <p>
-    판정이 safe라고 하면 컴파일러(rung ④)는 다음 절차를 실행합니다:
+    판정 사다리가 어떤 앤실라에 safe 판정을 내리면, 이제 컴파일러(rung ④)가 그 앤실라를 |0⟩로
+    되돌리는 정리 코드를 실제로 만들어 넣습니다. 이 단계는 회로를 새로 설계하지 않습니다. 이미
+    실행된 문장들을 재료로 삼는 기계적인 붙여넣기이고, 절차 전체가 다음 한 문장으로 요약됩니다.
   </p>
-  <div class="rule">앤실라를 쓴 <strong>문장들의 목록</strong>을 가져와, 각 문장의 <strong>역</strong>을, <strong>역순</strong>으로, <strong>사망점에</strong> 붙여넣습니다.</div>
+  <div class="rule">앤실라를 편집한 <strong>문장들의 목록</strong>을 가져와, 각 문장의 <strong>역</strong>을, <strong>역순</strong>으로, <strong>사망점에</strong> 붙여넣습니다.</div>
   <p>
-    붙여넣기의 재료는 문장 단위 역 카탈로그입니다: <code>X→X</code>, <code>CNOT→CNOT</code>,
-    <code>Y→Y†</code>, <code>호출 Foo(...) → Adjoint Foo(...)</code>.
+    목록에는 앤실라의 값을 실제로 <strong>편집한</strong> 문장만 들어갑니다. 앤실라를 컨트롤로 읽기만
+    한 문장은 값을 바꾸지 않았으므로 되돌릴 것도 없고, 목록에서 빠집니다. 역순이 필요한 이유는
+    양말과 신발의 순서와 같습니다. 양말을 신고 신발을 신었다면 벗을 때는 신발이 먼저입니다.
+    마지막에 한 편집을 가장 먼저 되돌려야 그 아래에 있던 이전 편집이 드러나기 때문입니다.
   </p>
+
+  <h3>역 카탈로그 — 문장마다 붙여넣을 역이 정해져 있습니다</h3>
+  <p>
+    각 문장의 역은 즉석에서 계산하는 것이 아니라, 문장 종류별로 정해진 카탈로그에서 꺼내 옵니다.
+    이 코스에서 자주 만나는 항목은 다음과 같습니다.
+  </p>
+  <div class="panel">
+    <table class="spec">
+      <tr><th>원래 문장</th><th>주입되는 역</th><th>왜 이것이 역인가</th></tr>
+      <tr><td><code>X(t[0])</code></td><td><code>X(t[0])</code></td><td>두 번 뒤집으면 원래대로 (자기 역)</td></tr>
+      <tr><td><code>CNOT(c[0], t[0])</code></td><td><code>CNOT(c[0], t[0])</code></td><td>같은 XOR을 한 번 더 (자기 역)</td></tr>
+      <tr><td><code>CCX(a, b, t)</code></td><td><code>CCX(a, b, t)</code></td><td>자기 역</td></tr>
+      <tr><td><code>Y(t[0])</code></td><td><code>Y†(t[0])</code></td><td>위상까지 함께 되돌리는 수반(adjoint) 게이트</td></tr>
+      <tr><td><code>Foo(...)</code> 호출</td><td><code>Adjoint Foo(...)</code> 호출</td><td>Foo 본문 전체의 역 (본문에 같은 규칙을 재귀 적용)</td></tr>
+    </table>
+  </div>
 
   <h3>예제 — 3중 컨트롤을 앤실라로 조립하고 자동 청소</h3>
 <pre><code><span class="cm">// a AND b AND c 일 때만 d를 뒤집고 싶은데 3중 컨트롤 게이트가 없음 → 중간값 t 사용</span>
@@ -143,16 +163,65 @@ CCX(a, b, t);    <span class="cm">// ① compute:  t = a AND b</span>
 CCX(t, c, d);    <span class="cm">// ② action:   d ^= t AND c   ← t의 마지막 사용 = 사망점</span>
 <span class="add">CCX(a, b, t);</span>    <span class="cm">// ③ uncompute: 주입된 역 (CCX는 자기 역) — t → |0⟩</span></code></pre>
   <p>
-    t를 쓴 문장은 ① 하나이므로, 그 역(자기 자신) 하나가 사망점 ② 직후에 붙습니다.
-    ①·②·③ 어느 것도 계수 칸을 건드리지 않으므로(전부 값 편집) 생존자 a·b·c·d는 완전히 보존됩니다.
-    사용자는 ③을 쓰지 않습니다 — 언어 규칙에 따라 컴파일러가 넣습니다.
+    t를 편집한 문장은 ① 하나뿐이므로 목록에는 항목이 하나이고, 카탈로그에 따라 그 역은 CCX 자기
+    자신입니다. 그래서 ①의 복사본 하나가 사망점인 ② 직후에 붙습니다. ②는 t를 컨트롤로 읽기만
+    했으므로 목록에 들어가지 않습니다. ①·②·③은 전부 값 칸만 편집하는 문장이어서 계수 칸은
+    어디에서도 건드려지지 않고, 생존자 a·b·c·d의 상태는 완전히 보존됩니다. ③은 사용자가 직접 쓰는
+    코드가 아니라, 측정하지 않은 <code>use</code> 레지스터는 |0⟩로 반납되어야 한다는 언어
+    규칙(<a href="uncompute-01-ancilla.html">1장</a>)을 이행하기 위해 컴파일러가 넣는 코드입니다.
+  </p>
+
+  <h3>예제 — 편집이 두 번이면 역순이 보입니다: 호출은 Adjoint 호출로</h3>
+  <p>
+    앞의 예제는 목록에 항목이 하나라서 역순이 드러나지 않았습니다. 이번에는 앤실라 t를 게이트로 한
+    번, 호출로 한 번, 총 두 번 편집해 봅니다.
+  </p>
+<pre><code>operation Mix(Qubit s, Qubit d){
+    X(d);                    <span class="cm">// d를 뒤집고</span>
+    CNOT(s, d);              <span class="cm">// s를 XOR</span>
+}
+operation Main(){
+    use q = Qubit[2];
+    use t = Qubit[1];
+    H(q[0]);
+    X(t[0]);                 <span class="cm">// ① t 편집: t = 1</span>
+    Mix(q[0], t[0]);         <span class="cm">// ② t 편집(호출): t = q[0]이 됨</span>
+    CNOT(t[0], q[1]);        <span class="cm">// ③ action: q[1] ^= t  ← t의 마지막 사용 = 사망점</span>
+    <span class="add">Adjoint Mix(q[0], t[0]);</span> <span class="cm">// 주입 1: ②의 역 — 호출은 Adjoint 호출로</span>
+    <span class="add">X(t[0]);</span>                 <span class="cm">// 주입 2: ①의 역 — t가 |0⟩로 복귀</span>
+    bit m0 = M(q[0]);
+    bit m1 = M(q[1]);
+    <span class="cm">// 항상 m0 == m1 (00 또는 11, 각각 50%)</span>
+}</code></pre>
+  <p>
+    t를 편집한 문장의 목록은 [①, ②] 두 개입니다. 역순이므로 ②의 역이 먼저, ①의 역이 나중에
+    붙습니다. ②는 호출이므로 카탈로그에 따라 <code>Adjoint Mix</code>가 되는데, 이것은 Mix가 한 일을
+    정확히 되돌리는 연산입니다. 안을 들여다보면 본문에도 같은 규칙이 적용되어 있습니다.
+    <code>CNOT(s, d)</code>가 먼저, <code>X(d)</code>가 나중, 즉 Mix 본문 각 문장의 역을 역순으로
+    실행하는 것입니다. 갈래별로 t의 값을 따라가 보면 주입된 두 줄이 t를 |0⟩로 데려다 놓는 과정이
+    그대로 보입니다.
+  </p>
+  <div class="panel">
+    <table class="spec">
+      <tr><th>시점</th><th>q[0]=0 갈래</th><th>q[0]=1 갈래</th></tr>
+      <tr><td class="k">① X 직후</td><td>t = 1</td><td>t = 1</td></tr>
+      <tr><td class="k">② Mix 직후</td><td>t = 0</td><td>t = 1 (t = q[0])</td></tr>
+      <tr><td class="k">③ action 직후</td><td>q[1] = 0, t = 0</td><td>q[1] = 1, t = 1</td></tr>
+      <tr><td class="k">주입 1 직후</td><td>t = 1</td><td>t = 1</td></tr>
+      <tr><td class="k">주입 2 직후</td><td>t = 0</td><td>t = 0</td></tr>
+    </table>
+  </div>
+  <p>
+    주입 1이 끝난 시점에 두 갈래의 t가 이미 같은 값 1로 모이고, 주입 2가 그 값을 0으로 내립니다.
+    t가 두 갈래에서 같은 값이 된 순간 t와 q 사이의 얽힘은 풀린 것이고, q에는 (|00⟩+|11⟩)/√2 상태만
+    깨끗하게 남습니다. 그래서 측정 결과는 언제나 m0 == m1이 됩니다.
   </p>
   <div class="call">
     <span class="h">주입 지점은 스코프 끝이 아니라 사망점입니다</span>
     <p>재료 조건(<a href="datasheet.html#s7">데이터시트 7장</a> rung ③의 4번 조항)은 "앤실라를 만든 재료가 <strong>사망점까지</strong> 그 값 그대로"를
-    요구합니다. 주입이 사망점에서 일어나기 때문입니다. 앤실라가 컨테이너(if/for) 안에서 마지막으로
-    쓰였다면 주입 지점은 최외곽 컨테이너 직후로 늦춰지며, 재료 검사 구간도 같이 연장됩니다 —
-    검사와 주입이 항상 같은 지점을 바라봅니다.</p>
+    요구합니다. 주입이 바로 그 사망점에서 일어나기 때문입니다. 앤실라가 컨테이너(if/for) 안에서
+    마지막으로 쓰였다면 주입 지점은 최외곽 컨테이너 직후로 늦춰지고, 재료 검사 구간도 같은 지점까지
+    함께 연장됩니다. 검사와 주입은 이렇게 언제나 같은 지점을 바라보도록 맞춰져 있습니다.</p>
   </div>
 
   <nav class="doc-links" aria-label="코스 내비게이션">

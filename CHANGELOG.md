@@ -11,6 +11,48 @@ emitted as **OpenQASM 3.0**.
 > **Note:** Qora was renamed from **Ket** on 2026-07-01 (a "Ket" extension already existed). Versions
 > 0.1–0.7 below were authored under the old name.
 
+## 0.19 — 2026-07-12
+
+### Added
+- **Rung ③ of the automatic-uncomputation ladder — the full safety verdict**
+  (`Ir/Passes/SemanticModel.cs`). `UncomputeSafety(op, q)` answers "can this register/element be
+  returned to |0⟩ by injecting the adjoint of the statements that wrote it, without touching any
+  surviving qubit?" with a reason and a culprit statement: `Irreversible` (reset, or a call that
+  transitively resets/measures), `NonQfreeWrite` (a superposition write — H/Rx/Ry — **or a
+  phase-carrying permutation write — Y/CY**, whose basis-value-dependent phase becomes a
+  survivor-relative phase under entanglement that the injected adjoint would strip;
+  state-vector-verified, matching Silq's `qfree`), `ContainedWrite` (a write inside an
+  `if`/loop/conjugation — a straight-line adjoint cannot mirror conditional/repeated execution;
+  callee-internal containers are fine because a call is inverted as a whole), and
+  `CoWrittenPartner`/`SourceDied` (well-sourced compute: co-written partners such as SWAP operands
+  block outright, a blanket write wider than an element query blocks with only the `use` birth
+  exempt, and every recorded source must survive unchanged to the death point — extended to the
+  outermost container's end when the death is contained). `IsSafelyUncomputable` is the boolean view.
+- **Two-layer classification, one term per concept**: `IsAncilla` (the BIRTH question — a `use`-born
+  workspace register, answered from graph facts: parameters carry seeds, use registers carry hoisted
+  births) and `IsCleanupCandidate` (the LIVENESS question — an ancilla never measured, directly or
+  transitively; a measured ancilla is *promoted to an output* and leaves the cleanup pool).
+  Measurement is ruled at the candidacy layer and relayed by the verdict (`Measured`,
+  `NotACleanupCandidate`) before any safety clause runs.
+- **Qubit graph** (`QubitNode`/`QubitEdge`): a per-operation value-genealogy DAG recorded by effect
+  analysis in the same pass as the event stream — nodes are value versions, parent edges say what
+  each value was made from (own previous version, read sources, co-written partners) with `Via`
+  preserving the access breadth of blanketed reads. Guarded by an always-on coherence sweep that
+  re-derives every link and parent set each compile and fails loud (QINTERNAL) on any mismatch;
+  the sweep itself is falsifiable through an internal test seam (13 negative tests).
+- **Hoisted register births**: `use` births are recorded at the front of the event stream, mirroring
+  the emitter's declaration hoisting — a gate may textually precede its register's `use`.
+- **`--stages` gained an `uncompute` view**: every qubit classified (input / ancilla promoted to
+  output / cleanup candidate with its verdict), per-element blocked reasons under a blanket headline,
+  and live ranges. `ContainerMap` pass added; `QubitEvent` gained `Irreversible`/`NonQfree`/`NodeId`.
+- SemanticModel analysis stores are **add-only** (a second analysis of the same op fails loud).
+
+### Docs
+- New 11-page auto-uncomputation course (`docs/architecture/ko/uncompute-01…11.html`) — ancilla &
+  cleanup candidates, the ledger model, gate edits, the qfree contract, why Y/CY are blocked, the
+  injector, loops vs calls, the blanket problem, principled vs conservative blocks, the two runtimes,
+  and the 2026 language landscape — linked from the datasheet, one chapter per page.
+
 ## 0.18 — 2026-07-09
 
 ### Changed

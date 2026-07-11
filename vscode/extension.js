@@ -207,6 +207,10 @@ const RUN_L10N = {
     stepVerify: 'verifying…',
     setupFailed: (m) => `Qora: simulator setup failed — ${m}`,
     running: (name) => `Qora: running ${name}…`,
+    compiling: 'compiling to OpenQASM…',
+    compiled: (s) => `compiled — ${s.qubits} qubits, ${s.gates} gates, ${s.measures} measurements`,
+    executing: (shots) => `running ${shots} shots on Braket LocalSimulator…`,
+    doneIn: (secs) => `done in ${secs}s`,
     runFailed: (m) => `Qora: run failed — ${m}`,
     openFirst: 'Qora: open a .qor file first.',
     cannotRun: (m) => `Qora: cannot run — ${m}`,
@@ -228,6 +232,10 @@ const RUN_L10N = {
     stepVerify: '확인 중…',
     setupFailed: (m) => `Qora: 시뮬레이터 준비 실패 — ${m}`,
     running: (name) => `Qora: ${name} 실행 중…`,
+    compiling: 'OpenQASM으로 컴파일 중…',
+    compiled: (s) => `컴파일 완료 — 큐빗 ${s.qubits}개 · 게이트 ${s.gates}개 · 측정 ${s.measures}개`,
+    executing: (shots) => `Braket LocalSimulator에서 ${shots} shots 실행 중…`,
+    doneIn: (secs) => `완료 (${secs}초)`,
     runFailed: (m) => `Qora: 실행 실패 — ${m}`,
     openFirst: 'Qora: 먼저 .qor 파일을 열어주세요.',
     cannotRun: (m) => `Qora: 실행할 수 없어요 — ${m}`,
@@ -249,6 +257,10 @@ const RUN_L10N = {
     stepVerify: '確認中…',
     setupFailed: (m) => `Qora: セットアップに失敗しました — ${m}`,
     running: (name) => `Qora: ${name} を実行中…`,
+    compiling: 'OpenQASM にコンパイル中…',
+    compiled: (s) => `コンパイル完了 — 量子ビット ${s.qubits} · ゲート ${s.gates} · 測定 ${s.measures}`,
+    executing: (shots) => `Braket LocalSimulator で ${shots} ショット実行中…`,
+    doneIn: (secs) => `完了 (${secs}秒)`,
     runFailed: (m) => `Qora: 実行に失敗しました — ${m}`,
     openFirst: 'Qora: まず .qor ファイルを開いてください。',
     cannotRun: (m) => `Qora: 実行できません — ${m}`,
@@ -270,6 +282,10 @@ const RUN_L10N = {
     stepVerify: 'đang kiểm tra…',
     setupFailed: (m) => `Qora: thiết lập thất bại — ${m}`,
     running: (name) => `Qora: đang chạy ${name}…`,
+    compiling: 'đang biên dịch sang OpenQASM…',
+    compiled: (s) => `biên dịch xong — ${s.qubits} qubit · ${s.gates} cổng · ${s.measures} phép đo`,
+    executing: (shots) => `chạy ${shots} shots trên Braket LocalSimulator…`,
+    doneIn: (secs) => `xong (${secs}s)`,
     runFailed: (m) => `Qora: chạy thất bại — ${m}`,
     openFirst: 'Qora: hãy mở một tệp .qor trước.',
     cannotRun: (m) => `Qora: không thể chạy — ${m}`,
@@ -488,46 +504,88 @@ async function runProgram() {
   const python = await ensureBraketPython();
   if (!python) return;
 
-  const { result, error } = await runQora(document.getText(), docArgs(document));
-  if (error) { warnInfraOnce(error); return; }
-  if (!result.success) {
-    const first = (result.errors && result.errors[0] && result.errors[0].message) || 'parse failed';
-    vscode.window.showErrorMessage(runL10n().cannotRun(first));
-    return;
-  }
-
-  const shots = vscode.workspace.getConfiguration('qora').get('shots', 1000);
+  const t = runL10n();
   const name = path.basename(document.fileName);
-  const reply = await vscode.window.withProgress(
-    { location: vscode.ProgressLocation.Window, title: runL10n().running(name) },
-    () => execP(python, [path.join(runnerDir(), 'braket_run.py'), '--shots', String(shots)],
-      { cwd: runnerDir() }, result.qasm));
+  const shots = vscode.workspace.getConfiguration('qora').get('shots', 1000);
+  const ch = ensureRunChannel();
+  ch.appendLine('');
+  ch.appendLine(`▶ ${name}  ·  ${new Date().toLocaleTimeString()}`);
+  ch.show(true);
 
-  let parsed;
-  try { parsed = JSON.parse(reply.stdout.trim().split('\n').pop()); }
-  catch { parsed = { error: (reply.stderr || reply.stdout || 'no output from the runner').slice(0, 300) }; }
-  if (parsed.error) {
-    vscode.window.showErrorMessage(runL10n().runFailed(parsed.error));
-    return;
-  }
-  renderHistogram(name, parsed.counts, parsed.shots);
+  await vscode.window.withProgress(
+    { location: vscode.ProgressLocation.Window, title: `Qora: ${name}` },
+    async (progress) => {
+      // ── compile ─────────────────────────────────────────────────────────────
+      progress.report({ message: t.compiling });
+      ch.appendLine(`  · ${t.compiling}`);
+      const t0 = Date.now();
+      const { result, error } = await runQora(document.getText(), docArgs(document));
+      if (error) { warnInfraOnce(error); ch.appendLine(`  ✗ ${error}`); return; }
+      if (!result.success) {
+        const first = (result.errors && result.errors[0] && result.errors[0].message) || 'parse failed';
+        vscode.window.showErrorMessage(t.cannotRun(first));
+        ch.appendLine(`  ✗ ${first}`);
+        return;
+      }
+      const summary = qasmSummary(result.qasm);
+      ch.appendLine(`  ✓ ${t.compiled(summary)}  (${((Date.now() - t0) / 1000).toFixed(1)}s)`);
+
+      // ── execute ─────────────────────────────────────────────────────────────
+      progress.report({ message: t.executing(shots) });
+      ch.appendLine(`  · ${t.executing(shots)}`);
+      const t1 = Date.now();
+      const reply = await execP(python, [path.join(runnerDir(), 'braket_run.py'), '--shots', String(shots)],
+        { cwd: runnerDir() }, result.qasm);
+
+      let parsed;
+      try { parsed = JSON.parse(reply.stdout.trim().split('\n').pop()); }
+      catch { parsed = { error: (reply.stderr || reply.stdout || 'no output from the runner').slice(0, 300) }; }
+      if (parsed.error) {
+        vscode.window.showErrorMessage(t.runFailed(parsed.error));
+        ch.appendLine(`  ✗ ${parsed.error}`);
+        return;
+      }
+      ch.appendLine(`  ✓ ${t.doneIn(((Date.now() - t1) / 1000).toFixed(1))}`);
+      appendHistogram(ch, parsed.counts, parsed.shots);
+    });
 }
 
-/** Measurement histogram in the "Qora Run" output channel (append-only, like a lab notebook). */
-function renderHistogram(name, counts, shots) {
+/** Lazily create the append-only "Qora Run" output channel (a lab notebook of runs). */
+function ensureRunChannel() {
   if (!runChannel) {
     runChannel = vscode.window.createOutputChannel('Qora Run');
     extContext.subscriptions.push(runChannel);
   }
+  return runChannel;
+}
+
+/** A quick shape summary of the emitted OpenQASM for the progress log — counts qubit declarations,
+ *  measurements, and everything else as gate/op statements. Approximate on purpose (a display aid). */
+function qasmSummary(qasm) {
+  let qubits = 0, gates = 0, measures = 0;
+  for (const raw of (qasm || '').split('\n')) {
+    const line = raw.trim();
+    if (!line || line.startsWith('//') || line.startsWith('OPENQASM') || line.startsWith('include')) continue;
+    const q = line.match(/^qubit(?:\[(\d+)\])?\s/);
+    if (q) { qubits += q[1] ? parseInt(q[1], 10) : 1; continue; }
+    if (/^(bit|int|uint|float|angle|const|def|gate)\b/.test(line)) continue;   // decls / definitions
+    if (/\bmeasure\b/.test(line)) { measures++; continue; }
+    if (line === '{' || line === '}') continue;
+    gates++;
+  }
+  return { qubits, gates, measures };
+}
+
+/** Append the measurement histogram to the run channel (bars only; the header line is logged above). */
+function appendHistogram(ch, counts, shots) {
   const total = Object.values(counts).reduce((a, b) => a + b, 0) || 1;
   const width = 40;
-  runChannel.appendLine('');
-  runChannel.appendLine(`${name} — ${shots} shots (Braket LocalSimulator, ${new Date().toLocaleTimeString()})`);
-  for (const [key, n] of Object.entries(counts).sort((a, b) => b[1] - a[1])) {
+  const rows = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+  ch.appendLine(`  ── ${shots} shots ──`);
+  for (const [key, n] of rows) {
     const bar = '█'.repeat(Math.max(1, Math.round(width * n / total)));
-    runChannel.appendLine(`  ${key}  ${bar}  ${n}  (${(100 * n / total).toFixed(1)}%)`);
+    ch.appendLine(`     ${key}  ${bar}  ${n}  (${(100 * n / total).toFixed(1)}%)`);
   }
-  runChannel.show(true);
 }
 
 /** One place to nag (once) when the CLI can't be run, so we don't spam on every keystroke. */

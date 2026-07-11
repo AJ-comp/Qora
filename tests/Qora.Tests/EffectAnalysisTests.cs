@@ -765,6 +765,9 @@ public class EffectAnalysisTests
 
         Assert.Contains("NOT uncomputable: non-qfree write", report);       // whole-register headline
         Assert.Contains("per element: q[0] safe cleanup candidate", report);        // the clean element is named
+        // the redundancy filter is falsifiable: q[1] is blocked by the SAME statement as the headline (the H),
+        // so repeating it per element would be noise — it must be omitted
+        Assert.DoesNotContain("q[1] blocked", report);
     }
 
     // --- 37. ContainedWrite: a WRITE of q inside a container (if / for) blocks — the flat event stream
@@ -1036,6 +1039,51 @@ public class EffectAnalysisTests
             () => EffectAnalysis.Run(r.AnalyzedIr!, m));                 // same ops, same model → QINTERNAL
     }
 
+    // --- 36b. per-element "same reason" means same blocker AND same culprit STATEMENT: an element blocked by a
+    //          DIFFERENT statement than the headline must carry its own reason, or the reader attributes its
+    //          blockage to a statement that never touches it ---
+
+    [Fact]
+    public void PerElementRendersDifferentCulpritEvenUnderSameBlockerEnum()
+    {
+        // headline: whole-a blocked CoWrittenPartner by the SWAP (which never touches a[1]);
+        // a[1]: blocked CoWrittenPartner too — but by the broadcast X(a), a different statement and story
+        var (r, m) = Compile(
+            "operation Main(){ use a=Qubit[2]; use x=Qubit[1]; X(x[0]); SWAP(a[0], x[0]); X(a); }");
+        var report = UncomputeReport.Format(r.AnalyzedIr, m);
+
+        Assert.Contains("co-written partner `x[0]`", report);                        // headline: the SWAP story
+        Assert.Contains("a[1] blocked: statement-wide write of `a`", report);        // a[1]: its own story
+    }
+
+    // --- 22b. Y/CY NonQfree must survive the TRANSITIVE and FUNCTOR paths, not just direct gates: a helper
+    //          that Y's its param, and Controlled/Adjoint functor forms, all block the caller's register ---
+
+    [Fact]
+    public void YAndCYNonQfreePropagateThroughCallsAndFunctors()
+    {
+        // through a call
+        var (r1, m1) = Compile("operation Yer(Qubit a){ Y(a); }\noperation Main(){ use q=Qubit[1]; Yer(q[0]); }");
+        Assert.Equal(UncomputeBlocker.NonQfreeWrite, m1.UncomputeSafety(Op(r1, "Main"), Whole("q")).Blocker);
+
+        // CY through a call — target blocked, control untouched by the flag
+        var (r2, m2) = Compile(
+            "operation CYer(Qubit c, Qubit t){ CY(c, t); }\n" +
+            "operation Main(){ use c=Qubit[1]; use t=Qubit[1]; CYer(c[0], t[0]); }");
+        var main2 = Op(r2, "Main");
+        Assert.Equal(UncomputeBlocker.NonQfreeWrite, m2.UncomputeSafety(main2, Whole("t")).Blocker);
+        Assert.True(m2.IsSafelyUncomputable(main2, Whole("c")));                     // control = read only
+
+        // functor forms on the bare gate
+        var (r3, m3) = Compile("operation Main(){ use c=Qubit[1]; use t=Qubit[1]; Controlled Y(c[0], t[0]); }");
+        var main3 = Op(r3, "Main");
+        Assert.Equal(UncomputeBlocker.NonQfreeWrite, m3.UncomputeSafety(main3, Whole("t")).Blocker);
+        Assert.True(m3.IsSafelyUncomputable(main3, Whole("c")));
+
+        var (r4, m4) = Compile("operation Main(){ use q=Qubit[1]; Adjoint Y(q[0]); }");
+        Assert.Equal(UncomputeBlocker.NonQfreeWrite, m4.UncomputeSafety(Op(r4, "Main"), Whole("q")).Blocker);
+    }
+
     // --- 49-0. round-5: the R4-F2 write-before-birth GUARD, pinned directly. Births are hoisted from the body's
     //           TOP LEVEL only; a `use` nested in a container (only constructible via hand-built IR — QSEM012
     //           forbids it from source) records no hoisted birth, so the register's first write mints a
@@ -1115,6 +1163,13 @@ public class EffectAnalysisTests
         var v = m2.UncomputeSafety(main2, Whole("a"));
         Assert.Equal(UncomputeBlocker.Measured, v.Blocker);
         Assert.Equal(QubitEventKind.Measure, v.Culprit!.Kind);        // culprit = the measuring event itself
+
+        // Measured outranks EVERY scan clause, Irreversible included: the Reset (order 2) precedes the
+        // measurement (order 3) in program order, yet the candidacy ruling still answers first
+        var (r3, m3) = Compile("operation Main(){ use a=Qubit[1]; X(a[0]); Reset(a[0]); bit c = M(a[0]); }");
+        var v3 = m3.UncomputeSafety(Op(r3, "Main"), Whole("a"));
+        Assert.Equal(UncomputeBlocker.Measured, v3.Blocker);
+        Assert.Equal(QubitEventKind.Measure, v3.Culprit!.Kind);
     }
 
     // --- 50. the exact round-5 fuzzer repro programs: a Y (and CY) write onto an ENTANGLED ancilla, which the

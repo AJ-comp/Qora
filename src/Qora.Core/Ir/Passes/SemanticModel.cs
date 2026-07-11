@@ -61,9 +61,10 @@ public sealed record QubitEvent(
 /// and excluded — they are the ancilla candidates a later liveness pass hunts for).
 /// <see cref="Irreversible"/> is true when the body (transitively) measures or resets.
 /// <see cref="ParamModifiedNonQfree"/> ⊆ <see cref="ParamModified"/> is the params whose value the body
-/// writes with a superposition-creating gate (<c>H</c>/<c>Rx</c>/<c>Ry</c>, transitively) — so a caller can
-/// tell a qfree helper (whose param-writes are classical permutations) from one that superposes a param, and
-/// stamp only the latter's projected writes <c>NonQfree</c>.
+/// writes NON-QFREE — an <c>H</c>/<c>Rx</c>/<c>Ry</c> superposition write or a <c>Y</c>/<c>CY</c>
+/// phase-permutation write, transitively — so a caller can tell a qfree helper (whose param-writes are
+/// phase-free permutations) from one that is not, and stamp only the latter's projected writes
+/// <c>NonQfree</c>.
 /// <see cref="ParamMeasured"/> ⊆ <see cref="ParamModified"/> is the params the body (transitively) MEASURES —
 /// so a call site can stamp the projected event <see cref="QubitEventKind.Measure"/> and a register measured
 /// through a helper is recognized as measured (not an ancilla candidate), same as a direct <c>M</c>.
@@ -160,8 +161,9 @@ public enum UncomputeBlocker { None, NotACleanupCandidate, Measured, Irreversibl
 /// (<see cref="UncomputeBlocker.None"/> = safe to auto-uncompute); <see cref="Culprit"/> is the offending
 /// event — its <see cref="QubitEvent.StmtId"/> ties the reason to the exact statement, so a consumer can
 /// render "blocked by the H at …" (the <c>--stages</c> uncompute view now, rung ④'s diagnostics later).
-/// Culprit is null when safe (and for <see cref="UncomputeBlocker.NotAnalyzed"/>, where there are no events
-/// to point at).</summary>
+/// Culprit is null when safe, for <see cref="UncomputeBlocker.NotAnalyzed"/> (no events to point at), and for
+/// <see cref="UncomputeBlocker.NotACleanupCandidate"/> (there is no offending event — the qubit was never an
+/// ancilla); <see cref="UncomputeBlocker.Measured"/> carries the first measuring event.</summary>
 public sealed record UncomputeVerdict(UncomputeBlocker Blocker, QubitEvent? Culprit)
 {
     public bool IsSafe => Blocker == UncomputeBlocker.None;
@@ -325,10 +327,11 @@ public sealed class SemanticModel
     /// value can escape through, so ancilla + never-measured exactly captures "workspace nobody needs"
     /// (literature-verified; future features add conditions — docs/TODO #16). Whether a candidate is actually
     /// SAFE to auto-uncompute is the further rung-③ question (<see cref="UncomputeSafety"/>). DERIVED, nothing
-    /// stored: reads the symbol table for the register's kind and scans its event stream for a measurement,
-    /// subsumption-aware via <see cref="QubitRef.Overlaps"/> (a measured element disqualifies its whole
-    /// register). False for a non-ancilla or when effect analysis never ran (no stream ⇒ cannot certify
-    /// "never measured" — never a vacuous yes).</summary>
+    /// stored: delegates the birth question to <see cref="IsAncilla"/> (graph facts — param seed vs use-born)
+    /// and scans the op's event stream for a measurement, subsumption-aware via
+    /// <see cref="QubitRef.Overlaps"/> (a measured element disqualifies its whole register). False for a
+    /// non-ancilla or when effect analysis never ran (no stream ⇒ cannot certify "never measured" — never a
+    /// vacuous yes).</summary>
     public bool IsCleanupCandidate(int opId, QubitRef q)
     {
         if (!WasEffectAnalyzed(opId)) return false;
@@ -403,7 +406,9 @@ public sealed class SemanticModel
     {
         if (!WasEffectAnalyzed(op.Id)) return new(UncomputeBlocker.NotAnalyzed, null);
 
-        // RUNG ORDER, in code: safety is a question about CLEANUP CANDIDATES only. Whether q is one is
+        // CLASSIFICATION BEFORE SAFETY, in code: safety is a question about CLEANUP CANDIDATES only —
+        // the candidacy ruling (measurement included, and it outranks EVERY scan clause below, Irreversible
+        // included) is delivered first. Whether q is a candidate is
         // rung 1's ruling (IsCleanupCandidate — measurement means the value was DELIVERED, an output), so
         // it is delegated there, never re-judged as a scan clause here: one concept, one home. It is
         // delivered as a VERDICT rather than a silent precondition, so a direct caller can never receive

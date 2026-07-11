@@ -111,17 +111,19 @@ Rx/Ry/Rz), measurement (`bit r = M(q)`), classical vars (const/var/int/bit) + re
 
 ## Auto-uncompute — rung ④ injector prerequisites (2026-07-12 deep-dive on blanket+all-scratch)
 
-- **#17 — whole-statement adjoint MATERIALIZATION.** A safe verdict on a register written by a CALL
-  (e.g. `Bcast(a)` — one blanket write) promises injection of `Adjoint Bcast(a)`: the injector must
-  synthesize the inverse of a user operation — body reversed, each statement inverted, loop ranges
-  reversed. This is the whole-operation Auto-Adjoint machinery (currently listed LOW/hard below;
-  rung ④ pulls it up). The verdict's clauses already fence its preconditions (no measurement —
-  transitive flags; static loop bounds — language rule; bit conditions imply measurement ⇒ excluded),
-  so everything verdict-SAFE is synthesizable in principle. Partial part exists: the within/apply
-  Inverter. Note the pleasant fact discovered here: Qora already performs Classiq-style COMPOUND
-  INVERSION implicitly at call boundaries (a callee's internal loops are mirrored by inverting the
-  whole call, which is why callee-internal containers correctly do NOT trigger ContainedWrite —
-  only caller-side containers around the write do).
+- **#17 — wiring the injector to the EXISTING adjoint materialization.** A safe verdict on a register
+  written by a CALL (e.g. `Bcast(a)`) promises injection of `Adjoint Bcast(a)`. The materialization
+  machinery for that ALREADY SHIPS: `AdjointMaterializer` + `Inverter` (v0.14/v0.16) turn an explicit
+  `Adjoint Foo(...)` call into a real `Foo__adj` operation — body reversed, statements inverted, loop
+  ranges reversed — verified end-to-end by the existing functor/conjugation tests. What rung ④ must ADD
+  is the wiring, not an inverter: emit the implicit `Adjoint <stmt>` calls at injection points (death
+  point / after outermost container, LIFO) and ensure the materializer runs over compiler-generated
+  adjoint references the same way it does over user-written ones. The verdict's clauses already fence
+  the preconditions (no measurement — transitive flags; static loop bounds — language rule; bit
+  conditions imply measurement ⇒ excluded), so everything verdict-SAFE is materializable. Note: Qora
+  already performs Classiq-style COMPOUND INVERSION implicitly at call boundaries (a callee's internal
+  loops are mirrored by inverting the whole call, which is why callee-internal containers correctly do
+  NOT trigger ContainedWrite — only caller-side containers around the write do).
 
 ## Auto-uncompute — registered data gaps (from the requirements cross-check, 2026-07-11)
 
@@ -136,9 +138,10 @@ The rung-③ analysis (events + qubit graph + ContainerMap) answers the injector
   design.
 - **#16 — ancilla-identification conditions coupled to FUTURE features** (2026-07-11 literature
   cross-check: Silq PLDI'20, Q#, Unqomp PLDI'21/Reqomp, Twist POPL'22, Quipper, Bennett'73, Gidney'18 —
-  20/20 key claims source-verified). `IsAncillaCandidate`'s two conditions (use-allocated + never
+  20/20 key claims source-verified). `IsCleanupCandidate`'s two conditions (`IsAncilla` use-birth + never
   measured) are provably COMPLETE for today's feature set (void ops, no aliasing, no closures: measurement
-  is the only value-escape channel). Each future feature adds a condition — add it in the SAME change:
+  is the only value-escape channel). Future escape channels add conditions to the CANDIDACY layer
+  (`IsCleanupCandidate`); the birth layer (`IsAncilla`) is feature-invariant. Add each in the SAME change:
   - **Return values** (roadmap) → add "not returned / does not escape" (Silq: return consumes; Bennett:
     outputs are copied out of scratch).
   - **Aliasing / borrowing** → add "no live alias"; and `borrow` splits ancillas into clean (end |0⟩,

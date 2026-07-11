@@ -2,6 +2,18 @@
 
 All notable changes to the Qora Language extension.
 
+## 0.13.0
+
+- Bundles the **Qora v0.19** compiler — rung ③ of the automatic-uncomputation ladder: the per-qubit
+  safety verdict (reason + culprit statement), the qubit value-genealogy graph with its always-on
+  coherence sweep, the `IsAncilla` / `IsCleanupCandidate` classification, hoisted register births,
+  and the `--stages` uncompute view with per-element blocked reasons.
+- **▶ Run now shows staged progress.** The "Qora Run" output channel logs each run like a lab
+  notebook — the compile step with a circuit summary (qubits · gates · measurements) and timing,
+  the execution step with the shot count and timing, and failures marked with `✗` so the cause
+  stays visible after the popup is gone. The status-bar progress message updates per stage
+  (compiling → running N shots) instead of a single "running…".
+
 ## 0.12.0
 
 - Bundles the **Qora v0.18** compiler — internal analysis infrastructure only, no new surface syntax:

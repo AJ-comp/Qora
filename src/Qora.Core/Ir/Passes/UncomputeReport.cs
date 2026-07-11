@@ -76,16 +76,21 @@ public static class UncomputeReport
     private static string PerElement(SemanticModel model, QOperation op, Symbol sym)
     {
         if (sym.RegisterSize is not int n || n < 2) return string.Empty;
-        var whole = model.UncomputeSafety(op, new QubitRef(sym.SourceName, null)).Blocker;
+        var whole = model.UncomputeSafety(op, new QubitRef(sym.SourceName, null));
         var parts = new List<string>();
         for (var i = 0; i < n; i++)
         {
             var e = new QubitRef(sym.SourceName, i);
             if (!model.IsCleanupCandidate(op.Id, e)) continue;       // a measured element left the pool
             var v = model.UncomputeSafety(op, e);
+            // "same reason" = same blocker AND same culprit STATEMENT — two CoWrittenPartner verdicts with
+            // different culprits are different stories (e.g. headline blocked by a SWAP that never touches
+            // this element, the element itself blocked by a later broadcast), and omitting the element's
+            // line would misattribute its blockage to a statement that never touched it
             if (v.IsSafe) parts.Add($"{sym.SourceName}[{i}] safe cleanup candidate");
-            else if (v.Blocker != whole) parts.Add($"{sym.SourceName}[{i}] blocked: {Reason(v, op, e)}");
-            // else: same blocker as the register headline — redundant, omit
+            else if (v.Blocker != whole.Blocker || v.Culprit?.StmtId != whole.Culprit?.StmtId)
+                parts.Add($"{sym.SourceName}[{i}] blocked: {Reason(v, op, e)}");
+            // else: same blocker, same culprit statement as the register headline — redundant, omit
         }
         return parts.Count > 0 ? $" — per element: {string.Join("; ", parts)}" : string.Empty;
     }
@@ -94,7 +99,7 @@ public static class UncomputeReport
     {
         // the two rung-1 rulings — the report normally short-circuits before reaching them (Describe's ladder),
         // but a verdict shown directly must still say what the qubit IS
-        UncomputeBlocker.NotACleanupCandidate => "not a cleanup candidate (caller-owned input)",
+        UncomputeBlocker.NotACleanupCandidate => "not a cleanup candidate (a caller-owned input, or a name with no recorded qubit history)",
         UncomputeBlocker.Measured => $"measured — promoted to output @ order {v.Culprit!.Order}",
         UncomputeBlocker.Irreversible => $"irreversible touch (reset, or a call that measures/resets) @ order {v.Culprit!.Order}",
         UncomputeBlocker.NonQfreeWrite => $"non-qfree write — superposition (H/Rx/Ry) or phase permutation (Y/CY) @ order {v.Culprit!.Order}",

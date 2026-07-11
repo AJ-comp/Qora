@@ -128,11 +128,20 @@
     <a class="doc-link" href="uncompute-09-limits.html">9. 차단의 두 종류 — 원리적 한계와 보수적 거부 →</a>
   </nav>
   <p>
-    한 문장이 레지스터 전체를 한 덩어리로 쓰는 경우 — 브로드캐스트 <code>X(a)</code>, 레지스터를 통째로
-    넘긴 호출, 인덱스가 컴파일 타임에 정해지지 않는 루프 — 를 <strong>담요 쓰기</strong>라고 부릅니다.
-    문제의 본질은 폭의 불일치 하나입니다:
+    한 문장이 레지스터 전체를 한 덩어리로 쓰는 것을 <strong>담요 쓰기</strong>라고 부릅니다. 브로드캐스트
+    <code>X(a)</code>, 레지스터를 통째로 넘긴 호출, 인덱스가 컴파일 타임에 정해지지 않는 루프가 모두
+    여기에 해당합니다. 담요 쓰기 자체는 잘못이 아닙니다. 문제는 담요 쓰기가 원소 단위의 질문과 만날 때
+    생기며, 그 본질은 폭의 불일치 하나입니다.
   </p>
-  <div class="rule">역연산의 폭은 <strong>문장 폭</strong>인데 질문의 폭이 <strong>원소</strong>라면 — 문장을 원소로 썰 수 없습니다.</div>
+  <p>
+    여기서 폭은 두 가지입니다. <strong>질의 폭</strong>이란 컴파일러가 "|0⟩로 되돌릴 수 있는가"라고 묻는
+    대상의 크기를 말합니다. 레지스터 전체를 묻는 질의도 있고, <code>a[1]</code>처럼 원소 하나만 묻는
+    질의도 있습니다. <strong>문장 폭</strong>이란 한 문장이 실제로 건드리는 큐빗의 범위를 말합니다.
+    예를 들어 <code>X(a)</code>의 문장 폭은 <code>a[0]</code>과 <code>a[1]</code> 전부이고,
+    <code>X(a[0])</code>의 문장 폭은 <code>a[0]</code> 하나입니다. 역연산은 문장을 통째로 뒤집어 만드는
+    것이므로 언제나 문장 폭 그대로만 만들어집니다.
+  </p>
+  <div class="rule">역연산은 <strong>문장 폭</strong>으로만 만들어지므로, 질문이 <strong>원소</strong> 폭인데 쓰기가 문장 폭이면 그 문장을 원소 단위로 썰 수 없습니다.</div>
   <div class="grid2">
     <div class="card good">
       <h4>담요 + 전원 스크래치 — ✅ 문제없음</h4>
@@ -142,8 +151,9 @@
 use a = Qubit[2];
 Bcast(a);       <span class="cm">// 아무도 측정 안 함</span>
 <span class="cm">// a: cleanup candidate — safe</span></code></pre>
-      <p>질의 폭(레지스터 전체) = 역연산 폭(문장 전체)이므로 썰 필요가 없습니다.
-      <code>Adjoint Bcast(a)</code> 한 번이면 끝입니다.</p>
+      <p>레지스터 전원이 같은 운명(스크래치)이므로 질의 폭이 레지스터 전체이고, 이는 역연산의
+      문장 폭과 정확히 일치합니다. 썰 필요가 없으니 <code>Adjoint Bcast(a)</code> 한 번으로
+      정리가 끝납니다.</p>
     </div>
     <div class="card bad">
       <h4>담요 + 운명 혼합 — ❌ 원소가 막힘</h4>
@@ -152,25 +162,47 @@ Bcast(a);
 bit c = M(a[0]);  <span class="cm">// a[0]만 측정</span>
 <span class="cm">// a[1] blocked: statement-wide</span>
 <span class="cm">//   write of `a` — ...</span></code></pre>
-      <p>치울 것은 a[1]뿐인데 <code>Adjoint Bcast(a)</code>는 측정된 a[0]까지 되써 버립니다.
-      원소 질의에 담요 쓰기는 차단됩니다.</p>
+      <p>치워야 하는 것은 <code>a[1]</code> 하나뿐인데, <code>Adjoint Bcast(a)</code>는 이미
+      측정되어 출력으로 승격된 <code>a[0]</code>까지 함께 다시 써 버립니다. 그래서 원소 폭 질의가
+      담요 쓰기를 만나면 컴파일러는 그 원소를 차단합니다.</p>
     </div>
   </div>
-  <p>리포트는 원소 단위 진실을 함께 보여줍니다 — 막힌 원소에는 이유가, 깨끗한 원소에는 후보 표시가 붙습니다:</p>
+  <p>
+    이때 리포트는 레지스터 요약과 함께 원소 단위의 진실도 보여줍니다. 막힌 원소에는 막힌 이유가 붙고,
+    깨끗한 원소에는 후보 표시가 붙습니다. 위의 나쁜 예를 컴파일하면 다음과 같은 판정이 나옵니다.
+  </p>
 <pre><code>a: ancilla, measured — promoted to output, not a cleanup candidate
    — per element: a[1] blocked: statement-wide write of `a` — its adjoint
      cannot be sliced to `a[1]` and would rewrite the sibling elements ...</code></pre>
 
   <h3>혼합 운명 에러를 받았을 때의 수정 경로</h3>
+  <p>
+    한 레지스터 안에서 원소마다 운명이 갈렸는데 역사에 담요 쓰기가 남아 있다면, 다음 네 가지 경로 중
+    하나로 코드를 고칠 수 있습니다.
+  </p>
   <div class="panel">
     <table class="spec">
       <tr><th>수정</th><th>코드</th><th>의미</th></tr>
-      <tr><td class="k">① 구조 변경 (권장)</td><td><code>Flip(a[0]); Flip(a[1]);</code> 원소별 호출, 또는 운명별로 레지스터 분리 선언</td><td>역사가 정밀해져 컴파일러가 자동으로 치웁니다</td></tr>
+      <tr><td class="k">① 구조 변경 (권장)</td><td><code>FlipOne(a[0]); FlipOne(a[1]);</code> 원소별 호출, 또는 운명별로 레지스터 분리 선언</td><td>역사가 정밀해져 컴파일러가 자동으로 치웁니다</td></tr>
       <tr><td class="k">② 측정</td><td><code>bit d = M(a[1]);</code></td><td>출력으로 승격 — 반납 의무가 사라집니다</td></tr>
-      <tr><td class="k">③ 명시적 Reset</td><td><code>Reset(a[1]);</code></td><td>비가역 지우기를 코드로 선언합니다 (얽힌 큐빗에는 생존자 오염 주의)</td></tr>
+      <tr><td class="k">③ 명시적 Reset</td><td><code>Reset(a[1]);</code></td><td>비가역 지우기를 코드로 선언합니다 (얽힌 큐빗에는 생존자 오염 주의). 컴파일러가 이를 "반납 완료"로 인정하는 규칙은 ④와 함께 향후 제공됩니다</td></tr>
       <tr><td class="k">④ 직접 역연산</td><td><code>X(a[1]);</code></td><td>물리적으로 완전한 수정 — 단 컴파일러가 이를 "반납 완료"로 인정하는 방식은 향후 명시 선언문으로 제공될 예정입니다</td></tr>
     </table>
   </div>
+  <p>
+    권장 경로인 ①을 위의 나쁜 예에 적용하면 다음과 같습니다. 담요 호출 하나를 원소별 호출 두 개로
+    바꾸면 각 문장의 폭이 원소 하나로 줄어듭니다. 그러면 <code>a[1]</code>의 역사는 원소 폭 문장만으로
+    이루어지므로, 원소 폭 질의와 폭이 일치해 컴파일러가 자동으로 치울 수 있게 됩니다.
+  </p>
+<pre><code>operation FlipOne(Qubit p){ X(p); }
+operation Main(){
+    use a = Qubit[2];
+    FlipOne(a[0]);           <span class="cm">// 문장 폭 = a[0] 하나</span>
+    FlipOne(a[1]);           <span class="cm">// 문장 폭 = a[1] 하나</span>
+    bit c = M(a[0]);         <span class="cm">// a[0]만 측정 → 출력으로 승격</span>
+    <span class="cm">// a[1]: 역사가 원소 폭뿐이라 청소 후보로 판정되고,</span>
+    <span class="cm">// 컴파일러가 마지막 사용 직후에 역연산을 자동 삽입합니다</span>
+}</code></pre>
 
   <nav class="doc-links" aria-label="코스 내비게이션">
     <a class="doc-link" href="uncompute-07-loops.html">← 7. 루프와 호출 — 왜 판정이 갈리는가</a>
