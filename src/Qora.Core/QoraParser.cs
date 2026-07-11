@@ -45,6 +45,11 @@ public sealed class QoraParseResult
     /// <summary>The persistent semantic side table built at the final validation (null when validation never
     /// ran or failed earlier) — Id-keyed symbol/scope facts carried through the rest of the pipeline.</summary>
     public Ir.Passes.SemanticModel? Semantics { get; init; }
+    /// <summary>The program <see cref="Ir.Passes.EffectAnalysis"/> actually ran on (post-monomorphize, before
+    /// any tree-copying pass) — the ops whose Ids key the model's event streams, so this is the program the
+    /// uncompute view must iterate (unlike <see cref="Ir"/>, which predates monomorphization and would miss
+    /// specializations). Null when analysis never ran (parse or semantic errors).</summary>
+    public Ir.QProgram? AnalyzedIr { get; init; }
 }
 
 /// <summary>
@@ -146,12 +151,13 @@ public static class QoraParser
         // emission runs on the MANGLED program; NameMangler auto-resolves any name collision by appending
         // `_` and returns one note per rename, surfaced as a `// Qora:` comment in the emitted QASM.
         string qasm = string.Empty;
+        Ir.QProgram? analyzedIr = null;   // the program effect analysis ran on (null when it never ran)
         if (monoProgram != null && semanticErrors.Count == 0)
         {
             // Effect analysis (pure, model-only): per-statement qubit touched/modified sets recorded on
             // the final SemanticModel — the seed data for the auto-uncompute ladder. Runs here, before
             // any tree-copying pass, so every recorded Id is one the model itself knows.
-            if (semantics is not null) EffectAnalysis.Run(monoProgram, semantics);
+            if (semantics is not null) { EffectAnalysis.Run(monoProgram, semantics); analyzedIr = monoProgram; }
 
             // Flatten within/apply conjugations (QConjugate) into straight-line gates + a synthesized inverse
             // of the `within` block, BEFORE AdjointMaterializer — so a reversal's `Adjoint Foo` becomes a real
@@ -193,6 +199,7 @@ public static class QoraParser
             Ir = resolved ?? expanded ?? ir,
             Qasm = qasm,
             Semantics = semantics,
+            AnalyzedIr = analyzedIr,
             Errors = !result.Success
                 ? result.AllErrors.Select(ToQoraError).ToList()
                 : semanticErrors,

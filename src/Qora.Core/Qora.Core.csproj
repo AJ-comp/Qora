@@ -10,4 +10,10 @@
     <PackageReference Include="Janglim" Version="0.3.0-preview.1" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- the tests feed hand-corrupted (events, graph) pairs to the coherence sweep and pin the model's
+         add-only guards — internal seams only, no public surface -->
+    <InternalsVisibleTo Include="Qora.Tests" />
+  </ItemGroup>
+
 </Project>

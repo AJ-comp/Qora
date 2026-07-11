@@ -260,8 +260,28 @@ public sealed record QCond(string Text, bool HasCall = false);
 /// <param name="Diagonal">Diagonal in the computational basis: targets keep their 0/1 value, only the
 /// phase may change. CAUTION for later passes: phase kickback (e.g. CZ) still entangles — diagonal-only
 /// contact does NOT make a qubit safely discardable.</param>
+/// <param name="NonQfree">This write is NOT safely uncomputable by whole-statement adjoint injection when its
+/// target is entangled — rung ③ rejects any ancilla that carries one. TWO gate families set it, for two
+/// distinct reasons, both established by state-vector verification (adversarial round 5):
+/// <list type="bullet">
+/// <item>SUPERPOSITION — <c>H</c>, <c>Rx</c>/<c>Ry</c> at a general angle turn a basis state into a genuine
+/// superposition; the ancilla then carries a fresh quantum degree of freedom the injected adjoint cannot fold
+/// back once a surviving qubit has recorded it.</item>
+/// <item>PHASE PERMUTATION — <c>Y</c>, <c>CY</c> permute the basis while attaching a basis-VALUE-dependent
+/// phase (Y: <c>+i</c> on 0→1, <c>−i</c> on 1→0). On a definite basis value that phase is global and the
+/// adjoint undoes it — but when the target is ENTANGLED the phase differs per survivor branch, becoming a
+/// RELATIVE phase the documented "replace q with |0⟩" keeps and the injected adjoint strips, flipping a
+/// downstream measurement (repro: <c>H(b);CNOT(b,a);Y(a);H(b);M(b)</c>). Matches Silq's exclusion of Y from
+/// qfree; an earlier "broader than Silq — Y is safe" claim was a verified bug.</item>
+/// </list>
+/// A phase-free basis PERMUTATION — X, CNOT, CCX, SWAP — does NOT set this: its target stays a definite basis
+/// value the adjoint cleanly undoes. Diagonal/phase gates (Z, S, T, CZ, Rz) never write a value (their targets
+/// are Reads), so this flag is irrelevant to them and they stay uncompute-safe. Default false; a NEW gate
+/// added without a deliberate value is caught by a table-invariant test, so the false default can never
+/// silently green-light an un-classified non-qfree gate. (A future taint-refinement could re-admit Y/CY on
+/// provably basis-constant ancestry — registered as a precision gap, validated by the fuzzer.)</param>
 public sealed record GateInfo(string QasmName, int Arity, bool AngleFirst = false, bool Unitary = true,
-    int Controls = 0, bool Diagonal = false);
+    int Controls = 0, bool Diagonal = false, bool NonQfree = false);
 
 /// <summary>One parameter slot of a built-in gate, derived from its <see cref="GateInfo"/>. A rotation's
 /// leading angle is a value slot (<see cref="QType.Angle"/>); every qubit slot broadcasts (a whole register
@@ -287,16 +307,16 @@ public static class QoraGates
 {
     public static readonly IReadOnlyDictionary<string, GateInfo> Gates = new Dictionary<string, GateInfo>
     {
-        ["H"] = new("h", 1), ["X"] = new("x", 1), ["Y"] = new("y", 1),
+        ["H"] = new("h", 1, NonQfree: true), ["X"] = new("x", 1), ["Y"] = new("y", 1, NonQfree: true),
         ["Z"] = new("z", 1, Diagonal: true),
         ["S"] = new("s", 1, Diagonal: true), ["T"] = new("t", 1, Diagonal: true),
         ["CNOT"] = new("cx", 2, Controls: 1), ["CX"] = new("cx", 2, Controls: 1),
         // CY is NOT diagonal: Y flips the target's basis value (only the control slot is value-preserving).
-        ["CY"] = new("cy", 2, Controls: 1),
+        ["CY"] = new("cy", 2, Controls: 1, NonQfree: true),
         ["CZ"] = new("cz", 2, Controls: 1, Diagonal: true),
         ["SWAP"] = new("swap", 2), ["CCX"] = new("ccx", 3, Controls: 2),
-        ["Rx"] = new("rx", 2, AngleFirst: true),
-        ["Ry"] = new("ry", 2, AngleFirst: true),
+        ["Rx"] = new("rx", 2, AngleFirst: true, NonQfree: true),
+        ["Ry"] = new("ry", 2, AngleFirst: true, NonQfree: true),
         ["Rz"] = new("rz", 2, AngleFirst: true, Diagonal: true),
         ["Reset"] = new("reset", 1, Unitary: false),
         ["ResetAll"] = new("reset", 1, Unitary: false),

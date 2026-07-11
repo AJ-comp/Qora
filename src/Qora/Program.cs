@@ -59,6 +59,7 @@ if (args.Contains("--json"))
                 ir = Qora.Ir.IrPrinter.Print(r.Ir),
                 irInverse = Qora.Ir.IrPrinter.PrintInverses(r.Ir),
                 symbols = Qora.Ir.Passes.SymbolTableBuilder.Format(r.Ir, r.Semantics),
+                uncompute = Qora.Ir.Passes.UncomputeReport.Format(r.AnalyzedIr, r.Semantics),
             }));
         }
         else

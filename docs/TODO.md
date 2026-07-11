@@ -32,6 +32,11 @@ Rx/Ry/Rz), measurement (`bit r = M(q)`), classical vars (const/var/int/bit) + re
   documented "true longest-match" lexer TODO in `AJPGS/docs/TODO.md`. Fix it in the engine; do **not**
   work it around in Qora (e.g. pre-lexing string passes) — that would blur the engine/language boundary
   and make Qora fragile.
+- **Parser crash on very large inputs.** Found incidentally during a 2026-07-10 adversarial review's
+  performance probe: a generated source with tens of thousands of statements makes the Janglim parse-tree
+  path throw a raw `InvalidOperationException` ("Sequence contains no elements" — an internal
+  `First()`/`Last()` on an empty sequence at scale) at `QoraParser.cs`'s `result.ToParseTree`. Report to
+  the engine with a minimized repro; no Qora-side workaround.
 
 ---
 
@@ -63,6 +68,17 @@ Rx/Ry/Rz), measurement (`bit r = M(q)`), classical vars (const/var/int/bit) + re
   `Adjoint U` — the U·V·U† scratch/ancilla pattern; one of the most important quantum lessons. OpenQASM
   has no conjugation construct, so Qora must synthesize `inv(U)` itself — feasible only once the
   single-gate `inv @` path exists (it now does) and only for fully-unitary `within` blocks. (workable)
+- **Local / loop-scoped `use` (qubit allocation lowering)** ⚛️ — allow `use` inside subroutines and
+  loops (Q#-style helper-owned ancillas), lifting QSEM012. OpenQASM has global-only qubit declarations,
+  but a target limit must not be a language limit: a dedicated allocation-lowering pass (same family as
+  the namespace mangling / `const` demotion that already compile away QASM gaps) maps local `use` onto
+  global registers — static-bound loops unroll or reuse, subroutine locals reuse across calls. The
+  correctness key is the **scope-exit |0⟩ guarantee** (reuse is legal only if the register is provably
+  returned), so this SITS ON the uncompute return-semantics decision; the QSEM012 gate stays until the
+  pass exists (its origin was exactly a silent-hoist bug — never hoist without the guarantee), and shapes
+  the pass cannot handle yet are loud errors, never silent skips. Standing design rule, already in force:
+  every analysis (events / liveness / verdicts / ContainerMap) is written placement-neutral, so nothing
+  built for uncompute needs rework when this lands. Decided as a goal 2026-07-10. (hard)
 - **Range / expression bounds** — `start..stop` with variable/const bounds and const/param-sized
   `Qubit[N]` / `use` (today loop bounds and register sizes must be literal numbers). OpenQASM
   `for int i in [a:b]` already accepts expressions. Grammar relaxation from `Num` to `expr` + light const
@@ -92,6 +108,67 @@ Rx/Ry/Rz), measurement (`bit r = M(q)`), classical vars (const/var/int/bit) + re
   a single-file toy. (not-expressible)
 
 ---
+
+## Auto-uncompute — rung ④ injector prerequisites (2026-07-12 deep-dive on blanket+all-scratch)
+
+- **#17 — whole-statement adjoint MATERIALIZATION.** A safe verdict on a register written by a CALL
+  (e.g. `Bcast(a)` — one blanket write) promises injection of `Adjoint Bcast(a)`: the injector must
+  synthesize the inverse of a user operation — body reversed, each statement inverted, loop ranges
+  reversed. This is the whole-operation Auto-Adjoint machinery (currently listed LOW/hard below;
+  rung ④ pulls it up). The verdict's clauses already fence its preconditions (no measurement —
+  transitive flags; static loop bounds — language rule; bit conditions imply measurement ⇒ excluded),
+  so everything verdict-SAFE is synthesizable in principle. Partial part exists: the within/apply
+  Inverter. Note the pleasant fact discovered here: Qora already performs Classiq-style COMPOUND
+  INVERSION implicitly at call boundaries (a callee's internal loops are mirrored by inverting the
+  whole call, which is why callee-internal containers correctly do NOT trigger ContainedWrite —
+  only caller-side containers around the write do).
+
+## Auto-uncompute — registered data gaps (from the requirements cross-check, 2026-07-11)
+
+The rung-③ analysis (events + qubit graph + ContainerMap) answers the injector's questions except:
+
+- **#11 — classical condition-bit flow.** Lifting the `ContainedWrite` block via conditional inverses
+  (`if (r==1) { inverse }`) requires proving the condition bit unchanged between the compute and the
+  injected inverse; classical bits are not in the event stream (only `Symbol.Uses`, thin). Fill when
+  building the if-tools.
+- **#14 — post-injection re-analysis.** The model's analysis stores are add-only (re-analysis throws
+  QINTERNAL), so re-verifying an injected tree needs generation-keyed storage. Decide during rung-④
+  design.
+- **#16 — ancilla-identification conditions coupled to FUTURE features** (2026-07-11 literature
+  cross-check: Silq PLDI'20, Q#, Unqomp PLDI'21/Reqomp, Twist POPL'22, Quipper, Bennett'73, Gidney'18 —
+  20/20 key claims source-verified). `IsAncillaCandidate`'s two conditions (use-allocated + never
+  measured) are provably COMPLETE for today's feature set (void ops, no aliasing, no closures: measurement
+  is the only value-escape channel). Each future feature adds a condition — add it in the SAME change:
+  - **Return values** (roadmap) → add "not returned / does not escape" (Silq: return consumes; Bennett:
+    outputs are copied out of scratch).
+  - **Aliasing / borrowing** → add "no live alias"; and `borrow` splits ancillas into clean (end |0⟩,
+    value-verifiable) vs **dirty** (end = original unknown state — verifiable only by structural
+    compute/uncompute pairing à la within/apply, never by value reasoning). Q# precedent.
+  - **Measure-reset reuse** (`MResetZ` idiom) → "never measured" must become per-LIFETIME-SEGMENT
+    (Reset ends one segment, starts a fresh |0⟩ one). Today: whole-register disqualification = sound
+    over-rejection.
+  - **Closures** → forbid qubit capture (Silq's choice) or add escape analysis.
+  - Note on principle: "measured ⟹ not scratch" is a correct LIVENESS test today (user `M` outcomes flow
+    into program data; deferred-measurement principle makes the register an output wire), but it is NOT
+    part of the literature's ancilla definition — Gidney-style measurement-based uncomputation MEASURES
+    the ancilla as its cleanup (X-basis + classical fixup). If rung ④ ever adopts that gadget, the
+    compiler-emitted cleanup measurement must not disqualify the register it is cleaning.
+    **DECIDED (2026-07-12): rung ④ v1 = adjoint injection ONLY.** Measure-and-fixup is a fault-tolerant
+    cost-model optimization (zero T-gates) with no benefit on Qora's current targets (simulators — no
+    T-gate premium) and three costs (mid-circuit measurement + real-time classical feedback requirement,
+    nondeterministic execution path, a whole new semantics to verify). Revisit only when targeting FT
+    backends; until then this entire bullet is dormant.
+  - Escape hatch precedent: Silq ships explicit unsafe `forget(x := expr)` (witness-based, opt-in, loud)
+    for legitimately-uncomputable-by-witness patterns the checker rejects — the acceptable shape if
+    rule-(B) errors ever prove too strict in practice; a silent skip stays forbidden.
+- **#15 — Y/CY taint refinement (precision, not soundness).** Rung ③ now blocks EVERY Y/CY write as
+  non-qfree (matching Silq), which conservatively over-rejects a Y/CY whose target is a *definite basis
+  value* (a |0⟩-rooted classical chain), where the phase is global and the adjoint undoes it cleanly. A
+  taint pass over the qubit graph — a node is superposition-tainted iff it is a param seed, born of an
+  H/Rx/Ry write, or has a tainted parent — could re-admit a Y/CY write whose parents are all untainted.
+  Sound (untainted ⟹ definite basis value ⟹ global phase) and validatable by the round-5 fuzzer (its
+  Y/CY-removed control already ran clean). Deferred deliberately: matching Silq is the correct minimal
+  fix, and a new taint subsystem is bug surface better added under test than unsupervised.
 
 ## Sequencing note
 
