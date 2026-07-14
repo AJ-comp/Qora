@@ -145,6 +145,10 @@ public sealed class QubitGraph
 /// <see cref="Measured"/> (an ancilla promoted to OUTPUT — its value was delivered, and a collapse has no
 /// unitary inverse either; the culprit is the measuring event). The rest are one value per safety clause:
 /// <see cref="Irreversible"/> breaks clause 1 (reversible history), <see cref="NonQfreeWrite"/> breaks clause 2 (qfree compute),
+/// <see cref="NotInvertibleCall"/> breaks the invertibility clause (the write is a call to a user operation whose
+/// body the <see cref="Inverter"/> cannot statement-adjoint — a <c>while</c>/<c>repeat</c> of unknown count,
+/// classical mutation, or a local <c>use</c>, transitively; the value is reversible in principle but no
+/// straight-line cleanup can be synthesized, so it is conservatively unsafe — the culprit is the call event),
 /// <see cref="ContainedWrite"/> breaks clause 3 (unconditional compute: a write sitting inside a container —
 /// an <c>if</c> runs it conditionally, a loop runs it repeatedly, and a within/apply conjugation already
 /// replays its own W† (another adjoint would RE-compute the restored value) — so replaying a straight-line
@@ -155,7 +159,7 @@ public sealed class QubitGraph
 /// statement that writes q must READ its other qubits, and those sources must stay unchanged until q dies).
 /// <see cref="NotAnalyzed"/> means the operation has no recorded event stream (effect analysis never ran on
 /// it — a semantic-error abort, or a synthesized op) — reported instead of a vacuous "safe".</summary>
-public enum UncomputeBlocker { None, NotACleanupCandidate, Measured, Irreversible, NonQfreeWrite, ContainedWrite, CoWrittenPartner, SourceDied, NotAnalyzed }
+public enum UncomputeBlocker { None, NotACleanupCandidate, Measured, Irreversible, NonQfreeWrite, NotInvertibleCall, ContainedWrite, CoWrittenPartner, SourceDied, NotAnalyzed }
 
 /// <summary>The rung-③ safety verdict for one qubit. <see cref="Blocker"/> names the failed clause
 /// (<see cref="UncomputeBlocker.None"/> = safe to auto-uncompute); <see cref="Culprit"/> is the offending
@@ -192,6 +196,7 @@ public sealed class SemanticModel
     private readonly Dictionary<int, QubitGraph> _qubitGraphByOp = new();   // QOperation.Id → value-genealogy DAG
     private readonly Dictionary<int, OpEffectSummary> _effectSummaryByOpId = new(); // QOperation.Id → summary
     private readonly Dictionary<int, string> _emittedNameByDeclId = new(); // declaring node Id → emitted (post-mangling) name
+    private readonly HashSet<int> _nonInvertibleCallStmts = new();      // StmtIds of CALL statements whose callee the Inverter cannot invert
     private Scope? _programScope;   // the top-level symbol table: one Operation symbol per op
 
     internal void AddOperation(QOperation op, Scope root)
@@ -233,6 +238,19 @@ public sealed class SemanticModel
         if (!_qubitGraphByOp.TryAdd(opId, graph))
             throw new System.InvalidOperationException(
                 $"QINTERNAL: op {opId} already has a qubit graph — re-analysis would silently replace add-only facts");
+    }
+
+    /// <summary>Record the CALL statements (by stable node <see cref="QStmt.Id"/>) whose callee the
+    /// <see cref="Inverter"/> cannot invert — recorded by <see cref="EffectAnalysis"/> alongside the event stream
+    /// (co-populated, same pass, so rung ③ never sees events without this companion fact). Keyed by StmtId, NOT by
+    /// operation NAME: monomorphization rewrites a generic call's name (<c>Loop</c> → <c>Loop__sz2</c>) while
+    /// PRESERVING the node Id, so a name test would miss the block whenever rung ③ is handed the pre-mono tree.
+    /// StmtIds are shared across the pre-mono and analyzed trees, so <see cref="UncomputeSafety"/> answers
+    /// correctly whichever it is given. Rung ③ reads this to refuse certifying an ancilla whose write is a call it
+    /// cannot actually uncompute — keeping the safety verdict and the Inverter (the single authority) in agreement.</summary>
+    internal void RecordNonInvertibleCallStmts(IEnumerable<int> stmtIds)
+    {
+        foreach (var id in stmtIds) _nonInvertibleCallStmts.Add(id);
     }
 
     /// <summary>The operation's value-genealogy graph (see <see cref="QubitNode"/>), or null when the op was
@@ -441,6 +459,8 @@ public sealed class SemanticModel
             if (e.Irreversible) return new(UncomputeBlocker.Irreversible, e);                          // (a) lossy touch
             if (e.Kind == QubitEventKind.Write && e.NonQfree)
                 return new(UncomputeBlocker.NonQfreeWrite, e);                                    // (b) superposition (H/Rx/Ry) or phase-permutation (Y/CY)
+            if (e.Kind == QubitEventKind.Write && _nonInvertibleCallStmts.Contains(e.StmtId))
+                return new(UncomputeBlocker.NotInvertibleCall, e);                                // (b″) write is a call the Inverter cannot invert (while/repeat/mutation/use in the callee) — keyed by StmtId, tree-independent
             if (e.Kind == QubitEventKind.Write && chain.Count > 0)
                 return new(UncomputeBlocker.ContainedWrite, e);                                        // (b′) contained write
             if (death is null || e.Order > death.Order) death = e;

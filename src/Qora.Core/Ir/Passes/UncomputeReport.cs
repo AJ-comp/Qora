@@ -103,6 +103,7 @@ public static class UncomputeReport
         UncomputeBlocker.Measured => $"measured — promoted to output @ order {v.Culprit!.Order}",
         UncomputeBlocker.Irreversible => $"irreversible touch (reset, or a call that measures/resets) @ order {v.Culprit!.Order}",
         UncomputeBlocker.NonQfreeWrite => $"non-qfree write — superposition (H/Rx/Ry) or phase permutation (Y/CY) @ order {v.Culprit!.Order}",
+        UncomputeBlocker.NotInvertibleCall => $"{NotInvertibleReason(v.Culprit!, op)} @ order {v.Culprit!.Order}",
         UncomputeBlocker.ContainedWrite => $"{ContainedReason(v.Culprit!, op)} @ order {v.Culprit!.Order}",
         // the blanket-self case: the culprit is q's OWN statement-wide write, not a distinct partner qubit
         UncomputeBlocker.CoWrittenPartner when v.Culprit!.Qubit.Index is null && v.Culprit.Qubit.Reg == q.Reg =>
@@ -117,6 +118,15 @@ public static class UncomputeReport
     /// conditional/repeated (a straight-line adjoint would not mirror it), while a write inside a
     /// within/apply conjugation is blocked for the opposite reason — the conjugation's own synthesized W†
     /// ALREADY uncomputes it, and injecting another adjoint would re-compute the restored value.</summary>
+    /// <summary>Names the callee the injector could not invert, so the dry-run view says WHICH call blocked the
+    /// cleanup and why (the flexible-plus-diagnostic contract: the ancilla is left live, not auto-cleaned, but
+    /// the reason is explicit rather than a silent skip).</summary>
+    private static string NotInvertibleReason(QubitEvent culprit, QOperation op)
+    {
+        var callee = StmtMap.Build(op).TryGetValue(culprit.StmtId, out var s) && s is QGate g ? $"`{g.Name}`" : "the callee";
+        return $"write is a call to {callee}, which cannot be inverted (a while/repeat, classical mutation, or local `use` in its body — reversible in principle, but no straight-line cleanup can be synthesized)";
+    }
+
     private static string ContainedReason(QubitEvent culprit, QOperation op)
     {
         var map = ContainerMap.Build(op);

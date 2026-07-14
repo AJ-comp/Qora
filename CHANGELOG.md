@@ -11,6 +11,32 @@ emitted as **OpenQASM 3.0**.
 > **Note:** Qora was renamed from **Ket** on 2026-07-01 (a "Ket" extension already existed). Versions
 > 0.1–0.7 below were authored under the old name.
 
+## 0.20 — 2026-07-14
+
+### Added
+- **Rung ④ of the automatic-uncomputation ladder — the cleanup PLAN builder**
+  (`Ir/Passes/UncomputePlanner.cs`). For one safely-uncomputable ancilla,
+  `UncomputePlanner.Plan(model, inverter, op, q)` computes its cleanup — the adjoints of the gates that
+  wrote the ancilla, in reverse program order — anchored at the ancilla's rung-② death point, WITHOUT
+  touching the IR (splicing is a later rung-④ step). The |0…0⟩ birth is excluded, and one statement that
+  writes several elements of the register (e.g. `SWAP(a[0], a[1])`) is inverted once, not once per element.
+- **Statement-Id → statement lookup** (`Ir/Passes/StmtMap.cs`) — resolves a qubit event's `StmtId` back to
+  its gate node, sharing `ContainerMap`'s single tree walk so a new container type is taught in one place.
+- **`QGate.CalleeOpId` — reference binding for calls.** A user-operation call now carries a stable node
+  reference to its callee, bound once at name resolution (`Resolver`) and re-pointed to the size
+  specialization at monomorphization. Effect analysis follows the reference instead of re-matching the
+  callee name (which shifts across monomorphization/mangling) — the standard "resolve once, reference
+  after", removing name-matching from the analysis middle.
+
+### Fixed
+- **Rung ③ no longer certifies an ancilla whose write it cannot actually invert** (`SemanticModel.cs`,
+  `EffectAnalysis.cs`). A write that is a call to an operation the inverter cannot statement-adjoint — a
+  `while`/`repeat` of runtime-unknown count, classical mutation, or a local `use` in the callee — is
+  blocked by a new `UncomputeBlocker.NotInvertibleCall` (shown in the `--stages` uncompute view). This
+  closes a soundness gap (a runtime-unknown loop count hidden behind a call was previously deemed safe) and
+  keeps the safety verdict in agreement with the inverter. Keyed by the call statement's stable Id, so it
+  answers correctly on the pre-monomorphization and analyzed trees alike.
+
 ## 0.19 — 2026-07-12
 
 ### Added

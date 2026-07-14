@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>컴파일러는 어떤 큐빗을 정리하는가 — 판별 사다리 — 자동 uncomputation 코스 2/16 — Qora</title>
+<style>
+  :root {
+    --bg: #ffffff; --ink: #1f2430; --muted: #5b6472; --line: #e6e8ee; --panel: #f7f8fb;
+    --plus: #1457d6; --minus: #d62b39; --accent: #6b3fd4; --good: #11875b; --amber: #b5810a;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo",
+      "Malgun Gothic", "Noto Sans KR", "Segoe UI Symbol", "Cambria Math", sans-serif;
+    line-height: 1.7; font-size: 16.5px;
+  }
+  .wrap { max-width: 940px; margin: 0 auto; padding: 0 20px 120px; }
+  header.hero {
+    padding: 60px 20px 36px; text-align: center; border-bottom: 1px solid var(--line);
+    background: linear-gradient(180deg, #faf9ff, #ffffff);
+  }
+  header.hero h1 { font-size: 2.0rem; margin: 0 0 10px; letter-spacing: -0.5px; }
+  header.hero p { color: var(--muted); margin: 0; font-size: 1.02rem; }
+  .tag { display:inline-block; font-size:.78rem; letter-spacing:.12em; text-transform:uppercase;
+         color: var(--accent); font-weight:700; margin-bottom:14px; }
+  h2 { margin: 54px 0 12px; font-size: 1.42rem; letter-spacing: -0.3px;
+       padding-top: 14px; border-top: 2px solid var(--line); }
+  h2 .n { display:inline-flex; align-items:center; justify-content:center;
+    width: 1.7em; height: 1.7em; border-radius: 50%;
+    background: var(--accent); color:#fff; font-size: .8rem; font-weight:700;
+    margin-right: 10px; vertical-align: middle; }
+  h3 { margin: 30px 0 8px; font-size: 1.1rem; }
+  p { margin: 12px 0; }
+  strong { color: #11203a; }
+  .lead { font-size: 1.05rem; }
+  .cref { display:inline-flex; align-items:center; font-size:.78rem; font-weight:700;
+          color: var(--accent); background:#f3efff; border:1px solid #e2d8ff;
+          border-radius:999px; padding:0 9px; vertical-align: middle; white-space:nowrap; }
+  code, .mono, pre {
+    font-family: "SF Mono", "JetBrains Mono", "D2Coding", Consolas, "Segoe UI Symbol", monospace;
+  }
+  code { background: var(--panel); border: 1px solid var(--line); border-radius: 5px; padding: 1px 6px; font-size: .9em; }
+  pre { background: #111827; color: #eef4ff; border-radius: 10px; padding: 15px 17px; margin: 16px 0;
+        overflow-x: auto; font-size: .86rem; line-height: 1.55; }
+  pre code { background: none; border: none; padding: 0; font-size: inherit; color: inherit; }
+  pre .cm { color: #8ba0c7; }
+  pre .hl { color: #c4a7ff; font-weight: 700; }
+  pre .add { color: #7fe0b0; font-weight: 700; }
+  pre .rd { color: #ff9db0; font-weight: 700; }
+  pre .result-ok { color: #7fe0b0; font-weight: 700; }
+  pre .result-bad { color: #ff9db0; font-weight: 700; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+           padding: 14px 16px; margin: 16px 0; overflow-x: auto; }
+  table.spec { border-collapse: collapse; width: 100%; font-size: .92rem; }
+  table.spec th, table.spec td { padding: 8px 11px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: top; }
+  table.spec th { font-size: .78rem; color: var(--muted); font-weight: 700; letter-spacing:.02em; background:#fbfbfe; }
+  table.spec tr:last-child td { border-bottom: none; }
+  table.spec code { white-space: nowrap; }
+  table.spec td.k { white-space: nowrap; font-weight: 700; color:#1a2740; }
+  .call { border-left: 4px solid var(--accent); background: #faf8ff;
+          padding: 13px 17px; border-radius: 0 8px 8px 0; margin: 18px 0; }
+  .call.why { border-color: var(--good); background: #f2fbf7; }
+  .call.warn { border-color: #e6a417; background: #fff9ec; }
+  .call .h { font-weight: 700; display:block; margin-bottom: 4px; }
+  .call p { margin: 8px 0 0; }
+  .rule { text-align:center; font-size: 1.02rem; font-weight: 700; color:#1a1140;
+          background: #f3efff; border:1px solid #e2d8ff; border-radius: 10px; padding: 15px; margin: 20px 0; }
+  .toc { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 20px; margin: 24px 0; }
+  .toc ol { margin: 6px 0 0; padding-left: 20px; columns: 2; column-gap: 30px; }
+  .toc a { color: var(--ink); text-decoration: none; }
+  .toc a:hover { color: var(--accent); }
+  .doc-links { display:flex; flex-wrap:wrap; gap:10px; margin: 18px 0 6px; }
+  .doc-link { display:inline-flex; align-items:center; gap:8px; border:1px solid #cddcff;
+              background:#f6f9ff; color:#1745b5; border-radius:999px; padding:7px 15px; font-weight:700; text-decoration:none; font-size:.92rem; }
+  .doc-link:hover { border-color:#9bb8ff; background:#eef4ff; }
+  .doc-meta { border: 1px solid #dfe5f2; border-left: 5px solid var(--accent); border-radius: 8px;
+              background: #f8faff; padding: 16px 18px; margin: 22px 0; }
+  .doc-meta .meta-title { font-weight: 800; color: #11203a; margin-bottom: 12px; }
+  .meta-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 18px; margin: 0; }
+  .meta-grid dt { color: var(--muted); font-size: .74rem; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; }
+  .meta-grid dd { margin: 3px 0 0; }
+  footer { text-align:center; color:var(--muted); font-size:.9rem; margin-top: 60px; padding-top: 24px; border-top:1px solid var(--line); }
+  /* datasheet-specific */
+  .pipe { display:flex; flex-direction:column; gap:0; margin: 18px 0; }
+  .pipe .stg { display:flex; align-items:center; gap:12px; }
+  .pipe .box { flex:1; background:#fff; border:1px solid var(--line); border-radius:8px; padding:9px 13px; font-size:.92rem; }
+  .pipe .box b { color:#1a2740; }
+  .pipe .box .d { color:var(--muted); font-size:.85rem; }
+  .pipe .box.key { border-color:#c9b6f4; background:#faf7ff; }
+  .pipe .arr { text-align:center; color:var(--accent); font-size:1.2rem; line-height:1; margin:5px 0; }
+  .ladder { display:grid; gap:10px; margin:18px 0; }
+  .rung { display:grid; grid-template-columns:auto 1fr; gap:14px; align-items:start;
+          border:1px solid var(--line); border-radius:10px; padding:13px 16px; background:#fff; }
+  .rung .rn { width:38px; height:38px; border-radius:8px; background:var(--accent); color:#fff;
+              font-weight:800; display:flex; align-items:center; justify-content:center; font-size:1.05rem; }
+  .rung.done { border-left:5px solid var(--good); }
+  .rung.done .rn { background:var(--good); }
+  .rung .rt { font-weight:800; color:#1a2740; }
+  .rung .rd { color:var(--muted); font-size:.92rem; margin-top:2px; }
+  .rung .st { display:inline-block; font-size:.72rem; font-weight:800; border-radius:999px; padding:2px 9px; margin-left:8px; vertical-align:middle; }
+  .rung .st.ok { background:#e4f7ee; color:var(--good); }
+  .rung .st.next { background:#f3efff; color:var(--accent); }
+  .badge { display:inline-block; font-size:.72rem; font-weight:800; border-radius:5px; padding:1px 7px; }
+  .badge.r { background:#eef4ff; color:var(--plus); }
+  .badge.w { background:#fdeef0; color:var(--minus); }
+  .badge.m { background:#f3efff; color:var(--accent); }
+  .grid2 { display:grid; grid-template-columns:1fr; gap:14px; margin:16px 0; }
+  @media (min-width:740px){ .grid2 { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+  .card { background:#fff; border:1px solid var(--line); border-radius:8px; padding:14px 16px; }
+  .card.good { border-top:4px solid var(--good); }
+  .card.bad { border-top:4px solid var(--minus); }
+  .card h4 { margin:0 0 8px; font-size:1rem; }
+  @media (max-width: 720px) { .meta-grid, .toc ol { grid-template-columns: 1fr; columns:1; } }
+</style>
+</head>
+<body>
+<div class="qora-lang-switch" style="position:sticky;top:0;z-index:99;text-align:right;padding:8px 16px;background:rgba(255,255,255,.92);backdrop-filter:blur(4px);border-bottom:1px solid #e6e8ee;font-size:13px;font-family:sans-serif;"><a href="../en/index.html">English</a> · <strong>한국어</strong> · <a href="../ja/index.html">日本語</a></div>
+
+<header class="hero">
+  <div class="tag">Qora · 자동 uncomputation 코스 · 2/16</div>
+  <h1>2. 컴파일러는 어떤 큐빗을 정리하는가 — 판별 사다리</h1>
+  <p>세 질문으로 정리 대상을 가려낸다 — 소유·측정·복원 가능성</p>
+</header>
+
+<div class="wrap">
+
+  <nav class="doc-links" aria-label="코스 내비게이션">
+    <a class="doc-link" href="uncompute-01-ancilla.html">← 1. 앤실라와 uncomputation — 작업 큐빗은 왜 되돌려야 하는가</a>
+    <a class="doc-link" href="datasheet.html#s8">코스 목차</a>
+    <a class="doc-link" href="uncompute-03-ledger.html">3. 상태를 읽는 법 — 상태벡터와 진폭 →</a>
+  </nav>
+  <p>
+    <a href="uncompute-01-ancilla.html">1장</a>에서 자동 uncomputation의 규칙을 세웠습니다.<br>
+    측정하지 않은 <code>use</code> 레지스터는 스코프가 끝날 때 |0⟩로 되돌려 반납되어야 한다는 규칙입니다.<br>
+    그런데 이 규칙을 지키려면 컴파일러는 먼저 어떤 큐빗을 되돌릴지부터 정해야 하고, 프로그램의 모든 큐빗을 되돌려서는 안 됩니다.<br>
+    파라미터로 받은 큐빗은 호출한 쪽의 소유라 함부로 건드릴 수 없고, 측정한 큐빗은 그 값이 곧 프로그램의 결과라서 되돌리면 결과를 지우는 셈이 됩니다.<br>
+    그리고 되돌려야 할 큐빗이라도, 계산 이력에 따라 자동으로 되돌릴 수 있는 경우와 없는 경우로 나뉩니다.<br>
+    그래서 컴파일러는 큐빗마다 아래와 같은 세 가지 질문을 차례로 던집니다.
+  </p>
+  <div class="panel">
+    <table class="spec">
+      <tr><th>단계</th><th>질문</th><th>판별 기준</th><th>API</th></tr>
+      <tr><td class="k">0. 앤실라인가?</td><td>누구의 큐빗인가</td><td><code>use</code>로 만들었으면 앤실라입니다. 파라미터는 호출자의 소유이므로 제외됩니다.</td><td><code>IsAncilla</code></td></tr>
+      <tr><td class="k">1. 청소 후보인가?</td><td>측정되었는가</td><td>측정되지 않은 앤실라만 청소 후보입니다. 측정된 앤실라는 되돌릴 역연산이 없어 청소할 수 없으므로 제외됩니다.</td><td><code>IsCleanupCandidate</code></td></tr>
+      <tr><td class="k">2. 청소 가능한가?</td><td>역사가 깨끗한가</td><td>계산 이력이 4개 조항을 통과해야 합니다 (<a href="uncompute-09-qfree.html">9장</a>–<a href="uncompute-13-blanket.html">13장</a>).</td><td><code>UncomputeSafety</code></td></tr>
+    </table>
+  </div>
+  <p>
+    각 질문이 실제로 어떤 큐빗을 필터링하는지, 0번과 1번을 예제로 하나씩 확인하겠습니다.<br>
+    (2번 질문은 <a href="uncompute-09-qfree.html">9장</a>부터 13장까지가 통째로 다룹니다.)
+  </p>
+
+  <h4>질문 0의 제외 사례 — 피호출 연산이 파라미터 큐빗을 되돌리면, 호출자가 그 큐빗에 준비한 상태가 사라집니다</h4>
+  <p>
+    번호 ①~⑤는 이 프로그램이 실제로 실행되는 순서입니다.<br>
+    <code>Main</code>은 자신이 <code>use</code>로 만든 큐빗 <code>q[0]</code>을 <code>Prepare</code>에 인자로 넘겨 호출합니다. <span class="cref">① 주석</span><br>
+    <code>Prepare</code>는 그 큐빗을 <code>p</code>라는 이름으로 받고, 이 <code>p</code>가 곧 <code>Main</code>의 <code>q[0]</code>입니다. <span class="cref">② 주석</span><br>
+    <code>Prepare</code>는 그 <code>p</code>에 X 게이트를 적용해 <code>p</code>를 |1⟩ 상태로 만듭니다. <span class="cref">③ 주석</span><br>
+    만약 컴파일러가 <code>p</code>를 청소 대상으로 오인하면, <code>Prepare</code>의 스코프가 끝날 때 <code>p</code>를 |0⟩로 되돌리는 역연산 <code>X(p)</code>를 삽입합니다. <span class="cref">④ 주석</span><br>
+    다시 <code>Main</code>으로 돌아와 <code>q[0]</code>을 측정해 <code>r</code>에 담는데, 앞서 삽입된 역연산이 <code>q[0]</code>을 |0⟩로 되돌려 <code>r</code>이 기대한 1이 아니라 0이 됩니다. <span class="cref">⑤ 주석</span>
+  </p>
+<pre><code>operation Prepare(Qubit p){    <span class="cm">// <span class="hl">②</span> Prepare가 그 큐빗을 p라는 이름으로 받는다 (p가 곧 Main의 q[0])</span>
+    X(p);                      <span class="cm">// <span class="hl">③</span> p에 X 게이트를 적용해 p = |1⟩</span>
+    <span class="rd">X(p);</span>                      <span class="cm">// <span class="hl">④</span> 청소 대상으로 오인하면 스코프 끝에 삽입되는 역연산 → p = |0⟩ (X가 취소됨)</span>
+}
+operation Main(){
+    use q = Qubit[1];
+    Prepare(q[0]);             <span class="cm">// <span class="hl">①</span> Main이 use로 만든 q[0]을 Prepare에 넘겨 호출한다</span>
+    bit r = M(q[0]);           <span class="cm">// <span class="hl">⑤</span> q[0]을 측정해 r에 담는다. 위 역연산 탓에 r = 1이 아니라 0</span>
+}</code></pre>
+  <p>
+    그래서 질문 0은 큐빗의 소유권을 기준으로 필터링합니다.<br>
+    파라미터 큐빗은 그 소유자인 호출자만 정리할 수 있고, 피호출 연산은 자신이 <code>use</code>로
+    생성한 큐빗만 정리 대상으로 삼습니다.
+  </p>
+
+  <h4>질문 1의 제외 사례 — 연산이 측정한 큐빗은 정리 코드를 만들 수 없습니다</h4>
+  <p>
+    측정은 큐빗의 중첩 상태를 하나의 기저 값으로 붕괴시키는 연산인데, 이 붕괴는 유니터리 연산이 아니라서 역연산이 존재하지 않습니다.<br>
+    자동 청소는 유니터리 게이트의 역연산을 거꾸로 적용해 큐빗을 |0⟩로 되돌리는 방식이므로, 되돌릴 역연산이 없는 측정된 큐빗은 원리적으로 청소할 수 없습니다.<br>
+    <a href="uncompute-08-gates.html">8장</a>의 상태벡터로 옮기면, 측정으로 삭제된 항의 내용은 어디에도 남지 않아 복원할 방법이 없다는 뜻입니다.
+  </p>
+<pre><code>use q = Qubit[1];
+H(q[0]);
+bit r = M(q[0]);     <span class="cm">// q를 측정해 그 값을 r에 저장한다. r이 이 프로그램의 결과다</span></code></pre>
+  <p>
+    그래서 질문 1은 큐빗이 측정된 적이 있는지를 확인하고, 위 <code>q</code>처럼 측정된 큐빗은 청소 후보에서 제외합니다.
+  </p>
+  <div class="call">
+    <span class="h">측정은 앤실라 여부를 바꾸지 않습니다 — 역할을 바꿉니다</span>
+    <p>측정된 <code>use</code> 레지스터도 앤실라로 태어났다는 사실은 변하지 않습니다.<br>
+    다만 측정으로 그 값이 <code>bit</code> 변수에 읽히면, 그 큐빗은 계산에 쓰고 버리는 작업공간이 아니라 프로그램이 내놓는 결과가 됩니다.<br>
+    측정으로 앤실라가 이렇게 출력이 되는 것을 <strong>출력으로 승격</strong>이라 부릅니다.<br>
+    그래서 같은 큐빗도 상황에 따라 세 가지 용어로 구분해 부릅니다.<br>
+    태생을 가리키는 말이 <em>앤실라</em>, 측정되지 않아 정리해야 하는 앤실라가 <em>청소 후보</em>, 판정까지 통과해 자동 정리가 확정된 후보가 <em>safe</em>입니다.</p>
+  </div>
+
+  <h3>예제 — 세 질문의 답을 한 프로그램에서 한꺼번에</h3>
+  <p>
+    이 판별은 상상 속 절차가 아니라 지금 실행해 볼 수 있는 기능입니다.<br>
+    컴파일러의
+    <code>--stages</code> 리포트가 큐빗마다 세 질문의 답을 그대로 출력합니다.<br>
+    파라미터 하나,
+    측정되는 레지스터 하나, 청소 후보 하나가 모두 등장하는 작은 프로그램으로
+    확인해 보겠습니다.
+  </p>
+<pre><code>operation Flip(Qubit p){ X(p); }
+operation Main(){
+    use a   = Qubit[1];          <span class="cm">// a를 만든다</span>
+    use out = Qubit[1];          <span class="cm">// out을 만든다</span>
+    Flip(a[0]);                  <span class="cm">// a에 X를 적용한다 (a = |1⟩)</span>
+    CNOT(a[0], out[0]);          <span class="cm">// a의 값을 out에 복사한다. 이후 a는 쓰이지 않는다</span>
+    bit c = M(out[0]);           <span class="cm">// out을 측정해 그 값을 c에 저장한다</span>
+}</code></pre>
+<pre><code><span class="cm">// --stages 의 uncompute 뷰:</span>
+p:   input (parameter) — caller-owned, not an ancilla
+out: ancilla, measured — promoted to output, not a cleanup candidate
+a:   ancilla, cleanup candidate — safe to uncompute</code></pre>
+  <p>
+    이 프로그램에는 큐빗이 <code>p</code>, <code>out</code>, <code>a</code> 셋 있습니다.<br>
+    아래 표의 각 행은 그중 한 큐빗이고, 가운데 칸은 그 큐빗이 세 질문(0 소유권 · 1 측정 여부 · 2 복원 가능성) 가운데 어디서 제외되었는지, 또는 셋 다 통과했는지를 나타냅니다.
+  </p>
+  <div class="panel">
+    <table class="spec">
+      <tr><th>큐빗</th><th>판정</th><th>사유</th></tr>
+      <tr><td class="k"><code>p</code></td><td>질문 0에서 제외</td><td><code>Flip</code>이 <code>use</code>로 생성한 큐빗이 아니라 파라미터로 전달받은 큐빗이므로 앤실라에 해당하지 않습니다.</td></tr>
+      <tr><td class="k"><code>out</code></td><td>질문 1에서 제외</td><td><code>use</code>로 생성한 앤실라이기는 하나, <code>M(out[0])</code>으로 측정되어 그 값이 고전 비트 <code>c</code>에 기록되었으므로 출력으로 승격됩니다.</td></tr>
+      <tr><td class="k"><code>a</code></td><td>세 질문 모두 충족</td><td><code>use</code>로 생성하였고(질문 0 충족), 측정된 이력이 없으며(질문 1 충족), X 하나만으로 값을 구성하여 복원이 가능합니다(질문 2 충족). 따라서 청소 후보이자 safe로 판정됩니다.</td></tr>
+    </table>
+  </div>
+  <p>
+    <code>a</code>의 값은 <code>CNOT</code>으로 <code>out</code>에 복사된 뒤로는 아무도
+    <code>a</code> 자체를 읽지 않습니다.<br>
+    클래식 코드의 <code>t = ...; result = f(t);</code>에서 <code>t</code>가 임시 변수인 것과 같은
+    상황입니다.<br>
+    이런 큐빗이 청소 후보가 되고, 컴파일러는 <code>a</code>가 마지막으로 쓰인 <code>CNOT</code> 직후에
+    정리 코드를 자동으로 넣습니다.<br>
+    그 정리 코드가 정확히 무엇이고 어떻게 만들어지는지는
+    <a href="uncompute-11-injector.html">11장</a>에서 다룹니다.
+  </p>
+  <nav class="doc-links" aria-label="코스 내비게이션">
+    <a class="doc-link" href="uncompute-01-ancilla.html">← 1. 앤실라와 uncomputation — 작업 큐빗은 왜 되돌려야 하는가</a>
+    <a class="doc-link" href="datasheet.html#s8">코스 목차</a>
+    <a class="doc-link" href="uncompute-03-ledger.html">3. 상태를 읽는 법 — 상태벡터와 진폭 →</a>
+  </nav>
+
+  <footer>
+    자동 uncomputation 코스 2/16 · <a href="datasheet.html#s8">코스 목차</a> ·
+    <a href="datasheet.html">컴파일러 데이터시트</a>
+  </footer>
+
+</div>
+</body>
+</html>

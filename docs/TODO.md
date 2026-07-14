@@ -172,6 +172,43 @@ The rung-③ analysis (events + qubit graph + ContainerMap) answers the injector
   Sound (untainted ⟹ definite basis value ⟹ global phase) and validatable by the round-5 fuzzer (its
   Y/CY-removed control already ran clean). Deferred deliberately: matching Silq is the correct minimal
   fix, and a new taint subsystem is bug surface better added under test than unsupervised.
+- **#18 — model facts must be keyed by node Id, never by a name that crosses tree domains (invariant,
+  2026-07-14).** A rung-③ regression (found by adversarial verify) keyed the non-invertible-call set by op
+  NAME. Names are domain-dependent — a generic call is `Loop` pre-mono, `Loop__sz2` post-mono, a third form
+  post-mangle — so a fact BUILT in the mono domain but QUERIED against a caller-passed pre-mono tree silently
+  missed and crashed `Plan` (the wrong-tree guard was defeated because monomorphization's `with`-copies preserve
+  StmtIds, so only the NAME differed). Fixed by keying the fact by the call statement's **StmtId** (stable across
+  mono, unlike the name). INVARIANT: any analysis fact exposed on `SemanticModel` and consumed against a
+  caller-supplied tree must be keyed by a stable node Id (StmtId / opId / declId), not a name string — names live
+  only at the EDGES (source-name→node binding in the `Scope`; node→name for diagnostics/emit via
+  `FindSymbol`/`FindEmittedName`). Only remaining name-key in the model = `QubitRef.Reg` (register name), safe
+  ONLY because ancilla registers live in the never-specialized entry op (QSEM012 + QSEM010). Optional hardening:
+  a reflection audit test asserting no model fact dictionary is keyed by `string`.
+- **#19 — bind calls to their callee by node reference, not by name — ✅ SHIPPED (2026-07-14, working tree).**
+  `QGate` now carries `int? CalleeOpId`: a user-op call is BOUND to its callee's stable node Id ONCE at name
+  resolution (`Resolver.ResolveCall`, via an Fqn→opId map), RE-POINTED to the size specialization at
+  monomorphization (`SpecializeCall`), and CLEARED to null by `AdjointMaterializer` on the `Adjoint Foo`→`Foo__adj`
+  rewrite (inverse Id not yet minted; runs after analysis). `CalleeOpId is int` ⟺ a user-op call; built-ins stay
+  null. `EffectAnalysis.AnalyzeGate` now FOLLOWS the reference (`_opById[cid]`) instead of re-matching the name,
+  fail-loud on a dangling Id. This is the standard "resolve once, reference after" (Rust DefId / Roslyn ISymbol),
+  cross-file-safe (node Ids globally unique under whole-program compilation), and it removes name-matching from
+  the analysis middle — decided worth doing as the long-term-correct structural direction (not on a current-scale
+  cost/benefit basis). Tests: `CalleeOpIdTests` (4 — plain call binds, built-in null, Adjoint survives functor,
+  generic re-points generic→specialization across mono); full suite 259/259; adversarial verify (3 lenses:
+  null-on-valid / stale-dangling / effect-regression) confirmed 0 defects. Remaining name-based call resolution
+  in NON-analytical passes (validator/printer/emitter) left as-is (single-tree, safe); may migrate to CalleeOpId
+  incrementally.
+- **#20 — incremental / separate compilation: NOT needed for Qora; foundation already salsa-shaped
+  (2026-07-14, checked against fresh data).** Qora compiles whole-program from scratch (`QoraParser.Parse`
+  rebuilds everything; no caching/invalidation). At classical scale that would not scale, but quantum programs
+  are tiny (tens–hundreds of gates), so from-scratch stays instant indefinitely — neither incremental nor
+  separate compilation is ever required. Reference if the question resurfaces (2026-07 data): whole-program +
+  incremental reaches ~millions of lines only as a HYBRID — TypeScript 7 (tsgo, Go-native, RC 2026-06) checks
+  the 1.5M-line VS Code codebase in 7.5s (10.4×) via native binary + shared-memory parallelism + `--incremental`
+  + project references (a coarse separation); rust-analyzer's salsa (3.0 adding parallelism) is the
+  query-incremental standard. Qora's stable node Ids + Id-keyed persistent `SemanticModel` ARE the salsa
+  foundation, so the start point is good IF ever wanted — but it is a non-goal at Qora's scale. Sources: MS
+  DevBlogs "Progress on TypeScript 7" (2025-12); Visual Studio Magazine (2026-06); rust-analyzer #17491 (salsa).
 
 ## Sequencing note
 

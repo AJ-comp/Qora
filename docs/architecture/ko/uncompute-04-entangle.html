@@ -1,0 +1,570 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>상태벡터를 큐빗별로 분해할 수 있는가 — 곱 상태와 얽힌 상태 — 자동 uncomputation 코스 4/16 — Qora</title>
+<style>
+  :root {
+    --bg: #ffffff; --ink: #1f2430; --muted: #5b6472; --line: #e6e8ee; --panel: #f7f8fb;
+    --plus: #1457d6; --minus: #d62b39; --accent: #6b3fd4; --good: #11875b; --amber: #b5810a;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo",
+      "Malgun Gothic", "Noto Sans KR", "Segoe UI Symbol", "Cambria Math", sans-serif;
+    line-height: 1.7; font-size: 16.5px; word-break: keep-all; overflow-wrap: break-word;
+  }
+  .wrap { max-width: 940px; margin: 0 auto; padding: 0 20px 120px; }
+  header.hero {
+    padding: 60px 20px 36px; text-align: center; border-bottom: 1px solid var(--line);
+    background: linear-gradient(180deg, #f7f8fa, #ffffff);
+  }
+  header.hero h1 { margin: 0 0 10px; font-size: 2rem; letter-spacing: -.5px; }
+  header.hero p { margin: 0; color: var(--muted); font-size: 1.02rem; }
+  .tag { display:inline-block; margin-bottom:14px; color:var(--accent); font-size:.78rem;
+         font-weight:700; letter-spacing:.12em; text-transform:uppercase; }
+  h2 { margin:54px 0 12px; padding-top:14px; border-top:2px solid var(--line);
+       font-size:1.42rem; letter-spacing:-.3px; }
+  h3 { margin:30px 0 8px; font-size:1.1rem; }
+  p { margin:12px 0; }
+  strong { color:#11203a; }
+  code {
+    padding:1px 6px; border:1px solid var(--line); border-radius:5px; background:var(--panel);
+    font-family:"SF Mono","JetBrains Mono","D2Coding",Consolas,"Segoe UI Symbol",monospace;
+    font-size:.9em;
+  }
+  .qora-lang-switch { position:sticky; top:0; z-index:99; padding:8px 16px; text-align:right;
+                      background:rgba(255,255,255,.94); border-bottom:1px solid var(--line);
+                      backdrop-filter:blur(4px); font-family:sans-serif; font-size:13px; }
+  .doc-links { display:flex; flex-wrap:wrap; gap:10px; margin:18px 0 6px; }
+  .doc-link { display:inline-flex; align-items:center; gap:8px; padding:7px 13px;
+              border:1px solid #cdd6e2; border-radius:6px; background:#fff; color:#1745b5;
+              font-size:.92rem; font-weight:700; text-decoration:none; }
+  .doc-link:hover { border-color:#9bb8ff; background:#eef4ff; }
+  footer { margin-top:60px; padding-top:24px; border-top:1px solid var(--line);
+           color:var(--muted); font-size:.9rem; text-align:center; }
+
+  .chapter-intro { max-width:52rem; margin:28px 0 34px; font-size:1.03rem; }
+  .chapter-section { margin:38px 0 0; padding:27px 0 5px; border-top:1px solid #aeb6c3; }
+  .section-heading { display:flex; align-items:baseline; gap:16px; margin-bottom:14px; }
+  .section-heading .label { flex:0 0 auto; color:var(--muted); font-size:.72rem; font-weight:800;
+                            letter-spacing:.12em; }
+  .section-heading h2 { margin:0; padding:0; border:0; color:#182235; font-size:1.28rem;
+                        letter-spacing:-.25px; }
+  .section-copy { max-width:52rem; }
+  .subheading { margin:30px 0 8px; color:#263247; font-size:1.05rem; }
+
+  .equation-display { overflow-x:auto; margin:18px 0; padding:22px 14px 18px;
+                      border-top:1px solid var(--line); border-bottom:1px solid var(--line);
+                      background:#fcfcfd; text-align:center; white-space:nowrap; }
+  .equation-display.long { text-align:left; }
+  .math-typeset, .math-typeset math {
+    font-family:"Cambria Math","STIX Two Math","Latin Modern Math","Noto Serif Math",
+                "Times New Roman",serif;
+  }
+  .math-typeset math { display:block; width:max-content; margin:0 auto; font-size:1.34em; }
+  .equation-display.long.math-typeset math { font-size:1.12em; }
+  .math-qubit-b { color:var(--plus); font-weight:700; }
+  .math-qubit-a { color:var(--amber); font-weight:700; }
+  .math-good { color:var(--good); font-weight:700; }
+  .math-bad { color:var(--minus); font-weight:700; }
+
+  .definition-list { margin:18px 0; border-top:1px solid var(--line); }
+  .definition-list > div { display:grid; grid-template-columns:140px minmax(0,1fr); gap:18px;
+                           padding:11px 2px; border-bottom:1px solid var(--line); }
+  .definition-list dt { color:#263247; font-weight:800; }
+  .definition-list dd { margin:0; }
+  .key-definition { display:grid; grid-template-columns:140px minmax(0,1fr); gap:18px;
+                    margin:22px 0 14px; padding:12px 2px; border-top:2px solid #263247;
+                    border-bottom:1px solid var(--line); }
+  .key-definition .label { color:var(--muted); font-size:.76rem; font-weight:800;
+                           letter-spacing:.1em; }
+
+  .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden;
+             clip:rect(0,0,0,0); white-space:nowrap; border:0; }
+  .diagonal-check { display:grid; grid-template-columns:minmax(250px,.9fr) minmax(290px,1.1fr);
+                    gap:32px; align-items:center; margin:22px 0 18px; padding:26px 0 20px;
+                    border-top:1px solid #9fa8b6; border-bottom:1px solid var(--line); }
+  .coefficient-matrix { width:100%; border-collapse:separate; border-spacing:10px 8px;
+                        text-align:center; }
+  .coefficient-matrix th { color:var(--muted); font-size:.78rem; font-weight:700; }
+  .coefficient-matrix .qubit-b, .coefficient-matrix .qubit-a { font-size:.84rem; }
+  .coefficient-matrix td span { display:flex; align-items:center; justify-content:center;
+                                min-height:52px; border-bottom:3px solid transparent;
+                                font-family:"Cambria Math","STIX Two Math","Latin Modern Math",serif;
+                                font-size:1.55rem; }
+  .coefficient-matrix td.diagonal-down span { border-color:var(--accent); color:var(--accent); }
+  .coefficient-matrix td.diagonal-up span { border-color:#64748b; color:#475569; }
+  .diagonal-products { padding-left:30px; border-left:1px solid var(--line); }
+  .diagonal-product { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:18px;
+                      align-items:center; padding:14px 0; }
+  .diagonal-product + .diagonal-product { border-top:1px solid var(--line); }
+  .diagonal-product .direction { color:#374151; font-size:.9rem; font-weight:700; }
+  .diagonal-product math { font-family:"Cambria Math","STIX Two Math","Latin Modern Math",serif;
+                           font-size:1.35rem; }
+  .diagonal-product.diagonal-down math { color:var(--accent); }
+  .diagonal-product.diagonal-up math { color:#475569; }
+  .diagonal-check figcaption { grid-column:1/-1; margin-top:2px; color:var(--muted);
+                               font-size:.9rem; text-align:center; }
+  .diagonal-verdict { margin:0 0 28px; border-bottom:1px solid var(--line); }
+  .diagonal-verdict > div { display:grid; grid-template-columns:180px minmax(0,1fr); gap:20px;
+                            padding:12px 2px; border-top:1px solid var(--line); }
+  .diagonal-verdict dt { display:flex; align-items:center; font-family:"Cambria Math","STIX Two Math",
+                         "Latin Modern Math",serif; font-size:1.12rem; font-weight:700; }
+  .diagonal-verdict dt math { font-family:inherit; }
+  .diagonal-verdict dd { margin:0; }
+  .quick-check-scroll { overflow-x:auto; margin:16px 0 22px; }
+  .quick-check-table { width:100%; min-width:720px; border-collapse:collapse;
+                       border-top:1px solid #9fa8b6; border-bottom:1px solid var(--line); }
+  .quick-check-table th, .quick-check-table td { padding:11px 12px; border-bottom:1px solid var(--line);
+                                                 text-align:left; vertical-align:middle; }
+  .quick-check-table th { color:var(--muted); font-size:.76rem; font-weight:800; letter-spacing:.04em; }
+  .quick-check-table tbody tr:last-child td { border-bottom:0; }
+  .quick-check-table .state, .quick-check-table .down, .quick-check-table .up {
+    font-family:"Cambria Math","STIX Two Math","Latin Modern Math","Noto Serif Math",
+                "Times New Roman",serif;
+  }
+  .quick-check-table .state { color:#263247; font-weight:700; white-space:nowrap; }
+  .quick-check-table .down { color:var(--accent); font-weight:700; white-space:nowrap; }
+  .quick-check-table .up { color:#475569; font-weight:700; white-space:nowrap; }
+  .quick-check-table .product { color:var(--good); font-weight:800; white-space:nowrap; }
+  .quick-check-table .entangled { color:var(--minus); font-weight:800; white-space:nowrap; }
+  .scope-note { margin:28px 0 8px; padding:15px 2px; border-top:1px solid var(--line);
+                border-bottom:1px solid var(--line); color:#374151; }
+  .chapter-summary { margin:42px 0 30px; padding:24px 0 25px; border-top:2px solid #263247;
+                     border-bottom:1px solid var(--line); }
+  .chapter-summary .label { color:var(--muted); font-size:.72rem; font-weight:800;
+                            letter-spacing:.12em; }
+  .chapter-summary h2 { margin:5px 0 12px; padding:0; border:0; font-size:1.22rem; }
+
+  @media (max-width:700px) {
+    .section-heading { display:block; }
+    .section-heading .label { display:block; margin-bottom:5px; }
+    .definition-list > div, .key-definition { grid-template-columns:1fr; gap:3px; }
+    .diagonal-check { grid-template-columns:1fr; gap:18px; }
+    .diagonal-products { padding:16px 0 0; border-top:1px solid var(--line); border-left:0; }
+    .diagonal-verdict > div { grid-template-columns:1fr; gap:4px; }
+    .quick-check-scroll { overflow:visible; }
+    .quick-check-table { min-width:0; }
+    .quick-check-table thead { position:absolute; width:1px; height:1px; padding:0; margin:-1px;
+                               overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
+    .quick-check-table, .quick-check-table tbody, .quick-check-table tr,
+    .quick-check-table td { display:block; width:100%; }
+    .quick-check-table tbody tr { padding:10px 0; border-bottom:1px solid var(--line); }
+    .quick-check-table tbody tr:last-child { border-bottom:0; }
+    .quick-check-table th, .quick-check-table td { border:0; }
+    .quick-check-table td { display:grid; grid-template-columns:76px minmax(0,1fr); gap:10px;
+                            padding:5px 2px; white-space:normal; }
+    .quick-check-table td::before { content:attr(data-label); color:var(--muted);
+                                    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",
+                                      "Malgun Gothic",sans-serif;
+                                    font-size:.72rem; font-weight:800; letter-spacing:.04em; }
+  }
+</style>
+</head>
+<body>
+<div class="qora-lang-switch"><a href="../en/index.html">English</a> · <strong>한국어</strong> · <a href="../ja/index.html">日本語</a></div>
+
+<header class="hero">
+  <div class="tag">Qora · 자동 uncomputation 코스 · 4/16</div>
+  <h1>4. 상태벡터를 큐빗별로 분해할 수 있는가 — 곱 상태와 얽힌 상태</h1>
+  <p>두 큐빗의 상태를 따로 적을 수 있는지 확인하여 곱 상태와 얽힌 상태를 구분합니다</p>
+</header>
+
+<div class="wrap">
+  <nav class="doc-links" aria-label="코스 내비게이션">
+    <a class="doc-link" href="uncompute-03-ledger.html">← 3. 상태를 읽는 법 — 상태벡터와 진폭</a>
+    <a class="doc-link" href="datasheet.html#s8">코스 목차</a>
+    <a class="doc-link" href="uncompute-05-trace.html">5. 곱에서 얽힘으로 — 프로그램 단계별 확인 →</a>
+  </nav>
+
+  <div class="chapter-intro">
+    <p>
+      <a href="uncompute-03-ledger.html">3장</a>에서는 상태벡터를 계산 기저의 선형 결합으로 읽고, 전체 상태벡터의 각 진폭이 해당 기저 상태 앞에 곱해지는 계수임을 확인했습니다.<br>
+      이제 두 큐빗의 전체 상태벡터를 큐빗 <code>b</code>의 상태벡터와 큐빗 <code>a</code>의 상태벡터로 분해할 수 있는지 살펴보겠습니다.
+    </p>
+    <p>
+      이 분해가 가능하면 두 큐빗을 각각의 순수 상태벡터로 기술할 수 있지만, 가능하지 않으면 독립된 순수 상태벡터 두 개로 나누어 기술할 수 없습니다.<br>
+      바로 이 차이가 <strong>곱 상태</strong>와 <strong>얽힌 상태</strong>를 구분합니다.<br>
+      먼저 쉬운 기준과 대각선 곱 비교로 차이를 확인한 뒤, 그 판정법이 성립하는 이유를 공식으로 정리하겠습니다.
+    </p>
+  </div>
+
+  <section class="chapter-section" aria-labelledby="factorization-title">
+    <div class="section-heading">
+      <span class="label">먼저 쉽게</span>
+      <h2 id="factorization-title">두 큐빗을 따로 적어도 원래 상태를 다시 만들 수 있는가</h2>
+    </div>
+    <p class="section-copy">
+      큐빗 <code>b</code>의 상태와 큐빗 <code>a</code>의 상태를 각각 따로 적은 뒤, 두 상태를 합쳐 원래의 전체 상태를 정확히 다시 만들 수 있는지 생각해보겠습니다.<br>
+      다시 만들 수 있으면 두 큐빗을 따로 기술할 수 있지만, 아무리 나누어 적어도 원래 상태를 재현할 수 없다면 두 큐빗을 하나의 전체 상태로 다루어야 합니다.
+    </p>
+    <p class="key-definition">
+      <span class="label">쉬운 기준</span>
+      <span><strong>큐빗별 상태를 따로 적고 다시 합쳐 원래 상태를 만들 수 있으면 곱 상태이고, 만들 수 없으면 얽힌 상태입니다.</strong></span>
+    </p>
+  </section>
+
+  <section class="chapter-section" aria-labelledby="diagonal-test-title">
+    <div class="section-heading">
+      <span class="label">빠른 판정</span>
+      <h2 id="diagonal-test-title">네 진폭을 놓고 두 대각선의 곱을 비교합니다</h2>
+    </div>
+    <p class="section-copy">
+      두 큐빗의 상태가 곱 상태인지 얽힌 상태인지 확인할 때마다 큐빗별 상태를 직접 찾아낼 필요는 없습니다.<br>
+      이 장에서 다루는 두 큐빗 순수 상태에서는 네 기저 상태의 진폭을 <code>2×2</code> 자리에 놓고 두 대각선의 곱만 비교하면 됩니다.
+    </p>
+    <p class="section-copy">
+      기저 상태 <code>|ba⟩</code>의 첫째 자리는 큐빗 <code>b</code>, 둘째 자리는 큐빗 <code>a</code>를 나타냅니다.<br>
+      각 기저 상태의 진폭을 차례로 <code>α</code>, <code>β</code>, <code>γ</code>, <code>δ</code>라고 하겠습니다.
+    </p>
+    <div class="equation-display math-typeset">
+      <math xmlns="http://www.w3.org/1998/Math/MathML" display="block" aria-label="일반적인 두 큐빗 상태 psi는 alpha 00, beta 01, gamma 10, delta 11 항의 합">
+        <mrow>
+          <mo>|</mo><mi>ψ</mi><mo>⟩</mo><mo>=</mo>
+          <mi>α</mi><mo>|</mo><mn>00</mn><mo>⟩</mo><mo>+</mo>
+          <mi>β</mi><mo>|</mo><mn>01</mn><mo>⟩</mo><mo>+</mo>
+          <mi>γ</mi><mo>|</mo><mn>10</mn><mo>⟩</mo><mo>+</mo>
+          <mi>δ</mi><mo>|</mo><mn>11</mn><mo>⟩</mo>
+        </mrow>
+      </math>
+    </div>
+    <figure class="diagonal-check" aria-labelledby="diagonal-check-caption">
+      <div class="coefficient-map">
+        <table class="coefficient-matrix">
+          <caption class="sr-only">행은 큐빗 b, 열은 큐빗 a의 값에 대응하는 진폭 배열</caption>
+          <thead>
+            <tr>
+              <th scope="col"></th>
+              <th scope="col"><span class="qubit-a">a</span>=0</th>
+              <th scope="col"><span class="qubit-a">a</span>=1</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <th scope="row"><span class="qubit-b">b</span>=0</th>
+              <td class="diagonal-down"><span>α</span></td>
+              <td class="diagonal-up"><span>β</span></td>
+            </tr>
+            <tr>
+              <th scope="row"><span class="qubit-b">b</span>=1</th>
+              <td class="diagonal-up"><span>γ</span></td>
+              <td class="diagonal-down"><span>δ</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="diagonal-products">
+        <div class="diagonal-product diagonal-down">
+          <span class="direction">↘ 왼쪽 위 × 오른쪽 아래</span>
+          <math xmlns="http://www.w3.org/1998/Math/MathML" display="block" aria-label="알파 곱하기 델타">
+            <mrow><mi>α</mi><mo>×</mo><mi>δ</mi></mrow>
+          </math>
+        </div>
+        <div class="diagonal-product diagonal-up">
+          <span class="direction">↙ 오른쪽 위 × 왼쪽 아래</span>
+          <math xmlns="http://www.w3.org/1998/Math/MathML" display="block" aria-label="베타 곱하기 감마">
+            <mrow><mi>β</mi><mo>×</mo><mi>γ</mi></mrow>
+          </math>
+        </div>
+      </div>
+      <figcaption id="diagonal-check-caption">왼쪽 위와 오른쪽 아래의 곱 <code>αδ</code>, 오른쪽 위와 왼쪽 아래의 곱 <code>βγ</code>를 비교합니다.</figcaption>
+    </figure>
+    <dl class="diagonal-verdict">
+      <div>
+        <dt>
+          <math xmlns="http://www.w3.org/1998/Math/MathML" aria-label="알파 델타와 베타 감마가 같다">
+            <mrow class="math-good"><mi>α</mi><mi>δ</mi><mo>=</mo><mi>β</mi><mi>γ</mi></mrow>
+          </math>
+        </dt>
+        <dd><strong>곱 상태</strong> — 큐빗별 상태벡터로 분해할 수 있습니다.</dd>
+      </div>
+      <div>
+        <dt>
+          <math xmlns="http://www.w3.org/1998/Math/MathML" aria-label="알파 델타와 베타 감마가 같지 않다">
+            <mrow class="math-bad"><mi>α</mi><mi>δ</mi><mo>≠</mo><mi>β</mi><mi>γ</mi></mrow>
+          </math>
+        </dt>
+        <dd><strong>얽힌 상태</strong> — 큐빗별 상태벡터로 분해할 수 없습니다.</dd>
+      </div>
+    </dl>
+    <h3 class="subheading">앞의 두 상태에 바로 적용하기</h3>
+    <p class="section-copy">이제 그림에서 본 곱 상태와 얽힌 상태에 진폭을 대입해보겠습니다.</p>
+    <div class="quick-check-scroll">
+      <table class="quick-check-table">
+        <caption class="sr-only">곱 상태 예제와 얽힌 상태 예제의 두 대각선 곱 비교</caption>
+        <thead>
+          <tr><th scope="col">상태</th><th scope="col">↘ αδ</th><th scope="col">↙ βγ</th><th scope="col">비교</th><th scope="col">판정</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="state" data-label="상태">(|00⟩+|10⟩)/√2</td>
+            <td class="down" data-label="↘ αδ">(1/√2) × 0 = 0</td>
+            <td class="up" data-label="↙ βγ">0 × (1/√2) = 0</td>
+            <td data-label="비교">0 = 0</td>
+            <td class="product" data-label="판정">곱 상태</td>
+          </tr>
+          <tr>
+            <td class="state" data-label="상태">(|00⟩+|11⟩)/√2</td>
+            <td class="down" data-label="↘ αδ">(1/√2) × (1/√2) = 1/2</td>
+            <td class="up" data-label="↙ βγ">0 × 0 = 0</td>
+            <td data-label="비교">1/2 ≠ 0</td>
+            <td class="entangled" data-label="판정">얽힌 상태</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="section-copy">
+      첫 번째 상태는 두 대각선 곱이 모두 0이므로 곱 상태이고, 실제로 다음과 같이 큐빗별 상태로 나눌 수 있습니다.
+    </p>
+    <div class="equation-display math-typeset">
+      <math xmlns="http://www.w3.org/1998/Math/MathML" display="block" aria-label="00과 10의 합을 루트 2로 나눈 상태를 큐빗 b의 균등 중첩과 큐빗 a의 0 상태로 분해">
+        <mrow>
+          <mfrac><mrow><mo>|</mo><mn>00</mn><mo>⟩</mo><mo>+</mo><mo>|</mo><mn>10</mn><mo>⟩</mo></mrow><msqrt><mn>2</mn></msqrt></mfrac>
+          <mo>=</mo>
+          <msub><mfrac><mrow><mo>|</mo><mn>0</mn><mo>⟩</mo><mo>+</mo><mo>|</mo><mn>1</mn><mo>⟩</mo></mrow><msqrt><mn>2</mn></msqrt></mfrac><mi class="math-qubit-b">b</mi></msub>
+          <mo>⊗</mo>
+          <msub><mrow><mo>|</mo><mn>0</mn><mo>⟩</mo></mrow><mi class="math-qubit-a">a</mi></msub>
+        </mrow>
+      </math>
+    </div>
+    <p class="section-copy">
+      반면에 두 번째 상태는 두 대각선 곱이 <code>1/2</code>과 <code>0</code>으로 다르므로 얽힌 상태입니다.<br>
+      여기까지는 판정법을 눈으로 확인한 단계입니다.<br>
+      이제 이 비교가 텐서 곱 분해 여부와 정확히 일치하는 이유를 공식으로 확인하겠습니다.
+    </p>
+  </section>
+
+  <section class="chapter-section" aria-labelledby="formal-definition-title">
+    <div class="section-heading">
+      <span class="label">정확한 정의</span>
+      <h2 id="formal-definition-title">판정 결과를 텐서 곱으로 정의합니다</h2>
+    </div>
+    <p class="section-copy">
+      앞에서 두 큐빗의 상태를 따로 적고 다시 합친다고 설명했습니다.<br>
+      이때 두 부분계의 상태벡터를 하나의 전체 상태벡터로 결합하는 연산을 <strong>텐서 곱</strong>이라고 하며, 기호 <code>⊗</code>로 나타냅니다.
+    </p>
+    <div class="equation-display math-typeset">
+      <math xmlns="http://www.w3.org/1998/Math/MathML" display="block" aria-label="두 큐빗 상태 psi는 큐빗 b의 상태 phi와 큐빗 a의 상태 chi의 텐서 곱">
+        <mrow>
+          <msub><mrow><mo>|</mo><mi>ψ</mi><mo>⟩</mo></mrow><mrow><mi class="math-qubit-b">b</mi><mi class="math-qubit-a">a</mi></mrow></msub>
+          <mo>=</mo>
+          <msub><mrow><mo>|</mo><mi>φ</mi><mo>⟩</mo></mrow><mi class="math-qubit-b">b</mi></msub>
+          <mo>⊗</mo>
+          <msub><mrow><mo>|</mo><mi>χ</mi><mo>⟩</mo></mrow><mi class="math-qubit-a">a</mi></msub>
+        </mrow>
+      </math>
+    </div>
+    <p class="section-copy">
+      여기서 <code>|φ⟩<sub>b</sub></code>와 <code>|χ⟩<sub>a</sub></code>는 각각 큐빗 <code>b</code>와 큐빗 <code>a</code>의 단일 큐빗 상태벡터입니다.<br>
+      텐서 곱은 두 수를 단순히 곱하는 연산이 아니라, 두 상태벡터에 들어 있는 모든 기저 상태 조합과 그 진폭을 함께 전개합니다.
+    </p>
+    <dl class="definition-list">
+      <div>
+        <dt>곱 상태</dt>
+        <dd>위 등식을 만족하는 두 단일 큐빗 상태벡터가 존재하는 상태입니다.<br>따라서 전체 상태벡터를 큐빗별 상태벡터의 텐서 곱으로 분해할 수 있습니다.</dd>
+      </div>
+      <div>
+        <dt>얽힌 상태</dt>
+        <dd>그러한 두 상태벡터가 존재하지 않는 상태입니다.<br>따라서 전체 상태벡터를 큐빗별 상태벡터의 텐서 곱으로 분해할 수 없습니다.</dd>
+      </div>
+    </dl>
+    <p class="section-copy">
+      측정 결과가 항상 같거나 다르다는 현상은 얽힘의 정의가 아닙니다.<br>
+      예를 들어 <code>(|01⟩+|10⟩)/√2</code>는 계산 기저로 측정할 때 두 결과가 항상 다르지만, 텐서 곱으로 분해되지 않으므로 얽힌 상태입니다.<br>
+      핵심은 측정 결과의 모양이 아니라 전체 상태벡터의 텐서 곱 분해 가능성입니다.
+    </p>
+  </section>
+
+  <section class="chapter-section" aria-labelledby="amplitude-factor-title">
+    <div class="section-heading">
+      <span class="label">공식 전개</span>
+      <h2 id="amplitude-factor-title">왜 두 대각선의 곱을 비교하는가</h2>
+    </div>
+    <p class="section-copy">
+      앞에서는 두 대각선의 곱이 같은지만 확인했습니다.<br>
+      이제 곱 상태의 텐서 곱을 직접 전개하여 그 판정법이 성립하는 이유를 확인하겠습니다.<br>
+      큐빗 <code>b</code>와 큐빗 <code>a</code>의 단일 큐빗 상태벡터를 각각 다음과 같이 나타내겠습니다.<br>
+      여기서 <code>u₀</code>과 <code>u₁</code>은 큐빗 <code>b</code>의 진폭이고, <code>v₀</code>과 <code>v₁</code>은 큐빗 <code>a</code>의 진폭입니다.
+    </p>
+    <div class="equation-display math-typeset">
+      <math xmlns="http://www.w3.org/1998/Math/MathML" display="block" aria-label="큐빗 b의 상태 phi와 큐빗 a의 상태 chi를 각각 두 기저 상태의 선형 결합으로 표현">
+        <mtable rowspacing=".75em">
+          <mtr>
+            <mtd><msub><mrow><mo>|</mo><mi>φ</mi><mo>⟩</mo></mrow><mi class="math-qubit-b">b</mi></msub></mtd>
+            <mtd><mo>=</mo></mtd>
+            <mtd><msub><mi>u</mi><mn>0</mn></msub><mo>|</mo><mn>0</mn><mo>⟩</mo><mo>+</mo><msub><mi>u</mi><mn>1</mn></msub><mo>|</mo><mn>1</mn><mo>⟩</mo></mtd>
+          </mtr>
+          <mtr>
+            <mtd><msub><mrow><mo>|</mo><mi>χ</mi><mo>⟩</mo></mrow><mi class="math-qubit-a">a</mi></msub></mtd>
+            <mtd><mo>=</mo></mtd>
+            <mtd><msub><mi>v</mi><mn>0</mn></msub><mo>|</mo><mn>0</mn><mo>⟩</mo><mo>+</mo><msub><mi>v</mi><mn>1</mn></msub><mo>|</mo><mn>1</mn><mo>⟩</mo></mtd>
+          </mtr>
+        </mtable>
+      </math>
+    </div>
+    <p class="section-copy">두 상태벡터의 텐서 곱을 전개하면 네 기저 상태의 진폭이 다음과 같이 정해집니다.</p>
+    <div class="equation-display long math-typeset">
+      <math xmlns="http://www.w3.org/1998/Math/MathML" display="block" aria-label="두 단일 큐빗 상태의 텐서 곱을 네 개의 두 큐빗 기저 상태 항으로 전개">
+        <mtable rowspacing=".65em">
+          <mtr>
+            <mtd>
+              <mrow>
+                <mo>(</mo><msub><mi>u</mi><mn>0</mn></msub><mo>|</mo><mn>0</mn><mo>⟩</mo><mo>+</mo><msub><mi>u</mi><mn>1</mn></msub><mo>|</mo><mn>1</mn><mo>⟩</mo><mo>)</mo>
+                <mo>⊗</mo>
+                <mo>(</mo><msub><mi>v</mi><mn>0</mn></msub><mo>|</mo><mn>0</mn><mo>⟩</mo><mo>+</mo><msub><mi>v</mi><mn>1</mn></msub><mo>|</mo><mn>1</mn><mo>⟩</mo><mo>)</mo>
+              </mrow>
+            </mtd>
+          </mtr>
+          <mtr>
+            <mtd>
+              <mrow>
+                <mo>=</mo>
+                <msub><mi>u</mi><mn>0</mn></msub><msub><mi>v</mi><mn>0</mn></msub><mo>|</mo><mn>00</mn><mo>⟩</mo>
+                <mo>+</mo><msub><mi>u</mi><mn>0</mn></msub><msub><mi>v</mi><mn>1</mn></msub><mo>|</mo><mn>01</mn><mo>⟩</mo>
+                <mo>+</mo><msub><mi>u</mi><mn>1</mn></msub><msub><mi>v</mi><mn>0</mn></msub><mo>|</mo><mn>10</mn><mo>⟩</mo>
+                <mo>+</mo><msub><mi>u</mi><mn>1</mn></msub><msub><mi>v</mi><mn>1</mn></msub><mo>|</mo><mn>11</mn><mo>⟩</mo>
+              </mrow>
+            </mtd>
+          </mtr>
+        </mtable>
+      </math>
+    </div>
+    <p class="section-copy">
+      이 전개식을 앞에서 사용한 <code>α</code>, <code>β</code>, <code>γ</code>, <code>δ</code>와 비교하면 각 진폭의 관계가 다음과 같이 정해집니다.
+    </p>
+    <div class="equation-display long math-typeset">
+      <math xmlns="http://www.w3.org/1998/Math/MathML" display="block" aria-label="alpha beta gamma delta를 큐빗 b와 a의 진폭 곱으로 나타내고 alpha delta와 beta gamma가 같음을 유도">
+        <mtable rowspacing=".75em">
+          <mtr>
+            <mtd>
+              <mrow>
+                <mi>α</mi><mo>=</mo><msub><mi>u</mi><mn>0</mn></msub><msub><mi>v</mi><mn>0</mn></msub><mo>,</mo>
+                <mi>β</mi><mo>=</mo><msub><mi>u</mi><mn>0</mn></msub><msub><mi>v</mi><mn>1</mn></msub><mo>,</mo>
+                <mi>γ</mi><mo>=</mo><msub><mi>u</mi><mn>1</mn></msub><msub><mi>v</mi><mn>0</mn></msub><mo>,</mo>
+                <mi>δ</mi><mo>=</mo><msub><mi>u</mi><mn>1</mn></msub><msub><mi>v</mi><mn>1</mn></msub>
+              </mrow>
+            </mtd>
+          </mtr>
+          <mtr>
+            <mtd>
+              <mrow>
+                <mi>α</mi><mi>δ</mi>
+                <mo>=</mo>
+                <mo>(</mo><msub><mi>u</mi><mn>0</mn></msub><msub><mi>v</mi><mn>0</mn></msub><mo>)</mo>
+                <mo>(</mo><msub><mi>u</mi><mn>1</mn></msub><msub><mi>v</mi><mn>1</mn></msub><mo>)</mo>
+                <mo>=</mo>
+                <msub><mi>u</mi><mn>0</mn></msub><msub><mi>u</mi><mn>1</mn></msub><msub><mi>v</mi><mn>0</mn></msub><msub><mi>v</mi><mn>1</mn></msub>
+                <mo>=</mo>
+                <mo>(</mo><msub><mi>u</mi><mn>0</mn></msub><msub><mi>v</mi><mn>1</mn></msub><mo>)</mo>
+                <mo>(</mo><msub><mi>u</mi><mn>1</mn></msub><msub><mi>v</mi><mn>0</mn></msub><mo>)</mo>
+                <mo>=</mo>
+                <mi>β</mi><mi>γ</mi>
+              </mrow>
+            </mtd>
+          </mtr>
+        </mtable>
+      </math>
+    </div>
+    <p class="key-definition">
+      <span class="label">전개의 결론</span>
+      <span>곱 상태라면 <strong><code>αδ</code>와 <code>βγ</code>가 반드시 같음</strong>을 확인했습니다.<br>반대 방향도 성립하는지는 다음 절에서 계수 행렬을 통해 확인합니다.</span>
+    </p>
+  </section>
+
+  <section class="chapter-section" aria-labelledby="determinant-title">
+    <div class="section-heading">
+      <span class="label">전문적 해석</span>
+      <h2 id="determinant-title">두 대각선 곱의 차이는 계수 행렬의 행렬식입니다</h2>
+    </div>
+    <p class="section-copy">
+      빠른 판정에서 네 진폭을 놓았던 <code>2×2</code> 배열을 선형대수에서는 <strong>계수 행렬</strong>이라고 합니다.<br>
+      행은 큐빗 <code>b</code>의 값, 열은 큐빗 <code>a</code>의 값에 대응하며, 이 계수 행렬을 <code>C</code>라고 하겠습니다.
+    </p>
+    <div class="equation-display math-typeset">
+      <math xmlns="http://www.w3.org/1998/Math/MathML" display="block" aria-label="계수 행렬 C는 alpha beta gamma delta의 2 곱하기 2 행렬">
+        <mrow>
+          <mi>C</mi><mo>=</mo>
+          <mfenced open="(" close=")">
+            <mtable>
+              <mtr><mtd><mi>α</mi></mtd><mtd><mi>β</mi></mtd></mtr>
+              <mtr><mtd><mi>γ</mi></mtd><mtd><mi>δ</mi></mtd></mtr>
+            </mtable>
+          </mfenced>
+        </mrow>
+      </math>
+    </div>
+    <p class="section-copy">
+      <code>2×2</code> 계수 행렬에서 두 대각선 곱의 차이 <code>αδ−βγ</code>를 행렬식이라고 합니다.<br>
+      따라서 앞에서 두 대각선 곱이 같은지 비교한 것은 행렬식이 0인지 확인한 것과 같습니다.
+    </p>
+    <div class="equation-display math-typeset">
+      <math xmlns="http://www.w3.org/1998/Math/MathML" display="block" aria-label="계수 행렬 C의 행렬식은 alpha delta 빼기 beta gamma">
+        <mrow>
+          <mi mathvariant="normal">det</mi><mo>⁡</mo><mi>C</mi>
+          <mo>=</mo>
+          <mi>α</mi><mi>δ</mi><mo>−</mo><mi>β</mi><mi>γ</mi>
+        </mrow>
+      </math>
+    </div>
+    <p class="section-copy">
+      앞의 텐서 곱 전개는 곱 상태라면 행렬식이 0이라는 방향을 보여주었습니다.<br>
+      반대 방향도 성립합니다.<br>
+      행렬의 랭크는 서로 독립인 행 또는 열의 수를 나타냅니다.<br>
+      정규화된 상태의 계수 행렬은 영행렬이 아니므로, 행렬식이 0이면 랭크가 1입니다.<br>
+      랭크가 1인 <code>2×2</code> 행렬은 한 열벡터와 한 행벡터의 곱으로 분해되며, 이는 곧 두 단일 큐빗 상태벡터의 텐서 곱에 해당합니다.<br>
+      그러므로 다음 조건은 두 큐빗 순수 상태에서 곱 상태를 판별하는 <strong>필요충분조건</strong>입니다.
+    </p>
+    <div class="equation-display long math-typeset">
+      <math xmlns="http://www.w3.org/1998/Math/MathML" display="block" aria-label="alpha delta와 beta gamma가 같음, 행렬식이 0, 랭크가 1, 곱 상태는 모두 동치">
+        <mrow>
+          <mi>α</mi><mi>δ</mi><mo>=</mo><mi>β</mi><mi>γ</mi>
+          <mo>⇔</mo>
+          <mi mathvariant="normal">det</mi><mo>⁡</mo><mi>C</mi><mo>=</mo><mn>0</mn>
+          <mo>⇔</mo>
+          <mi mathvariant="normal">rank</mi><mo>⁡</mo><mi>C</mi><mo>=</mo><mn>1</mn>
+          <mo>⇔</mo>
+          <mtext>곱 상태</mtext>
+        </mrow>
+      </math>
+    </div>
+    <p class="section-copy">
+      반대로 <code>αδ≠βγ</code>이면 행렬식이 0이 아니고 계수 행렬의 랭크가 2이므로, 두 단일 큐빗 상태벡터의 텐서 곱으로 분해할 수 없는 얽힌 상태입니다.
+    </p>
+    <p class="scope-note">
+      <strong>적용 범위</strong><br>
+      이 대각선 곱 비교는 두 큐빗 순수 상태에 직접 적용하는 판정법입니다.<br>
+      세 큐빗 이상에서는 어떤 부분계 분할을 기준으로 분해 가능성을 검사하는지 명시해야 하며, 완전한 곱 상태와 일부 부분계만 분리되는 상태도 구분해야 합니다.<br>
+      다만 주어진 분할에 대해 텐서 곱으로 분해되지 않으면 얽힌 상태라는 원리는 같습니다.
+    </p>
+  </section>
+
+  <section class="chapter-summary" aria-labelledby="chapter-summary-title">
+    <span class="label">장 요약</span>
+    <h2 id="chapter-summary-title">상태벡터의 분해 가능성이 얽힘을 결정합니다</h2>
+    <p>
+      두 큐빗의 전체 상태벡터를 두 단일 큐빗 상태벡터의 텐서 곱으로 분해할 수 있으면 곱 상태이고, 분해할 수 없으면 얽힌 상태입니다.<br>
+      두 큐빗 순수 상태에서는 진폭 네 개를 <code>2×2</code> 자리에 놓고 두 대각선의 곱을 비교하여 이를 빠르게 판별할 수 있습니다.<br>
+      두 곱이 같다는 조건 <code>αδ=βγ</code>를 전문적으로 표현하면 계수 행렬의 행렬식이 0이고 랭크가 1이라는 뜻입니다.
+    </p>
+    <p>
+      <a href="uncompute-05-trace.html">다음 장</a>에서는 초기 상태에 <code>H</code>를 적용한 뒤에도 곱 구조가 유지되는 과정과, 그 상태에 <code>CNOT</code>을 적용했을 때 얽힌 상태로 바뀌는 과정을 프로그램의 각 단계에서 확인합니다.
+    </p>
+  </section>
+
+  <nav class="doc-links" aria-label="코스 내비게이션">
+    <a class="doc-link" href="uncompute-03-ledger.html">← 3. 상태를 읽는 법 — 상태벡터와 진폭</a>
+    <a class="doc-link" href="datasheet.html#s8">코스 목차</a>
+    <a class="doc-link" href="uncompute-05-trace.html">5. 곱에서 얽힘으로 — 프로그램 단계별 확인 →</a>
+  </nav>
+
+  <footer>
+    자동 uncomputation 코스 4/16 · <a href="datasheet.html#s8">코스 목차</a> ·
+    <a href="datasheet.html">컴파일러 데이터시트</a>
+  </footer>
+</div>
+</body>
+</html>

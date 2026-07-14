@@ -42,6 +42,7 @@ public static class EffectAnalysis
         private readonly SemanticModel _model;
         private readonly IReadOnlyList<QOperation> _operations;
         private readonly Dictionary<string, QOperation> _opByName;
+        private readonly Dictionary<int, QOperation> _opById;   // for CALL → callee resolution by reference (CalleeOpId)
         private readonly Dictionary<string, OpEffectSummary> _summaries = new();
 
         public Analyzer(QProgram program, SemanticModel model)
@@ -49,11 +50,32 @@ public static class EffectAnalysis
             _model = model;
             _operations = program.Operations;
             _opByName = program.Operations.ToDictionary(o => o.Name);
+            _opById = program.Operations.ToDictionary(o => o.Id);
         }
 
         public void RunAll()
         {
             foreach (var op in _operations) Summarize(op.Name);
+
+            // Which user operations cannot be statement-adjoint-inverted (a while/repeat of unknown count, classical
+            // mutation, a local `use`, or measure/reset in the body — transitively). The Inverter is the SINGLE
+            // authority on invertibility. We run it over the SAME (monomorphized) operations analysis saw, so the
+            // names here are the mono names the mono call sites actually use.
+            var inverter = new Inverter(_operations);
+            var nonInvertibleOps = _operations
+                .Where(op => !inverter.TryInvertOperation(op.Name, out _, out _))
+                .Select(op => op.Name).ToHashSet();
+
+            // Record the CALL statements (by stable Id) that target such an op, so rung ③ blocks them without a
+            // name lookup — StmtIds are shared with the pre-mono tree, mono names are not (a generic call's name is
+            // rewritten while its Id is preserved). One walk of every statement at every depth.
+            var nonInvertibleCallStmts = new HashSet<int>();
+            foreach (var op in _operations)
+                ContainerMap.Visit(op, (stmt, _) =>
+                {
+                    if (stmt is QGate g && nonInvertibleOps.Contains(g.Name)) nonInvertibleCallStmts.Add(g.Id);
+                });
+            _model.RecordNonInvertibleCallStmts(nonInvertibleCallStmts);
         }
 
         private OpEffectSummary Summarize(string opName)
@@ -198,9 +220,16 @@ public static class EffectAnalysis
             AnalyzeGate(QGate g)
         {
             // user-operation call (Adjoint Foo projects identically — U† touches the same qubits;
-            // Controlled on a user op is impossible here, QSEM002 rejected it)
-            if (_opByName.TryGetValue(g.Name, out var callee))
+            // Controlled on a user op is impossible here, QSEM002 rejected it). A call is bound to its callee by
+            // REFERENCE (CalleeOpId, set at name resolution): `CalleeOpId is int` ⟺ user-op call, and we follow
+            // the reference — never re-matching the name, which shifts across mono/mangle domains.
+            if (g.CalleeOpId is int calleeId)
             {
+                // The reference must resolve within THIS analyzed program; a dangling Id is an internal
+                // inconsistency (a rewrite dropped the callee or forgot to re-point), never a valid input.
+                if (!_opById.TryGetValue(calleeId, out var callee))
+                    throw new System.InvalidOperationException(
+                        $"effect analysis: call `{g.Name}` binds CalleeOpId {calleeId}, but no such operation exists — a stale/dangling callee reference");
                 // INVARIANT: the only functor that reaches a user-op call is Adjoint — Controlled on a user
                 // op is rejected by QSEM002. Adjoint preserves both arg count and qubit support, so the
                 // positional projection below is exact. A Controlled here would prepend a control arg,
@@ -209,7 +238,7 @@ public static class EffectAnalysis
                 if (g.Functors.Any(f => f != "Adjoint"))
                     throw new System.InvalidOperationException(
                         $"effect analysis: user-op call `{g.Name}` carries a non-Adjoint functor [{string.Join(", ", g.Functors)}]; QSEM002 should have rejected it before analysis");
-                var summary = Summarize(g.Name);
+                var summary = Summarize(callee.Name);
                 // Adjoint is superposition-agnostic: U† writes exactly what U writes, so the callee's
                 // superposition-write set projects identically to its touched/modified sets. A param the
                 // callee measures projects as measured here too — the caller-side event must be a Measure,

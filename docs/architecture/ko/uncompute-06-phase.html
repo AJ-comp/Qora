@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>언제 위상이 측정에 드러나는가 — 전역 위상과 상대 위상 — 자동 uncomputation 코스 6/16 — Qora</title>
+<style>
+  :root {
+    --bg: #ffffff; --ink: #1f2430; --muted: #5b6472; --line: #e6e8ee; --panel: #f7f8fb;
+    --plus: #1457d6; --minus: #d62b39; --accent: #6b3fd4; --good: #11875b; --amber: #b5810a;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo",
+      "Malgun Gothic", "Noto Sans KR", "Segoe UI Symbol", "Cambria Math", sans-serif;
+    line-height: 1.7; font-size: 16.5px; word-break: keep-all; overflow-wrap: break-word;
+  }
+  .wrap { max-width: 940px; margin: 0 auto; padding: 0 20px 120px; }
+  header.hero {
+    padding: 60px 20px 36px; text-align: center; border-bottom: 1px solid var(--line);
+    background: linear-gradient(180deg, #f7f8fa, #ffffff);
+  }
+  header.hero h1 { font-size: 2.0rem; margin: 0 0 10px; letter-spacing: -0.5px; }
+  header.hero p { color: var(--muted); margin: 0; font-size: 1.02rem; }
+  .tag { display:inline-block; font-size:.78rem; letter-spacing:.12em; text-transform:uppercase;
+         color: var(--accent); font-weight:700; margin-bottom:14px; }
+  h2 { margin: 54px 0 12px; font-size: 1.42rem; letter-spacing: -0.3px;
+       padding-top: 14px; border-top: 2px solid var(--line); }
+  h3 { margin: 30px 0 8px; font-size: 1.1rem; }
+  p { margin: 12px 0; }
+  strong { color: #11203a; }
+  code {
+    font-family: "SF Mono", "JetBrains Mono", "D2Coding", Consolas, "Segoe UI Symbol", monospace;
+  }
+  code { background: var(--panel); border: 1px solid var(--line); border-radius: 5px; padding: 1px 6px; font-size: .9em; }
+  .qora-lang-switch { position:sticky; top:0; z-index:99; padding:8px 16px; text-align:right;
+                      background:rgba(255,255,255,.94); border-bottom:1px solid var(--line);
+                      backdrop-filter:blur(4px); font-family:sans-serif; font-size:13px; }
+  .doc-links { display:flex; flex-wrap:wrap; gap:10px; margin: 18px 0 6px; }
+  .doc-link { display:inline-flex; align-items:center; gap:8px; border:1px solid #cdd6e2;
+              background:#fff; color:#1745b5; border-radius:6px; padding:7px 13px; font-weight:700; text-decoration:none; font-size:.92rem; }
+  .doc-link:hover { border-color:#9bb8ff; background:#eef4ff; }
+  footer { text-align:center; color:var(--muted); font-size:.9rem; margin-top: 60px; padding-top: 24px; border-top:1px solid var(--line); }
+  .chapter-intro { max-width:52rem; margin:28px 0 34px; font-size:1.03rem; }
+  .chapter-section { margin:38px 0 0; padding:27px 0 5px; border-top:1px solid #aeb6c3; }
+  .section-heading { display:flex; align-items:baseline; gap:16px; margin-bottom:14px; }
+  .section-heading .label { flex:0 0 auto; color:var(--muted); font-size:.72rem; font-weight:800;
+                            letter-spacing:.12em; }
+  .section-heading h2 { margin:0; padding:0; border:0; color:#182235; font-size:1.28rem; letter-spacing:-.25px; }
+  .section-copy { max-width:52rem; }
+  .subheading { margin:30px 0 8px; color:#263247; font-size:1.05rem; }
+  .equation-display { overflow-x:auto; margin:18px 0; padding:22px 14px 17px; text-align:center;
+                      white-space:nowrap; background:#fcfcfd; border-top:1px solid var(--line);
+                      border-bottom:1px solid var(--line);
+                      font-family:"SF Mono","JetBrains Mono","D2Coding",Consolas,"Segoe UI Symbol",monospace;
+                      font-size:clamp(1rem,3.2vw,1.24rem); line-height:1.45; }
+  .equation-display.long { text-align:left; font-size:clamp(.9rem,2.5vw,1.08rem); }
+  .qubit-b { color:var(--plus); font-weight:800; }
+  .qubit-a { color:var(--amber); font-weight:800; }
+  .definition-list { margin:18px 0; border-top:1px solid var(--line); }
+  .definition-list > div { display:grid; grid-template-columns:140px minmax(0,1fr); gap:18px;
+                           padding:10px 2px; border-bottom:1px solid var(--line); }
+  .definition-list dt { color:#263247; font-weight:800; }
+  .definition-list dd { margin:0; }
+  .key-definition { display:grid; grid-template-columns:140px minmax(0,1fr); gap:18px;
+                    margin:22px 0 14px; padding:12px 2px; border-top:2px solid #263247;
+                    border-bottom:1px solid var(--line); }
+  .key-definition .label { color:var(--muted); font-size:.76rem; font-weight:800; letter-spacing:.1em; }
+  .key-definition .relations { display:flex; flex-wrap:wrap; gap:5px 24px; }
+  .phase-comparison { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); margin:22px 0;
+                      border-top:1px solid #9fa8b6; border-bottom:1px solid var(--line); }
+  .phase-column { padding:19px 24px 21px 2px; }
+  .phase-column + .phase-column { padding-left:24px; border-left:1px solid var(--line); }
+  .phase-column .phase-label { color:var(--muted); font-size:.72rem; font-weight:800; letter-spacing:.09em; }
+  .phase-column h3 { margin:5px 0 10px; font-size:1.04rem; }
+  .phase-formula { min-height:2.4em; margin:10px 0; overflow-x:auto; }
+  .math-typeset, .math-typeset math, .inline-math, .math-scroll math {
+    font-family:"Cambria Math","STIX Two Math","Latin Modern Math","Noto Serif Math","Times New Roman",serif;
+  }
+  .math-typeset math { display:block; width:max-content; margin:0 auto; font-size:1.35em; }
+  .equation-display.long.math-typeset math { width:max-content; margin:0 auto; font-size:1.18em; }
+  .phase-formula math { display:block; width:max-content; margin:0 auto;
+                        font-family:"Cambria Math","STIX Two Math","Latin Modern Math","Noto Serif Math","Times New Roman",serif;
+                        font-size:1.12em; }
+  .math-accent { color:var(--accent); font-weight:700; }
+  .math-minus { color:var(--minus); font-weight:700; }
+  .math-qubit-b { color:var(--plus); font-weight:700; }
+  .math-qubit-a { color:var(--amber); font-weight:700; }
+  .phase-pi { color:var(--minus); font-weight:700; }
+  .phase-half { color:var(--accent); font-weight:700; }
+  .term-label { color:var(--muted); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Malgun Gothic",sans-serif;
+                font-size:.7em; font-weight:600; }
+  .inline-math { font-size:1.08em; vertical-align:-.08em; }
+  .math-scroll { overflow-x:auto; }
+  .math-scroll math { display:block; width:max-content; margin:0 auto; font-size:1.08em; }
+  .result-equivalent { color:var(--good); font-weight:800; }
+  .result-observable { color:var(--minus); font-weight:800; }
+  .chapter-summary { margin:42px 0 30px; padding:24px 0 25px; border-top:2px solid #263247;
+                     border-bottom:1px solid var(--line); }
+  .chapter-summary .label { color:var(--muted); font-size:.72rem; font-weight:800; letter-spacing:.12em; }
+  .chapter-summary h2 { margin:5px 0 12px; padding:0; border:0; font-size:1.22rem; }
+  @media (max-width:700px) {
+    .section-heading { display:block; }
+    .section-heading .label { display:block; margin-bottom:5px; }
+    .definition-list > div, .key-definition { grid-template-columns:1fr; gap:3px; }
+    .phase-comparison { grid-template-columns:1fr; }
+    .phase-column { padding-right:2px; }
+    .phase-column + .phase-column { padding-left:2px; border-left:0; border-top:1px solid var(--line); }
+  }
+</style>
+</head>
+<body>
+<div class="qora-lang-switch"><a href="../en/index.html">English</a> · <strong>한국어</strong> · <a href="../ja/index.html">日本語</a></div>
+
+<header class="hero">
+  <div class="tag">Qora · 자동 uncomputation 코스 · 6/16</div>
+  <h1>6. 언제 위상이 측정에 드러나는가 — 전역 위상과 상대 위상</h1>
+  <p>진폭에 포함된 위상 정보 — 전역 위상은 측정 결과를 바꾸지 않으며, 상대 위상은 간섭을 통해 드러납니다</p>
+</header>
+
+<div class="wrap">
+
+  <nav class="doc-links" aria-label="코스 내비게이션">
+    <a class="doc-link" href="uncompute-05-trace.html">← 5. 곱에서 얽힘으로 — 프로그램 단계별 확인</a>
+    <a class="doc-link" href="datasheet.html#s8">코스 목차</a>
+    <a class="doc-link" href="uncompute-07-observe.html">7. 전역 위상과 상대 위상 — 측정으로 확인하기 →</a>
+  </nav>
+  <div class="chapter-intro">
+    <p>
+      <a href="uncompute-05-trace.html">앞 장</a>에서는 두 큐빗의 상태가 각각의 상태벡터의 텐서 곱으로 분해되지 않는 과정을 따라가며 얽힘을 확인했습니다.<br>
+      이제 자동 uncomputation이 전체 상태를 온전히 보존하는지 판단하려면, 기저 상태의 값뿐 아니라 각 항의 진폭도 살펴봐야 합니다.
+    </p>
+    <p>
+      복소수 진폭은 크기와 위상을 함께 가집니다.<br>
+      이 장에서는 먼저 진폭과 항의 관계를 정리한 다음, 전역 위상과 상대 위상을 구분하는 기준을 세웁니다.
+    </p>
+  </div>
+
+  <section class="chapter-section" aria-labelledby="state-parts-title">
+    <div class="section-heading">
+      <span class="label">개념 복습</span>
+      <h2 id="state-parts-title">기저 상태, 진폭, 항, 상태벡터의 관계</h2>
+    </div>
+    <p class="section-copy">
+      상태벡터를 계산 기저의 선형 결합으로 나타내면, 각 항은 <strong>진폭과 기저 상태의 곱</strong>으로 구성됩니다.<br>
+      따라서 항은 기저 상태 자체가 아니며, 진폭도 항 전체와 같은 개념이 아닙니다.
+    </p>
+    <div class="equation-display math-typeset">
+      <math xmlns="http://www.w3.org/1998/Math/MathML" display="block" aria-label="상태벡터 psi는 alpha 곱하기 기저 상태 0과 beta 곱하기 기저 상태 1의 합">
+        <mrow>
+          <mrow class="math-accent"><mo>|</mo><mi>ψ</mi><mo>⟩</mo></mrow>
+          <mo>=</mo>
+          <munder>
+            <munder accentunder="true">
+              <mrow><mi class="math-accent">α</mi><mo>|</mo><mn>0</mn><mo>⟩</mo></mrow>
+              <mo stretchy="true">⏟</mo>
+            </munder>
+            <mtext class="term-label">항 1</mtext>
+          </munder>
+          <mo>+</mo>
+          <munder>
+            <munder accentunder="true">
+              <mrow><mi class="math-accent">β</mi><mo>|</mo><mn>1</mn><mo>⟩</mo></mrow>
+              <mo stretchy="true">⏟</mo>
+            </munder>
+            <mtext class="term-label">항 2</mtext>
+          </munder>
+        </mrow>
+      </math>
+    </div>
+    <dl class="definition-list">
+      <div>
+        <dt>기저 상태</dt>
+        <dd>이 장에서 사용하는 한 큐빗의 계산 기저는 <code>|0⟩</code>과 <code>|1⟩</code>로 이루어집니다.</dd>
+      </div>
+      <div>
+        <dt>진폭</dt>
+        <dd><code>α</code>와 <code>β</code>는 각 기저 상태 앞에 곱해지는 복소수 계수이며, 크기와 위상을 가집니다.</dd>
+      </div>
+      <div>
+        <dt>항</dt>
+        <dd><code>α|0⟩</code>과 <code>β|1⟩</code>은 각각 진폭과 기저 상태를 곱한 하나의 항입니다.</dd>
+      </div>
+      <div>
+        <dt>상태벡터</dt>
+        <dd>두 항의 합인 <code>|ψ⟩</code>가 큐빗 <code>q</code>의 전체 상태를 나타내는 상태벡터입니다.</dd>
+      </div>
+    </dl>
+    <p class="key-definition">
+      <span class="label">관계</span>
+      <span class="relations">
+        <strong>상태벡터 = 항들의 합</strong>
+        <strong>항 = 진폭 × 기저 상태</strong>
+      </span>
+    </p>
+    <p class="section-copy">
+      이 관계에서 이 장의 핵심은 복소수 진폭입니다.<br>
+      다음에서는 진폭의 크기와 위상을 나누어 살펴보겠습니다.
+    </p>
+  </section>
+  <section class="chapter-section" aria-labelledby="amplitude-phase-title">
+    <div class="section-heading">
+      <span class="label">위상</span>
+      <h2 id="amplitude-phase-title">복소수 진폭의 크기와 위상</h2>
+    </div>
+    <p class="section-copy">
+      0이 아닌 복소수 진폭 <code>α</code>는 크기와 위상을 분리해 다음과 같이 쓸 수 있습니다.<br>
+      아래 식의 <code>|α|</code>는 진폭의 크기이고, <code>θ</code>는 위상입니다.
+    </p>
+    <div class="equation-display math-typeset">
+      <math xmlns="http://www.w3.org/1998/Math/MathML" display="block" aria-label="alpha는 alpha의 절댓값 곱하기 e의 i theta 승">
+        <mrow>
+          <mi class="math-accent">α</mi>
+          <mo>=</mo>
+          <mrow><mo>|</mo><mi class="math-accent">α</mi><mo>|</mo></mrow>
+          <mo>·</mo>
+          <msup><mi>e</mi><mrow><mi>i</mi><mi>θ</mi></mrow></msup>
+        </mrow>
+      </math>
+    </div>
+    <dl class="definition-list">
+      <div>
+        <dt>크기 <code>|α|</code></dt>
+        <dd>진폭의 절댓값입니다.<br>계산 기저로 측정할 때 <code>|α|²</code>이 해당 기저 상태의 확률을 정합니다.</dd>
+      </div>
+      <div>
+        <dt>위상 <code>θ</code></dt>
+        <dd>복소평면에서 진폭이 가리키는 각도입니다.<br>다른 항의 위상과 비교될 때 간섭 결과에 영향을 줍니다.</dd>
+      </div>
+      <div>
+        <dt>위상 인자 <code>e<sup>iφ</sup></code></dt>
+        <dd>절댓값이 1인 복소수입니다.<br>진폭에 곱하면 크기는 유지되고 위상만 <code>φ</code>만큼 바뀝니다.</dd>
+      </div>
+    </dl>
+    <h3 class="subheading">오일러 공식으로 위상 인자 확인하기</h3>
+    <p class="section-copy">
+      <code>−1 = e<sup>iπ</sup></code>와 <code>i = e<sup>iπ/2</sup></code>는 오일러 공식에서 나옵니다.<br>
+      오일러 공식은 복소 지수 함수와 삼각함수를 다음과 같이 연결합니다.
+    </p>
+    <div class="equation-display math-typeset">
+      <math xmlns="http://www.w3.org/1998/Math/MathML" display="block" aria-label="e의 i theta 승은 코사인 theta 더하기 i 사인 theta">
+        <mrow>
+          <msup><mi>e</mi><mrow><mi>i</mi><mi>θ</mi></mrow></msup>
+          <mo>=</mo>
+          <mi mathvariant="normal">cos</mi><mo>&#x2061;</mo><mi>θ</mi>
+          <mo>+</mo>
+          <mi>i</mi><mo>·</mo><mi mathvariant="normal">sin</mi><mo>&#x2061;</mo><mi>θ</mi>
+        </mrow>
+      </math>
+    </div>
+    <p class="section-copy">
+      이제 <code>θ</code>에 <code>π</code>와 <code>π/2</code>를 각각 대입하면 두 위상 인자를 직접 확인할 수 있습니다.
+    </p>
+    <dl class="definition-list">
+      <div>
+        <dt>
+          <math class="inline-math" xmlns="http://www.w3.org/1998/Math/MathML" aria-label="theta는 pi">
+            <mi>θ</mi><mo>=</mo><mi class="phase-pi">π</mi>
+          </math>
+        </dt>
+        <dd class="math-scroll">
+          <math xmlns="http://www.w3.org/1998/Math/MathML" display="block" aria-label="e의 i pi 승은 마이너스 1">
+            <mrow>
+              <msup><mi>e</mi><mrow><mi>i</mi><mi>π</mi></mrow></msup>
+              <mo>=</mo>
+              <mi mathvariant="normal">cos</mi><mo>&#x2061;</mo><mi>π</mi>
+              <mo>+</mo>
+              <mi>i</mi><mo>·</mo><mi mathvariant="normal">sin</mi><mo>&#x2061;</mo><mi>π</mi>
+              <mo>=</mo><mo>−</mo><mn>1</mn><mo>+</mo><mi>i</mi><mo>·</mo><mn>0</mn>
+              <mo>=</mo><mrow class="phase-pi"><mo>−</mo><mn>1</mn></mrow>
+            </mrow>
+          </math>
+        </dd>
+      </div>
+      <div>
+        <dt>
+          <math class="inline-math" xmlns="http://www.w3.org/1998/Math/MathML" aria-label="theta는 pi 나누기 2">
+            <mi>θ</mi><mo>=</mo><mfrac class="phase-half"><mi>π</mi><mn>2</mn></mfrac>
+          </math>
+        </dt>
+        <dd class="math-scroll">
+          <math xmlns="http://www.w3.org/1998/Math/MathML" display="block" aria-label="e의 i pi 나누기 2 승은 i">
+            <mrow>
+              <msup><mi>e</mi><mrow><mi>i</mi><mfrac><mi>π</mi><mn>2</mn></mfrac></mrow></msup>
+              <mo>=</mo>
+              <mi mathvariant="normal">cos</mi><mo>&#x2061;</mo><mo>(</mo><mfrac><mi>π</mi><mn>2</mn></mfrac><mo>)</mo>
+              <mo>+</mo>
+              <mi>i</mi><mo>·</mo><mi mathvariant="normal">sin</mi><mo>&#x2061;</mo><mo>(</mo><mfrac><mi>π</mi><mn>2</mn></mfrac><mo>)</mo>
+              <mo>=</mo><mn>0</mn><mo>+</mo><mi>i</mi><mo>·</mo><mn>1</mn>
+              <mo>=</mo><mi class="phase-half">i</mi>
+            </mrow>
+          </math>
+        </dd>
+      </div>
+    </dl>
+    <p class="section-copy">
+      따라서 <code>−1</code>을 곱하면 진폭의 위상이 <code>π</code>만큼 바뀌고, <code>i</code>를 곱하면 <code>π/2</code>만큼 바뀝니다.<br>
+      두 수는 모두 절댓값이 1이므로 진폭의 크기는 바꾸지 않고 위상만 바꾸며, 위상은 <code>2π</code>를 주기로 반복됩니다.
+    </p>
+
+    <h3 class="subheading">텐서 곱에서 위상 인자의 위치</h3>
+    <p class="section-copy">
+      큐빗 순서를 <code>|b,a⟩</code>로 정하면 <code>|01⟩ = |0⟩<sub class="qubit-b">b</sub> ⊗ |1⟩<sub class="qubit-a">a</sub></code>입니다.<br>
+      이 기저 상태의 진폭이 <code>i</code>인 항 <code>i|01⟩</code>을 텐서 곱으로 풀어 쓰면 다음 세 표현을 얻습니다.
+    </p>
+    <div class="equation-display long math-typeset">
+      <math xmlns="http://www.w3.org/1998/Math/MathML" display="block" aria-label="위상 인자 i는 텐서 곱의 어느 인자에 포함해도 같은 상태벡터를 나타냄">
+        <mrow>
+          <mi class="math-accent">i</mi><mo>·</mo><mo>(</mo>
+          <msub><mrow><mo>|</mo><mn>0</mn><mo>⟩</mo></mrow><mi class="math-qubit-b">b</mi></msub>
+          <mo>⊗</mo>
+          <msub><mrow><mo>|</mo><mn>1</mn><mo>⟩</mo></mrow><mi class="math-qubit-a">a</mi></msub>
+          <mo>)</mo>
+          <mo>=</mo>
+          <mo>(</mo><mi class="math-accent">i</mi><mo>·</mo>
+          <msub><mrow><mo>|</mo><mn>0</mn><mo>⟩</mo></mrow><mi class="math-qubit-b">b</mi></msub><mo>)</mo>
+          <mo>⊗</mo>
+          <msub><mrow><mo>|</mo><mn>1</mn><mo>⟩</mo></mrow><mi class="math-qubit-a">a</mi></msub>
+          <mo>=</mo>
+          <msub><mrow><mo>|</mo><mn>0</mn><mo>⟩</mo></mrow><mi class="math-qubit-b">b</mi></msub>
+          <mo>⊗</mo>
+          <mo>(</mo><mi class="math-accent">i</mi><mo>·</mo>
+          <msub><mrow><mo>|</mo><mn>1</mn><mo>⟩</mo></mrow><mi class="math-qubit-a">a</mi></msub><mo>)</mo>
+        </mrow>
+      </math>
+    </div>
+    <p class="section-copy">
+      텐서 곱은 각 인자에 대해 선형이므로, 복소수 스칼라 <code>i</code>를 어느 인자에 포함해도 전체 상태벡터는 같습니다.<br>
+      따라서 이 <code>i</code>를 큐빗 <code>b</code>와 <code>a</code> 가운데 어느 한쪽의 위상이라고 유일하게 지정할 수 없습니다.
+    </p>
+    <p class="key-definition">
+      <span class="label">항의 구성</span>
+      <span><strong>이 상태벡터 표현에서 <code>|01⟩</code> 항의 진폭은 <code>i</code>입니다.</strong></span>
+    </p>
+    <p class="section-copy">
+      다만 이 예시는 항이 하나뿐이므로 <code>i</code>는 상태 전체에 곱해진 전역 위상이며, <code>i|01⟩</code>과 <code>|01⟩</code>은 같은 물리적 상태를 나타냅니다.<br>
+      반면에 다른 항이 함께 존재할 때에는 각 진폭의 위상을 서로 비교해야 합니다.
+    </p>
+  </section>
+  <section class="chapter-section" aria-labelledby="phase-criterion-title">
+    <div class="section-heading">
+      <span class="label">판정 기준</span>
+      <h2 id="phase-criterion-title">전역 위상과 상대 위상은 이렇게 구분합니다</h2>
+    </div>
+    <p class="section-copy">
+      한 항의 위상만 보아서는 그 위상이 측정 가능한 차이를 만드는지 판단할 수 없습니다.<br>
+      따라서 연산 전후의 상태벡터를 비교하여 모든 진폭에 같은 위상 인자가 곱해졌는지, 아니면 항 사이의 위상 관계가 달라졌는지 확인해야 합니다.
+    </p>
+    <p class="section-copy">
+      가장 단순한 위상 인자 <code>−1</code>을 사용해 두 경우를 비교하겠습니다.<br>
+      기준 상태는 다음과 같습니다.
+    </p>
+    <div class="equation-display math-typeset">
+      <math xmlns="http://www.w3.org/1998/Math/MathML" display="block" aria-label="기준 상태 psi는 0과 1의 합을 루트 2로 나눈 상태">
+        <mrow>
+          <mrow class="math-accent"><mo>|</mo><mi>ψ</mi><mo>⟩</mo></mrow>
+          <mo>=</mo>
+          <mfrac>
+            <mrow><mo>|</mo><mn>0</mn><mo>⟩</mo><mo>+</mo><mo>|</mo><mn>1</mn><mo>⟩</mo></mrow>
+            <msqrt><mn>2</mn></msqrt>
+          </mfrac>
+        </mrow>
+      </math>
+    </div>
+
+    <div class="phase-comparison">
+      <section class="phase-column" aria-labelledby="global-phase-title">
+        <span class="phase-label">모든 항에 같은 위상 인자</span>
+        <h3 id="global-phase-title">전역 위상</h3>
+        <div class="phase-formula">
+          <math xmlns="http://www.w3.org/1998/Math/MathML" display="block" aria-label="마이너스 psi는 마이너스 0과 마이너스 1의 합을 루트 2로 나눈 상태">
+            <mrow>
+              <mo class="math-minus">−</mo><mrow class="math-accent"><mo>|</mo><mi>ψ</mi><mo>⟩</mo></mrow>
+              <mo>=</mo>
+              <mfrac>
+                <mrow>
+                  <mo class="math-minus">−</mo><mo>|</mo><mn>0</mn><mo>⟩</mo>
+                  <mo class="math-minus">−</mo><mo>|</mo><mn>1</mn><mo>⟩</mo>
+                </mrow>
+                <msqrt><mn>2</mn></msqrt>
+              </mfrac>
+            </mrow>
+          </math>
+        </div>
+        <p>
+          0이 아닌 두 진폭에 모두 <code>−1</code>이 곱해졌으므로 상태벡터 전체에 공통 인자 <code>−1</code>을 묶을 수 있습니다.<br>
+          이 공통 인자는 이후의 모든 유니터리 연산에서도 공통으로 남고, 측정 확률을 계산할 때 소거됩니다.
+        </p>
+        <p class="result-equivalent">상태벡터 표기는 다르지만 같은 물리적 상태입니다.</p>
+      </section>
+      <section class="phase-column" aria-labelledby="relative-phase-title">
+        <span class="phase-label">항 사이에 서로 다른 위상 인자</span>
+        <h3 id="relative-phase-title">상대 위상</h3>
+        <div class="phase-formula">
+          <math xmlns="http://www.w3.org/1998/Math/MathML" display="block" aria-label="0과 마이너스 1의 합을 루트 2로 나눈 상태">
+            <mfrac>
+              <mrow><mo>|</mo><mn>0</mn><mo>⟩</mo><mo class="math-minus">−</mo><mo>|</mo><mn>1</mn><mo>⟩</mo></mrow>
+              <msqrt><mn>2</mn></msqrt>
+            </mfrac>
+          </math>
+        </div>
+        <p>
+          <code>|0⟩</code> 항에는 <code>+1</code>, <code>|1⟩</code> 항에는 <code>−1</code>이 곱해져 두 진폭 사이의 위상 관계가 달라졌습니다.<br>
+          진폭의 크기는 같아도 적절한 간섭을 거치면 이 위상 차이가 확률 차이로 바뀔 수 있습니다.
+        </p>
+        <p class="result-observable">간섭을 이용하면 기준 상태와 구별할 수 있습니다.</p>
+      </section>
+    </div>
+
+    <p class="key-definition">
+      <span class="label">판정</span>
+      <span><strong>0이 아닌 모든 진폭에 같은 위상 인자가 곱해졌으면 전역 위상이고, 적어도 일부 항에 서로 다른 위상 인자가 적용되어 진폭 사이의 위상 관계가 바뀌었으면 상대 위상입니다.</strong></span>
+    </p>
+    <p class="section-copy">
+      계산 기저에서 곧바로 측정하면 기준 상태와 두 변형 상태 모두 0과 1이 각각 50% 확률로 나오므로 차이가 보이지 않습니다.<br>
+      그러나 <code>H</code>처럼 항들을 다시 합치는 게이트를 적용하면 상대 위상은 서로 다른 간섭 결과를 만들 수 있습니다.
+    </p>
+    <p class="section-copy">
+      다만 상대 위상이 존재한다는 사실만으로 자동 청소가 실패하는 것은 아닙니다.<br>
+      그러나 기저 값을 바꾸는 연산이 값에 따라 서로 다른 위상 인자까지 남기면 문제가 될 수 있으며, 구체적인 이유는 <a href="uncompute-10-y-gate.html">10장 — Y·CY가 차단되는 이유</a>에서 다룹니다.
+    </p>
+  </section>
+
+  <section class="chapter-summary" aria-labelledby="chapter-summary-title">
+    <span class="label">장 요약</span>
+    <h2 id="chapter-summary-title">자동 청소는 항 사이의 위상 관계까지 보존해야 합니다</h2>
+    <p class="section-copy">
+      위상은 기저 상태 자체가 아니라 각 항을 구성하는 복소수 진폭에 포함됩니다.<br>
+      따라서 자동 청소의 안전성을 판단할 때에는 텐서 곱 항 전체에 곱해진 공통 스칼라를 특정 큐빗에 임의로 귀속하지 않고, 연산이 상태 전체의 전역 위상만 바꾸는지 아니면 항 사이의 상대 위상까지 바꾸는지 구분해야 합니다.
+    </p>
+    <p class="section-copy">
+      <a href="uncompute-07-observe.html">다음 장</a>에서는 <code>Z</code> 게이트를 <code>|1⟩</code>과 <code>(|0⟩+|1⟩)/√2</code>에 각각 적용합니다.<br>
+      첫 번째 상태에서는 유일한 진폭에 곱해진 <code>−1</code>이 전역 위상이 되고, 두 번째 상태에서는 <code>|1⟩</code> 항에만 곱해진 <code>−1</code>이 상대 위상이 되는 과정을 Qora 코드와 측정 결과로 확인합니다.
+    </p>
+  </section>
+
+  <nav class="doc-links" aria-label="코스 내비게이션">
+    <a class="doc-link" href="uncompute-05-trace.html">← 5. 곱에서 얽힘으로 — 프로그램 단계별 확인</a>
+    <a class="doc-link" href="datasheet.html#s8">코스 목차</a>
+    <a class="doc-link" href="uncompute-07-observe.html">7. 전역 위상과 상대 위상 — 측정으로 확인하기 →</a>
+  </nav>
+
+  <footer>
+    자동 uncomputation 코스 6/16 · <a href="datasheet.html#s8">코스 목차</a> ·
+    <a href="datasheet.html">컴파일러 데이터시트</a>
+  </footer>
+
+</div>
+</body>
+</html>

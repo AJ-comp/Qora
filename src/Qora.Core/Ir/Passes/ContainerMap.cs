@@ -19,42 +19,51 @@ public static class ContainerMap
     public static IReadOnlyDictionary<int, IReadOnlyList<QStmt>> Build(QOperation op)
     {
         var map = new Dictionary<int, IReadOnlyList<QStmt>>();
-        Walk(op.Body, new List<QStmt>(), map);
+        Visit(op, (stmt, chain) => map[stmt.Id] = chain.ToArray()); // snapshot the chain enclosing THIS statement
         return map;
     }
 
-    private static void Walk(IReadOnlyList<QStmt> body, List<QStmt> stack, Dictionary<int, IReadOnlyList<QStmt>> map)
+    /// <summary>The ONE recursive walk of an operation body: invoke <paramref name="visit"/> exactly once per
+    /// statement (containers included, at any depth) with its enclosing container chain, outermost first. The
+    /// chain handed in is the live stack — snapshot it (<c>.ToArray()</c>) if you need to keep it past the
+    /// call. Both the container map above and <see cref="StmtMap"/> are derived from this single walk, so a new
+    /// container statement type is taught to the walk in ONE place and both maps learn it at once (the
+    /// exhaustiveness guard in ContainerMapTests fails until a new body-bearing type is added here).</summary>
+    public static void Visit(QOperation op, Action<QStmt, IReadOnlyList<QStmt>> visit)
+        => Walk(op.Body, new List<QStmt>(), visit);
+
+    private static void Walk(IReadOnlyList<QStmt> body, List<QStmt> stack, Action<QStmt, IReadOnlyList<QStmt>> visit)
     {
         foreach (var stmt in body)
         {
-            map[stmt.Id] = stack.ToArray();   // snapshot of the chain enclosing THIS statement
+            visit(stmt, stack);
             switch (stmt)
             {
                 case QIf i:
                     stack.Add(i);
-                    Walk(i.Then, stack, map);
-                    Walk(i.Else, stack, map);
+                    Walk(i.Then, stack, visit);
+                    Walk(i.Else, stack, visit);
                     stack.RemoveAt(stack.Count - 1);
                     break;
                 case QFor f:
                     stack.Add(f);
-                    Walk(f.Body, stack, map);
+                    Walk(f.Body, stack, visit);
                     stack.RemoveAt(stack.Count - 1);
                     break;
                 case QWhile w:
                     stack.Add(w);
-                    Walk(w.Body, stack, map);
+                    Walk(w.Body, stack, visit);
                     stack.RemoveAt(stack.Count - 1);
                     break;
                 case QRepeat r:
                     stack.Add(r);
-                    Walk(r.Body, stack, map);
+                    Walk(r.Body, stack, visit);
                     stack.RemoveAt(stack.Count - 1);
                     break;
                 case QConjugate c:
                     stack.Add(c);
-                    Walk(c.Within, stack, map);
-                    Walk(c.Apply, stack, map);
+                    Walk(c.Within, stack, visit);
+                    Walk(c.Apply, stack, visit);
                     stack.RemoveAt(stack.Count - 1);
                     break;
             }

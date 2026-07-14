@@ -90,7 +90,9 @@ public static class Monomorphizer
                 specNameByKey[key] = specName;
                 specs[specName] = Specialize(callee, bindings, specName);   // may create further (nested) specs
             }
-            return g with { Name = specName };
+            // re-point the callee reference from the generic op to THIS size specialization (name alone shifts
+            // here — the whole reason CalleeOpId exists; the specialization op is what analysis will see).
+            return g with { Name = specName, CalleeOpId = specs[specName].Id };
         }
 
         string MakeName(string baseName, Dictionary<string, int> bindings)

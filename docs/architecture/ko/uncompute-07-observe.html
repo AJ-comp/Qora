@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>게이트는 장부를 어떻게 편집하는가 — 자동 uncomputation 코스 3/11 — Qora</title>
+<title>전역 위상과 상대 위상 — 측정으로 확인하기 — 자동 uncomputation 코스 7/16 — Qora</title>
 <style>
   :root {
     --bg: #ffffff; --ink: #1f2430; --muted: #5b6472; --line: #e6e8ee; --panel: #f7f8fb;
@@ -51,7 +51,7 @@
            padding: 14px 16px; margin: 16px 0; overflow-x: auto; }
   table.spec { border-collapse: collapse; width: 100%; font-size: .92rem; }
   table.spec th, table.spec td { padding: 8px 11px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: top; }
-  table.spec th { font-size: .78rem; color: var(--muted); font-weight: 700; text-transform: uppercase; letter-spacing:.05em; background:#fbfbfe; }
+  table.spec th { font-size: .78rem; color: var(--muted); font-weight: 700; letter-spacing:.02em; background:#fbfbfe; }
   table.spec tr:last-child td { border-bottom: none; }
   table.spec code { white-space: nowrap; }
   table.spec td.k { white-space: nowrap; font-weight: 700; color:#1a2740; }
@@ -115,87 +115,86 @@
 <div class="qora-lang-switch" style="position:sticky;top:0;z-index:99;text-align:right;padding:8px 16px;background:rgba(255,255,255,.92);backdrop-filter:blur(4px);border-bottom:1px solid #e6e8ee;font-size:13px;font-family:sans-serif;"><a href="../en/index.html">English</a> · <strong>한국어</strong> · <a href="../ja/index.html">日本語</a></div>
 
 <header class="hero">
-  <div class="tag">Qora · 자동 uncomputation 코스 · 3/11</div>
-  <h1>3. 게이트는 장부를 어떻게 편집하는가</h1>
-  <p>값 칸 · 계수 칸 · 줄 쪼개기 — 편집의 세 종류</p>
+  <div class="tag">Qora · 자동 uncomputation 코스 · 7/16</div>
+  <h1>7. 전역 위상과 상대 위상 — 측정으로 확인하기</h1>
+  <p>같은 Z 게이트가 항 1개엔 전역 위상, 항 2개엔 상대 위상 — 측정으로 확인합니다</p>
 </header>
 
 <div class="wrap">
 
   <nav class="doc-links" aria-label="코스 내비게이션">
-    <a class="doc-link" href="uncompute-02-ledger.html">← 2. 상태를 읽는 법 — 장부 모델</a>
+    <a class="doc-link" href="uncompute-06-phase.html">← 6. 언제 위상이 측정에 드러나는가 — 전역 위상과 상대 위상</a>
     <a class="doc-link" href="datasheet.html#s8">코스 목차</a>
-    <a class="doc-link" href="uncompute-04-qfree.html">4. 청소의 계약과 qfree →</a>
+    <a class="doc-link" href="uncompute-08-gates.html">8. 게이트는 상태벡터를 어떻게 바꾸는가 →</a>
   </nav>
   <p>
-    2장에서 양자 상태를 줄과 계수 칸으로 이루어진 장부로 읽는 법을 익혔습니다. 그 장부 위에서 보면
-    모든 게이트는 장부를 고치는 편집 연산입니다. 어떤 게이트는 줄의 값 칸만 고치고, 어떤 게이트는
-    값 칸을 그대로 둔 채 계수에만 위상을 곱하며, 어떤 게이트는 줄 하나를 두 줄로 쪼갭니다. 게이트가
-    이 중 어떤 편집을 하는지가 뒤 장들에서 자동 청소의 안전성을 판정하는 기준이 됩니다.
-  </p>
-  <div class="panel">
-    <table class="spec">
-      <tr><th>게이트</th><th>장부에 하는 일</th><th>비고</th></tr>
-      <tr><td class="k">X</td><td>각 줄에서 해당 <strong>값 칸만</strong> 뒤집기</td><td>계수 무접촉</td></tr>
-      <tr><td class="k">CNOT · CCX · SWAP</td><td>조건에 따라 값 칸 뒤집기/맞바꾸기</td><td>값 칸만, 계수 무접촉</td></tr>
-      <tr><td class="k">Z · S · T · CZ · Rz</td><td>값 칸은 안 건드리고 <strong>계수에만</strong> 위상 곱하기</td><td>효과분석에서는 읽기(Read)로 기록</td></tr>
-      <tr><td class="k">H · Rx · Ry</td><td><strong>줄을 두 줄로 쪼개기</strong> (하나의 값 → 두 값의 중첩)</td><td>1줄 장부 → 2줄 장부</td></tr>
-      <tr><td class="k">Y · CY</td><td>값 칸 뒤집기 <strong>+ 뒤집은 값에 따라 다른 도장</strong>을 그 줄 계수에</td><td>0→1이면 +i, 1→0이면 −i</td></tr>
-      <tr><td class="k">M (측정)</td><td>한 값으로 <strong>줄들을 삭제</strong>하고 결과를 bit로 배달</td><td>비가역</td></tr>
-      <tr><td class="k">Reset</td><td>값을 강제로 |0⟩ (이력 소실)</td><td>비가역</td></tr>
-    </table>
-  </div>
-  <p>
-    표에서 값 칸 편집, 계수 편집, 줄 쪼개기는 모두 되돌릴 수 있는 편집입니다. 예를 들어 X를 두 번
-    적용하면 값 칸이 원래대로 돌아오고, H를 두 번 적용하면 쪼개졌던 줄이 간섭으로 다시 한 줄로
-    합쳐집니다. 반면 마지막 두 줄의 측정과 Reset은 장부의 줄을 지워 버리는 동작이라서 한 번
-    지나가면 되돌릴 수 없습니다. 측정이 줄을 삭제한다는 말이 무슨 뜻인지 가장 작은 예로 확인해
-    봅니다.
-  </p>
-<pre><code>use q = Qubit[1];
-H(q[0]);           <span class="cm">// 장부: |0⟩ ×1/√2 · |1⟩ ×1/√2 — 두 줄</span>
-bit m = M(q[0]);   <span class="cm">// 두 줄 중 하나만 남기고 삭제 → m = 0 또는 1 (각 50%)</span></code></pre>
-  <p>
-    측정 직전의 장부에는 줄이 두 개 있었습니다. 측정은 그중 한 줄만 남기고 나머지를 삭제한 뒤,
-    남은 줄에 적힌 값을 bit 변수 <code>m</code>으로 배달합니다. 지워진 줄의 내용은 어디에도 남지
-    않으므로, 그 뒤에 어떤 게이트를 붙여도 삭제 이전의 장부를 복원할 수 없습니다. 측정과 Reset이
-    표에서 비가역으로 표시된 이유가 바로 이것입니다.
+    <a href="uncompute-06-phase.html">앞 장</a>에서 위상이 항의 속성이라는 것과, 위상이 모든 항에 똑같이 붙으면 <strong>전역 위상(측정에 안 드러남)</strong>, 항마다 다르게 붙으면 <strong>상대 위상(측정에 드러남)</strong>이 된다는 것을 보았습니다.<br>
+    그 “측정에 드러난다”가 말뿐이 아니라 실제로 그런지는 아직 직접 보지 않았습니다.<br>
+    이 장에서는 <code>Z</code> 게이트 하나로, 같은 게이트가 항이 하나뿐인 상태에서는 전역 위상이 되어 결과를 그대로 두고, 항이 두 개인 상태에서는 상대 위상이 되어 결과를 뒤집는 과정을 단계별로 확인합니다.
   </p>
 
-  <h3>예제 — 장부의 진화를 단계별로</h3>
   <p>
-    이번에는 세 종류의 편집이 실제로 어떻게 이어지는지, 두 큐빗 프로그램 하나로 처음부터 끝까지
-    따라가 봅니다.
+    확인에 쓸 게이트는 <code>Z</code>입니다. <code>Z</code> 게이트는 값이 1인 항의 진폭에 −1을 곱하고 기저 값은 건드리지 않습니다.<br>
+    같은 <code>Z</code> 게이트를 항 개수만 다른 두 상태벡터에 한 번씩 적용해, 언제 전역 위상이 되고 언제 상대 위상이 되는지 봅니다.
   </p>
-<pre><code>use b = Qubit[1];  use a = Qubit[1];
-H(b[0]);           <span class="cm">// ① 줄 쪼개기</span>
-CNOT(b[0], a[0]);  <span class="cm">// ② 조건부 값 편집</span>
-Z(a[0]);           <span class="cm">// ③ 계수 편집</span></code></pre>
+
+  <h4>1단계 — 항이 하나뿐인 상태벡터: Z의 부호는 전역 위상이 됩니다</h4>
+<pre><code>use q = Qubit[1];
+X(q[0]);       <span class="cm">// 상태벡터: (1)→1, 줄 하나</span>
+Z(q[0]);       <span class="cm">// 유일한 줄에 부호 − → 전역 위상</span>
+bit m = M(q[0]);
+<span class="cm">// m = 1 (확률 100%) — Z를 지워도 동일</span></code></pre>
   <div class="panel">
     <table class="spec">
-      <tr><th>시점</th><th>장부 (|b,a⟩)</th><th>일어난 편집</th></tr>
-      <tr><td class="k">시작</td><td>|0,0⟩ ×1</td><td>줄 하나</td></tr>
-      <tr><td class="k">① H(b)</td><td>|0,0⟩ ×1/√2 · |1,0⟩ ×1/√2</td><td>줄이 둘로 쪼개짐</td></tr>
-      <tr><td class="k">② CNOT(b,a)</td><td>|0,0⟩ ×1/√2 · |1,1⟩ ×1/√2</td><td>b=1인 줄에서만 a 값 칸 뒤집힘 — <strong>얽힘 탄생</strong> (줄마다 a 값이 다름)</td></tr>
-      <tr><td class="k">③ Z(a)</td><td>|0,0⟩ ×1/√2 · |1,1⟩ ×<strong>−</strong>1/√2</td><td>a=1인 줄의 계수에만 −1 — 값 칸 무접촉 (읽기)</td></tr>
+      <tr><th>시점</th><th>상태벡터 (<code>q</code>)</th><th>일어난 일</th></tr>
+      <tr><td class="k">X 후</td><td>(1) ×1</td><td>항 하나짜리 상태벡터</td></tr>
+      <tr><td class="k">Z 후</td><td>(1) ×<strong>−</strong>1</td><td>유일한 항 = 모든 항에 부호 − → 전역 위상</td></tr>
+      <tr><td class="k">M 후</td><td>m = 1 (확률 100%)</td><td>확률은 진폭 크기의 제곱 |−1|² = 1 — Z 게이트가 없을 때와 동일</td></tr>
     </table>
   </div>
   <p>
-    ②에서 일어난 일이 곧 얽힘의 장부적 정의입니다. CNOT이 b가 1인 줄에서만 a의 값 칸을 뒤집었기
-    때문에, 편집이 끝난 장부에서는 줄마다 a의 값이 다릅니다. 이렇게 <strong>줄마다 어떤 큐빗의 값이
-    달라서 장부를 큐빗별 곱으로 쪼갤 수 없는 상태</strong>를 얽힘이라 부릅니다. 반면 ③의 Z는 값 칸을
-    전혀 건드리지 않고 a가 1인 줄의 계수에 −1을 곱했을 뿐입니다. 효과분석은 이처럼 값 칸을 건드리지
-    않는 계수 전용 편집을 읽기(Read)로 기록하며, 그 이유는 다음 장에서 분명해집니다.
+    부호가 상태벡터의 모든 항에 붙었고, 측정 확률은 진폭의 크기만 보기 때문에 결과는 Z 게이트가 없을 때와
+    완전히 같습니다.<br>
+    전역 위상은 이렇게 어떤 측정으로도 흔적을 남기지 않습니다.
+  </p>
+
+  <h4>2단계 — 항이 두 개인 상태벡터: 같은 Z가 상대 위상이 되어 결과를 뒤집습니다</h4>
+  <p>
+    이번에는 1장의 기준선이었던 "H 두 번, 결과는 항상 0" 프로그램을 다시 가져와, 두 H 사이에
+    같은 Z 한 줄만 끼워 넣습니다.
+  </p>
+<pre><code>use q = Qubit[1];
+H(q[0]);       <span class="cm">// 상태벡터: (0)→1/√2, (1)→1/√2</span>
+<span class="rd">Z(q[0]);</span>       <span class="cm">// ← 추가된 한 줄: 1인 줄에만 부호 −</span>
+H(q[0]);
+bit m = M(q[0]);
+<span class="cm">// m = 1 (확률 100%) — Z가 없으면 m = 0</span></code></pre>
+  <div class="panel">
+    <table class="spec">
+      <tr><th>시점</th><th>상태벡터 (<code>q</code>)</th><th>일어난 일</th></tr>
+      <tr><td class="k">첫 H 후</td><td>(0) ×1/√2 · (1) ×1/√2</td><td>항이 둘로 나뉨</td></tr>
+      <tr><td class="k">Z 후</td><td>(0) ×1/√2 · (1) ×<strong>−</strong>1/√2</td><td>1인 항에만 부호 − → 상대 위상</td></tr>
+      <tr><td class="k">둘째 H 후</td><td>(1) ×1</td><td>0으로 모이는 기여 +1/2와 −1/2가 상쇄, 1로 모이는 기여 +1/2와 +1/2가 합쳐짐</td></tr>
+      <tr><td class="k">M 후</td><td>m = 1 (확률 100%)</td><td>Z가 없으면 두 항이 (0) ×1로 합쳐져 m = 0</td></tr>
+    </table>
+  </div>
+  <p>
+    같은 Z 게이트가 이번에는 두 항 중 1인 항에만 부호를 붙였습니다.<br>
+    둘째 H 게이트는 각 항을 다시 두 항으로 나눠 같은 값끼리 합치는데, 0으로 모이는 두 기여는 +1/2와
+    −1/2라서 상쇄되고 1로 모이는 두 기여는 +1/2와 +1/2라서 살아남습니다.<br>
+    그래서 측정 결과가 "항상 0"에서 "항상 1"로 확실하게 뒤집힙니다.<br>
+    1단계와 프로그램 두 개를 나란히 두고 보면, 전역 위상과 상대 위상의 차이가 측정으로 직접
+    관측된다는 사실이 확인됩니다.
   </p>
 
   <nav class="doc-links" aria-label="코스 내비게이션">
-    <a class="doc-link" href="uncompute-02-ledger.html">← 2. 상태를 읽는 법 — 장부 모델</a>
+    <a class="doc-link" href="uncompute-06-phase.html">← 6. 언제 위상이 측정에 드러나는가 — 전역 위상과 상대 위상</a>
     <a class="doc-link" href="datasheet.html#s8">코스 목차</a>
-    <a class="doc-link" href="uncompute-04-qfree.html">4. 청소의 계약과 qfree →</a>
+    <a class="doc-link" href="uncompute-08-gates.html">8. 게이트는 상태벡터를 어떻게 바꾸는가 →</a>
   </nav>
 
   <footer>
-    자동 uncomputation 코스 3/11 · <a href="datasheet.html#s8">코스 목차</a> ·
+    자동 uncomputation 코스 7/16 · <a href="datasheet.html#s8">코스 목차</a> ·
     <a href="datasheet.html">컴파일러 데이터시트</a>
   </footer>
 

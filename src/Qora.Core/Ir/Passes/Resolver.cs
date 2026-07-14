@@ -67,9 +67,15 @@ public static class Resolver
                         $"in namespace `{ns}`: `open {open.Target};` names an unknown namespace — `open` only makes loaded names shorter; if `{open.Target}` lives in another file, `import` that file first",
                         open.Span);
 
+        // each user op's fully-qualified name -> its stable node Id, so a resolved CALL is BOUND to its callee
+        // by reference (QGate.CalleeOpId) instead of re-matching the name later. TryAdd tolerates a duplicate
+        // Fqn (reported as a duplicate-operation error by validation, which runs next — no throw here).
+        var opIdByFqn = new Dictionary<string, int>();
+        foreach (var op in program.Operations) opIdByFqn.TryAdd(Fqn(op), op.Id);
+
         var resolvedOps = program.Operations
             .Select(op => (op with { Name = Fqn(op) })
-                with { Body = ResolveBody(op.Body, op.Namespace, op.Name, program, table, namespaces, errors) })
+                with { Body = ResolveBody(op.Body, op.Namespace, op.Name, program, table, namespaces, errors, opIdByFqn) })
             .ToList();
 
         return (program with { Operations = resolvedOps }, errors);
@@ -78,28 +84,40 @@ public static class Resolver
     private static string Fqn(QOperation op) => op.Namespace.Length > 0 ? $"{op.Namespace}.{op.Name}" : op.Name;
 
     private static IReadOnlyList<QStmt> ResolveBody(IReadOnlyList<QStmt> stmts, string ns, string opName,
-        QProgram program, HashSet<string> table, HashSet<string> namespaces, List<QoraError> errors) =>
-        stmts.Select(s => ResolveStmt(s, ns, opName, program, table, namespaces, errors)).ToList();
+        QProgram program, HashSet<string> table, HashSet<string> namespaces, List<QoraError> errors,
+        IReadOnlyDictionary<string, int> opIds) =>
+        stmts.Select(s => ResolveStmt(s, ns, opName, program, table, namespaces, errors, opIds)).ToList();
 
     private static QStmt ResolveStmt(QStmt s, string ns, string opName,
-        QProgram program, HashSet<string> table, HashSet<string> namespaces, List<QoraError> errors) => s switch
+        QProgram program, HashSet<string> table, HashSet<string> namespaces, List<QoraError> errors,
+        IReadOnlyDictionary<string, int> opIds) => s switch
     {
-        QGate g => g with { Name = ResolveCallee(g.Name, ns, opName, program, table, namespaces, errors, g.Span) },
+        QGate g => ResolveCall(g, ns, opName, program, table, namespaces, errors, opIds),
         QIf i => i with
         {
-            Then = ResolveBody(i.Then, ns, opName, program, table, namespaces, errors),
-            Else = ResolveBody(i.Else, ns, opName, program, table, namespaces, errors),
+            Then = ResolveBody(i.Then, ns, opName, program, table, namespaces, errors, opIds),
+            Else = ResolveBody(i.Else, ns, opName, program, table, namespaces, errors, opIds),
         },
-        QFor f => f with { Body = ResolveBody(f.Body, ns, opName, program, table, namespaces, errors) },
-        QWhile w => w with { Body = ResolveBody(w.Body, ns, opName, program, table, namespaces, errors) },
-        QRepeat r => r with { Body = ResolveBody(r.Body, ns, opName, program, table, namespaces, errors) },
+        QFor f => f with { Body = ResolveBody(f.Body, ns, opName, program, table, namespaces, errors, opIds) },
+        QWhile w => w with { Body = ResolveBody(w.Body, ns, opName, program, table, namespaces, errors, opIds) },
+        QRepeat r => r with { Body = ResolveBody(r.Body, ns, opName, program, table, namespaces, errors, opIds) },
         QConjugate c => c with
         {
-            Within = ResolveBody(c.Within, ns, opName, program, table, namespaces, errors),
-            Apply = ResolveBody(c.Apply, ns, opName, program, table, namespaces, errors),
+            Within = ResolveBody(c.Within, ns, opName, program, table, namespaces, errors, opIds),
+            Apply = ResolveBody(c.Apply, ns, opName, program, table, namespaces, errors, opIds),
         },
         _ => s,
     };
+
+    // Resolve a call's name, then BIND it to its callee by reference (CalleeOpId): a user op resolves to its
+    // node Id; a built-in gate resolves to no op and stays null. Bound once HERE so no later pass has to
+    // re-match the (mono/mangle-shifting) name to find the callee.
+    private static QGate ResolveCall(QGate g, string ns, string opName, QProgram program, HashSet<string> table,
+        HashSet<string> namespaces, List<QoraError> errors, IReadOnlyDictionary<string, int> opIds)
+    {
+        var name = ResolveCallee(g.Name, ns, opName, program, table, namespaces, errors, g.Span);
+        return g with { Name = name, CalleeOpId = opIds.TryGetValue(name, out var id) ? id : (int?)null };
+    }
 
     private static string ResolveCallee(string name, string ns, string opName,
         QProgram program, HashSet<string> table, HashSet<string> namespaces, List<QoraError> errors, QSpan? span)

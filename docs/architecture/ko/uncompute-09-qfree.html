@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>청소의 계약과 qfree — 자동 uncomputation 코스 9/16 — Qora</title>
+<style>
+  :root {
+    --bg: #ffffff; --ink: #1f2430; --muted: #5b6472; --line: #e6e8ee; --panel: #f7f8fb;
+    --plus: #1457d6; --minus: #d62b39; --accent: #6b3fd4; --good: #11875b; --amber: #b5810a;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo",
+      "Malgun Gothic", "Noto Sans KR", "Segoe UI Symbol", "Cambria Math", sans-serif;
+    line-height: 1.7; font-size: 16.5px;
+  }
+  .wrap { max-width: 940px; margin: 0 auto; padding: 0 20px 120px; }
+  header.hero {
+    padding: 60px 20px 36px; text-align: center; border-bottom: 1px solid var(--line);
+    background: linear-gradient(180deg, #faf9ff, #ffffff);
+  }
+  header.hero h1 { font-size: 2.0rem; margin: 0 0 10px; letter-spacing: -0.5px; }
+  header.hero p { color: var(--muted); margin: 0; font-size: 1.02rem; }
+  .tag { display:inline-block; font-size:.78rem; letter-spacing:.12em; text-transform:uppercase;
+         color: var(--accent); font-weight:700; margin-bottom:14px; }
+  h2 { margin: 54px 0 12px; font-size: 1.42rem; letter-spacing: -0.3px;
+       padding-top: 14px; border-top: 2px solid var(--line); }
+  h2 .n { display:inline-flex; align-items:center; justify-content:center;
+    width: 1.7em; height: 1.7em; border-radius: 50%;
+    background: var(--accent); color:#fff; font-size: .8rem; font-weight:700;
+    margin-right: 10px; vertical-align: middle; }
+  h3 { margin: 30px 0 8px; font-size: 1.1rem; }
+  p { margin: 12px 0; }
+  strong { color: #11203a; }
+  .lead { font-size: 1.05rem; }
+  code, .mono, pre {
+    font-family: "SF Mono", "JetBrains Mono", "D2Coding", Consolas, "Segoe UI Symbol", monospace;
+  }
+  code { background: var(--panel); border: 1px solid var(--line); border-radius: 5px; padding: 1px 6px; font-size: .9em; }
+  pre { background: #111827; color: #eef4ff; border-radius: 10px; padding: 15px 17px; margin: 16px 0;
+        overflow-x: auto; font-size: .86rem; line-height: 1.55; }
+  pre code { background: none; border: none; padding: 0; font-size: inherit; color: inherit; }
+  pre .cm { color: #8ba0c7; }
+  pre .hl { color: #c4a7ff; font-weight: 700; }
+  pre .add { color: #7fe0b0; font-weight: 700; }
+  pre .rd { color: #ff9db0; font-weight: 700; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+           padding: 14px 16px; margin: 16px 0; overflow-x: auto; }
+  table.spec { border-collapse: collapse; width: 100%; font-size: .92rem; }
+  table.spec th, table.spec td { padding: 8px 11px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: top; }
+  table.spec th { font-size: .78rem; color: var(--muted); font-weight: 700; letter-spacing:.02em; background:#fbfbfe; }
+  table.spec tr:last-child td { border-bottom: none; }
+  table.spec code { white-space: nowrap; }
+  table.spec td.k { white-space: nowrap; font-weight: 700; color:#1a2740; }
+  .call { border-left: 4px solid var(--accent); background: #faf8ff;
+          padding: 13px 17px; border-radius: 0 8px 8px 0; margin: 18px 0; }
+  .call.why { border-color: var(--good); background: #f2fbf7; }
+  .call.warn { border-color: #e6a417; background: #fff9ec; }
+  .call .h { font-weight: 700; display:block; margin-bottom: 4px; }
+  .call p { margin: 8px 0 0; }
+  .rule { text-align:center; font-size: 1.02rem; font-weight: 700; color:#1a1140;
+          background: #f3efff; border:1px solid #e2d8ff; border-radius: 10px; padding: 15px; margin: 20px 0; }
+  .toc { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 20px; margin: 24px 0; }
+  .toc ol { margin: 6px 0 0; padding-left: 20px; columns: 2; column-gap: 30px; }
+  .toc a { color: var(--ink); text-decoration: none; }
+  .toc a:hover { color: var(--accent); }
+  .doc-links { display:flex; flex-wrap:wrap; gap:10px; margin: 18px 0 6px; }
+  .doc-link { display:inline-flex; align-items:center; gap:8px; border:1px solid #cddcff;
+              background:#f6f9ff; color:#1745b5; border-radius:999px; padding:7px 15px; font-weight:700; text-decoration:none; font-size:.92rem; }
+  .doc-link:hover { border-color:#9bb8ff; background:#eef4ff; }
+  .doc-meta { border: 1px solid #dfe5f2; border-left: 5px solid var(--accent); border-radius: 8px;
+              background: #f8faff; padding: 16px 18px; margin: 22px 0; }
+  .doc-meta .meta-title { font-weight: 800; color: #11203a; margin-bottom: 12px; }
+  .meta-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 18px; margin: 0; }
+  .meta-grid dt { color: var(--muted); font-size: .74rem; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; }
+  .meta-grid dd { margin: 3px 0 0; }
+  footer { text-align:center; color:var(--muted); font-size:.9rem; margin-top: 60px; padding-top: 24px; border-top:1px solid var(--line); }
+  /* datasheet-specific */
+  .pipe { display:flex; flex-direction:column; gap:0; margin: 18px 0; }
+  .pipe .stg { display:flex; align-items:center; gap:12px; }
+  .pipe .box { flex:1; background:#fff; border:1px solid var(--line); border-radius:8px; padding:9px 13px; font-size:.92rem; }
+  .pipe .box b { color:#1a2740; }
+  .pipe .box .d { color:var(--muted); font-size:.85rem; }
+  .pipe .box.key { border-color:#c9b6f4; background:#faf7ff; }
+  .pipe .arr { text-align:center; color:var(--accent); font-size:1.2rem; line-height:1; margin:5px 0; }
+  .ladder { display:grid; gap:10px; margin:18px 0; }
+  .rung { display:grid; grid-template-columns:auto 1fr; gap:14px; align-items:start;
+          border:1px solid var(--line); border-radius:10px; padding:13px 16px; background:#fff; }
+  .rung .rn { width:38px; height:38px; border-radius:8px; background:var(--accent); color:#fff;
+              font-weight:800; display:flex; align-items:center; justify-content:center; font-size:1.05rem; }
+  .rung.done { border-left:5px solid var(--good); }
+  .rung.done .rn { background:var(--good); }
+  .rung .rt { font-weight:800; color:#1a2740; }
+  .rung .rd { color:var(--muted); font-size:.92rem; margin-top:2px; }
+  .rung .st { display:inline-block; font-size:.72rem; font-weight:800; border-radius:999px; padding:2px 9px; margin-left:8px; vertical-align:middle; }
+  .rung .st.ok { background:#e4f7ee; color:var(--good); }
+  .rung .st.next { background:#f3efff; color:var(--accent); }
+  .badge { display:inline-block; font-size:.72rem; font-weight:800; border-radius:5px; padding:1px 7px; }
+  .badge.r { background:#eef4ff; color:var(--plus); }
+  .badge.w { background:#fdeef0; color:var(--minus); }
+  .badge.m { background:#f3efff; color:var(--accent); }
+  .grid2 { display:grid; grid-template-columns:1fr; gap:14px; margin:16px 0; }
+  @media (min-width:740px){ .grid2 { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+  .card { background:#fff; border:1px solid var(--line); border-radius:8px; padding:14px 16px; }
+  .card.good { border-top:4px solid var(--good); }
+  .card.bad { border-top:4px solid var(--minus); }
+  .card h4 { margin:0 0 8px; font-size:1rem; }
+  @media (max-width: 720px) { .meta-grid, .toc ol { grid-template-columns: 1fr; columns:1; } }
+</style>
+</head>
+<body>
+<div class="qora-lang-switch" style="position:sticky;top:0;z-index:99;text-align:right;padding:8px 16px;background:rgba(255,255,255,.92);backdrop-filter:blur(4px);border-bottom:1px solid #e6e8ee;font-size:13px;font-family:sans-serif;"><a href="../en/index.html">English</a> · <strong>한국어</strong> · <a href="../ja/index.html">日本語</a></div>
+
+<header class="hero">
+  <div class="tag">Qora · 자동 uncomputation 코스 · 9/16</div>
+  <h1>9. 청소의 계약과 qfree</h1>
+  <p>되돌릴 수 있는 쓰기의 조건</p>
+</header>
+
+<div class="wrap">
+
+  <nav class="doc-links" aria-label="코스 내비게이션">
+    <a class="doc-link" href="uncompute-08-gates.html">← 8. 게이트는 상태벡터를 어떻게 바꾸는가</a>
+    <a class="doc-link" href="datasheet.html#s8">코스 목차</a>
+    <a class="doc-link" href="uncompute-10-y-gate.html">10. Y·CY가 차단되는 이유 — 위상 →</a>
+  </nav>
+  <p>
+    <a href="uncompute-08-gates.html">8장</a>에서 게이트가 상태벡터를 고치는 방식을 기저 값 뒤집기·진폭 조정·중첩 생성 세 종류로 나눠 보았습니다.<br>
+    자동 청소는 이 편집을 거꾸로 되돌리는 일인데, 세 종류가 모두 똑같이 되돌릴 수 있는 것은 아닙니다.<br>
+    그래서 이 장에서는 자동 청소가 만족해야 하는 조건을 정확하게 정의하고, 어떤 게이트로 만들어진 값이 그 조건을 지킬 수 있는지를 가려냅니다.
+  </p>
+  <p>
+    컴파일러가 앤실라를 정리하는 코드를 삽입했을 때, 실행 결과는 다음 두 조건을 동시에 만족해야
+    합니다.
+  </p>
+  <div class="panel">
+    <table class="spec">
+      <tr><th>조건</th><th>내용</th></tr>
+      <tr><td class="k">1. 앤실라 복귀</td><td>정리가 끝난 시점에 앤실라는 |0⟩ 상태여야 합니다.</td></tr>
+      <tr><td class="k">2. 나머지 보존</td><td>앤실라를 제외한 모든 큐빗의 양자 상태가, 정리 코드를 넣지 않고 실행했을 때의 상태와 완전히 일치해야 합니다.<br>측정 확률이 같은 것만으로는 부족하며, <strong>각 기저 상태의 진폭이 부호와 위상까지 같아야</strong> 합니다.</td></tr>
+    </table>
+  </div>
+  <p>
+    2번 조건이 부호와 위상까지 요구하는 이유는, 진폭의 부호가 관측 가능한 양이기 때문입니다.<br>
+    정리 직후의 측정 확률이 같더라도 부호가 달라져 있으면, 뒤에 오는 H 같은 게이트가 그 차이를
+    서로 다른 측정 결과로 바꿉니다.<br>
+    8장의 "같은 값끼리 합치기" 계산에서 +와 −가 상쇄 여부를 갈랐던 것이 정확히 이 현상입니다.<br>
+    상태벡터의 말로 옮기면, 생존자들의 항 구성과 진폭이 정리 전후로 완전히 같아야 한다는 뜻입니다.
+  </p>
+  <p>
+    어떤 게이트가 이 조건을 지킬 수 있는지는 판정 기준 하나로 판가름되는데, 바로 <strong>그 게이트가 기저 상태의 값 이외에 진폭까지 변경하는가</strong>입니다.<br>
+    기저 상태를 기저 상태로 보내면서 진폭에는 어떤 위상도 추가로 곱하지 않는 연산을 학계에서
+    <strong>qfree</strong>라고 부르며, qfree 연산으로만 만들어진 값은 안전하게 청소할 수 있습니다.<br>
+    이 기준이 8장의 편집 분류를 실제로 어떻게 가르는지, 청소가 성공하는 부류부터 한 부류씩
+    코드와 상태벡터로 확인합니다.
+  </p>
+
+  <h3>기저 값만 바꾸는 편집부터 확인합니다 — qfree 체인은 왜 안전한가</h3>
+  <p>
+    가장 먼저 확인할 부류는 기저 상태의 값만 바꾸는 편집, 곧 X·CNOT·CCX·SWAP으로만 값을 만든 경우입니다.<br>
+    아래 프로그램은 앤실라 <code>a</code>에 X 게이트로 값을 만들고 CNOT 게이트로 <code>out</code>에 그 값을
+    복사하며, 컴파일러는 쓰기 이력의 역순인 X 한 번을 청소로 주입합니다.
+  </p>
+<pre><code>use a = Qubit[1];  use out = Qubit[1];
+X(a[0]);              <span class="cm">// a: |0⟩ → |1⟩ (기저 값만)</span>
+CNOT(a[0], out[0]);   <span class="cm">// a의 값을 out에 복사한다. 이후 a는 쓰이지 않는다</span>
+<span class="add">X(a[0]);</span>              <span class="cm">// ← 자동 주입될 청소: a → |0⟩</span>
+bit c = M(out[0]);    <span class="cm">// 결과 1, 결정론 — 주입 전과 완전 동일</span></code></pre>
+  <div class="panel">
+    <table class="spec">
+      <tr><th>시점</th><th>상태벡터 (<code>|a,out⟩</code>)</th><th>일어난 일</th></tr>
+      <tr><td class="k">시작</td><td>|0,0⟩ ×1</td><td>두 레지스터 모두 |0⟩</td></tr>
+      <tr><td class="k">X(a) 후</td><td>|1,0⟩ ×1</td><td>a의 기저 값만 0→1</td></tr>
+      <tr><td class="k">CNOT 후</td><td>|1,1⟩ ×1</td><td>out의 기저 값만 0→1 (값 복사)</td></tr>
+      <tr><td class="k">청소 X(a) 후</td><td>|0,1⟩ ×1</td><td>a는 |0⟩ 반납, out은 그대로 — c = 1 확정</td></tr>
+    </table>
+  </div>
+  <p>
+    진폭 열이 처음부터 끝까지 ×1 그대로인 데서 보이듯, 모든 편집이 기저 값만 바꾸었고 진폭은
+    어느 시점에도 변하지 않았습니다.<br>
+    그래서 청소를 넣어도 생존자 <code>out</code>의 상태는 청소를 넣지 않았을 때와 완전히 같고,
+    2번 조건이 그대로 충족됩니다.<br>
+    앤실라 <code>a</code>도 마지막 항에서 |0⟩로 돌아왔으므로 1번 조건까지 충족됩니다.<br>
+    이것이 qfree 체인의 안전성이며,
+    교과서의 앤실라 사용 패턴(가역 논리 체인, Grover 오라클, 산술 회로)이 전부 이 부류에 속합니다.
+  </p>
+
+  <h3>그럼 체인 중간에 위상 편집이 끼면 어떻게 될까요 — Z는 왜 무해한가</h3>
+  <p>
+    첫 예제의 체인은 기저 값만 만졌는데, 실제 알고리즘에서는 표의 두 번째 항에 해당하는 게이트가
+    그 체인 중간에 끼는 일이 흔합니다.<br>
+    Z 게이트는 기저 상태의 값은 그대로 두고, 값이 1인 기저 상태의 진폭에 −1을 곱하는 유니터리입니다.<br>
+    상태벡터의 말로 옮기면, 기저 값을 전혀 고치지 않고 그 항의 부호만 바꾸는 편집입니다.<br>
+    값을 바꾸지 않으므로 앤실라에 Z 게이트를 찍어도 쓰기 이력에는
+    아무것도 추가되지 않고, 이미 세워 둔 청소 계획이 그대로 유효합니다.<br>
+    아래 프로그램에서 앤실라
+    <code>a</code>를 쓰는 편집은 CNOT 하나뿐이므로, 중간에 Z 게이트가 끼어 있어도 청소는 여전히 CNOT 한 번입니다.
+  </p>
+<pre><code>use q = Qubit[1];  use a = Qubit[1];
+H(q[0]);              <span class="cm">// q: 중첩 생성</span>
+CNOT(q[0], a[0]);     <span class="cm">// a가 q의 값을 기록 (기저 값만 — 쓰기)</span>
+Z(a[0]);              <span class="cm">// a=1인 줄의 부호만 −로 (진폭만 — 읽기)</span>
+<span class="add">CNOT(q[0], a[0]);</span>     <span class="cm">// ← 자동 주입될 청소: a → |0⟩ (Z는 쓰기 이력에 없음)</span>
+H(q[0]);
+bit m = M(q[0]);      <span class="cm">// m = 1 (확률 100%)</span></code></pre>
+  <div class="panel">
+    <table class="spec">
+      <tr><th>시점</th><th>상태벡터 (<code>|q,a⟩</code>)</th><th>일어난 일</th></tr>
+      <tr><td class="k">H · CNOT 후</td><td>|0,0⟩ ×1/√2 · |1,1⟩ ×1/√2</td><td>a가 q의 값을 기록 (얽힘)</td></tr>
+      <tr><td class="k">Z(a) 후</td><td>|0,0⟩ ×1/√2 · |1,1⟩ ×<strong>−</strong>1/√2</td><td>기저 값 무접촉 — 부호만 편집</td></tr>
+      <tr><td class="k">청소 CNOT 후</td><td>|0,0⟩ ×1/√2 · |1,0⟩ ×−1/√2</td><td>a는 모든 항에서 0 — |0⟩ 반납 완료</td></tr>
+      <tr><td class="k">H(q) 후</td><td>|1,0⟩ ×1</td><td>m = 1 확정</td></tr>
+    </table>
+  </div>
+  <p>
+    Z 게이트가 기저 값을 건드리지 않았기 때문에 Z 이전과 이후의 기저 값 배치는 완전히 같고, 따라서 쓰기 이력의
+    역순인 CNOT 한 번으로 <code>a</code>는 정확히 |0⟩로 돌아갑니다.<br>
+    위상이 사라지는 것도 아닙니다.<br>
+    −1 부호는 <code>a</code>가 |0⟩로 반납된 뒤에도 q=1인 항에 그대로 남아서, 마지막 H 게이트의 간섭 방향을
+    바꾸고 측정 결과를 0에서 1로 뒤집습니다.<br>
+    실제로 위 프로그램에서 Z 한 줄을 지우면 두 CNOT 게이트와 두 H 게이트가
+    전부 상쇄되어 <code>m</code>은 100% 확률로 0이 됩니다.<br>
+    값을 안 쓰는 진폭 편집은 이렇게 청소를
+    방해하지 않으면서 정보(부호)만 생존자에게 옮겨 주며, Grover 오라클의 위상 킥백이 정확히 이
+    패턴입니다.
+  </p>
+
+  <h3>한눈에 정리 — qfree 기준으로 본 게이트 분류</h3>
+  <p>
+    지금까지 확인한 두 부류와, 아직 차단 판정만 언급한 두 부류를 한 표로 모으면 다음과 같습니다.
+  </p>
+  <div class="panel">
+    <table class="spec">
+      <tr><th>편집의 종류</th><th>게이트</th><th>판정</th><th>근거</th></tr>
+      <tr><td class="k">기저 값만 변경 (진폭 불변)</td><td>X, CNOT, CCX, SWAP</td><td>✅ 청소 가능 (qfree)</td><td>역연산이 값만 되돌리고 진폭은 그대로이므로 2번 조건 충족 (위의 qfree 체인 예제)</td></tr>
+      <tr><td class="k">값은 그대로, 위상만 곱함</td><td>Z, S, T, CZ, Rz</td><td>✅ 애초에 쓰기가 아님</td><td>값을 바꾸지 않아 읽기로 기록되고 청소 이력에 들어가지 않음 (위의 Z 예제)</td></tr>
+      <tr><td class="k">값 변경 + 값에 따라 다른 위상</td><td><strong>Y, CY</strong></td><td>❌ 차단 (NonQfreeWrite)</td><td>얽힌 타깃이면 위상이 상대 위상이 되어 2번 조건을 깨뜨림 (<a href="uncompute-10-y-gate.html">10장</a>)</td></tr>
+      <tr><td class="k">중첩 생성</td><td>H, Rx, Ry</td><td>❌ 차단 (NonQfreeWrite)</td><td>기저 상태 하나를 여러 기저 상태의 중첩으로 만들어 되돌릴 수 없음 (<a href="uncompute-08-gates.html">8장</a>의 H 편집)</td></tr>
+    </table>
+  </div>
+  <p>
+    표에서 남은 것은 차단 판정을 받은 아래 두 부류입니다.<br>
+    그중 값을 뒤집으면서 위상까지 곱하는 Y 게이트가 실제로 2번 조건을 깨뜨리는 장면을
+    <a href="uncompute-10-y-gate.html">10장</a>에서 같은 방식의 상태벡터 계산으로 따라갑니다.
+  </p>
+
+  <nav class="doc-links" aria-label="코스 내비게이션">
+    <a class="doc-link" href="uncompute-08-gates.html">← 8. 게이트는 상태벡터를 어떻게 바꾸는가</a>
+    <a class="doc-link" href="datasheet.html#s8">코스 목차</a>
+    <a class="doc-link" href="uncompute-10-y-gate.html">10. Y·CY가 차단되는 이유 — 위상 →</a>
+  </nav>
+
+  <footer>
+    자동 uncomputation 코스 9/16 · <a href="datasheet.html#s8">코스 목차</a> ·
+    <a href="datasheet.html">컴파일러 데이터시트</a>
+  </footer>
+
+</div>
+</body>
+</html>

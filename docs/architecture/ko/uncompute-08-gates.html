@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>게이트는 상태벡터를 어떻게 바꾸는가 — 자동 uncomputation 코스 8/16 — Qora</title>
+<style>
+  :root {
+    --bg: #ffffff; --ink: #1f2430; --muted: #5b6472; --line: #e6e8ee; --panel: #f7f8fb;
+    --plus: #1457d6; --minus: #d62b39; --accent: #6b3fd4; --good: #11875b; --amber: #b5810a;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo",
+      "Malgun Gothic", "Noto Sans KR", "Segoe UI Symbol", "Cambria Math", sans-serif;
+    line-height: 1.7; font-size: 16.5px;
+  }
+  .wrap { max-width: 940px; margin: 0 auto; padding: 0 20px 120px; }
+  header.hero {
+    padding: 60px 20px 36px; text-align: center; border-bottom: 1px solid var(--line);
+    background: linear-gradient(180deg, #faf9ff, #ffffff);
+  }
+  header.hero h1 { font-size: 2.0rem; margin: 0 0 10px; letter-spacing: -0.5px; }
+  header.hero p { color: var(--muted); margin: 0; font-size: 1.02rem; }
+  .tag { display:inline-block; font-size:.78rem; letter-spacing:.12em; text-transform:uppercase;
+         color: var(--accent); font-weight:700; margin-bottom:14px; }
+  h2 { margin: 54px 0 12px; font-size: 1.42rem; letter-spacing: -0.3px;
+       padding-top: 14px; border-top: 2px solid var(--line); }
+  h2 .n { display:inline-flex; align-items:center; justify-content:center;
+    width: 1.7em; height: 1.7em; border-radius: 50%;
+    background: var(--accent); color:#fff; font-size: .8rem; font-weight:700;
+    margin-right: 10px; vertical-align: middle; }
+  h3 { margin: 30px 0 8px; font-size: 1.1rem; }
+  p { margin: 12px 0; }
+  strong { color: #11203a; }
+  .lead { font-size: 1.05rem; }
+  code, .mono, pre {
+    font-family: "SF Mono", "JetBrains Mono", "D2Coding", Consolas, "Segoe UI Symbol", monospace;
+  }
+  code { background: var(--panel); border: 1px solid var(--line); border-radius: 5px; padding: 1px 6px; font-size: .9em; }
+  pre { background: #111827; color: #eef4ff; border-radius: 10px; padding: 15px 17px; margin: 16px 0;
+        overflow-x: auto; font-size: .86rem; line-height: 1.55; }
+  pre code { background: none; border: none; padding: 0; font-size: inherit; color: inherit; }
+  pre .cm { color: #8ba0c7; }
+  pre .hl { color: #c4a7ff; font-weight: 700; }
+  pre .add { color: #7fe0b0; font-weight: 700; }
+  pre .rd { color: #ff9db0; font-weight: 700; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+           padding: 14px 16px; margin: 16px 0; overflow-x: auto; }
+  table.spec { border-collapse: collapse; width: 100%; font-size: .92rem; }
+  table.spec th, table.spec td { padding: 8px 11px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: top; }
+  table.spec th { font-size: .78rem; color: var(--muted); font-weight: 700; letter-spacing:.02em; background:#fbfbfe; }
+  table.spec tr:last-child td { border-bottom: none; }
+  table.spec code { white-space: nowrap; }
+  table.spec td.k { white-space: nowrap; font-weight: 700; color:#1a2740; }
+  .call { border-left: 4px solid var(--accent); background: #faf8ff;
+          padding: 13px 17px; border-radius: 0 8px 8px 0; margin: 18px 0; }
+  .call.why { border-color: var(--good); background: #f2fbf7; }
+  .call.warn { border-color: #e6a417; background: #fff9ec; }
+  .call .h { font-weight: 700; display:block; margin-bottom: 4px; }
+  .call p { margin: 8px 0 0; }
+  .rule { text-align:center; font-size: 1.02rem; font-weight: 700; color:#1a1140;
+          background: #f3efff; border:1px solid #e2d8ff; border-radius: 10px; padding: 15px; margin: 20px 0; }
+  .toc { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 20px; margin: 24px 0; }
+  .toc ol { margin: 6px 0 0; padding-left: 20px; columns: 2; column-gap: 30px; }
+  .toc a { color: var(--ink); text-decoration: none; }
+  .toc a:hover { color: var(--accent); }
+  .doc-links { display:flex; flex-wrap:wrap; gap:10px; margin: 18px 0 6px; }
+  .doc-link { display:inline-flex; align-items:center; gap:8px; border:1px solid #cddcff;
+              background:#f6f9ff; color:#1745b5; border-radius:999px; padding:7px 15px; font-weight:700; text-decoration:none; font-size:.92rem; }
+  .doc-link:hover { border-color:#9bb8ff; background:#eef4ff; }
+  .doc-meta { border: 1px solid #dfe5f2; border-left: 5px solid var(--accent); border-radius: 8px;
+              background: #f8faff; padding: 16px 18px; margin: 22px 0; }
+  .doc-meta .meta-title { font-weight: 800; color: #11203a; margin-bottom: 12px; }
+  .meta-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 18px; margin: 0; }
+  .meta-grid dt { color: var(--muted); font-size: .74rem; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; }
+  .meta-grid dd { margin: 3px 0 0; }
+  footer { text-align:center; color:var(--muted); font-size:.9rem; margin-top: 60px; padding-top: 24px; border-top:1px solid var(--line); }
+  /* datasheet-specific */
+  .pipe { display:flex; flex-direction:column; gap:0; margin: 18px 0; }
+  .pipe .stg { display:flex; align-items:center; gap:12px; }
+  .pipe .box { flex:1; background:#fff; border:1px solid var(--line); border-radius:8px; padding:9px 13px; font-size:.92rem; }
+  .pipe .box b { color:#1a2740; }
+  .pipe .box .d { color:var(--muted); font-size:.85rem; }
+  .pipe .box.key { border-color:#c9b6f4; background:#faf7ff; }
+  .pipe .arr { text-align:center; color:var(--accent); font-size:1.2rem; line-height:1; margin:5px 0; }
+  .ladder { display:grid; gap:10px; margin:18px 0; }
+  .rung { display:grid; grid-template-columns:auto 1fr; gap:14px; align-items:start;
+          border:1px solid var(--line); border-radius:10px; padding:13px 16px; background:#fff; }
+  .rung .rn { width:38px; height:38px; border-radius:8px; background:var(--accent); color:#fff;
+              font-weight:800; display:flex; align-items:center; justify-content:center; font-size:1.05rem; }
+  .rung.done { border-left:5px solid var(--good); }
+  .rung.done .rn { background:var(--good); }
+  .rung .rt { font-weight:800; color:#1a2740; }
+  .rung .rd { color:var(--muted); font-size:.92rem; margin-top:2px; }
+  .rung .st { display:inline-block; font-size:.72rem; font-weight:800; border-radius:999px; padding:2px 9px; margin-left:8px; vertical-align:middle; }
+  .rung .st.ok { background:#e4f7ee; color:var(--good); }
+  .rung .st.next { background:#f3efff; color:var(--accent); }
+  .badge { display:inline-block; font-size:.72rem; font-weight:800; border-radius:5px; padding:1px 7px; }
+  .badge.r { background:#eef4ff; color:var(--plus); }
+  .badge.w { background:#fdeef0; color:var(--minus); }
+  .badge.m { background:#f3efff; color:var(--accent); }
+  .grid2 { display:grid; grid-template-columns:1fr; gap:14px; margin:16px 0; }
+  @media (min-width:740px){ .grid2 { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+  .card { background:#fff; border:1px solid var(--line); border-radius:8px; padding:14px 16px; }
+  .card.good { border-top:4px solid var(--good); }
+  .card.bad { border-top:4px solid var(--minus); }
+  .card h4 { margin:0 0 8px; font-size:1rem; }
+  @media (max-width: 720px) { .meta-grid, .toc ol { grid-template-columns: 1fr; columns:1; } }
+</style>
+</head>
+<body>
+<div class="qora-lang-switch" style="position:sticky;top:0;z-index:99;text-align:right;padding:8px 16px;background:rgba(255,255,255,.92);backdrop-filter:blur(4px);border-bottom:1px solid #e6e8ee;font-size:13px;font-family:sans-serif;"><a href="../en/index.html">English</a> · <strong>한국어</strong> · <a href="../ja/index.html">日本語</a></div>
+
+<header class="hero">
+  <div class="tag">Qora · 자동 uncomputation 코스 · 8/16</div>
+  <h1>8. 게이트는 상태벡터를 어떻게 바꾸는가</h1>
+  <p>기저 값 · 진폭 · 중첩 생성 — 편집의 세 종류</p>
+</header>
+
+<div class="wrap">
+
+  <nav class="doc-links" aria-label="코스 내비게이션">
+    <a class="doc-link" href="uncompute-07-observe.html">← 7. 전역 위상과 상대 위상 — 측정으로 확인하기</a>
+    <a class="doc-link" href="datasheet.html#s8">코스 목차</a>
+    <a class="doc-link" href="uncompute-09-qfree.html">9. 청소의 계약과 qfree →</a>
+  </nav>
+  <p>
+    3장에서 양자 상태를 항과 진폭으로 이루어진 상태벡터로 읽는 법을 익혔고, 그 상태벡터 위에서 보면 모든 게이트는 상태벡터를 고치는 편집 연산입니다.<br>
+    이 장에서는 게이트 하나하나가 상태벡터를 실제로 어떻게 바꾸는지, 매번 편집 전과 편집 후의 상태벡터를
+    나란히 놓고 확인합니다.<br>
+    게이트가 어떤 종류의 편집을 하는지가 뒤 장들에서 자동 청소의 안전성을 판정하는 기준이 되므로,
+    여기서 눈에 익혀 두면 이후 장들이 전부 쉬워집니다.
+  </p>
+
+  <h3>X — 각 항에서 기저 값만 뒤집습니다</h3>
+  <p>
+    가장 단순한 편집, 기저 값 하나만 고치는 X 게이트부터 시작합니다.<br>
+    출발 상태벡터로 <code>H(b[0])</code>까지 실행된 두 항짜리 상태를 쓰겠습니다.<br>
+    여기에 <code>X(a[0])</code>를 적용하면, 상태벡터의 <strong>모든 항에서</strong> a의 기저 값이 뒤집힙니다.<br>
+    진폭은 어느 항에서도 변하지 않습니다.
+  </p>
+  <div class="grid2">
+    <div class="card">
+      <h4>편집 전</h4>
+      <table class="spec">
+        <tr><th>항</th><th><code>b</code> 값</th><th><code>a</code> 값</th><th>진폭</th></tr>
+        <tr><td class="k">1행</td><td>0</td><td>0</td><td>1/√2</td></tr>
+        <tr><td class="k">2행</td><td>1</td><td>0</td><td>1/√2</td></tr>
+      </table>
+    </div>
+    <div class="card">
+      <h4>X(a[0]) 후</h4>
+      <table class="spec">
+        <tr><th>항</th><th><code>b</code> 값</th><th><code>a</code> 값</th><th>진폭</th></tr>
+        <tr><td class="k">1행</td><td>0</td><td><strong>1</strong></td><td>1/√2</td></tr>
+        <tr><td class="k">2행</td><td>1</td><td><strong>1</strong></td><td>1/√2</td></tr>
+      </table>
+    </div>
+  </div>
+  <p>
+    바뀐 것은 a의 두 기저 값뿐입니다.<br>
+    한 번 더 적용하면 그 두 값이 다시 0으로 돌아오므로, X 게이트는 자기 자신이 역연산입니다.
+  </p>
+
+  <h3>CNOT — 조건에 맞는 항에서만 기저 값을 뒤집습니다 (얽힘이 태어나는 곳)</h3>
+  <p>
+    X 게이트는 모든 항을 조건 없이 뒤집었습니다.<br>
+    그럼 일부 항에서만 뒤집으면 상태벡터가 어떻게 될까요.<br>
+    같은 출발 상태벡터에 이번에는 <code>CNOT(b[0], a[0])</code>를 적용합니다.<br>
+    CNOT 게이트는 "컨트롤(b)이 1인 항에서만 타깃(a)의 기저 값을 뒤집어라"라는 편집입니다.
+  </p>
+  <div class="grid2">
+    <div class="card">
+      <h4>편집 전</h4>
+      <table class="spec">
+        <tr><th>항</th><th><code>b</code> 값</th><th><code>a</code> 값</th><th>진폭</th></tr>
+        <tr><td class="k">1행</td><td>0</td><td>0</td><td>1/√2</td></tr>
+        <tr><td class="k">2행</td><td>1</td><td>0</td><td>1/√2</td></tr>
+      </table>
+    </div>
+    <div class="card">
+      <h4>CNOT(b,a) 후</h4>
+      <table class="spec">
+        <tr><th>항</th><th><code>b</code> 값</th><th><code>a</code> 값</th><th>진폭</th></tr>
+        <tr><td class="k">1행</td><td>0</td><td>0</td><td>1/√2</td></tr>
+        <tr><td class="k">2행</td><td>1</td><td><strong>1</strong></td><td>1/√2</td></tr>
+      </table>
+    </div>
+  </div>
+  <p>
+    1행은 b가 0이라 그대로이고 2행만 a가 뒤집혔으므로, <strong>항마다 a의 값이 달라졌습니다</strong>.<br>
+    4장에서 본 "곱으로 분해할 수 없는 상태벡터"가 정확히 이 모양이며, 이것이 상태벡터에서 읽어낸
+    얽힘입니다.<br>
+    CCX 게이트도 같은 원리이며, 조건이 "컨트롤 두 개가 모두 1인 항"로 바뀔 뿐입니다.
+  </p>
+
+  <h3>SWAP — 두 기저 값을 맞바꿉니다</h3>
+  <p>
+    기저 값을 고치는 편집이 뒤집기만 있는 것은 아닙니다.<br>
+    SWAP 게이트는 각 항에서 두 큐빗의 기저 값을 서로 맞바꿉니다.<br>
+    상태 |0,1⟩ 한 항짜리 상태벡터로 보면 다음과 같습니다.
+  </p>
+  <div class="grid2">
+    <div class="card">
+      <h4>편집 전</h4>
+      <table class="spec">
+        <tr><th>항</th><th><code>b</code> 값</th><th><code>a</code> 값</th><th>진폭</th></tr>
+        <tr><td class="k">1행</td><td>0</td><td>1</td><td>1</td></tr>
+      </table>
+    </div>
+    <div class="card">
+      <h4>SWAP(b,a) 후</h4>
+      <table class="spec">
+        <tr><th>항</th><th><code>b</code> 값</th><th><code>a</code> 값</th><th>진폭</th></tr>
+        <tr><td class="k">1행</td><td><strong>1</strong></td><td><strong>0</strong></td><td>1</td></tr>
+      </table>
+    </div>
+  </div>
+  <p>
+    항이 여러 개면 모든 항에서 같은 맞바꿈이 일어납니다.<br>
+    X·CNOT·CCX·SWAP까지가 <strong>기저 값만 만지는 편집</strong>이고, 진폭은 단 한 번도 등장하지
+    않았다는 점을 기억해 두십시오.
+  </p>
+
+  <h3>Z — 기저 값은 두고 진폭에만 부호를 곱합니다</h3>
+  <p>
+    이제 처음으로 진폭을 만지는 게이트입니다.<br>
+    Z 게이트는 "타깃이 1인 항의 진폭에 −1을 곱해라"라는 편집이며, 기저 값은 어느 항에서도 변하지 않습니다.<br>
+    CNOT 게이트까지 실행돼 얽혀 있는 상태벡터에 <code>Z(a[0])</code>를 적용해 보겠습니다.
+  </p>
+  <div class="grid2">
+    <div class="card">
+      <h4>편집 전</h4>
+      <table class="spec">
+        <tr><th>항</th><th><code>b</code> 값</th><th><code>a</code> 값</th><th>진폭</th></tr>
+        <tr><td class="k">1행</td><td>0</td><td>0</td><td>1/√2</td></tr>
+        <tr><td class="k">2행</td><td>1</td><td>1</td><td>1/√2</td></tr>
+      </table>
+    </div>
+    <div class="card">
+      <h4>Z(a[0]) 후</h4>
+      <table class="spec">
+        <tr><th>항</th><th><code>b</code> 값</th><th><code>a</code> 값</th><th>진폭</th></tr>
+        <tr><td class="k">1행</td><td>0</td><td>0</td><td>1/√2</td></tr>
+        <tr><td class="k">2행</td><td>1</td><td>1</td><td><strong>−</strong>1/√2</td></tr>
+      </table>
+    </div>
+  </div>
+  <p>
+    a가 1인 2행의 진폭만 부호가 바뀌었습니다.<br>
+    S·T·Rz 게이트도 곱하는 위상의 크기만 다를 뿐 같은 종류의 편집이고, CZ 게이트는 조건이 "두 큐빗이 모두 1인
+    항"로 바뀝니다.<br>
+    기저 값을 전혀 건드리지 않기 때문에 효과분석은 이 부류를 읽기(Read)로 기록하며,
+    그 이유는 <a href="uncompute-09-qfree.html">9장</a>에서 분명해집니다.
+  </p>
+
+  <h3>H — 항 하나를 두 항으로 쪼갭니다</h3>
+  <p>
+    지금까지의 편집은 기저 값을 뒤집거나 진폭에 위상을 곱했을 뿐, 항의 개수는 늘 그대로였습니다.<br>
+    H 게이트는 완전히 다른 종류의 편집으로, 기저 값이나 진폭을 고치는 것이 아니라
+    <strong>항 자체를 늘립니다</strong>.<br>
+    규칙은 두 가지입니다.<br>
+    값이 0인 항은 "0인 항 + 1인 항"로, 값이 1인 항은 "0인 항 − 1인 항"로 나뉘며,
+    새 항들의 진폭은 원래 진폭의 1/√2배입니다.
+  </p>
+  <div class="grid2">
+    <div class="card">
+      <h4>|0⟩에 H — 부호가 같게 나뉨</h4>
+      <table class="spec">
+        <tr><th>항</th><th><code>a</code> 값</th><th>진폭</th></tr>
+        <tr><td class="k">전</td><td>0</td><td>1</td></tr>
+        <tr><td class="k">후 1행</td><td>0</td><td>+1/√2</td></tr>
+        <tr><td class="k">후 2행</td><td>1</td><td>+1/√2</td></tr>
+      </table>
+    </div>
+    <div class="card">
+      <h4>|1⟩에 H — 부호가 다르게 나뉨</h4>
+      <table class="spec">
+        <tr><th>항</th><th><code>a</code> 값</th><th>진폭</th></tr>
+        <tr><td class="k">전</td><td>1</td><td>1</td></tr>
+        <tr><td class="k">후 1행</td><td>0</td><td>+1/√2</td></tr>
+        <tr><td class="k">후 2행</td><td>1</td><td><strong>−</strong>1/√2</td></tr>
+      </table>
+    </div>
+  </div>
+  <p>
+    그럼 1장의 예제에서 H 게이트를 두 번 적용하면 왜 원래대로 돌아왔을까요.<br>
+    두 항짜리 상태벡터에 H 게이트를 다시 적용하면 <strong>각 항이 또 나뉘어</strong> 항이 네 개가 되는데,
+    값이 같은 항끼리는 한 항으로 합쳐지면서 진폭을 더합니다.<br>
+    그 덧셈에서 +와 −가 상쇄되는 것이 간섭입니다.
+  </p>
+  <div class="panel">
+    <table class="spec">
+      <tr><th>단계</th><th>상태벡터 내용</th></tr>
+      <tr><td class="k">H 한 번 후</td><td>|0⟩ ×+1/√2 · |1⟩ ×+1/√2</td></tr>
+      <tr><td class="k">H 또 적용 (나뉜 직후)</td><td>|0⟩ ×+1/2 · |1⟩ ×+1/2 (첫 항에서) · |0⟩ ×+1/2 · |1⟩ ×<strong>−</strong>1/2 (둘째 항에서)</td></tr>
+      <tr><td class="k">같은 값끼리 합치기</td><td>|0⟩ ×(1/2+1/2)=<strong>1</strong> · |1⟩ ×(1/2−1/2)=<strong>0</strong> → |0⟩ 한 항</td></tr>
+    </table>
+  </div>
+  <p>
+    |1⟩ 항의 진폭이 정확히 0이 되어 사라지고 |0⟩ 한 항만 남습니다.<br>
+    이것이 1장에서 "|0⟩ 성분으로 가는 진폭 기여는 보강되고 |1⟩ 성분으로 가는 진폭 기여는
+    상쇄된다"라고 설명했던 계산의 실체입니다.<br>
+    그리고 1장의 사고도 이제 숫자로 보입니다.<br>
+    두 항의 a 값이 얽힘 때문에 서로 다르면 합칠 "같은 값" 항이 애초에 생기지 않아
+    상쇄가 일어날 수 없습니다.<br>
+    Rx·Ry 게이트도 나누는 비율과 새 항에 곱하는 위상만 다를 뿐 H 게이트와 같은 중첩 생성 부류입니다.
+  </p>
+
+  <h3>Y — 기저 값을 뒤집으면서 진폭에 위상을 곱습니다</h3>
+  <p>
+    여기까지 기저 값 편집, 진폭 편집, 중첩 생성을 각각 따로 봤는데, 한 게이트가 앞의 두 편집을 동시에 하기도 합니다.<br>
+    Y 게이트는 X 게이트처럼 기저 값을 뒤집는데, 한 가지가 더 붙습니다.<br>
+    <strong>뒤집은 값에 따라 다른 위상</strong>을 그 항의 진폭에 곱합니다.<br>
+    0을 1로 뒤집으면 +i를 곱하고, 1을 0으로 뒤집으면 −i를 곱합니다.<br>
+    얽힌 상태벡터에 <code>Y(a[0])</code>를 적용하면 두 편집이 동시에 보입니다.
+  </p>
+  <div class="grid2">
+    <div class="card">
+      <h4>편집 전</h4>
+      <table class="spec">
+        <tr><th>항</th><th><code>b</code> 값</th><th><code>a</code> 값</th><th>진폭</th></tr>
+        <tr><td class="k">1행</td><td>0</td><td>0</td><td>1/√2</td></tr>
+        <tr><td class="k">2행</td><td>1</td><td>1</td><td>1/√2</td></tr>
+      </table>
+    </div>
+    <div class="card">
+      <h4>Y(a[0]) 후</h4>
+      <table class="spec">
+        <tr><th>항</th><th><code>b</code> 값</th><th><code>a</code> 값</th><th>진폭</th></tr>
+        <tr><td class="k">1행</td><td>0</td><td><strong>1</strong></td><td><strong>+i</strong>/√2</td></tr>
+        <tr><td class="k">2행</td><td>1</td><td><strong>0</strong></td><td><strong>−i</strong>/√2</td></tr>
+      </table>
+    </div>
+  </div>
+  <p>
+    1행은 a가 0→1로 뒤집혀 +i, 2행은 1→0으로 뒤집혀 −i가 곱해졌습니다.<br>
+    항마다 a의 값이 달랐기 때문에 <strong>항마다 다른 위상</strong>이 찍혔고, 이것이 상대 위상입니다.<br>
+    이 위상이 자동 청소에서 왜 사고를 만드는지가 <a href="uncompute-10-y-gate.html">10장</a>의
+    주제입니다.<br>
+    CY 게이트는 컨트롤이 1인 항에서만 같은 일을 합니다.
+  </p>
+
+  <h3>M (측정) — 항들을 삭제하고 값을 고전 비트로 읽어냅니다</h3>
+  <p>
+    지금까지의 편집은 모두 항을 고치거나 늘렸을 뿐, 항을 없애지는 않았습니다.<br>
+    측정은 편집이 아니라 <strong>삭제</strong>입니다.<br>
+    a를 측정하면 상태벡터는 a의 한 가지 값만 남기고 나머지 항을 전부 지우며, 남은 값이 <code>bit</code> 변수로
+    읽힙니다.<br>
+    어느 값이 남는지는 진폭의 크기가 정하는 확률에 따라 무작위로 결정됩니다.<br>
+    얽힌 상태벡터에서 <code>bit m = M(a[0])</code>를 실행하면 결과에 따라 두 미래 중 하나가 됩니다.
+  </p>
+  <div class="grid2">
+    <div class="card">
+      <h4>m = 0이 나온 경우 (확률 50%)</h4>
+      <table class="spec">
+        <tr><th>항</th><th><code>b</code> 값</th><th><code>a</code> 값</th><th>진폭</th></tr>
+        <tr><td class="k">1행</td><td>0</td><td>0</td><td>1</td></tr>
+      </table>
+      <p>a=1이던 2행이 삭제되고, 남은 항의 진폭은 1로 재조정됩니다.</p>
+    </div>
+    <div class="card">
+      <h4>m = 1이 나온 경우 (확률 50%)</h4>
+      <table class="spec">
+        <tr><th>항</th><th><code>b</code> 값</th><th><code>a</code> 값</th><th>진폭</th></tr>
+        <tr><td class="k">1행</td><td>1</td><td>1</td><td>1</td></tr>
+      </table>
+      <p>a=0이던 1행이 삭제됩니다.</p>
+    </div>
+  </div>
+  <p>
+    삭제된 항의 내용은 어디에도 남지 않으므로, 측정 뒤에는 어떤 게이트를 붙여도 삭제 이전의 상태벡터를 복원할 수 없고, 이것이 측정이
+    비가역인 이유입니다.<br>
+    b의 값까지 함께 확정된 것도 눈여겨보십시오.<br>
+    얽힌 상태벡터에서는 한 큐빗의 측정이 상대의 항까지 지웁니다.
+  </p>
+
+  <h3>Reset — 값을 강제로 0으로 만들고 이력을 지웁니다</h3>
+  <p>
+    상태벡터의 이력을 지워 비가역이 되는 연산이 측정만 있는 것은 아닙니다.<br>
+    Reset 게이트는 큐빗의 현재 값이 무엇이든 강제로 |0⟩로 만듭니다.<br>
+    |1⟩ 한 항짜리 상태벡터라면 기저 값이 0으로 바뀌는 것으로 끝나지만, X 게이트와 달리 "1이었다"는 사실이
+    어디에도 남지 않으므로 원래 값을 복원할 방법이 없습니다.<br>
+    측정과 마찬가지로 비가역이며, 얽힌 큐빗에 적용하면 상대 큐빗의 상태벡터까지 망가뜨릴 수 있어서
+    (<a href="uncompute-13-blanket.html">13장</a>의 수정 경로에서 다시 등장합니다) 주의가 필요한
+    도구입니다.
+  </p>
+
+  <h3>한눈에 정리</h3>
+  <p>지금까지 본 편집들을 한 표로 모으면 다음과 같습니다.</p>
+  <div class="panel">
+    <table class="spec">
+      <tr><th>게이트</th><th>상태벡터에 하는 일</th><th>비고</th></tr>
+      <tr><td class="k">X</td><td>각 항에서 해당 <strong>기저 값만</strong> 뒤집기</td><td>진폭 무접촉</td></tr>
+      <tr><td class="k">CNOT · CCX · SWAP</td><td>조건에 맞는 항에서 기저 값 뒤집기/맞바꾸기</td><td>기저 값만 — CNOT 게이트가 얽힘을 만드는 방법</td></tr>
+      <tr><td class="k">Z · S · T · CZ · Rz</td><td>기저 값은 그대로, <strong>진폭에만</strong> 위상 곱하기</td><td>효과분석에서는 읽기(Read)</td></tr>
+      <tr><td class="k">H · Rx · Ry</td><td><strong>중첩 생성</strong> — 두 번째 적용 시 같은 값끼리 합쳐지며 간섭</td><td>1항 → 2항</td></tr>
+      <tr><td class="k">Y · CY</td><td>기저 값 뒤집기 + <strong>뒤집은 값에 따른 위상</strong>(±i)을 진폭에</td><td>얽힌 항에서는 상대 위상</td></tr>
+      <tr><td class="k">M (측정)</td><td><strong>항 삭제</strong> + 남은 값을 <code>bit</code>로 읽어냄</td><td>비가역</td></tr>
+      <tr><td class="k">Reset</td><td>값을 강제로 |0⟩ (이력 소실)</td><td>비가역</td></tr>
+    </table>
+  </div>
+  <p>
+    기저 값 편집·진폭 편집·중첩 생성은 모두 되돌릴 수 있는 편집이고, 항 삭제(측정·Reset)만이
+    되돌릴 수 없습니다.<br>
+    다음 장에서는 이 분류 위에서 "어떤 편집으로 만들어진 값이 자동으로 청소될 수 있는가"라는
+    질문에 답합니다.
+  </p>
+
+  <nav class="doc-links" aria-label="코스 내비게이션">
+    <a class="doc-link" href="uncompute-07-observe.html">← 7. 전역 위상과 상대 위상 — 측정으로 확인하기</a>
+    <a class="doc-link" href="datasheet.html#s8">코스 목차</a>
+    <a class="doc-link" href="uncompute-09-qfree.html">9. 청소의 계약과 qfree →</a>
+  </nav>
+
+  <footer>
+    자동 uncomputation 코스 8/16 · <a href="datasheet.html#s8">코스 목차</a> ·
+    <a href="datasheet.html">컴파일러 데이터시트</a>
+  </footer>
+
+</div>
+</body>
+</html>

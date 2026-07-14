@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>상태를 읽는 법 — 상태벡터와 진폭 — 자동 uncomputation 코스 3/16 — Qora</title>
+<style>
+  :root {
+    --bg: #ffffff; --ink: #1f2430; --muted: #5b6472; --line: #e6e8ee; --panel: #f7f8fb;
+    --plus: #1457d6; --minus: #d62b39; --accent: #6b3fd4; --good: #11875b; --amber: #b5810a;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo",
+      "Malgun Gothic", "Noto Sans KR", "Segoe UI Symbol", "Cambria Math", sans-serif;
+    line-height: 1.7; font-size: 16.5px;
+  }
+  .wrap { max-width: 940px; margin: 0 auto; padding: 0 20px 120px; }
+  header.hero {
+    padding: 60px 20px 36px; text-align: center; border-bottom: 1px solid var(--line);
+    background: linear-gradient(180deg, #faf9ff, #ffffff);
+  }
+  header.hero h1 { font-size: 2.0rem; margin: 0 0 10px; letter-spacing: -0.5px; }
+  header.hero p { color: var(--muted); margin: 0; font-size: 1.02rem; }
+  .tag { display:inline-block; font-size:.78rem; letter-spacing:.12em; text-transform:uppercase;
+         color: var(--accent); font-weight:700; margin-bottom:14px; }
+  h2 { margin: 54px 0 12px; font-size: 1.42rem; letter-spacing: -0.3px;
+       padding-top: 14px; border-top: 2px solid var(--line); }
+  h2 .n { display:inline-flex; align-items:center; justify-content:center;
+    width: 1.7em; height: 1.7em; border-radius: 50%;
+    background: var(--accent); color:#fff; font-size: .8rem; font-weight:700;
+    margin-right: 10px; vertical-align: middle; }
+  h3 { margin: 30px 0 8px; font-size: 1.1rem; }
+  p { margin: 12px 0; }
+  strong { color: #11203a; }
+  .lead { font-size: 1.05rem; }
+  code, .mono, pre {
+    font-family: "SF Mono", "JetBrains Mono", "D2Coding", Consolas, "Segoe UI Symbol", monospace;
+  }
+  code { background: var(--panel); border: 1px solid var(--line); border-radius: 5px; padding: 1px 6px; font-size: .9em; }
+  pre { background: #111827; color: #eef4ff; border-radius: 10px; padding: 15px 17px; margin: 16px 0;
+        overflow-x: auto; font-size: .86rem; line-height: 1.55; }
+  pre code { background: none; border: none; padding: 0; font-size: inherit; color: inherit; }
+  pre .cm { color: #8ba0c7; }
+  pre .hl { color: #c4a7ff; font-weight: 700; }
+  pre .add { color: #7fe0b0; font-weight: 700; }
+  pre .rd { color: #ff9db0; font-weight: 700; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+           padding: 14px 16px; margin: 16px 0; overflow-x: auto; }
+  table.spec { border-collapse: collapse; width: 100%; font-size: .92rem; }
+  table.spec th, table.spec td { padding: 8px 11px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: top; }
+  table.spec th { font-size: .78rem; color: var(--muted); font-weight: 700; letter-spacing:.02em; background:#fbfbfe; }
+  table.spec tr:last-child td { border-bottom: none; }
+  table.spec code { white-space: nowrap; }
+  table.spec td.k { white-space: nowrap; font-weight: 700; color:#1a2740; }
+  .call { border-left: 4px solid var(--accent); background: #faf8ff;
+          padding: 13px 17px; border-radius: 0 8px 8px 0; margin: 18px 0; }
+  .call.why { border-color: var(--good); background: #f2fbf7; }
+  .call.warn { border-color: #e6a417; background: #fff9ec; }
+  .call .h { font-weight: 700; display:block; margin-bottom: 4px; }
+  .call p { margin: 8px 0 0; }
+  .rule { text-align:center; font-size: 1.02rem; font-weight: 700; color:#1a1140;
+          background: #f3efff; border:1px solid #e2d8ff; border-radius: 10px; padding: 15px; margin: 20px 0; }
+  .toc { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 20px; margin: 24px 0; }
+  .toc ol { margin: 6px 0 0; padding-left: 20px; columns: 2; column-gap: 30px; }
+  .toc a { color: var(--ink); text-decoration: none; }
+  .toc a:hover { color: var(--accent); }
+  .doc-links { display:flex; flex-wrap:wrap; gap:10px; margin: 18px 0 6px; }
+  .doc-link { display:inline-flex; align-items:center; gap:8px; border:1px solid #cddcff;
+              background:#f6f9ff; color:#1745b5; border-radius:999px; padding:7px 15px; font-weight:700; text-decoration:none; font-size:.92rem; }
+  .doc-link:hover { border-color:#9bb8ff; background:#eef4ff; }
+  .doc-meta { border: 1px solid #dfe5f2; border-left: 5px solid var(--accent); border-radius: 8px;
+              background: #f8faff; padding: 16px 18px; margin: 22px 0; }
+  .doc-meta .meta-title { font-weight: 800; color: #11203a; margin-bottom: 12px; }
+  .meta-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 18px; margin: 0; }
+  .meta-grid dt { color: var(--muted); font-size: .74rem; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; }
+  .meta-grid dd { margin: 3px 0 0; }
+  footer { text-align:center; color:var(--muted); font-size:.9rem; margin-top: 60px; padding-top: 24px; border-top:1px solid var(--line); }
+  /* datasheet-specific */
+  .pipe { display:flex; flex-direction:column; gap:0; margin: 18px 0; }
+  .pipe .stg { display:flex; align-items:center; gap:12px; }
+  .pipe .box { flex:1; background:#fff; border:1px solid var(--line); border-radius:8px; padding:9px 13px; font-size:.92rem; }
+  .pipe .box b { color:#1a2740; }
+  .pipe .box .d { color:var(--muted); font-size:.85rem; }
+  .pipe .box.key { border-color:#c9b6f4; background:#faf7ff; }
+  .pipe .arr { text-align:center; color:var(--accent); font-size:1.2rem; line-height:1; margin:5px 0; }
+  .ladder { display:grid; gap:10px; margin:18px 0; }
+  .rung { display:grid; grid-template-columns:auto 1fr; gap:14px; align-items:start;
+          border:1px solid var(--line); border-radius:10px; padding:13px 16px; background:#fff; }
+  .rung .rn { width:38px; height:38px; border-radius:8px; background:var(--accent); color:#fff;
+              font-weight:800; display:flex; align-items:center; justify-content:center; font-size:1.05rem; }
+  .rung.done { border-left:5px solid var(--good); }
+  .rung.done .rn { background:var(--good); }
+  .rung .rt { font-weight:800; color:#1a2740; }
+  .rung .rd { color:var(--muted); font-size:.92rem; margin-top:2px; }
+  .rung .st { display:inline-block; font-size:.72rem; font-weight:800; border-radius:999px; padding:2px 9px; margin-left:8px; vertical-align:middle; }
+  .rung .st.ok { background:#e4f7ee; color:var(--good); }
+  .rung .st.next { background:#f3efff; color:var(--accent); }
+  .badge { display:inline-block; font-size:.72rem; font-weight:800; border-radius:5px; padding:1px 7px; }
+  .badge.r { background:#eef4ff; color:var(--plus); }
+  .badge.w { background:#fdeef0; color:var(--minus); }
+  .badge.m { background:#f3efff; color:var(--accent); }
+  .grid2 { display:grid; grid-template-columns:1fr; gap:14px; margin:16px 0; }
+  @media (min-width:740px){ .grid2 { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+  .card { background:#fff; border:1px solid var(--line); border-radius:8px; padding:14px 16px; }
+  .card.good { border-top:4px solid var(--good); }
+  .card.bad { border-top:4px solid var(--minus); }
+  .card h4 { margin:0 0 8px; font-size:1rem; }
+  @media (max-width: 720px) { .meta-grid, .toc ol { grid-template-columns: 1fr; columns:1; } }
+</style>
+</head>
+<body>
+<div class="qora-lang-switch" style="position:sticky;top:0;z-index:99;text-align:right;padding:8px 16px;background:rgba(255,255,255,.92);backdrop-filter:blur(4px);border-bottom:1px solid #e6e8ee;font-size:13px;font-family:sans-serif;"><a href="../en/index.html">English</a> · <strong>한국어</strong> · <a href="../ja/index.html">日本語</a></div>
+
+<header class="hero">
+  <div class="tag">Qora · 자동 uncomputation 코스 · 3/16</div>
+  <h1>3. 상태를 읽는 법 — 상태벡터와 진폭</h1>
+  <p>기저 상태와 진폭 — 이후 모든 판정을 설명하는 틀</p>
+</header>
+
+<div class="wrap">
+
+  <nav class="doc-links" aria-label="코스 내비게이션">
+    <a class="doc-link" href="uncompute-02-ladder.html">← 2. 컴파일러는 어떤 큐빗을 정리하는가 — 판별 사다리</a>
+    <a class="doc-link" href="datasheet.html#s8">코스 목차</a>
+    <a class="doc-link" href="uncompute-04-entangle.html">4. 상태벡터를 큐빗별로 분해할 수 있는가 — 곱 상태와 얽힌 상태 →</a>
+  </nav>
+
+  <p>
+    앞 장의 <a href="uncompute-02-ladder.html">판별 사다리</a>에서 컴파일러는 청소할 큐빗을 세 질문으로 가려냈습니다.<br>
+    앞의 두 질문은 큐빗이 누구의 것인지, 측정된 적이 있는지만 확인하면 답할 수 있었습니다.<br>
+    그러나 마지막 질문, 곧 큐빗을 원래의 |0⟩로 되돌릴 수 있는지는 게이트가 큐빗의 상태를 어떻게 바꾸는지 읽을 수 있어야 답할 수 있습니다.
+  </p>
+  <div class="panel">
+    <table class="spec">
+      <tr><th>질문</th><th>큐빗에게 묻는 것</th><th>답하는 곳</th></tr>
+      <tr><td class="k">0</td><td>누구의 큐빗인가 (<code>use</code>로 만든 앤실라인가)</td><td><a href="uncompute-02-ladder.html">2장</a></td></tr>
+      <tr><td class="k">1</td><td>측정된 적이 있는가</td><td><a href="uncompute-02-ladder.html">2장</a></td></tr>
+      <tr><td class="k">2</td><td>되돌릴 수 있는가</td><td><a href="uncompute-09-qfree.html">9장</a>부터</td></tr>
+    </table>
+  </div>
+  <p>
+    그래서 이 장에서는 그 마지막 질문에 답하기 위한 바탕, 곧 상태를 읽는 틀부터 세웁니다.<br>
+    이후 장들의 모든 판정, 예컨대 "이 게이트를 거친 앤실라는 왜 되돌릴 수 없는가"라는 질문은 이 틀 하나로 전부 설명됩니다.
+  </p>
+  <p>
+    그 틀의 출발점은 양자 상태의 형식적 정의입니다.<br>
+    큐빗 여러 개로 이루어진 기계의 <strong>양자 상태</strong>는, 모든 큐빗의 값 조합 하나하나를 나타내는 <strong>기저 상태</strong>들의 선형 결합이며, 결합에 참여하는 각 기저 상태에는 복소수 <strong>진폭</strong>이 하나씩 붙습니다.
+  </p>
+  <p>
+    예를 들어 큐빗이 둘이면 값 조합은 <code>|00⟩</code>·<code>|01⟩</code>·<code>|10⟩</code>·<code>|11⟩</code> 네 가지이고, 양자 상태는 이 네 기저 상태를 각자의 진폭으로 섞은 선형 결합입니다.<br>
+    이를 식으로 쓰면 다음과 같습니다.
+  </p>
+  <div class="panel" style="text-align:center;">
+    <div style="font-size:1.12rem; line-height:1.9;">
+      양자 상태 &nbsp;=&nbsp; <b style="color:var(--accent)">c₀</b>|00⟩ &nbsp;+&nbsp; <b style="color:var(--accent)">c₁</b>|01⟩ &nbsp;+&nbsp; <b style="color:var(--accent)">c₂</b>|10⟩ &nbsp;+&nbsp; <b style="color:var(--accent)">c₃</b>|11⟩
+    </div>
+    <div style="color:var(--muted); font-size:.9rem; margin-top:10px;">
+      네 <strong>기저 상태</strong>를 더한 <strong>선형 결합</strong>이고, 각 기저 상태 앞의 <b style="color:var(--accent)">c₀…c₃</b>가 그 기저 상태의 복소수 <strong>진폭</strong>입니다.<br>
+      큐빗이 <strong>n개</strong>이면 기저 상태(항)는 <strong>2ⁿ개</strong>입니다.<br>
+      지금은 큐빗이 2개라 4개여서, 진폭이 <b style="color:var(--accent)">c₀</b>부터 <b style="color:var(--accent)">c₃</b>까지인 것입니다.<br>
+      각 진폭의 절댓값 제곱 <b style="color:var(--accent)">|cᵢ|²</b>은 그 기저 상태가 측정될 <strong>확률</strong>이므로, 넷을 모두 더하면 항상 1입니다 (<b style="color:var(--accent)">|c₀|² + |c₁|² + |c₂|² + |c₃|² = 1</b>).
+    </div>
+  </div>
+  <p>
+    이 정의를 표 한 장으로 옮겨 적은 것이 아래의 <strong>상태벡터</strong>입니다.<br>
+    위 식에서 <code>c₀|00⟩</code>, <code>c₁|01⟩</code>처럼 더해지던 각 부분이 표에서는 한 줄이 됩니다.
+  </p>
+  <div class="panel">
+    <table class="spec">
+      <tr><th>항 (기저 상태)</th><th>진폭</th></tr>
+      <tr><td class="k"><code>|00⟩</code></td><td><b style="color:var(--accent)">c₀</b></td></tr>
+      <tr><td class="k"><code>|01⟩</code></td><td><b style="color:var(--accent)">c₁</b></td></tr>
+      <tr><td class="k"><code>|10⟩</code></td><td><b style="color:var(--accent)">c₂</b></td></tr>
+      <tr><td class="k"><code>|11⟩</code></td><td><b style="color:var(--accent)">c₃</b></td></tr>
+    </table>
+  </div>
+  <p>
+    이 표의 한 줄을 <strong>항</strong>이라 부르고, 한 항이 기저 상태 하나에 대응합니다.<br>
+    <a href="uncompute-01-ancilla.html">1장</a>에서 상태가 나뉘며 생긴 기저 상태 하나가 여기서는 항 하나입니다.
+  </p>
+  <p>
+    예를 들어 아래 프로그램이 상태벡터를 어떻게 만들어 가는지 한 단계씩 따라가 보겠습니다.<br>
+    그 전에, 이 장에서 쓰는 두 자리 켓 <code>|b,a⟩</code>를 읽는 법부터 한 번 보고 갑시다.
+  </p>
+  <div style="text-align:center; background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:14px; margin:14px 0 18px;">
+    <span style="font-family:'SF Mono',Consolas,monospace; font-size:1.8rem; letter-spacing:.14em;">|<b style="color:var(--plus)">0</b>,<b style="color:var(--amber)">0</b>⟩</span>
+    <div style="font-size:.95rem; margin-top:8px;">
+      앞 자리 = <b style="color:var(--plus)">b의 값</b> &nbsp;·&nbsp; 뒤 자리 = <b style="color:var(--amber)">a의 값</b>
+    </div>
+    <div style="color:var(--muted); font-size:.86rem; margin-top:6px;">
+      예를 들어 <span style="font-family:'SF Mono',Consolas,monospace;">|<b style="color:var(--plus)">0</b>,<b style="color:var(--amber)">1</b>⟩</span> 은 <b style="color:var(--plus)">b=0</b>, <b style="color:var(--amber)">a=1</b>. &nbsp;(쉼표 없이 <code>|01⟩</code>로도 씁니다.)
+    </div>
+  </div>
+<pre><code>use a = Qubit[1];  use b = Qubit[1];
+H(a[0]);             <span class="cm">// a가 0과 1의 두 항으로 나뉨</span>
+CNOT(a[0], b[0]);    <span class="cm">// b가 a의 값을 기록</span></code></pre>
+  <div class="panel" style="max-width:560px; margin:16px auto;">
+    <div style="text-align:center; color:var(--muted); font-size:.82rem; margin-bottom:8px;">각 켓은 <code>|b,a⟩</code> — <b>앞자리가 b, 뒷자리가 a</b></div>
+    <div style="background:#fff; border:1px solid var(--line); border-radius:8px; padding:9px 14px; text-align:center;">
+      <code>|0,0⟩</code>
+      <div style="color:var(--muted); font-size:.83rem; margin-top:2px;">시작 — 두 큐빗 모두 |0⟩</div>
+    </div>
+    <div style="text-align:center; margin:6px 0; font-size:.87rem;">
+      <span style="background:var(--accent); color:#fff; border-radius:999px; padding:2px 11px; font-weight:700; font-size:.8rem;">H(a)</span>
+      <span style="color:var(--muted);"> a를 0·1 두 갈래로</span>
+      <div style="color:var(--accent); font-size:1.05rem; line-height:1;">↓</div>
+    </div>
+    <div style="background:#fff; border:1px solid var(--line); border-radius:8px; padding:9px 14px; text-align:center;">
+      <code>(|0,0⟩ + <b style="color:var(--accent)">|0,1⟩</b>)/√2</code>
+      <div style="color:var(--muted); font-size:.83rem; margin-top:2px;">새로 생긴 <b style="color:var(--accent)">|0,1⟩</b>은 앞자리 b=0, 뒷자리 a=1</div>
+    </div>
+    <div style="text-align:center; margin:6px 0; font-size:.87rem;">
+      <span style="background:var(--accent); color:#fff; border-radius:999px; padding:2px 11px; font-weight:700; font-size:.8rem;">CNOT</span>
+      <span style="color:var(--muted);"> b가 a의 값을 복사</span>
+      <div style="color:var(--accent); font-size:1.05rem; line-height:1;">↓</div>
+    </div>
+    <div style="background:#faf7ff; border:1px solid #c9b6f4; border-radius:8px; padding:9px 14px; text-align:center;">
+      <code>(|0,0⟩ + <b style="color:var(--accent)">|1,1⟩</b>)/√2</code>
+      <div style="color:var(--muted); font-size:.83rem; margin-top:2px;">a=1이던 <b style="color:var(--accent)">|0,1⟩</b>에서 앞자리 b가 0→1 → <b style="color:var(--accent)">|1,1⟩</b> (두 항 모두 b=a)</div>
+    </div>
+  </div>
+  <p>
+    이렇게 <code>b</code>가 <code>a</code>를 따라가므로, <code>b</code>≠<code>a</code>인 <code>|0,1⟩</code>·<code>|1,0⟩</code> 항은 아예 생기지 않고 <code>|0,0⟩</code>·<code>|1,1⟩</code> 두 항만 남습니다.
+  </p>
+  <p>
+    이 최종 상태를 상태벡터 표로 쓰면 아래와 같습니다.
+  </p>
+  <div class="panel">
+    <table class="spec">
+      <tr><th>항</th><th><code>b</code> 값</th><th><code>a</code> 값</th><th>진폭</th></tr>
+      <tr><td class="k"><code>|0,0⟩</code></td><td>0</td><td>0</td><td>1/√2</td></tr>
+      <tr><td class="k"><code>|1,1⟩</code></td><td>1</td><td>1</td><td>1/√2</td></tr>
+    </table>
+  </div>
+  <p>
+    이 표에서 한 항을 읽을 때 헷갈리기 쉬운 점은 두 가지입니다.<br>
+    <strong>① 한 항의 값은 기계 전체의 값 조합 하나입니다.</strong> 기저 상태는 특정 큐빗의 값이 아니라 모든 큐빗의 값을 한 세트로 묶은 것이므로, 한 항에 <code>b</code>값과 <code>a</code>값이 함께 적힙니다.<br>
+    <strong>② 진폭은 항마다 하나뿐입니다.</strong> "b의 진폭"과 "a의 진폭"이 따로 있는 것이 아니라, 진폭 하나가 그 값 조합 전체에 붙습니다.<br>
+    이 둘을 식으로 쓰면 표의 한 행은 <code>c|b,a⟩</code> 꼴입니다.
+  </p>
+  <div class="panel" style="text-align:center;">
+    <div style="font-size:1.12rem; line-height:1.9;">
+      표의 한 행 &nbsp;=&nbsp; <b style="color:var(--accent)">c</b>|b,a⟩
+    </div>
+    <div style="color:var(--muted); font-size:.9rem; margin-top:8px;">
+      <strong>|b,a⟩</strong>는 기저 상태(규칙 ①), <b style="color:var(--accent)">c</b>는 진폭(규칙 ②)입니다.<br>
+      예를 들어 첫 항은 <b style="color:var(--accent)">1/√2</b><code>|0,0⟩</code>입니다.
+    </div>
+  </div>
+  <nav class="doc-links" aria-label="코스 내비게이션">
+    <a class="doc-link" href="uncompute-02-ladder.html">← 2. 컴파일러는 어떤 큐빗을 정리하는가 — 판별 사다리</a>
+    <a class="doc-link" href="datasheet.html#s8">코스 목차</a>
+    <a class="doc-link" href="uncompute-04-entangle.html">4. 상태벡터를 큐빗별로 분해할 수 있는가 — 곱 상태와 얽힌 상태 →</a>
+  </nav>
+
+  <footer>
+    자동 uncomputation 코스 3/16 · <a href="datasheet.html#s8">코스 목차</a> ·
+    <a href="datasheet.html">컴파일러 데이터시트</a>
+  </footer>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>담요 문제 — 질의 폭과 문장 폭 — 자동 uncomputation 코스 13/16 — Qora</title>
+<style>
+  :root {
+    --bg: #ffffff; --ink: #1f2430; --muted: #5b6472; --line: #e6e8ee; --panel: #f7f8fb;
+    --plus: #1457d6; --minus: #d62b39; --accent: #6b3fd4; --good: #11875b; --amber: #b5810a;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo",
+      "Malgun Gothic", "Noto Sans KR", "Segoe UI Symbol", "Cambria Math", sans-serif;
+    line-height: 1.7; font-size: 16.5px;
+  }
+  .wrap { max-width: 940px; margin: 0 auto; padding: 0 20px 120px; }
+  header.hero {
+    padding: 60px 20px 36px; text-align: center; border-bottom: 1px solid var(--line);
+    background: linear-gradient(180deg, #faf9ff, #ffffff);
+  }
+  header.hero h1 { font-size: 2.0rem; margin: 0 0 10px; letter-spacing: -0.5px; }
+  header.hero p { color: var(--muted); margin: 0; font-size: 1.02rem; }
+  .tag { display:inline-block; font-size:.78rem; letter-spacing:.12em; text-transform:uppercase;
+         color: var(--accent); font-weight:700; margin-bottom:14px; }
+  h2 { margin: 54px 0 12px; font-size: 1.42rem; letter-spacing: -0.3px;
+       padding-top: 14px; border-top: 2px solid var(--line); }
+  h2 .n { display:inline-flex; align-items:center; justify-content:center;
+    width: 1.7em; height: 1.7em; border-radius: 50%;
+    background: var(--accent); color:#fff; font-size: .8rem; font-weight:700;
+    margin-right: 10px; vertical-align: middle; }
+  h3 { margin: 30px 0 8px; font-size: 1.1rem; }
+  p { margin: 12px 0; }
+  strong { color: #11203a; }
+  .lead { font-size: 1.05rem; }
+  code, .mono, pre {
+    font-family: "SF Mono", "JetBrains Mono", "D2Coding", Consolas, "Segoe UI Symbol", monospace;
+  }
+  code { background: var(--panel); border: 1px solid var(--line); border-radius: 5px; padding: 1px 6px; font-size: .9em; }
+  pre { background: #111827; color: #eef4ff; border-radius: 10px; padding: 15px 17px; margin: 16px 0;
+        overflow-x: auto; font-size: .86rem; line-height: 1.55; }
+  pre code { background: none; border: none; padding: 0; font-size: inherit; color: inherit; }
+  pre .cm { color: #8ba0c7; }
+  pre .hl { color: #c4a7ff; font-weight: 700; }
+  pre .add { color: #7fe0b0; font-weight: 700; }
+  pre .rd { color: #ff9db0; font-weight: 700; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+           padding: 14px 16px; margin: 16px 0; overflow-x: auto; }
+  table.spec { border-collapse: collapse; width: 100%; font-size: .92rem; }
+  table.spec th, table.spec td { padding: 8px 11px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: top; }
+  table.spec th { font-size: .78rem; color: var(--muted); font-weight: 700; letter-spacing:.02em; background:#fbfbfe; }
+  table.spec tr:last-child td { border-bottom: none; }
+  table.spec code { white-space: nowrap; }
+  table.spec td.k { white-space: nowrap; font-weight: 700; color:#1a2740; }
+  .call { border-left: 4px solid var(--accent); background: #faf8ff;
+          padding: 13px 17px; border-radius: 0 8px 8px 0; margin: 18px 0; }
+  .call.why { border-color: var(--good); background: #f2fbf7; }
+  .call.warn { border-color: #e6a417; background: #fff9ec; }
+  .call .h { font-weight: 700; display:block; margin-bottom: 4px; }
+  .call p { margin: 8px 0 0; }
+  .rule { text-align:center; font-size: 1.02rem; font-weight: 700; color:#1a1140;
+          background: #f3efff; border:1px solid #e2d8ff; border-radius: 10px; padding: 15px; margin: 20px 0; }
+  .toc { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 20px; margin: 24px 0; }
+  .toc ol { margin: 6px 0 0; padding-left: 20px; columns: 2; column-gap: 30px; }
+  .toc a { color: var(--ink); text-decoration: none; }
+  .toc a:hover { color: var(--accent); }
+  .doc-links { display:flex; flex-wrap:wrap; gap:10px; margin: 18px 0 6px; }
+  .doc-link { display:inline-flex; align-items:center; gap:8px; border:1px solid #cddcff;
+              background:#f6f9ff; color:#1745b5; border-radius:999px; padding:7px 15px; font-weight:700; text-decoration:none; font-size:.92rem; }
+  .doc-link:hover { border-color:#9bb8ff; background:#eef4ff; }
+  .doc-meta { border: 1px solid #dfe5f2; border-left: 5px solid var(--accent); border-radius: 8px;
+              background: #f8faff; padding: 16px 18px; margin: 22px 0; }
+  .doc-meta .meta-title { font-weight: 800; color: #11203a; margin-bottom: 12px; }
+  .meta-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 18px; margin: 0; }
+  .meta-grid dt { color: var(--muted); font-size: .74rem; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; }
+  .meta-grid dd { margin: 3px 0 0; }
+  footer { text-align:center; color:var(--muted); font-size:.9rem; margin-top: 60px; padding-top: 24px; border-top:1px solid var(--line); }
+  /* datasheet-specific */
+  .pipe { display:flex; flex-direction:column; gap:0; margin: 18px 0; }
+  .pipe .stg { display:flex; align-items:center; gap:12px; }
+  .pipe .box { flex:1; background:#fff; border:1px solid var(--line); border-radius:8px; padding:9px 13px; font-size:.92rem; }
+  .pipe .box b { color:#1a2740; }
+  .pipe .box .d { color:var(--muted); font-size:.85rem; }
+  .pipe .box.key { border-color:#c9b6f4; background:#faf7ff; }
+  .pipe .arr { text-align:center; color:var(--accent); font-size:1.2rem; line-height:1; margin:5px 0; }
+  .ladder { display:grid; gap:10px; margin:18px 0; }
+  .rung { display:grid; grid-template-columns:auto 1fr; gap:14px; align-items:start;
+          border:1px solid var(--line); border-radius:10px; padding:13px 16px; background:#fff; }
+  .rung .rn { width:38px; height:38px; border-radius:8px; background:var(--accent); color:#fff;
+              font-weight:800; display:flex; align-items:center; justify-content:center; font-size:1.05rem; }
+  .rung.done { border-left:5px solid var(--good); }
+  .rung.done .rn { background:var(--good); }
+  .rung .rt { font-weight:800; color:#1a2740; }
+  .rung .rd { color:var(--muted); font-size:.92rem; margin-top:2px; }
+  .rung .st { display:inline-block; font-size:.72rem; font-weight:800; border-radius:999px; padding:2px 9px; margin-left:8px; vertical-align:middle; }
+  .rung .st.ok { background:#e4f7ee; color:var(--good); }
+  .rung .st.next { background:#f3efff; color:var(--accent); }
+  .badge { display:inline-block; font-size:.72rem; font-weight:800; border-radius:5px; padding:1px 7px; }
+  .badge.r { background:#eef4ff; color:var(--plus); }
+  .badge.w { background:#fdeef0; color:var(--minus); }
+  .badge.m { background:#f3efff; color:var(--accent); }
+  .grid2 { display:grid; grid-template-columns:1fr; gap:14px; margin:16px 0; }
+  @media (min-width:740px){ .grid2 { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+  .card { background:#fff; border:1px solid var(--line); border-radius:8px; padding:14px 16px; }
+  .card.good { border-top:4px solid var(--good); }
+  .card.bad { border-top:4px solid var(--minus); }
+  .card h4 { margin:0 0 8px; font-size:1rem; }
+  @media (max-width: 720px) { .meta-grid, .toc ol { grid-template-columns: 1fr; columns:1; } }
+</style>
+</head>
+<body>
+<div class="qora-lang-switch" style="position:sticky;top:0;z-index:99;text-align:right;padding:8px 16px;background:rgba(255,255,255,.92);backdrop-filter:blur(4px);border-bottom:1px solid #e6e8ee;font-size:13px;font-family:sans-serif;"><a href="../en/index.html">English</a> · <strong>한국어</strong> · <a href="../ja/index.html">日本語</a></div>
+
+<header class="hero">
+  <div class="tag">Qora · 자동 uncomputation 코스 · 13/16</div>
+  <h1>13. 담요 문제 — 질의 폭과 문장 폭</h1>
+  <p>레지스터 통짜 쓰기와 원소 질문의 충돌</p>
+</header>
+
+<div class="wrap">
+
+  <nav class="doc-links" aria-label="코스 내비게이션">
+    <a class="doc-link" href="uncompute-12-loops.html">← 12. 루프와 호출 — 왜 판정이 달라지는가</a>
+    <a class="doc-link" href="datasheet.html#s8">코스 목차</a>
+    <a class="doc-link" href="uncompute-14-limits.html">14. 차단의 두 종류 — 원리적 한계와 보수적 거부 →</a>
+  </nav>
+  <p>
+    <a href="uncompute-12-loops.html">12장</a>에서 루프를 연산으로 감싸 호출 문장 하나로 만드는 요령을
+    익히면서, 그 문장이 레지스터 전체를 한 덩어리로 기록하게 된다는 대가도 함께 보았습니다.<br>
+    이렇게 한 문장이 레지스터 전체를 한 덩어리로 쓰는 것을 <strong>담요 쓰기</strong>라고 부릅니다.<br>
+    브로드캐스트 <code>X(a)</code>, 레지스터를 통째로 넘긴 호출, 인덱스가 컴파일 타임에 정해지지 않는
+    루프가 모두 여기에 해당합니다.<br>
+    담요 쓰기 자체는 잘못이 아닙니다.<br>
+    문제는 담요 쓰기가 원소 단위의 질문과 만날 때
+    생기며, 그 본질은 폭의 불일치 하나입니다.
+  </p>
+  <p>
+    여기서 폭은 두 종류입니다.<br>
+    <strong>질의 폭</strong>이란 컴파일러가 "스코프가 끝나기 전에 |0⟩ 상태로 되돌릴 수 있는가"라고 묻는
+    대상의 크기를 말합니다.<br>
+    레지스터 전체를 묻는 질의도 있고, <code>a[1]</code>처럼 원소 하나만 묻는
+    질의도 있습니다.<br>
+    <strong>문장 폭</strong>이란 한 문장이 적용하는 유니터리가 실제로 작용하는 큐빗의 범위를 말합니다.<br>
+    예를 들어 <code>X(a)</code>의 문장 폭은 <code>a[0]</code>과 <code>a[1]</code> 전부이고,
+    <code>X(a[0])</code>의 문장 폭은 <code>a[0]</code> 하나입니다.<br>
+    역연산은 문장이 적용한 유니터리의 역을 같은 큐빗 범위에 통째로 적용하는 것이므로, 언제나
+    문장 폭 그대로만 만들어집니다.
+  </p>
+  <div class="rule">역연산은 문장 전체 단위로만 만들 수 있습니다.<br>따라서 청소해야 할 것은 원소 하나인데 그 원소를 편집한 문장이 레지스터 전체를 편집했다면, 그 문장의 역연산을 원소 하나로 축소할 방법이 없습니다.</div>
+
+  <h3>기준선 — 전원이 스크래치인 담요 쓰기는 왜 문제없이 통과하는가</h3>
+  <p>
+    규칙만 보면 담요 쓰기는 늘 위험해 보이지만, 두 폭이 일치하는 동안에는 아무 문제도 없습니다.<br>
+    먼저 그 기준선을 세워 두겠습니다.<br>
+    아래 프로그램은 두 원소짜리 앤실라 <code>a</code>를 담요 호출 하나로 기록하고, 아무도 측정하지
+    않습니다.
+  </p>
+<pre><code>operation Bcast(Qubit[2] p){
+    for i in 0..1 { X(p[i]); }
+}
+operation Main(){
+    use a = Qubit[2];
+    Bcast(a);            <span class="cm">// 담요 쓰기 — 문장 폭 = a[0]·a[1] 전부</span>
+    <span class="cm">// 아무도 a를 측정하지 않습니다 — 전원이 스크래치</span>
+}</code></pre>
+  <p>
+    <code>a</code>의 두 원소는 모두 측정되지 않았으므로 레지스터 전원이 청소 후보이고, 질의 폭은
+    레지스터 전체입니다.<br>
+    <code>a</code>를 기록한 문장은 <code>Bcast(a)</code> 하나뿐이고, 그 역연산
+    <code>Adjoint Bcast(a)</code>의 문장 폭도 레지스터 전체입니다.<br>
+    질의 폭과 문장 폭이 정확히 일치하므로 썰어낼 것이 없고,
+    <a href="uncompute-11-injector.html">11장</a>의 주입기가 사망점에
+    <code>Adjoint Bcast(a)</code> 한 문장을 붙여넣는 것으로 정리가 끝납니다.<br>
+    상태로 확인해 보면, <code>Bcast(a)</code>는 <code>a</code>의 기저 상태 |00⟩을 |11⟩로 보내고
+    <code>Adjoint Bcast(a)</code>는 |11⟩을 도로 |00⟩으로 보내므로, <code>a</code>는 정확히 |00⟩
+    상태로 반납됩니다.<br>
+    리포트도 같은 결론을 출력합니다.
+  </p>
+<pre><code><span class="cm">// --stages 의 uncompute 뷰:</span>
+a: ancilla, cleanup candidate — safe to uncompute</code></pre>
+
+  <h3>한 줄을 추가하면 —  25 만 측정해 운명을 가릅니다</h3>
+  <p>
+    기준선이 통과한 이유는 두 원소의 운명이 같아서 질의 폭이 레지스터 전체였기 때문입니다.<br>
+    그렇다면 두 원소의 처리가 나뉘는 순간에는 무슨 일이 벌어질까요.<br>
+    기준선 프로그램에 딱 한 줄, <code>a[0]</code>만 측정하는 문장을 끼워 넣겠습니다.
+  </p>
+<pre><code>operation Bcast(Qubit[2] p){
+    for i in 0..1 { X(p[i]); }
+}
+operation Main(){
+    use a = Qubit[2];
+    Bcast(a);                 <span class="cm">// 담요 쓰기 — 문장 폭 = a[0]·a[1] 전부</span>
+    <span class="rd">bit c = M(a[0]);</span>          <span class="cm">// ← 추가된 한 줄: a[0]만 측정</span>
+    <span class="cm">// c = 1 (확률 100%) — Bcast가 a[0]을 |1⟩로 만들어 두었기 때문입니다</span>
+}</code></pre>
+  <p>
+    추가된 측정 하나가 두 원소의 처리를 서로 다르게 만들었습니다.<br>
+    <code>a[0]</code>은 측정되어 그 값이 고전 비트 <code>c</code>로 읽혔으므로 출력으로 승격되어 청소 대상에서
+    빠집니다.<br>
+    <code>a[1]</code>은 측정되지 않았으므로 여전히 청소 후보이고, 질의 폭은 이제 원소 하나인
+    <code>a[1]</code>로 줄었습니다.<br>
+    그런데 <code>a[1]</code>을 기록한 문장은 기준선과 똑같은 담요 호출 <code>Bcast(a)</code>이고,
+    그 역연산의 문장 폭은 여전히 레지스터 전체입니다.<br>
+    기준선에서 정확히 일치했던 두 폭이 처음으로 어긋났습니다.
+  </p>
+
+  <h3>어긋난 폭은 어떻게 처리되는가 — 리포트가 지목하는 원소</h3>
+  <p>
+    치워야 하는 것은 <code>a[1]</code> 하나뿐인데, 주입기가 붙여넣을 수 있는 역은 문장 전체의 역인
+    <code>Adjoint Bcast(a)</code>뿐입니다.<br>
+    그 문장을 붙여넣으면 이미 측정되어 출력으로 승격된 <code>a[0]</code>까지 함께 다시 써 버립니다.<br>
+    그래서 원소 폭 질의가 담요 쓰기를 만나면 컴파일러는 그 원소를 차단합니다.<br>
+    위 프로그램을 컴파일하면 다음과 같은 판정이 나옵니다.
+  </p>
+<pre><code>a: ancilla, measured — promoted to output, not a cleanup candidate
+   — per element: a[1] blocked: statement-wide write of `a` — its adjoint
+     cannot be sliced to `a[1]` and would rewrite the sibling elements ...</code></pre>
+  <p>
+    리포트는 레지스터 요약과 함께 원소 단위의 진실도 보여줍니다.<br>
+    막힌 원소에는 막힌 이유가 붙고, 깨끗한 원소에는 후보 표시가 붙습니다.<br>
+    첫 항의 레지스터 요약만 보면 측정과 승격으로 끝난 것 같지만, per element 항이 <code>a[1]</code>은
+    담요 쓰기 때문에 막혔다는 사실과 그 이유까지 정확히 지목합니다.
+  </p>
+  <p>
+    이제 두 경우가 모두 눈앞에 있으니, 폭의 언어로 나란히 놓고 정리하겠습니다.
+  </p>
+  <div class="panel">
+    <table class="spec">
+      <tr><th>경우</th><th>질의 폭</th><th>역연산의 문장 폭</th><th>판정</th></tr>
+      <tr><td class="k">담요 + 전원 스크래치</td><td>레지스터 전체 (<code>a[0]</code>·<code>a[1]</code>)</td><td>레지스터 전체</td><td>✅ safe — <code>Adjoint Bcast(a)</code> 한 번으로 정리</td></tr>
+      <tr><td class="k">담요 + 운명 혼합</td><td>원소 하나 (<code>a[1]</code>)</td><td>레지스터 전체</td><td>❌ <code>a[1]</code> 차단 — 역을 원소 하나로 썰 수 없음</td></tr>
+    </table>
+  </div>
+
+  <h3>그럼 어떻게 고쳐야 할까요 — 네 개의 수정 경로</h3>
+  <p>
+    리포트가 원인을 폭의 불일치로 지목했으니, 고치는 길도 폭을 기준으로 정리됩니다.<br>
+    한 레지스터 안에서 원소마다 처리가 나뉘었는데 이력에 담요 쓰기가 남아 있다면, 다음 네 개의 경로 중
+    하나로 코드를 고칠 수 있습니다.<br>
+    경로마다 위의 막힌 프로그램에 실제로 적용해 결과를 확인하겠습니다.
+  </p>
+
+  <h4>수정 ① — 구조 변경 (권장): 문장 폭을 원소 하나로 줄입니다</h4>
+  <p>
+    첫 번째 길은 원인 자체를 없애는 길입니다.<br>
+    담요 호출 하나를 원소별 호출 두 개로 바꾸면 각 문장의 폭이 원소 하나로 줄어듭니다.<br>
+    그러면 <code>a[1]</code>의 이력은 원소 폭 문장만으로 이루어지므로, 원소 폭 질의와 폭이 일치해
+    컴파일러가 자동으로 치울 수 있게 됩니다.
+  </p>
+<pre><code>operation FlipOne(Qubit p){ X(p); }
+operation Main(){
+    use a = Qubit[2];
+    <span class="add">FlipOne(a[0]);</span>           <span class="cm">// 문장 폭 = a[0] 하나</span>
+    <span class="add">FlipOne(a[1]);</span>           <span class="cm">// 문장 폭 = a[1] 하나</span>
+    bit c = M(a[0]);         <span class="cm">// c = 1 (확률 100%) — a[0]만 측정 → 출력으로 승격</span>
+    <span class="cm">// a[1]: 이력이 원소 폭뿐이라 청소 후보로 판정되고,</span>
+    <span class="cm">// 컴파일러가 마지막 사용 직후에 역연산을 자동 삽입합니다</span>
+}</code></pre>
+  <p>
+    같은 효과를 내는 다른 구조 변경으로, 운명이 다른 원소들을 처음부터 서로 다른 레지스터로 선언하는
+    방법도 있습니다.<br>
+    어느 쪽이든 이력이 정밀해져서 컴파일러가 자동으로 치워 주므로, 이 길이 권장 경로입니다.
+  </p>
+
+  <h4>수정 ② — 남은 원소도 측정합니다: 질의 자체를 없앱니다</h4>
+  <p>
+    두 번째 길은 폭을 맞추는 대신 질의 자체를 없애는 길입니다.<br>
+    <code>a[1]</code>도 측정하면 그 값이 고전 비트로 읽혀 출력으로 승격되고, 반납 의무가
+    사라집니다.<br>
+    승격된 원소는 청소 후보가 아니므로 |0⟩ 상태로 되돌릴 수 있는지 묻는 질의가 애초에 발생하지
+    않습니다.
+  </p>
+<pre><code><span class="cm">// operation Bcast는 기준선과 동일합니다</span>
+operation Main(){
+    use a = Qubit[2];
+    Bcast(a);
+    bit c = M(a[0]);          <span class="cm">// c = 1 (확률 100%)</span>
+    <span class="add">bit d = M(a[1]);</span>          <span class="cm">// ← 추가: a[1]도 측정 → 출력으로 승격</span>
+    <span class="cm">// d = 1 (확률 100%) — Bcast가 a[1]도 |1⟩로 만들어 두었기 때문입니다</span>
+}</code></pre>
+  <p>
+    이제 두 원소가 모두 출력으로 승격되어 레지스터에 청소 후보가 없고, 차단할 대상도 없습니다.<br>
+    다만 측정은 프로그램의 의미를 바꾸는 실제 변경이므로, 그 값이 정말 결과로 필요할 때 선택하는
+    길입니다.
+  </p>
+
+  <h4>수정 ③ — 명시적 Reset: 비가역 지우기를 코드로 선언합니다</h4>
+  <p>
+    세 번째 길은 남은 원소를 <code>Reset</code>으로 강제로 |0⟩ 상태로 만드는 길입니다.<br>
+    <a href="uncompute-08-gates.html">8장</a>에서 본 대로 Reset 게이트는 값을 강제로 0으로 만들고 이력을
+    지우는 비가역 연산입니다.
+  </p>
+<pre><code><span class="cm">// operation Bcast는 기준선과 동일합니다</span>
+operation Main(){
+    use a = Qubit[2];
+    Bcast(a);
+    bit c = M(a[0]);          <span class="cm">// c = 1 (확률 100%)</span>
+    <span class="add">Reset(a[1]);</span>              <span class="cm">// ← 추가: 비가역 지우기를 코드로 선언</span>
+    <span class="cm">// a[1]은 |0⟩로 — 이 프로그램에서는 얽힘이 없어 무해합니다</span>
+}</code></pre>
+  <p>
+    이 프로그램에서는 <code>Bcast(a)</code>가 만든 상태가 기저 상태 |11⟩ 하나뿐이라
+    <code>a[1]</code>이 어느 큐빗과도 얽혀 있지 않고, 따라서 <code>Reset(a[1])</code>은
+    <code>a[1]</code>만 |0⟩로 되돌리며 다른 큐빗은 건드리지 않습니다.<br>
+    그러나 얽힌 큐빗에 Reset 게이트를 적용하면 측정과 똑같이 상태벡터가 하나의 기저 상태로 붕괴하여
+    얽혀 있던 다른 큐빗의 상태까지 함께 바뀌므로, 얽힘이 없음을 스스로 확신할 수 있을 때만 쓰는 길입니다.
+  </p>
+
+  <h4>수정 ④ — 직접 역연산: 이력을 손으로 되돌립니다</h4>
+  <p>
+    네 번째 길은 남은 원소의 이력을 손으로 되돌리는 길입니다.<br>
+    <code>Bcast(a)</code>가 <code>a[1]</code>에 적용한 편집은 X 하나이고 X 게이트는 자기 자신이 역이므로,
+    <code>X(a[1])</code> 한 문장이 <code>a[1]</code>을 정확히 |0⟩로 되돌립니다.
+  </p>
+<pre><code><span class="cm">// operation Bcast는 기준선과 동일합니다</span>
+operation Main(){
+    use a = Qubit[2];
+    Bcast(a);
+    bit c = M(a[0]);          <span class="cm">// c = 1 (확률 100%)</span>
+    <span class="add">X(a[1]);</span>                  <span class="cm">// ← 추가: 손으로 쓴 역연산 — a[1]은 |0⟩로</span>
+}</code></pre>
+  <p>
+    이 길은 유니터리만 사용하므로, Reset 게이트와 달리 얽힘이 있어도 물리적으로 완전한 수정입니다.<br>
+    컴파일러가 자동으로 하려던 일을 사용자가 손으로 대신한 것과 같습니다.
+  </p>
+  <p>
+    ③과 ④는 물리적으로는 반납을 끝내지만, 컴파일러가 그 Reset 게이트가나 손 역연산을 "반납 완료"로 인정하는
+    규칙은 아직 없습니다.<br>
+    따라서 지금 판정까지 바꾸는 수정은 ①과 ②이며, ③·④를 반납 완료로 인정하는 명시 선언문은 향후
+    제공됩니다.
+  </p>
+  <p>
+    네 경로를 한눈에 정리하면 다음과 같습니다.
+  </p>
+  <div class="panel">
+    <table class="spec">
+      <tr><th>수정</th><th>코드</th><th>의미</th></tr>
+      <tr><td class="k">① 구조 변경 (권장)</td><td><code>FlipOne(a[0]); FlipOne(a[1]);</code> 원소별 호출, 또는 운명별로 레지스터 분리 선언</td><td>이력이 정밀해져 컴파일러가 자동으로 치웁니다</td></tr>
+      <tr><td class="k">② 측정</td><td><code>bit d = M(a[1]);</code></td><td>출력으로 승격되어 반납 의무가 사라집니다</td></tr>
+      <tr><td class="k">③ 명시적 Reset</td><td><code>Reset(a[1]);</code></td><td>비가역 지우기를 코드로 선언합니다 (얽힌 큐빗에서는 다른 큐빗까지 오염될 수 있으니 주의; 컴파일러 판정은 아직 바뀌지 않습니다)</td></tr>
+      <tr><td class="k">④ 직접 역연산</td><td><code>X(a[1]);</code></td><td>물리적으로 완전한 수정입니다 (컴파일러 판정은 아직 바뀌지 않습니다)</td></tr>
+    </table>
+  </div>
+  <p>
+    그렇다면 이 담요 차단은 앤실라에 H 게이트를 적용해 벌어지는 차단과 같은 성격일까요.<br>
+    같은 컴파일 에러라도 어느 언어도 넘을 수 없는 물리의 벽과, 현재 구현이 안전한 쪽으로 물러선
+    판정은 다르게 읽어야 합니다.<br>
+    차단들을 이 기준으로 가려내는 일이 <a href="uncompute-14-limits.html">14장</a>의 주제입니다.
+  </p>
+
+  <nav class="doc-links" aria-label="코스 내비게이션">
+    <a class="doc-link" href="uncompute-12-loops.html">← 12. 루프와 호출 — 왜 판정이 달라지는가</a>
+    <a class="doc-link" href="datasheet.html#s8">코스 목차</a>
+    <a class="doc-link" href="uncompute-14-limits.html">14. 차단의 두 종류 — 원리적 한계와 보수적 거부 →</a>
+  </nav>
+
+  <footer>
+    자동 uncomputation 코스 13/16 · <a href="datasheet.html#s8">코스 목차</a> ·
+    <a href="datasheet.html">컴파일러 데이터시트</a>
+  </footer>
+
+</div>
+</body>
+</html>

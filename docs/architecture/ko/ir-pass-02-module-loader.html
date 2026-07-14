@@ -1,0 +1,883 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>2. ModuleLoader — import 그래프를 하나의 QProgram으로 — Qora IR 패스 데이터시트</title>
+<style>
+  :root {
+    --bg: #ffffff; --ink: #1f2430; --muted: #5b6472; --line: #e1e5eb; --panel: #f6f7f9;
+    --plus: #1457d6; --minus: #d62b39; --accent: #485568; --good: #11875b; --amber: #b5810a;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink); word-break: keep-all; overflow-wrap: break-word;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo",
+      "Malgun Gothic", "Noto Sans KR", "Segoe UI Symbol", "Cambria Math", sans-serif;
+    line-height: 1.7; font-size: 16.5px;
+  }
+  .wrap { max-width: 940px; margin: 0 auto; padding: 0 20px 120px; }
+  header.hero {
+    padding: 60px 20px 36px; text-align: center; border-bottom: 1px solid var(--line);
+    background: #f7f8fa;
+  }
+  header.hero h1 { font-size: 2rem; margin: 0 0 10px; letter-spacing: -.5px; }
+  header.hero p { color: var(--muted); margin: 0; font-size: 1.02rem; }
+  .tag { display:inline-block; font-size:.78rem; letter-spacing:.12em; text-transform:uppercase;
+         color:var(--muted); font-weight:800; margin-bottom:14px; }
+  h2 { margin:54px 0 12px; font-size:1.42rem; letter-spacing:-.3px;
+       padding-bottom:10px; border-bottom:1px solid var(--line); }
+  h2 .n { display:inline-flex; align-items:center; justify-content:center;
+    width:1.7em; height:1.7em; border:1px solid #cfd5de; border-radius:5px;
+    background:#f2f4f7; color:#364152; font-size:.8rem; font-weight:800;
+    margin-right:10px; vertical-align:middle; }
+  h3 { margin:30px 0 8px; font-size:1.1rem; }
+  p { margin:12px 0; }
+  strong { color:#11203a; }
+  .lead { font-size:1.05rem; }
+  code, .mono, pre { font-family:"SF Mono", "JetBrains Mono", "D2Coding", Consolas, "Segoe UI Symbol", monospace; }
+  code { background:var(--panel); border:1px solid var(--line); border-radius:5px; padding:1px 6px; font-size:.9em; }
+  pre { background:#111827; color:#eef4ff; border-radius:10px; padding:15px 17px; margin:16px 0;
+        overflow-x:auto; font-size:.86rem; line-height:1.55; word-break:normal; }
+  pre code { background:none; border:none; padding:0; font-size:inherit; color:inherit; }
+  pre .cm { color:#8ba0c7; }
+  pre .hl { color:#93c5fd; font-weight:700; }
+  pre .add { color:#7fe0b0; font-weight:700; }
+  pre .rd { color:#ff9db0; font-weight:700; }
+  .panel { background:#fff; border:1px solid var(--line); border-radius:9px;
+           padding:0; margin:16px 0; overflow-x:auto; }
+  table.spec { border-collapse:collapse; width:100%; font-size:.92rem; }
+  table.spec th, table.spec td { padding:8px 11px; text-align:left; border-bottom:1px solid var(--line); vertical-align:top; }
+  table.spec th { font-size:.78rem; color:var(--muted); font-weight:700; letter-spacing:.02em; background:#fbfbfe; }
+  table.spec tr:last-child td { border-bottom:none; }
+  table.spec code { white-space:nowrap; }
+  table.spec td.k { white-space:nowrap; font-weight:700; color:#1a2740; }
+  .call { border:1px solid #dfe3e9; background:#f8f9fb; box-shadow:0 4px 14px rgba(24,32,45,.045);
+          padding:15px 17px; border-radius:9px; margin:18px 0; }
+  .call.good { background:#f6faf8; }
+  .call.warn { background:#fbfaf5; }
+  .call .h { display:block; margin-bottom:7px; color:#576171; font-size:.72rem;
+             font-weight:850; letter-spacing:.1em; text-transform:uppercase; }
+  .call p { margin:0; }
+  .rule { text-align:center; font-size:1.02rem; font-weight:700; color:#364152;
+          background:#f3f5f7; border:1px solid #dfe3e9; border-radius:9px; padding:15px; margin:20px 0; }
+  .doc-links { display:flex; flex-wrap:wrap; gap:10px; margin:18px 0 6px; }
+  .doc-link { display:inline-flex; align-items:center; gap:8px; border:1px solid #cddcff;
+              background:#f6f9ff; color:#1745b5; border-radius:999px; padding:7px 15px;
+              font-weight:700; text-decoration:none; font-size:.92rem; }
+  .doc-link:hover { border-color:#9bb8ff; background:#eef4ff; }
+  .doc-meta { border:1px solid #d9dee6; border-radius:10px; background:#fff; padding:0;
+              margin:22px 0; overflow:hidden; box-shadow:0 8px 22px rgba(24,32,45,.055); }
+  .doc-meta .meta-title { display:flex; align-items:center; justify-content:space-between; gap:16px;
+                         margin:0; padding:11px 18px; background:#263141; color:#f7f9fc;
+                         font-size:.76rem; font-weight:800; letter-spacing:.1em; text-transform:uppercase; }
+  .meta-pass { color:#cbd3df; font-family:"SF Mono","JetBrains Mono","D2Coding",Consolas,monospace;
+               font-size:.74rem; font-weight:650; letter-spacing:.02em; text-transform:none; }
+  .meta-body { padding:18px; }
+  .meta-section + .meta-section { margin-top:20px; }
+  .meta-section-label { display:flex; align-items:center; gap:12px; margin-bottom:11px;
+                        color:#586273; font-size:.69rem; font-weight:850; letter-spacing:.12em; }
+  .meta-section-label::after { content:""; flex:1; height:1px; background:#e5e9ef; }
+  .pass-purpose { margin:0 0 13px; color:#283445; font-size:.98rem; line-height:1.68; }
+  .work-steps { counter-reset:work; margin:0; padding:0; overflow:hidden; border:1px solid var(--line);
+                border-radius:9px; background:#fff; list-style:none; }
+  .work-steps li { counter-increment:work; display:grid; grid-template-columns:32px minmax(0,1fr); gap:11px;
+                   padding:11px 14px; border-bottom:1px solid #e8ecf1; }
+  .work-steps li:last-child { border-bottom:0; }
+  .work-steps li::before { content:counter(work); display:flex; align-items:center; justify-content:center;
+                           width:28px; height:28px; border:1px solid #d5dbe4; border-radius:6px;
+                           background:#f3f5f7; color:#3f4b5d; font-size:.75rem; font-weight:850; }
+  .work-steps strong { display:block; color:#1f2a3a; font-size:.94rem; }
+  .work-steps span { display:block; margin-top:3px; color:var(--muted); font-size:.86rem; line-height:1.58; }
+  .work-steps code, .state-panel code, .meta-reference code { white-space:normal; overflow-wrap:anywhere; }
+  .state-compare { display:grid; grid-template-columns:minmax(0,1fr) 46px minmax(0,1fr); gap:1px;
+                   overflow:hidden; border:1px solid var(--line); border-radius:9px; background:var(--line); }
+  .state-panel { min-width:0; padding:15px 16px; background:#fff; }
+  .state-panel.after { background:#f7f8fa; }
+  .state-arrow { display:flex; align-items:center; justify-content:center; background:#eef1f4;
+                 color:#737e8e; font-size:1.05rem; font-weight:850; }
+  .state-tag { display:inline-block; color:#647083; font-size:.68rem; font-weight:850; letter-spacing:.12em; }
+  .state-panel h3 { margin:5px 0 8px; color:#1f2a3a; font-size:1rem; }
+  .state-panel ul { margin:0; padding-left:19px; }
+  .state-panel li { margin:5px 0; color:#4f5a6b; font-size:.86rem; line-height:1.55; }
+  .meta-reference { display:flex; align-items:baseline; flex-wrap:wrap; gap:5px 10px; margin-top:14px;
+                    padding-top:12px; border-top:1px solid #e5e9ef; color:var(--muted); font-size:.75rem; }
+  .reference-label { color:#667184; font-size:.67rem; font-weight:850; letter-spacing:.08em; }
+  .toc { margin:24px 0; padding:14px 20px; border:1px solid var(--line);
+         border-radius:10px; background:var(--panel); }
+  .toc ol { margin:6px 0 0; padding-left:22px; columns:2; column-gap:32px; }
+  .toc a { color:var(--ink); text-decoration:none; }
+  .toc a:hover { color:var(--accent); }
+  .pipe { display:flex; flex-direction:column; gap:0; margin:18px 0; }
+  .pipe .box { background:#fff; border:1px solid var(--line); border-radius:8px; padding:9px 13px; font-size:.92rem; }
+  .pipe .box b { color:#1a2740; }
+  .pipe .box .d { color:var(--muted); font-size:.85rem; }
+  .pipe .box.key { border-color:#cbd2dc; background:#f3f5f7; }
+  .pipe .box.pass-detail { padding:13px 15px; }
+  .pipe .box.pass-detail b { display:block; margin-bottom:6px; }
+  .pipe .box.pass-detail .d { display:block; line-height:1.65; }
+  .pipe .arr { text-align:center; color:var(--accent); font-size:1rem; line-height:1.2; margin:5px 0; }
+  .grid2 { display:grid; grid-template-columns:1fr; gap:14px; margin:16px 0; }
+  @media (min-width:740px) { .grid2 { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+  .card { background:#fff; border:1px solid #dfe3ea; border-radius:9px; padding:14px 16px;
+          box-shadow:0 2px 8px rgba(17,24,39,.045); }
+  .card.good { background:#f4f8f6; }
+  .card.warn { background:#fbf8f0; }
+  .card h3, .card h4 { margin:0 0 8px; font-size:1rem; }
+  .card p { margin:7px 0 0; }
+  .steps { counter-reset:step; list-style:none; padding:0; margin:18px 0; display:grid; gap:10px; }
+  .steps li { counter-increment:step; position:relative; padding:12px 15px 12px 58px;
+              border:1px solid var(--line); border-radius:9px; background:#fff; }
+  .steps li::before { content:counter(step); position:absolute; left:14px; top:12px; width:30px; height:30px;
+                     display:flex; align-items:center; justify-content:center; border:1px solid #cfd5de;
+                     border-radius:7px; background:#f2f4f7; color:#364152; font-weight:800; }
+  .diagram { margin:20px 0; border:1px solid var(--line); border-radius:10px; background:#f8f9fb; padding:10px; overflow-x:auto; }
+  .diagram svg { display:block; width:100%; min-width:760px; height:auto; }
+  .caption { color:var(--muted); font-size:.88rem; margin:8px 4px 2px; }
+  .split-code { display:grid; grid-template-columns:1fr; gap:14px; margin:16px 0; }
+  @media (min-width:760px) { .split-code { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+  .split-code h3 { margin:0 0 8px; }
+  .split-code pre { height:calc(100% - 35px); margin:0; }
+  .badge { display:inline-block; font-size:.72rem; font-weight:800; border-radius:5px; padding:1px 7px; }
+  .badge.r { background:#eef4ff; color:var(--plus); }
+  .badge.w { background:#fdeef0; color:var(--minus); }
+  .badge.m { background:#eef1f4; color:#3f4b5d; }
+  footer { text-align:center; color:var(--muted); font-size:.9rem; margin-top:60px;
+           padding-top:24px; border-top:1px solid var(--line); }
+  @media (max-width:720px) {
+    .wrap { padding-right:16px; padding-left:16px; }
+    .meta-body { padding:16px; }
+    .work-steps li { grid-template-columns:28px minmax(0,1fr); gap:9px; padding:11px 12px; }
+    .work-steps li::before { width:26px; height:26px; }
+    .state-compare { grid-template-columns:1fr; gap:0; }
+    .state-arrow { min-height:32px; border-top:1px solid var(--line); border-bottom:1px solid var(--line); }
+    .state-arrow span { transform:rotate(90deg); }
+    .toc ol { columns:1; }
+    header.hero { padding-right:16px; padding-left:16px; }
+    header.hero h1 { font-size:1.5rem; line-height:1.38; overflow-wrap:anywhere; }
+    header.hero p { font-size:.94rem; }
+    table.spec td.k { white-space:normal; }
+  }
+</style>
+</head>
+<body>
+<div class="qora-lang-switch" style="position:sticky;top:0;z-index:99;text-align:right;padding:8px 16px;background:rgba(255,255,255,.92);backdrop-filter:blur(4px);border-bottom:1px solid #e6e8ee;font-size:13px;font-family:sans-serif;"><a href="../en/index.html">English</a> · <strong>한국어</strong> · <a href="../ja/index.html">日本語</a></div>
+
+<header class="hero">
+  <div class="tag">Qora · IR 패스 데이터시트 · 2장</div>
+  <h1>2. ModuleLoader — 여러 파일을 하나의 프로그램으로 병합</h1>
+  <p>경로 해석 · 재귀 import · 중복 제거 · 순환 진단 · 후속 패스 계약</p>
+</header>
+
+<div class="wrap">
+
+  <nav class="doc-links" aria-label="IR 패스 데이터시트 내비게이션">
+    <a class="doc-link" href="ir-pass-01-qora-lowering.html">← 1. QoraLowering</a>
+    <a class="doc-link" href="datasheet.html#s2">패스 목차</a>
+  </nav>
+
+  <p class="lead">
+    <code>QoraLowering</code>은 소스 파일 한 개를 <code>QProgram</code>으로 변환합니다.<br>
+    그러나 엔트리 파일이 다른 파일을 <code>import</code>하면, 그 시점의 <code>QProgram</code>에는 엔트리 파일에 선언된 연산만 들어 있고 import 대상 파일의 연산은 아직 들어 있지 않습니다.<br>
+    따라서 이름을 해소하거나 중복 정의를 검사하기 전에 모든 import 파일을 읽어 하나의 프로그램으로 합쳐야 합니다.<br>
+    <code>ModuleLoader</code>가 바로 이 파일 병합을 담당합니다.<br>
+  </p>
+
+  <section class="doc-meta" aria-label="ModuleLoader 사양 정보">
+    <div class="meta-title"><span>PASS SPECIFICATION</span><span class="meta-pass">ModuleLoader</span></div>
+    <div class="meta-body">
+      <div class="meta-section">
+        <div class="meta-section-label">이 패스가 하는 일</div>
+        <p class="pass-purpose">
+          <code>ModuleLoader</code>는 엔트리 <code>QProgram.Imports</code>에 남아 있는 경로를 따라가며, 도달 가능한 파일을 하나의 <code>QProgram</code>에 편입합니다.<br>
+          단순히 파일 내용을 이어 붙이는 것이 아니라, 각 경로의 기준 디렉터리를 계산하고 정상적인 중복과 실제 순환을 구분한 뒤, 파일별 연산과 <code>open</code> 정보를 정해진 순서로 병합합니다.
+        </p>
+        <ol class="work-steps">
+          <li><div><strong>처리할 import와 상대 경로의 기준이 있는지 먼저 확인합니다.</strong><span><code>Imports</code>가 비어 있으면 입력 프로그램을 그대로 반환합니다.<br>import가 있지만 <code>baseDir</code>가 없으면 파일을 전혀 읽지 않고 각 import에 <code>QSEM020</code>을 기록하며, 이때 원래 <code>Imports</code>도 그대로 남습니다.</span></div></li>
+          <li><div><strong>현재 파일의 import를 소스 순서대로 절대 경로로 바꿉니다.</strong><span><code>baseDir</code>가 있으면 import를 작성한 파일의 디렉터리와 <code>QImport.Target</code>을 결합하고 <code>GetFullPath</code>로 정규화합니다.<br>특정 경로를 만들 수 없으면 해당 import에 <code>QSEM020</code>을 기록하고 다음 import로 넘어갑니다.</span></div></li>
+          <li><div><strong><code>chain</code>을 먼저 확인하여 순환을 찾습니다.</strong><span>대상 절대 경로가 현재 처리 중인 재귀 경로에 있으면 상위 파일로 되돌아간 것이므로 <code>QSEM021</code>을 생성합니다.<br>이 검사를 중복 검사보다 먼저 수행하므로 순환을 단순 재사용으로 놓치지 않습니다.</span></div></li>
+          <li><div><strong><code>loaded</code>로 이미 시도한 파일을 다시 읽지 않습니다.</strong><span>순환이 아닌 새 경로는 파일 존재 확인 전에 <code>loaded</code>에 등록합니다.<br>이미 등록된 경로라면 직접 중복이나 다이아몬드 공유로 보고 건너뛰며, 같은 읽기 실패도 한 번만 보고합니다.</span></div></li>
+          <li><div><strong>새 파일을 읽어 단일 파일 IR로 바꾸고, 그 파일의 import를 재귀적으로 처리합니다.</strong><span>파일을 읽은 뒤 <code>QoraParser.ParseToIr</code>로 <code>QProgram</code>을 만듭니다.<br>자식 import가 있으면 현재 파일을 <code>chain</code>에 넣고, 현재 파일의 디렉터리를 새 기준으로 전달하여 같은 절차를 반복합니다.</span></div></li>
+          <li><div><strong>자식 import가 끝난 뒤 현재 파일의 연산과 <code>open</code>을 병합합니다.</strong><span>엔트리 연산은 처음부터 목록 앞에 보존됩니다.<br>같은 단계의 import는 소스 순서대로 방문하지만, 각 import 하위 그래프에서는 자식 파일의 연산을 먼저 추가한 뒤 그 자식을 import한 파일의 연산을 추가합니다.<br><code>open</code>은 namespace별 목록에 누적합니다.</span></div></li>
+          <li><div><strong>병합 결과와 지금까지 수집한 오류를 함께 반환합니다.</strong><span>namespace별 <code>open</code>은 같은 <code>Target</code>의 중복을 제거하고, 경로 기준이 있었던 확장 경로에서는 처리한 import를 <code>Imports = null</code>로 소비합니다.<br>오류가 하나라도 있으면 호출자는 후속 패스를 실행하지 않습니다.</span></div></li>
+        </ol>
+      </div>
+
+      <div class="meta-section">
+        <div class="meta-section-label">패스를 통과하기 전과 후</div>
+        <div class="state-compare" aria-label="ModuleLoader 전후 상태 비교">
+          <div class="state-panel before">
+            <span class="state-tag">BEFORE</span>
+            <h3>엔트리 파일 하나의 <code>QProgram</code></h3>
+            <ul>
+              <li><code>Operations</code>와 <code>Opens</code>에는 엔트리 파일에서 lowering한 내용만 들어 있습니다.</li>
+              <li><code>Imports</code>에는 아직 해석하지 않은 상대 경로가 소스 순서대로 남아 있습니다.</li>
+              <li>import 대상 파일의 연산과 namespace 정보는 현재 프로그램에 포함되지 않았습니다.</li>
+              <li>같은 파일을 여러 경로에서 가리키는지, import 순환이 있는지도 확인되지 않았습니다.</li>
+            </ul>
+          </div>
+          <div class="state-arrow" aria-hidden="true"><span>→</span></div>
+          <div class="state-panel after">
+            <span class="state-tag">AFTER</span>
+            <h3>import 그래프를 반영한 병합 결과</h3>
+            <ul>
+              <li><code>Operations</code>는 엔트리 연산으로 시작합니다.<br>같은 단계의 import는 소스 순서를 따르며, 각 import 하위 그래프에서는 자식 파일의 연산이 그 자식을 import한 파일의 연산보다 먼저 한 번씩 추가됩니다.</li>
+              <li><code>Opens</code>는 namespace별로 합쳐지며 같은 <code>Target</code>은 한 번만 남습니다.</li>
+              <li>경로 문맥이 있는 확장 경로에서는 처리할 import를 모두 소비하고 <code>Imports = null</code>로 반환합니다.</li>
+              <li>누락 파일, 읽기 실패, 파싱 오류, 순환은 오류 목록에 누적되며, 목록이 비어 있을 때만 후속 패스로 넘어갑니다.</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <div class="meta-reference">
+        <span class="reference-label">SOURCE</span><code>src/Qora.Core/Ir/Passes/ModuleLoader.cs</code>
+        <span class="reference-label">API</span><code>ModuleLoader.Expand(QProgram, string?, string?)</code>
+      </div>
+    </div>
+  </section>
+
+  <nav class="toc" aria-label="이 장의 목차">
+    <strong>이 장에서 확인할 내용</strong>
+    <ol>
+      <li><a href="#purpose">파일 병합이 필요한 이유</a></li>
+      <li><a href="#contract">입력값과 경로 문맥</a></li>
+      <li><a href="#sequence">실제 처리 순서</a></li>
+      <li><a href="#example">하나의 예제로 보는 병합</a></li>
+      <li><a href="#structures">자료구조와 저장 값</a></li>
+      <li><a href="#graphs">중복·다이아몬드·순환</a></li>
+      <li><a href="#errors">오류와 부분 결과</a></li>
+      <li><a href="#handoff">후속 패스 계약</a></li>
+    </ol>
+  </nav>
+
+  <h2 id="purpose"><span class="n">1</span>파일 병합이 필요한 이유</h2>
+
+  <p>
+    Qora 소스는 여러 파일로 나눌 수 있지만, 후속 IR 패스는 파일을 직접 읽지 않습니다.<br>
+    예를 들어 엔트리 파일의 <code>Main</code>이 import 파일에 선언된 <code>Prepare</code>를 호출한다면, 이름 해소 패스는 <code>Prepare</code>의 선언을 같은 <code>QProgram</code> 안에서 찾을 수 있어야 합니다.<br>
+    그러므로 <code>ModuleLoader</code>는 파일 경계를 먼저 제거하고, 엔트리 파일과 모든 import 파일의 연산을 <code>Operations</code> 한 목록에 모읍니다.<br>
+    이때 파일 하나를 점으로, 파일 사이의 import 관계를 화살표로 나타낸 전체 연결 구조를 <strong>import 그래프</strong>라고 부릅니다.<br>
+  </p>
+
+  <div class="call">
+    <span class="h">import와 open의 차이</span>
+    <code>import "lib/shared.qor";</code>는 파일을 찾아 읽고, 그 파일에 선언된 연산과 네임스페이스 정보를 현재 프로그램에 포함시킵니다.<br>
+    반면에 <code>open Shared;</code>는 이미 프로그램에 포함된 <code>Shared</code> 네임스페이스의 이름을 짧게 사용할 수 있게 할 뿐이며, 파일을 읽지는 않습니다.<br>
+    따라서 다른 파일에 있는 이름을 사용하려면 먼저 <code>import</code>로 파일을 포함해야 하며, 필요한 경우 그다음에 <code>open</code>을 적용해야 합니다.<br>
+  </div>
+
+<pre><code><span class="cm">// app/main.qor</span>
+import "lib/prepare.qor";
+
+namespace App {
+  open Library;
+
+  operation Main() {
+    use q = Qubit[1];
+    Prepare(q);
+  }
+}
+
+<span class="cm">// app/lib/prepare.qor</span>
+namespace Library {
+  operation Prepare(Qubit[1] q) {
+    H(q[0]);
+  }
+}</code></pre>
+
+  <p>
+    위 예제에서 <code>open Library;</code>만 남기고 import를 제거하면 <code>Library</code> 자체가 프로그램에 포함되지 않습니다.<br>
+    반대로 import가 정상적으로 처리되면 <code>Main</code>과 <code>Prepare</code>가 같은 <code>Operations</code> 목록에 들어갑니다.<br>
+    그 결과 Resolver는 <code>Prepare(q)</code>가 <code>Library.Prepare(q)</code>를 뜻한다는 사실을 판단할 수 있습니다.<br>
+  </p>
+
+  <div class="pipe" aria-label="ModuleLoader의 파이프라인 위치">
+    <div class="box"><b>QoraLowering</b> <span class="d">— 엔트리 파일 한 개를 QProgram으로 변환</span></div>
+    <div class="arr">▼</div>
+    <div class="box"><b>단일 파일 QProgram</b> <span class="d">— Imports에 아직 처리하지 않은 파일 경로가 남아 있음</span></div>
+    <div class="arr">▼</div>
+    <div class="box key pass-detail">
+      <b>ModuleLoader.Expand</b>
+      <span class="d">
+        각 import 경로를 그 문장을 작성한 파일의 위치를 기준으로 절대 경로로 정규화합니다.<br>
+        이어서 <code>chain</code>으로 순환을 먼저 판별하고, <code>loaded</code>로 이미 시도한 파일의 중복 읽기를 막습니다.<br>
+        새 파일만 단일 파일 IR로 변환한 뒤 그 파일의 자식 import부터 확장하며, 자식 연산에서 부모 연산으로 이어지는 순서로 <code>Operations</code>에 추가합니다.<br>
+        마지막으로 namespace별 <code>open</code> 목록을 합치고 같은 <code>Target</code>을 제거합니다.
+      </span>
+    </div>
+    <div class="arr">▼ 오류가 없을 때만</div>
+    <div class="box"><b>MeasureConditionLowering</b> <span class="d">— 병합된 모든 연산 본문에 동일한 변환 적용</span></div>
+    <div class="arr">▼</div>
+    <div class="box"><b>Resolver</b> <span class="d">— 전체 Operations와 Opens를 기준으로 호출 이름 해소</span></div>
+  </div>
+
+  <h2 id="contract"><span class="n">2</span>입력값과 경로 문맥</h2>
+
+<pre><code>public static (QProgram Program, List&lt;QoraError&gt; Errors) Expand(
+    QProgram program,
+    string? baseDir,
+    string? sourcePath)</code></pre>
+
+  <p>
+    여기서 <strong>엔트리 파일</strong>은 사용자가 컴파일 대상으로 직접 지정한 첫 파일을 뜻합니다.<br>
+    반면에 <strong>import 파일</strong>은 엔트리 파일 또는 다른 import 파일이 경로로 참조한 파일을 뜻합니다.<br>
+    두 종류의 파일을 구분해야 하는 이유는 상대 경로의 기준이 항상 import 문장을 작성한 파일의 위치이기 때문입니다.<br>
+  </p>
+
+  <div class="panel">
+    <table class="spec">
+      <tr><th>인자 / 반환값</th><th>담고 있는 값</th><th>필요한 이유</th></tr>
+      <tr>
+        <td class="k"><code>program</code></td>
+        <td>엔트리 파일 하나를 lowering한 <code>QProgram</code>입니다.<br>엔트리 파일의 <code>Operations</code>, 소스 순서대로 기록된 <code>Imports</code>, 네임스페이스별 <code>Opens</code>를 포함합니다.<br></td>
+        <td>병합 결과의 기준이 되며, 엔트리 연산을 최종 목록의 앞부분에 보존하는 데 사용됩니다.<br></td>
+      </tr>
+      <tr>
+        <td class="k"><code>baseDir</code></td>
+        <td>엔트리 파일에 적힌 상대 import를 해석할 기준 디렉터리입니다.<br>예를 들어 엔트리 경로가 <code>C:\work\app\main.qor</code>라면 일반적으로 <code>C:\work\app</code>이 전달됩니다.<br></td>
+        <td>첫 번째 import 경로를 절대 경로로 바꾸는 데 필요합니다.<br><code>null</code>이면 파일을 찾을 기준이 없으므로 import마다 <code>QSEM020</code>을 생성합니다.<br></td>
+      </tr>
+      <tr>
+        <td class="k"><code>sourcePath</code></td>
+        <td>엔트리 파일 자체의 경로입니다.<br>예: <code>C:\work\app\main.qor</code></td>
+        <td>엔트리 파일로 되돌아오는 import를 순환으로 즉시 알아내는 데 사용됩니다.<br>선택값이므로 <code>null</code>일 수 있지만, 제공되면 정규화한 경로를 <code>loaded</code>와 <code>chain</code>에 미리 등록합니다.<br></td>
+      </tr>
+      <tr>
+        <td class="k"><code>Program</code></td>
+        <td>엔트리 연산과 읽어 온 파일의 연산·<code>open</code> 정보를 합친 <code>QProgram</code>입니다.<br></td>
+        <td>오류가 없으면 다음 패스의 입력으로 사용됩니다.<br>다만 오류가 있더라도 진단을 위해 현재까지의 부분 병합 결과가 반환될 수 있습니다.<br></td>
+      </tr>
+      <tr>
+        <td class="k"><code>Errors</code></td>
+        <td>경로, 파일 읽기, 순환, import 파일 파싱 문제를 수집한 목록입니다.<br></td>
+        <td>호출자는 목록이 비어 있을 때만 후속 패스를 실행합니다.<br>따라서 부분 병합 결과가 실수로 유효한 프로그램처럼 처리되지 않습니다.<br></td>
+      </tr>
+    </table>
+  </div>
+
+  <h3>상대 경로의 기준</h3>
+
+  <p>
+    엔트리 파일의 import는 <code>baseDir</code>를 기준으로 해석합니다.<br>
+    그러나 import 파일 안에 또 다른 import가 있으면, 그 경로는 엔트리 디렉터리가 아니라 현재 import 파일의 디렉터리를 기준으로 해석합니다.<br>
+    따라서 라이브러리 폴더 전체를 다른 프로젝트로 옮겨도 라이브러리 내부의 상대 경로 관계를 그대로 유지할 수 있습니다.<br>
+  </p>
+
+  <div class="panel">
+    <table class="spec">
+      <tr><th>현재 읽는 문장</th><th>기준 디렉터리</th><th>계산되는 대상</th></tr>
+      <tr>
+        <td class="k"><code>main.qor</code>의<br><code>import "lib/a.qor";</code></td>
+        <td><code>C:\work\app</code></td>
+        <td><code>C:\work\app\lib\a.qor</code></td>
+      </tr>
+      <tr>
+        <td class="k"><code>lib/a.qor</code>의<br><code>import "shared/b.qor";</code></td>
+        <td><code>C:\work\app\lib</code></td>
+        <td><code>C:\work\app\lib\shared\b.qor</code></td>
+      </tr>
+    </table>
+  </div>
+
+  <h2 id="sequence"><span class="n">3</span>실제 처리 순서</h2>
+
+  <p>
+    <code>ModuleLoader</code>는 import 문장을 소스에 적힌 순서대로 확인합니다.<br>
+    다만 한 파일이 다시 다른 파일을 import하면 그 자식 파일을 먼저 끝까지 처리한 뒤 현재 파일의 연산을 추가합니다.<br>
+    이러한 깊이 우선 방문 방식 때문에 import 관계가 여러 단계로 이어져도 같은 규칙으로 처리할 수 있습니다.<br>
+    구현과 아래 표에서 사용하는 <strong>DFS</strong>는 이 깊이 우선 탐색을 뜻하는 약어입니다.<br>
+  </p>
+
+  <ol class="steps">
+    <li>
+      <strong>빠른 종료 조건을 확인합니다.</strong><br>
+      <code>program.Imports</code>가 <code>null</code>이거나 비어 있으면 파일 작업이 필요하지 않으므로 입력 <code>program</code> 객체를 그대로 반환합니다.<br>
+      반면에 import는 있지만 <code>baseDir</code>가 없으면 각 import에 <code>QSEM020</code>을 기록하고, 이 경우에도 입력 프로그램을 그대로 반환합니다.<br>
+    </li>
+    <li>
+      <strong>병합용 목록을 준비합니다.</strong><br>
+      <code>operations</code>에는 엔트리 파일의 연산을 먼저 복사하고, <code>opens</code>에는 엔트리 파일의 네임스페이스별 <code>open</code> 목록을 복사합니다.<br>
+      따라서 최종 결과에서도 엔트리 연산이 항상 앞에 남습니다.<br>
+    </li>
+    <li>
+      <strong>상대 경로를 절대 경로로 바꿉니다.</strong><br>
+      현재 파일의 디렉터리와 <code>QImport.Target</code>을 <code>Path.Combine</code>으로 연결한 뒤, <code>Path.GetFullPath</code>로 정규화합니다.<br>
+      이 절대 경로가 이후의 순환 검사와 중복 검사에서 파일의 식별자로 사용됩니다.<br>
+    </li>
+    <li>
+      <strong>현재 방문 경로로 되돌아가는지 먼저 확인합니다.</strong><br>
+      대상 경로가 <code>chain</code>에 있으면 아직 처리가 끝나지 않은 상위 파일로 되돌아간 것이므로 순환입니다.<br>
+      이때 <code>QSEM021</code>을 추가하고 해당 import 간선만 중단합니다.<br>
+    </li>
+    <li>
+      <strong>이미 시도한 파일인지 확인합니다.</strong><br>
+      순환이 아니라면 대상 경로를 <code>loaded</code>에 추가합니다.<br>
+      같은 절대 경로가 이미 들어 있으면 다른 import 경로에서 처리했거나 처리 시도한 파일이므로 다시 읽지 않습니다.<br>
+    </li>
+    <li>
+      <strong>파일을 읽고 단일 파일 IR로 변환합니다.</strong><br>
+      파일 존재 여부를 확인한 뒤 <code>File.ReadAllText</code>로 내용을 읽고, <code>QoraParser.ParseToIr</code>로 해당 파일만 lowering합니다.<br>
+      파싱에 실패하면 오류를 기록하며, 그 파일의 자식 import와 연산은 병합하지 않습니다.<br>
+    </li>
+    <li>
+      <strong>자식 import를 먼저 처리합니다.</strong><br>
+      읽은 파일에 import가 있으면 현재 파일을 <code>chain</code>에 추가하고, 현재 파일의 디렉터리를 새 경로 기준으로 전달해 재귀 호출합니다.<br>
+      자식 처리가 끝나면 현재 파일을 <code>chain</code>에서 제거합니다.<br>
+    </li>
+    <li>
+      <strong>현재 파일의 IR을 병합합니다.</strong><br>
+      자식 처리가 끝난 뒤 현재 파일의 <code>Operations</code>를 추가하고, 네임스페이스별 <code>Opens</code>를 누적합니다.<br>
+      모든 import를 처리한 뒤에는 같은 네임스페이스에서 같은 대상을 여는 중복 <code>open</code>을 제거하고, 반환 프로그램의 <code>Imports</code>를 <code>null</code>로 설정합니다.<br>
+    </li>
+  </ol>
+
+  <div class="call warn">
+    <span class="h">loaded 등록 시점</span>
+    대상 경로는 파일 존재 확인과 읽기보다 먼저 <code>loaded</code>에 추가됩니다.<br>
+    따라서 존재하지 않거나 읽을 수 없는 파일을 여러 곳에서 import하더라도 첫 시도에서만 파일 오류가 생성되며, 같은 절대 경로에 대한 후속 시도는 중복으로 건너뜁니다.<br>
+  </div>
+
+  <h2 id="example"><span class="n">4</span>하나의 예제로 보는 병합 결과</h2>
+
+  <p>
+    다음 예제는 <code>main.qor</code>가 두 파일을 import하고, 두 파일이 다시 같은 <code>shared.qor</code>를 import하는 구조입니다.<br>
+    여러 경로가 하나의 파일로 모이므로 흔히 다이아몬드 import라고 부르지만, 먼저 파일 내용과 최종 IR이 어떻게 연결되는지 확인하는 편이 이해하기 쉽습니다.<br>
+  </p>
+
+  <div class="split-code">
+    <div>
+      <h3>입력 파일</h3>
+<pre><code><span class="cm">// app/main.qor</span>
+import "lib/prepare.qor";
+import "lib/readout.qor";
+namespace Demo {
+  open Shared;
+  operation Main() {
+    use q = Qubit[1];
+    Prepare(q);
+    Readout(q);
+  }
+}
+
+<span class="cm">// app/lib/prepare.qor</span>
+import "shared.qor";
+namespace Demo {
+  open Shared;
+  operation Prepare(Qubit[1] q) {
+    H(q[0]);
+  }
+}
+
+<span class="cm">// app/lib/readout.qor</span>
+import "shared.qor";
+namespace Demo {
+  open Shared;
+  operation Readout(Qubit[1] q) {
+    Mark(q);
+  }
+}
+
+<span class="cm">// app/lib/shared.qor</span>
+namespace Shared {
+  operation Mark(Qubit[1] q) {
+    Z(q[0]);
+  }
+}</code></pre>
+    </div>
+    <div>
+      <h3>ModuleLoader 반환값</h3>
+<pre><code>QProgram
+  Operations = [
+    QOperation("Main",
+      Namespace: "Demo"),
+    QOperation("Mark",
+      Namespace: "Shared"),
+    QOperation("Prepare",
+      Namespace: "Demo"),
+    QOperation("Readout",
+      Namespace: "Demo")
+  ]
+
+  Imports = <span class="add">null</span>
+
+  Opens = {
+    "Demo": [
+      QOpen("Shared")
+    ]
+  }
+
+Errors = []</code></pre>
+    </div>
+  </div>
+
+  <p>
+    먼저 <code>operations</code>는 엔트리 파일의 <code>Main</code>으로 시작합니다.<br>
+    이어서 첫 import인 <code>prepare.qor</code>를 읽지만, 이 파일에는 다시 <code>shared.qor</code> import가 있으므로 <code>shared.qor</code>의 <code>Mark</code>를 먼저 추가합니다.<br>
+    그다음 <code>prepare.qor</code>로 돌아와 <code>Prepare</code>를 추가합니다.<br>
+    마지막으로 <code>readout.qor</code>를 처리할 때 <code>shared.qor</code>를 다시 만나지만, 이미 같은 절대 경로를 처리했으므로 두 번째 읽기와 병합은 생략하고 <code>Readout</code>만 추가합니다.<br>
+    결과적으로 연산 순서는 <code>Main → Mark → Prepare → Readout</code>이 됩니다.<br>
+  </p>
+
+  <h3>Opens가 네임스페이스별 사전인 이유</h3>
+
+  <p>
+    <code>open</code>은 프로그램 전체에 무조건 적용되는 선언이 아니라, 해당 <code>namespace</code> 블록 안에서 이름을 찾을 때 사용하는 문맥입니다.<br>
+    따라서 <code>QProgram.Opens</code>는 단순한 문자열 목록이 아니라 <strong>선언 네임스페이스 이름을 키로 하고, 그 안에서 연 대상들을 값으로 갖는 사전</strong>입니다.<br>
+    위 예제에서는 <code>Demo</code> 네임스페이스 안에서 <code>Shared</code>를 열었으므로 <code>"Demo" → [QOpen("Shared")]</code>로 저장됩니다.<br>
+  </p>
+
+  <div class="panel">
+    <table class="spec">
+      <tr><th>처리 전 파일별 값</th><th>병합 과정</th><th>처리 후 값</th></tr>
+      <tr>
+        <td class="k"><code>main.qor</code><br><code>"Demo" → ["Shared"]</code></td>
+        <td>엔트리 값이 먼저 복사됩니다.<br></td>
+        <td rowspan="3"><code>"Demo" → ["Shared"]</code><br><br>같은 <code>Target</code>은 <code>DistinctBy</code>로 제거되며, 처음 들어온 <code>QOpen</code>이 보존됩니다.<br></td>
+      </tr>
+      <tr>
+        <td class="k"><code>prepare.qor</code><br><code>"Demo" → ["Shared"]</code></td>
+        <td>기존 <code>Demo</code> 목록 뒤에 연결됩니다.<br></td>
+      </tr>
+      <tr>
+        <td class="k"><code>readout.qor</code><br><code>"Demo" → ["Shared"]</code></td>
+        <td>다시 연결한 뒤 최종 중복 제거 대상이 됩니다.<br></td>
+      </tr>
+    </table>
+  </div>
+
+  <p>
+    이 단계에서는 연산 이름을 완전 수식 이름으로 바꾸지 않습니다.<br>
+    따라서 <code>Prepare</code>와 <code>Readout</code>의 <code>Name</code>은 아직 짧은 이름이며, 원래 선언된 위치는 <code>Namespace = "Demo"</code>에 따로 남아 있습니다.<br>
+    이후 Resolver가 병합된 <code>Operations</code>와 <code>Opens</code>를 함께 읽어 이름을 확정합니다.<br>
+  </p>
+
+  <h2 id="structures"><span class="n">5</span>자료구조가 담는 값과 필요한 이유</h2>
+
+  <p>
+    파일 병합에는 “한 번이라도 만난 파일”과 “지금 처리 중인 경로에 있는 파일”이라는 서로 다른 정보가 필요합니다.<br>
+    두 정보는 겉보기에는 비슷하지만, 전자는 중복 읽기를 막고 후자는 순환을 찾아내므로 하나의 집합으로 합칠 수 없습니다.<br>
+    구현에서는 각각 <code>loaded</code>와 <code>chain</code>이라는 이름으로 구분합니다.<br>
+  </p>
+
+  <div class="panel">
+    <table class="spec">
+      <tr><th>자료구조</th><th>실제로 담는 값</th><th>필요한 이유</th><th>변경 시점</th></tr>
+      <tr>
+        <td class="k"><code>List&lt;QoraError&gt;<br>errors</code></td>
+        <td>파일별 경로·읽기·순환·파싱 오류</td>
+        <td>한 파일의 문제만 보고 즉시 끝내지 않고, 처리 가능한 형제 import의 문제까지 함께 보고하기 위해 사용합니다.<br></td>
+        <td>문제를 발견할 때마다 추가하며 <code>Expand</code> 반환까지 유지합니다.<br></td>
+      </tr>
+      <tr>
+        <td class="k"><code>List&lt;QOperation&gt;<br>operations</code></td>
+        <td>엔트리 연산과 방문이 끝난 import 파일의 연산</td>
+        <td>여러 파일에 흩어진 연산을 후속 패스가 읽을 수 있는 하나의 순서 있는 목록으로 만들기 위해 사용합니다.<br></td>
+        <td>엔트리 연산으로 시작하며, 각 파일의 자식 처리가 끝난 뒤 현재 파일의 연산을 추가합니다.<br></td>
+      </tr>
+      <tr>
+        <td class="k"><code>Dictionary&lt;string,<br>List&lt;QOpen&gt;&gt; opens</code></td>
+        <td>네임스페이스 이름과 그 안에서 선언된 <code>open</code> 대상 목록</td>
+        <td>같은 네임스페이스 블록이 여러 파일에 나뉘어 있어도 Resolver가 하나의 이름 탐색 문맥으로 사용할 수 있게 병합합니다.<br></td>
+        <td>엔트리 값으로 시작하며, 파일 병합 시 같은 키의 목록 뒤에 값을 추가합니다.<br></td>
+      </tr>
+      <tr>
+        <td class="k"><code>HashSet&lt;string&gt;<br>loaded</code></td>
+        <td><code>GetFullPath</code>로 정규화한, 이미 처리 대상으로 등록된 절대 경로</td>
+        <td>직접 중복 import와 다이아몬드 import에서 같은 파일을 다시 읽고 같은 연산을 두 번 추가하는 문제를 막습니다.<br></td>
+        <td>순환 검사를 통과한 직후 추가하며, DFS 전체가 끝날 때까지 제거하지 않습니다.<br></td>
+      </tr>
+      <tr>
+        <td class="k"><code>List&lt;(Path, Name)&gt;<br>chain</code></td>
+        <td>현재 재귀 호출에서 아직 처리가 끝나지 않은 파일의 절대 경로와 표시용 파일 이름</td>
+        <td>대상이 현재 경로의 상위 파일이면 순환으로 판정하고, 사람이 읽을 수 있는 파일 이름 연결을 오류 메시지에 표시합니다.<br></td>
+        <td>자식 import로 들어가기 전에 추가하고, 자식 처리가 끝나면 즉시 제거합니다.<br></td>
+      </tr>
+      <tr>
+        <td class="k"><code>LoadAll(imports,<br>dir, importer)</code></td>
+        <td>현재 파일의 import 목록, 상대 경로 기준 디렉터리, 진단에 표시할 현재 파일 이름</td>
+        <td>엔트리와 중첩 import에 같은 처리 절차를 재사용하면서도 각 파일의 경로 기준과 진단 문맥을 유지합니다.<br></td>
+        <td>각 import 파일의 자식 목록을 처리할 때 재귀 호출합니다.<br></td>
+      </tr>
+    </table>
+  </div>
+
+  <div class="rule">
+    <code>chain</code>에 있으면 현재 경로로 되돌아온 순환이며, <code>loaded</code>에만 있으면 이미 다른 경로에서 만난 중복입니다.
+  </div>
+
+  <h3>예제 처리 중 두 구조의 상태</h3>
+
+  <div class="panel">
+    <table class="spec">
+      <tr><th>시점</th><th><code>loaded</code></th><th><code>chain</code></th><th>판단</th></tr>
+      <tr>
+        <td class="k">시작</td>
+        <td><code>{ main }</code></td>
+        <td><code>[ main ]</code></td>
+        <td><code>sourcePath</code>가 제공되었으므로 엔트리를 미리 등록합니다.<br></td>
+      </tr>
+      <tr>
+        <td class="k"><code>prepare</code>의 자식 처리</td>
+        <td><code>{ main, prepare }</code></td>
+        <td><code>[ main, prepare ]</code></td>
+        <td><code>prepare</code>가 아직 자식 import 처리를 마치지 않았습니다.<br></td>
+      </tr>
+      <tr>
+        <td class="k">첫 <code>shared</code> 등록</td>
+        <td><code>{ main, prepare, shared }</code></td>
+        <td><code>[ main, prepare ]</code></td>
+        <td><code>shared</code>는 자식 import가 없는 파일이므로 연산을 병합하고 복귀합니다.<br></td>
+      </tr>
+      <tr>
+        <td class="k">두 번째 <code>shared</code> 발견</td>
+        <td><code>{ main, prepare, shared, readout }</code></td>
+        <td><code>[ main, readout ]</code></td>
+        <td><code>shared</code>는 <code>chain</code>에는 없고 <code>loaded</code>에만 있으므로 오류 없이 건너뜁니다.<br></td>
+      </tr>
+    </table>
+  </div>
+
+  <h2 id="graphs"><span class="n">6</span>정상·중복·다이아몬드·순환 흐름</h2>
+
+  <p>
+    아래 순환 예제는 <code>sourcePath</code>가 제공되어 엔트리 파일이 처음부터 <code>chain</code>에 등록된 경우를 기준으로 합니다.<br>
+    이 조건에서는 <code>b</code>가 <code>main</code>을 다시 가리키는 순간 엔트리 파일이 현재 방문 경로에 있음을 확인하고 곧바로 순환을 보고합니다.<br>
+    반면에 <code>sourcePath</code>가 <code>null</code>이면 엔트리 파일의 실제 경로를 미리 등록할 수 없으므로, <code>main</code>을 다시 읽은 뒤 그 안의 import가 기존 <code>chain</code>으로 돌아갈 때 순환을 발견합니다.
+  </p>
+
+  <div class="grid2">
+    <div class="card good">
+      <h3>정상적인 일렬 import</h3>
+      <p>
+        <code>main → a → b</code>처럼 한 방향으로만 이어지면 각 파일을 한 번씩 읽습니다.<br>
+        먼저 <code>b</code>의 연산을 추가하고, 재귀 호출이 돌아오면서 <code>a</code>의 연산을 추가합니다.<br>
+        엔트리 연산은 처음부터 목록에 있으므로 최종 순서는 <code>main 연산 → b 연산 → a 연산</code>입니다.<br>
+      </p>
+    </div>
+    <div class="card good">
+      <h3>같은 파일의 직접 중복 import</h3>
+      <p>
+        한 파일이 <code>shared.qor</code>를 두 번 import하면 첫 번째 import에서 절대 경로를 <code>loaded</code>에 등록합니다.<br>
+        따라서 두 번째 import는 같은 경로를 확인하는 즉시 건너뛰며, 파일 읽기와 연산 병합도 반복하지 않습니다.<br>
+        이 경우는 순환이 아니므로 오류를 생성하지 않습니다.<br>
+      </p>
+    </div>
+    <div class="card good">
+      <h3>다이아몬드 import</h3>
+      <p>
+        <code>prepare</code>와 <code>readout</code>이 모두 <code>shared</code>를 import하더라도 첫 경로에서만 <code>shared</code>를 병합합니다.<br>
+        두 번째 경로가 <code>shared</code>에 도달할 때에는 첫 방문이 끝났으므로 <code>chain</code>에는 없고 <code>loaded</code>에만 남아 있습니다.<br>
+        따라서 정상적인 공유로 판단하고 다시 읽지 않습니다.<br>
+      </p>
+    </div>
+    <div class="card warn">
+      <h3>순환 import</h3>
+      <p>
+        <code>main → a → b → main</code>처럼 아직 처리가 끝나지 않은 상위 파일로 되돌아가면 대상이 <code>chain</code>에서 발견됩니다.<br>
+        이 경우 마지막 간선을 더 따라가지 않고 <code>QSEM021</code>을 생성합니다.<br>
+        순환 검사를 <code>loaded</code> 검사보다 먼저 수행하므로 순환을 단순 중복으로 잘못 처리하지 않습니다.<br>
+      </p>
+    </div>
+  </div>
+
+  <div class="diagram">
+    <svg viewBox="0 0 900 430" role="img" aria-labelledby="graph-title graph-desc">
+      <title id="graph-title">다이아몬드 import와 순환 import의 처리 차이</title>
+      <desc id="graph-desc">왼쪽은 prepare와 readout이 shared를 함께 import하는 다이아몬드 구조이며 shared는 한 번만 병합됩니다. 오른쪽은 sourcePath가 제공된 경우를 기준으로 main, a, b를 거쳐 다시 main으로 돌아오는 순환 구조이며 마지막 간선에서 QSEM021이 생성됩니다.</desc>
+      <defs>
+        <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+          <path d="M0,0 L8,4 L0,8 Z" fill="#485568"></path>
+        </marker>
+        <marker id="arrow-red" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+          <path d="M0,0 L8,4 L0,8 Z" fill="#d62b39"></path>
+        </marker>
+      </defs>
+
+      <rect x="12" y="12" width="425" height="405" rx="13" fill="#ffffff" stroke="#e6e8ee"></rect>
+      <text x="30" y="42" font-size="18" font-weight="700" fill="#1f2430">다이아몬드 — 두 번째 경로 생략</text>
+      <line x1="218" y1="100" x2="115" y2="154" stroke="#485568" stroke-width="2.5" marker-end="url(#arrow)"></line>
+      <line x1="225" y1="100" x2="330" y2="154" stroke="#485568" stroke-width="2.5" marker-end="url(#arrow)"></line>
+      <line x1="110" y1="205" x2="205" y2="263" stroke="#485568" stroke-width="2.5" marker-end="url(#arrow)"></line>
+      <line x1="335" y1="205" x2="238" y2="263" stroke="#485568" stroke-width="2.5" stroke-dasharray="7 5" marker-end="url(#arrow)"></line>
+      <rect x="164" y="62" width="120" height="42" rx="8" fill="#eef1f4" stroke="#485568"></rect>
+      <text x="224" y="88" text-anchor="middle" font-size="14" font-weight="700" fill="#1f2430">main.qor</text>
+      <rect x="47" y="159" width="130" height="48" rx="8" fill="#eef4ff" stroke="#1457d6"></rect>
+      <text x="112" y="188" text-anchor="middle" font-size="14" font-weight="700" fill="#1f2430">prepare.qor</text>
+      <rect x="272" y="159" width="130" height="48" rx="8" fill="#eef4ff" stroke="#1457d6"></rect>
+      <text x="337" y="188" text-anchor="middle" font-size="14" font-weight="700" fill="#1f2430">readout.qor</text>
+      <rect x="157" y="269" width="134" height="48" rx="8" fill="#e4f7ee" stroke="#11875b"></rect>
+      <text x="224" y="290" text-anchor="middle" font-size="14" font-weight="700" fill="#1f2430">shared.qor</text>
+      <text x="224" y="308" text-anchor="middle" font-size="11" fill="#11875b">한 번만 읽고 병합</text>
+      <text x="300" y="245" font-size="11" fill="#5b6472">loaded에 있으므로 생략</text>
+      <text x="30" y="355" font-size="13" fill="#5b6472">병합 순서</text>
+      <text x="30" y="380" font-size="14" font-weight="700" fill="#1f2430">main → shared → prepare → readout</text>
+      <text x="30" y="402" font-size="12" fill="#5b6472">엔트리 연산은 먼저, 자식 연산은 부모 연산보다 먼저</text>
+
+      <rect x="463" y="12" width="425" height="405" rx="13" fill="#ffffff" stroke="#e6e8ee"></rect>
+      <text x="481" y="42" font-size="18" font-weight="700" fill="#1f2430">순환 — 현재 경로로 복귀</text>
+      <line x1="675" y1="104" x2="565" y2="162" stroke="#485568" stroke-width="2.5" marker-end="url(#arrow)"></line>
+      <line x1="585" y1="203" x2="716" y2="268" stroke="#485568" stroke-width="2.5" marker-end="url(#arrow)"></line>
+      <path d="M760 266 C850 205, 840 104, 735 85" fill="none" stroke="#d62b39" stroke-width="3" marker-end="url(#arrow-red)"></path>
+      <rect x="621" y="62" width="120" height="42" rx="8" fill="#fdeef0" stroke="#d62b39"></rect>
+      <text x="681" y="88" text-anchor="middle" font-size="14" font-weight="700" fill="#1f2430">main.qor</text>
+      <rect x="500" y="163" width="110" height="44" rx="8" fill="#eef1f4" stroke="#485568"></rect>
+      <text x="555" y="190" text-anchor="middle" font-size="14" font-weight="700" fill="#1f2430">a.qor</text>
+      <rect x="704" y="270" width="110" height="44" rx="8" fill="#eef1f4" stroke="#485568"></rect>
+      <text x="759" y="297" text-anchor="middle" font-size="14" font-weight="700" fill="#1f2430">b.qor</text>
+      <text x="805" y="177" font-size="12" font-weight="700" fill="#d62b39">순환 간선</text>
+      <text x="805" y="195" font-size="12" font-weight="700" fill="#d62b39">QSEM021</text>
+      <text x="481" y="355" font-size="13" fill="#5b6472">발견 시점의 chain</text>
+      <text x="481" y="380" font-size="14" font-weight="700" fill="#1f2430">main.qor → a.qor → b.qor</text>
+      <text x="481" y="402" font-size="12" fill="#5b6472">main.qor를 다시 가리키는 간선에서 탐색 중단</text>
+    </svg>
+    <p class="caption">
+      두 구조 모두 같은 파일을 다시 가리키지만, 대상이 현재 <code>chain</code>에 있는지에 따라 정상 공유와 순환이 구분됩니다.<br>
+    </p>
+  </div>
+
+  <h2 id="errors"><span class="n">7</span>오류 처리와 부분 결과</h2>
+
+  <p>
+    로더는 하나의 import에서 문제가 발생하더라도 같은 단계의 다른 import를 계속 확인합니다.<br>
+    따라서 사용자는 여러 개의 누락 파일이나 읽기 문제를 한 번의 컴파일 결과에서 함께 확인할 수 있습니다.<br>
+    다만 오류가 하나라도 있으면 <code>QoraParser.Parse</code>가 후속 패스를 실행하지 않으므로, 반환된 부분 병합 결과는 진단용으로만 사용됩니다.<br>
+  </p>
+
+  <div class="panel">
+    <table class="spec">
+      <tr><th>상황</th><th>코드와 위치</th><th>처리 결과</th></tr>
+      <tr>
+        <td class="k">파일 문맥 없음</td>
+        <td><code>QSEM020</code><br>엔트리 import의 <code>Span</code></td>
+        <td><code>baseDir</code>가 <code>null</code>이면 상대 경로를 계산할 수 없습니다.<br>따라서 엔트리의 각 import에 오류를 만들고 파일을 열지 않으며, 입력 <code>program</code>을 그대로 반환합니다.<br></td>
+      </tr>
+      <tr>
+        <td class="k">사용할 수 없는 경로</td>
+        <td><code>QSEM020</code><br>해당 <code>QImport.Span</code></td>
+        <td><code>Path.Combine</code> 또는 <code>Path.GetFullPath</code>에서 발생한 예외를 경로 진단으로 변환합니다.<br>그다음 같은 목록의 다음 import를 처리합니다.<br></td>
+      </tr>
+      <tr>
+        <td class="k">파일 없음</td>
+        <td><code>QSEM020</code><br>해당 <code>QImport.Span</code></td>
+        <td>현재 파일 이름, 소스에 적힌 import 표기, 계산된 전체 경로를 메시지에 포함합니다.<br>대상 경로는 이미 <code>loaded</code>에 등록되었으므로 같은 경로를 다시 시도하지 않습니다.<br></td>
+      </tr>
+      <tr>
+        <td class="k">파일 읽기 실패</td>
+        <td><code>QSEM020</code><br>해당 <code>QImport.Span</code></td>
+        <td>권한 또는 I/O 예외 메시지를 진단에 포함한 뒤 다음 import를 처리합니다.<br></td>
+      </tr>
+      <tr>
+        <td class="k">순환 import</td>
+        <td><code>QSEM021</code><br>순환을 닫은 <code>QImport.Span</code></td>
+        <td><code>chain</code>에서 순환이 시작된 위치부터 파일 이름을 연결해 경로를 표시합니다.<br>그리고 순환을 만드는 간선만 중단합니다.<br></td>
+      </tr>
+      <tr>
+        <td class="k">import 파일 파싱 오류</td>
+        <td>원래 파서 오류 코드<br><code>Start = End = -1</code></td>
+        <td>원래 오류 코드를 유지하고 메시지 앞에 import 파일 이름을 붙입니다.<br>해당 파일의 IR은 만들지 않으므로 자식 import, 연산, <code>open</code>도 병합하지 않습니다.<br></td>
+      </tr>
+    </table>
+  </div>
+
+<pre><code><span class="cm">// 파일 없음</span>
+in main.qor: import "lib/missing.qor";
+— file not found: C:\work\app\lib\missing.qor
+<span class="rd">QSEM020</span>
+
+<span class="cm">// 순환</span>
+imports form a cycle:
+main.qor -&gt; a.qor -&gt; b.qor -&gt; main.qor
+<span class="rd">QSEM021</span></code></pre>
+
+  <h3>import 파일의 Span을 제거하는 이유</h3>
+
+  <p>
+    <code>QoraError.Start</code>와 <code>End</code>는 편집기에 열려 있는 엔트리 문서의 문자 위치를 뜻합니다.<br>
+    만약 import 파일의 문자 위치를 그대로 넣으면, 편집기는 그 숫자를 엔트리 문서의 위치로 해석해 전혀 다른 부분에 오류 표시를 그리게 됩니다.<br>
+    따라서 <code>ParseToIr</code>는 import 파일을 <code>QoraLowering.Lower(ast, withSpans: false)</code>로 변환하여 IR 노드의 <code>Span</code>을 제거합니다.<br>
+    또한 import 파일의 파싱 오류는 메시지에 파일 이름을 남기는 대신 위치를 <code>-1..-1</code>로 바꿉니다.<br>
+  </p>
+
+  <div class="call warn">
+    <span class="h">부분 결과의 의미</span>
+    <code>baseDir</code>가 있는 확장 경로에서는 일부 파일을 읽지 못하더라도, 현재까지 병합된 <code>Operations</code>와 <code>Opens</code>를 담은 프로그램을 반환합니다.<br>
+    그러나 <code>Errors.Count &gt; 0</code>이면 호출자가 <code>MeasureConditionLowering</code>과 Resolver를 실행하지 않습니다.<br>
+    그러므로 이 프로그램은 디버깅과 진단을 위한 중간 상태이며, 방출 가능한 유효 IR로 간주하면 안 됩니다.<br>
+  </div>
+
+  <h2 id="handoff"><span class="n">8</span>후속 패스에 넘기는 계약</h2>
+
+  <p>
+    import가 있고 경로 문맥도 제공된 확장 경로에서는, 성공 여부와 관계없이 반환용 레코드를 만들면서 <code>Imports = null</code>로 설정합니다.<br>
+    다만 후속 패스로 실제 전달되는 경우는 오류 목록이 비어 있는 성공 경로뿐입니다.<br>
+    성공한 프로그램에서는 모든 파일의 연산과 네임스페이스별 <code>open</code> 정보가 하나의 <code>QProgram</code>에 모여 있으므로, 이후 단계가 파일 시스템에 접근할 필요가 없습니다.<br>
+  </p>
+
+  <div class="panel">
+    <table class="spec">
+      <tr><th>항목</th><th>ModuleLoader가 보장하는 내용</th><th>후속 패스가 담당하는 내용</th></tr>
+      <tr>
+        <td class="k">연산 목록</td>
+        <td>엔트리 연산을 먼저 보존하고, import 파일 연산을 깊이 우선 순서로 한 번씩 추가합니다.<br></td>
+        <td>호출 이름 해소, 의미 검증, 연산 본문 변환</td>
+      </tr>
+      <tr>
+        <td class="k">파일 경계</td>
+        <td>성공한 확장 결과에서 <code>Imports = null</code>이며, 후속 단계가 읽어야 할 import 경로가 남지 않습니다.<br></td>
+        <td>파일 I/O 없음</td>
+      </tr>
+      <tr>
+        <td class="k">네임스페이스</td>
+        <td>같은 네임스페이스의 <code>open</code> 목록을 합치고, 같은 <code>Target</code>의 중복을 제거합니다.<br></td>
+        <td>Resolver가 <code>Namespace</code>와 <code>Opens</code>를 사용해 짧은 호출 이름을 완전 수식 이름으로 바꿉니다.<br></td>
+      </tr>
+      <tr>
+        <td class="k">중복 연산 이름</td>
+        <td>파일이 같은 경로인지 여부만 판단하며, 서로 다른 파일에 같은 연산 이름이 있는지는 허용 여부를 판단하지 않습니다.<br></td>
+        <td>Resolver가 연산 이름을 완전 수식 이름으로 바꾼 뒤, <code>QoraValidator</code>가 전체 이름을 비교하여 전역 중복 <code>QSEM008</code> 또는 네임스페이스 내부 중복 <code>QSEM022</code>를 생성합니다.<br></td>
+      </tr>
+      <tr>
+        <td class="k">노드 내용과 Id</td>
+        <td>연산 본문과 이름을 재작성하지 않으며, <code>program with { ... }</code>로 반환하므로 기존 <code>QProgram.Id</code>를 유지합니다.<br></td>
+        <td>각 전용 IR 패스가 필요한 노드만 이후에 변환합니다.<br></td>
+      </tr>
+      <tr>
+        <td class="k">심볼릭 링크</td>
+        <td><code>GetFullPath</code> 결과를 대소문자 구분 없이 비교합니다.<br></td>
+        <td>서로 다른 경로가 같은 물리 파일을 가리키는지까지 판별하지는 않습니다.<br></td>
+      </tr>
+    </table>
+  </div>
+
+  <div class="pipe" aria-label="ModuleLoader 이후 계약">
+    <div class="box key"><b>ModuleLoader 정상 출력</b> <span class="d">— 하나의 QProgram, 처리할 Imports 없음, 파일별 Operations와 Opens 병합 완료</span></div>
+    <div class="arr">▼</div>
+    <div class="box"><b>MeasureConditionLowering</b> <span class="d">— 어느 파일에서 온 연산인지와 관계없이 측정 조건을 동일한 IR 형태로 변환</span></div>
+    <div class="arr">▼</div>
+    <div class="box"><b>Resolver</b> <span class="d">— 전체 Operations와 네임스페이스별 Opens를 사용해 호출 대상을 확정</span></div>
+    <div class="arr">▼</div>
+    <div class="box"><b>QoraValidator</b> <span class="d">— 병합 뒤에 드러난 중복 정의와 호출 규칙을 전체 프로그램 단위로 검사</span></div>
+  </div>
+
+  <p>
+    정리하면 <code>ModuleLoader</code>의 책임은 경로로 연결된 여러 파일을 하나의 IR 컨테이너에 모으는 데까지입니다.<br>
+    이름의 의미를 결정하거나 연산 본문을 바꾸지 않으며, 그 작업에 필요한 전체 프로그램 문맥만 준비합니다.<br>
+    이러한 책임 분리 덕분에 후속 패스는 파일이 몇 개였는지 알 필요 없이 <code>QProgram</code> 하나만 처리할 수 있습니다.<br>
+  </p>
+
+  <nav class="doc-links" aria-label="IR 패스 데이터시트 내비게이션">
+    <a class="doc-link" href="ir-pass-01-qora-lowering.html">← 1. QoraLowering</a>
+    <a class="doc-link" href="datasheet.html#s2">패스 목차</a>
+  </nav>
+
+  <footer>
+    IR 패스 데이터시트 · 2장 · <code>ModuleLoader</code> ·
+    <a href="datasheet.html#s2">패스 목차</a> ·
+    <a href="datasheet.html">컴파일러 데이터시트</a>
+  </footer>
+
+</div>
+</body>
+</html>

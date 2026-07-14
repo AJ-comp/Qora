@@ -3,7 +3,7 @@ namespace Qora.Ir;
 /// <summary>The compiler's version, stamped into emitted QASM for provenance.</summary>
 public static class QoraVersion
 {
-    public const string Value = "0.19";
+    public const string Value = "0.20";
 }
 
 /// <summary>
@@ -185,7 +185,19 @@ public sealed record QUse(string Name, int Size) : QStmt;
 /// can stack (<c>inv @ ctrl @ …</c>). The emitter tells a gate from a call by whether <see cref="Name"/>
 /// is a defined operation.
 /// </summary>
-public sealed record QGate(IReadOnlyList<string> Functors, string Name, IReadOnlyList<QArg> Args) : QStmt;
+public sealed record QGate(IReadOnlyList<string> Functors, string Name, IReadOnlyList<QArg> Args) : QStmt
+{
+    /// <summary>For a user-operation CALL, the stable node Id of the callee operation — bound ONCE at name
+    /// resolution (<see cref="Passes.Resolver"/>) and re-pointed when the call is rewritten (monomorphization
+    /// aims it at the size specialization). Null for a built-in gate (X, CNOT, …), which resolves to no
+    /// operation, so <c>CalleeOpId is int</c> ⟺ "this gate is a user-op call". Consumers that need the callee
+    /// FOLLOW this reference instead of re-matching <see cref="Name"/>, which is domain-dependent (a generic
+    /// call is <c>Loop</c> pre-mono, <c>Loop__sz2</c> post-mono, a third form post-mangle). Cleared to null by
+    /// <see cref="Passes.AdjointMaterializer"/> when it rewrites <c>Adjoint Foo</c> to a <c>Foo__adj</c> call:
+    /// the synthesized inverse's Id is not yet minted at that point, and no post-adjoint consumer needs the
+    /// reference (analysis runs earlier), so null (= "unbound, resolve by name") is honest, never a stale Id.</summary>
+    public int? CalleeOpId { get; init; }
+}
 
 /// <summary><c>const int n = e;</c> / <c>int n = e;</c> / <c>bit r = M(q);</c> (measurement when Value is <see cref="QMeasure"/>).</summary>
 public sealed record QDecl(bool IsConst, QType? Type, string Name, QExpr Value) : QStmt;

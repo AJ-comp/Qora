@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>언어 지형 속의 Qora — 자동 uncomputation 코스 16/16 — Qora</title>
+<style>
+  :root {
+    --bg: #ffffff; --ink: #1f2430; --muted: #5b6472; --line: #e6e8ee; --panel: #f7f8fb;
+    --plus: #1457d6; --minus: #d62b39; --accent: #6b3fd4; --good: #11875b; --amber: #b5810a;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo",
+      "Malgun Gothic", "Noto Sans KR", "Segoe UI Symbol", "Cambria Math", sans-serif;
+    line-height: 1.7; font-size: 16.5px;
+  }
+  .wrap { max-width: 940px; margin: 0 auto; padding: 0 20px 120px; }
+  header.hero {
+    padding: 60px 20px 36px; text-align: center; border-bottom: 1px solid var(--line);
+    background: linear-gradient(180deg, #faf9ff, #ffffff);
+  }
+  header.hero h1 { font-size: 2.0rem; margin: 0 0 10px; letter-spacing: -0.5px; }
+  header.hero p { color: var(--muted); margin: 0; font-size: 1.02rem; }
+  .tag { display:inline-block; font-size:.78rem; letter-spacing:.12em; text-transform:uppercase;
+         color: var(--accent); font-weight:700; margin-bottom:14px; }
+  h2 { margin: 54px 0 12px; font-size: 1.42rem; letter-spacing: -0.3px;
+       padding-top: 14px; border-top: 2px solid var(--line); }
+  h2 .n { display:inline-flex; align-items:center; justify-content:center;
+    width: 1.7em; height: 1.7em; border-radius: 50%;
+    background: var(--accent); color:#fff; font-size: .8rem; font-weight:700;
+    margin-right: 10px; vertical-align: middle; }
+  h3 { margin: 30px 0 8px; font-size: 1.1rem; }
+  p { margin: 12px 0; }
+  strong { color: #11203a; }
+  .lead { font-size: 1.05rem; }
+  code, .mono, pre {
+    font-family: "SF Mono", "JetBrains Mono", "D2Coding", Consolas, "Segoe UI Symbol", monospace;
+  }
+  code { background: var(--panel); border: 1px solid var(--line); border-radius: 5px; padding: 1px 6px; font-size: .9em; }
+  pre { background: #111827; color: #eef4ff; border-radius: 10px; padding: 15px 17px; margin: 16px 0;
+        overflow-x: auto; font-size: .86rem; line-height: 1.55; }
+  pre code { background: none; border: none; padding: 0; font-size: inherit; color: inherit; }
+  pre .cm { color: #8ba0c7; }
+  pre .hl { color: #c4a7ff; font-weight: 700; }
+  pre .add { color: #7fe0b0; font-weight: 700; }
+  pre .rd { color: #ff9db0; font-weight: 700; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+           padding: 14px 16px; margin: 16px 0; overflow-x: auto; }
+  table.spec { border-collapse: collapse; width: 100%; font-size: .92rem; }
+  table.spec th, table.spec td { padding: 8px 11px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: top; }
+  table.spec th { font-size: .78rem; color: var(--muted); font-weight: 700; letter-spacing:.02em; background:#fbfbfe; }
+  table.spec tr:last-child td { border-bottom: none; }
+  table.spec code { white-space: nowrap; }
+  table.spec td.k { white-space: nowrap; font-weight: 700; color:#1a2740; }
+  .call { border-left: 4px solid var(--accent); background: #faf8ff;
+          padding: 13px 17px; border-radius: 0 8px 8px 0; margin: 18px 0; }
+  .call.why { border-color: var(--good); background: #f2fbf7; }
+  .call.warn { border-color: #e6a417; background: #fff9ec; }
+  .call .h { font-weight: 700; display:block; margin-bottom: 4px; }
+  .call p { margin: 8px 0 0; }
+  .rule { text-align:center; font-size: 1.02rem; font-weight: 700; color:#1a1140;
+          background: #f3efff; border:1px solid #e2d8ff; border-radius: 10px; padding: 15px; margin: 20px 0; }
+  .toc { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 20px; margin: 24px 0; }
+  .toc ol { margin: 6px 0 0; padding-left: 20px; columns: 2; column-gap: 30px; }
+  .toc a { color: var(--ink); text-decoration: none; }
+  .toc a:hover { color: var(--accent); }
+  .doc-links { display:flex; flex-wrap:wrap; gap:10px; margin: 18px 0 6px; }
+  .doc-link { display:inline-flex; align-items:center; gap:8px; border:1px solid #cddcff;
+              background:#f6f9ff; color:#1745b5; border-radius:999px; padding:7px 15px; font-weight:700; text-decoration:none; font-size:.92rem; }
+  .doc-link:hover { border-color:#9bb8ff; background:#eef4ff; }
+  .doc-meta { border: 1px solid #dfe5f2; border-left: 5px solid var(--accent); border-radius: 8px;
+              background: #f8faff; padding: 16px 18px; margin: 22px 0; }
+  .doc-meta .meta-title { font-weight: 800; color: #11203a; margin-bottom: 12px; }
+  .meta-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 18px; margin: 0; }
+  .meta-grid dt { color: var(--muted); font-size: .74rem; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; }
+  .meta-grid dd { margin: 3px 0 0; }
+  footer { text-align:center; color:var(--muted); font-size:.9rem; margin-top: 60px; padding-top: 24px; border-top:1px solid var(--line); }
+  /* datasheet-specific */
+  .pipe { display:flex; flex-direction:column; gap:0; margin: 18px 0; }
+  .pipe .stg { display:flex; align-items:center; gap:12px; }
+  .pipe .box { flex:1; background:#fff; border:1px solid var(--line); border-radius:8px; padding:9px 13px; font-size:.92rem; }
+  .pipe .box b { color:#1a2740; }
+  .pipe .box .d { color:var(--muted); font-size:.85rem; }
+  .pipe .box.key { border-color:#c9b6f4; background:#faf7ff; }
+  .pipe .arr { text-align:center; color:var(--accent); font-size:1.2rem; line-height:1; margin:5px 0; }
+  .ladder { display:grid; gap:10px; margin:18px 0; }
+  .rung { display:grid; grid-template-columns:auto 1fr; gap:14px; align-items:start;
+          border:1px solid var(--line); border-radius:10px; padding:13px 16px; background:#fff; }
+  .rung .rn { width:38px; height:38px; border-radius:8px; background:var(--accent); color:#fff;
+              font-weight:800; display:flex; align-items:center; justify-content:center; font-size:1.05rem; }
+  .rung.done { border-left:5px solid var(--good); }
+  .rung.done .rn { background:var(--good); }
+  .rung .rt { font-weight:800; color:#1a2740; }
+  .rung .rd { color:var(--muted); font-size:.92rem; margin-top:2px; }
+  .rung .st { display:inline-block; font-size:.72rem; font-weight:800; border-radius:999px; padding:2px 9px; margin-left:8px; vertical-align:middle; }
+  .rung .st.ok { background:#e4f7ee; color:var(--good); }
+  .rung .st.next { background:#f3efff; color:var(--accent); }
+  .badge { display:inline-block; font-size:.72rem; font-weight:800; border-radius:5px; padding:1px 7px; }
+  .badge.r { background:#eef4ff; color:var(--plus); }
+  .badge.w { background:#fdeef0; color:var(--minus); }
+  .badge.m { background:#f3efff; color:var(--accent); }
+  .grid2 { display:grid; grid-template-columns:1fr; gap:14px; margin:16px 0; }
+  @media (min-width:740px){ .grid2 { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+  .card { background:#fff; border:1px solid var(--line); border-radius:8px; padding:14px 16px; }
+  .card.good { border-top:4px solid var(--good); }
+  .card.bad { border-top:4px solid var(--minus); }
+  .card h4 { margin:0 0 8px; font-size:1rem; }
+  @media (max-width: 720px) { .meta-grid, .toc ol { grid-template-columns: 1fr; columns:1; } }
+</style>
+</head>
+<body>
+<div class="qora-lang-switch" style="position:sticky;top:0;z-index:99;text-align:right;padding:8px 16px;background:rgba(255,255,255,.92);backdrop-filter:blur(4px);border-bottom:1px solid #e6e8ee;font-size:13px;font-family:sans-serif;"><a href="../en/index.html">English</a> · <strong>한국어</strong> · <a href="../ja/index.html">日本語</a></div>
+
+<header class="hero">
+  <div class="tag">Qora · 자동 uncomputation 코스 · 16/16</div>
+  <h1>16. 언어 지형 속의 Qora</h1>
+  <p>2026년의 도구들과 Qora의 자리</p>
+</header>
+
+<div class="wrap">
+
+  <nav class="doc-links" aria-label="코스 내비게이션">
+    <a class="doc-link" href="uncompute-15-two-runtimes.html">← 15. 왜 정적 컴파일인가 — 두 개의 런타임</a>
+    <a class="doc-link" href="datasheet.html#s8">코스 목차</a>
+  </nav>
+  <p>
+    <a href="uncompute-15-two-runtimes.html">15장</a>은 마이크로초의 코히어런스 창이 호스트의
+    인터프리터를 물리적으로 거부하기 때문에, 회로 내 반응 로직은 컴파일되어 QPU 옆에 미리 배치되어야
+    한다는 결론으로 끝났습니다.<br>
+    그렇다면 같은 물리 위에서 일하는 다른 도구들은 이 강제 앞에서 각자 어떤 자리를 골랐을까요.<br>
+    이 장에서는 2026년 현재의 도구들을 층별로 세워 놓고, 앞 장들에서 유도한 규칙들이 그 지형의
+    어디에 서 있는지 확인합니다.
+  </p>
+
+  <h3>도구들이 서 있는 세 개의 층 — 규칙을 누가 언제 검사하는가</h3>
+  <p>
+    2026년 현재 양자 프로그래밍 도구들은 크게 세 층으로 나뉘며, 층을 가르는 기준은 프로그램의 규칙을
+    누가 언제 검사하는가입니다.<br>
+    아래층부터 하나씩 올라가 보겠습니다.
+  </p>
+  <p>
+    첫 번째는 <strong>라이브러리 층</strong>으로, Qiskit과 Cirq가 여기에 있습니다.<br>
+    이 층에서는 Python 코드가 회로를 조립해 줍니다.<br>
+    생태계는 가장 크지만, 회로를 만드는 주체가 언어가 아니라 보통의 Python 프로그램이므로 규칙 위반을
+    실행 전에 잡아 주는 컴파일 타임 보증이 없습니다.<br>
+    방치된 앤실라(<a href="uncompute-01-ancilla.html">1장</a>) 같은 위반을 회로가 조립되는 시점에
+    검사해 항 주체가 이 층에는 없다는 뜻입니다.
+  </p>
+  <p>
+    두 번째는 <strong>컴파일러 인프라 층</strong>으로, NVIDIA의 CUDA-Q가 여기에 있습니다.<br>
+    CUDA-Q는 그 자체가 언어가 아니라, 여러 언어가 올라타는 컴파일 기반(MLIR→QIR)과 GPU 시뮬레이터를
+    제공합니다.<br>
+    규칙을 정하는 층이 아니라, 규칙 검사를 마친 프로그램이 지나가는 공용 기반입니다.
+  </p>
+  <p>
+    세 번째가 <strong>언어 층</strong>으로, Silq·Guppy·Classiq Qmod 그리고 Qora처럼 프로그램을 언어
+    차원에서 받아들여 규칙을 검사하는 시스템들이 여기에 있습니다.<br>
+    Silq는 자동 uncomputation의 원조인 인터프리터 언어이지만, 실기계 실행 경로가 없습니다.<br>
+    Quantinuum의 Guppy는 선형 타입으로 큐빗 누수와 복제를 컴파일 에러로 강제하되, 청소 자체는
+    사용자 몫으로 남깁니다.<br>
+    Classiq Qmod는 추론 기반 자동 uncomputation을 클로즈드 플랫폼으로 상용화했습니다.<br>
+    Qora는 이 층에서 주석 없는 추론과 자동 청소, 그리고 못 치우면 명시적 에러라는 조합을
+    OpenQASM 3로 AOT 컴파일하는 공개 구현으로 제공합니다.
+  </p>
+  <p>
+    세 층을 한눈에 정리하면 다음과 같습니다.
+  </p>
+  <div class="panel">
+    <table class="spec">
+      <tr><th>도구</th><th>방식</th><th>특징</th></tr>
+      <tr><td class="k">Qiskit · Cirq</td><td>Python이 회로를 조립</td><td>최대 생태계 — 다만 언어가 아니라서 컴파일 타임 보증이 없습니다</td></tr>
+      <tr><td class="k">Silq</td><td>인터프리터 언어</td><td>자동 uncomputation의 원조 — 다만 실기계 실행 경로가 없습니다</td></tr>
+      <tr><td class="k">CUDA-Q (NVIDIA)</td><td>컴파일러 인프라 (MLIR→QIR)</td><td>언어가 아니라 언어들이 올라타는 기반 + GPU 시뮬레이터</td></tr>
+      <tr><td class="k">Guppy (Quantinuum)</td><td>정적 컴파일, 선형 타입</td><td>큐빗 누수·복제를 컴파일 에러로 강제 — 청소는 사용자 몫</td></tr>
+      <tr><td class="k">Classiq Qmod</td><td>정적 컴파일 + 합성</td><td>추론 기반 자동 uncomputation을 상용화 — 클로즈드 플랫폼</td></tr>
+      <tr><td class="k"><strong>Qora</strong></td><td>정적 컴파일 (AOT → OpenQASM 3)</td><td>주석 없는 추론 + 자동 청소 + 못 치우면 명시적 에러 — 공개 구현, 교육 지향</td></tr>
+    </table>
+  </div>
+
+  <h3>언어 층이 공유하는 한 가지 구조 — 컴파일 에러와 명시적 탈출구</h3>
+  <p>
+    층이 정리되었으니 이제 언어 층 안으로 들어가, 검사를 언어가 맡는다는 공통점 아래에서 이
+    시스템들이 또 무엇을 공유하는지 보겠습니다.<br>
+    표의 언어들은 접근이 서로 달라도 한 가지 구조를 공유합니다.<br>
+    자동으로 보증할 수 없는 것은
+    조용히 넘기는 대신 <strong>컴파일 에러로 알리고</strong>, 프로그래머가 직접 책임지겠다고 선언할 수
+    있는 <strong>명시적 탈출구</strong>를 따로 제공합니다.<br>
+    Silq의 <code>forget</code>, Classiq의
+    <code>free</code>와 <code>within-apply</code>, Guppy의 명시적 discard가 각 언어의 탈출구이고,
+    Qora에서는 "측정하지 않은 <code>use</code> 레지스터는 스코프가 끝날 때 |0⟩로 반납되어야 하며
+    위반은 에러"라는 언어 규칙이 같은 자리를 차지합니다.
+  </p>
+
+  <h3>예제 — 이 구조가 Qora 코드에서 보이는 모습</h3>
+
+  <h4>1단계 — 안전 판정을 통과하면 청소 코드가 주입됩니다</h4>
+  <p>
+    먼저 자동 보증이 성립하는 기준선 프로그램부터 보겠습니다.<br>
+    앤실라 <code>t</code>의 이력은 CNOT 한 번뿐이고, CNOT 게이트는 기저 상태의 값만 바꾸고 진폭은 건드리지
+    않는 qfree 편집입니다 (<a href="uncompute-09-qfree.html">9장</a>).<br>
+    그래서 <code>t</code>는 안전 판정을 통과하고, 컴파일러가 사망점에 역연산
+    <code>CNOT(q[0], t[0])</code>를 자동으로 주입합니다.
+  </p>
+<pre><code>operation Main(){
+    use q = Qubit[1];
+    use t = Qubit[1];
+    H(q[0]);
+    CNOT(q[0], t[0]);   <span class="cm">// t의 마지막 사용 = 사망점</span>
+    <span class="add">CNOT(q[0], t[0]);</span>   <span class="cm">// ← 컴파일러가 자동 주입</span>
+    H(q[0]);
+    bit m = M(q[0]);
+    <span class="cm">// m = 0 (확률 100%)</span>
+}</code></pre>
+  <p>
+    주입된 CNOT 게이트가 <code>t</code>의 기록을 지워 얽힘을 풀기 때문에, 두 번째 H 게이트에서는 두 기저 상태 항에서
+    나온 기여가 다시 만나 |0⟩ 쪽에서는 보강되고 |1⟩ 쪽에서는 상쇄되므로, 측정 결과는 언제나
+    0입니다.<br>
+    <a href="uncompute-01-ancilla.html">1장</a>의 해결 단계에서 손으로 넣었던 바로 그 정리 코드를,
+    여기서는 컴파일러가 넣어 줍니다.
+  </p>
+
+  <h4>2단계 — 한 줄을 더하면 같은 프로그램이 컴파일 에러가 됩니다</h4>
+  <p>
+    이제 기준선 프로그램의 CNOT 뒤에 딱 한 줄, <code>Y(t[0])</code>를 끼워 넣겠습니다.
+  </p>
+<pre><code>operation Main(){
+    use q = Qubit[1];
+    use t = Qubit[1];
+    H(q[0]);
+    CNOT(q[0], t[0]);
+    <span class="rd">Y(t[0]);</span>            <span class="cm">// ← 추가된 한 줄</span>
+    H(q[0]);
+    bit m = M(q[0]);
+}
+<span class="cm">// 컴파일 에러: t를 자동으로 치울 수 없음</span></code></pre>
+  <p>
+    1단계에서 청소가 성립한 근거는 <code>t</code>의 이력이 진폭을 건드리지 않는 편집뿐이라는
+    점이었습니다.<br>
+    Y 게이트가 그 근거를 깨뜨립니다.<br>
+    Y 게이트는 기저 상태의 값을 뒤집으면서 값에 따라 서로 다른 위상을 진폭에 곱하는 쓰기라서, 얽힌
+    <code>t</code>에 남긴 위상이 두 기저 상태 항 사이의 상대 위상으로 살아남고, 어떤 역연산 주입도
+    <a href="uncompute-09-qfree.html">9장</a>의 두 조건을 함께 지킬 수 없게 됩니다
+    (<a href="uncompute-10-y-gate.html">10장</a>).<br>
+    자동 청소가 불가능해졌으므로, 컴파일러는 조용히 넘어가는 대신 에러로 보고합니다.
+  </p>
+  <p>
+    이 에러에서 벗어나는 길도 명시적입니다.<br>
+    Y 게이트를 계산에서 걷어내거나, <code>t</code>를 직접 측정해 출력으로 승격시키면
+    (<a href="uncompute-02-ladder.html">2장</a>) 청소 대상에서 빠집니다.<br>
+    어느 쪽이든 선택이 코드에 그대로 남으므로, 컴파일러가 몰래 무언가를 버리는 일은 없습니다.
+  </p>
+
+  <h3>같은 접근은 같은 규칙에 도달했을까요 — Classiq Qmod와 항목별 비교</h3>
+  <p>
+    탈출구의 모양은 언어마다 달라도 구조는 같았습니다.<br>
+    그렇다면 접근까지 같은 두 시스템은 세부 규칙까지 같아질까요.<br>
+    이 질문을 확인할 상대로 가장 알맞은 시스템이 Classiq Qmod입니다.<br>
+    주석 없는 추론으로 앤실라를
+    식별해 자동으로 청소한다는 접근이 Qora와 같으므로, 항목별로 나란히 놓으면 어느 선택이 접근
+    자체에서 오고 어느 선택이 구현마다 달라지는지가 드러납니다.
+  </p>
+
+  <h4>앤실라 식별 — 두 시스템 모두 주석 없는 추론입니다</h4>
+  <p>
+    1단계 예제에서 <code>t</code>가 청소 대상임을 표시하는 주석이나 특별한 표기는 코드 어디에도
+    없었습니다.<br>
+    Qora는 <code>use</code>로 태어났는가와 측정되었는가라는 사실만으로 청소 후보를 추론하고
+    (<a href="uncompute-02-ladder.html">2장</a>의 판별 사다리), Classiq Qmod도 같은 추론 접근으로
+    앤실라를 식별합니다.<br>
+    이 항목에서 두 시스템은 완전히 같은 자리에 서 있습니다.
+  </p>
+
+  <h4>청소 메커니즘 — 둘 다 역연산 주입입니다</h4>
+  <p>
+    청소의 실체도 두 시스템 모두 같아서, 앤실라의 이력을 거꾸로 되감는 역연산을 회로에 넣습니다.<br>
+    Qora에서는 주입 위치가 앤실라의 마지막 사용 직후, 곧 사망점 한 곳으로 정해져 있으며
+    (<a href="uncompute-11-injector.html">11장</a>), 1단계 예제에서 자동으로 들어간
+    <code>CNOT(q[0], t[0])</code>가 정확히 그 주입입니다.<br>
+    Classiq Qmod는 같은 역연산 주입을 쓰되, 어디에 배치할지는 합성 엔진이 결정합니다.
+  </p>
+
+  <h4>루프·조건문 안의 쓰기 — 여기서부터 달라집니다</h4>
+  <p>
+    Qora의 주입기는 문장 단위로만 역을 만들 수 있어서, <code>for</code>나 <code>if</code> 같은
+    컨테이너 안에 들어 있는 앤실라 쓰기를 만나면 ContainedWrite로 분류해 자동 청소를 차단합니다
+    (<a href="uncompute-12-loops.html">12장</a>).
+  </p>
+<pre><code>operation Main(){
+    use a   = Qubit[3];
+    use out = Qubit[1];
+    <span class="rd">for i in 0..2 { X(a[i]); }</span>   <span class="cm">// 벌거벗은 루프</span>
+    CNOT(a[0], out[0]);
+    bit c = M(out[0]);
+}
+<span class="cm">// a 청소 불가 (ContainedWrite) — 루프를 연산으로 감싸면 통과합니다 (12장)</span></code></pre>
+  <p>
+    이 거부는 물리의 벽이 아니라 현재 구현이 안전한 쪽으로 물러선 보수적 거부이고
+    (<a href="uncompute-14-limits.html">14장</a>), Classiq Qmod는 같은 자리를 복합문 통째 역변환으로
+    지원합니다.
+  </p>
+
+  <h4>원소 단위 정밀도 — Qora는 원소별로 판정합니다</h4>
+  <p>
+    한 레지스터 안에서 원소마다 처리가 나뉘는 경우, Qora는 원소별로 따로 판정하고 리포트도 원소
+    단위로 이유를 보고합니다 (<a href="uncompute-13-blanket.html">13장</a>).<br>
+    아래 프로그램에서 측정된 <code>a[0]</code>은 출력으로 승격되고, <code>a[1]</code>만 청소 후보로
+    판정되어 역연산이 자동 주입됩니다.
+  </p>
+<pre><code>operation FlipOne(Qubit p){ X(p); }
+operation Main(){
+    use a = Qubit[2];
+    FlipOne(a[0]);             <span class="cm">// 문장 폭 = a[0] 하나</span>
+    FlipOne(a[1]);             <span class="cm">// a[1]의 마지막 사용 = 사망점</span>
+    <span class="add">Adjoint FlipOne(a[1]);</span>     <span class="cm">// ← a[1]만 골라서 자동 주입</span>
+    bit c = M(a[0]);           <span class="cm">// c = 1 (확률 100%) — a[0]은 출력으로 승격</span>
+}</code></pre>
+  <p>
+    Classiq Qmod에서 배열은 수명상 한 덩어리라서, 같은 상황이 오면 사용자가 배열을 수동으로
+    분할해야 합니다.
+  </p>
+
+  <h4>Y·CY의 취급 — 같은 위험을 서로 다른 자리에서 막습니다</h4>
+  <p>
+    2단계 예제에서 본 대로, Qora는 청소 후보의 이력에 Y·CY 쓰기가 들어오면 차단합니다
+    (<a href="uncompute-10-y-gate.html">10장</a>).<br>
+    Classiq Qmod는 Y 자체를 허용하되, 얽힌 상대에게 비치환 연산을 금지합니다.<br>
+    막는 자리가 다를 뿐 지키려는 것은 같습니다.<br>
+    값에 따라 다른 위상이 얽힌 기저 상태 항 사이의 상대 위상으로 남아 청소를 무너뜨리는 일을, 양쪽 모두
+    규칙으로 봉쇄합니다.
+  </p>
+
+  <h4>동적 값 — 막는 방식이 다를 뿐 도착점은 같습니다</h4>
+  <p>
+    컴파일 타임에 정해지지 않는 인덱스나 루프 경계가 이력에 들어오면 Qora는 에러로 보고합니다
+    (<a href="uncompute-14-limits.html">14장</a>).<br>
+    Classiq Qmod는 문법 자체가 컴파일 타임 전용이어서, 그런 값을 적을 자리부터 없습니다.<br>
+    에러로 막느냐 문법으로 막느냐가 다를 뿐, 회로는 컴파일 타임에 확정된다는
+    <a href="uncompute-15-two-runtimes.html">15장</a>의 물리적 강제에 대한 답이라는 점은 같습니다.
+  </p>
+
+  <p>
+    여섯 항목을 한눈에 정리하면 다음과 같습니다.
+  </p>
+  <div class="panel">
+    <table class="spec">
+      <tr><th>비교 항목</th><th>Qora</th><th>Classiq Qmod (같은 접근의 상용 시스템)</th></tr>
+      <tr><td class="k">앤실라 식별</td><td>추론 (주석·표기 불필요)</td><td>추론 — 같은 접근</td></tr>
+      <tr><td class="k">청소 메커니즘</td><td>역연산 주입</td><td>역연산 주입 + 합성 엔진이 배치 결정</td></tr>
+      <tr><td class="k">루프/조건문의 청소</td><td>보수적 거부 (<a href="uncompute-12-loops.html">7</a>·<a href="uncompute-14-limits.html">14장</a> — 완화 예정)</td><td>복합문 통째 역변환으로 지원</td></tr>
+      <tr><td class="k">원소 단위 정밀도</td><td>원소별 판정·리포트 지원</td><td>배열은 수명상 한 덩어리 — 사용자가 수동 분할</td></tr>
+      <tr><td class="k">Y·CY 취급</td><td>차단 (<a href="uncompute-10-y-gate.html">10장</a>)</td><td>허용하되 얽힌 상대에게 비치환 연산 금지 — 다른 방식의 방어</td></tr>
+      <tr><td class="k">동적 값 (인덱스·경계)</td><td>에러</td><td>문법으로 금지 (컴파일 타임 전용)</td></tr>
+    </table>
+  </div>
+
+  <h3>서로 달라진 부분과 수렴한 부분 — 규칙은 문제 자체의 형태입니다</h3>
+  <p>
+    항목별로 놓고 보니 서로 달라진 부분은 배치의 결정자, 복합문의 지원 범위, 판정의 단위처럼 구현의 선택이
+    쌓이는 자리였습니다.<br>
+    반면 규칙의 핵심부는 갈리지 않았습니다.<br>
+    두 시스템은 서로를 참고하지 않고 독립적으로 만들어졌는데도 거의 같은 규칙 집합에 도달했습니다.<br>
+    비치환 쓰기 금지, 재료 보존, 순환 의존 금지가 그것이며,
+    <a href="uncompute-09-qfree.html">9장</a>부터 <a href="uncompute-13-blanket.html">13장</a>까지
+    하나씩 유도한 조항들과 같습니다.<br>
+    같은 문제를 풀면 같은 규칙이 나온다는 이 수렴은, 이 규칙들이
+    특정 구현의 취향이 아니라 <strong>정적 컴파일과 자동 청소라는 문제 자체의 형태</strong>임을
+    보여줍니다.
+  </p>
+
+  <nav class="doc-links" aria-label="코스 내비게이션">
+    <a class="doc-link" href="uncompute-15-two-runtimes.html">← 15. 왜 정적 컴파일인가 — 두 개의 런타임</a>
+    <a class="doc-link" href="datasheet.html#s8">코스 목차</a>
+  </nav>
+
+  <footer>
+    자동 uncomputation 코스 16/16 · <a href="datasheet.html#s8">코스 목차</a> ·
+    <a href="datasheet.html">컴파일러 데이터시트</a>
+  </footer>
+
+</div>
+</body>
+</html>

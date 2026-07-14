@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Y·CY가 차단되는 이유 — 위상 — 자동 uncomputation 코스 10/16 — Qora</title>
+<style>
+  :root {
+    --bg: #ffffff; --ink: #1f2430; --muted: #5b6472; --line: #e6e8ee; --panel: #f7f8fb;
+    --plus: #1457d6; --minus: #d62b39; --accent: #6b3fd4; --good: #11875b; --amber: #b5810a;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo",
+      "Malgun Gothic", "Noto Sans KR", "Segoe UI Symbol", "Cambria Math", sans-serif;
+    line-height: 1.7; font-size: 16.5px;
+  }
+  .wrap { max-width: 940px; margin: 0 auto; padding: 0 20px 120px; }
+  header.hero {
+    padding: 60px 20px 36px; text-align: center; border-bottom: 1px solid var(--line);
+    background: linear-gradient(180deg, #faf9ff, #ffffff);
+  }
+  header.hero h1 { font-size: 2.0rem; margin: 0 0 10px; letter-spacing: -0.5px; }
+  header.hero p { color: var(--muted); margin: 0; font-size: 1.02rem; }
+  .tag { display:inline-block; font-size:.78rem; letter-spacing:.12em; text-transform:uppercase;
+         color: var(--accent); font-weight:700; margin-bottom:14px; }
+  h2 { margin: 54px 0 12px; font-size: 1.42rem; letter-spacing: -0.3px;
+       padding-top: 14px; border-top: 2px solid var(--line); }
+  h2 .n { display:inline-flex; align-items:center; justify-content:center;
+    width: 1.7em; height: 1.7em; border-radius: 50%;
+    background: var(--accent); color:#fff; font-size: .8rem; font-weight:700;
+    margin-right: 10px; vertical-align: middle; }
+  h3 { margin: 30px 0 8px; font-size: 1.1rem; }
+  p { margin: 12px 0; }
+  strong { color: #11203a; }
+  .lead { font-size: 1.05rem; }
+  code, .mono, pre {
+    font-family: "SF Mono", "JetBrains Mono", "D2Coding", Consolas, "Segoe UI Symbol", monospace;
+  }
+  code { background: var(--panel); border: 1px solid var(--line); border-radius: 5px; padding: 1px 6px; font-size: .9em; }
+  pre { background: #111827; color: #eef4ff; border-radius: 10px; padding: 15px 17px; margin: 16px 0;
+        overflow-x: auto; font-size: .86rem; line-height: 1.55; }
+  pre code { background: none; border: none; padding: 0; font-size: inherit; color: inherit; }
+  pre .cm { color: #8ba0c7; }
+  pre .hl { color: #c4a7ff; font-weight: 700; }
+  pre .add { color: #7fe0b0; font-weight: 700; }
+  pre .rd { color: #ff9db0; font-weight: 700; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+           padding: 14px 16px; margin: 16px 0; overflow-x: auto; }
+  table.spec { border-collapse: collapse; width: 100%; font-size: .92rem; }
+  table.spec th, table.spec td { padding: 8px 11px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: top; }
+  table.spec th { font-size: .78rem; color: var(--muted); font-weight: 700; letter-spacing:.02em; background:#fbfbfe; }
+  table.spec tr:last-child td { border-bottom: none; }
+  table.spec code { white-space: nowrap; }
+  table.spec td.k { white-space: nowrap; font-weight: 700; color:#1a2740; }
+  .call { border-left: 4px solid var(--accent); background: #faf8ff;
+          padding: 13px 17px; border-radius: 0 8px 8px 0; margin: 18px 0; }
+  .call.why { border-color: var(--good); background: #f2fbf7; }
+  .call.warn { border-color: #e6a417; background: #fff9ec; }
+  .call .h { font-weight: 700; display:block; margin-bottom: 4px; }
+  .call p { margin: 8px 0 0; }
+  .rule { text-align:center; font-size: 1.02rem; font-weight: 700; color:#1a1140;
+          background: #f3efff; border:1px solid #e2d8ff; border-radius: 10px; padding: 15px; margin: 20px 0; }
+  .toc { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 20px; margin: 24px 0; }
+  .toc ol { margin: 6px 0 0; padding-left: 20px; columns: 2; column-gap: 30px; }
+  .toc a { color: var(--ink); text-decoration: none; }
+  .toc a:hover { color: var(--accent); }
+  .doc-links { display:flex; flex-wrap:wrap; gap:10px; margin: 18px 0 6px; }
+  .doc-link { display:inline-flex; align-items:center; gap:8px; border:1px solid #cddcff;
+              background:#f6f9ff; color:#1745b5; border-radius:999px; padding:7px 15px; font-weight:700; text-decoration:none; font-size:.92rem; }
+  .doc-link:hover { border-color:#9bb8ff; background:#eef4ff; }
+  .doc-meta { border: 1px solid #dfe5f2; border-left: 5px solid var(--accent); border-radius: 8px;
+              background: #f8faff; padding: 16px 18px; margin: 22px 0; }
+  .doc-meta .meta-title { font-weight: 800; color: #11203a; margin-bottom: 12px; }
+  .meta-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 18px; margin: 0; }
+  .meta-grid dt { color: var(--muted); font-size: .74rem; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; }
+  .meta-grid dd { margin: 3px 0 0; }
+  footer { text-align:center; color:var(--muted); font-size:.9rem; margin-top: 60px; padding-top: 24px; border-top:1px solid var(--line); }
+  /* datasheet-specific */
+  .pipe { display:flex; flex-direction:column; gap:0; margin: 18px 0; }
+  .pipe .stg { display:flex; align-items:center; gap:12px; }
+  .pipe .box { flex:1; background:#fff; border:1px solid var(--line); border-radius:8px; padding:9px 13px; font-size:.92rem; }
+  .pipe .box b { color:#1a2740; }
+  .pipe .box .d { color:var(--muted); font-size:.85rem; }
+  .pipe .box.key { border-color:#c9b6f4; background:#faf7ff; }
+  .pipe .arr { text-align:center; color:var(--accent); font-size:1.2rem; line-height:1; margin:5px 0; }
+  .ladder { display:grid; gap:10px; margin:18px 0; }
+  .rung { display:grid; grid-template-columns:auto 1fr; gap:14px; align-items:start;
+          border:1px solid var(--line); border-radius:10px; padding:13px 16px; background:#fff; }
+  .rung .rn { width:38px; height:38px; border-radius:8px; background:var(--accent); color:#fff;
+              font-weight:800; display:flex; align-items:center; justify-content:center; font-size:1.05rem; }
+  .rung.done { border-left:5px solid var(--good); }
+  .rung.done .rn { background:var(--good); }
+  .rung .rt { font-weight:800; color:#1a2740; }
+  .rung .rd { color:var(--muted); font-size:.92rem; margin-top:2px; }
+  .rung .st { display:inline-block; font-size:.72rem; font-weight:800; border-radius:999px; padding:2px 9px; margin-left:8px; vertical-align:middle; }
+  .rung .st.ok { background:#e4f7ee; color:var(--good); }
+  .rung .st.next { background:#f3efff; color:var(--accent); }
+  .badge { display:inline-block; font-size:.72rem; font-weight:800; border-radius:5px; padding:1px 7px; }
+  .badge.r { background:#eef4ff; color:var(--plus); }
+  .badge.w { background:#fdeef0; color:var(--minus); }
+  .badge.m { background:#f3efff; color:var(--accent); }
+  .grid2 { display:grid; grid-template-columns:1fr; gap:14px; margin:16px 0; }
+  @media (min-width:740px){ .grid2 { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+  .card { background:#fff; border:1px solid var(--line); border-radius:8px; padding:14px 16px; }
+  .card.good { border-top:4px solid var(--good); }
+  .card.bad { border-top:4px solid var(--minus); }
+  .card h4 { margin:0 0 8px; font-size:1rem; }
+  @media (max-width: 720px) { .meta-grid, .toc ol { grid-template-columns: 1fr; columns:1; } }
+</style>
+</head>
+<body>
+<div class="qora-lang-switch" style="position:sticky;top:0;z-index:99;text-align:right;padding:8px 16px;background:rgba(255,255,255,.92);backdrop-filter:blur(4px);border-bottom:1px solid #e6e8ee;font-size:13px;font-family:sans-serif;"><a href="../en/index.html">English</a> · <strong>한국어</strong> · <a href="../ja/index.html">日本語</a></div>
+
+<header class="hero">
+  <div class="tag">Qora · 자동 uncomputation 코스 · 10/16</div>
+  <h1>10. Y·CY가 차단되는 이유 — 위상</h1>
+  <p>값에 따라 달라지는 위상과 얽힘</p>
+</header>
+
+<div class="wrap">
+
+  <nav class="doc-links" aria-label="코스 내비게이션">
+    <a class="doc-link" href="uncompute-09-qfree.html">← 9. 청소의 계약과 qfree</a>
+    <a class="doc-link" href="datasheet.html#s8">코스 목차</a>
+    <a class="doc-link" href="uncompute-11-injector.html">11. 주입기 — 문장 붙여넣기 기계 →</a>
+  </nav>
+  <p>
+    <a href="uncompute-09-qfree.html">9장</a>의 판정표는 Y 게이트와 CY 게이트에 차단(NonQfreeWrite) 판정을
+    내렸습니다.<br>
+    이 장에서는 그 판정이 왜 불가피한지를 반례 프로그램 하나로 끝까지 계산해 보입니다.<br>
+    출발점은 Y 게이트의 정확한 정의입니다.<br>
+    Y 게이트는 기저 상태를 기저 상태로 보내는 유니터리이고, 그 작용은 <code>Y|0⟩ = +i|1⟩</code>,
+    <code>Y|1⟩ = −i|0⟩</code>입니다.<br>
+    즉 Y 게이트는 X 게이트처럼 기저 상태의 값을 0↔1로 맞바꾸지만, X 게이트와 달리 진폭에 위상 인수를 함께 곱하며,
+    그 인수가 뒤집는 방향에 따라 다릅니다(0→1이면 +i, 1→0이면 −i).<br>
+    상태벡터의 말로 옮기면, Y 게이트는 모든 항에서 기저 값을 뒤집으면서 각 항의 진폭에 뒤집은 방향에 따라
+    다른 위상(±i)을 곱하는 편집입니다 — <a href="uncompute-08-gates.html">8장</a>의 편집 전후
+    표에서 확인한 그대로입니다.
+  </p>
+  <p>
+    문제가 생기는 조건은 이 정의에 <a href="uncompute-06-phase.html">6장</a>의 사실 하나를
+    결합하면 정확히 하나로 좁혀집니다.<br>
+    여러 큐빗의 양자 상태는 기저 상태들의 텐서 곱에 진폭을 곱해 더한 것이고, 위상은 큐빗 하나의
+    소유물이 아니라 각 기저 상태의 진폭에 붙는 속성입니다.<br>
+    따라서 Y 게이트의 타깃이 다른 큐빗과 얽혀 있어서 기저 상태마다 타깃의 값이 다르면, Y 게이트가 곱하는 위상
+    인수도 기저 상태마다 달라지고, 그 차이는 모든 진폭에 공통으로 곱해지는 전역 위상이 아니라
+    관측 가능한 상대 위상이 됩니다.<br>
+    상태벡터의 말로 옮기면, 항마다 타깃 값이 다르면 위상도 항마다 다르게 곱해진다는 뜻입니다.<br>
+    CY 게이트는 컨트롤이 1인 항에서 타깃에 같은 위상을 곱하므로 동일한 문제를 그대로 가집니다.
+  </p>
+  <div class="rule">얽힌 타깃 위의 Y 게이트가 곱하는 위상 인수는 기저 상태마다 달라서, 전역 위상으로 흡수되지 않는 상대 위상이 됩니다.</div>
+
+  <h3>반례 프로그램 — 그 조건을 최소 형태로 재현합니다</h3>
+  <p>
+    이 상대 위상이 9장의 청소 계약을 실제로 깨뜨리는지는 프로그램 하나로 확인할 수 있습니다.<br>
+    <code>b</code>를 중첩에 놓고, CNOT 게이트로 <code>a</code>를 <code>b</code>와 얽어 항마다
+    <code>a</code> 값이 다른 상태벡터를 만든 다음, 그 <code>a</code>에 Y 게이트를 적용합니다.
+  </p>
+<pre><code>use a = Qubit[1];  use b = Qubit[1];
+H(b[0]);  CNOT(b[0], a[0]);  Y(a[0]);  H(b[0]);  bit m = M(b[0]);</code></pre>
+  <div class="panel">
+    <table class="spec">
+      <tr><th>시점</th><th>상태벡터 (<code>|b,a⟩</code>)</th><th>설명</th></tr>
+      <tr><td class="k">시작</td><td>|0,0⟩</td><td>항 1개</td></tr>
+      <tr><td class="k">H(b)</td><td>(|0,0⟩ + |1,0⟩)/√2</td><td>항 2개</td></tr>
+      <tr><td class="k">CNOT(b,a)</td><td>(|0,0⟩ + |1,1⟩)/√2</td><td>a가 b와 얽힘 — 항마다 a 값이 다름</td></tr>
+      <tr><td class="k">Y(a)</td><td>(<strong>+i</strong>|0,1⟩ <strong>−i</strong>|1,0⟩)/√2</td><td>1행은 a=0을 뒤집어 +i, 2행은 a=1을 뒤집어 −i — <strong>항마다 다른 위상</strong></td></tr>
+    </table>
+  </div>
+  <p>
+    CNOT 게이트까지는 기저 값만 편집되었고 진폭은 어느 항에서도 변하지 않았습니다.<br>
+    Y 게이트가 적용되는 순간 두 항의 진폭이 처음으로 분기합니다.<br>
+    1행은 a=0을 1로 뒤집으므로 +i가, 2행은 a=1을 0으로 뒤집으므로 −i가 곱해졌고, 항마다 타깃
+    값이 달랐기 때문에 위상도 항마다 달라졌습니다 — 위에서 좁힌 조건이 정확히 이 상태벡터에서
+    성립합니다.
+  </p>
+  <p>
+    Y 직후가 <code>a</code>의 사망점입니다.<br>
+    <code>a</code>는 그 뒤로 아무 데도 쓰이지 않으므로, 정리 코드가 들어간다면 바로 이 지점입니다.<br>
+    이 지점에서 프로그램이 가질 수 있는 미래는 세 가지이고, 이제 그 셋을 하나씩 끝까지 계산합니다.
+  </p>
+
+  <h4>미래 ① — 청소하지 않고 방치하면 (비교의 기준선)</h4>
+  <p>
+    청소의 효과를 말하려면 먼저 청소가 없을 때의 결과부터 확정해야 합니다.<br>
+    사망점의 상태벡터에 남은 코드 <code>H(b); M(b)</code>를 그대로 적용합니다.<br>
+    H 게이트는 각 항을 b 값에 따라 두 항으로 쪼갭니다 — b가 0인 항은 부호가 같게, 1인 항은 부호가 다르게
+    나뉜다는 8장의 규칙 그대로입니다.
+  </p>
+  <div class="panel">
+    <table class="spec">
+      <tr><th>시점</th><th>상태벡터 (<code>|b,a⟩</code>)</th><th>설명</th></tr>
+      <tr><td class="k">사망점</td><td>(+i|0,1⟩ − i|1,0⟩)/√2</td><td>항마다 a 값이 다름</td></tr>
+      <tr><td class="k">H(b) 후</td><td>(−i|0,0⟩ + i|0,1⟩ + i|1,0⟩ + i|1,1⟩)/2</td><td>a 값이 다른 항끼리는 합쳐지지 못함 — 상쇄 없음</td></tr>
+      <tr><td class="k">M(b)</td><td>m = 0/1 각 50%</td><td>네 항의 진폭 크기가 모두 1/2</td></tr>
+    </table>
+  </div>
+  <p>
+    <a href="uncompute-01-ancilla.html">1장</a>에서 방치된 앤실라가 결정론을 동전 던지기로
+    무너뜨리던 것과 같은 현상입니다.<br>
+    a가 항마다 다른 값을 기록한 채 남아 있어서, H 게이트가 만든 네 항 중 값이 같은 항이 하나도 없고
+    간섭(상쇄)이 일어나지 못합니다.<br>
+    이 미래가 "정리 코드 없음"의 기준선입니다.
+  </p>
+
+  <h4>미래 ② — 계약이 요구하는 상태로 청소되면</h4>
+  <p>
+    기준선이 확정되었으니, 이번에는 9장의 계약이 사망점에 요구하는 상태를 그대로 적어 봅니다.<br>
+    조건 1(앤실라 복귀)에 따라 a의 기저 값은 모든 항에서 0이어야 하고, 조건 2(나머지 보존)에 따라
+    생존자 b의 항 구성과 진폭은 부호와 위상까지 그대로여야 합니다.<br>
+    즉 사망점 상태벡터에서 a의 기저 값만 0으로 바꾸고 진폭에는 손대지 않은 상태입니다.
+  </p>
+  <div class="panel">
+    <table class="spec">
+      <tr><th>시점</th><th>상태벡터 (<code>|b,a⟩</code>)</th><th>설명</th></tr>
+      <tr><td class="k">계약이 요구하는 상태</td><td>(+i|0,0⟩ − i|1,0⟩)/√2</td><td>a는 전항 0 · 진폭은 그대로</td></tr>
+      <tr><td class="k">묶어서 보면</td><td>i · (|0⟩ − |1⟩)/√2 ⊗ |0⟩</td><td>공통 인수 i는 전역 위상 — b는 |−⟩ 상태</td></tr>
+      <tr><td class="k">H(b) 후</td><td>i|1,0⟩</td><td>H는 |−⟩를 |1⟩로 보냄</td></tr>
+      <tr><td class="k">M(b)</td><td><strong>m = 1 확률 100%</strong></td><td>결정론 복구</td></tr>
+    </table>
+  </div>
+  <p>
+    이 미래에서 Y 게이트의 두 위상은 생존자 b의 상대 위상, 즉 b=0 항과 b=1 항 사이의 부호 차이로
+    남습니다.<br>
+    계약은 바로 그 위상을 남기라고 요구하고, 남은 위상이 마지막 H 게이트의 간섭 방향을 정해
+    m = 1을 확정합니다.
+  </p>
+
+  <h4>미래 ③ — 쓰기 이력의 역연산(Y†; CNOT†)을 주입하면</h4>
+  <p>
+    그런데 컴파일러가 만들 항 아는 정리 코드는 계약 상태를 직접 적어 넣는 것이 아니라,
+    <code>a</code>의 쓰기 이력을 역순으로 되돌리는 역연산 주입뿐입니다(<a href="uncompute-11-injector.html">11장</a>).<br>
+    이 방식을 여기에 그대로 적용한다면, a의 쓰기 이력이 CNOT(b,a) 다음 Y(a)이므로 주입될 코드는
+    Y†(a) 다음 CNOT†(b,a)입니다.<br>
+    Y 게이트와 CNOT 게이트는 각각 자기 자신이 역연산이므로, 코드로는 두 게이트를 한 번씩 더 쓰는 것과 같습니다.
+  </p>
+<pre><code>use a = Qubit[1];  use b = Qubit[1];
+H(b[0]);  CNOT(b[0], a[0]);  Y(a[0]);
+<span class="add">Y(a[0]);  CNOT(b[0], a[0]);</span>  <span class="cm">// ← 역연산 청소 (Y† = Y, CNOT† = CNOT)</span>
+H(b[0]);  bit m = M(b[0]);   <span class="cm">// m = 0 (확률 100%)</span></code></pre>
+  <div class="panel">
+    <table class="spec">
+      <tr><th>시점</th><th>상태벡터 (<code>|b,a⟩</code>)</th><th>설명</th></tr>
+      <tr><td class="k">사망점</td><td>(+i|0,1⟩ − i|1,0⟩)/√2</td><td>단계별 상태벡터의 마지막 항</td></tr>
+      <tr><td class="k">Y†(a) 후</td><td>(|0,0⟩ + |1,1⟩)/√2</td><td>+i 항에는 −i가, −i 항에는 +i가 곱해져 <strong>위상까지 회수됨</strong></td></tr>
+      <tr><td class="k">CNOT†(b,a) 후</td><td>(|0,0⟩ + |1,0⟩)/√2</td><td>a는 전항 0 — b는 |+⟩ 상태</td></tr>
+      <tr><td class="k">H(b) 후</td><td>|0,0⟩</td><td>H는 |+⟩를 |0⟩으로 보냄</td></tr>
+      <tr><td class="k">M(b)</td><td><strong>m = 0 확률 100%</strong></td><td>②와 정반대의 확정</td></tr>
+    </table>
+  </div>
+  <p>
+    a는 이번에도 모든 항에서 0으로 깨끗하게 돌아왔습니다.<br>
+    그러나 Y†는 Y 게이트가 한 일(값 뒤집기와 위상 곱하기)을 통째로 되돌리는 하나의 유니터리이므로,
+    값만 되돌리고 위상은 남겨 둘 수 없습니다.<br>
+    값이 돌아오는 순간 계약이 남기라고 요구한 위상까지 함께 회수되어, b는 |−⟩가 아니라 |+⟩가
+    되었고 측정 결과가 ②와 정반대로 확정됩니다.
+  </p>
+
+  <h3>세 미래 비교 — 계약을 지킬 청소가 존재하지 않습니다</h3>
+  <p>
+    세 미래가 모두 계산되었으니 이제 한 표에 놓고 비교할 수 있습니다.
+  </p>
+  <div class="panel">
+    <table class="spec">
+      <tr><th>미래</th><th>이후 <code>H(b); M(b)</code>의 결과</th></tr>
+      <tr><td class="k">① 청소하지 않음</td><td>m = 0/1 각 50%</td></tr>
+      <tr><td class="k">② 계약이 요구하는 상태 (a만 |0⟩, 부호 유지)</td><td>b가 |−⟩ 상태 → <strong>m=1 확률 100%</strong></td></tr>
+      <tr><td class="k">③ 역연산 주입 (Y†; CNOT†)</td><td>위상까지 회수되어 b가 |+⟩ 상태 → <strong>m=0 확률 100%</strong></td></tr>
+    </table>
+  </div>
+  <div class="call warn">
+    <span class="h">② ≠ ③ — 계약을 지킬 방법이 존재하지 않습니다</span>
+    <p>②와 ③ 어느 미래에서도 a 자체는 문제없이 |0⟩로 돌아옵니다(①은 a를 얽힌 채 방치하는
+    미래로, 비교를 위한 기준선일 뿐입니다).<br>
+    ②와 ③을 가르는 것은 a가 아니라 <strong>생존자 b의 부호</strong>입니다.<br>
+    Y 게이트의 ±i 위상은 텐서 곱으로 묶인 기저 상태 전체의 진폭에 곱해진 위상이므로 a만의 소유물이
+    아닙니다.<br>
+    상태벡터의 말로 하면 위상은 항의 공동 재산이어서, 역연산이 위상을 회수하는 순간 b의 재산까지
+    건드린 것이 됩니다.<br>
+    그렇다고 위상을 남기는 청소는 역연산으로 만들 수 없으므로, 얽힐 수 있는 앤실라에 대한 Y·CY 쓰기는 <strong>차단이 유일하게 정직한 답</strong>이며,
+    Silq의 qfree 정의가 Y 게이트를 제외하는 것과 같은 결론입니다.</p>
+  </div>
+
+  <h3>그럼 얽히지 않은 타깃 위의 Y는 왜 무해할까요</h3>
+  <p>
+    방금의 차단 판정은 "얽힐 수 있는" 앤실라에 대한 것이었습니다.<br>
+    처음에 좁힌 문제 조건을 다시 보면, 사고는 항마다 타깃 값이 다를 때에만 일어났습니다.<br>
+    타깃이 얽혀 있지 않아 모든 항에서 값이 같다면 위상도 모든 항에 똑같이 곱해지고, 모든 진폭에
+    공통으로 곱해진 위상 인수는 전역 위상이라 어떤 측정으로도 관찰되지 않습니다.<br>
+    아래 한 항짜리 상태벡터의 사례에서 Y 게이트의 +i 위상은 결과에 아무 흔적도 남기지 않습니다.
+  </p>
+<pre><code>use q = Qubit[1];
+Y(q[0]);            <span class="cm">// |0⟩ → +i|1⟩ — 줄이 하나뿐이므로 +i는 전역 위상</span>
+bit m = M(q[0]);    <span class="cm">// m = 1 (확률 100%) — X(q[0])를 썼을 때와 완전히 같은 결과</span></code></pre>
+  <p>
+    다만 현재 판정은 이 구분을 아직 활용하지 않습니다.<br>
+    얽힘 여부와 무관하게 Y·CY 쓰기를 일괄 차단하는 보수적 형태이며, 확정 기저값 위의 Y 게이트를 다시
+    허용하는 정밀화는 계획된 개선입니다(<a href="uncompute-14-limits.html">14장</a>).
+  </p>
+
+  <h3>Z·S·T·CZ의 위상은 왜 문제가 없을까요</h3>
+  <p>
+    마지막으로 짚어야 할 질문이 하나 남습니다.<br>
+    Z 게이트의 −1 위상도 타깃이 1인 항에만 곱해지므로, 얽힌 상태벡터에서는 항마다 위상이 달라질 수 있습니다.<br>
+    그런데도 Z·S·T·CZ 게이트가 안전한 이유는 기저 값에 있는데, 이 게이트들은 위상만 곱할 뿐 값을 쓰지 않는 읽기입니다.<br>
+    예를 들어 Z 게이트는 타깃이 1인 항에 −1 위상을 곱하지만 타깃의 값 자체는 그대로 둡니다.<br>
+    값을 쓰지 않으므로 앤실라의 쓰기 이력에 아예 들어가지 않고, 청소는 쓰기 이력만 되돌리므로
+    그 위상을 회수할 일도 없습니다.<br>
+    그래서 그 위상은 생존자 값의 함수로 남아 보존되며, <a href="uncompute-09-qfree.html">9장</a>의
+    Z 예제가 이 보존을 상태벡터 표로 이미 확인했습니다.<br>
+    Y 게이트가 차단되는 이유는 위상을 곱해서가 아니라, 값을 뒤집는 쓰기에 위상이 붙어 있어서 역연산이
+    값과 위상을 함께 되돌릴 수밖에 없기 때문입니다.
+  </p>
+
+  <nav class="doc-links" aria-label="코스 내비게이션">
+    <a class="doc-link" href="uncompute-09-qfree.html">← 9. 청소의 계약과 qfree</a>
+    <a class="doc-link" href="datasheet.html#s8">코스 목차</a>
+    <a class="doc-link" href="uncompute-11-injector.html">11. 주입기 — 문장 붙여넣기 기계 →</a>
+  </nav>
+
+  <footer>
+    자동 uncomputation 코스 10/16 · <a href="datasheet.html#s8">코스 목차</a> ·
+    <a href="datasheet.html">컴파일러 데이터시트</a>
+  </footer>
+
+</div>
+</body>
+</html>

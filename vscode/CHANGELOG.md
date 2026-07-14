@@ -2,6 +2,14 @@
 
 All notable changes to the Qora Language extension.
 
+## 0.14.0
+
+- Bundles the **Qora v0.20** compiler — rung ④ of the automatic-uncomputation ladder begins with the
+  cleanup **plan builder** (a safe ancilla's reverse-order adjoint cleanup, computed but not yet injected);
+  rung ③ now blocks an ancilla whose write is a call it cannot invert (a `while`/`repeat`, classical
+  mutation, or local `use` in the callee), with the reason shown in the `--stages` uncompute view; and
+  calls are bound to their callee by stable node reference (`CalleeOpId`) rather than by name.
+
 ## 0.13.0
 
 - Bundles the **Qora v0.19** compiler — rung ③ of the automatic-uncomputation ladder: the per-qubit

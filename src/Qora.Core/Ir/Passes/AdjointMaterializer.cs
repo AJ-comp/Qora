@@ -111,7 +111,10 @@ public static class AdjointMaterializer
     private static QStmt RewriteStmt(QStmt s, Dictionary<string, string> adjName, HashSet<string> opNames) => s switch
     {
         QGate g when opNames.Contains(g.Name) && g.Functors.FirstOrDefault() == "Adjoint" && adjName.ContainsKey(g.Name)
-            => g with { Name = adjName[g.Name], Functors = g.Functors.Skip(1).ToList() },
+            // CalleeOpId → null: the callee changes from Foo to the synthesized Foo__adj, whose Id is not yet
+            // minted here (created after this rewrite), so clear the now-stale forward reference. null means
+            // "unbound, resolve by name"; no post-adjoint consumer follows the reference (analysis ran earlier).
+            => g with { Name = adjName[g.Name], Functors = g.Functors.Skip(1).ToList(), CalleeOpId = null },
         QIf i => i with { Then = RewriteAdjointCalls(i.Then, adjName, opNames), Else = RewriteAdjointCalls(i.Else, adjName, opNames) },
         QFor f => f with { Body = RewriteAdjointCalls(f.Body, adjName, opNames) },
         QWhile w => w with { Body = RewriteAdjointCalls(w.Body, adjName, opNames) },
