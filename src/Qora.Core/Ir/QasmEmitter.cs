@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.RegularExpressions;
 
 namespace Qora.Ir;
 
@@ -19,6 +20,11 @@ namespace Qora.Ir;
 /// </summary>
 public static class QasmEmitter
 {
+    private static readonly Regex CountPattern = new(
+        @"\b(?<name>[_a-zA-Z][_a-zA-Z0-9]*)\s*\.\s*Count\b", RegexOptions.Compiled);
+    private static readonly Regex IndexPattern = new(
+        @"\b(?<name>[_a-zA-Z][_a-zA-Z0-9]*)\s*\[\s*(?<index>[_a-zA-Z][_a-zA-Z0-9]*|[0-9]+)\s*\]",
+        RegexOptions.Compiled);
     private static readonly Dictionary<string, string> FunctorMods = new()
     {
         ["Adjoint"] = "inv @ ",
@@ -239,7 +245,8 @@ public static class QasmEmitter
                     break;
 
                 case QAssign a:
-                    body.AppendLine($"{pad}{a.Name} = {RenderExpr(a.Value)};");
+                    var target = a.Index is null ? a.Name : $"{a.Name}[{RenderText(a.Index)}]";
+                    body.AppendLine($"{pad}{target} = {RenderExpr(a.Value)};");
                     break;
 
                 case QIf i:
@@ -247,14 +254,16 @@ public static class QasmEmitter
                     break;
 
                 case QFor f:
-                    var range = f.Step is null ? $"[{f.From}:{f.To}]" : $"[{f.From}:{f.Step}:{f.To}]";
+                    var range = f.Step is null
+                        ? $"[{RenderText(f.From)}:{RenderText(f.To)}]"
+                        : $"[{RenderText(f.From)}:{RenderText(f.Step)}:{RenderText(f.To)}]";
                     body.AppendLine($"{pad}for int {f.Var} in {range} {{");
                     EmitStatements(f.Body, body, indent + 1, ctx, varTypes);
                     body.AppendLine($"{pad}}}");
                     break;
 
                 case QWhile w:
-                    body.AppendLine($"{pad}while ({RewriteBitCond(w.Cond.Text, varTypes)}) {{");
+                    body.AppendLine($"{pad}while ({RenderText(RewriteBitCond(w.Cond.Text, varTypes))}) {{");
                     EmitStatements(w.Body, body, indent + 1, ctx, varTypes);
                     body.AppendLine($"{pad}}}");
                     break;
@@ -262,7 +271,7 @@ public static class QasmEmitter
                 case QRepeat r:
                     body.AppendLine($"{pad}while (true) {{");
                     EmitStatements(r.Body, body, indent + 1, ctx, varTypes);
-                    body.AppendLine($"{pad}  if ({RewriteBitCond(r.Until.Text, varTypes)}) {{ break; }}");
+                    body.AppendLine($"{pad}  if ({RenderText(RewriteBitCond(r.Until.Text, varTypes))}) {{ break; }}");
                     body.AppendLine($"{pad}}}");
                     break;
 
@@ -281,7 +290,7 @@ public static class QasmEmitter
     {
         var pad = new string(' ', indent * 2);
 
-        body.AppendLine($"{pad}if ({RewriteBitCond(node.Cond.Text, varTypes)}) {{");
+        body.AppendLine($"{pad}if ({RenderText(RewriteBitCond(node.Cond.Text, varTypes))}) {{");
         EmitStatements(node.Then, body, indent + 1, ctx, varTypes);
         body.AppendLine($"{pad}}}");
 
@@ -323,6 +332,38 @@ public static class QasmEmitter
 
     private static void EmitDecl(QDecl d, StringBuilder body, string pad, Dictionary<string, string> varTypes)
     {
+        if (d.IsArray)
+        {
+            var elementType = TypeName(d.Type) ?? throw new InvalidOperationException(
+                $"QINTERNAL: array `{d.Name}` reached emission without an element type");
+            var length = d.Value switch
+            {
+                QArrayLiteral literal => literal.Elements.Count,
+                QArrayNew allocation => allocation.Length,
+                _ => throw new InvalidOperationException(
+                    $"QINTERNAL: array `{d.Name}` reached emission without an array initializer"),
+            };
+            // varTypes drives RewriteBitCond (`if (f[1] == true)`), so it is recorded for BOTH shapes below.
+            varTypes.TryAdd(d.Name, elementType);
+
+            // `bit` is the one element type that cannot take the general form: "bit, bit[n] and stretch are
+            // not valid array base types" (OpenQASM 3, types.rst). Bits get the dedicated register type.
+            if (d.Type == QType.Bit)
+            {
+                EmitBitRegisterDecl(d, length, body, pad);
+                return;
+            }
+
+            var initializer = d.Value switch
+            {
+                QArrayLiteral literal => string.Join(", ", literal.Elements.Select(RenderExpr)),
+                QArrayNew allocation => string.Join(", ", Enumerable.Repeat(DefaultValue(allocation.ElementType), allocation.Length)),
+                _ => string.Empty,
+            };
+            body.AppendLine($"{pad}array[{elementType}, {length}] {d.Name} = {{{initializer}}};");
+            return;
+        }
+
         if (d.Value is QMeasure)
         {
             // The `bit r;` declaration is hoisted to the top of the def body (HoistDecls) for OpenQASM
@@ -337,6 +378,36 @@ public static class QasmEmitter
         var prefix = d.IsConst ? "const " : string.Empty;
         body.AppendLine($"{pad}{prefix}{type} {d.Name} = {RenderExpr(d.Value)};");
     }
+
+    /// <summary>
+    /// A <c>bit[]</c> declaration, as OpenQASM's dedicated <c>bit[N]</c> register.
+    /// <para><c>new bit[N]</c> emits the all-zeros bitstring rather than a bare <c>bit[N] f;</c>, because a
+    /// bare register is UNDEFINED, not zeroed, and Qora's <c>new T[N]</c> promises zero-initialization for
+    /// every other element type. An all-zeros string is the same read either way, so the ordering caveat
+    /// below cannot bite it.</para>
+    /// <para>An array LITERAL is written element by element and never as a bitstring: the spec's prose puts
+    /// element 0 at the RIGHT (least-significant) end while Braket reads it at the LEFT, so any non-uniform
+    /// bitstring would silently reverse the array. Indexed writes mean the same thing on both.</para>
+    /// </summary>
+    private static void EmitBitRegisterDecl(QDecl d, int length, StringBuilder body, string pad)
+    {
+        if (d.Value is QArrayNew)
+        {
+            body.AppendLine($"{pad}bit[{length}] {d.Name} = \"{new string('0', length)}\";");
+            return;
+        }
+
+        var literal = (QArrayLiteral)d.Value!;
+        body.AppendLine($"{pad}bit[{length}] {d.Name};");
+        for (var i = 0; i < literal.Elements.Count; i++)
+            body.AppendLine($"{pad}{d.Name}[{i}] = {RenderExpr(literal.Elements[i])};");
+    }
+
+    private static string DefaultValue(QType type) => type switch
+    {
+        QType.Float or QType.Angle => "0.0",
+        _ => "0",
+    };
 
     /// <summary>
     /// The emitted type of an untyped `var`/`const`, inferred from its initializer using the type map (which
@@ -427,6 +498,9 @@ public static class QasmEmitter
     /// </summary>
     private static string RewriteBitCond(string text, Dictionary<string, string> varTypes)
     {
+        // Compact indexed references first so `flags [ i ]` is one token and can inherit the array's
+        // element type during the same bit-condition rewrite used for scalar bits.
+        text = RenderText(text);
         var toks = text.Split(' ');
 
         // OpenQASM has no logical `!` on a classical scalar (it reads a bit/int/float as a numeric
@@ -435,7 +509,7 @@ public static class QasmEmitter
         // — the same emit-time adjustment as `s == 1` -> `s == true`.
         var neg = new List<string>(toks.Length);
         for (var i = 0; i < toks.Length; i++)
-            if (toks[i] == "!" && i + 3 < toks.Length && toks[i + 1] == "(" && varTypes.ContainsKey(toks[i + 2]) && toks[i + 3] == ")")
+            if (toks[i] == "!" && i + 3 < toks.Length && toks[i + 1] == "(" && TypeOf(toks[i + 2]) is not null && toks[i + 3] == ")")
             {
                 neg.Add(toks[i + 2]); neg.Add("=="); neg.Add("0");
                 i += 3;
@@ -451,31 +525,55 @@ public static class QasmEmitter
         }
         return string.Join(" ", toks);
 
-        bool IsBit(string tok) => varTypes.TryGetValue(tok, out var t) && t == "bit";
+        bool IsBit(string tok) => TypeOf(tok) == "bit";
+
+        string? TypeOf(string token)
+        {
+            if (varTypes.TryGetValue(token, out var direct)) return direct;
+            var indexed = IndexPattern.Match(token);
+            return indexed.Success && indexed.Index == 0 && indexed.Length == token.Length
+                && varTypes.TryGetValue(indexed.Groups["name"].Value, out var elementType)
+                    ? elementType
+                    : null;
+        }
     }
 
     private static string EmitParam(QParam p) => p.Type switch
     {
+        _ when p.Type != QType.Qubit && p.IsArray => $"mutable array[{TypeName(p.Type)}, #dim = 1] {p.Name}",
         QType.Int => $"int {p.Name}",
         QType.Bit => $"bit {p.Name}",
         QType.Float => $"float {p.Name}",
         QType.Angle => $"angle {p.Name}",
-        _ => p.RegisterSize is int n ? $"qubit[{n}] {p.Name}" : $"qubit {p.Name}",
+        QType.Qubit when p.RegisterSize is int n => $"qubit[{n}] {p.Name}",
+        QType.Qubit when p.IsQubitArray => throw new InvalidOperationException(
+            $"QINTERNAL: unspecialized Qubit[] parameter `{p.Name}` reached OpenQASM emission"),
+        _ => $"qubit {p.Name}",
     };
 
     private static string RenderArg(QArg arg) => arg switch
     {
         QQubitArg q => $"{q.Reg}[{q.Index}]",
-        QTextArg t => t.Text,
+        QTextArg t => RenderText(t.Text),
         _ => string.Empty,
     };
 
     private static string RenderExpr(QExpr expr) => expr switch
     {
         QMeasure m => m.Target is null ? "measure" : $"measure {m.Target.Reg}[{m.Target.Index}]",
-        QText t => t.Text,
+        QText t => RenderText(t.Text),
+        QArrayLiteral literal => $"{{{string.Join(", ", literal.Elements.Select(RenderExpr))}}}",
+        QArrayNew allocation => $"{{{string.Join(", ", Enumerable.Repeat(DefaultValue(allocation.ElementType), allocation.Length))}}}",
         _ => string.Empty,
     };
+
+    private static string RenderText(string text)
+    {
+        var rendered = CountPattern.Replace(text, match => $"sizeof({match.Groups["name"].Value})");
+        rendered = IndexPattern.Replace(rendered,
+            match => $"{match.Groups["name"].Value}[{match.Groups["index"].Value}]");
+        return rendered;
+    }
 
     private static string MapGate(string name) =>
         QoraGates.Names.TryGetValue(name, out var qasm) ? qasm : name.ToLowerInvariant();

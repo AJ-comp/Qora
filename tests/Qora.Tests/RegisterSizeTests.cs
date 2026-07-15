@@ -13,7 +13,6 @@ public class RegisterSizeTests
     [InlineData("operation Main(){ use q = Qubit[0]; }")]                              // zero-size register
     [InlineData("operation Main(){ use q = Qubit[2]; H(q[2147483648]); }")]           // index overflows int
     [InlineData("operation Main(){ use q = Qubit[2]; H(q[99999999999]); }")]          // index overflows int
-    [InlineData("operation Foo(Qubit[99999999999] q){ H(q[0]); }\noperation Main(){ use q=Qubit[2]; }")] // sized-parameter size overflows
     public void RejectsOutOfRangeSizeOrIndex(string source) => Compiler.Rejects(source, "QSEM016");
 
     [Theory]
@@ -31,6 +30,6 @@ public class RegisterSizeTests
     [Theory]
     [InlineData("operation Main(){ use q = Qubit[3]; H(q[0]); H(q[2]); }")]            // valid size + in-range indices
     [InlineData("operation Main(){ use q = Qubit[2]; H(q[1]); }")]
-    [InlineData("operation Foo(Qubit[4] q){ H(q[3]); }\noperation Main(){ use q=Qubit[4]; Foo(q); }")]  // valid sized parameter
+    [InlineData("operation Foo(Qubit[] q){ H(q[3]); }\noperation Main(){ use q=Qubit[4]; Foo(q); }")]  // array parameter specialized to size 4
     public void AcceptsValidSizesAndIndices(string source) => Compiler.Accepts(source);
 }

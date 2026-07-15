@@ -104,7 +104,9 @@ public static class IrPrinter
     private static string PrintParam(QParam p) => p.Type switch
     {
         QType.Qubit when p.RegisterSize is int n => $"Qubit[{n}] {p.Name}",
+        QType.Qubit when p.IsQubitArray => $"Qubit[] {p.Name}",
         QType.Qubit => $"Qubit {p.Name}",
+        _ when p.IsArray => $"{p.Type.ToString().ToLowerInvariant()}[] {p.Name}",
         _ => $"{p.Type} {p.Name}",
     };
 
@@ -121,10 +123,10 @@ public static class IrPrinter
                     sb.AppendLine($"{indent}QGate(functors=[{string.Join(",", g.Functors)}], name={g.Name}, args=[{string.Join(", ", g.Args.Select(PrintArg))}])");
                     break;
                 case QDecl d:
-                    sb.AppendLine($"{indent}QDecl(const={d.IsConst}, type={d.Type?.ToString() ?? "?"}, name={d.Name}, value={PrintExpr(d.Value)})");
+                    sb.AppendLine($"{indent}QDecl(const={d.IsConst}, type={d.Type?.ToString() ?? "?"}{(d.IsArray ? "[]" : "")}, name={d.Name}, value={PrintExpr(d.Value)})");
                     break;
                 case QAssign a:
-                    sb.AppendLine($"{indent}QAssign({a.Name} = {PrintExpr(a.Value)})");
+                    sb.AppendLine($"{indent}QAssign({a.Name}{(a.Index is null ? "" : $"[{a.Index}]")} = {PrintExpr(a.Value)})");
                     break;
                 case QIf i:
                     sb.AppendLine($"{indent}QIf(cond=\"{i.Cond.Text}\")");
@@ -170,6 +172,8 @@ public static class IrPrinter
     {
         QMeasure m => m.Target is null ? "QMeasure()" : $"QMeasure({m.Target.Reg}[{m.Target.Index}])",
         QText t => t.Text,
+        QArrayLiteral literal => $"[{string.Join(", ", literal.Elements.Select(PrintExpr))}]",
+        QArrayNew allocation => $"new {allocation.ElementType.ToString().ToLowerInvariant()}[{allocation.Length}]",
         _ => string.Empty,
     };
 

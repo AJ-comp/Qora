@@ -148,7 +148,12 @@ public static class NameMangler
                 Args = g.Args.Select(a => MangleArg(a, map)).ToList(),
             },
             QDecl d => d with { Name = L(d.Name, map), Value = MangleExpr(d.Value, map) },
-            QAssign a => a with { Name = L(a.Name, map), Value = MangleExpr(a.Value, map) },
+            QAssign a => a with
+            {
+                Name = L(a.Name, map),
+                Index = a.Index is null ? null : MangleTokens(a.Index, map),
+                Value = MangleExpr(a.Value, map),
+            },
             QIf i => i with { Cond = MangleCond(i.Cond, map), Then = MangleBody(i.Then, map), Else = MangleBody(i.Else, map) },
             QFor f => f with { Var = L(f.Var, map), From = MangleTokens(f.From, map), To = MangleTokens(f.To, map), Body = MangleBody(f.Body, map) },
             QWhile w => w with { Cond = MangleCond(w.Cond, map), Body = MangleBody(w.Body, map) },
@@ -168,6 +173,10 @@ public static class NameMangler
         {
             QMeasure { Target: { } t } mm => mm with { Target = new QQubitArg(L(t.Reg, map), MangleIndex(t.Index, map)) },
             QText t => t with { Text = MangleTokens(t.Text, map) },
+            QArrayLiteral literal => literal with
+            {
+                Elements = literal.Elements.Select(element => MangleExpr(element, map)).ToList(),
+            },
             _ => expr,
         };
 
@@ -182,9 +191,18 @@ public static class NameMangler
         /// def declares (via the local map); built-in constants, numbers, operators and anything not declared
         /// locally pass through unchanged.
         /// </summary>
-        private static string MangleTokens(string text, Dictionary<string, string> map) =>
-            string.Join(" ", text.Split(' ').Select(tok =>
-                IsIdentifier(tok) && !BuiltinConstants.Contains(tok) ? L(tok, map) : tok));
+        private static string MangleTokens(string text, Dictionary<string, string> map)
+        {
+            var tokens = text.Split(' ');
+            for (var i = 0; i < tokens.Length; i++)
+            {
+                // In `array . Count`, Count names a member rather than a local declaration.
+                if (i > 0 && tokens[i - 1] == ".") continue;
+                if (IsIdentifier(tokens[i]) && !BuiltinConstants.Contains(tokens[i]))
+                    tokens[i] = L(tokens[i], map);
+            }
+            return string.Join(" ", tokens);
+        }
 
         private static bool IsIdentifier(string tok) =>
             tok.Length > 0 && (char.IsLetter(tok[0]) || tok[0] == '_')

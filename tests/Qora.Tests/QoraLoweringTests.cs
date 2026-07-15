@@ -1,0 +1,81 @@
+using Janglim.FrontEnd.Ast;
+using Qora.Ir;
+
+namespace Qora.Tests;
+
+public class QoraLoweringTests
+{
+    private const string Source = """
+        operation Probe(Qubit q, Qubit[] work, int[] counts, float weight) { }
+        operation Main() {
+            use work = Qubit[3];
+        }
+        """;
+
+    [Fact]
+    public void QubitTypeTokenRemainsInSemanticAst()
+    {
+        var result = QoraParser.Parse(Source);
+        var ast = Assert.IsAssignableFrom<AstSymbol>(result.Ast);
+        var nodes = Descendants(ast).OfType<AstNonTerminal>().ToList();
+        var parameters = nodes.Where(n => n.Name == "Param").ToList();
+        var use = Assert.Single(nodes, n => n.Name == "Use");
+
+        Assert.Collection(
+            parameters,
+            p => Assert.Equal(new[] { "Qubit", "q" }, Leaves(p)),
+            p => Assert.Equal(new[] { "Qubit", "work" }, Leaves(p)),
+            p => Assert.Equal(new[] { "int", "counts" }, Leaves(p)),
+            p => Assert.Equal(new[] { "float", "weight" }, Leaves(p)));
+        Assert.DoesNotContain(parameters[0].Items.OfType<AstNonTerminal>(), n => n.Name == "ArrayType");
+        Assert.Contains(parameters[1].Items.OfType<AstNonTerminal>(), n => n.Name == "ArrayType");
+        Assert.Contains(parameters[2].Items.OfType<AstNonTerminal>(), n => n.Name == "ArrayType");
+        Assert.DoesNotContain(parameters[3].Items.OfType<AstNonTerminal>(), n => n.Name == "ArrayType");
+        Assert.Equal(new[] { "work", "Qubit", "3" }, Leaves(use));
+    }
+
+    [Fact]
+    public void RetainedQubitTypeTokenLowersToTheSameIrShape()
+    {
+        var result = QoraParser.Parse(Source);
+        var program = Assert.IsType<QProgram>(QoraLowering.Lower(result.Ast));
+        var probe = Assert.Single(program.Operations, o => o.Name == "Probe");
+        var main = Assert.Single(program.Operations, o => o.Name == "Main");
+
+        Assert.Collection(
+            probe.Params,
+            p => AssertParam(p, "q", QType.Qubit, isArray: false),
+            p => AssertParam(p, "work", QType.Qubit, isArray: true),
+            p => AssertParam(p, "counts", QType.Int, isArray: true),
+            p => AssertParam(p, "weight", QType.Float, isArray: false));
+
+        var use = Assert.IsType<QUse>(Assert.Single(main.Body));
+        Assert.Equal("work", use.Name);
+        Assert.Equal(3, use.Size);
+    }
+
+    private static void AssertParam(QParam param, string name, QType type, bool isArray)
+    {
+        Assert.Equal(name, param.Name);
+        Assert.Equal(type, param.Type);
+        Assert.Null(param.RegisterSize);
+        Assert.Equal(isArray, param.IsArray);
+        Assert.Equal(type == QType.Qubit && isArray, param.IsQubitArray);
+    }
+
+    private static IEnumerable<AstSymbol> Descendants(AstSymbol node)
+    {
+        yield return node;
+        if (node is not AstNonTerminal nonTerminal) yield break;
+
+        foreach (var child in nonTerminal.Items)
+        foreach (var descendant in Descendants(child))
+            yield return descendant;
+    }
+
+    private static string[] Leaves(AstNonTerminal node) =>
+        Descendants(node)
+            .OfType<AstTerminal>()
+            .Select(t => t.ToString() ?? string.Empty)
+            .ToArray();
+}

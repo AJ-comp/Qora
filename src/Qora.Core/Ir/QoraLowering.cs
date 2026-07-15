@@ -13,7 +13,7 @@ namespace Qora.Ir;
 /// </summary>
 public static class QoraLowering
 {
-    private static readonly HashSet<string> TypeKeywords = new() { "int", "bit", "float", "angle" };
+    private static readonly HashSet<string> TypeKeywords = new() { "Qubit", "int", "bit", "float", "angle" };
     private static readonly HashSet<string> FunctorNames = new() { "Adjoint", "Controlled" };
 
     // Spans are meaningful only for the ENTRY document (the editor contract's offsets). Imported files
@@ -100,36 +100,39 @@ public static class QoraLowering
     /// <summary>Every statement gets its source span here, in ONE place, whatever its kind.</summary>
     private static QStmt LowerSpanned(AstNonTerminal node) => LowerStmt(node) with { Span = SpanOf(node) };
 
-    // Qubit q / Qubit[2] q / int n / bit b  (mirrors the old EmitParam token inspection).
+    // Qubit q / Qubit[] qs / int n / bit b. Every type keyword is explicit in the AST.
     private static QParam LowerParam(AstNonTerminal param)
     {
         var terms = param.Items.OfType<AstTerminal>().Select(t => t.ToString() ?? string.Empty).ToList();
-        var typeKw = terms.FirstOrDefault(t => TypeKeywords.Contains(t));
-        var size = terms.FirstOrDefault(IsNumber);
-        // Identifiers that are neither a type keyword nor a number: the parameter name, plus — for a
-        // generic register `Qubit[n] q` — a leading size symbol. Source order puts the size symbol first
-        // and the name last, so the name is the LAST such identifier.
+        var arrayType = param.Items.OfType<AstNonTerminal>().FirstOrDefault(n => n.Name == "ArrayType");
+        var typeKw = terms.FirstOrDefault(t => TypeKeywords.Contains(t))
+                     ?? arrayType?.Items.OfType<AstTerminal>().Select(t => t.ToString() ?? string.Empty)
+                         .FirstOrDefault(t => TypeKeywords.Contains(t));
+        var isArray = arrayType is not null;
+        // A source parameter contains one identifier besides its explicit type: the parameter name.
         var idents = terms.Where(t => !TypeKeywords.Contains(t) && !IsNumber(t)).ToList();
         var name = idents.Count > 0 ? idents[^1] : string.Empty;
         var span = SpanOf(param.Items.OfType<AstTerminal>().FirstOrDefault(t => (t.ToString() ?? "") == name));
 
-        if (typeKw == "int") return new QParam(name, QType.Int, null) { Span = span };
-        if (typeKw == "bit") return new QParam(name, QType.Bit, null) { Span = span };
-        if (typeKw == "float") return new QParam(name, QType.Float, null) { Span = span };
-        if (typeKw == "angle") return new QParam(name, QType.Angle, null) { Span = span };
-        if (size is not null) return new QParam(name, QType.Qubit, Count(size)) { Span = span };       // Qubit[2] q
-        if (idents.Count >= 2)                                                                          // Qubit[n] q
-            return new QParam(name, QType.Qubit, null) { SizeParam = idents[0], Span = span };
-        return new QParam(name, QType.Qubit, null) { Span = span };                                     // Qubit q
+        if (typeKw == "int") return new QParam(name, QType.Int, null) { IsArray = isArray, Span = span };
+        if (typeKw == "bit") return new QParam(name, QType.Bit, null) { IsArray = isArray, Span = span };
+        if (typeKw == "float") return new QParam(name, QType.Float, null) { IsArray = isArray, Span = span };
+        if (typeKw == "angle") return new QParam(name, QType.Angle, null) { IsArray = isArray, Span = span };
+        if (typeKw == "Qubit" && isArray)
+            return new QParam(name, QType.Qubit, null) { IsArray = true, Span = span };                // Qubit[] qs
+        if (typeKw == "Qubit")
+            return new QParam(name, QType.Qubit, null) { IsArray = false, Span = span };               // Qubit q
+
+        throw new InvalidOperationException("a parameter AST must contain an explicit type keyword");
     }
 
     private static QStmt LowerStmt(AstNonTerminal node) => node.Name switch
     {
-        "Use" => new QUse(Child(node, 0), Count(Child(node, 1))),
+        "Use" => LowerUse(node),
         "Gate" => LowerGate(node),
         "ConstDecl" => LowerDecl(node, isConst: true),
         "VarDecl" => LowerDecl(node, isConst: false),
-        "Assign" => new QAssign(FirstIdent(node), LowerExpr(ExprOf(node))),
+        "Assign" => LowerAssign(node),
         "If" => LowerIf(node),
         "For" => LowerFor(node),
         "While" => new QWhile(LowerCondition(CondOf(node)), BodyStmts(node).Select(LowerSpanned).ToList()),
@@ -141,6 +144,14 @@ public static class QoraLowering
     /// not fit in a 32-bit int — an absurd size like <c>Qubit[99999999999]</c> — so the validator rejects it
     /// cleanly (QSEM016) instead of <c>int.Parse</c> throwing and crashing the compiler.</summary>
     private static int Count(string s) => int.TryParse(s, out var n) ? n : -1;
+
+    private static QUse LowerUse(AstNonTerminal node)
+    {
+        var terms = node.Items.OfType<AstTerminal>().Select(t => t.ToString() ?? string.Empty).ToList();
+        var name = terms.FirstOrDefault(t => !TypeKeywords.Contains(t) && !IsNumber(t)) ?? string.Empty;
+        var size = terms.FirstOrDefault(IsNumber) ?? string.Empty;
+        return new QUse(name, Count(size));
+    }
 
     private static QGate LowerGate(AstNonTerminal node)
     {
@@ -173,6 +184,8 @@ public static class QoraLowering
             if (nt.Name == "Qubit") return new QQubitArg(Child(nt, 0), Child(nt, 1));
             if (nt.Name == "Expr")
             {
+                if (nt.Items.Count == 1 && nt.Items[0] is AstNonTerminal { Name: "Qubit" } indexed)
+                    return new QQubitArg(Child(indexed, 0), Child(indexed, 1));
                 var (text, hasCall) = RenderExpr(nt);
                 return new QTextArg(text, hasCall);
             }
@@ -184,7 +197,34 @@ public static class QoraLowering
     {
         var name = DeclName(node);
         var type = DeclType(node) switch { "int" => (QType?)QType.Int, "bit" => QType.Bit, "float" => QType.Float, "angle" => QType.Angle, _ => null };
-        return new QDecl(isConst, type, name, LowerExpr(ExprOf(node)));
+        var literal = node.Items.OfType<AstNonTerminal>().FirstOrDefault(n => n.Name == "ArrayLiteral");
+        var allocation = node.Items.OfType<AstNonTerminal>().FirstOrDefault(n => n.Name == "ArrayNew");
+        var value = literal is not null ? LowerArrayLiteral(literal)
+                  : allocation is not null ? LowerArrayNew(allocation)
+                  : LowerExpr(ExprOf(node));
+        return new QDecl(isConst, type, name, value)
+        {
+            IsArray = node.Items.OfType<AstNonTerminal>().Any(n => n.Name == "ArrayType"),
+        };
+    }
+
+    private static QAssign LowerAssign(AstNonTerminal node)
+    {
+        var indexed = node.Items.OfType<AstNonTerminal>().FirstOrDefault(n => n.Name == "Qubit");
+        return indexed is null
+            ? new QAssign(FirstIdent(node), LowerExpr(ExprOf(node)))
+            : new QAssign(Child(indexed, 0), LowerExpr(ExprOf(node))) { Index = Child(indexed, 1) };
+    }
+
+    private static QArrayLiteral LowerArrayLiteral(AstNonTerminal node) =>
+        new(node.Items.OfType<AstNonTerminal>().Where(n => n.Name == "Expr").Select(LowerExpr).ToList());
+
+    private static QArrayNew LowerArrayNew(AstNonTerminal node)
+    {
+        var terms = node.Items.OfType<AstTerminal>().Select(t => t.ToString() ?? string.Empty).ToList();
+        var type = ParseType(terms.FirstOrDefault(t => TypeKeywords.Contains(t)));
+        var length = terms.FirstOrDefault(IsNumber) ?? string.Empty;
+        return new QArrayNew(type ?? QType.Int, Count(length));
     }
 
     private static QIf LowerIf(AstNonTerminal node)
@@ -228,9 +268,9 @@ public static class QoraLowering
     {
         if (expr is null) return new QText(string.Empty);
 
-        var call = expr.Items.OfType<AstNonTerminal>().FirstOrDefault(n => n.Name == "Call");
+        var call = Descendants(expr).FirstOrDefault(n => n.Name == "Call");
         if (call is null)
-            return new QText(string.Join(" ", expr.Items.OfType<AstTerminal>().Select(t => t.ToString())));
+            return new QText(RenderItems(expr));
 
         var isLoneCall = expr.Items.Count == 1;
         if (isLoneCall && CallName(call) == QoraGates.Measurement)
@@ -244,7 +284,7 @@ public static class QoraLowering
     /// <summary>Render an expression to text, reporting whether a call appeared anywhere inside it.</summary>
     private static (string Text, bool HasCall) RenderExpr(AstNonTerminal expr)
     {
-        var hasCall = expr.Items.OfType<AstNonTerminal>().Any(n => n.Name == "Call");
+        var hasCall = Descendants(expr).Any(n => n.Name == "Call");
         return (RenderItems(expr), hasCall);
     }
 
@@ -279,12 +319,15 @@ public static class QoraLowering
     }
 
     private static string RenderItems(AstNonTerminal expr) =>
-        string.Join(" ", expr.Items.Select(item => item switch
-        {
-            AstNonTerminal { Name: "Call" } call => RenderCall(call),
-            AstNonTerminal nt => nt.ToString() ?? string.Empty,
-            _ => item.ToString() ?? string.Empty,
-        }));
+        string.Join(" ", expr.Items.Select(RenderItem).Where(s => s.Length > 0));
+
+    private static string RenderItem(AstSymbol item) => item switch
+    {
+        AstNonTerminal { Name: "Call" } call => RenderCall(call),
+        AstNonTerminal { Name: "Qubit" } indexed => $"{Child(indexed, 0)} [ {Child(indexed, 1)} ]",
+        AstNonTerminal nt => RenderItems(nt),
+        _ => item.ToString() ?? string.Empty,
+    };
 
     private static string RenderCall(AstNonTerminal call)
     {
@@ -326,7 +369,30 @@ public static class QoraLowering
 
     private static string? DeclType(AstNonTerminal node) =>
         node.Items.OfType<AstTerminal>().Select(t => t.ToString() ?? string.Empty)
+            .FirstOrDefault(t => TypeKeywords.Contains(t))
+        ?? node.Items.OfType<AstNonTerminal>().Where(n => n.Name == "ArrayType")
+            .SelectMany(n => n.Items.OfType<AstTerminal>())
+            .Select(t => t.ToString() ?? string.Empty)
             .FirstOrDefault(t => TypeKeywords.Contains(t));
+
+    private static QType? ParseType(string? keyword) => keyword switch
+    {
+        "Qubit" => QType.Qubit,
+        "int" => QType.Int,
+        "bit" => QType.Bit,
+        "float" => QType.Float,
+        "angle" => QType.Angle,
+        _ => null,
+    };
+
+    private static IEnumerable<AstNonTerminal> Descendants(AstNonTerminal node)
+    {
+        foreach (var child in node.Items.OfType<AstNonTerminal>())
+        {
+            yield return child;
+            foreach (var nested in Descendants(child)) yield return nested;
+        }
+    }
 
     private static bool IsNumber(string s) => s.Length > 0 && s.All(char.IsDigit);
 

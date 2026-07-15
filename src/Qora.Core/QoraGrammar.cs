@@ -6,9 +6,9 @@ using Janglim.FrontEnd.RegularGrammar;
 namespace Qora;
 
 /// <summary>
-/// Qora v0.14 — a Q#/C#-flavored quantum language on the Janglim engine.
+/// Qora v0.21 — a Q#/C#-flavored quantum language on the Janglim engine.
 ///
-///   operation Bell(Qubit[2] q) {       // a subroutine, with C#-style parameters
+///   operation Bell(Qubit[] q) {        // a subroutine, with C#-style array parameters
 ///       H(q[0]);
 ///       Controlled X(q[0], q[1]);       // add a control -> ctrl @ x  (CNOT)
 ///   }
@@ -49,23 +49,27 @@ namespace Qora;
 /// toolchain (Braket runner + two release-gate validators; Braket's local simulator runs the FULL
 /// language). Operations are still void (no return value yet).
 /// v0.14 adds: classical <c>float</c> and <c>angle</c> types (parameters and <c>var</c>/<c>const</c>);
-/// parameterized register sizes <c>Qubit[n]</c> specialized per call site by monomorphization
+/// sized qubit-register parameters, specialized internally per call-site size by monomorphization
 /// (<c>Ir/Passes/Monomorphizer.cs</c>); name mangling that renames ONLY on a real collision — append
 /// <c>_</c>, auto-resolved, never an error, with a <c>// Qora:</c> note per rename (superseding v0.12's
 /// suffix-every-name scheme, so <c>q</c> stays <c>q</c> unless it clashes); whole-operation <c>Adjoint</c>
 /// materialized into a real inverse-def op BEFORE mangling (<c>Ir/Passes/AdjointMaterializer.cs</c>),
 /// leaving <c>QasmEmitter</c> a pure printer; and a post-mangle referential-integrity gate
 /// (<c>Ir/Passes/ReferentialCheck.cs</c>, QINTERNAL) that proves every emitted name resolves.
+/// v0.21 replaces sized source parameters with <c>Qubit[]</c> plus <c>.Count</c>, while retaining
+/// <c>use q = Qubit[N]</c> for allocation. It also adds one-dimensional <c>int[]</c>, <c>float[]</c>,
+/// <c>bit[]</c>, and <c>angle[]</c> values: explicit literals, zero-initialized <c>new T[N]</c>, indexed
+/// reads/writes, <c>.Count</c>, and mutable array parameters lowered to OpenQASM 3 general arrays.
 /// </summary>
 public class QoraGrammar : Grammar
 {
-    // --- keywords (meaning=false -> excluded from AST; bWord=false -> win the lexer tie vs identifier) ---
+    // --- structural keywords (meaning=false -> excluded from AST; bWord=false -> win the lexer tie vs identifier) ---
     public Terminal Operation { get; } = new Terminal(TokenType.Keyword, "operation", false);
     public Terminal Namespace { get; } = new Terminal(TokenType.Keyword, "namespace", false);
     public Terminal Open { get; } = new Terminal(TokenType.Keyword, "open", false);
     public Terminal Import { get; } = new Terminal(TokenType.Keyword, "import", false);
     public Terminal Use { get; } = new Terminal(TokenType.Keyword, "use", false);
-    public Terminal Qubit { get; } = new Terminal(TokenType.Keyword, "Qubit", false);
+    public Terminal New { get; } = new Terminal(TokenType.Keyword, "new", false);
     public Terminal Const { get; } = new Terminal(TokenType.Keyword, "const", false);
     public Terminal Var { get; } = new Terminal(TokenType.Keyword, "var", false);
     public Terminal If { get; } = new Terminal(TokenType.Keyword, "if", false);
@@ -83,6 +87,7 @@ public class QoraGrammar : Grammar
     public Terminal Controlled { get; } = new Terminal(TokenType.Keyword, "Controlled", "Controlled", true, false);
 
     // --- type keywords (meaning=TRUE so they stay in the AST; bWordPattern=false for keyword priority) ---
+    public Terminal Qubit { get; } = new Terminal(TokenType.Keyword, "Qubit", "Qubit", true, false);
     public Terminal Int { get; } = new Terminal(TokenType.Keyword, "int", "int", true, false);
     public Terminal Bit { get; } = new Terminal(TokenType.Keyword, "bit", "bit", true, false);
     public Terminal FloatType { get; } = new Terminal(TokenType.Keyword, "float", "float", true, false);
@@ -160,10 +165,16 @@ public class QoraGrammar : Grammar
     private NonTerminal whileStmt = new NonTerminal("whileStmt");
     private NonTerminal repeatStmt = new NonTerminal("repeatStmt");
     private NonTerminal typeName = new NonTerminal("typeName");
+    private NonTerminal arrayType = new NonTerminal("arrayType");
+    private NonTerminal qubitArrayType = new NonTerminal("qubitArrayType");
+    private NonTerminal arrayInitializer = new NonTerminal("arrayInitializer");
+    private NonTerminal arrayLiteral = new NonTerminal("arrayLiteral");
+    private NonTerminal arrayNew = new NonTerminal("arrayNew");
     private NonTerminal condition = new NonTerminal("condition");
     private NonTerminal condAtom = new NonTerminal("condAtom");
     private NonTerminal expr = new NonTerminal("expr");
     private NonTerminal primary = new NonTerminal("primary");
+    private NonTerminal memberAccess = new NonTerminal("memberAccess");
     private NonTerminal call = new NonTerminal("call");
     private NonTerminal qubitRef = new NonTerminal("qubitRef");
     private NonTerminal index = new NonTerminal("index");
@@ -175,6 +186,9 @@ public class QoraGrammar : Grammar
     public static MeaningUnit OpenM { get; } = new MeaningUnit("Open");
     public static MeaningUnit OperationM { get; } = new MeaningUnit("Operation");
     public static MeaningUnit ParamM { get; } = new MeaningUnit("Param");
+    public static MeaningUnit ArrayTypeM { get; } = new MeaningUnit("ArrayType");
+    public static MeaningUnit ArrayLiteralM { get; } = new MeaningUnit("ArrayLiteral");
+    public static MeaningUnit ArrayNewM { get; } = new MeaningUnit("ArrayNew");
     public static MeaningUnit UseM { get; } = new MeaningUnit("Use");
     public static MeaningUnit GateM { get; } = new MeaningUnit("Gate");
     public static MeaningUnit ConstDeclM { get; } = new MeaningUnit("ConstDecl");
@@ -212,12 +226,12 @@ public class QoraGrammar : Grammar
         operation.AddItem(Operation + Ident + LParen + paramList + RParen + LBrace + statement.ZeroOrMore() + RBrace, OperationM);
 
         paramList.AddItem(param + (Comma + param).ZeroOrMore());
-        // Qubit q  /  Qubit[2] q  /  Qubit[n] q (generic register size)  /  int n  /  bit b  /  float theta  /  angle phi
-        //   (Qubit keyword is dropped; a concrete register keeps its size Num, a generic one its size Ident)
+        // Qubit q / Qubit[] qs / int n / bit b / float theta / angle phi.
+        // Array length is intentionally absent from the source parameter type; use-allocation still has one.
         param.AddItem(Qubit + Ident, ParamM);
-        param.AddItem(Qubit + LBracket + Num + RBracket + Ident, ParamM);
-        param.AddItem(Qubit + LBracket + Ident + RBracket + Ident, ParamM);
+        param.AddItem(qubitArrayType + Ident, ParamM);
         param.AddItem(typeName + Ident, ParamM);
+        param.AddItem(arrayType + Ident, ParamM);
 
         statement.AddItem(useStmt | gateStmt | constDecl | varDecl | assignStmt | ifStmt | forStmt | whileStmt | repeatStmt);
 
@@ -236,30 +250,40 @@ public class QoraGrammar : Grammar
         gateStmt.AddItem(Adjoint + qname + LParen + arg + (Comma + arg).ZeroOrMore() + RParen + Semicolon, GateM);
         gateStmt.AddItem(Controlled + qname + LParen + RParen + Semicolon, GateM);
         gateStmt.AddItem(Controlled + qname + LParen + arg + (Comma + arg).ZeroOrMore() + RParen + Semicolon, GateM);
-        arg.AddItem(qubitRef | expr);   // q[0] (qubit)  |  an expression: q (register) / 5 / pi/2 / 0.5
+        // Every argument is an expression. Lowering still preserves a lone indexed reference as a
+        // structured argument, allowing validation to decide whether its base is a qubit or T[].
+        arg.AddItem(expr);
 
         // const i = expr;   /   const int i = expr;
         constDecl.AddItem(Const + Ident + Assign + expr + Semicolon, ConstDeclM);
         constDecl.AddItem(Const + typeName + Ident + Assign + expr + Semicolon, ConstDeclM);
+        constDecl.AddItem(Const + arrayType + Ident + Assign + arrayInitializer + Semicolon, ConstDeclM);
 
         // var i = expr;   /   int i = expr;   /   bit r = M(q[0]);   (all mutable)
         varDecl.AddItem(Var + Ident + Assign + expr + Semicolon, VarDeclM);
         varDecl.AddItem(typeName + Ident + Assign + expr + Semicolon, VarDeclM);
+        varDecl.AddItem(arrayType + Ident + Assign + arrayInitializer + Semicolon, VarDeclM);
 
         // i = expr;
         assignStmt.AddItem(Ident + Assign + expr + Semicolon, AssignM);
+        assignStmt.AddItem(qubitRef + Assign + expr + Semicolon, AssignM);
 
         // if (cond) { … }   /   if (cond) { … } else { … }   /   if (cond) { … } else if (…) { … }
         ifStmt.AddItem(If + LParen + condition + RParen + LBrace + statement.ZeroOrMore() + RBrace, IfM);
         ifStmt.AddItem(If + LParen + condition + RParen + LBrace + statement.ZeroOrMore() + RBrace + Else + LBrace + statement.ZeroOrMore() + RBrace, IfM);
         ifStmt.AddItem(If + LParen + condition + RParen + LBrace + statement.ZeroOrMore() + RBrace + Else + ifStmt, IfM);
 
-        // bounds are expressions so a loop can range over a generic register size: `for i in 0..n-1`.
+        // bounds are expressions so a loop can range over an array: `for i in 0..q.Count-1`.
         forStmt.AddItem(For + Ident + In + expr + DotDot + expr + LBrace + statement.ZeroOrMore() + RBrace, ForM);
         whileStmt.AddItem(While + LParen + condition + RParen + LBrace + statement.ZeroOrMore() + RBrace, WhileM);
         repeatStmt.AddItem(Repeat + LBrace + statement.ZeroOrMore() + RBrace + Until + LParen + condition + RParen + Semicolon, RepeatM);
 
         typeName.AddItem(Int | Bit | FloatType | AngleType);
+        arrayType.AddItem(typeName + LBracket + RBracket, ArrayTypeM);
+        qubitArrayType.AddItem(Qubit + LBracket + RBracket, ArrayTypeM);
+        arrayInitializer.AddItem(arrayLiteral | arrayNew);
+        arrayLiteral.AddItem(LBracket + expr + (Comma + expr).ZeroOrMore() + RBracket, ArrayLiteralM);
+        arrayNew.AddItem(New + typeName + LBracket + Num + RBracket, ArrayNewM);
 
         // condition: a flat boolean expression joined by comparison/boolean operators. Flat on purpose —
         // the tokens emit in order and OpenQASM re-parses with its own precedence, so "a == 1 && b == 0"
@@ -271,8 +295,11 @@ public class QoraGrammar : Grammar
         // expression: atoms joined by + - * /   (e.g.  i + 1 ,  pi / 2 ,  2 * pi ,  0.5 ,  M(q[0]) ).
         // A leading unary minus is its own production (e.g. -pi/2 for rotation angles).
         expr.AddItem(primary + ((Plus | Minus | Mul | Div) + primary).ZeroOrMore(), ExprM);
-        primary.AddItem(Num | Float | Ident | call);
+        primary.AddItem(Num | Float | Ident | call | memberAccess | qubitRef);
         primary.AddItem(Minus + primary);
+        // Semantic validation currently exposes exactly one member, Array.Count. Keeping the grammar
+        // general lets it produce a precise diagnostic for `q.Length` instead of a low-level parse error.
+        memberAccess.AddItem(Ident + Dot + Ident);
         call.AddItem(Ident + LParen + qubitRef + RParen, CallM);   // M(q[0])
 
         qubitRef.AddItem(Ident + LBracket + index + RBracket, QubitM);

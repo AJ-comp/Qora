@@ -19,6 +19,11 @@
     "body": ["use ${1:q} = Qubit[${2:2}];"],
     "description": "큐비트 할당"
   },
+  "classical array": {
+    "prefix": "array",
+    "body": ["${1|int,float,bit,angle|}[] ${2:values} = new ${1}[${3:3}];"],
+    "description": "0으로 초기화된 고전 배열 선언"
+  },
   "measure": {
     "prefix": "measure",
     "body": ["bit ${1:r} = M(${2:q}[${3:0}]);"],
@@ -37,7 +42,7 @@
   "Bell state": {
     "prefix": "bell",
     "body": [
-      "operation Bell(Qubit[2] q) {",
+      "operation Bell(Qubit[] q) {",
       "\tH(q[0]);",
       "\tCNOT(q[0], q[1]);",
       "}"

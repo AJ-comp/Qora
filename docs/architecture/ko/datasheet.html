@@ -136,7 +136,7 @@
       <div><dt>방출 타깃</dt><dd>OpenQASM 3.0</dd></div>
       <div><dt>실행 검증 오라클</dt><dd>Amazon Braket LocalSimulator (전체 언어 실행)</dd></div>
       <div><dt>중심 자료구조</dt><dd>강타입 IR(<code>QProgram</code>) + 지속 <code>SemanticModel</code></dd></div>
-      <div><dt>문서 버전</dt><dd>Qora v0.19 기준</dd></div>
+      <div><dt>문서 버전</dt><dd>Qora v0.21 기준</dd></div>
     </dl>
   </section>
 
@@ -208,8 +208,8 @@
       <tr><td class="k">ModuleLoader</td><td>import 확장 — 여러 파일을 하나의 프로그램으로 병합.</td><td>QSEM020/021</td></tr>
       <tr><td class="k">MeasureConditionLowering</td><td><code>if (M(q)==v)</code>를 <code>bit t=M(q); if(t==v)</code>로 desugar.</td><td>해소·검증 前</td></tr>
       <tr><td class="k">Resolver</td><td>이름을 완전수식명(FQN)으로 해소 (네임스페이스/open).</td><td>QSEM018/019</td></tr>
-      <tr><td class="k">QoraValidator</td><td>의미 검증 1차 실행 — 수집형(조기중단 없음). 스코프 트리를 SemanticModel로 적재.</td><td>QSEM001–028</td></tr>
-      <tr><td class="k">Monomorphizer</td><td>제네릭 <code>Qubit[n]</code>을 구체 크기로 특수화. 복제 노드는 <code>ReId</code>로 새 Id.</td><td>모델 소유 검증 이후</td></tr>
+      <tr><td class="k">QoraValidator</td><td>의미 검증 1차 실행 — 수집형(조기중단 없음). 스코프 트리를 SemanticModel로 적재.</td><td>QSEM001–029</td></tr>
+      <tr><td class="k">Monomorphizer</td><td>소스의 <code>Qubit[]</code> 파라미터를 호출부의 실제 크기로 특수화하고 <code>Count</code>를 정수로 치환. 복제 노드는 <code>ReId</code>로 새 Id.</td><td>모델 소유 검증 이후</td></tr>
       <tr><td class="k">EffectAnalysis</td><td><strong>rung ①</strong> — 리프 문장마다 큐빗이벤트(Read/Write/Measure) + op 요약. 순수 분석.</td><td>IR 무변경</td></tr>
       <tr><td class="k">ConjugationLowering</td><td><code>QConjugate</code>(within/apply)를 <code>W ++ A ++ inverse(W)</code>로 평탄화.</td><td>QSEM027 (역함수 없으면 거부)</td></tr>
       <tr><td class="k">AdjointMaterializer</td><td><code>Adjoint Foo</code>를 진짜 역연산 op <code>Foo__adj</code>로 실체화 + 호출부 재작성.</td><td>맹글 前</td></tr>
@@ -250,14 +250,14 @@
       <tr><th>노드</th><th>의미</th><th>주요 필드</th></tr>
       <tr><td class="k">QProgram</td><td>프로그램 전체</td><td>Operations</td></tr>
       <tr><td class="k">QOperation</td><td>연산 정의 (Q#의 operation)</td><td>Name, Params, Body, Id</td></tr>
-      <tr><td class="k">QParam</td><td>파라미터 슬롯</td><td>Name, Type, RegisterSize/SizeParam, Id</td></tr>
+      <tr><td class="k">QParam</td><td>스칼라 또는 배열 파라미터 슬롯</td><td>Name, Type, IsArray, RegisterSize, Id</td></tr>
       <tr><td class="k">QUse</td><td>큐빗 레지스터 할당 <code>use q = Qubit[n]</code></td><td>Name, Size, Id</td></tr>
       <tr><td class="k">QGate</td><td>게이트 적용 또는 <strong>op 호출</strong> (같은 노드)</td><td>Functors, Name, Args, Id</td></tr>
-      <tr><td class="k">QDecl / QAssign</td><td>고전 선언 / 대입 (측정 포함 가능)</td><td>Name, Type, Value, Id</td></tr>
+      <tr><td class="k">QDecl / QAssign</td><td>고전 스칼라·배열 선언 / 전체 변수 또는 배열 원소 대입</td><td>Name, Type, IsArray / Index, Value, Id</td></tr>
       <tr><td class="k">QIf / QFor / QWhile / QRepeat</td><td>제어흐름 (컨테이너)</td><td>Cond/Var·From·To·Step, Body, Id</td></tr>
       <tr><td class="k">QConjugate</td><td>within/apply 켤레 — <strong>내부 IR 전용</strong> (표면 문법 없음)</td><td>Within, Apply, Id</td></tr>
       <tr><td class="k">QArg</td><td>게이트 인자: <code>QQubitArg</code>(reg[idx]) / <code>QTextArg</code>(통짜·각도식)</td><td>—</td></tr>
-      <tr><td class="k">QExpr / QCond</td><td>값 표현식 (<code>QText</code>·<code>QMeasure</code>) / 조건</td><td>HasCall 플래그</td></tr>
+      <tr><td class="k">QExpr / QCond</td><td>값 표현식 (<code>QText</code>·<code>QMeasure</code>·<code>QArrayLiteral</code>·<code>QArrayNew</code>) / 조건</td><td>HasCall 플래그 또는 배열 원소·타입·길이</td></tr>
     </table>
   </div>
 
@@ -466,14 +466,15 @@
       <tr><td class="k">QSEM004–005</td><td>bare 측정문 / 표현식 안의 호출</td></tr>
       <tr><td class="k">QSEM006–007</td><td>인자 수·종류·모양 오류 / 미지 게이트·연산 이름</td></tr>
       <tr><td class="k">QSEM008 · 022</td><td>중복 연산 정의 (전역 / 네임스페이스 내)</td></tr>
-      <tr><td class="k">QSEM009–012</td><td>entry 호출·함자 / entry 파라미터 / 재귀 사이클 / 잘못된 <code>use</code> 위치</td></tr>
+      <tr><td class="k">QSEM009–012</td><td>entry 호출·함자 / entry 파라미터 / 재귀 사이클 / 잘못된 <code>use</code>·고전 배열 선언 위치</td></tr>
       <tr><td class="k">QSEM013 · 015</td><td>내장 가림 예약 이름 / 같은 스코프 중복 선언 (단일 삽입 문)</td></tr>
-      <tr><td class="k">QSEM014</td><td>한 게이트에 같은 큐빗 중복 피연산자</td></tr>
-      <tr><td class="k">QSEM016–017</td><td>잘못된 인덱스·레지스터 크기 / 측정을 비-bit에 대입</td></tr>
+      <tr><td class="k">QSEM014</td><td>한 게이트의 중복 큐빗 피연산자 또는 한 호출에 겹쳐 전달한 가변 배열</td></tr>
+      <tr><td class="k">QSEM016–017</td><td>잘못된 배열·큐빗 인덱스와 할당 크기 / 측정을 비-bit에 대입</td></tr>
       <tr><td class="k">QSEM018–021</td><td>모호한 참조 / 미지 네임스페이스 (Resolver) · import 없음 / 순환 (ModuleLoader)</td></tr>
       <tr><td class="k">QSEM024–026</td><td><code>const</code> 재대입 / 미해소·선언전 사용 / 큐빗을 고전값 자리에</td></tr>
       <tr><td class="k">QSEM027</td><td>역함수 없는 within 블록 (ConjugationLowering)</td></tr>
       <tr><td class="k">QSEM028</td><td>연산을 값으로 사용 (<code>var x = Foo</code>) — 연산은 호출만 가능</td></tr>
+      <tr><td class="k">QSEM029</td><td>배열 형태·초기화·멤버 접근 또는 전체 배열 대입 오류</td></tr>
       <tr><td class="k">QINTERNAL</td><td>컴파일러 불변식 위반 — 조용히 틀리는 대신 크게 실패 (ReferentialCheck / 효과분석 자물쇠)</td></tr>
     </table>
   </div>
@@ -491,11 +492,13 @@
       <tr><td class="k">v0.17</td><td>효과분석(touched/modified), 연산을 1급 심벌로(연결 스코프), 소스/방출 이름 도메인 분리</td></tr>
       <tr><td class="k">v0.18</td><td>큐빗이벤트 스트림으로 저장 통일, <strong>rung ② liveness</strong>(<code>LiveRange</code> 조회)</td></tr>
       <tr><td class="k">v0.19</td><td><strong>rung ③ 안전판정</strong>(4-clause + 사유·범인, 비-qfree 기준에 Y·CY 위상치환 포함), <strong>큐빗그래프</strong>(값 족보 DAG, 이벤트와 동시 기록 + 상시 일치성 스윕), 반납 규칙(스코프 끝 |0⟩ 반납, 못 치우면 에러), 앤실라/청소 후보 용어 체계와 원소별 리포트</td></tr>
+      <tr><td class="k">v0.20</td><td>자동 uncompute 정리 계획 생성기, 문장 Id 조회, 호출 대상 <code>CalleeOpId</code> 연결</td></tr>
+      <tr><td class="k">v0.21</td><td><code>Qubit[]</code>·<code>Count</code> 기반 크기 독립 파라미터와 호출부 특수화, <code>int[]</code>·<code>float[]</code>·<code>bit[]</code>·<code>angle[]</code> 고전 배열</td></tr>
     </table>
   </div>
 
   <footer>
-    Qora 컴파일러 데이터시트 · v0.19 기준 · 개념 배경은 <a href="adjoint-pipeline.html">역합성 파이프라인</a>과
+    Qora 컴파일러 데이터시트 · v0.21 기준 · 개념 배경은 <a href="adjoint-pipeline.html">역합성 파이프라인</a>과
     <a href="hadamard.html">H 게이트 문서</a> 참조
   </footer>
 

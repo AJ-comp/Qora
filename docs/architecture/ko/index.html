@@ -206,7 +206,7 @@
       <li><a href="#s3">Lower — AST에서 Qora IR로 (경계를 넘다)</a></li>
       <li><a href="#s4">Expand &amp; Resolve — 임포트와 호출 대상 FQN</a></li>
       <li><a href="#s5">Validate — 의미 게이트</a></li>
-      <li><a href="#s6">Monomorphize — 제네릭 레지스터의 특수화</a></li>
+      <li><a href="#s6">Monomorphize — 큐비트 배열 호출의 특수화</a></li>
       <li><a href="#s7">Materialize Adjoint — 역연산을 진짜 op으로</a></li>
       <li><a href="#s8">Mangle &amp; Check — 충돌 없는 이름, 그리고 검증</a></li>
       <li><a href="#s9">Emit — OpenQASM 3로 내보내는 단순 출력기</a></li>
@@ -218,13 +218,13 @@
 
   <p>
     모든 단계가 실제로 일하는 모습을 보기 위해, <strong>네임스페이스</strong>와
-    <strong>제네릭 레지스터</strong>(<code>Qubit[n]</code>), 호출, 그리고 <strong>Adjoint</strong>를
+    <strong>큐비트 배열 파라미터</strong>(<code>Qubit[]</code>), 호출, 그리고 <strong>Adjoint</strong>를
     한 프로그램에 담았습니다:
   </p>
 
 <pre><code>namespace Prep {
-    operation Fanout(Qubit[n] q) {       <span class="cm">// 제네릭: n은 나중에, 호출부마다 정해짐</span>
-        for i in 0..n-1 { H(q[i]); }
+    operation Fanout(Qubit[] q) {        <span class="cm">// 배열 길이는 호출부마다 정해짐</span>
+        for i in 0..q.Count-1 { H(q[i]); }
     }
 }
 
@@ -281,18 +281,19 @@ operation Main() {
     Nonterminal : Operation
       Terminal : Fanout
       Nonterminal : Param
-        Terminal : n                    <span class="cm">← 제네릭 크기 심볼</span>
+        Nonterminal : ArrayType
+          Terminal : Qubit
         Terminal : q
       Nonterminal : For
         Terminal : i
         Nonterminal : Expr ( 0 )
-        Nonterminal : Expr ( n - 1 )
+        Nonterminal : Expr ( q . Count - 1 )
         Nonterminal : Gate
           Terminal : H
           Nonterminal : Qubit ( q , i )
   Nonterminal : Operation
     Terminal : Main
-    Nonterminal : Use ( reg , 3 )
+    Nonterminal : Use ( reg , Qubit , 3 )
     Nonterminal : Gate                  <span class="cm">← 호출도 다른 모든 것처럼 Gate로 태깅됨</span>
       Terminal : Prep
       Terminal : .
@@ -419,24 +420,24 @@ qubit[2] q;
     수 있습니다.
   </div>
 
-  <h2 id="s6"><span class="n">6</span>Monomorphize — 제네릭 레지스터의 특수화</h2>
+  <h2 id="s6"><span class="n">6</span>Monomorphize — 큐비트 배열 호출의 특수화</h2>
 
   <p class="stagehead">in: 검증된 IR &nbsp;·&nbsp; out: 구체적 크기의 op을 가진 IR &nbsp;·&nbsp; 패스: <code>Monomorphizer</code></p>
 
   <p>
-    <code>Fanout(Qubit[n] q)</code>는 제네릭입니다: <code>n</code>은 호출이 정해주기 전까지 미지수입니다.
-    단형화기(monomorphizer)는 C++ 템플릿이나 Rust 제네릭처럼 작동합니다 — 각 호출부마다 <code>n</code>을 실제
-    레지스터 크기로 치환한 <strong>구체적 복사본을 찍어내고</strong>, 그 복사본을 가리키도록 호출을 다시 씁니다.
+    표면 타입 <code>Fanout(Qubit[] q)</code>에는 배열 길이를 적지 않습니다.<br>
+    단형화기(monomorphizer)는 각 호출부에서 실제 레지스터 크기를 읽어 <strong>구체적인 내부 복사본을 만들고</strong>,
+    그 복사본의 <code>q.Count</code>를 실제 크기로 치환한 뒤 호출이 해당 복사본을 가리키도록 다시 씁니다.<br>
     예제의 호출은 <code>reg</code>(큐비트 3개)를 넘기므로:
   </p>
 
   <div class="rule">
-    <code>Prep.Fanout(Qubit[n])</code> &nbsp;+&nbsp; 크기 3 레지스터로의 호출
+    <code>Prep.Fanout(Qubit[])</code> &nbsp;+&nbsp; 크기 3 레지스터로의 호출
     &nbsp;⟶&nbsp; <code>Prep.Fanout__sz3(Qubit[3])</code>
   </div>
 
   <p>
-    이제 크기가 구체적이므로, 프로그램은 <strong>두 번째로 검증</strong>됩니다: <code>n</code>이 숫자여야만
+    이제 크기가 구체적이므로, 프로그램은 <strong>두 번째로 검증</strong>됩니다: <code>q.Count</code>가 숫자여야만
     의미가 있는 검사 — 인덱스 범위, 레지스터 크기 일치 — 가 비로소 대조할 대상을 갖습니다. 이 패스 이후에는
     제네릭 연산이 남지 않습니다.
   </p>
@@ -597,7 +598,7 @@ r = measure reg[0];</code></pre>
       <tr><td>Desugar measure</td><td><code>MeasureConditionLowering</code></td><td>조건 안의 측정 → 끌어올린 <code>bit</code>, 대입 후 검사</td></tr>
       <tr><td>Resolve</td><td><code>Resolver</code></td><td>연산 호출 대상 → 정규화된 이름(FQN)</td></tr>
       <tr><td>Validate</td><td><code>QoraValidator</code> + <code>SymbolTableBuilder</code></td><td>IR → 심볼 테이블 + 모든 의미 오류 (방출을 막는 단단한 게이트)</td></tr>
-      <tr><td>Monomorphize</td><td><code>Monomorphizer</code></td><td>제네릭 <code>Qubit[n]</code> → 구체적 크기 복사본, 바뀐 경우 재검증</td></tr>
+      <tr><td>Monomorphize</td><td><code>Monomorphizer</code></td><td><code>Qubit[]</code> 호출 → 호출 크기별 내부 복사본, 바뀐 경우 재검증</td></tr>
       <tr><td>Flatten conjugation</td><td><code>ConjugationLowering</code></td><td><code>within/apply</code> (<code>QConjugate</code>) → <code>compute; apply;</code> + 합성된 <code>within</code>의 역연산</td></tr>
       <tr><td>Materialize</td><td><code>AdjointMaterializer</code></td><td><code>Adjoint Foo</code> → 진짜 <code>Foo__adj</code> op + 평범한 호출</td></tr>
       <tr><td>Mangle</td><td><code>NameMangler</code></td><td>Qora 이름 → 충돌 없는 OpenQASM 식별자</td></tr>

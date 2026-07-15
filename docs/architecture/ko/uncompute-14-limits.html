@@ -227,8 +227,8 @@ bit c = M(out[0]);
     </div>
     <div class="card good">
       <h4>연산으로 감싼 같은 계산 — ✅ safe</h4>
-<pre><code>operation Flip(Qubit[3] p){
-  for i in 0..2 { X(p[i]); }
+<pre><code>operation Flip(Qubit[] p){
+  for i in 0..p.Count-1 { X(p[i]); }
 }
 use a = Qubit[3];  use out = Qubit[1];
 Flip(a);

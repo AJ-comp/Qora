@@ -205,7 +205,7 @@
       <li><a href="#s3">Lower — AST to Qora IR (crossing the boundary)</a></li>
       <li><a href="#s4">Expand &amp; Resolve — imports and callee FQNs</a></li>
       <li><a href="#s5">Validate — the semantic gate</a></li>
-      <li><a href="#s6">Monomorphize — specializing generic registers</a></li>
+      <li><a href="#s6">Monomorphize — specializing qubit-array calls</a></li>
       <li><a href="#s7">Materialize Adjoint — inverses become real ops</a></li>
       <li><a href="#s8">Mangle &amp; Check — collision-free names, then verified</a></li>
       <li><a href="#s9">Emit — the dumb printer to OpenQASM 3</a></li>
@@ -217,12 +217,12 @@
 
   <p>
     To see every stage do real work, we use one small program that packs in a <strong>namespace</strong>,
-    a <strong>generic register</strong> (<code>Qubit[n]</code>), a call, and an <strong>Adjoint</strong>:
+    a <strong>qubit-array parameter</strong> (<code>Qubit[]</code>), a call, and an <strong>Adjoint</strong>:
   </p>
 
 <pre><code>namespace Prep {
-    operation Fanout(Qubit[n] q) {       <span class="cm">// generic: n is fixed later, per call site</span>
-        for i in 0..n-1 { H(q[i]); }
+    operation Fanout(Qubit[] q) {        <span class="cm">// the array length comes from each call site</span>
+        for i in 0..q.Count-1 { H(q[i]); }
     }
 }
 
@@ -280,18 +280,19 @@ operation Main() {
     Nonterminal : Operation
       Terminal : Fanout
       Nonterminal : Param
-        Terminal : n                    <span class="cm">← the generic size symbol</span>
+        Nonterminal : ArrayType
+          Terminal : Qubit
         Terminal : q
       Nonterminal : For
         Terminal : i
         Nonterminal : Expr ( 0 )
-        Nonterminal : Expr ( n - 1 )
+        Nonterminal : Expr ( q . Count - 1 )
         Nonterminal : Gate
           Terminal : H
           Nonterminal : Qubit ( q , i )
   Nonterminal : Operation
     Terminal : Main
-    Nonterminal : Use ( reg , 3 )
+    Nonterminal : Use ( reg , Qubit , 3 )
     Nonterminal : Gate                  <span class="cm">← a call is tagged Gate, like everything else</span>
       Terminal : Prep
       Terminal : .
@@ -420,25 +421,25 @@ qubit[2] q;
     gate stands in front of them all.
   </div>
 
-  <h2 id="s6"><span class="n">6</span>Monomorphize — specializing generic registers</h2>
+  <h2 id="s6"><span class="n">6</span>Monomorphize — specializing qubit-array calls</h2>
 
   <p class="stagehead">in: validated IR &nbsp;·&nbsp; out: IR with concrete-size ops &nbsp;·&nbsp; pass: <code>Monomorphizer</code></p>
 
   <p>
-    <code>Fanout(Qubit[n] q)</code> is generic: <code>n</code> is unknown until a call fixes it. The
-    monomorphizer works like a C++ template or a Rust generic — for each call site, it <strong>stamps out a
-    concrete copy</strong> of the operation with <code>n</code> replaced by the actual register size, and
-    rewrites the call to point at that copy. Our call passes <code>reg</code> (3 qubits), so:
+    The surface type <code>Fanout(Qubit[] q)</code> deliberately omits the array length. At each call site,
+    the monomorphizer reads the actual register size, <strong>stamps out a concrete internal copy</strong>,
+    replaces <code>q.Count</code> with that size, and rewrites the call to point at the copy. Our call passes
+    <code>reg</code> (3 qubits), so:
   </p>
 
   <div class="rule">
-    <code>Prep.Fanout(Qubit[n])</code> &nbsp;+&nbsp; call with a size-3 register
+    <code>Prep.Fanout(Qubit[])</code> &nbsp;+&nbsp; call with a size-3 register
     &nbsp;⟶&nbsp; <code>Prep.Fanout__sz3(Qubit[3])</code>
   </div>
 
   <p>
     Because sizes are now concrete, the program is <strong>validated a second time</strong>: checks that only
-    make sense once <code>n</code> is a number — index bounds, register-size matches — finally have something
+    make sense once <code>q.Count</code> is a number — index bounds, register-size matches — finally have something
     to run against. After this pass, no generic operations remain.
   </p>
 
@@ -605,7 +606,7 @@ r = measure reg[0];</code></pre>
       <tr><td>Desugar measure</td><td><code>MeasureConditionLowering</code></td><td>a measurement inside a condition → a hoisted <code>bit</code>, assigned then tested</td></tr>
       <tr><td>Resolve</td><td><code>Resolver</code></td><td>operation call targets → fully-qualified names</td></tr>
       <tr><td>Validate</td><td><code>QoraValidator</code> + <code>SymbolTableBuilder</code></td><td>IR → symbol tables + every semantic error (a hard gate on emission)</td></tr>
-      <tr><td>Monomorphize</td><td><code>Monomorphizer</code></td><td>generic <code>Qubit[n]</code> → concrete-size copies, then re-validate if changed</td></tr>
+      <tr><td>Monomorphize</td><td><code>Monomorphizer</code></td><td><code>Qubit[]</code> calls → call-size-specific internal copies, then re-validate if changed</td></tr>
       <tr><td>Flatten conjugation</td><td><code>ConjugationLowering</code></td><td><code>within/apply</code> (<code>QConjugate</code>) → <code>compute; apply;</code> + synthesized inverse of <code>within</code></td></tr>
       <tr><td>Materialize</td><td><code>AdjointMaterializer</code></td><td><code>Adjoint Foo</code> → a real <code>Foo__adj</code> op + a plain call</td></tr>
       <tr><td>Mangle</td><td><code>NameMangler</code></td><td>Qora names → collision-free OpenQASM identifiers</td></tr>

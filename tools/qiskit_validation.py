@@ -83,7 +83,7 @@ operation Main() {
 load_and_run("F4 for loop flips both -> 11", """
 operation Main() {
     use q = Qubit[2];
-    for i in 0..1 {
+    for i in 0..q.Count - 1 {
         X(q[i]);
     }
     bit r0 = M(q[0]);
@@ -142,7 +142,7 @@ print()
 print("== DEF programs (subroutines: the known consumer-support question) ==")
 
 load_and_run("D1 Bell via def", """
-operation Bell(Qubit[2] q) {
+operation Bell(Qubit[] q) {
     H(q[0]);
     CNOT(q[0], q[1]);
 }
@@ -154,7 +154,7 @@ operation Main() {
 }""", {"00", "11"})
 
 load_and_run("D2 whole-op Adjoint identity (Prep; Adjoint Prep -> 00)", """
-operation Prep(Qubit[2] q) {
+operation Prep(Qubit[] q) {
     H(q[0]);
     T(q[1]);
     CNOT(q[0], q[1]);
@@ -169,7 +169,7 @@ operation Main() {
 
 load_and_run("D3 namespaced call (def MyLib__Bell_)", """
 namespace MyLib {
-    operation Bell(Qubit[2] q) {
+    operation Bell(Qubit[] q) {
         H(q[0]);
         CNOT(q[0], q[1]);
     }
@@ -182,15 +182,15 @@ operation Main() {
 }""", {"00", "11"})
 
 load_and_run("D4 adjoint-pipeline doc example (defs + ___adj + reversed for)", """
-operation Inner(Qubit[2] q) {
+operation Inner(Qubit[] q) {
     H(q[0]);
     T(q[1]);
 }
-operation Outer(Qubit[2] q, bit b) {
+operation Outer(Qubit[] q, bit b) {
     int k = 2;
     Inner(q);
     Rx(pi/k, q[0]);
-    for i in 0..1 {
+    for i in 0..q.Count - 1 {
         X(q[i]);
     }
     if (b == 1) {

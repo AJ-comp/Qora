@@ -30,14 +30,17 @@ namespace Qora.Ir;
 public sealed class Inverter
 {
     private readonly IReadOnlyDictionary<string, QOperation> _ops;
+    private readonly IReadOnlyDictionary<int, QOperation> _opsById;   // call-site → callee resolution by reference (CalleeOpId)
     private readonly Dictionary<string, (IReadOnlyList<QStmt>? Inverse, string Reason)> _cache = new();
     private readonly HashSet<string> _inProgress = new();
 
     public Inverter(IEnumerable<QOperation> operations)
     {
         var map = new Dictionary<string, QOperation>();
-        foreach (var op in operations) map[op.Name] = op;
+        var byId = new Dictionary<int, QOperation>();
+        foreach (var op in operations) { map[op.Name] = op; byId[op.Id] = op; }
         _ops = map;
+        _opsById = byId;
     }
 
     /// <summary>Invert a user operation's body by name. Memoized; safe under (and rejecting of) call cycles.</summary>
@@ -141,7 +144,12 @@ public sealed class Inverter
 
     private (QStmt? Inverse, string Reason) InvertGate(QGate g)
     {
-        var isUserOp = _ops.ContainsKey(g.Name);
+        // Resolve the callee by REFERENCE (CalleeOpId) when the call carries one; fall back to the name for
+        // hand-built IR (test gates carry no CalleeOpId). isUserOp ⟺ the call resolves to a user operation;
+        // the resolved op's own name then drives the memoized, single-tree op inversion below.
+        var callee = g.CalleeOpId is int cid && _opsById.TryGetValue(cid, out var byId) ? byId
+                   : _ops.TryGetValue(g.Name, out var byName) ? byName : null;
+        var isUserOp = callee is not null;
         var hasAdjoint = g.Functors.FirstOrDefault() == "Adjoint";
 
         // name-based irreversibles from the shared registry: non-unitary built-ins (reset, plus its
@@ -162,7 +170,7 @@ public sealed class Inverter
         // Requiring it on the Adjoint side also routes cycles through the _inProgress guard.
         if (isUserOp)
         {
-            var target = InvertOperationCached(g.Name);
+            var target = InvertOperationCached(callee!.Name);
             if (target.Inverse is null)
                 return (null, hasAdjoint
                     ? $"it applies Adjoint to `{g.Name}`, which cannot be inverted ({target.Reason})"

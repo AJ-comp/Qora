@@ -203,16 +203,16 @@
     <strong>gates, classical declarations, for loops, if branches, and nested calls</strong> — into a single program.
   </p>
 
-<pre><code>operation Inner(Qubit[2] q) {          <span class="cm">// target of the nested call</span>
+<pre><code>operation Inner(Qubit[] q) {           <span class="cm">// target of the nested call</span>
     H(q[0]);
     T(q[1]);
 }
 
-operation Outer(Qubit[2] q, bit b) {
+operation Outer(Qubit[] q, bit b) {
     int k = 2;                         <span class="cm">// ① classical declaration</span>
     Inner(q);                          <span class="cm">// ② nested call</span>
     Rx(pi/k, q[0]);                    <span class="cm">// ③ gate (uses the declared value as an angle)</span>
-    for i in 0..1 {                    <span class="cm">// ④ for loop</span>
+    for i in 0..q.Count-1 {            <span class="cm">// ④ for loop over the received array</span>
         X(q[i]);
     }
     if (b == 1) {                      <span class="cm">// ⑤ if branch</span>
@@ -239,11 +239,11 @@ operation Main() {
 
 <pre><code>Operation
 ├─ "Outer"
-├─ Param(2, q)   Param(bit, b)
+├─ Param(ArrayType(Qubit), q)   Param(bit, b)
 ├─ VarDecl(int, k, Expr: 2)              <span class="cm">← int k = 2;</span>
 ├─ Gate("Inner", Expr: q)                <span class="cm">← calls and gates share the same Gate tag</span>
 ├─ Gate("Rx", Expr: pi / k, Qubit(q,0))
-├─ For(i, 0, 1)
+├─ For(i, 0, q.Count - 1)
 │   └─ Gate("X", Qubit(q,i))
 └─ If
     ├─ Condition(b == 1)
@@ -264,11 +264,11 @@ operation Main() {
     The IR for <code>Outer</code>:
   </p>
 
-<pre><code>QOperation Outer(Qubit[2] q, Bit b)
+<pre><code>QOperation Outer(Qubit[] q, Bit b)
   QDecl(const=False, type=Int, name=k, value=2)
   QGate(functors=[],        name=Inner, args=[q])
   QGate(functors=[],        name=Rx,    args=[pi / k, q[0]])
-  QFor(i in 0..1)
+  QFor(i in 0..q.Count-1)
     QGate(functors=[],      name=X,     args=[q[i]])
   QIf(cond="b == 1")
     then:

@@ -164,7 +164,7 @@ public class UncomputePlannerTests
     public void GenericNonInvertibleCalleeIsBlockedOnThePreMonoTree()
     {
         var (op, m, inv) = Compile(
-            "operation Loop(Qubit[n] p){ repeat { X(p[0]); } until (1 == 1); }\n" +
+            "operation Loop(Qubit[] p){ repeat { X(p[0]); } until (1 == 1); }\n" +
             "operation Main(){ use a=Qubit[2]; use b=Qubit[1]; Loop(a); CNOT(a[0], b[0]); }");
         // op is the PRE-MONO Main (r.Ir): its call gate is still named "Loop", not the mono "Loop__sz2"
         Assert.False(m.IsSafelyUncomputable(op, Whole("a")));

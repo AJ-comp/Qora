@@ -152,7 +152,7 @@ public class QubitGraphTests
     public void BlanketReadBreadthLivesOnTheEdgeVia()
     {
         var (r, m) = Compile(
-            "operation Fold(Qubit[2] p){ for i in 0..0 { CNOT(p[i], p[1]); } }\n" +
+            "operation Fold(Qubit[] p){ for i in 0..0 { CNOT(p[i], p[1]); } }\n" +
             "operation Main(){ use a=Qubit[2]; X(a[0]); Fold(a); }");
         var main = Op(r, "Main");
         var g = m.Graph(main.Id)!;

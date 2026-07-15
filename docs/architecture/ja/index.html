@@ -205,7 +205,7 @@
       <li><a href="#s3">Lower — AST から Qora IR へ（境界を越える）</a></li>
       <li><a href="#s4">Expand &amp; Resolve — インポートと呼び出し先 FQN</a></li>
       <li><a href="#s5">Validate — 意味のゲート</a></li>
-      <li><a href="#s6">Monomorphize — ジェネリックレジスタの特殊化</a></li>
+      <li><a href="#s6">Monomorphize — 量子ビット配列呼び出しの特殊化</a></li>
       <li><a href="#s7">Materialize Adjoint — 逆演算を本物の op に</a></li>
       <li><a href="#s8">Mangle &amp; Check — 衝突しない名前、そして検証</a></li>
       <li><a href="#s9">Emit — OpenQASM 3 へ出す単純なプリンタ</a></li>
@@ -216,13 +216,13 @@
   <h2 id="s0"><span class="n">0</span>例 — すべてのパスに触れる 1 ファイル</h2>
 
   <p>
-    すべてのステージが実際に働く様子を見るため、<strong>名前空間</strong>と<strong>ジェネリックレジスタ</strong>
-    （<code>Qubit[n]</code>）、呼び出し、そして <strong>Adjoint</strong> を 1 つのプログラムに詰め込みます:
+    すべてのステージが実際に働く様子を見るため、<strong>名前空間</strong>と<strong>量子ビット配列パラメータ</strong>
+    （<code>Qubit[]</code>）、呼び出し、そして <strong>Adjoint</strong> を 1 つのプログラムに詰め込みます:
   </p>
 
 <pre><code>namespace Prep {
-    operation Fanout(Qubit[n] q) {       <span class="cm">// ジェネリック: n は後で、呼び出しごとに決まる</span>
-        for i in 0..n-1 { H(q[i]); }
+    operation Fanout(Qubit[] q) {        <span class="cm">// 配列長は呼び出しごとに決まる</span>
+        for i in 0..q.Count-1 { H(q[i]); }
     }
 }
 
@@ -279,18 +279,19 @@ operation Main() {
     Nonterminal : Operation
       Terminal : Fanout
       Nonterminal : Param
-        Terminal : n                    <span class="cm">← ジェネリックのサイズ記号</span>
+        Nonterminal : ArrayType
+          Terminal : Qubit
         Terminal : q
       Nonterminal : For
         Terminal : i
         Nonterminal : Expr ( 0 )
-        Nonterminal : Expr ( n - 1 )
+        Nonterminal : Expr ( q . Count - 1 )
         Nonterminal : Gate
           Terminal : H
           Nonterminal : Qubit ( q , i )
   Nonterminal : Operation
     Terminal : Main
-    Nonterminal : Use ( reg , 3 )
+    Nonterminal : Use ( reg , Qubit , 3 )
     Nonterminal : Gate                  <span class="cm">← 呼び出しも他のすべてと同じく Gate としてタグ付け</span>
       Terminal : Prep
       Terminal : .
@@ -417,24 +418,23 @@ qubit[2] q;
     エミッタは不正な呼び出しに決して出会いません。ゲートが全員の前に立っているからこそ、各変換パスは単純でいられます。
   </div>
 
-  <h2 id="s6"><span class="n">6</span>Monomorphize — ジェネリックレジスタの特殊化</h2>
+  <h2 id="s6"><span class="n">6</span>Monomorphize — 量子ビット配列呼び出しの特殊化</h2>
 
   <p class="stagehead">in: 検証済み IR &nbsp;·&nbsp; out: 具体サイズの op を持つ IR &nbsp;·&nbsp; パス: <code>Monomorphizer</code></p>
 
   <p>
-    <code>Fanout(Qubit[n] q)</code> はジェネリックです: <code>n</code> は呼び出しが決めるまで未知です。単相化器
-    （monomorphizer）は C++ のテンプレートや Rust のジェネリックのように働きます — 呼び出し側ごとに、<code>n</code>
-    を実際のレジスタサイズに置き換えた<strong>具体的なコピーを打ち出し</strong>、そのコピーを指すように呼び出しを
-    書き換えます。例の呼び出しは <code>reg</code>（量子ビット 3 個）を渡すので:
+    表面型 <code>Fanout(Qubit[] q)</code> には配列長を書きません。単相化器（monomorphizer）は呼び出しごとに
+    実際のレジスタサイズを読み取り、<strong>具体的な内部コピーを打ち出し</strong>、そのコピーの <code>q.Count</code>
+    を実際のサイズに置き換えてから、呼び出し先を書き換えます。例の呼び出しは <code>reg</code>（量子ビット 3 個）を渡すので:
   </p>
 
   <div class="rule">
-    <code>Prep.Fanout(Qubit[n])</code> &nbsp;+&nbsp; サイズ 3 のレジスタでの呼び出し
+    <code>Prep.Fanout(Qubit[])</code> &nbsp;+&nbsp; サイズ 3 のレジスタでの呼び出し
     &nbsp;⟶&nbsp; <code>Prep.Fanout__sz3(Qubit[3])</code>
   </div>
 
   <p>
-    サイズが具体的になったので、プログラムは<strong>二度目の検証</strong>を受けます: <code>n</code> が数になって
+    サイズが具体的になったので、プログラムは<strong>二度目の検証</strong>を受けます: <code>q.Count</code> が数になって
     初めて意味を持つ検査 — インデックス範囲、レジスタサイズの一致 — が、ようやく照合する対象を得ます。このパスの
     後には、ジェネリックな演算は残りません。
   </p>
@@ -598,7 +598,7 @@ r = measure reg[0];</code></pre>
       <tr><td>Desugar measure</td><td><code>MeasureConditionLowering</code></td><td>条件の中の測定 → 巻き上げた <code>bit</code>、代入してから検査</td></tr>
       <tr><td>Resolve</td><td><code>Resolver</code></td><td>演算呼び出し先 → 完全修飾名(FQN)</td></tr>
       <tr><td>Validate</td><td><code>QoraValidator</code> + <code>SymbolTableBuilder</code></td><td>IR → シンボルテーブル + すべての意味エラー（出力を止める固いゲート）</td></tr>
-      <tr><td>Monomorphize</td><td><code>Monomorphizer</code></td><td>ジェネリック <code>Qubit[n]</code> → 具体サイズのコピー、変化した場合に再検証</td></tr>
+      <tr><td>Monomorphize</td><td><code>Monomorphizer</code></td><td><code>Qubit[]</code> の呼び出し → 呼び出しサイズごとの内部コピー、変化した場合に再検証</td></tr>
       <tr><td>Flatten conjugation</td><td><code>ConjugationLowering</code></td><td><code>within/apply</code>（<code>QConjugate</code>） → <code>compute; apply;</code> + <code>within</code> の合成された逆演算</td></tr>
       <tr><td>Materialize</td><td><code>AdjointMaterializer</code></td><td><code>Adjoint Foo</code> → 本物の <code>Foo__adj</code> op + 普通の呼び出し</td></tr>
       <tr><td>Mangle</td><td><code>NameMangler</code></td><td>Qora 名 → 衝突しない OpenQASM 識別子</td></tr>

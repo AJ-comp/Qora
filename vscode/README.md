@@ -9,7 +9,7 @@ extension gives `.qor` files syntax highlighting, hover docs, **live error diagn
 
 ## Features
 
-- **Syntax highlighting** — keywords (`operation`/`use`/`if`/`for`/…), types (`Qubit`/`int`/`bit`), gates (`H`/`CNOT`/`Rx`/…), `pi`, numbers, operators
+- **Syntax highlighting** — keywords (`operation`/`use`/`new`/`if`/`for`/…), types (`Qubit`/`int`/`float`/`bit`/`angle`), gates (`H`/`CNOT`/`Rx`/…), `pi`, numbers, operators
 - **Hover docs** — hover a gate or keyword for a short description (e.g. `Rx`, `CNOT`, `M`)
 - **Live parse errors** — the parser runs as you type and underlines the offending token
 - **Status bar feedback** — the active `.qor` file shows `Qora: OK`, an error count, or parser status

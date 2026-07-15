@@ -1,5 +1,5 @@
 ```qora
-operation Bell(Qubit[2] q) {
+operation Bell(Qubit[] q) {
     H(q[0]);
     CNOT(q[0], q[1]);
 }

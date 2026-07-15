@@ -39,7 +39,7 @@ public class ClassicalValueTests
     [InlineData("operation Main(){ use q=Qubit[3]; for i in 0..2 { X(q[i]); } }")]      // loop var as an index
     [InlineData("operation Main(){ use q=Qubit[2]; bit r=M(q[0]); if(r==1){ X(q[1]); } }")] // measure-bit in a condition
     [InlineData("operation Main(){ use q=Qubit[3]; const int n=2; for i in 0..n { X(q[i]); } }")] // const int as a bound
-    [InlineData("operation Flip(Qubit[n] q){ for i in 0..n-1 { X(q[i]); } }\noperation Main(){ use q=Qubit[3]; Flip(q); }")] // symbolic size in a bound
+    [InlineData("operation Flip(Qubit[] q){ for i in 0..q.Count-1 { X(q[i]); } }\noperation Main(){ use q=Qubit[3]; Flip(q); }")] // array Count in a bound
     [InlineData("operation Main(){ use q=Qubit[2]; bit r=M(q[0]); r = M(q[1]); }")]     // reassign a bit with a measurement
     [InlineData("operation Main(){ use q=Qubit[1]; int c=0; c = c + 1; Rx(c, q[0]); }")] // reassign a classical
     public void AcceptsLegitimateClassicalUse(string source) => Compiler.Accepts(source);

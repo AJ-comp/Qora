@@ -26,8 +26,8 @@ public class ScopeTests
     [Theory]
     // an operation is a symbol at the program layer, but NOT a value: it resolves up the scope chain yet
     // can only be CALLED, never referenced in an expression / argument / index.
-    [InlineData("operation Foo(Qubit[1] q){ H(q[0]); }\noperation Main(){ use a=Qubit[1]; int x = Foo; }")]        // op as an initializer value
-    [InlineData("operation Foo(Qubit[1] q){ H(q[0]); }\noperation Main(){ use a=Qubit[1]; Foo(a); int y = Foo + 1; }")] // op inside an arithmetic expression
+    [InlineData("operation Foo(Qubit[] q){ H(q[0]); }\noperation Main(){ use a=Qubit[1]; int x = Foo; }")]        // op as an initializer value
+    [InlineData("operation Foo(Qubit[] q){ H(q[0]); }\noperation Main(){ use a=Qubit[1]; Foo(a); int y = Foo + 1; }")] // op inside an arithmetic expression
     public void RejectsOperationUsedAsValue(string source) => Compiler.Rejects(source, "QSEM028");
 
     [Theory]
@@ -40,8 +40,7 @@ public class ScopeTests
     // the same measure-bit name in disjoint if/else branches is fine (they never coexist):
     [InlineData("operation Main(){ use q=Qubit[2]; bit c=M(q[0]); if(c==1){ bit r=M(q[1]); if(r==1){X(q[0]);} } else { bit r=M(q[0]); if(r==1){X(q[1]);} } }")]
     [InlineData("operation Main(){ use q=Qubit[2]; bit r0=M(q[0]); bit r1=M(q[1]); }")] // distinct measure bits
-    // a generic size param `n` may collide with an OPERATION named `n`: the size param is a non-symbol,
-    // exempt from resolution, so its use in a bound/index is NOT read as the operation (no false QSEM028).
-    [InlineData("operation n(Qubit[1] q){ H(q[0]); }\noperation Foo(Qubit[n] q){ for i in 0..n-1 { H(q[i]); } }\noperation Main(){ use a=Qubit[2]; Foo(a); }")]
+    // `.Count` is a member, so an unrelated operation named Count is not resolved as its value.
+    [InlineData("operation Count(Qubit[] q){ H(q[0]); }\noperation Foo(Qubit[] q){ for i in 0..q.Count-1 { H(q[i]); } }\noperation Main(){ use a=Qubit[2]; Foo(a); }")]
     public void AcceptsValidScoping(string source) => Compiler.Accepts(source);
 }

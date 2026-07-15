@@ -87,7 +87,7 @@ if (args.Contains("--json"))
 
 // Quick CLI runner for Qora — parses a sample and prints tokens, AST, and emitted OpenQASM.
 const string sample = """
-    operation Prepare(Qubit[2] q) {
+    operation Prepare(Qubit[] q) {
         H(q[0]);
         CNOT(q[0], q[1]);
         Rz(pi/4, q[1]);
@@ -97,7 +97,7 @@ const string sample = """
     operation Main() {
         use q = Qubit[2];
         Prepare(q);
-        for i in 0..1 {
+        for i in 0..q.Count - 1 {
             Rx(pi/2, q[i]);
         }
         bit r = M(q[0]);

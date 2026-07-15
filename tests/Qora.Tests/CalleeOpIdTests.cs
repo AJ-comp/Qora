@@ -56,7 +56,7 @@ public class CalleeOpIdTests
     [Fact]
     public void GenericCallRepointsFromGenericToSpecialization()
     {
-        var r = Parse("operation Loop(Qubit[n] p){ X(p[0]); }\noperation Main(){ use a=Qubit[2]; Loop(a); }");
+        var r = Parse("operation Loop(Qubit[] p){ X(p[0]); }\noperation Main(){ use a=Qubit[2]; Loop(a); }");
 
         // pre-mono (r.Ir): bound to the GENERIC Loop
         var genLoop = r.Ir!.Operations.Single(o => o.Name == "Loop");

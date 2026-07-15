@@ -27,11 +27,11 @@
     },
     "keywords": {
       "name": "keyword.control.qor",
-      "match": "\\b(import|namespace|open|operation|use|const|var|if|for|in|while|repeat|until)\\b"
+      "match": "\\b(import|namespace|open|operation|use|new|const|var|if|for|in|while|repeat|until)\\b"
     },
     "types": {
       "name": "storage.type.qor",
-      "match": "\\b(Qubit|int|bit)\\b"
+      "match": "\\b(Qubit|int|float|bit|angle)\\b"
     },
     "gates": {
       "name": "support.function.qor",

@@ -11,6 +11,43 @@ emitted as **OpenQASM 3.0**.
 > **Note:** Qora was renamed from **Ket** on 2026-07-01 (a "Ket" extension already existed). Versions
 > 0.1–0.7 below were authored under the old name.
 
+## 0.21 — 2026-07-16
+
+### Changed
+- **Qubit array parameters now use the size-independent source type `Qubit[]`.** Helpers inspect
+  `q.Count`; monomorphization specializes each call to its actual register size and replaces `Count`
+  with the concrete integer. `Qubit[N]` remains the allocation form in `use q = Qubit[N]`, but is no
+  longer accepted in an operation signature.
+- **Qubit and classical type keywords remain explicit in the Janglim semantic AST.** Array parameter
+  types are represented by an `ArrayType` node, so `QoraLowering` can map both `Qubit[]` and classical
+  `T[]` directly to `QParam.IsArray` without reconstructing a missing type.
+
+### Added
+- **One-dimensional classical arrays** for `int[]`, `float[]`, `bit[]`, and `angle[]`: explicit
+  literals (`[1, 2]`), zero-initialized allocation (`new int[3]`), indexed reads and writes, `.Count`,
+  and mutable array parameters. Declarations are restricted to the top level of `Main`; helper
+  operations receive arrays through parameters, and overlapping mutable array arguments are rejected.
+- **OpenQASM 3 general-array emission:** `int[]`, `float[]` and `angle[]` declarations use
+  `array[T, N]`, helper parameters use `mutable array[T, #dim = 1]`, and `.Count` lowers to
+  `sizeof(array)`.
+- **`bit[]` emits an OpenQASM bit register, `bit[N]`.** Bit is the one element type OpenQASM forbids as
+  an array base type ("bit, bit[n] and stretch are not valid array base types") — it has a dedicated
+  register type instead. So a `bit[]` declaration emits `bit[N]`, and its `.Count` folds to a literal
+  rather than `sizeof`, which is likewise undefined on a bit register. A `new bit[N]` spells its
+  zero-initialization out as `bit[N] name = "0…0";`, because a bare `bit[N] name;` is undefined rather
+  than zeroed; an array literal is written element by element, never as a bitstring, since the spec puts
+  element 0 at the least-significant end while simulators read it at the leftmost.
+
+### Fixed
+- **A literal index outside an array's bounds is now caught through a parameter, not only inline
+  (QSEM016).** An array parameter carries no length of its own — the length arrives with the argument
+  and differs per call — so a literal `x[5]` in an operation body states a precondition on its callers:
+  *the array passed here needs at least 6 elements*. That minimum is computed per parameter, folded
+  through call chains, and checked at every call site against the argument's known length. Previously
+  nothing related the two, so `a[5]` on a three-element array was rejected when written inline but
+  silently emitted once the same access was factored into a helper. Dynamic indices are unaffected and
+  remain a runtime concern.
+
 ## 0.20 — 2026-07-14
 
 ### Added

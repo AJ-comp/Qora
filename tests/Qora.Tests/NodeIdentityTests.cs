@@ -59,7 +59,7 @@ public class NodeIdentityTests
     public void PipelineWithSpecializationsAndAdjointHasUniqueIds()
     {
         var r = QoraParser.Parse(
-            "operation Flip(Qubit[n] q){ for i in 0..n-1 { X(q[i]); } }\n" +
+            "operation Flip(Qubit[] q){ for i in 0..q.Count-1 { X(q[i]); } }\n" +
             "operation Main(){ use a=Qubit[2]; use b=Qubit[3]; Flip(a); Flip(b); Adjoint Flip(a); }");
         Assert.True(r.Success, string.Join(" | ", r.Errors));
         Assert.DoesNotContain(r.Errors, e => e.Code == "QINTERNAL");
@@ -90,7 +90,7 @@ public class NodeIdentityTests
     public void ModelBasedSymbolFormatMatchesRebuildText()
     {
         var r = QoraParser.Parse(
-            "operation Flip(Qubit[n] q){ for i in 0..n-1 { X(q[i]); } }\n" +
+            "operation Flip(Qubit[] q){ for i in 0..q.Count-1 { X(q[i]); } }\n" +
             "operation Main(){ use a=Qubit[2]; const int x = 1; Flip(a); }");
         Assert.True(r.Success, string.Join(" | ", r.Errors));
         Assert.Equal(SymbolTableBuilder.Format(r.Ir), SymbolTableBuilder.Format(r.Ir, r.Semantics));
@@ -145,15 +145,15 @@ public class NodeIdentityTests
     public void ParameterAndOperationNodesCarryEmittedNameFacts()
     {
         var r = QoraParser.Parse(
-            "operation Foo(Qubit[1] x){ H(x[0]); }\noperation Main(){ use q=Qubit[1]; Foo(q); }");
+            "operation Foo(Qubit[] x){ H(x[0]); }\noperation Main(){ use q=Qubit[1]; Foo(q); }");
         Assert.True(r.Success, string.Join(" | ", r.Errors));
 
-        var foo = r.Ir!.Operations.Single(o => o.Name == "Foo");
-        var main = r.Ir.Operations.Single(o => o.Name == "Main");
+        var foo = r.AnalyzedIr!.Operations.Single(o => o.DisplayName == "Foo");
+        var main = r.AnalyzedIr.Operations.Single(o => o.Name == "Main");
         Assert.Equal("x_", r.Semantics!.FindEmittedName(foo.Params.Single().Id));
-        Assert.Equal("Foo", r.Semantics.FindEmittedName(foo.Id));
+        Assert.Equal(foo.Name, r.Semantics.FindEmittedName(foo.Id));
         Assert.Equal("Main", r.Semantics.FindEmittedName(main.Id));
-        Assert.Contains("def Foo(qubit[1] x_)", r.Qasm);
+        Assert.Contains($"def {foo.Name}(qubit[1] x_)", r.Qasm);
     }
 
     // --- 4f. unit-level Mangle: a namespaced op's DOT-FLATTENED def name lands on the op node's Id, and
@@ -185,17 +185,17 @@ public class NodeIdentityTests
     public void OperationIsASymbolWithOneUsePerCallSite()
     {
         var r = QoraParser.Parse(
-            "operation Foo(Qubit[1] q){ H(q[0]); }\n" +
+            "operation Foo(Qubit[] q){ H(q[0]); }\n" +
             "operation Main(){ use a=Qubit[1]; use b=Qubit[1]; Foo(a); Foo(b); }");
         Assert.True(r.Success, string.Join(" | ", r.Errors));
 
-        var foo = r.Ir!.Operations.Single(o => o.Name == "Foo");
-        var main = r.Ir.Operations.Single(o => o.Name == "Main");
+        var foo = r.AnalyzedIr!.Operations.Single(o => o.DisplayName == "Foo");
+        var main = r.AnalyzedIr.Operations.Single(o => o.Name == "Main");
 
         var fooSym = r.Semantics!.FindSymbol(foo.Id);
         Assert.NotNull(fooSym);
         Assert.Equal(SymbolKind.Operation, fooSym!.Kind);
-        Assert.Equal("Foo", fooSym.SourceName);
+        Assert.Equal(foo.Name, fooSym.SourceName);
         Assert.Equal(2, fooSym.Uses.Count);                          // called from Main twice
 
         Assert.Empty(r.Semantics.FindSymbol(main.Id)!.Uses);         // the entry op is never called

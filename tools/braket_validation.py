@@ -49,7 +49,7 @@ def load_and_run(name, src, expect_keys=None, subset=False, shots=1000):
 print("== Qiskit이 거부했던 케이스들을 Braket LocalSimulator에 ==")
 
 load_and_run("B1 def Bell (서브루틴)", """
-operation Bell(Qubit[2] q) {
+operation Bell(Qubit[] q) {
     H(q[0]);
     CNOT(q[0], q[1]);
 }
@@ -73,7 +73,7 @@ operation Main() {
 load_and_run("B3 for 루프 + 변수 인덱스 q[i]", """
 operation Main() {
     use q = Qubit[2];
-    for i in 0..1 {
+    for i in 0..q.Count - 1 {
         X(q[i]);
     }
     bit r0 = M(q[0]);
@@ -81,7 +81,7 @@ operation Main() {
 }""", {"11"})
 
 load_and_run("B4 전연산 Adjoint 항등성 (합성 ___adj def)", """
-operation Prep(Qubit[2] q) {
+operation Prep(Qubit[] q) {
     H(q[0]);
     T(q[1]);
     CNOT(q[0], q[1]);
@@ -96,7 +96,7 @@ operation Main() {
 
 load_and_run("B5 네임스페이스 맹글명 def", """
 namespace MyLib {
-    operation Bell(Qubit[2] q) {
+    operation Bell(Qubit[] q) {
         H(q[0]);
         CNOT(q[0], q[1]);
     }

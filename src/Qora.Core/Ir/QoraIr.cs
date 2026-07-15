@@ -3,7 +3,7 @@ namespace Qora.Ir;
 /// <summary>The compiler's version, stamped into emitted QASM for provenance.</summary>
 public static class QoraVersion
 {
-    public const string Value = "0.20";
+    public const string Value = "0.21";
 }
 
 /// <summary>
@@ -115,7 +115,7 @@ public enum QType { Qubit, Int, Bit, Float, Angle }
 /// <summary>
 /// One parameter slot of a CALLABLE — a built-in gate or a user operation — reduced to exactly what a
 /// call-site kind check needs. <see cref="Type"/> <c>== Qubit</c> is a QUBIT slot (shaped by
-/// <see cref="RegisterSize"/> / <see cref="SizeParam"/> / <see cref="QubitBroadcast"/>); any other
+/// <see cref="RegisterSize"/> / <see cref="IsQubitArray"/> / <see cref="QubitBroadcast"/>); any other
 /// <see cref="Type"/> is a VALUE slot expecting a classical of that type (an angle for a rotation, an
 /// int/bit/float for a classical parameter). A qubit passed to a value slot — or a value to a qubit slot —
 /// is QSEM006.
@@ -124,8 +124,9 @@ public interface IParamSpec
 {
     string Name { get; }
     QType Type { get; }
-    int? RegisterSize { get; }   // qubit slot: exact register size (null ⇒ single qubit, unless QubitBroadcast)
-    string? SizeParam { get; }   // qubit slot: symbolic (generic) register size
+    int? RegisterSize { get; }   // qubit-array slot: concrete size after specialization; null before it
+    bool IsArray { get; }        // source shape: T[] rather than one scalar value
+    bool IsQubitArray { get; }   // source shape: Qubit[] rather than one Qubit
     bool QubitBroadcast { get; } // qubit slot: accepts ANY qubit shape (built-in gates broadcast; ops are strict)
 }
 
@@ -143,7 +144,7 @@ public interface ICallableSig
     bool IsBuiltin { get; }                     // gate vs user op — consulted ONLY for message phrasing, not the check
 }
 
-/// <summary>A def parameter: a qubit, a sized qubit register (<see cref="RegisterSize"/> != null), or an int/bit.
+/// <summary>A def parameter: one qubit, a qubit array, or a classical scalar/array value.
 /// It IS its own signature slot (<see cref="IParamSpec"/>) — user-op qubit params are strict (no broadcast).</summary>
 public sealed record QParam(string Name, QType Type, int? RegisterSize) : IParamSpec
 {
@@ -151,11 +152,14 @@ public sealed record QParam(string Name, QType Type, int? RegisterSize) : IParam
     public int Id { get; init; } = QNodeIds.Next();
 
     /// <summary>
-    /// A generic register <c>Qubit[n] name</c>: the symbolic size symbol (e.g. <c>"n"</c>), bound to a
-    /// concrete size per call site by <see cref="Passes.Monomorphizer"/>. Null for concrete/non-register
-    /// params; while non-null, <see cref="RegisterSize"/> stays null until specialization fills it in.
+    /// True for any source <c>T[]</c> parameter. A source <c>Qubit[]</c> deliberately carries no length;
+    /// <see cref="Passes.Monomorphizer"/> fills <see cref="RegisterSize"/> only on the hidden per-call-size
+    /// copy used by the OpenQASM backend. A concrete register size also implies array shape for hand-built IR.
     /// </summary>
-    public string? SizeParam { get; init; }
+    public bool IsArray { get; init; } = RegisterSize is not null;
+
+    /// <summary>Convenience view used by quantum passes; classical arrays keep this false.</summary>
+    public bool IsQubitArray => Type == QType.Qubit && IsArray;
 
     /// <summary>A user-operation qubit parameter matches its declared shape exactly — no register broadcast.</summary>
     public bool QubitBroadcast => false;
@@ -200,15 +204,23 @@ public sealed record QGate(IReadOnlyList<string> Functors, string Name, IReadOnl
 }
 
 /// <summary><c>const int n = e;</c> / <c>int n = e;</c> / <c>bit r = M(q);</c> (measurement when Value is <see cref="QMeasure"/>).</summary>
-public sealed record QDecl(bool IsConst, QType? Type, string Name, QExpr Value) : QStmt;
+public sealed record QDecl(bool IsConst, QType? Type, string Name, QExpr Value) : QStmt
+{
+    /// <summary>True when <see cref="Type"/> is the element type of a source <c>T[]</c>.</summary>
+    public bool IsArray { get; init; }
+}
 
-/// <summary><c>name = e;</c></summary>
-public sealed record QAssign(string Name, QExpr Value) : QStmt;
+/// <summary><c>name = e;</c>, or <c>name[index] = e;</c> when <see cref="Index"/> is present.</summary>
+public sealed record QAssign(string Name, QExpr Value) : QStmt
+{
+    public string? Index { get; init; }
+}
 
 public sealed record QIf(QCond Cond, IReadOnlyList<QStmt> Then, IReadOnlyList<QStmt> Else) : QStmt;
 
 /// <summary>
-/// <c>for Var in From..To { Body }</c> (bounds are literal numbers today, so kept as text).
+/// <c>for Var in From..To { Body }</c>. Bounds are expressions such as <c>0</c> and
+/// <c>values.Count - 1</c>, kept as text until OpenQASM emission.
 /// <see cref="Step"/> has no surface syntax: the surface form always steps by +1 (null); the inversion
 /// pass sets <c>"-1"</c> to run a loop backwards, which emits OpenQASM's <c>[From:Step:To]</c> range.
 /// </summary>
@@ -229,7 +241,11 @@ public sealed record QConjugate(IReadOnlyList<QStmt> Within, IReadOnlyList<QStmt
 
 public abstract record QArg;
 
-/// <summary>A qubit reference <c>reg[Index]</c> (Index is a literal or a loop variable).</summary>
+/// <summary>
+/// A syntactically indexed argument <c>name[Index]</c>. It usually denotes a qubit; after arrays were
+/// added it may also denote a classical array element in a classical parameter slot. Validation resolves
+/// the base symbol before quantum analyses run.
+/// </summary>
 public sealed record QQubitArg(string Reg, string Index) : QArg;
 
 /// <summary>
@@ -252,6 +268,12 @@ public sealed record QMeasure(QQubitArg? Target) : QExpr;
 /// call) — unexpressible in OpenQASM, rejected by the validator.
 /// </summary>
 public sealed record QText(string Text, bool HasCall = false) : QExpr;
+
+/// <summary>A source array initializer such as <c>[1, 2, 3]</c>.</summary>
+public sealed record QArrayLiteral(IReadOnlyList<QExpr> Elements) : QExpr;
+
+/// <summary>A zero-initialized source array allocation such as <c>new float[4]</c>.</summary>
+public sealed record QArrayNew(QType ElementType, int Length) : QExpr;
 
 /// <summary>
 /// A boolean condition, kept as rendered text (e.g. <c>r == 1</c>). <see cref="HasCall"/> marks a call
@@ -301,7 +323,8 @@ public sealed record GateInfo(string QasmName, int Arity, bool AngleFirst = fals
 public sealed record GateParam(string Name, QType Type, bool QubitBroadcast = false) : IParamSpec
 {
     public int? RegisterSize => null;
-    public string? SizeParam => null;
+    public bool IsArray => false;
+    public bool IsQubitArray => false;
 }
 
 /// <summary>A built-in gate's signature (see <see cref="QoraGates.SigOf"/>).</summary>
@@ -392,7 +415,7 @@ public static class QoraGates
     public static readonly IReadOnlySet<string> QasmKeywords = new HashSet<string>
     {
         "OPENQASM", "include", "def", "gate", "qubit", "bit", "int", "uint", "float", "angle", "bool",
-        "complex", "array", "duration", "stretch", "let", "const", "measure", "reset", "barrier",
+        "complex", "array", "duration", "stretch", "let", "const", "readonly", "mutable", "measure", "reset", "barrier",
         "delay", "if", "else", "for", "while", "in", "return", "break", "continue", "end", "input",
         "output", "extern", "box", "ctrl", "negctrl", "inv", "pow", "im", "true", "false", "pi",
         "euler", "tau", "defcal", "defcalgrammar", "cal", "durationof", "sizeof", "U", "gphase",

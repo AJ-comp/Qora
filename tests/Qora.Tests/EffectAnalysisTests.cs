@@ -24,7 +24,12 @@ public class EffectAnalysisTests
         return (r, r.Semantics!);
     }
 
-    private static QOperation Op(QoraParseResult r, string name) => r.Ir!.Operations.Single(o => o.Name == name);
+    private static QOperation Op(QoraParseResult r, string name)
+    {
+        var analyzed = r.AnalyzedIr ?? r.Ir!;
+        return analyzed.Operations.FirstOrDefault(o => o.Name == name)
+               ?? analyzed.Operations.Single(o => o.DisplayName == name);
+    }
 
     private static QubitRef At(string reg, int i) => new(reg, i);
     private static QubitRef Whole(string reg) => new(reg, null);
@@ -243,7 +248,7 @@ public class EffectAnalysisTests
     public void AdjointCallHasSameEventsAsPlainCall()
     {
         var (r, m) = Compile(
-            "operation Foo(Qubit[2] a){ H(a[0]); CNOT(a[0], a[1]); }\n" +
+            "operation Foo(Qubit[] a){ H(a[0]); CNOT(a[0], a[1]); }\n" +
             "operation Main(){ use q=Qubit[2]; Foo(q); Adjoint Foo(q); }");
         var main = Op(r, "Main");
 
@@ -611,7 +616,7 @@ public class EffectAnalysisTests
     public void TransitiveMeasureThroughACallMakesAnOutput()
     {
         var (r, m) = Compile(
-            "operation ReadOut(Qubit[1] s){ bit r = M(s[0]); }\n" +
+            "operation ReadOut(Qubit[] s){ bit r = M(s[0]); }\n" +
             "operation Main(){ use o=Qubit[1]; X(o[0]); ReadOut(o); }");
         var main = Op(r, "Main");
 
@@ -742,7 +747,7 @@ public class EffectAnalysisTests
     public void ReportShowsMonomorphizedSpecializationsOfGenerics()
     {
         var (r, m) = Compile(
-            "operation Prep(Qubit[n] p){ X(p[0]); }\n" +
+            "operation Prep(Qubit[] p){ X(p[0]); }\n" +
             "operation Main(){ use w=Qubit[2]; Prep(w); }");
         var report = UncomputeReport.Format(r.AnalyzedIr, m);
 
@@ -869,7 +874,7 @@ public class EffectAnalysisTests
     public void BlanketPartnerUnderElementQueryIsARealSource()
     {
         var (r, m) = Compile(
-            "operation Fold(Qubit[2] p){ for i in 0..0 { CNOT(p[i], p[1]); } }\n" +
+            "operation Fold(Qubit[] p){ for i in 0..0 { CNOT(p[i], p[1]); } }\n" +
             "operation Main(){ use a=Qubit[2]; use w=Qubit[1]; X(a[0]); Fold(a); X(a[0]); CNOT(a[1], w[0]); bit b = M(a[0]); }");
         // a[1] = f(a[0]) via the Fold call (whose control blankets to the whole register); X(a[0]) kills the source
         var v = m.UncomputeSafety(Op(r, "Main"), At("a", 1));
@@ -885,14 +890,14 @@ public class EffectAnalysisTests
     public void ReadThroughAMeasuringCalleeStaysCleanWriteStaysBlocked()
     {
         var (r1, m1) = Compile(
-            "operation Peek(Qubit ctl, Qubit[1] res){ CNOT(ctl, res[0]); bit b = M(res[0]); }\n" +
+            "operation Peek(Qubit ctl, Qubit[] res){ CNOT(ctl, res[0]); bit b = M(res[0]); }\n" +
             "operation Main(){ use a=Qubit[1]; use o=Qubit[1]; X(a[0]); Peek(a[0], o); }");
         var main1 = Op(r1, "Main");
         Assert.True(m1.IsSafelyUncomputable(main1, Whole("a")));          // a: control only — clean
         Assert.False(m1.IsCleanupCandidate(main1.Id, Whole("o")));        // o: measured through the call
 
         var (r2, m2) = Compile(
-            "operation Mix(Qubit p, Qubit[1] s){ CNOT(s[0], p); bit r = M(s[0]); }\n" +
+            "operation Mix(Qubit p, Qubit[] s){ CNOT(s[0], p); bit r = M(s[0]); }\n" +
             "operation Main(){ use a=Qubit[1]; use k=Qubit[1]; Mix(a[0], k); }");
         Assert.Equal(UncomputeBlocker.Irreversible,
             m2.UncomputeSafety(Op(r2, "Main"), Whole("a")).Blocker);      // a: WRITTEN by the measuring callee
@@ -968,7 +973,7 @@ public class EffectAnalysisTests
     public void MeasureAndResetInOneCallSplitPerQubit()
     {
         var (r, m) = Compile(
-            "operation Both(Qubit[1] a, Qubit b){ bit r = M(a[0]); Reset(b); }\n" +
+            "operation Both(Qubit[] a, Qubit b){ bit r = M(a[0]); Reset(b); }\n" +
             "operation Main(){ use x=Qubit[1]; use y=Qubit[1]; Both(x, y[0]); }");
         var main = Op(r, "Main");
         var evs = EventsOf(m, main, main.Body[2]);
@@ -995,7 +1000,7 @@ public class EffectAnalysisTests
     {
         // opaque call whose adjoint has the full statement breadth
         var (r1, m1) = Compile(
-            "operation Bcast(Qubit[2] p){ for i in 0..1 { X(p[i]); } }\n" +
+            "operation Bcast(Qubit[] p){ for i in 0..1 { X(p[i]); } }\n" +
             "operation Main(){ use a=Qubit[2]; Bcast(a); bit c = M(a[0]); }");
         var main1 = Op(r1, "Main");
         var v1 = m1.UncomputeSafety(main1, At("a", 1));
@@ -1136,7 +1141,7 @@ public class EffectAnalysisTests
     public void ReportRendersPerElementBlockReasonUnderABlanketHeadline()
     {
         var (r, m) = Compile(
-            "operation Bcast(Qubit[2] p){ for i in 0..1 { X(p[i]); } }\n" +
+            "operation Bcast(Qubit[] p){ for i in 0..1 { X(p[i]); } }\n" +
             "operation Main(){ use a=Qubit[2]; Bcast(a); bit c = M(a[0]); }");
         var report = UncomputeReport.Format(r.AnalyzedIr, m);
         Assert.Contains("a: ancilla, measured — promoted to output, not a cleanup candidate", report);                    // headline: a[0] measured

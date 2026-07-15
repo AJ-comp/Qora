@@ -2,6 +2,17 @@
 
 All notable changes to the Qora Language extension.
 
+## 0.15.0
+
+- Bundles the **Qora v0.21** compiler. Operation register parameters now use `Qubit[]` and inspect
+  their call-site-specialized length with `.Count`; concrete allocation remains `use q = Qubit[N]`.
+- Adds `int[]`, `float[]`, `bit[]`, and `angle[]` highlighting and examples, including literals,
+  zero-initialized `new T[N]`, indexed reads/writes, and `.Count`.
+- `bit[]` now compiles to an OpenQASM bit register (`bit[N]`) rather than a general array, which
+  OpenQASM does not allow for bits.
+- An out-of-bounds literal index is now reported at the call site when the array reaches the access
+  through a parameter, matching what was already reported for the same access written inline.
+
 ## 0.14.0
 
 - Bundles the **Qora v0.20** compiler — rung ④ of the automatic-uncomputation ladder begins with the

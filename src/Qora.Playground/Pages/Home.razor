@@ -8,8 +8,8 @@
         <h1 class="text-3xl font-bold tracking-tight">Qora Playground</h1>
         <p class="text-muted-foreground">
             Q# 스타일 양자 토이 언어 <span class="font-semibold">Qora</span>을 브라우저에서 바로 파싱·변환해보세요 —
-            <code class="font-mono">operation Foo(Qubit[n] q)</code> · <code class="font-mono">호출 Foo(q)</code> · <code class="font-mono">use … Qubit[n]</code> ·
-            <code class="font-mono">const/var/int</code> · <code class="font-mono">H / X / CNOT / S / T / CZ / SWAP / CCX</code> ·
+            <code class="font-mono">operation Foo(Qubit[] q)</code> · <code class="font-mono">호출 Foo(q)</code> · <code class="font-mono">q.Count</code> · <code class="font-mono">use … Qubit[n]</code> ·
+            <code class="font-mono">const/var/int</code> · <code class="font-mono">int[] / float[] / bit[] / angle[]</code> · <code class="font-mono">H / X / CNOT / S / T / CZ / SWAP / CCX</code> ·
             <code class="font-mono">Rx / Ry / Rz (회전, pi/2)</code> ·
             <code class="font-mono">bit r = M(…)</code> · <code class="font-mono">for … in</code> ·
             <code class="font-mono">if</code> · <code class="font-mono">while</code> · <code class="font-mono">repeat … until</code>
@@ -145,7 +145,7 @@
 
 @code {
     private const string BellExample =
-        "operation Prepare(Qubit[2] q) {\n    H(q[0]);\n    CNOT(q[0], q[1]);\n    Rz(pi/4, q[1]);\n    Ry(0.5, q[0]);\n}\n\noperation Main() {\n    use q = Qubit[2];\n    Prepare(q);\n    for i in 0..1 {\n        Rx(pi/2, q[i]);\n    }\n    bit r = M(q[0]);\n    if (r == 1) {\n        X(q[1]);\n    }\n}";
+        "operation Prepare(Qubit[] q) {\n    H(q[0]);\n    CNOT(q[0], q[1]);\n    Rz(pi/4, q[1]);\n    Ry(0.5, q[0]);\n}\n\noperation Main() {\n    use q = Qubit[2];\n    Prepare(q);\n    for i in 0..q.Count - 1 {\n        Rx(pi/2, q[i]);\n    }\n    bit r = M(q[0]);\n    if (r == 1) {\n        X(q[1]);\n    }\n}";
 
     private StandaloneCodeEditor _editor = null!;
     private QoraParseResult? _result;

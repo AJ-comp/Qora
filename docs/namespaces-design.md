@@ -23,7 +23,7 @@ namespace MyLib                     // a file may declare namespaces; ops outsid
     open Qora.Intrinsic;            // (implicitly available) — see "builtins" below
     open OtherLib;                  // bring OtherLib's ops into unqualified scope
 
-    operation Bell(Qubit[2] q)
+    operation Bell(Qubit[] q)
     {
         ...
     }

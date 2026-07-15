@@ -9,7 +9,7 @@ chuột, **báo lỗi thời gian thực** và một lệnh **chuyển đổi**.
 
 ## Tính năng
 
-- **Tô sáng cú pháp** — từ khóa (`operation`/`use`/`if`/`for`/…), kiểu (`Qubit`/`int`/`bit`), cổng (`H`/`CNOT`/`Rx`/…), `pi`, số, toán tử
+- **Tô sáng cú pháp** — từ khóa (`operation`/`use`/`new`/`if`/`for`/…), kiểu (`Qubit`/`int`/`float`/`bit`/`angle`), cổng (`H`/`CNOT`/`Rx`/…), `pi`, số, toán tử
 - **Chú thích khi di chuột** — di chuột lên một cổng hoặc từ khóa để xem mô tả ngắn (ví dụ `Rx`, `CNOT`, `M`)
 - **Báo lỗi thời gian thực** — bộ phân tích chạy khi bạn gõ và gạch chân token gây lỗi
 - **Phản hồi trên status bar** — tệp `.qor` đang mở hiển thị `Qora: OK`, số lỗi hoặc trạng thái parser

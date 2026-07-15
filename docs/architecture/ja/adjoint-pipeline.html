@@ -203,16 +203,16 @@
     <strong>ゲート、古典宣言、for ループ、if 分岐、ネスト呼び出し</strong> — を 1 つのプログラムにすべて詰め込みました。
   </p>
 
-<pre><code>operation Inner(Qubit[2] q) {          <span class="cm">// ネスト呼び出しの対象</span>
+<pre><code>operation Inner(Qubit[] q) {           <span class="cm">// ネスト呼び出しの対象</span>
     H(q[0]);
     T(q[1]);
 }
 
-operation Outer(Qubit[2] q, bit b) {
+operation Outer(Qubit[] q, bit b) {
     int k = 2;                         <span class="cm">// ① 古典宣言</span>
     Inner(q);                          <span class="cm">// ② ネスト呼び出し</span>
     Rx(pi/k, q[0]);                    <span class="cm">// ③ ゲート(宣言値を角度として使用)</span>
-    for i in 0..1 {                    <span class="cm">// ④ for ループ</span>
+    for i in 0..q.Count-1 {            <span class="cm">// ④ 受け取った配列を回る for ループ</span>
         X(q[i]);
     }
     if (b == 1) {                      <span class="cm">// ⑤ if 分岐</span>
@@ -238,11 +238,11 @@ operation Main() {
 
 <pre><code>Operation
 ├─ "Outer"
-├─ Param(2, q)   Param(bit, b)
+├─ Param(ArrayType(Qubit), q)   Param(bit, b)
 ├─ VarDecl(int, k, Expr: 2)              <span class="cm">← int k = 2;</span>
 ├─ Gate("Inner", Expr: q)                <span class="cm">← 呼び出しもゲートも同じ Gate タグ</span>
 ├─ Gate("Rx", Expr: pi / k, Qubit(q,0))
-├─ For(i, 0, 1)
+├─ For(i, 0, q.Count - 1)
 │   └─ Gate("X", Qubit(q,i))
 └─ If
     ├─ Condition(b == 1)
@@ -263,11 +263,11 @@ operation Main() {
     <code>Outer</code> の IR:
   </p>
 
-<pre><code>QOperation Outer(Qubit[2] q, Bit b)
+<pre><code>QOperation Outer(Qubit[] q, Bit b)
   QDecl(const=False, type=Int, name=k, value=2)
   QGate(functors=[],        name=Inner, args=[q])
   QGate(functors=[],        name=Rx,    args=[pi / k, q[0]])
-  QFor(i in 0..1)
+  QFor(i in 0..q.Count-1)
     QGate(functors=[],      name=X,     args=[q[i]])
   QIf(cond="b == 1")
     then:

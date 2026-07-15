@@ -110,6 +110,7 @@ public static class ReferentialCheck
                     break;
                 case QAssign a:
                     Check(a.Name, opName, known, errors, a.Span);
+                    if (a.Index is not null) CheckTokens(a.Index, opName, known, errors, a.Span);
                     CheckExpr(a.Value, opName, known, errors, a.Span);
                     break;
                 case QIf i:
@@ -167,12 +168,19 @@ public static class ReferentialCheck
             case QText t:
                 CheckTokens(t.Text, opName, known, errors, span);
                 break;
+            case QArrayLiteral literal:
+                foreach (var element in literal.Elements)
+                    CheckExpr(element, opName, known, errors, span);
+                break;
         }
     }
 
     private static void CheckTokens(string text, string opName, HashSet<string> known, List<QoraError> errors, QSpan? span)
     {
-        foreach (var tok in text.Split(' ')) Check(tok, opName, known, errors, span);
+        foreach (var member in SymbolTableBuilder.MemberAccesses(text))
+            Check(member.Base, opName, known, errors, span);
+        foreach (var name in SymbolTableBuilder.ExpressionIdentifiers(text))
+            Check(name, opName, known, errors, span);
     }
 
     /// <summary>Check ONE token: strip surrounding parentheses, and flag it only if the core is an

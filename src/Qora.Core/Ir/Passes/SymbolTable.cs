@@ -1,5 +1,6 @@
 using System.Linq;
 using System.Text;
+using System.Text.RegularExpressions;
 
 namespace Qora.Ir.Passes;
 
@@ -30,14 +31,28 @@ public sealed class Symbol
     public string? ConstValue { get; }          // a const's initializer text (for folding); null for var/measure/register
     public QSpan? DeclSpan { get; }
     public int DeclNodeId { get; }              // stable Id of the declaring node (QParam / QUse / QDecl / QFor)
-    public int? RegisterSize { get; }           // concrete qubit count: `use q = Qubit[N]` and sized qubit params; null otherwise
-    public string? SizeParam { get; }           // symbolic register size name: `Qubit[n] q` (unknown until monomorphization); null otherwise
+    public int? RegisterSize { get; }           // concrete qubit count: `use q = Qubit[N]` or a specialized Qubit[] param
+    public bool IsArray { get; }                 // source T[] shape, independent of the element type
+    public bool IsQubitArray { get; }            // convenience view for quantum passes
+    public int? ArrayLength { get; }             // known length of a classical array declaration
     public List<UseSite> Uses { get; } = new();
 
     public Symbol(string name, SymbolKind kind, QType? type = null, bool isConst = false, string? constValue = null,
-        QSpan? declSpan = null, int? registerSize = null, string? sizeParam = null, int declNodeId = 0)
-        => (SourceName, Kind, Type, IsConst, ConstValue, DeclSpan, RegisterSize, SizeParam, DeclNodeId)
-         = (name, kind, type, isConst, constValue, declSpan, registerSize, sizeParam, declNodeId);
+        QSpan? declSpan = null, int? registerSize = null, bool isArray = false,
+        int? arrayLength = null, int declNodeId = 0)
+    {
+        SourceName = name;
+        Kind = kind;
+        Type = type;
+        IsConst = isConst;
+        ConstValue = constValue;
+        DeclSpan = declSpan;
+        RegisterSize = registerSize;
+        IsArray = isArray || registerSize is not null;
+        IsQubitArray = type == QType.Qubit && IsArray;
+        ArrayLength = type == QType.Qubit ? null : arrayLength;
+        DeclNodeId = declNodeId;
+    }
 }
 
 /// <summary>
@@ -86,6 +101,13 @@ public sealed class Scope
 /// </summary>
 public static class SymbolTableBuilder
 {
+    private static readonly Regex MemberAccessPattern = new(
+        @"\b(?<base>[_a-zA-Z][_a-zA-Z0-9]*)\s*\.\s*(?<member>[_a-zA-Z][_a-zA-Z0-9]*)\b",
+        RegexOptions.Compiled);
+    private static readonly Regex IndexedAccessPattern = new(
+        @"\b(?<base>[_a-zA-Z][_a-zA-Z0-9]*)\s*\[\s*(?<index>[_a-zA-Z][_a-zA-Z0-9]*|[0-9]+)\s*\]",
+        RegexOptions.Compiled);
+
     /// <summary>Build the PROGRAM scope: the top-level symbol table whose entries are the operation symbols
     /// (one per op, kind <see cref="SymbolKind.Operation"/>, keyed by the op's declaring node Id). They go
     /// in through <see cref="Scope.TryAdd"/> — the SAME single insertion door every parameter, register and
@@ -131,7 +153,7 @@ public static class SymbolTableBuilder
         foreach (var p in op.Params)
             Declare(root, new Symbol(p.Name, SymbolKind.Parameter, p.Type, declSpan: p.Span,
                 registerSize: p.Type == QType.Qubit ? p.RegisterSize : null,
-                sizeParam: p.Type == QType.Qubit ? p.SizeParam : null,
+                isArray: p.IsArray,
                 declNodeId: p.Id));
 
         void SeedRegisters(IReadOnlyList<QStmt> stmts)
@@ -139,7 +161,8 @@ public static class SymbolTableBuilder
             foreach (var s in stmts)
                 switch (s)
                 {
-                    case QUse u: Declare(root, new Symbol(u.Name, SymbolKind.Register, QType.Qubit, declSpan: u.Span, registerSize: u.Size, declNodeId: u.Id)); break;
+                    case QUse u: Declare(root, new Symbol(u.Name, SymbolKind.Register, QType.Qubit, declSpan: u.Span,
+                        registerSize: u.Size, isArray: true, declNodeId: u.Id)); break;
                     case QIf i: SeedRegisters(i.Then); SeedRegisters(i.Else); break;
                     case QFor f: SeedRegisters(f.Body); break;
                     case QWhile w: SeedRegisters(w.Body); break;
@@ -149,28 +172,16 @@ public static class SymbolTableBuilder
         }
         SeedRegisters(op.Body);
 
-        // The symbolic register size `n` in `Qubit[n] q` is a legal in-body value (e.g. `for i in 0..n`) but
-        // is NOT a declared symbol (the size-uniqueness check owns it). Exempt it from resolution so the
-        // strict "unknown name" error below never fires on it.
-        var sizeParams = op.Params
-            .Where(p => p.Type == QType.Qubit && p.SizeParam is not null)
-            .Select(p => p.SizeParam!)
-            .ToHashSet();
-
         // Resolve a referenced name. Found → record a use (tagged with the using statement's node Id). Not
         // found → it is neither a hoisted name (registers/measure bits seed the root) nor an in-scope
         // classical, so it is an unknown name OR a classical used before its declaration: QSEM025.
-        // Expression literals (pi/tau/euler/true/false) and the symbolic register size are legitimate
-        // non-symbols and never error.
+        // Expression literals (pi/tau/euler/true/false) are legitimate non-symbols and never error.
         var currentStmtId = 0;   // set by Walk to the statement being visited, so uses carry their node Id
         void Record(Scope scope, string name, string detail, QSpan? span)
         {
-            // pi/tau/euler/true/false and the symbolic register size `n` are legitimate NON-symbols — they
-            // mean something in an expression but are never declared — so they are exempt from resolution
-            // ENTIRELY, checked BEFORE the lookup. This matters now that the scope chain reaches the program
-            // table: a size param `n` may collide with an `operation n`, and the exemption must win over the
-            // operation-kind branch below (else a valid generic body is wrongly rejected).
-            if (IsReservedName(name) || sizeParams.Contains(name)) return;
+            // pi/tau/euler/true/false mean something in an expression but are never declared, so they are
+            // exempt from resolution entirely and checked before lookup.
+            if (IsReservedName(name)) return;
             var sym = scope.Lookup(name);
             // An operation resolves up the scope chain but is NOT a value: it can only be called (the QGate
             // path records those uses), never referenced in an expression or used as an assignment target.
@@ -187,11 +198,23 @@ public static class SymbolTableBuilder
         // emitted. <paramref name="classicalOnly"/> marks a position that must hold a CLASSICAL value; a qubit
         // there is QSEM026, raised at most ONCE per expression (mirroring the validator's FirstQubitIn, so
         // `if (q == q)` reports once — not once per token). Numeric literals aren't identifiers; pi/tau/euler
-        // /true/false and the symbolic register size are exempt.
+        // /true/false are exempt.
         void RecordExpr(Scope scope, string? text, string detail, QSpan? span, bool classicalOnly = false)
         {
             if (string.IsNullOrEmpty(text)) return;
-            foreach (var name in Identifiers(text))
+            // A member access is one semantic value, not two free identifiers. `q.Count` reads classical
+            // shape metadata: q is recorded as used, while Count is not resolved as a standalone variable.
+            foreach (var member in MemberAccesses(text))
+            {
+                Record(scope, member.Base, detail, span);
+                if (scope.Lookup(member.Base) is not { } owner) continue; // Record already produced QSEM025
+                if (member.Member != "Count")
+                    Add(errors, "QSEM029", $"in `{opName}`: `{member.Base}.{member.Member}` is not a supported member; arrays expose `.Count`", span);
+                else if (!owner.IsArray)
+                    Add(errors, "QSEM029", $"in `{opName}`: `{member.Base}.Count` is invalid because `{member.Base}` is not an array", span);
+            }
+
+            foreach (var name in ExpressionIdentifiers(text))
             {
                 Record(scope, name, detail, span);
                 // QSEM026 at most once per statement span: `reported026.Add` is false on a repeat, so
@@ -251,17 +274,21 @@ public static class SymbolTableBuilder
                         Declare(scope, new Symbol(md.Name, SymbolKind.MeasureBit, QType.Bit, isConst: md.IsConst, declSpan: md.Span, declNodeId: md.Id));
                         break;
                     case QDecl d:
-                        if (d.Value is QText dv) RecordExpr(scope, dv.Text, $"init {d.Name} = {dv.Text}", d.Span, classicalOnly: true);  // an initializer is a classical value
+                        RecordValue(scope, d.Value, $"init {d.Name}", d.Span);
                         Declare(scope, new Symbol(d.Name, d.IsConst ? SymbolKind.Const : SymbolKind.Var, d.Type,
-                            d.IsConst, d.IsConst && d.Value is QText qt ? qt.Text : null, d.Span, declNodeId: d.Id));
+                            d.IsConst, d.IsConst && d.Value is QText qt ? qt.Text : null, d.Span,
+                            isArray: d.IsArray, arrayLength: ArrayLengthOf(d), declNodeId: d.Id));
                         break;
                     case QAssign { Value: QMeasure { Target: { } at } } ma:
+                        Record(scope, ma.Name, $"assign {ma.Name}", ma.Span);
+                        RecordExpr(scope, ma.Index, $"assign index {ma.Name}[{ma.Index}]", ma.Span, classicalOnly: true);
                         Record(scope, at.Reg, $"measure @ {at.Reg}[{at.Index}]", ma.Span);
                         RecordExpr(scope, at.Index, $"measure index @ {at.Reg}[{at.Index}]", ma.Span);
                         break;
                     case QAssign a:
                         Record(scope, a.Name, $"assign {a.Name}", a.Span);                                          // the target is referenced (written)
-                        if (a.Value is QText av) RecordExpr(scope, av.Text, $"assign {a.Name} = {av.Text}", a.Span, classicalOnly: true);  // an assigned value is classical
+                        RecordExpr(scope, a.Index, $"assign index {a.Name}[{a.Index}]", a.Span, classicalOnly: true);
+                        RecordValue(scope, a.Value, $"assign {a.Name}", a.Span);
                         break;
                     case QFor f:
                         RecordExpr(scope, f.From, $"for bound {f.From}", f.Span, classicalOnly: true);              // range bounds are classical (read in the ENCLOSING scope)…
@@ -298,26 +325,37 @@ public static class SymbolTableBuilder
 
         Walk(op.Body, root);
 
-        // QSEM013 / QSEM015 — declaration-name rules the symbol table owns. EVERY declared name (all symbols,
-        // plus each generic register size) is checked HERE, in one place, so no declaration site can be
-        // forgotten:
-        //   - a reserved expression literal (pi/tau/euler/true/false) can never be a declared name — it means
-        //     something else in an expression, and a generic size named `pi` would be captured by the
-        //     Monomorphizer's whole-word textual substitution (silently corrupting `pi` in angle expressions);
-        //   - a generic register size must not collide with any other declared name.
+        // QSEM013 — every declared name is checked here, so no declaration site can bypass the
+        // reserved-expression-name rule.
         foreach (var sym in root.AllSymbols())
             if (IsReservedName(sym.SourceName))
                 Add(errors, "QSEM013", $"in `{opName}`: {KindLabel(sym.Kind)} name `{sym.SourceName}` shadows the built-in `{sym.SourceName}`; choose another name", sym.DeclSpan);
-        foreach (var p in op.Params)
-            if (p.Type == QType.Qubit && p.SizeParam is { } spName)
-            {
-                if (IsReservedName(spName))
-                    Add(errors, "QSEM013", $"in `{opName}`: the generic register size `{spName}` shadows the built-in `{spName}`; choose another name", p.Span);
-                if (root.AllSymbols().Any(s => s.SourceName == spName))
-                    Add(errors, "QSEM015", $"in `{opName}`: `{spName}` is both the generic register size in `Qubit[{spName}] {p.Name}` and a declared name — the size parameter needs a unique name", p.Span);
-            }
-
         return root;
+
+        void RecordValue(Scope valueScope, QExpr value, string detail, QSpan? span)
+        {
+            switch (value)
+            {
+                case QText text:
+                    RecordExpr(valueScope, text.Text, detail, span, classicalOnly: true);
+                    break;
+                case QMeasure { Target: { } target }:
+                    Record(valueScope, target.Reg, $"measure @ {target.Reg}[{target.Index}]", span);
+                    RecordExpr(valueScope, target.Index, $"measure index @ {target.Reg}[{target.Index}]", span);
+                    break;
+                case QArrayLiteral literal:
+                    foreach (var element in literal.Elements)
+                        RecordValue(valueScope, element, detail, span);
+                    break;
+            }
+        }
+
+        static int? ArrayLengthOf(QDecl declaration) => declaration.Value switch
+        {
+            QArrayLiteral literal => literal.Elements.Count,
+            QArrayNew allocation when allocation.Length >= 0 => allocation.Length,
+            _ => null,
+        };
     }
 
     private static void Add(List<QoraError> errors, string code, string message, QSpan? span) =>
@@ -346,6 +384,47 @@ public static class SymbolTableBuilder
     /// filter to real symbols via <see cref="Scope.Lookup"/>, so bare literals (<c>pi</c>, <c>tau</c>, numbers)
     /// that aren't declared never produce a use. Also used by the validator to find a qubit hidden inside a
     /// value-slot expression (QSEM026).</summary>
+    internal readonly record struct MemberAccess(string Base, string Member, int Start, int Length);
+    internal readonly record struct IndexedAccess(string Base, string Index, int Start, int Length);
+
+    internal static IEnumerable<MemberAccess> MemberAccesses(string text)
+    {
+        foreach (Match match in MemberAccessPattern.Matches(text))
+            yield return new MemberAccess(
+                match.Groups["base"].Value,
+                match.Groups["member"].Value,
+                match.Index,
+                match.Length);
+    }
+
+    internal static IEnumerable<IndexedAccess> IndexedAccesses(string text)
+    {
+        foreach (Match match in IndexedAccessPattern.Matches(text))
+            yield return new IndexedAccess(
+                match.Groups["base"].Value,
+                match.Groups["index"].Value,
+                match.Index,
+                match.Length);
+    }
+
+    /// <summary>Identifiers that are ordinary values, excluding both tokens in a member access. The
+    /// owner is handled once through <see cref="MemberAccesses"/> and the member is not a free name.</summary>
+    internal static IEnumerable<string> ExpressionIdentifiers(string text)
+    {
+        var members = MemberAccesses(text).ToList();
+        for (var i = 0; i < text.Length;)
+        {
+            if (char.IsLetter(text[i]) || text[i] == '_')
+            {
+                var start = i;
+                while (i < text.Length && (char.IsLetterOrDigit(text[i]) || text[i] == '_')) i++;
+                if (!members.Any(m => start >= m.Start && start < m.Start + m.Length))
+                    yield return text.Substring(start, i - start);
+            }
+            else i++;
+        }
+    }
+
     internal static IEnumerable<string> Identifiers(string text)
     {
         for (var i = 0; i < text.Length;)

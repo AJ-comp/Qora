@@ -25,6 +25,12 @@ Earlier: operations + C#-style params + calls, `use`/`Qubit`, gates (H/X/Y/Z/S/T
 Rx/Ry/Rz), measurement (`bit r = M(q)`), classical vars (const/var/int/bit) + reassignment + arithmetic,
 `for`-in-range, `while`, `repeat`-`until`. Emits OpenQASM 3.
 
+Also shipped: **size-independent qubit-register parameters and classical arrays**. Helpers receive
+`Qubit[]` and can iterate with `.Count`; the compiler specializes each call to its concrete register
+size. Classical `int[]` / `float[]` / `bit[]` / `angle[]` values support literals, zero-initialized
+`new T[N]`, indexed reads and writes, `.Count`, and mutable `T[]` helper parameters. Array storage is
+declared at `Main` top level and lowers to OpenQASM general arrays. (clean)
+
 ## ⏸ Deferred to the ENGINE (not to be hacked around in Qora)
 
 - **Comments `//` and `/* */`.** Blocked by the Janglim lexer, which only *fakes* longest-match: a single
@@ -61,9 +67,8 @@ Rx/Ry/Rz), measurement (`bit r = M(q)`), classical vars (const/var/int/bit) + re
 - **Calls used as expressions** — `let x = Foo(a);` binding a returned value (today the only
   expression-position call is hard-wired to mean measurement). Sequenced right after return values.
   (workable)
-- **`float` / `angle` / `bool` classical types** — rotation angles are real-valued but everything defaults
-  to `int` today (misleading). Identity mapping to OpenQASM-3 native types; pure grammar + table work.
-  (clean)
+- **`bool` classical type** — `float` and `angle` have shipped, while a Boolean type distinct from the
+  measurement-oriented `bit` remains. It maps directly to OpenQASM 3 `bool`. (clean)
 - **`within { } apply { }` conjugation (auto-uncompute)** ⚛️ — run U, then V, then automatically
   `Adjoint U` — the U·V·U† scratch/ancilla pattern; one of the most important quantum lessons. OpenQASM
   has no conjugation construct, so Qora must synthesize `inv(U)` itself — feasible only once the
@@ -79,10 +84,9 @@ Rx/Ry/Rz), measurement (`bit r = M(q)`), classical vars (const/var/int/bit) + re
   the pass cannot handle yet are loud errors, never silent skips. Standing design rule, already in force:
   every analysis (events / liveness / verdicts / ContainerMap) is written placement-neutral, so nothing
   built for uncompute needs rework when this lands. Decided as a goal 2026-07-10. (hard)
-- **Range / expression bounds** — `start..stop` with variable/const bounds and const/param-sized
-  `Qubit[N]` / `use` (today loop bounds and register sizes must be literal numbers). OpenQASM
-  `for int i in [a:b]` already accepts expressions. Grammar relaxation from `Num` to `expr` + light const
-  handling → scalable circuits. (workable)
+- **Expression-sized qubit allocation** — loop bounds now accept expressions, and `Qubit[]` helpers can
+  iterate with `.Count`. However, `use q = Qubit[N]` still requires a positive literal size; accepting a
+  const/expression there needs compile-time evaluation before allocation. (workable)
 - **Register measurement + `MResetZ`** ⚛️ — measure a whole register (`M(q)` → `c = measure q;`) and a
   measure-and-reset combinator, beyond the current single-`q[i]`-on-decl-RHS form. OpenQASM handles both
   natively; mostly relaxing Qora's restrictive call-RHS recognition. (clean)
@@ -100,9 +104,6 @@ Rx/Ry/Rz), measurement (`bit r = M(q)`), classical vars (const/var/int/bit) + re
 - **`Pauli` type + Pauli-basis ops/measurement** ⚛️ — `PauliI/X/Y/Z` to select rotation/measurement bases.
   No native Pauli in OpenQASM; must desugar by case analysis (basis-change + measure + uncompute). Only
   after functors + richer measurement. (hard)
-- **General classical arrays** — `array[int, N]`, `bit[N]`, literals, indexed classical lvalues (today only
-  qubit registers are indexable). OpenQASM supports arrays, so it is Qora front-end work; real effort for
-  limited early-learning payoff. (workable)
 - **Namespaces + `open` / import** — organizational familiarity, but OpenQASM has no module system (only
   textual `include`); a namespace can only be name-mangled/flattened and erases at the target. Cosmetic on
   a single-file toy. (not-expressible)
