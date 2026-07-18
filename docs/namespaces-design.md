@@ -39,7 +39,8 @@ operation Main()                    // files without namespaces keep working (gl
 - Backward compatible: a file with no `namespace` block lives in the global namespace; every existing
   `.qor` program compiles unchanged.
 - Exactly one `Main` across the whole import graph (entry rules unchanged).
-- Imports are acyclic (cycle ⇒ semantic error) and non-transitive for `open` visibility.
+- Imports may contain cycles. A cyclic back-edge reaches a canonical path already registered in `loaded`
+  and is skipped without an error; `open` visibility remains non-transitive.
 
 ## Name resolution (the standard algorithm)
 
@@ -116,7 +117,7 @@ New semantic codes:
 | QSEM018 | ambiguous unqualified reference (lists candidates) |
 | QSEM019 | unknown namespace / unknown member in a qualified name |
 | QSEM020 | import file not found / unreadable |
-| QSEM021 | cyclic imports |
+| QSEM021 | retired/reserved; cyclic back-edges are skipped and do not emit a diagnostic |
 | QSEM022 | duplicate operation name within one namespace (QSEM008 becomes per-namespace) |
 | QSEM023 | reserved; emitted-name collisions are auto-renamed by `NameMangler` and surfaced as `// Qora:` notes |
 | QSEM025 | identifier not declared in scope here: an unknown name, or a classical name used before declaration |
@@ -143,9 +144,10 @@ New semantic codes:
    `import` remains QSEM099-gated until increment 3.
 3. **Multi-file** — DONE: `ModuleLoader.cs` expands the import graph into one merged program before
    resolution. `import "gates_lib.qor";`, `import "lib/gates.qor";`, and `import "a b.qor";` all use
-   the quoted relative path exactly as written, including the extension. Transitive with diamond-sharing
-   (canonicalized, case-insensitive paths load once); QSEM020 missing/unreadable file, QSEM021 cycle
-   (chain shown);
+   the quoted relative path exactly as written, including the extension. Transitive with diamond-sharing;
+   canonicalized, case-insensitive paths are registered before file I/O, so both diamond sharing and cyclic
+   back-edges are skipped when `loaded.Add` returns false. QSEM020 covers missing/unreadable files;
+   QSEM021 is retired/reserved and is no longer emitted.
    parse errors in an imported file surface with the file name prefixed, span -1. CLI: entry-file
    imports resolve next to the file; stdin takes `--base-dir` (extension passes the document's dir —
    imports resolve live in unsaved buffers). No file context ⇒ clear QSEM020 (playground stays

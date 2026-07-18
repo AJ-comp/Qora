@@ -909,7 +909,7 @@ function provideImportPaths(document, position) {
       it.command = { command: 'editor.action.triggerSuggest', title: '' }; // keep completing into it
       items.push(it);
     } else if (e.isFile() && e.name.toLowerCase().endsWith('.qor')) {
-      if (dirPart === '' && e.name === self) continue; // importing yourself is just a cycle (QSEM021)
+      if (dirPart === '' && e.name === self) continue; // self-import is a no-op: the entry path is already loaded
       const it = new vscode.CompletionItem(e.name, vscode.CompletionItemKind.File);
       it.insertText = e.name;
       it.range = replaceRange;

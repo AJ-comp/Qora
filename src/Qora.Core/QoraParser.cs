@@ -42,14 +42,24 @@ public sealed class QoraParseResult
     public string Qasm { get; init; } = string.Empty;
     /// <summary>Parse errors, each carrying a source span (see <see cref="QoraError"/>); empty on success.</summary>
     public IReadOnlyList<QoraError> Errors { get; init; } = new List<QoraError>();
-    /// <summary>The persistent semantic side table built at the final validation (null when validation never
-    /// ran or failed earlier) — Id-keyed symbol/scope facts carried through the rest of the pipeline.</summary>
+    /// <summary>The persistent semantic side table from whichever validation ran LAST (null when validation
+    /// never ran) — Id-keyed symbol/scope facts carried through the rest of the pipeline. A REJECTED program
+    /// keeps the model of the validation that rejected it, so its recorded facts (e.g.
+    /// <see cref="Ir.Passes.SemanticModel.UnprovenIndexes"/>, the data behind each QSEM030) stay readable —
+    /// facts outlive the verdict; consumers must not treat non-null as "compiled".</summary>
     public Ir.Passes.SemanticModel? Semantics { get; init; }
     /// <summary>The program <see cref="Ir.Passes.EffectAnalysis"/> actually ran on (post-monomorphize, before
     /// any tree-copying pass) — the ops whose Ids key the model's event streams, so this is the program the
     /// uncompute view must iterate (unlike <see cref="Ir"/>, which predates monomorphization and would miss
     /// specializations). Null when analysis never ran (parse or semantic errors).</summary>
     public Ir.QProgram? AnalyzedIr { get; init; }
+    /// <summary>The MONOMORPHIZED program whenever monomorphization ran — kept even when the post-mono
+    /// validation REJECTED it (unlike <see cref="AnalyzedIr"/>, which requires a clean program). The final
+    /// <see cref="Semantics"/> of such a rejection keys its facts (e.g.
+    /// <see cref="Ir.Passes.SemanticModel.RequiredArgLengths"/>) by SPECIALIZED op Ids, and those ops exist
+    /// only in this tree — without it, a rejected specialization's recorded facts point into a program the
+    /// consumer cannot see. Facts outlive the verdict, so the tree they describe must too.</summary>
+    public Ir.QProgram? MonoIr { get; init; }
 }
 
 /// <summary>
@@ -62,8 +72,8 @@ public static class QoraParser
     public static QoraParseResult Parse(string source) => Parse(source, baseDir: null);
 
     /// <param name="baseDir">Directory the entry file's imports resolve against (null = single-file mode).</param>
-    /// <param name="sourcePath">The entry file's own path when known — lets the loader catch an import
-    /// cycle that leads back to the entry file itself.</param>
+    /// <param name="sourcePath">The entry file's own path when known — lets the loader register its
+    /// canonical path up front, so an import back-edge to the entry is skipped without reading it again.</param>
     public static QoraParseResult Parse(string source, string? baseDir, string? sourcePath = null)
     {
         source ??= string.Empty;
@@ -121,6 +131,7 @@ public static class QoraParser
                     if (baseErrors.Count > 0)
                     {
                         semanticErrors = baseErrors;
+                        semantics = baseModel;   // a rejected program keeps its model — the facts behind the verdict stay readable
                     }
                     else
                     {
@@ -200,6 +211,7 @@ public static class QoraParser
             Qasm = qasm,
             Semantics = semantics,
             AnalyzedIr = analyzedIr,
+            MonoIr = monoProgram,
             Errors = !result.Success
                 ? result.AllErrors.Select(ToQoraError).ToList()
                 : semanticErrors,

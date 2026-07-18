@@ -231,7 +231,8 @@ operation Main()
 
 `import "lib/gates.qor";`는 현재 파일이 있는 디렉터리를 기준으로 `lib/gates.qor`를 읽습니다.
 경로는 따옴표 안에 그대로 적고, 확장자도 포함합니다.
-같은 파일은 여러 경로로 도달해도 한 번만 로드되고, 순환 import가 생기면 그 고리를 에러 메시지로 보여줍니다.
+같은 절대 경로는 여러 import 경로로 도달해도 한 번만 처리를 시도합니다.
+따라서 순환 back-edge는 `loaded`에 이미 등록된 경로로 보아 오류 없이 생략하며, QSEM021은 폐기된 예약 코드로만 남아 더 이상 생성하지 않습니다.
 
 내장 게이트 이름도 같은 규칙을 따르며, 내장 게이트는 암묵적인 `Qora.Intrinsic` 네임스페이스에 살기 때문에, 네임스페이스 안에서는 `Rx` 같은 이름의 연산을 직접 정의할 수 있습니다.
 다만 어떤 호출이 사용자 정의 연산과 내장 게이트 둘 다를 뜻할 수 있으면 명시적인 모호성 에러가 납니다.
@@ -248,7 +249,6 @@ operation Main()
 [QSEM016] in `Main`: index `q[5]` is out of range; `q` has 2 qubit(s) (valid: 0..1)
 [QSEM018] in `Go`: `Flip` is ambiguous here: it could be `LibA.Flip` or `LibB.Flip`
           — qualify the call (e.g. `LibA.Flip(...)`)
-[QSEM021] imports form a cycle: main.qor -> lib.qor -> main.qor — remove one of these imports
 ```
 
 **프로그램 실행하기.** 사용자 정의 연산, 루프, 고전 변수, `while`까지 포함한 Qora 프로그램을 지금 바로

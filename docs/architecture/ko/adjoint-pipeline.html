@@ -241,13 +241,13 @@ operation Main() {
 ├─ Param(ArrayType(Qubit), q)   Param(bit, b)
 ├─ VarDecl(int, k, Expr: 2)              <span class="cm">← int k = 2;</span>
 ├─ Gate("Inner", Expr: q)                <span class="cm">← 호출도 게이트도 같은 Gate 태그</span>
-├─ Gate("Rx", Expr: pi / k, Qubit(q,0))
+├─ Gate("Rx", Expr: pi / k, IndexAccess(q,0))
 ├─ For(i, 0, q.Count - 1)
-│   └─ Gate("X", Qubit(q,i))
+│   └─ Gate("X", IndexAccess(q,i))
 └─ If
     ├─ Condition(b == 1)
-    ├─ Gate("Z", Qubit(q,0))
-    └─ Gate(<span class="hl">"Adjoint"</span>, "S", Qubit(q,0))  <span class="cm">← 함자는 자식 토큰</span></code></pre>
+    ├─ Gate("Z", IndexAccess(q,0))
+    └─ Gate(<span class="hl">"Adjoint"</span>, "S", IndexAccess(q,0))  <span class="cm">← 함자는 자식 토큰</span></code></pre>
 
   <div class="call">
     <span class="h">이 트리는 이후에 절대 수정되지 않아요</span>

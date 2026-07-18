@@ -54,6 +54,41 @@ public class QoraLoweringTests
         Assert.Equal(3, use.Size);
     }
 
+    [Fact]
+    public void IndexedReferencesUseTypeNeutralSemanticAstNode()
+    {
+        const string source = """
+            operation Main() {
+                use q = Qubit[1];
+                bit[] results = new bit[1];
+                results[0] = M(q[0]);
+            }
+            """;
+
+        var result = QoraParser.Parse(source);
+        var ast = Assert.IsAssignableFrom<AstSymbol>(result.Ast);
+        var nodes = Descendants(ast).OfType<AstNonTerminal>().ToList();
+        var accesses = nodes.Where(n => n.Name == "IndexAccess").ToList();
+
+        Assert.Collection(
+            accesses,
+            access => Assert.Equal(new[] { "results", "0" }, Leaves(access)),
+            access => Assert.Equal(new[] { "q", "0" }, Leaves(access)));
+        Assert.DoesNotContain(nodes, n => n.Name == "Qubit");
+        Assert.Contains(Descendants(ast).OfType<AstTerminal>(), t => t.ToString() == "Qubit");
+
+        var program = Assert.IsType<QProgram>(QoraLowering.Lower(ast));
+        var main = Assert.Single(program.Operations);
+        var assignment = Assert.IsType<QAssign>(main.Body[2]);
+        var measurement = Assert.IsType<QMeasure>(assignment.Value);
+
+        Assert.Equal("results", assignment.Name);
+        Assert.Equal("0", assignment.Index);
+        Assert.NotNull(measurement.Target);
+        Assert.Equal("q", measurement.Target.Reg);
+        Assert.Equal("0", measurement.Target.Index);
+    }
+
     private static void AssertParam(QParam param, string name, QType type, bool isArray)
     {
         Assert.Equal(name, param.Name);

@@ -28,7 +28,13 @@ public sealed class Symbol
     public SymbolKind Kind { get; }
     public QType? Type { get; }                 // Int / Float / Angle / Bit / Qubit (null if unknown)
     public bool IsConst { get; }
-    public string? ConstValue { get; }          // a const's initializer text (for folding); null for var/measure/register
+    public string? ConstValue { get; }          // a const's initializer text (diagnostics); null for var/measure/register
+    /// <summary>The const's value, FOLDED ONCE at its declaration — in the declaring scope, by the one
+    /// shared calculator (<see cref="BoundFolder"/>) over the initializer tree — and read as plain data ever
+    /// after. May be a definite number OR a symbolic <c>k·array.Count + c</c> (so <c>const hi = q.Count</c>
+    /// carries the count through), or null when it does not settle (or the symbol is not a const). A const
+    /// can never be reassigned (QSEM024), so this value has no time axis: true wherever the symbol is visible.</summary>
+    internal Bound? FoldedBound { get; init; }
     public QSpan? DeclSpan { get; }
     public int DeclNodeId { get; }              // stable Id of the declaring node (QParam / QUse / QDecl / QFor)
     public int? RegisterSize { get; }           // concrete qubit count: `use q = Qubit[N]` or a specialized Qubit[] param
@@ -104,9 +110,6 @@ public static class SymbolTableBuilder
     private static readonly Regex MemberAccessPattern = new(
         @"\b(?<base>[_a-zA-Z][_a-zA-Z0-9]*)\s*\.\s*(?<member>[_a-zA-Z][_a-zA-Z0-9]*)\b",
         RegexOptions.Compiled);
-    private static readonly Regex IndexedAccessPattern = new(
-        @"\b(?<base>[_a-zA-Z][_a-zA-Z0-9]*)\s*\[\s*(?<index>[_a-zA-Z][_a-zA-Z0-9]*|[0-9]+)\s*\]",
-        RegexOptions.Compiled);
 
     /// <summary>Build the PROGRAM scope: the top-level symbol table whose entries are the operation symbols
     /// (one per op, kind <see cref="SymbolKind.Operation"/>, keyed by the op's declaring node Id). They go
@@ -177,6 +180,7 @@ public static class SymbolTableBuilder
         // classical, so it is an unknown name OR a classical used before its declaration: QSEM025.
         // Expression literals (pi/tau/euler/true/false) are legitimate non-symbols and never error.
         var currentStmtId = 0;   // set by Walk to the statement being visited, so uses carry their node Id
+        var measureBits = new List<(string Name, QSpan? Span)>();   // every measure bit, for the post-walk top-level collision check
         void Record(Scope scope, string name, string detail, QSpan? span)
         {
             // pi/tau/euler/true/false mean something in an expression but are never declared, so they are
@@ -225,9 +229,21 @@ public static class SymbolTableBuilder
             }
         }
 
+        // A block-local declaration of <paramref name="name"/> is being made in <paramref name="scope"/>.
+        // If an ENCLOSING value of that name was already USED earlier in THIS block (a use whose program
+        // order lies after the block began and before this declaration), then that use bound to the outer
+        // value — but the completed scope dictionary the validator later reads would resolve the same name
+        // to this later local, so the two passes would disagree (an out-of-bounds index folded to the wrong
+        // value, or a duplicate qubit missed). Point-of-declaration scoping (which the emitted OpenQASM
+        // follows) means a name may not be used before its declaration in its own scope: reject it here.
+        bool UsedBeforeShadow(Scope scope, string name, int scopeStart) =>
+            scope.Lookup(name) is { Kind: not SymbolKind.Operation } outer
+            && outer.Uses.Any(u => u.Order > scopeStart && u.Order < order);
+
         void Walk(IReadOnlyList<QStmt> stmts, Scope scope)
         {
             scopeIndex?.TryAdd(stmts, scope);   // map each body list -> its scope, so the validator resolves names with correct nesting
+            var scopeStart = order;             // program order just before this block's first statement (for UsedBeforeShadow)
             foreach (var s in stmts)
             {
                 order++;
@@ -271,13 +287,29 @@ public static class SymbolTableBuilder
                         // may reuse a name — they dedup into one emitted bit and never coexist.)
                         if (scope.Parent?.Lookup(md.Name) is { Kind: SymbolKind.Register or SymbolKind.Parameter or SymbolKind.MeasureBit } encl)
                             Add(errors, "QSEM015", $"in `{opName}`: measure bit `{md.Name}` reuses the name of an enclosing {KindLabel(encl.Kind)}; a measured result is emitted as one top-level `bit {md.Name};`, so its name must be unique across the operation's registers, parameters and measure bits — rename one", md.Span);
+                        if (UsedBeforeShadow(scope, md.Name, scopeStart))
+                            Add(errors, "QSEM025", $"in `{opName}`: `{md.Name}` is used earlier in this block but declared here, shadowing an outer `{md.Name}` — a name cannot be used before its declaration in its own scope; move this declaration above the first use or rename it", md.Span);
+                        measureBits.Add((md.Name, md.Span));   // checked against the completed root scope after the walk (top-level collision)
                         Declare(scope, new Symbol(md.Name, SymbolKind.MeasureBit, QType.Bit, isConst: md.IsConst, declSpan: md.Span, declNodeId: md.Id));
                         break;
                     case QDecl d:
                         RecordValue(scope, d.Value, $"init {d.Name}", d.Span);
+                        // Point-of-declaration scoping: this name may not have been used earlier in its own
+                        // block (that use would bind to the outer value, which this local shadows). The
+                        // initializer's own use of the name (order == this statement) is exempt, so a const
+                        // chain reading the outer — `const int n = n + 1` — is still fine.
+                        if (UsedBeforeShadow(scope, d.Name, scopeStart))
+                            Add(errors, "QSEM025", $"in `{opName}`: `{d.Name}` is used earlier in this block but declared here, shadowing an outer `{d.Name}` — a name cannot be used before its declaration in its own scope; move this declaration above the first use or rename it", d.Span);
+                        // A const's initializer folds HERE — the owner's site, the owner's scope (earlier
+                        // consts are already in scope, so chains like `const int m = k + 1` settle too).
+                        // From now on the value is DATA on the symbol; no consumer re-reads the text.
                         Declare(scope, new Symbol(d.Name, d.IsConst ? SymbolKind.Const : SymbolKind.Var, d.Type,
                             d.IsConst, d.IsConst && d.Value is QText qt ? qt.Text : null, d.Span,
-                            isArray: d.IsArray, arrayLength: ArrayLengthOf(d), declNodeId: d.Id));
+                            isArray: d.IsArray, arrayLength: ArrayLengthOf(d), declNodeId: d.Id)
+                        {
+                            FoldedBound = d is { IsConst: true, IsArray: false, Value: QText ct }
+                                ? BoundFolder.Fold(ct.Tree, scope) : null,
+                        });
                         break;
                     case QAssign { Value: QMeasure { Target: { } at } } ma:
                         Record(scope, ma.Name, $"assign {ma.Name}", ma.Span);
@@ -324,6 +356,17 @@ public static class SymbolTableBuilder
         }
 
         Walk(op.Body, root);
+
+        // QSEM015 — a measure bit HOISTS to a flat top-level `bit r;` at emission, so it shares the emitted
+        // top-level namespace with root-scope classicals (const/var/array), which also emit there. A same
+        // name in both is a duplicate top-level declaration OpenQASM 3 rejects — and NameMangler, keying by
+        // source name, would emit both under one name rather than renaming. Checked HERE, against the
+        // COMPLETED root scope, so it fires regardless of whether the classical is declared before or after
+        // the measure bit's block. (Enclosing register/parameter/measure-bit collisions are caught inline
+        // during the walk; a BLOCK-local classical stays in its own emitted scope and does not collide.)
+        foreach (var (mbName, mbSpan) in measureBits)
+            if (root.LookupLocal(mbName) is { Kind: SymbolKind.Const or SymbolKind.Var } top)
+                Add(errors, "QSEM015", $"in `{opName}`: measure bit `{mbName}` reuses the name of the top-level {KindLabel(top.Kind)} `{mbName}`; a measured result hoists to `bit {mbName};` at the top level, so its name must be unique there — rename one", mbSpan);
 
         // QSEM013 — every declared name is checked here, so no declaration site can bypass the
         // reserved-expression-name rule.
@@ -385,24 +428,17 @@ public static class SymbolTableBuilder
     /// that aren't declared never produce a use. Also used by the validator to find a qubit hidden inside a
     /// value-slot expression (QSEM026).</summary>
     internal readonly record struct MemberAccess(string Base, string Member, int Start, int Length);
-    internal readonly record struct IndexedAccess(string Base, string Index, int Start, int Length);
 
+    // MemberAccesses + ExpressionIdentifiers scan the FINAL EMITTED (post-mangling) QASM text for
+    // ReferentialCheck — where the pre-mangle expression trees no longer apply (the mangler renamed the
+    // text, not the trees), so a text scan of the emitted artifact is the correct tool, not a mole. The
+    // pre-mangle consumers (bounds checking, guard reading, const folding) all read the QNode tree instead.
     internal static IEnumerable<MemberAccess> MemberAccesses(string text)
     {
         foreach (Match match in MemberAccessPattern.Matches(text))
             yield return new MemberAccess(
                 match.Groups["base"].Value,
                 match.Groups["member"].Value,
-                match.Index,
-                match.Length);
-    }
-
-    internal static IEnumerable<IndexedAccess> IndexedAccesses(string text)
-    {
-        foreach (Match match in IndexedAccessPattern.Matches(text))
-            yield return new IndexedAccess(
-                match.Groups["base"].Value,
-                match.Groups["index"].Value,
                 match.Index,
                 match.Length);
     }

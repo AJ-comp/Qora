@@ -11,6 +11,41 @@ emitted as **OpenQASM 3.0**.
 > **Note:** Qora was renamed from **Ket** on 2026-07-01 (a "Ket" extension already existed). Versions
 > 0.1–0.7 below were authored under the old name.
 
+## 0.22 — 2026-07-18
+
+### Added
+- **Every array and register index is proven in bounds at compile time (rung B′).** An index is accepted
+  only with a proof: a literal within a known length, a loop over `0..a.Count-1` (safe for any length), a
+  constant-bounded loop, a call-site minimum-length precondition for a classical-array parameter, or a
+  programmer guard `if (0 <= n && n < a.Count) { … }` that narrows a runtime index in its then-branch. An
+  index that is provably out of range is `QSEM016`; one that cannot be proven either way is `QSEM030` —
+  OpenQASM 3 has no runtime bounds check, so an unprovable index cannot be deferred to run time. The bound
+  arithmetic is evaluated (`+ - * /`, `const` names, `.Count`) in 64-bit checked arithmetic, so
+  `for i in 0..a.Count*2-4` is judged by its actual value.
+- **A name may not be used before its declaration in its own scope (`QSEM025`, point-of-declaration
+  scoping).** A later same-name `const`/`var`/measure-bit shadows an outer binding; using the name earlier
+  in the same block — where it still means the outer binding — is now rejected rather than silently read
+  two different ways by the validator and the emitted code.
+- **A measurement into a non-`bit` array-literal element is rejected (`QSEM017`),** and measure-target
+  indexes inside conditions and array-literal initializers are bounds-checked like every other index.
+
+### Changed
+- **Expressions are parsed to a tree once, at lowering.** Bounds, indices, conditions, and guards are
+  read from a structured `QNode` tree (`Ir/ExprTree.cs`) instead of being re-parsed from text by each
+  consumer. One evaluator folds a bound or index, one reader narrows a guard, one walker finds every
+  indexed access — so no two readings of one expression can disagree, and a `const` carries its own
+  folded value (`const hi = q.Count` is transparent to the folder).
+- **`SemanticModel` carries the bounds-proof facts as data.** `UnprovenIndexes` records each access that
+  could not be proven (the source each `QSEM030` is derived from), and `RequiredArgLengths` records each
+  operation's classical-array-parameter minimum lengths — the same table the call-site check reads.
+- **Gate-operand distinctness (`QSEM014`) compares indices by value, not spelling.** `CNOT(q[k], q[2])`
+  with `const int k = 2` is caught as the same qubit twice, as is a loop variable whose range reaches a
+  literal operand.
+- **Cyclic import back-edges are now harmless.** `ModuleLoader` registers each canonical path in
+  `loaded` before file I/O, so both a cycle and a diamond reuse return `false` from `loaded.Add(full)`
+  and skip only that import edge. `QSEM021` is retired/reserved; missing or unreadable imports remain
+  `QSEM020`.
+
 ## 0.21 — 2026-07-16
 
 ### Changed
@@ -21,6 +56,9 @@ emitted as **OpenQASM 3.0**.
 - **Qubit and classical type keywords remain explicit in the Janglim semantic AST.** Array parameter
   types are represented by an `ArrayType` node, so `QoraLowering` can map both `Qubit[]` and classical
   `T[]` directly to `QParam.IsArray` without reconstructing a missing type.
+- **Indexed source references now use the type-neutral semantic AST node `IndexAccess`.** The syntax
+  `name[index]` no longer produces a misleading `Qubit` node before type resolution; semantic analysis
+  still determines whether the base symbol is a qubit register or a classical array.
 
 ### Added
 - **One-dimensional classical arrays** for `int[]`, `float[]`, `bit[]`, and `angle[]`: explicit

@@ -241,13 +241,13 @@ operation Main() {
 ├─ Param(ArrayType(Qubit), q)   Param(bit, b)
 ├─ VarDecl(int, k, Expr: 2)              <span class="cm">← int k = 2;</span>
 ├─ Gate("Inner", Expr: q)                <span class="cm">← 呼び出しもゲートも同じ Gate タグ</span>
-├─ Gate("Rx", Expr: pi / k, Qubit(q,0))
+├─ Gate("Rx", Expr: pi / k, IndexAccess(q,0))
 ├─ For(i, 0, q.Count - 1)
-│   └─ Gate("X", Qubit(q,i))
+│   └─ Gate("X", IndexAccess(q,i))
 └─ If
     ├─ Condition(b == 1)
-    ├─ Gate("Z", Qubit(q,0))
-    └─ Gate(<span class="hl">"Adjoint"</span>, "S", Qubit(q,0))  <span class="cm">← ファンクタは子トークン</span></code></pre>
+    ├─ Gate("Z", IndexAccess(q,0))
+    └─ Gate(<span class="hl">"Adjoint"</span>, "S", IndexAccess(q,0))  <span class="cm">← ファンクタは子トークン</span></code></pre>
 
   <div class="call">
     <span class="h">この木は以後、決して修正されません</span>

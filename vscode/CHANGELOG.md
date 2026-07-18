@@ -2,6 +2,16 @@
 
 All notable changes to the Qora Language extension.
 
+## 0.16.0
+
+- Bundles the **Qora v0.22** compiler. Every array and register index is now proven in bounds at compile
+  time: an index with no proof is reported as `QSEM030`, and one provably out of range as `QSEM016`.
+  Proofs come from a literal within a known length, a `0..a.Count-1` loop, a constant-bounded loop, a
+  call-site minimum-length precondition for a classical-array parameter, or a guard
+  `if (0 <= n && n < a.Count)`.
+- A name used before its declaration in its own scope is reported as `QSEM025`, and a measurement into a
+  non-`bit` array element as `QSEM017`.
+
 ## 0.15.0
 
 - Bundles the **Qora v0.21** compiler. Operation register parameters now use `Qubit[]` and inspect

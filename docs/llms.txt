@@ -130,7 +130,8 @@ QSEM016 literal array/qubit index out of range / indexing a scalar or single qub
 QSEM017 measurement assigned to a non-bit     QSEM018 ambiguous unqualified name (candidates listed)
 QSEM019 unknown namespace/member in qualified name or `open`
 QSEM020 import file not found/unreadable/no file context
-QSEM021 import cycle (chain shown)            QSEM022 duplicate operation name within one namespace
+QSEM021 retired/reserved; cyclic back-edges are skipped when loaded.Add returns false
+QSEM022 duplicate operation name within one namespace
 QSEM023 reserved; emitted-name collisions are auto-renamed by NameMangler with a `// Qora:` note
 QSEM024 mutation of a `const` value/array (including passing a const array to a mutable parameter)
 QSEM025 identifier not declared in scope here (unknown name, or classical used before declaration)

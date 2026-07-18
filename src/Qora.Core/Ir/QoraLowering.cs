@@ -181,13 +181,13 @@ public static class QoraLowering
     {
         if (sym is AstNonTerminal nt)
         {
-            if (nt.Name == "Qubit") return new QQubitArg(Child(nt, 0), Child(nt, 1));
+            if (nt.Name == "IndexAccess") return new QQubitArg(Child(nt, 0), Child(nt, 1));
             if (nt.Name == "Expr")
             {
-                if (nt.Items.Count == 1 && nt.Items[0] is AstNonTerminal { Name: "Qubit" } indexed)
+                if (nt.Items.Count == 1 && nt.Items[0] is AstNonTerminal { Name: "IndexAccess" } indexed)
                     return new QQubitArg(Child(indexed, 0), Child(indexed, 1));
                 var (text, hasCall) = RenderExpr(nt);
-                return new QTextArg(text, hasCall);
+                return new QTextArg(text, hasCall) { Tree = ExprTree.Expression(nt) };
             }
         }
         return new QTextArg(sym.ToString() ?? string.Empty);
@@ -210,7 +210,7 @@ public static class QoraLowering
 
     private static QAssign LowerAssign(AstNonTerminal node)
     {
-        var indexed = node.Items.OfType<AstNonTerminal>().FirstOrDefault(n => n.Name == "Qubit");
+        var indexed = node.Items.OfType<AstNonTerminal>().FirstOrDefault(n => n.Name == "IndexAccess");
         return indexed is null
             ? new QAssign(FirstIdent(node), LowerExpr(ExprOf(node)))
             : new QAssign(Child(indexed, 0), LowerExpr(ExprOf(node))) { Index = Child(indexed, 1) };
@@ -256,7 +256,14 @@ public static class QoraLowering
         var bounds = node.Items.OfType<AstNonTerminal>().Where(n => n.Name == "Expr").ToList();
         var from = bounds.Count > 0 ? RenderItems(bounds[0]) : "0";
         var to = bounds.Count > 1 ? RenderItems(bounds[1]) : from;
-        return new QFor(loopVar, from, to, BodyStmts(node).Select(LowerSpanned).ToList());
+        // Structured companions, parsed once (see ExprTree); the bounds prover reads these, not the text.
+        var fromTree = bounds.Count > 0 ? ExprTree.Expression(bounds[0]) : new QNumLit(0);
+        var toTree = bounds.Count > 1 ? ExprTree.Expression(bounds[1]) : fromTree;
+        return new QFor(loopVar, from, to, BodyStmts(node).Select(LowerSpanned).ToList())
+        {
+            FromTree = fromTree,
+            ToTree = toTree,
+        };
     }
 
     // A decl/assign RHS. The only legal call form is a LONE call to the registered measurement
@@ -270,15 +277,15 @@ public static class QoraLowering
 
         var call = Descendants(expr).FirstOrDefault(n => n.Name == "Call");
         if (call is null)
-            return new QText(RenderItems(expr));
+            return new QText(RenderItems(expr)) { Tree = ExprTree.Expression(expr) };
 
         var isLoneCall = expr.Items.Count == 1;
         if (isLoneCall && CallName(call) == QoraGates.Measurement)
         {
-            var qref = call.Items.OfType<AstNonTerminal>().FirstOrDefault(q => q.Name == "Qubit");
-            return new QMeasure(qref is null ? null : new QQubitArg(Child(qref, 0), Child(qref, 1)));
+            var target = call.Items.OfType<AstNonTerminal>().FirstOrDefault(q => q.Name == "IndexAccess");
+            return new QMeasure(target is null ? null : new QQubitArg(Child(target, 0), Child(target, 1)));
         }
-        return new QText(RenderItems(expr), HasCall: true);
+        return new QText(RenderItems(expr), HasCall: true) { Tree = ExprTree.Expression(expr) };
     }
 
     /// <summary>Render an expression to text, reporting whether a call appeared anywhere inside it.</summary>
@@ -315,7 +322,9 @@ public static class QoraLowering
                 negateNext = tok == "!";
             }
         }
-        return new QCond(string.Join(" ", parts), hasCall);
+        // The structured companion, built ONCE here (see ExprTree). Carried alongside the text while
+        // consumers migrate off the string; nothing reads it yet, so behaviour is unchanged.
+        return new QCond(string.Join(" ", parts), hasCall) { Tree = ExprTree.Condition(cond) };
     }
 
     private static string RenderItems(AstNonTerminal expr) =>
@@ -324,15 +333,15 @@ public static class QoraLowering
     private static string RenderItem(AstSymbol item) => item switch
     {
         AstNonTerminal { Name: "Call" } call => RenderCall(call),
-        AstNonTerminal { Name: "Qubit" } indexed => $"{Child(indexed, 0)} [ {Child(indexed, 1)} ]",
+        AstNonTerminal { Name: "IndexAccess" } indexed => $"{Child(indexed, 0)} [ {Child(indexed, 1)} ]",
         AstNonTerminal nt => RenderItems(nt),
         _ => item.ToString() ?? string.Empty,
     };
 
     private static string RenderCall(AstNonTerminal call)
     {
-        var qref = call.Items.OfType<AstNonTerminal>().FirstOrDefault(q => q.Name == "Qubit");
-        return qref is null ? $"{CallName(call)}()" : $"{CallName(call)}({Child(qref, 0)}[{Child(qref, 1)}])";
+        var target = call.Items.OfType<AstNonTerminal>().FirstOrDefault(q => q.Name == "IndexAccess");
+        return target is null ? $"{CallName(call)}()" : $"{CallName(call)}({Child(target, 0)}[{Child(target, 1)}])";
     }
 
     private static string CallName(AstNonTerminal call) =>

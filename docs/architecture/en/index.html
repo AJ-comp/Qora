@@ -289,7 +289,7 @@ operation Main() {
         Nonterminal : Expr ( q . Count - 1 )
         Nonterminal : Gate
           Terminal : H
-          Nonterminal : Qubit ( q , i )
+          Nonterminal : IndexAccess ( q , i )
   Nonterminal : Operation
     Terminal : Main
     Nonterminal : Use ( reg , Qubit , 3 )
@@ -307,7 +307,7 @@ operation Main() {
     Nonterminal : VarDecl
       Terminal : bit
       Terminal : r
-      Nonterminal : Expr → Call ( M , Qubit ( reg , 0 ) )</code></pre>
+      Nonterminal : Expr → Call ( M , IndexAccess ( reg , 0 ) )</code></pre>
 
   <div class="call">
     <span class="h">This tree is read once, then never touched again</span>
@@ -352,8 +352,10 @@ QOperation Main()
   <p>
     <strong>Expand</strong> is the module loader. If the file had <code>import "lib/prep.qor"</code>, this
     pass parses that file, lowers it, and merges its operations into one <code>QProgram</code> so everything
-    downstream sees a single flat program. (Our example imports nothing, so this is a no-op here — but it is
-    where a missing file becomes <code>QSEM020</code> and an import cycle becomes <code>QSEM021</code>.)
+    downstream sees a single flat program. (Our example imports nothing, so this is a no-op here. A missing
+    file becomes <code>QSEM020</code>, while a cyclic back-edge reaches a path already registered in
+    <code>loaded</code> and is skipped without an error. <code>QSEM021</code> is retained only as a
+    retired/reserved code and is no longer emitted.)
   </p>
 
   <p>

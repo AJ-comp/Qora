@@ -144,6 +144,24 @@ public static class MeasureConditionLowering
         // A remaining `name(` is a non-measurement call the validator must still reject; otherwise the
         // condition is now call-free.
         var stillHasCall = Regex.IsMatch(text, @"[A-Za-z_]\w*\s*\(");
-        return (temps, new QCond(text, stillHasCall));
+        // Keep the parsed TREE in sync with the rewritten text: replace each measurement node with the same
+        // hoisted bit name the regex used, in the same left-to-right order. Without this the rewritten
+        // condition would carry a null tree, and the tree-reading validator (bounds check, guard narrowing)
+        // would silently skip the whole condition — an out-of-bounds index escaping, a guard's facts lost.
+        var tree = cond.Tree is { } t ? RewriteMeasurements(t, temps, new[] { 0 }) : null;
+        return (temps, new QCond(text, stillHasCall) { Tree = tree });
     }
+
+    /// <summary>Replace each measurement <c>M(reg[i])</c> node with a reference to its hoisted bit — visited
+    /// left-to-right so the i-th measurement gets <c>temps[i]</c>, matching the text regex exactly.</summary>
+    private static QNode RewriteMeasurements(QNode node, List<QDecl> temps, int[] cursor) => node switch
+    {
+        QCallNode { Name: "M", Arg: QIndexNode } when cursor[0] < temps.Count => new QNameRef(temps[cursor[0]++].Name),
+        QBinOp b => b with { Left = RewriteMeasurements(b.Left, temps, cursor), Right = RewriteMeasurements(b.Right, temps, cursor) },
+        QUnary u => u with { Operand = RewriteMeasurements(u.Operand, temps, cursor) },
+        QMember m => m with { Base = RewriteMeasurements(m.Base, temps, cursor) },
+        QIndexNode idx => idx with { Base = RewriteMeasurements(idx.Base, temps, cursor), Index = RewriteMeasurements(idx.Index, temps, cursor) },
+        QCallNode { Arg: { } a } c => c with { Arg = RewriteMeasurements(a, temps, cursor) },
+        _ => node,
+    };
 }

@@ -11,11 +11,11 @@ namespace Qora.Ir.Passes;
 ///         exactly as written, including the extension. Paths resolve against the IMPORTING file's
 ///         directory (the entry file uses <c>baseDir</c>), so a library's own imports keep working
 ///         wherever it is imported from.</item>
-///   <item>Loading is transitive with diamond-sharing: each file loads once no matter how many import
-///         paths reach it (paths are canonicalized; case-insensitive, matching Windows).</item>
-///   <item>Cycles are an error (<b>QSEM021</b>, showing the chain); a missing/unreadable file is
-///         <b>QSEM020</b>. A parse error inside an imported file is reported with the file name
-///         prefixed and no span (spans are offsets into the ENTRY document only).</item>
+///   <item>Loading is transitive with diamond-sharing: each file is attempted once no matter how many
+///         import paths reach it (paths are canonicalized; case-insensitive, matching Windows).
+///         A cyclic back-edge is therefore harmless: its path is already registered and the import is skipped.</item>
+///   <item>A missing/unreadable file is <b>QSEM020</b>. A parse error inside an imported file is reported
+///         with the file name prefixed and no span (spans are offsets into the ENTRY document only).</item>
 ///   <item>Merged order = entry file's operations first, then imports depth-first. The entry-op rule
 ///         ("global <c>Main</c>, else the first operation") therefore keeps pointing at the entry
 ///         file. Namespaces merge across files (same name = same namespace, C#-style), opens union
@@ -44,16 +44,14 @@ public static class ModuleLoader
         var opens = new Dictionary<string, List<QOpen>>();
         MergeOpens(opens, program.Opens);
 
-        // loaded = every canonical path merged so far (diamonds load once);
-        // chain  = the DFS path currently in progress (a back-edge into it is a cycle).
+        // Register every canonical path before I/O. Both a recursive back-edge and a diamond therefore
+        // become the same harmless case: loaded.Add returns false and that import edge is skipped.
         var loaded = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var chain = new List<(string Path, string Name)>();
         var entryName = sourcePath is null ? "<entry>" : Path.GetFileName(sourcePath);
         if (sourcePath is not null)
         {
             var entryFull = Path.GetFullPath(sourcePath);
             loaded.Add(entryFull);
-            chain.Add((entryFull, entryName));
         }
 
         LoadAll(program.Imports, baseDir, entryName);
@@ -80,16 +78,7 @@ public static class ModuleLoader
                     continue;
                 }
                 var name = Path.GetFileName(full);
-
-                var cycleAt = chain.FindIndex(c => string.Equals(c.Path, full, StringComparison.OrdinalIgnoreCase));
-                if (cycleAt >= 0)
-                {
-                    Add(errors, "QSEM021",
-                        $"imports form a cycle: {string.Join(" -> ", chain.Skip(cycleAt).Select(c => c.Name))} -> {name} — remove one of these imports",
-                        imp.Span);
-                    continue;
-                }
-                if (!loaded.Add(full)) continue; // diamond: already merged via another path
+                if (!loaded.Add(full)) continue; // cycle or diamond: this canonical path was already attempted
 
                 if (!File.Exists(full))
                 {
@@ -114,11 +103,7 @@ public static class ModuleLoader
                 if (sub is null) continue; // empty file: nothing to merge
 
                 if (sub.Imports is { Count: > 0 })
-                {
-                    chain.Add((full, name));
                     LoadAll(sub.Imports, Path.GetDirectoryName(full)!, name);
-                    chain.RemoveAt(chain.Count - 1);
-                }
 
                 operations.AddRange(sub.Operations);
                 MergeOpens(opens, sub.Opens);

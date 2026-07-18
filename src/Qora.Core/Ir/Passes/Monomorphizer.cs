@@ -76,13 +76,15 @@ public static class Monomorphizer
         QArg ResolveArg(QArg arg, IReadOnlyDictionary<string, int> regs) => arg switch
         {
             QQubitArg q => new QQubitArg(q.Reg, ResolveCounts(q.Index, regs)),
-            QTextArg t => new QTextArg(ResolveCounts(t.Text, regs), t.HasCall),
+            QTextArg t => t with { Text = ResolveCounts(t.Text, regs) },   // `with` preserves the parsed Tree
             _ => arg,
         };
 
         QExpr ResolveExpr(QExpr expr, IReadOnlyDictionary<string, int> regs) => expr switch
         {
-            QText t => new QText(ResolveCounts(t.Text, regs), t.HasCall),
+            // `with` preserves the parsed Tree: its names resolve to the now-sized symbols at fold time, so
+            // it needs no rewrite — a `new QText` would drop the tree and break post-mono const folding.
+            QText t => t with { Text = ResolveCounts(t.Text, regs) },
             QMeasure { Target: { } q } m => m with
             {
                 Target = new QQubitArg(q.Reg, ResolveCounts(q.Index, regs)),

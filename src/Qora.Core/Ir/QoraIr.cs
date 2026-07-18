@@ -3,7 +3,7 @@ namespace Qora.Ir;
 /// <summary>The compiler's version, stamped into emitted QASM for provenance.</summary>
 public static class QoraVersion
 {
-    public const string Value = "0.21";
+    public const string Value = "0.22";
 }
 
 /// <summary>
@@ -224,7 +224,14 @@ public sealed record QIf(QCond Cond, IReadOnlyList<QStmt> Then, IReadOnlyList<QS
 /// <see cref="Step"/> has no surface syntax: the surface form always steps by +1 (null); the inversion
 /// pass sets <c>"-1"</c> to run a loop backwards, which emits OpenQASM's <c>[From:Step:To]</c> range.
 /// </summary>
-public sealed record QFor(string Var, string From, string To, IReadOnlyList<QStmt> Body, string? Step = null) : QStmt;
+public sealed record QFor(string Var, string From, string To, IReadOnlyList<QStmt> Body, string? Step = null) : QStmt
+{
+    /// <summary>The <see cref="From"/>/<see cref="To"/> bounds parsed to trees (see <see cref="QNode"/>),
+    /// built once at lowering — the structured companion the bounds prover folds instead of re-parsing the
+    /// text. Null on synthesized loops (e.g. the inverter's step-flip) that set only the text.</summary>
+    public QNode? FromTree { get; init; }
+    public QNode? ToTree { get; init; }
+}
 
 public sealed record QWhile(QCond Cond, IReadOnlyList<QStmt> Body) : QStmt;
 
@@ -253,7 +260,13 @@ public sealed record QQubitArg(string Reg, string Index) : QArg;
 /// <c>pi / 2</c>. <see cref="HasCall"/> marks that a call (e.g. <c>M(q[0])</c>) appeared inside — no
 /// such argument can lower to OpenQASM, so the validator rejects it before emission.
 /// </summary>
-public sealed record QTextArg(string Text, bool HasCall = false) : QArg;
+public sealed record QTextArg(string Text, bool HasCall = false) : QArg
+{
+    /// <summary>The argument expression parsed to a tree (see <see cref="QNode"/>) — the structured
+    /// companion the validator walks to find any indexed access (e.g. a classical element in an angle).
+    /// Null for a bare register name or synthesized text.</summary>
+    public QNode? Tree { get; init; }
+}
 
 // ---- expressions / conditions (rendered text for now) ----
 
@@ -267,7 +280,13 @@ public sealed record QMeasure(QQubitArg? Target) : QExpr;
 /// <see cref="HasCall"/> marks that a call appeared inside (mixed with arithmetic, or a non-<c>M</c>
 /// call) — unexpressible in OpenQASM, rejected by the validator.
 /// </summary>
-public sealed record QText(string Text, bool HasCall = false) : QExpr;
+public sealed record QText(string Text, bool HasCall = false) : QExpr
+{
+    /// <summary>The expression parsed to a tree (see <see cref="QNode"/>), built once at lowering — the
+    /// structured companion the folder reads instead of re-parsing <see cref="Text"/>. Preserved verbatim
+    /// through monomorphization (names resolve to now-sized symbols at fold time), null on synthesized text.</summary>
+    public QNode? Tree { get; init; }
+}
 
 /// <summary>A source array initializer such as <c>[1, 2, 3]</c>.</summary>
 public sealed record QArrayLiteral(IReadOnlyList<QExpr> Elements) : QExpr;
@@ -280,7 +299,57 @@ public sealed record QArrayNew(QType ElementType, int Length) : QExpr;
 /// inside the condition (e.g. <c>while (M(q[0]) == 0)</c>) — OpenQASM has no measurement expressions,
 /// so the validator rejects it (assign to a bit first).
 /// </summary>
-public sealed record QCond(string Text, bool HasCall = false);
+public sealed record QCond(string Text, bool HasCall = false)
+{
+    /// <summary>The condition parsed to a tree (see <see cref="QNode"/>) — the structured companion to
+    /// <see cref="Text"/>, built once at lowering. Null until the tree-migration wires it in.</summary>
+    public QNode? Tree { get; init; }
+}
+
+// ---- expression tree (QNode) ----
+//
+// The engine's grammar gives an `Expr` as a FLAT token run (`a . Count - 1` -> [a, ., Count, -, 1]); only
+// IndexAccess and Call are grouped nonterminals. Historically lowering re-flattened that to a string and
+// every consumer (the bounds folder, the guard parser, the `.Count`/index regexes, the emitter) re-derived
+// structure from the text. QNode is that structure recovered ONCE, at lowering, by a standard-precedence
+// parse (`* /` above `+ -`, matching how OpenQASM re-evaluates the emitted tokens). Downstream reads the
+// tree instead of re-parsing text — so no two readings of one expression can disagree, and a shadowed name
+// or an arithmetic index is a node to resolve, never a string to pattern-match.
+
+/// <summary>One node of a parsed expression or condition.</summary>
+public abstract record QNode;
+
+/// <summary>An integer literal (<c>5</c>, <c>0</c>) — the only literal the bounds folder evaluates.</summary>
+public sealed record QNumLit(long Value) : QNode;
+
+/// <summary>A non-integer literal or built-in constant kept verbatim: a float (<c>0.5</c>), a rotation
+/// constant (<c>pi</c>, <c>tau</c>, <c>euler</c>), or a boolean (<c>true</c>, <c>false</c>). Not foldable
+/// to an integer index/bound; carried for emission and type diagnostics.</summary>
+public sealed record QLit(string Text) : QNode;
+
+/// <summary>A bare identifier — a const, var, loop variable, register, or parameter. Resolved to a
+/// <c>Symbol</c> at the USE site by the reader, so shadowing is settled by identity, not spelling.</summary>
+public sealed record QNameRef(string Name) : QNode;
+
+/// <summary>A unary operator: <c>-</c> (negation) or <c>!</c> (logical not).</summary>
+public sealed record QUnary(string Op, QNode Operand) : QNode;
+
+/// <summary>A binary operator — arithmetic (<c>+ - * /</c>), comparison (<c>== != &lt; &lt;= &gt; &gt;=</c>),
+/// or boolean (<c>&amp;&amp; ||</c>) — with standard precedence already applied by the parse.</summary>
+public sealed record QBinOp(string Op, QNode Left, QNode Right) : QNode;
+
+/// <summary>A member access <c>Base.Member</c>. Only <c>.Count</c> on an array is meaningful; any other
+/// member is a diagnostic the reader raises (the grammar stays general for a precise error).</summary>
+public sealed record QMember(QNode Base, string Member) : QNode;
+
+/// <summary>An indexed access <c>Base[Index]</c>. The grammar restricts <c>Index</c> to a number or bare
+/// identifier today (so <c>a[k+1]</c> is a parse error), but the node admits any expression for when that
+/// restriction is lifted.</summary>
+public sealed record QIndexNode(QNode Base, QNode Index) : QNode;
+
+/// <summary>A call <c>Name(Arg)</c> — the surface grammar allows only the measurement form <c>M(q[i])</c>;
+/// any other call is carried so the reader can reject it (no OpenQASM expression form).</summary>
+public sealed record QCallNode(string Name, QNode? Arg) : QNode;
 
 // ---- the built-in gate table (single source of truth for emitter + validator + inverter) ----
 

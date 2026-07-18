@@ -173,6 +173,15 @@ public sealed record UncomputeVerdict(UncomputeBlocker Blocker, QubitEvent? Culp
     public bool IsSafe => Blocker == UncomputeBlocker.None;
 }
 
+/// <summary>An indexed access whose in-bounds proof FAILED (rung B′): the bound never settles to a value at
+/// compile time, so the access is neither proven safe nor proven wrong. Recorded by <see cref="QoraValidator"/>
+/// as DATA, not as a diagnostic — the verdict is target-independent, only its disposition differs per backend:
+/// the OpenQASM backend derives one QSEM030 per entry (OpenQASM 3 has no runtime failure channel, so an
+/// unproven access cannot ship), while a QIR backend would instead wrap each site in a runtime bounds check
+/// that aborts. <see cref="LoopBound"/> is the undetermined loop upper bound when <see cref="Index"/> is a
+/// <c>for</c> variable, and null when the index is a bare runtime value.</summary>
+public sealed record UnprovenIndex(string Op, string Array, string Index, string? LoopBound, QSpan? Span);
+
 /// <summary>
 /// The PERSISTENT semantic side table: everything <see cref="SymbolTableBuilder"/> proved during the final
 /// validation, keyed by stable node <see cref="QStmt.Id"/>s and carried to the END of the pipeline instead
@@ -197,6 +206,8 @@ public sealed class SemanticModel
     private readonly Dictionary<int, OpEffectSummary> _effectSummaryByOpId = new(); // QOperation.Id → summary
     private readonly Dictionary<int, string> _emittedNameByDeclId = new(); // declaring node Id → emitted (post-mangling) name
     private readonly HashSet<int> _nonInvertibleCallStmts = new();      // StmtIds of CALL statements whose callee the Inverter cannot invert
+    private readonly List<UnprovenIndex> _unprovenIndexes = new();      // rung B′: accesses whose bounds proof never settled
+    private readonly Dictionary<int, IReadOnlyDictionary<string, long>> _requiredArgLengthsByOp = new(); // rung B′/P4: op → classical-array param → min length
     private Scope? _programScope;   // the top-level symbol table: one Operation symbol per op
 
     internal void AddOperation(QOperation op, Scope root)
@@ -252,6 +263,32 @@ public sealed class SemanticModel
     {
         foreach (var id in stmtIds) _nonInvertibleCallStmts.Add(id);
     }
+
+    /// <summary>Record one unproven indexed access (rung B′) — produced by <see cref="QoraValidator"/> during
+    /// the bounds-proof walk, add-only like every other fact. The backend decides the disposition: the
+    /// OpenQASM path derives QSEM030 from each entry; a QIR path would lower each to a checked access.</summary>
+    internal void AddUnprovenIndex(UnprovenIndex access) => _unprovenIndexes.Add(access);
+
+    /// <summary>Record an operation's array-argument CONTRACT (rung B′/P4): the minimum length each of its
+    /// classical-array parameters requires, settled after call-graph propagation. Single producer
+    /// (<see cref="QoraValidator"/>, once per validation), add-only like every other fact.</summary>
+    internal void SetRequiredArgLengths(int opId, IReadOnlyDictionary<string, long> needs)
+    {
+        if (!_requiredArgLengthsByOp.TryAdd(opId, needs))
+            throw new System.InvalidOperationException(
+                $"QINTERNAL: op {opId} already has an array-argument contract — re-validation would silently replace add-only facts");
+    }
+
+    /// <summary>The operation's array-argument contract — parameter name → minimum required length — or null
+    /// when the op demands nothing. The call-site QSEM016s are DERIVED from this table; consumers (signature
+    /// help, docs, backends) can read the same contract.</summary>
+    public IReadOnlyDictionary<string, long>? RequiredArgLengths(int opId) =>
+        _requiredArgLengthsByOp.TryGetValue(opId, out var needs) ? needs : null;
+
+    /// <summary>Every indexed access this validation could not prove in bounds, in walk order — empty when
+    /// the whole program is proven. Non-empty NEVER coexists with a successful OpenQASM compile (each entry
+    /// became a QSEM030); a future QIR backend reads this list as its runtime-check insertion plan.</summary>
+    public IReadOnlyList<UnprovenIndex> UnprovenIndexes => _unprovenIndexes;
 
     /// <summary>The operation's value-genealogy graph (see <see cref="QubitNode"/>), or null when the op was
     /// never analyzed — same key discipline as <see cref="QubitEvents"/> (no derivation walk: a synthesized

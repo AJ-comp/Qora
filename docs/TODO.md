@@ -50,7 +50,7 @@ declared at `Main` top level and lowers to OpenQASM general arrays. (clean)
 
 - **Module system + namespaces** ⚛️ — ✅ SHIPPED in v0.12 (2026-07-03): `namespace` / `open` /
   qualified call targets resolve (Resolver.cs, QSEM018/019/022), `import` loads real multi-file programs
-  (ModuleLoader.cs, QSEM020/021, CLI `--base-dir`, extension passes the document dir), and emission
+  (ModuleLoader.cs, QSEM020, cyclic/repeated paths deduplicated through `loaded`, CLI `--base-dir`, extension passes the document dir), and emission
   flattens namespace names (`MyLib.Bell` → `MyLib_Bell`) while auto-renaming only real collisions. The symbol-table machinery the
   effect-analysis step needs now exists. The QSEM013 follow-up also shipped: built-in gate names are
   relaxed Q#-style ("declaration allowed, ambiguous use is an error") with the built-ins living in the

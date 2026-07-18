@@ -236,7 +236,8 @@ If two `open`ed namespaces contain the same name, Qora does not silently pick on
 
 `import "lib/gates.qor";` loads `lib/gates.qor` relative to the file that contains the import.
 The path is written exactly inside quotes, including the extension.
-The same file is loaded only once even if multiple import paths reach it, and an import cycle is reported with the cycle chain.
+Each canonical path is attempted only once even if multiple import paths reach it.
+A cyclic back-edge therefore reaches a path already registered in `loaded` and is skipped without an error; QSEM021 is retained only as a retired/reserved code and is no longer emitted.
 
 Built-in gate names follow the same rule, and built-in gates live in the implicit `Qora.Intrinsic` namespace.
 Because of that, a namespace may define an operation with a name such as `Rx`.
@@ -255,7 +256,6 @@ That lets you use the gate names from the documentation directly in your program
 [QSEM016] in `Main`: index `q[5]` is out of range; `q` has 2 qubit(s) (valid: 0..1)
 [QSEM018] in `Go`: `Flip` is ambiguous here: it could be `LibA.Flip` or `LibB.Flip`
           — qualify the call (e.g. `LibA.Flip(...)`)
-[QSEM021] imports form a cycle: main.qor -> lib.qor -> main.qor — remove one of these imports
 ```
 
 **Running your programs.** Qora programs with user-defined operations, loops, classical variables, and `while` can run today on Amazon Braket's local simulator:

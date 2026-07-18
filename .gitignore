@@ -20,3 +20,6 @@ Thumbs.db
 # NuGet
 *.nupkg
 packages/
+
+# Research notes — not for publication
+docs/papers/

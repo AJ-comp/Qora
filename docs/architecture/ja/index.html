@@ -288,7 +288,7 @@ operation Main() {
         Nonterminal : Expr ( q . Count - 1 )
         Nonterminal : Gate
           Terminal : H
-          Nonterminal : Qubit ( q , i )
+          Nonterminal : IndexAccess ( q , i )
   Nonterminal : Operation
     Terminal : Main
     Nonterminal : Use ( reg , Qubit , 3 )
@@ -306,7 +306,7 @@ operation Main() {
     Nonterminal : VarDecl
       Terminal : bit
       Terminal : r
-      Nonterminal : Expr → Call ( M , Qubit ( reg , 0 ) )</code></pre>
+      Nonterminal : Expr → Call ( M , IndexAccess ( reg , 0 ) )</code></pre>
 
   <div class="call">
     <span class="h">この木は一度読まれた後、二度と触れられません</span>
@@ -350,8 +350,10 @@ QOperation Main()
   <p>
     <strong>Expand</strong> はモジュールローダです。ファイルに <code>import "lib/prep.qor"</code> があったなら、
     このパスがそのファイルをパース・ローワリングし、その演算群を 1 つの <code>QProgram</code> に統合して、以降の
-    すべてが単一の平坦なプログラムを見るようにします。（例は何もインポートしないのでここでは何もしませんが —
-    ファイルが見つからないと <code>QSEM020</code>、インポートの循環が <code>QSEM021</code> になる場所です。）
+    すべてが単一の平坦なプログラムを見るようにします。（例は何もインポートしないのでここでは何もしません。
+    ファイルが見つからない場合は <code>QSEM020</code> になります。一方、循環する back-edge は
+    <code>loaded</code> に登録済みのパスとしてエラーなしでスキップされます。<code>QSEM021</code> は
+    廃止済みの予約コードとしてのみ残り、現在は出力されません。）
   </p>
 
   <p>

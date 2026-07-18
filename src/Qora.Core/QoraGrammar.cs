@@ -6,7 +6,7 @@ using Janglim.FrontEnd.RegularGrammar;
 namespace Qora;
 
 /// <summary>
-/// Qora v0.21 — a Q#/C#-flavored quantum language on the Janglim engine.
+/// Qora v0.22 — a Q#/C#-flavored quantum language on the Janglim engine.
 ///
 ///   operation Bell(Qubit[] q) {        // a subroutine, with C#-style array parameters
 ///       H(q[0]);
@@ -38,7 +38,7 @@ namespace Qora;
 /// raw-regex StringLiteral token).
 /// v0.12 adds: the module system for real — namespaces/opens/qualified calls resolve
 /// (<c>Ir/Passes/Resolver.cs</c>, QSEM018/019/022), <c>import</c> loads files (<c>Ir/Passes/ModuleLoader.cs</c>,
-/// QSEM020/021, CLI <c>--base-dir</c>), and emission name mangling was introduced
+/// QSEM020, CLI <c>--base-dir</c>; repeated and cyclic paths are deduplicated), and emission name mangling was introduced
 /// (<c>Ir/Passes/NameMangler.cs</c>; current behavior is collision-only, see v0.14 below).
 /// Built-in gate names relaxed Q#-style: a NAMESPACED op may reuse one (ambiguous use ⇒ QSEM018,
 /// qualify via <c>L.Rx</c> / <c>Qora.Intrinsic.Rx</c>); measurement family + pi/tau/euler + global
@@ -60,6 +60,12 @@ namespace Qora;
 /// <c>use q = Qubit[N]</c> for allocation. It also adds one-dimensional <c>int[]</c>, <c>float[]</c>,
 /// <c>bit[]</c>, and <c>angle[]</c> values: explicit literals, zero-initialized <c>new T[N]</c>, indexed
 /// reads/writes, <c>.Count</c>, and mutable array parameters lowered to OpenQASM 3 general arrays.
+/// v0.22 proves every array/register index in bounds at compile time (rung B′): a literal within a known
+/// length, a loop over <c>0..a.Count-1</c>, a constant-bounded loop, a call-site minimum-length floor for a
+/// classical-array parameter, or a guard <c>if (0 &lt;= n &amp;&amp; n &lt; a.Count)</c> proves it; an index that
+/// cannot be proven is <c>QSEM030</c> (OpenQASM 3 has no runtime bounds check). Expressions are parsed to a
+/// tree (<c>Ir/ExprTree.cs</c>) once at lowering, and every consumer reads that tree rather than re-parsing
+/// text. A name used before its own-scope declaration is <c>QSEM025</c> (point-of-declaration scoping).
 /// </summary>
 public class QoraGrammar : Grammar
 {
@@ -176,7 +182,7 @@ public class QoraGrammar : Grammar
     private NonTerminal primary = new NonTerminal("primary");
     private NonTerminal memberAccess = new NonTerminal("memberAccess");
     private NonTerminal call = new NonTerminal("call");
-    private NonTerminal qubitRef = new NonTerminal("qubitRef");
+    private NonTerminal indexAccess = new NonTerminal("indexAccess");
     private NonTerminal index = new NonTerminal("index");
 
     // --- semantic tags ---
@@ -201,7 +207,7 @@ public class QoraGrammar : Grammar
     public static MeaningUnit ConditionM { get; } = new MeaningUnit("Condition");
     public static MeaningUnit ExprM { get; } = new MeaningUnit("Expr");
     public static MeaningUnit CallM { get; } = new MeaningUnit("Call");
-    public static MeaningUnit QubitM { get; } = new MeaningUnit("Qubit");
+    public static MeaningUnit IndexAccessM { get; } = new MeaningUnit("IndexAccess");
 
     public override NonTerminal EbnfRoot => program;
 
@@ -266,7 +272,7 @@ public class QoraGrammar : Grammar
 
         // i = expr;
         assignStmt.AddItem(Ident + Assign + expr + Semicolon, AssignM);
-        assignStmt.AddItem(qubitRef + Assign + expr + Semicolon, AssignM);
+        assignStmt.AddItem(indexAccess + Assign + expr + Semicolon, AssignM);
 
         // if (cond) { … }   /   if (cond) { … } else { … }   /   if (cond) { … } else if (…) { … }
         ifStmt.AddItem(If + LParen + condition + RParen + LBrace + statement.ZeroOrMore() + RBrace, IfM);
@@ -295,14 +301,16 @@ public class QoraGrammar : Grammar
         // expression: atoms joined by + - * /   (e.g.  i + 1 ,  pi / 2 ,  2 * pi ,  0.5 ,  M(q[0]) ).
         // A leading unary minus is its own production (e.g. -pi/2 for rotation angles).
         expr.AddItem(primary + ((Plus | Minus | Mul | Div) + primary).ZeroOrMore(), ExprM);
-        primary.AddItem(Num | Float | Ident | call | memberAccess | qubitRef);
+        primary.AddItem(Num | Float | Ident | call | memberAccess | indexAccess);
         primary.AddItem(Minus + primary);
         // Semantic validation currently exposes exactly one member, Array.Count. Keeping the grammar
         // general lets it produce a precise diagnostic for `q.Length` instead of a low-level parse error.
         memberAccess.AddItem(Ident + Dot + Ident);
-        call.AddItem(Ident + LParen + qubitRef + RParen, CallM);   // M(q[0])
+        call.AddItem(Ident + LParen + indexAccess + RParen, CallM);   // M(q[0])
 
-        qubitRef.AddItem(Ident + LBracket + index + RBracket, QubitM);
+        // Type-neutral indexed access. Semantic validation later decides whether the base symbol is a
+        // qubit register or a classical array.
+        indexAccess.AddItem(Ident + LBracket + index + RBracket, IndexAccessM);
         index.AddItem(Num | Ident);
 
         this.Optimization();

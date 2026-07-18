@@ -234,7 +234,8 @@ operation Main()
 
 `import "lib/gates.qor";` は、現在のファイルがあるディレクトリを基準に `lib/gates.qor` を読みます。
 パスは引用符の中にそのまま書き、拡張子も含めます。
-同じファイルは複数の経路から到達しても一度だけロードされ、循環 import があるとそのチェーンをエラーメッセージで表示します。
+同じ正規化済み絶対パスは、複数の import 経路から到達しても一度だけ処理を試みます。
+そのため循環する back-edge は `loaded` に登録済みのパスとしてエラーなしでスキップされ、QSEM021 は廃止済みの予約コードとしてのみ残り、現在は出力されません。
 
 組み込みゲート名も同じ規則に従い、組み込みゲートは暗黙の `Qora.Intrinsic` 名前空間にあります。
 そのため、名前空間の中では `Rx` のような名前の演算を直接定義できます。
@@ -253,7 +254,6 @@ operation Main()
 [QSEM016] in `Main`: index `q[5]` is out of range; `q` has 2 qubit(s) (valid: 0..1)
 [QSEM018] in `Go`: `Flip` is ambiguous here: it could be `LibA.Flip` or `LibB.Flip`
           — qualify the call (e.g. `LibA.Flip(...)`)
-[QSEM021] imports form a cycle: main.qor -> lib.qor -> main.qor — remove one of these imports
 ```
 
 **プログラムの実行。** ユーザー定義演算、ループ、古典変数、`while` を含む Qora プログラムは、Amazon Braket のローカルシミュレータで実行できます:
