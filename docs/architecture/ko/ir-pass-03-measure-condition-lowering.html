@@ -1,0 +1,786 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>3. MeasureConditionLowering — 조건 속 측정을 측정 문장과 비트 조건으로 분리 — Qora IR 패스 데이터시트</title>
+<style>
+  :root {
+    --bg:#ffffff; --ink:#1f2430; --muted:#5b6472; --line:#e1e5eb; --panel:#f6f7f9;
+    --navy:#0f1726; --slate:#263141; --blue:#2369ad; --green:#13865f; --amber:#b87913; --red:#b4233d;
+  }
+  * { box-sizing:border-box; }
+  html { scroll-behavior:smooth; }
+  body {
+    margin:0; background:var(--bg); color:var(--ink); word-break:keep-all; overflow-wrap:break-word;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Apple SD Gothic Neo",
+      "Malgun Gothic","Noto Sans KR","Segoe UI Symbol","Cambria Math",sans-serif;
+    font-size:16.5px; line-height:1.72;
+  }
+  .wrap { max-width:940px; margin:0 auto; padding:0 20px 120px; }
+  header.hero { padding:60px 20px 36px; text-align:center; border-bottom:1px solid var(--line); background:#f7f8fa; }
+  header.hero h1 { margin:0 0 10px; font-size:2rem; line-height:1.35; letter-spacing:-.5px; }
+  header.hero p { margin:0; color:var(--muted); font-size:1.02rem; }
+  .tag { display:inline-block; margin-bottom:14px; color:var(--muted); font-size:.78rem;
+         font-weight:800; letter-spacing:.12em; text-transform:uppercase; }
+  h2 { margin:54px 0 12px; padding-bottom:10px; border-bottom:1px solid var(--line);
+       font-size:1.42rem; letter-spacing:-.3px; }
+  h3 { margin:30px 0 8px; font-size:1.1rem; }
+  p { margin:12px 0; }
+  strong { color:#11203a; }
+  a { color:#1745b5; }
+  code,.mono,pre { font-family:"SF Mono","JetBrains Mono","D2Coding",Consolas,"Segoe UI Symbol",monospace; }
+  code { padding:1px 6px; border:1px solid var(--line); border-radius:5px; background:var(--panel);
+         font-size:.9em; word-break:normal; }
+  pre { margin:16px 0; padding:15px 17px; overflow-x:auto; border-radius:10px; background:#111827;
+        color:#eef4ff; font-size:.86rem; line-height:1.56; white-space:pre; word-break:normal; }
+  pre code { padding:0; border:0; background:none; color:inherit; font-size:inherit; }
+  .lead { margin-top:24px; font-size:1.04rem; }
+  .doc-links { display:flex; flex-wrap:wrap; gap:10px; margin:20px 0 6px; }
+  .doc-link { display:inline-flex; align-items:center; padding:7px 15px; border:1px solid #cddcff;
+              border-radius:999px; background:#f6f9ff; color:#1745b5; font-size:.92rem;
+              font-weight:750; text-decoration:none; }
+  .doc-link:hover { border-color:#9bb8ff; background:#eef4ff; }
+  .doc-meta { margin:22px 0; overflow:hidden; border:1px solid #d9dee6; border-radius:10px;
+              background:#fff; box-shadow:0 8px 22px rgba(24,32,45,.055); }
+  .doc-meta .meta-title { display:flex; align-items:center; justify-content:space-between; gap:16px;
+                          padding:11px 18px; background:#263141; color:#f7f9fc;
+                          font-size:.76rem; font-weight:800; letter-spacing:.1em; text-transform:uppercase; }
+  .meta-pass { color:#cbd3df; font-family:"SF Mono","JetBrains Mono","D2Coding",Consolas,monospace;
+               font-size:.74rem; font-weight:650; letter-spacing:.02em; text-transform:none; }
+  .meta-body { min-width:0; padding:18px; }
+  .walkthrough { display:grid; gap:15px; }
+  .walk-stage { min-width:0; overflow:hidden; scroll-margin-top:52px; border:1px solid #dce2e9;
+                border-radius:10px; background:#f8fafc; }
+  .walk-head { display:grid; grid-template-columns:34px minmax(0,1fr); align-items:center; gap:11px;
+               padding:11px 13px; border-bottom:1px solid #dfe4eb; background:#eef1f5; }
+  .walk-number { display:flex; align-items:center; justify-content:center; width:30px; height:30px;
+                 border-radius:7px; background:#263141; color:#fff; font-size:.78rem; font-weight:850; }
+  .walk-number.input { background:#422d16; color:#ffedd5; font-size:.66rem; letter-spacing:-.03em; }
+  .walk-number.output { background:#0d6f51; color:#ecfdf5; font-size:.61rem; letter-spacing:-.03em; }
+  .walk-head h3 { margin:0; color:#253044; font-size:1rem; line-height:1.42; }
+  .walk-body { min-width:0; padding:12px; }
+  .walk-body > p:first-child { margin-top:0; }
+  .walk-body > p:last-child { margin-bottom:0; }
+  .diagram-reading-rule { display:grid; grid-template-columns:auto minmax(0,1fr); align-items:start; gap:13px;
+                          margin:11px 0 14px; padding:13px 15px; border:1px solid #dec9a7;
+                          border-radius:9px; background:#fffaf2; box-shadow:0 4px 14px rgba(66,45,22,.045); }
+  .diagram-reading-badge { display:inline-flex; align-items:center; justify-content:center; min-height:25px;
+                           padding:3px 10px; border-radius:999px; background:#422d16; color:#ffedd5;
+                           font-size:.7rem; font-weight:850; letter-spacing:.025em; white-space:nowrap; }
+  .diagram-reading-rule p { margin:0; color:#374151; font-size:.9rem; line-height:1.68; }
+  .pass-map { margin:12px 0 14px; overflow:hidden; border:1px solid #d4dde8; border-radius:12px;
+              background:#f8fafc; box-shadow:0 7px 20px rgba(24,32,45,.055); }
+  .pass-map .diagram-scroll-hint { display:none; }
+  .pass-map .diagram-scroll { overflow-x:auto; scrollbar-gutter:stable; }
+  .pass-map .diagram-scroll:focus-visible { outline:3px solid rgba(35,105,173,.3); outline-offset:-3px; }
+  .pass-map svg { display:block; width:100%; min-width:840px; height:auto;
+                  shape-rendering:geometricPrecision; text-rendering:geometricPrecision; }
+  .pass-map figcaption { padding:10px 14px 11px; border-top:1px solid #dfe5ed; background:#fff;
+                         color:#536074; font-size:.8rem; line-height:1.58; }
+  .pass-map .svg-ui { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Apple SD Gothic Neo",
+                      "Malgun Gothic","Noto Sans KR",sans-serif; }
+  .pass-map .svg-code { font-family:"SF Mono","JetBrains Mono","D2Coding",Consolas,monospace; }
+  .call { margin:14px 0; padding:14px 16px; border:1px solid #dfe3e9; border-radius:9px;
+          background:#f8f9fb; box-shadow:0 4px 14px rgba(24,32,45,.04); }
+  .call.good { border-color:#cfe4da; background:#f6faf8; }
+  .call.warn { border-color:#ead8bd; background:#fffaf1; }
+  .call .h { display:block; margin-bottom:6px; color:#576171; font-size:.72rem;
+             font-weight:850; letter-spacing:.09em; text-transform:uppercase; }
+  .call p { margin:0; }
+  .panel { margin:14px 0; overflow-x:auto; border:1px solid var(--line); border-radius:9px; background:#fff; }
+  table.spec { width:100%; border-collapse:collapse; font-size:.9rem; }
+  table.spec th,table.spec td { padding:9px 11px; border-bottom:1px solid var(--line);
+                               text-align:left; vertical-align:top; }
+  table.spec th { background:#fbfbfe; color:var(--muted); font-size:.76rem; font-weight:800; letter-spacing:.02em; }
+  table.spec tr:last-child td { border-bottom:0; }
+  table.spec td.k { width:1%; color:#1a2740; font-weight:750; white-space:nowrap; }
+  table.spec code { white-space:nowrap; }
+  .result-strip { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin:14px 0; }
+  .result-card { min-width:0; padding:12px 13px; border:1px solid #d8e0ea; border-radius:8px; background:#fff; }
+  .result-card b { display:block; margin-bottom:4px; color:#263141; font-size:.78rem; }
+  .result-card span { color:#536074; font-size:.82rem; }
+  .meta-reference { display:flex; align-items:baseline; flex-wrap:wrap; gap:5px 10px; margin-top:16px;
+                    padding-top:13px; border-top:1px solid #e5e9ef; color:var(--muted); font-size:.75rem; }
+  .reference-label { color:#667184; font-size:.67rem; font-weight:850; letter-spacing:.08em; }
+  .meta-reference code { white-space:normal; overflow-wrap:anywhere; }
+  footer { margin-top:58px; padding-top:24px; border-top:1px solid var(--line);
+           color:var(--muted); text-align:center; font-size:.9rem; }
+  @media (max-width:720px) {
+    .wrap { padding-right:16px; padding-left:16px; }
+    .meta-body { padding:14px; }
+    .walk-body { padding:10px; }
+    .walk-head { grid-template-columns:30px minmax(0,1fr); gap:9px; padding:10px; }
+    .walk-number { width:28px; height:28px; }
+    .diagram-reading-rule { grid-template-columns:minmax(0,1fr); gap:8px; padding:12px; }
+    .diagram-reading-badge { justify-self:start; }
+    .pass-map .diagram-scroll-hint { display:block; padding:7px 10px; border-bottom:1px solid #e1e6ed;
+                                     background:#fff8ec; color:#7a5114; font-size:.72rem; font-weight:750;
+                                     text-align:center; }
+    header.hero { padding-right:16px; padding-left:16px; }
+    header.hero h1 { font-size:1.5rem; overflow-wrap:anywhere; }
+    header.hero p { font-size:.94rem; }
+    .result-strip { grid-template-columns:minmax(0,1fr); }
+    table.spec td.k { white-space:normal; }
+  }
+</style>
+</head>
+<body>
+<div class="qora-lang-switch" style="position:sticky;top:0;z-index:99;text-align:right;padding:8px 16px;background:rgba(255,255,255,.92);backdrop-filter:blur(4px);border-bottom:1px solid #e6e8ee;font-size:13px;font-family:sans-serif;"><a href="../en/index.html">English</a> · <strong>한국어</strong> · <a href="../ja/index.html">日本語</a></div>
+
+<header class="hero">
+  <div class="tag">Qora · IR 패스 데이터시트 · 3장</div>
+  <h1>3. MeasureConditionLowering — 조건 속 측정을 측정 문장과 비트 조건으로 분리</h1>
+  <p>병합된 QProgram의 측정 조건을 후속 패스가 처리할 수 있는 IR로 정규화</p>
+</header>
+
+<div class="wrap">
+  <nav class="doc-links" aria-label="IR 패스 데이터시트 내비게이션">
+    <a class="doc-link" href="ir-pass-02-module-loader.html">← 2. ModuleLoader</a>
+    <a class="doc-link" href="datasheet.html#s2">패스 목차</a>
+  </nav>
+
+  <p class="lead">
+    2장에서 <code>ModuleLoader</code>는 import 대상의 연산과 <code>open</code>을 하나의 <code>QProgram</code>으로 병합했습니다.<br>
+    import 오류가 없다면 <code>MeasureConditionLowering</code>은 이 병합 결과를 입력받아, 조건 안의 <code>M(q[i])</code>를 독립된 측정 문장과 그 결과를 읽는 비트 조건으로 분리합니다.
+  </p>
+
+  <section class="doc-meta" aria-label="MeasureConditionLowering 사양 정보">
+    <div class="meta-title"><span>PASS SPECIFICATION</span><span class="meta-pass">MeasureConditionLowering</span></div>
+    <div class="meta-body">
+      <div class="walkthrough">
+        <section class="walk-stage" id="input-ir">
+          <div class="walk-head">
+            <div class="walk-number input">입력</div>
+            <h3>입력: ModuleLoader가 병합한 <code>QProgram</code></h3>
+          </div>
+          <div class="walk-body">
+            <p>
+              이 패스는 <code>QProgram.Operations</code>의 모든 연산을 기존 순서대로 방문합니다.<br>
+              아래 도식에서는 2장의 병합 결과 가운데 <code>Operations[0]</code>인 <code>Main</code>을 열어, 측정 호출이 남은 <code>QIf.Cond</code>를 확인합니다.
+            </p>
+            <figure class="pass-map" aria-labelledby="mc-input-title mc-input-caption">
+              <div class="diagram-scroll-hint" aria-hidden="true">↔ 좌우로 밀어 병합 QProgram과 선택한 Main 본문을 함께 확인합니다</div>
+              <div class="diagram-scroll" tabindex="0" aria-label="ModuleLoader가 병합한 QProgram에서 Main 연산의 측정 조건을 선택한 도식">
+                <svg viewBox="0 0 1000 540" role="img" aria-labelledby="mc-input-title mc-input-desc" focusable="false">
+                  <title id="mc-input-title">MeasureConditionLowering이 입력받는 병합 QProgram</title>
+                  <desc id="mc-input-desc">왼쪽에는 Imports가 소비되고 Main, Mark, Prepare, Readout 연산과 Demo의 open이 병합된 QProgram이 있으며, 오른쪽에는 Main 본문의 QUse와 측정 호출이 있는 QIf가 펼쳐져 있다.</desc>
+                  <defs>
+                    <marker id="mc-input-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+                      <path d="M0 0 L10 5 L0 10 Z" fill="#64748b"/>
+                    </marker>
+                  </defs>
+
+                  <rect x="22" y="18" width="118" height="28" rx="14" fill="#422d16"/>
+                  <text class="svg-ui" x="81" y="37" text-anchor="middle" fill="#ffedd5" font-size="13" font-weight="850">실제 입력 IR</text>
+                  <text class="svg-ui" x="156" y="38" fill="#253044" font-size="19" font-weight="850">병합된 QProgram에서 조건이 있는 연산을 선택합니다</text>
+
+                  <rect x="22" y="72" width="456" height="430" rx="12" fill="#0f1726" stroke="#334155"/>
+                  <path d="M34 72 H466 Q478 72 478 84 V118 H22 V84 Q22 72 34 72 Z" fill="#202b3c"/>
+                  <rect x="40" y="84" width="94" height="23" rx="11.5" fill="none" stroke="#bfdbfe"/>
+                  <text class="svg-ui" x="87" y="100" text-anchor="middle" fill="#dbeafe" font-size="11.5" font-weight="800">QProgram IR</text>
+                  <text class="svg-ui" x="151" y="101" fill="#f8fafc" font-size="13.5" font-weight="800">ModuleLoader 직후</text>
+
+                  <rect x="50" y="140" width="400" height="48" rx="9" fill="#1f2d40" stroke="#64748b"/>
+                  <rect x="66" y="152" width="86" height="24" rx="12" fill="#173657" stroke="#60a5fa"/>
+                  <text class="svg-code" x="109" y="169" text-anchor="middle" fill="#dbeafe" font-size="12.5" font-weight="800">QProgram</text>
+                  <path d="M90 188 V460 M90 224 H108 M90 292 H108 M90 421 H108" fill="none" stroke="#64748b" stroke-width="2"/>
+
+                  <rect x="108" y="204" width="318" height="42" rx="8" fill="#342711" stroke="#b87913"/>
+                  <text class="svg-code" x="126" y="230" fill="#ffedd5" font-size="13">Imports = null</text>
+
+                  <rect x="108" y="262" width="318" height="134" rx="9" fill="#102f4d" stroke="#3b82c4"/>
+                  <text class="svg-code" x="126" y="288" fill="#bfdbfe" font-size="13" font-weight="800">Operations · 4개</text>
+                  <rect x="122" y="303" width="286" height="28" rx="6" fill="#1e4f7d" stroke="#60a5fa"/>
+                  <text class="svg-code" x="138" y="322" fill="#eff6ff" font-size="12.5" font-weight="800">[0] Main</text>
+                  <text class="svg-ui" x="392" y="322" text-anchor="end" fill="#bfdbfe" font-size="11.5" font-weight="750">선택</text>
+                  <text class="svg-code" x="138" y="351" fill="#dbeafe" font-size="12.5">[1] Mark</text>
+                  <text class="svg-code" x="138" y="374" fill="#dbeafe" font-size="12.5">[2] Prepare</text>
+                  <text class="svg-code" x="267" y="374" fill="#dbeafe" font-size="12.5">[3] Readout</text>
+
+                  <rect x="108" y="412" width="318" height="64" rx="9" fill="#0d3a2b" stroke="#15966c"/>
+                  <text class="svg-code" x="126" y="438" fill="#a7f3d0" font-size="13" font-weight="800">Opens[&quot;Demo&quot;]</text>
+                  <text class="svg-code" x="126" y="461" fill="#d1fae5" font-size="12.5">[ QOpen(Target = &quot;Shared&quot;) ]</text>
+
+                  <path d="M478 317 H520" fill="none" stroke="#64748b" stroke-width="2.5" marker-end="url(#mc-input-arrow)"/>
+
+                  <rect x="522" y="72" width="456" height="430" rx="12" fill="#f8fafc" stroke="#bdc9d8"/>
+                  <path d="M534 72 H966 Q978 72 978 84 V118 H522 V84 Q522 72 534 72 Z" fill="#263141"/>
+                  <rect x="540" y="84" width="102" height="23" rx="11.5" fill="none" stroke="#bfdbfe"/>
+                  <text class="svg-code" x="591" y="100" text-anchor="middle" fill="#dbeafe" font-size="11.5" font-weight="800">QOperation</text>
+                  <text class="svg-ui" x="658" y="101" fill="#f8fafc" font-size="13.5" font-weight="800">Operations[0] · Main</text>
+
+                  <rect x="548" y="140" width="404" height="42" rx="8" fill="#eaf2fb" stroke="#8db8e0"/>
+                  <text class="svg-code" x="566" y="166" fill="#174f88" font-size="13" font-weight="800">Body · IReadOnlyList&lt;QStmt&gt; · 2개</text>
+
+                  <rect x="548" y="198" width="404" height="58" rx="8" fill="#f4f7fb" stroke="#9db2c9"/>
+                  <rect x="564" y="212" width="76" height="24" rx="12" fill="#dbeafe"/>
+                  <text class="svg-code" x="602" y="229" text-anchor="middle" fill="#174f88" font-size="11.5" font-weight="800">Body[0]</text>
+                  <text class="svg-code" x="656" y="229" fill="#263141" font-size="12.5" font-weight="800">QUse · Name = &quot;q&quot; · Size = 2</text>
+
+                  <rect x="548" y="272" width="404" height="202" rx="9" fill="#eef5fd" stroke="#3b82c4" stroke-width="1.5"/>
+                  <rect x="564" y="286" width="76" height="24" rx="12" fill="#2369ad"/>
+                  <text class="svg-code" x="602" y="303" text-anchor="middle" fill="#fff" font-size="11.5" font-weight="800">Body[1]</text>
+                  <text class="svg-code" x="656" y="303" fill="#174f88" font-size="13" font-weight="850">QIf</text>
+                  <path d="M584 322 V445 M584 342 H604 M584 401 H604" fill="none" stroke="#6a9ac8" stroke-width="1.8"/>
+
+                  <rect x="604" y="326" width="324" height="60" rx="7" fill="#fff7e8" stroke="#d9a23d"/>
+                  <text class="svg-code" x="620" y="350" fill="#7a5114" font-size="12.5" font-weight="800">Cond · QCond</text>
+                  <text class="svg-code" x="620" y="371" fill="#5f4a27" font-size="12">Text = &quot;M(q[0]) == 1&quot; · HasCall = true</text>
+
+                  <rect x="604" y="398" width="324" height="56" rx="7" fill="#f4f7fb" stroke="#9db2c9"/>
+                  <text class="svg-code" x="620" y="421" fill="#334155" font-size="12.5" font-weight="800">Then[0] · QGate</text>
+                  <text class="svg-code" x="620" y="442" fill="#475569" font-size="12">Name = &quot;X&quot; · Args[0] = q[1]</text>
+                </svg>
+              </div>
+              <figcaption id="mc-input-caption">
+                <code>Imports</code>와 <code>Opens</code>도 입력에 남아 있지만, 이 패스가 다시 만드는 값은 <code>Operations</code>입니다.
+              </figcaption>
+            </figure>
+          </div>
+        </section>
+
+        <section class="walk-stage" id="find-measurement">
+          <div class="walk-head">
+            <div class="walk-number">1</div>
+            <h3><code>QCond.HasCall</code>을 확인한 뒤 <code>M(register[index])</code>를 찾습니다</h3>
+          </div>
+          <div class="walk-body">
+            <p>
+              먼저 <code>HasCall</code>이 <code>false</code>이면 측정 패턴을 검색하지 않고 조건 내용을 유지합니다.<br>
+              <code>true</code>이면 <code>QCond.Text</code>에서 대문자 <code>M</code> 호출을 찾아 레지스터 이름과 인덱스 문자열을 분리합니다.
+            </p>
+            <figure class="pass-map" aria-labelledby="mc-find-title mc-find-caption">
+              <div class="diagram-scroll-hint" aria-hidden="true">↔ 좌우로 밀어 조건 검사와 추출 결과를 확인합니다</div>
+              <div class="diagram-scroll" tabindex="0" aria-label="QCond HasCall 검사 후 M q 0 호출에서 레지스터와 인덱스를 추출하는 도식">
+                <svg viewBox="0 0 1000 350" role="img" aria-labelledby="mc-find-title mc-find-desc" focusable="false">
+                  <title id="mc-find-title">QCond에서 측정 호출을 찾는 순서</title>
+                  <desc id="mc-find-desc">왼쪽 QCond의 HasCall이 true이면 가운데에서 Text를 검색하고, 오른쪽에서 M q 0 호출을 Reg q와 Index 0으로 분리한다. HasCall이 false이면 조건 내용을 유지한다.</desc>
+                  <defs>
+                    <marker id="mc-find-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+                      <path d="M0 0 L10 5 L0 10 Z" fill="#64748b"/>
+                    </marker>
+                    <marker id="mc-find-amber" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+                      <path d="M0 0 L10 5 L0 10 Z" fill="#b87913"/>
+                    </marker>
+                  </defs>
+
+                  <rect x="30" y="48" width="350" height="194" rx="11" fill="#0f1726" stroke="#334155"/>
+                  <path d="M42 48 H368 Q380 48 380 60 V88 H30 V60 Q30 48 42 48 Z" fill="#263141"/>
+                  <text class="svg-code" x="52" y="75" fill="#f8fafc" font-size="14" font-weight="850">Body[1].Cond · QCond</text>
+                  <text class="svg-code" x="54" y="126" fill="#dbeafe" font-size="14">Text</text>
+                  <rect x="112" y="105" width="238" height="34" rx="6" fill="#342711" stroke="#b87913"/>
+                  <text class="svg-code" x="231" y="127" text-anchor="middle" fill="#ffedd5" font-size="13.5" font-weight="800">M(q[0]) == 1</text>
+                  <text class="svg-code" x="54" y="178" fill="#dbeafe" font-size="14">HasCall</text>
+                  <rect x="132" y="157" width="74" height="30" rx="15" fill="#b87913"/>
+                  <text class="svg-code" x="169" y="177" text-anchor="middle" fill="#fff" font-size="13" font-weight="850">true</text>
+
+                  <path d="M380 146 H438" fill="none" stroke="#b87913" stroke-width="2.5" marker-end="url(#mc-find-amber)"/>
+                  <rect x="440" y="88" width="158" height="116" rx="10" fill="#fff8e9" stroke="#d9a23d"/>
+                  <rect x="462" y="106" width="114" height="28" rx="14" fill="#b87913"/>
+                  <text class="svg-ui" x="519" y="125" text-anchor="middle" fill="#fff" font-size="12.5" font-weight="850">Text 검색</text>
+                  <text class="svg-code" x="519" y="160" text-anchor="middle" fill="#7a5114" font-size="13">M(q[0])</text>
+                  <text class="svg-ui" x="519" y="184" text-anchor="middle" fill="#7a5114" font-size="11.5">측정 호출 발견</text>
+
+                  <path d="M598 146 H656" fill="none" stroke="#64748b" stroke-width="2.5" marker-end="url(#mc-find-arrow)"/>
+                  <rect x="658" y="48" width="312" height="194" rx="11" fill="#f5f9fd" stroke="#8db8e0"/>
+                  <path d="M670 48 H958 Q970 48 970 60 V88 H658 V60 Q658 48 670 48 Z" fill="#1f4f7c"/>
+                  <text class="svg-code" x="680" y="75" fill="#eff6ff" font-size="14" font-weight="850">QMeasure의 Target으로 옮길 값</text>
+                  <rect x="684" y="108" width="260" height="48" rx="8" fill="#e8f2fc" stroke="#8db8e0"/>
+                  <text class="svg-code" x="702" y="138" fill="#174f88" font-size="14">Reg = &quot;q&quot;</text>
+                  <rect x="684" y="170" width="260" height="48" rx="8" fill="#e8f2fc" stroke="#8db8e0"/>
+                  <text class="svg-code" x="702" y="200" fill="#174f88" font-size="14">Index = &quot;0&quot;</text>
+
+                  <path d="M205 242 V282 H440" fill="none" stroke="#94a3b8" stroke-width="2" marker-end="url(#mc-find-arrow)"/>
+                  <rect x="442" y="262" width="398" height="54" rx="9" fill="#f1f5f9" stroke="#aebbc9"/>
+                  <text class="svg-code" x="641" y="285" text-anchor="middle" fill="#475569" font-size="12.5" font-weight="800">다른 조건 · HasCall = false</text>
+                  <text class="svg-ui" x="641" y="304" text-anchor="middle" fill="#64748b" font-size="11.5">추가 측정 노드 없이 조건 내용을 유지</text>
+                </svg>
+              </div>
+              <figcaption id="mc-find-caption">
+                이 단계는 문자열에서 두 값을 분리할 뿐이며, <code>q</code>의 선언 여부와 <code>0</code>의 범위는 판정하지 않습니다.
+              </figcaption>
+            </figure>
+          </div>
+        </section>
+
+        <section class="walk-stage" id="lower-if">
+          <div class="walk-head">
+            <div class="walk-number">2</div>
+            <h3><code>if</code> 앞에 <code>QDecl</code>을 넣고 조건의 측정 호출을 비트 이름으로 바꿉니다</h3>
+          </div>
+          <div class="walk-body">
+            <div class="diagram-reading-rule">
+              <span class="diagram-reading-badge">도식 읽기</span>
+              <p><strong>왼쪽 소스 코드는 패스의 입력이 아니라, 강조한 코드 범위에 대응하는 입력 IR이 가운데에서 어떤 출력 IR로 바뀌는지를 찾기 위한 기준입니다.</strong></p>
+            </div>
+            <figure class="pass-map" aria-labelledby="mc-if-title mc-if-caption">
+              <div class="diagram-scroll-hint" aria-hidden="true">↔ 좌우로 밀어 원본 코드 대응 범위와 변환 전·후 IR을 확인합니다</div>
+              <div class="diagram-scroll" tabindex="0" aria-label="Main 전체 원본 코드의 if 측정 조건이 QDecl과 새 QIf로 변환되는 도식">
+                <svg viewBox="0 0 1000 570" role="img" aria-labelledby="mc-if-title mc-if-desc" focusable="false">
+                  <title id="mc-if-title">if 측정 조건의 IR 변환</title>
+                  <desc id="mc-if-desc">왼쪽은 Main 전체 원본 코드에서 if 범위를 강조하고, 가운데는 변환 전 QIf, 오른쪽은 QDecl 측정과 측정 결과를 읽는 QIf로 바뀐 IR을 보여준다.</desc>
+                  <defs>
+                    <marker id="mc-if-dash-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+                      <path d="M0 0 L10 5 L0 10 Z" fill="#64748b"/>
+                    </marker>
+                    <marker id="mc-if-blue-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+                      <path d="M0 0 L10 5 L0 10 Z" fill="#2369ad"/>
+                    </marker>
+                  </defs>
+
+                  <rect x="18" y="28" width="286" height="496" rx="11" fill="#0f1726" stroke="#334155"/>
+                  <path d="M30 28 H292 Q304 28 304 40 V72 H18 V40 Q18 28 30 28 Z" fill="#422d16"/>
+                  <rect x="34" y="40" width="118" height="22" rx="11" fill="none" stroke="#fed7aa"/>
+                  <text class="svg-ui" x="93" y="56" text-anchor="middle" fill="#ffedd5" font-size="11.5" font-weight="850">원본 코드 대응 범위</text>
+                  <text class="svg-code" x="274" y="56" text-anchor="end" fill="#fed7aa" font-size="11.5">main.qor</text>
+                  <text class="svg-code" x="38" y="112" fill="#f8fafc" font-size="13.2">operation Main() {</text>
+                  <text class="svg-code" x="38" y="143" fill="#dbeafe" font-size="13.2">  use q = Qubit[2];</text>
+                  <rect x="30" y="170" width="262" height="154" rx="9" fill="#102f4d" stroke="#3b82c4" stroke-width="1.6"/>
+                  <rect x="42" y="184" width="34" height="23" rx="11.5" fill="#2369ad"/>
+                  <text class="svg-code" x="59" y="200" text-anchor="middle" fill="#fff" font-size="11" font-weight="850">2</text>
+                  <text class="svg-code" x="88" y="202" fill="#eff6ff" font-size="13.2" font-weight="800">if (M(q[0]) == 1) {</text>
+                  <text class="svg-code" x="88" y="236" fill="#eff6ff" font-size="13.2">  X(q[1]);</text>
+                  <text class="svg-code" x="88" y="270" fill="#eff6ff" font-size="13.2">}</text>
+                  <text class="svg-code" x="38" y="355" fill="#f8fafc" font-size="13.2">}</text>
+                  <text class="svg-ui" x="161" y="492" text-anchor="middle" fill="#94a3b8" font-size="11.5">실제 입력은 오른쪽에 대응하는 QProgram IR</text>
+
+                  <path d="M304 247 H348" fill="none" stroke="#64748b" stroke-width="2.2" stroke-dasharray="6 5" marker-end="url(#mc-if-dash-arrow)"/>
+
+                  <rect x="350" y="82" width="254" height="400" rx="11" fill="#f8fafc" stroke="#9db2c9"/>
+                  <path d="M362 82 H592 Q604 82 604 94 V126 H350 V94 Q350 82 362 82 Z" fill="#263141"/>
+                  <text class="svg-ui" x="372" y="109" fill="#f8fafc" font-size="14" font-weight="850">변환 전 · Main.Body</text>
+                  <rect x="370" y="148" width="214" height="50" rx="8" fill="#f1f5f9" stroke="#aebbc9"/>
+                  <text class="svg-code" x="386" y="179" fill="#475569" font-size="12.5">Body[0]: QUse(q, 2)</text>
+                  <rect x="370" y="216" width="214" height="224" rx="9" fill="#eef5fd" stroke="#3b82c4" stroke-width="1.5"/>
+                  <rect x="386" y="232" width="72" height="24" rx="12" fill="#2369ad"/>
+                  <text class="svg-code" x="422" y="249" text-anchor="middle" fill="#fff" font-size="11.5" font-weight="850">Body[1]</text>
+                  <text class="svg-code" x="472" y="249" fill="#174f88" font-size="13" font-weight="850">QIf</text>
+                  <path d="M400 270 V406 M400 292 H416 M400 358 H416" fill="none" stroke="#6a9ac8" stroke-width="1.8"/>
+                  <text class="svg-code" x="416" y="290" fill="#334155" font-size="12.2">Cond: QCond</text>
+                  <text class="svg-code" x="428" y="316" fill="#7a5114" font-size="11.7">Text = &quot;M(q[0]) == 1&quot;</text>
+                  <text class="svg-code" x="428" y="338" fill="#7a5114" font-size="11.7">HasCall = true</text>
+                  <text class="svg-code" x="416" y="374" fill="#334155" font-size="12.2">Then[0]: QGate</text>
+                  <text class="svg-code" x="428" y="400" fill="#475569" font-size="11.7">Name = &quot;X&quot;</text>
+                  <text class="svg-code" x="428" y="422" fill="#475569" font-size="11.7">Args[0] = q[1]</text>
+
+                  <path d="M604 282 H646" fill="none" stroke="#2369ad" stroke-width="2.8" marker-end="url(#mc-if-blue-arrow)"/>
+
+                  <rect x="648" y="42" width="334" height="480" rx="11" fill="#f8fafc" stroke="#8db8e0"/>
+                  <path d="M660 42 H970 Q982 42 982 54 V86 H648 V54 Q648 42 660 42 Z" fill="#1f4f7c"/>
+                  <text class="svg-ui" x="670" y="69" fill="#eff6ff" font-size="14" font-weight="850">변환 후 · Main.Body</text>
+                  <rect x="670" y="106" width="290" height="42" rx="7" fill="#f1f5f9" stroke="#aebbc9"/>
+                  <text class="svg-code" x="686" y="132" fill="#475569" font-size="12.2">Body[0]: QUse(q, 2)</text>
+
+                  <rect x="670" y="162" width="290" height="166" rx="9" fill="#fff7e8" stroke="#d9a23d" stroke-width="1.5"/>
+                  <rect x="686" y="176" width="72" height="24" rx="12" fill="#b87913"/>
+                  <text class="svg-code" x="722" y="193" text-anchor="middle" fill="#fff" font-size="11.5" font-weight="850">Body[1]</text>
+                  <text class="svg-code" x="772" y="193" fill="#7a5114" font-size="13" font-weight="850">QDecl</text>
+                  <path d="M700 214 V300 M700 234 H716 M700 258 H716 M700 282 H716" fill="none" stroke="#c68b27" stroke-width="1.7"/>
+                  <text class="svg-code" x="716" y="235" fill="#5f4a27" font-size="11.7">IsConst = false · Type = Bit</text>
+                  <text class="svg-code" x="716" y="259" fill="#5f4a27" font-size="11.7">IsArray = false</text>
+                  <text class="svg-code" x="716" y="283" fill="#5f4a27" font-size="11.7">Name = &quot;__m0&quot;</text>
+                  <text class="svg-code" x="716" y="307" fill="#5f4a27" font-size="11.7">Value = QMeasure(q[0])</text>
+
+                  <rect x="670" y="342" width="290" height="152" rx="9" fill="#eef5fd" stroke="#3b82c4" stroke-width="1.5"/>
+                  <rect x="686" y="356" width="72" height="24" rx="12" fill="#2369ad"/>
+                  <text class="svg-code" x="722" y="373" text-anchor="middle" fill="#fff" font-size="11.5" font-weight="850">Body[2]</text>
+                  <text class="svg-code" x="772" y="373" fill="#174f88" font-size="13" font-weight="850">QIf</text>
+                  <text class="svg-code" x="700" y="408" fill="#334155" font-size="11.7">Cond.Text = &quot;__m0 == 1&quot;</text>
+                  <text class="svg-code" x="700" y="432" fill="#334155" font-size="11.7">Cond.HasCall = false</text>
+                  <text class="svg-code" x="700" y="468" fill="#475569" font-size="11.7">Then[0] = QGate X(q[1])</text>
+                </svg>
+              </div>
+              <figcaption id="mc-if-caption">
+                기존 <code>QIf</code>가 있던 자리는 측정 결과를 선언하는 <code>QDecl</code>과 측정 결과를 검사하는 새 <code>QIf</code>의 두 문장으로 확장됩니다.
+              </figcaption>
+            </figure>
+            <p>
+              새 선언의 <code>Value</code>는 <code>QMeasure(QQubitArg("q", "0"))</code>이며, 조건에서 <code>M(q[0])</code>가 있던 자리에는 임시 비트 이름 <code>__m0</code>이 들어갑니다.<br>
+              측정 호출이 모두 제거된 조건은 <code>HasCall=false</code>가 되며, 기존 <code>Then</code>과 <code>Else</code>의 문장 순서는 유지됩니다.
+            </p>
+          </div>
+        </section>
+
+        <section class="walk-stage" id="fresh-name">
+          <div class="walk-head">
+            <div class="walk-number">3</div>
+            <h3>연산 안에서 이미 차지한 이름을 건너뛰어 임시 비트 이름을 정합니다</h3>
+          </div>
+          <div class="walk-body">
+            <p>
+              임시 번호는 연산마다 <code>0</code>부터 시작합니다.<br>
+              파라미터와 <code>QUse</code>·<code>QDecl</code>·<code>QFor.Var</code>에서 수집한 이름을 후보 집합과 대조하며, 이미 있는 이름은 건너뜁니다.
+            </p>
+            <figure class="pass-map" aria-labelledby="mc-name-title mc-name-caption">
+              <div class="diagram-scroll-hint" aria-hidden="true">↔ 좌우로 밀어 임시 이름 후보를 고르는 순서를 확인합니다</div>
+              <div class="diagram-scroll" tabindex="0" aria-label="이미 선언된 q __m0 __m1을 피하고 __m2를 선택하는 도식">
+                <svg viewBox="0 0 1000 310" role="img" aria-labelledby="mc-name-title mc-name-desc" focusable="false">
+                  <title id="mc-name-title">임시 측정 비트 이름 선택</title>
+                  <desc id="mc-name-desc">연산에서 선언된 이름 q, __m0, __m1을 taken 집합에 넣고 후보 __m0과 __m1을 건너뛴 뒤 __m2를 선택한다.</desc>
+                  <defs>
+                    <marker id="mc-name-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+                      <path d="M0 0 L10 5 L0 10 Z" fill="#64748b"/>
+                    </marker>
+                  </defs>
+                  <rect x="32" y="32" width="936" height="246" rx="12" fill="#f8fafc" stroke="#bdc9d8"/>
+                  <rect x="54" y="56" width="270" height="86" rx="9" fill="#0f1726" stroke="#334155"/>
+                  <text class="svg-code" x="72" y="85" fill="#dbeafe" font-size="14" font-weight="850">taken · 이미 차지한 이름</text>
+                  <text class="svg-code" x="72" y="119" fill="#f8fafc" font-size="14">{ q, __m0, __m1 }</text>
+
+                  <path d="M324 99 H390" fill="none" stroke="#64748b" stroke-width="2.4" marker-end="url(#mc-name-arrow)"/>
+                  <rect x="392" y="64" width="142" height="70" rx="10" fill="#fff4f5" stroke="#d67889"/>
+                  <text class="svg-code" x="463" y="91" text-anchor="middle" fill="#98243a" font-size="14" font-weight="850">__m0</text>
+                  <text class="svg-ui" x="463" y="116" text-anchor="middle" fill="#a32135" font-size="12">사용 중 · 건너뜀</text>
+
+                  <path d="M534 99 H584" fill="none" stroke="#64748b" stroke-width="2.4" marker-end="url(#mc-name-arrow)"/>
+                  <rect x="586" y="64" width="142" height="70" rx="10" fill="#fff4f5" stroke="#d67889"/>
+                  <text class="svg-code" x="657" y="91" text-anchor="middle" fill="#98243a" font-size="14" font-weight="850">__m1</text>
+                  <text class="svg-ui" x="657" y="116" text-anchor="middle" fill="#a32135" font-size="12">사용 중 · 건너뜀</text>
+
+                  <path d="M728 99 H778" fill="none" stroke="#64748b" stroke-width="2.4" marker-end="url(#mc-name-arrow)"/>
+                  <rect x="780" y="54" width="164" height="90" rx="10" fill="#eaf7f1" stroke="#4fad89" stroke-width="1.5"/>
+                  <rect x="816" y="68" width="92" height="28" rx="14" fill="#13865f"/>
+                  <text class="svg-code" x="862" y="87" text-anchor="middle" fill="#fff" font-size="13" font-weight="850">__m2</text>
+                  <text class="svg-ui" x="862" y="121" text-anchor="middle" fill="#116347" font-size="12.5" font-weight="800">선택 후 taken에 추가</text>
+
+                  <path d="M862 144 V184 H502" fill="none" stroke="#13865f" stroke-width="2.3" marker-end="url(#mc-name-arrow)"/>
+                  <rect x="230" y="184" width="544" height="62" rx="9" fill="#fff7e8" stroke="#d9a23d"/>
+                  <text class="svg-code" x="502" y="211" text-anchor="middle" fill="#7a5114" font-size="13.5" font-weight="850">QDecl(false, Bit, &quot;__m2&quot;, QMeasure(q[0]))</text>
+                  <text class="svg-ui" x="502" y="233" text-anchor="middle" fill="#8a5b13" font-size="11.5">선택한 이름이 측정 선언과 새 조건에 함께 사용됩니다</text>
+                </svg>
+              </div>
+              <figcaption id="mc-name-caption">
+                <code>__mN</code>은 사용자가 작성하는 이름이 아니라 이 패스가 만든 내부 이름이며, 번호 자체에는 프로그램 의미가 없습니다.
+              </figcaption>
+            </figure>
+          </div>
+        </section>
+
+        <section class="walk-stage" id="lower-while">
+          <div class="walk-head">
+            <div class="walk-number">4</div>
+            <h3><code>while</code>은 첫 검사 전에 측정하고 본문 끝에서 다시 측정합니다</h3>
+          </div>
+          <div class="walk-body">
+            <p>
+              <code>while</code>의 조건은 반복을 시작하기 전과 매 반복이 끝난 뒤 다시 평가됩니다.<br>
+              따라서 첫 측정은 루프 앞의 <code>QDecl</code>로 만들고, 같은 측정은 루프 본문 마지막의 <code>QAssign</code>으로 다시 배치합니다.
+            </p>
+            <figure class="pass-map" aria-labelledby="mc-while-title mc-while-caption">
+              <div class="diagram-scroll-hint" aria-hidden="true">↔ 좌우로 밀어 while 코드와 측정 위치를 확인합니다</div>
+              <div class="diagram-scroll" tabindex="0" aria-label="while 측정 조건을 루프 앞 QDecl과 본문 끝 QAssign으로 바꾸는 도식">
+                <svg viewBox="0 0 1000 500" role="img" aria-labelledby="mc-while-title mc-while-desc" focusable="false">
+                  <title id="mc-while-title">while 조건 측정의 배치</title>
+                  <desc id="mc-while-desc">왼쪽은 while 측정 조건이 있는 Main 전체 코드이며 오른쪽 IR은 루프 앞 QDecl, __m0 조건의 QWhile, 원래 게이트 뒤의 QAssign 재측정을 보여준다.</desc>
+                  <defs>
+                    <marker id="mc-while-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+                      <path d="M0 0 L10 5 L0 10 Z" fill="#2369ad"/>
+                    </marker>
+                    <marker id="mc-while-loop" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+                      <path d="M0 0 L10 5 L0 10 Z" fill="#13865f"/>
+                    </marker>
+                  </defs>
+
+                  <rect x="22" y="30" width="350" height="422" rx="11" fill="#0f1726" stroke="#334155"/>
+                  <path d="M34 30 H360 Q372 30 372 42 V74 H22 V42 Q22 30 34 30 Z" fill="#422d16"/>
+                  <rect x="38" y="42" width="118" height="22" rx="11" fill="none" stroke="#fed7aa"/>
+                  <text class="svg-ui" x="97" y="58" text-anchor="middle" fill="#ffedd5" font-size="11.5" font-weight="850">원본 코드 대응 범위</text>
+                  <text class="svg-code" x="340" y="58" text-anchor="end" fill="#fed7aa" font-size="11.5">main.qor</text>
+                  <text class="svg-code" x="46" y="112" fill="#f8fafc" font-size="13.5">operation Main() {</text>
+                  <text class="svg-code" x="46" y="146" fill="#dbeafe" font-size="13.5">  use q = Qubit[1];</text>
+                  <rect x="38" y="174" width="318" height="146" rx="9" fill="#102f4d" stroke="#3b82c4" stroke-width="1.5"/>
+                  <text class="svg-code" x="58" y="209" fill="#eff6ff" font-size="13.5" font-weight="800">while (M(q[0]) == 1) {</text>
+                  <text class="svg-code" x="58" y="249" fill="#eff6ff" font-size="13.5">  X(q[0]);</text>
+                  <text class="svg-code" x="58" y="289" fill="#eff6ff" font-size="13.5">}</text>
+                  <text class="svg-code" x="46" y="356" fill="#f8fafc" font-size="13.5">}</text>
+
+                  <path d="M372 241 H426" fill="none" stroke="#2369ad" stroke-width="2.6" marker-end="url(#mc-while-arrow)"/>
+
+                  <rect x="428" y="30" width="550" height="422" rx="11" fill="#f8fafc" stroke="#8db8e0"/>
+                  <path d="M440 30 H966 Q978 30 978 42 V74 H428 V42 Q428 30 440 30 Z" fill="#1f4f7c"/>
+                  <text class="svg-ui" x="450" y="58" fill="#eff6ff" font-size="14" font-weight="850">변환 후 · Main.Body</text>
+                  <rect x="458" y="96" width="490" height="62" rx="8" fill="#fff7e8" stroke="#d9a23d"/>
+                  <rect x="474" y="112" width="72" height="24" rx="12" fill="#b87913"/>
+                  <text class="svg-code" x="510" y="129" text-anchor="middle" fill="#fff" font-size="11.5" font-weight="850">Body[1]</text>
+                  <text class="svg-code" x="562" y="129" fill="#7a5114" font-size="12.5" font-weight="850">QDecl · __m0 = QMeasure(q[0])</text>
+
+                  <rect x="458" y="178" width="490" height="224" rx="9" fill="#eef5fd" stroke="#3b82c4" stroke-width="1.5"/>
+                  <rect x="474" y="194" width="72" height="24" rx="12" fill="#2369ad"/>
+                  <text class="svg-code" x="510" y="211" text-anchor="middle" fill="#fff" font-size="11.5" font-weight="850">Body[2]</text>
+                  <text class="svg-code" x="562" y="211" fill="#174f88" font-size="12.5" font-weight="850">QWhile</text>
+                  <text class="svg-code" x="492" y="246" fill="#334155" font-size="12.5">Cond = QCond(&quot;__m0 == 1&quot;, false)</text>
+                  <rect x="490" y="266" width="426" height="48" rx="7" fill="#f4f7fb" stroke="#9db2c9"/>
+                  <text class="svg-code" x="506" y="296" fill="#475569" font-size="12.5">Body[0]: QGate · X(q[0])</text>
+                  <rect x="490" y="330" width="426" height="48" rx="7" fill="#eaf7f1" stroke="#4fad89"/>
+                  <text class="svg-code" x="506" y="360" fill="#116347" font-size="12.5" font-weight="800">Body[1]: QAssign · __m0 = QMeasure(q[0])</text>
+
+                  <path d="M916 354 H942 V242 H920" fill="none" stroke="#13865f" stroke-width="2.2" marker-end="url(#mc-while-loop)"/>
+                  <text class="svg-ui" x="936" y="303" text-anchor="end" fill="#116347" font-size="11.5" font-weight="800">다음 검사</text>
+
+                  <rect x="488" y="417" width="430" height="26" rx="13" fill="#e8f2fc"/>
+                  <text class="svg-ui" x="703" y="435" text-anchor="middle" fill="#174f88" font-size="11.5" font-weight="800">최초 측정 → 조건 검사 → 본문 → 재측정 → 다음 조건 검사</text>
+                </svg>
+              </div>
+              <figcaption id="mc-while-caption">
+                루프 앞의 첫 측정은 선언이므로 <code>QDecl</code>이며, 이미 선언된 비트에 값을 갱신하는 본문 끝의 측정은 <code>QAssign</code>입니다.
+              </figcaption>
+            </figure>
+          </div>
+        </section>
+
+        <section class="walk-stage" id="lower-repeat">
+          <div class="walk-head">
+            <div class="walk-number">5</div>
+            <h3><code>repeat-until</code>은 본문을 실행한 뒤 측정하여 <code>Until</code>에서 읽습니다</h3>
+          </div>
+          <div class="walk-body">
+            <p>
+              <code>repeat</code>는 본문을 먼저 실행한 다음 <code>Until</code> 조건을 검사합니다.<br>
+              따라서 측정 선언을 반복문 밖으로 꺼내지 않고, 기존 본문의 마지막 문장으로 추가합니다.
+            </p>
+            <figure class="pass-map" aria-labelledby="mc-repeat-title mc-repeat-caption">
+              <div class="diagram-scroll-hint" aria-hidden="true">↔ 좌우로 밀어 repeat-until 코드와 측정 위치를 확인합니다</div>
+              <div class="diagram-scroll" tabindex="0" aria-label="repeat 본문 끝에 QDecl 측정을 추가하고 Until 조건이 그 비트를 읽는 도식">
+                <svg viewBox="0 0 1000 470" role="img" aria-labelledby="mc-repeat-title mc-repeat-desc" focusable="false">
+                  <title id="mc-repeat-title">repeat-until 조건 측정의 배치</title>
+                  <desc id="mc-repeat-desc">왼쪽은 repeat-until 측정 조건이 있는 Main 전체 코드이며 오른쪽 IR은 QRepeat 본문의 원래 QGate 뒤에 QDecl을 추가하고 Until이 __m0을 읽는 구조를 보여준다.</desc>
+                  <defs>
+                    <marker id="mc-repeat-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+                      <path d="M0 0 L10 5 L0 10 Z" fill="#13865f"/>
+                    </marker>
+                  </defs>
+
+                  <rect x="22" y="28" width="350" height="394" rx="11" fill="#0f1726" stroke="#334155"/>
+                  <path d="M34 28 H360 Q372 28 372 40 V72 H22 V40 Q22 28 34 28 Z" fill="#422d16"/>
+                  <rect x="38" y="40" width="118" height="22" rx="11" fill="none" stroke="#fed7aa"/>
+                  <text class="svg-ui" x="97" y="56" text-anchor="middle" fill="#ffedd5" font-size="11.5" font-weight="850">원본 코드 대응 범위</text>
+                  <text class="svg-code" x="340" y="56" text-anchor="end" fill="#fed7aa" font-size="11.5">main.qor</text>
+                  <text class="svg-code" x="46" y="105" fill="#f8fafc" font-size="13.5">operation Main() {</text>
+                  <text class="svg-code" x="46" y="139" fill="#dbeafe" font-size="13.5">  use q = Qubit[1];</text>
+                  <rect x="38" y="164" width="318" height="158" rx="9" fill="#0d3a2b" stroke="#15966c" stroke-width="1.5"/>
+                  <text class="svg-code" x="58" y="199" fill="#d1fae5" font-size="13.5" font-weight="800">repeat {</text>
+                  <text class="svg-code" x="58" y="237" fill="#d1fae5" font-size="13.5">  X(q[0]);</text>
+                  <text class="svg-code" x="58" y="275" fill="#d1fae5" font-size="13.5">} until (M(q[0]) == 1);</text>
+                  <text class="svg-code" x="46" y="354" fill="#f8fafc" font-size="13.5">}</text>
+
+                  <path d="M372 225 H426" fill="none" stroke="#13865f" stroke-width="2.6" marker-end="url(#mc-repeat-arrow)"/>
+
+                  <rect x="428" y="28" width="550" height="394" rx="11" fill="#f8fafc" stroke="#8fc9b2"/>
+                  <path d="M440 28 H966 Q978 28 978 40 V72 H428 V40 Q428 28 440 28 Z" fill="#146047"/>
+                  <text class="svg-ui" x="450" y="56" fill="#ecfdf5" font-size="14" font-weight="850">변환 후 · Main.Body[1] · QRepeat</text>
+
+                  <rect x="458" y="94" width="490" height="234" rx="9" fill="#eef9f4" stroke="#4fad89" stroke-width="1.5"/>
+                  <text class="svg-code" x="480" y="124" fill="#116347" font-size="13" font-weight="850">Body · 2개</text>
+                  <rect x="480" y="144" width="446" height="54" rx="7" fill="#f4f7fb" stroke="#9db2c9"/>
+                  <text class="svg-code" x="498" y="177" fill="#475569" font-size="12.5">Body[0]: QGate · X(q[0])</text>
+                  <path d="M703 198 V220" fill="none" stroke="#13865f" stroke-width="2.2" marker-end="url(#mc-repeat-arrow)"/>
+                  <rect x="480" y="222" width="446" height="76" rx="7" fill="#fff7e8" stroke="#d9a23d"/>
+                  <text class="svg-code" x="498" y="251" fill="#7a5114" font-size="12.5" font-weight="850">Body[1]: QDecl</text>
+                  <text class="svg-code" x="498" y="278" fill="#5f4a27" font-size="12.5">__m0 = QMeasure(q[0])</text>
+
+                  <path d="M703 328 V346" fill="none" stroke="#13865f" stroke-width="2.2" marker-end="url(#mc-repeat-arrow)"/>
+                  <rect x="458" y="348" width="490" height="48" rx="8" fill="#e8f2fc" stroke="#8db8e0"/>
+                  <text class="svg-code" x="480" y="378" fill="#174f88" font-size="12.5" font-weight="850">Until = QCond(&quot;__m0 == 1&quot;, false)</text>
+                </svg>
+              </div>
+              <figcaption id="mc-repeat-caption">
+                <code>Until</code>은 repeat 본문의 실행 뒤에 평가되므로, 심볼 테이블에서도 본문 범위에 선언된 <code>__m0</code>을 읽습니다.
+              </figcaption>
+            </figure>
+          </div>
+        </section>
+
+        <section class="walk-stage" id="recursive-boundary">
+          <div class="walk-head">
+            <div class="walk-number">6</div>
+            <h3>조건이 들어 있는 본문만 재귀적으로 방문하고 다른 호출 위치는 바꾸지 않습니다</h3>
+          </div>
+          <div class="walk-body">
+            <p>
+              본문 안의 제어문은 같은 규칙으로 다시 방문합니다.<br>
+              다만 <code>QFor</code>에서는 <code>Body</code>만 방문하며, 범위식이나 게이트 인자처럼 조건이 아닌 위치의 호출은 이 패스의 대상이 아닙니다.
+            </p>
+            <figure class="pass-map" aria-labelledby="mc-recursive-title mc-recursive-caption">
+              <div class="diagram-scroll-hint" aria-hidden="true">↔ 좌우로 밀어 재귀 방문 범위를 확인합니다</div>
+              <div class="diagram-scroll" tabindex="0" aria-label="QOperation Body에서 각 제어문의 하위 본문으로 재귀 방문하는 트리">
+                <svg viewBox="0 0 1000 420" role="img" aria-labelledby="mc-recursive-title mc-recursive-desc" focusable="false">
+                  <title id="mc-recursive-title">MeasureConditionLowering의 재귀 방문 범위</title>
+                  <desc id="mc-recursive-desc">QOperation Body를 루트로 하여 QIf Then Else, QWhile Body, QRepeat Body, QFor Body, QConjugate Within Apply를 같은 색의 하위 카드로 연결한다.</desc>
+                  <rect x="372" y="28" width="256" height="66" rx="11" fill="#263141" stroke="#334155"/>
+                  <rect x="398" y="43" width="104" height="28" rx="14" fill="none" stroke="#bfdbfe"/>
+                  <text class="svg-code" x="450" y="62" text-anchor="middle" fill="#dbeafe" font-size="12" font-weight="850">QOperation</text>
+                  <text class="svg-code" x="516" y="62" fill="#f8fafc" font-size="13.5" font-weight="850">Body</text>
+                  <path d="M500 94 V130 M100 130 H900 M100 130 V162 M300 130 V162 M500 130 V162 M700 130 V162 M900 130 V162" fill="none" stroke="#5688b8" stroke-width="2.2"/>
+
+                  <g class="svg-code" font-size="13">
+                    <rect x="28" y="162" width="144" height="66" rx="9" fill="#eaf2fb" stroke="#6a9ac8"/>
+                    <text x="100" y="190" text-anchor="middle" fill="#174f88" font-weight="850">QIf</text>
+                    <text x="100" y="214" text-anchor="middle" fill="#475569">Then · Else</text>
+
+                    <rect x="228" y="162" width="144" height="66" rx="9" fill="#eaf2fb" stroke="#6a9ac8"/>
+                    <text x="300" y="190" text-anchor="middle" fill="#174f88" font-weight="850">QWhile</text>
+                    <text x="300" y="214" text-anchor="middle" fill="#475569">Body</text>
+
+                    <rect x="428" y="162" width="144" height="66" rx="9" fill="#eaf2fb" stroke="#6a9ac8"/>
+                    <text x="500" y="190" text-anchor="middle" fill="#174f88" font-weight="850">QRepeat</text>
+                    <text x="500" y="214" text-anchor="middle" fill="#475569">Body</text>
+
+                    <rect x="628" y="162" width="144" height="66" rx="9" fill="#eaf2fb" stroke="#6a9ac8"/>
+                    <text x="700" y="190" text-anchor="middle" fill="#174f88" font-weight="850">QFor</text>
+                    <text x="700" y="214" text-anchor="middle" fill="#475569">Body</text>
+
+                    <rect x="828" y="162" width="144" height="66" rx="9" fill="#eaf2fb" stroke="#6a9ac8"/>
+                    <text x="900" y="190" text-anchor="middle" fill="#174f88" font-weight="850">QConjugate</text>
+                    <text x="900" y="214" text-anchor="middle" fill="#475569">Within · Apply</text>
+                  </g>
+
+                  <path d="M100 228 V274 M300 228 V274 M500 228 V274 M700 228 V274 M900 228 V274" fill="none" stroke="#5688b8" stroke-width="2" stroke-dasharray="6 5"/>
+                  <rect x="92" y="270" width="816" height="82" rx="10" fill="#f5f9fd" stroke="#8db8e0"/>
+                  <text class="svg-ui" x="500" y="300" text-anchor="middle" fill="#174f88" font-size="14" font-weight="850">하위 본문에서 다시 QIf · QWhile · QRepeat 조건을 확인</text>
+                  <text class="svg-code" x="500" y="330" text-anchor="middle" fill="#475569" font-size="12.5">조건의 M(register[index])만 QMeasure와 임시 비트로 분리</text>
+                  <rect x="308" y="370" width="384" height="30" rx="15" fill="#fff7e8" stroke="#d9a23d"/>
+                  <text class="svg-ui" x="500" y="390" text-anchor="middle" fill="#7a5114" font-size="11.7" font-weight="800">QFor의 From · To · Step과 일반 문장의 식은 방문 대상이 아닙니다</text>
+                </svg>
+              </div>
+              <figcaption id="mc-recursive-caption">
+                같은 연산 안에서는 하나의 임시 이름 생성기를 공유하므로, 서로 다른 중첩 본문에 추가한 측정 비트도 서로 다른 이름을 받습니다.
+              </figcaption>
+            </figure>
+
+            <div class="panel">
+              <table class="spec">
+                <tr><th>원본 코드의 호출 위치</th><th>이 패스의 처리</th><th>남는 IR</th></tr>
+                <tr><td class="k"><code>if (M(q[0]) == 1)</code></td><td>측정을 <code>QDecl</code>로 분리</td><td><code>QIf.Cond = "__m0 == 1"</code></td></tr>
+                <tr><td class="k"><code>while (M(q[0]) == 1)</code></td><td>첫 측정과 반복 끝 재측정으로 분리</td><td><code>QDecl + QWhile + QAssign</code></td></tr>
+                <tr><td class="k"><code>repeat ... until (M(q[0]) == 1)</code></td><td>본문 끝에 측정 선언 추가</td><td><code>QRepeat.Body + QDecl</code></td></tr>
+                <tr><td class="k"><code>if (Foo(q[0]) == 1)</code></td><td>측정 호출이 아니므로 변경하지 않음</td><td><code>QCond.HasCall = true</code></td></tr>
+                <tr><td class="k"><code>Rx(M(q[0]), q[1])</code></td><td>조건이 아니므로 변경하지 않음</td><td>호출 표식이 있는 기존 인자</td></tr>
+                <tr><td class="k"><code>var x = M(q[0]) + 1</code></td><td>조건이 아니므로 변경하지 않음</td><td><code>QText.HasCall = true</code></td></tr>
+                <tr><td class="k"><code>for i in 0..M(q[0])</code></td><td>범위식은 방문하지 않음</td><td>호출 문자열이 남은 <code>QFor.To</code></td></tr>
+              </table>
+            </div>
+            <p>
+              측정을 분리한 뒤에도 다른 호출이 조건에 남아 있으면 새 <code>QCond</code>의 <code>HasCall</code>은 계속 <code>true</code>입니다.<br>
+              이 패스는 그 호출을 오류로 확정하지 않고 그대로 다음 패스에 전달합니다.
+            </p>
+          </div>
+        </section>
+
+        <section class="walk-stage" id="output-ir">
+          <div class="walk-head">
+            <div class="walk-number output">출력</div>
+            <h3>변환한 <code>Operations</code>를 같은 <code>QProgram</code> 구조에 넣어 반환합니다</h3>
+          </div>
+          <div class="walk-body">
+            <p>
+              각 연산의 <code>Body</code> 처리가 끝나면 새 연산 목록을 <code>QProgram.Operations</code>에 넣습니다.<br>
+              <code>Imports</code>와 <code>Opens</code>는 변경하지 않으며, 이 패스는 별도의 오류 목록 없이 <code>QProgram</code> 하나만 반환합니다.
+            </p>
+            <figure class="pass-map" aria-labelledby="mc-output-title mc-output-caption">
+              <div class="diagram-scroll-hint" aria-hidden="true">↔ 좌우로 밀어 최종 QProgram과 후속 패스 경계를 확인합니다</div>
+              <div class="diagram-scroll" tabindex="0" aria-label="측정 조건을 변환한 QProgram이 Resolver와 QoraValidator로 이어지는 도식">
+                <svg viewBox="0 0 1000 520" role="img" aria-labelledby="mc-output-title mc-output-desc" focusable="false">
+                  <title id="mc-output-title">MeasureConditionLowering의 출력 QProgram</title>
+                  <desc id="mc-output-desc">왼쪽의 QProgram 트리에서 Main 본문에 QDecl과 변경된 QIf가 있고 Imports와 Opens는 유지된다. 오른쪽에서 QProgram이 Resolver를 거쳐 QoraValidator로 전달된다.</desc>
+                  <defs>
+                    <marker id="mc-output-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+                      <path d="M0 0 L10 5 L0 10 Z" fill="#64748b"/>
+                    </marker>
+                  </defs>
+
+                  <rect x="22" y="24" width="626" height="456" rx="12" fill="#0f1726" stroke="#334155"/>
+                  <path d="M34 24 H636 Q648 24 648 36 V70 H22 V36 Q22 24 34 24 Z" fill="#202b3c"/>
+                  <rect x="40" y="36" width="102" height="23" rx="11.5" fill="none" stroke="#bfdbfe"/>
+                  <text class="svg-code" x="91" y="52" text-anchor="middle" fill="#dbeafe" font-size="11.5" font-weight="850">QProgram IR</text>
+                  <text class="svg-ui" x="158" y="53" fill="#f8fafc" font-size="13.5" font-weight="850">MeasureConditionLowering 직후</text>
+
+                  <rect x="50" y="92" width="570" height="44" rx="8" fill="#342711" stroke="#b87913"/>
+                  <text class="svg-code" x="68" y="120" fill="#ffedd5" font-size="13">Imports = null</text>
+                  <rect x="50" y="150" width="570" height="254" rx="9" fill="#102f4d" stroke="#3b82c4" stroke-width="1.5"/>
+                  <text class="svg-code" x="68" y="179" fill="#bfdbfe" font-size="13" font-weight="850">Operations[0] · QOperation · Name = &quot;Main&quot;</text>
+                  <path d="M82 194 V372 M82 216 H102 M82 248 H102 M82 330 H102" fill="none" stroke="#6a9ac8" stroke-width="1.8"/>
+                  <text class="svg-code" x="102" y="220" fill="#dbeafe" font-size="12.5">Body[0]: QUse · q · 2</text>
+                  <rect x="102" y="232" width="488" height="76" rx="7" fill="#342711" stroke="#b87913"/>
+                  <text class="svg-code" x="118" y="259" fill="#ffedd5" font-size="12.5" font-weight="850">Body[1]: QDecl · __m0 · Bit</text>
+                  <text class="svg-code" x="118" y="286" fill="#ffedd5" font-size="12.2">Value = QMeasure(QQubitArg(&quot;q&quot;, &quot;0&quot;))</text>
+                  <rect x="102" y="320" width="488" height="62" rx="7" fill="#174873" stroke="#60a5fa"/>
+                  <text class="svg-code" x="118" y="347" fill="#eff6ff" font-size="12.5" font-weight="850">Body[2]: QIf · Cond = &quot;__m0 == 1&quot;</text>
+                  <text class="svg-code" x="118" y="370" fill="#dbeafe" font-size="12.2">Then[0] = QGate X(q[1])</text>
+
+                  <rect x="50" y="418" width="570" height="42" rx="8" fill="#0d3a2b" stroke="#15966c"/>
+                  <text class="svg-code" x="68" y="444" fill="#d1fae5" font-size="12.5">Opens[&quot;Demo&quot;] = [ QOpen(Target = &quot;Shared&quot;) ]</text>
+
+                  <path d="M648 252 H704" fill="none" stroke="#64748b" stroke-width="2.5" marker-end="url(#mc-output-arrow)"/>
+                  <rect x="706" y="150" width="254" height="82" rx="10" fill="#eaf2fb" stroke="#6a9ac8"/>
+                  <rect x="732" y="166" width="92" height="26" rx="13" fill="#2369ad"/>
+                  <text class="svg-code" x="778" y="184" text-anchor="middle" fill="#fff" font-size="12" font-weight="850">Resolver</text>
+                  <text class="svg-ui" x="833" y="213" text-anchor="middle" fill="#475569" font-size="11.5">연산 호출 이름 해소</text>
+                  <path d="M833 232 V278" fill="none" stroke="#64748b" stroke-width="2.5" marker-end="url(#mc-output-arrow)"/>
+                  <rect x="706" y="280" width="254" height="96" rx="10" fill="#eef9f4" stroke="#4fad89"/>
+                  <rect x="730" y="296" width="126" height="26" rx="13" fill="#13865f"/>
+                  <text class="svg-code" x="793" y="314" text-anchor="middle" fill="#fff" font-size="12" font-weight="850">QoraValidator</text>
+                  <text class="svg-ui" x="833" y="344" text-anchor="middle" fill="#116347" font-size="11.5">측정 대상과 조건 검증</text>
+                  <text class="svg-ui" x="833" y="363" text-anchor="middle" fill="#116347" font-size="11.5">남은 호출은 QSEM005</text>
+                  <rect x="704" y="408" width="258" height="52" rx="9" fill="#f1f5f9" stroke="#aebbc9"/>
+                  <text class="svg-code" x="833" y="430" text-anchor="middle" fill="#475569" font-size="11.8" font-weight="800">Run(QProgram) → QProgram</text>
+                  <text class="svg-ui" x="833" y="449" text-anchor="middle" fill="#64748b" font-size="11.2">이 패스가 만드는 오류 목록 없음</text>
+                </svg>
+              </div>
+              <figcaption id="mc-output-caption">
+                <code>Resolver</code>는 조건의 측정을 다시 해석하지 않습니다. 측정은 이미 <code>QMeasure</code>로 구조화되어 있으며, Resolver는 기존 <code>QGate</code>의 호출 이름을 해소합니다.
+              </figcaption>
+            </figure>
+
+            <div class="result-strip" aria-label="MeasureConditionLowering 결과 요약">
+              <div class="result-card"><b>바뀌는 값</b><span><code>Operations[*].Body</code>의 측정 조건</span></div>
+              <div class="result-card"><b>유지되는 값</b><span><code>Imports</code>, <code>Opens</code>, 연산 순서</span></div>
+              <div class="result-card"><b>반환값</b><span>변환된 <code>QProgram</code> 하나</span></div>
+            </div>
+
+            <p>
+              이후 <code>QasmEmitter</code>는 이 <code>QDecl</code>을 OpenQASM의 비트 선언과 측정 대입으로 출력합니다.<br>
+              비트 선언을 연산 위쪽으로 올리거나 조건의 <code>1</code>을 <code>true</code>로 출력하는 작업은 방출 단계의 책임이며, <code>MeasureConditionLowering</code>의 IR 출력에는 포함되지 않습니다.
+            </p>
+          </div>
+        </section>
+      </div>
+
+      <div class="meta-reference" aria-label="MeasureConditionLowering 구현 참조">
+        <span class="reference-label">PIPELINE</span><code>ModuleLoader.Expand → MeasureConditionLowering.Run → Resolver.Resolve → QoraValidator.Validate</code>
+        <span class="reference-label">IMPLEMENTATION</span><code>src/Qora.Core/Ir/Passes/MeasureConditionLowering.cs</code>
+        <span class="reference-label">IR</span><code>QCond · QDecl · QAssign · QMeasure · QQubitArg · QIf · QWhile · QRepeat</code>
+      </div>
+    </div>
+  </section>
+
+  <h2>패스 계약</h2>
+  <div class="panel">
+    <table class="spec">
+      <tr><th>항목</th><th>계약</th></tr>
+      <tr><td class="k">입력</td><td>import 오류 없이 병합된 <code>QProgram</code></td></tr>
+      <tr><td class="k">탐색 대상</td><td>모든 <code>QOperation.Body</code>와 그 안의 제어문 본문</td></tr>
+      <tr><td class="k">변환 대상</td><td><code>QIf.Cond</code>, <code>QWhile.Cond</code>, <code>QRepeat.Until</code> 안의 <code>M(register[index])</code></td></tr>
+      <tr><td class="k">출력</td><td>측정이 <code>QMeasure</code> 문장으로 분리된 <code>QProgram</code></td></tr>
+      <tr><td class="k">오류</td><td>이 패스에서는 생성하지 않으며, 남은 호출과 측정 대상의 유효성은 후속 검증에서 판정</td></tr>
+      <tr><td class="k">다음 패스</td><td><code>Resolver</code>; 이후 <code>QoraValidator</code>가 구조화된 측정과 조건을 검증</td></tr>
+    </table>
+  </div>
+
+  <p>
+    <code>MeasureConditionLowering</code>은 조건 안에 섞여 있던 측정 호출을 실행 위치가 분명한 <code>QMeasure</code>와 일반 비트 조건으로 분리합니다.
+  </p>
+
+  <nav class="doc-links" aria-label="IR 패스 데이터시트 내비게이션">
+    <a class="doc-link" href="ir-pass-02-module-loader.html">← 2. ModuleLoader</a>
+    <a class="doc-link" href="datasheet.html#s2">패스 목차</a>
+  </nav>
+
+  <footer>
+    IR 패스 데이터시트 · 3장 · <code>MeasureConditionLowering</code> ·
+    <a href="datasheet.html#s2">패스 목차</a> ·
+    <a href="datasheet.html">컴파일러 데이터시트</a>
+  </footer>
+</div>
+</body>
+</html>

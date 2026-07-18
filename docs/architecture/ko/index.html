@@ -290,7 +290,7 @@ operation Main() {
         Nonterminal : Expr ( q . Count - 1 )
         Nonterminal : Gate
           Terminal : H
-          Nonterminal : Qubit ( q , i )
+          Nonterminal : IndexAccess ( q , i )
   Nonterminal : Operation
     Terminal : Main
     Nonterminal : Use ( reg , Qubit , 3 )
@@ -308,7 +308,7 @@ operation Main() {
     Nonterminal : VarDecl
       Terminal : bit
       Terminal : r
-      Nonterminal : Expr → Call ( M , Qubit ( reg , 0 ) )</code></pre>
+      Nonterminal : Expr → Call ( M , IndexAccess ( reg , 0 ) )</code></pre>
 
   <div class="call">
     <span class="h">이 트리는 한 번 읽힌 뒤 다시는 손대지 않습니다</span>
@@ -352,8 +352,9 @@ QOperation Main()
   <p>
     <strong>Expand</strong>는 모듈 로더입니다. 파일에 <code>import "lib/prep.qor"</code>가 있었다면, 이
     패스가 그 파일을 파싱·로워링하고 그 연산들을 하나의 <code>QProgram</code>으로 병합하여, 이후 모든 단계가
-    하나의 평탄한 프로그램을 보게 합니다. (예제는 아무것도 임포트하지 않으므로 여기서는 아무 일도 하지 않지만 —
-    파일 없음이 <code>QSEM020</code>, 임포트 순환이 <code>QSEM021</code>이 되는 곳입니다.)
+    하나의 평탄한 프로그램을 보게 합니다. (예제는 아무것도 임포트하지 않으므로 여기서는 아무 일도 하지 않아요.<br>
+    파일이 없으면 <code>QSEM020</code>이 됩니다. 반면에 순환 back-edge는 <code>loaded</code>에 이미 등록된 경로로 보아 오류 없이 생략해요.<br>
+    <code>QSEM021</code>은 폐기된 예약 코드로만 남아 더 이상 생성하지 않아요.)
   </p>
 
   <p>

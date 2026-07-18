@@ -205,8 +205,8 @@
     <table class="spec">
       <tr><th>패스</th><th>역할</th><th>비고 / 진단</th></tr>
       <tr><td class="k">QoraLowering</td><td>엔진 AST → Qora IR (1회). 문자열 태그 → 강타입 노드.</td><td>여기서 노드 안정 <code>Id</code> 발급</td></tr>
-      <tr><td class="k">ModuleLoader</td><td>import 확장 — 여러 파일을 하나의 프로그램으로 병합.</td><td>QSEM020/021</td></tr>
-      <tr><td class="k">MeasureConditionLowering</td><td><code>if (M(q)==v)</code>를 <code>bit t=M(q); if(t==v)</code>로 desugar.</td><td>해소·검증 前</td></tr>
+      <tr><td class="k">ModuleLoader</td><td>import 확장 — 여러 파일을 하나의 프로그램으로 병합.</td><td>QSEM020 · QSEM021은 폐기된 예약 코드</td></tr>
+      <tr><td class="k"><a href="ir-pass-03-measure-condition-lowering.html">MeasureConditionLowering</a></td><td><code>if (M(q[i]) == v)</code>를 측정 문장과 그 결과를 읽는 비트 조건으로 분리.</td><td>해소·검증 前</td></tr>
       <tr><td class="k">Resolver</td><td>이름을 완전수식명(FQN)으로 해소 (네임스페이스/open).</td><td>QSEM018/019</td></tr>
       <tr><td class="k">QoraValidator</td><td>의미 검증 1차 실행 — 수집형(조기중단 없음). 스코프 트리를 SemanticModel로 적재.</td><td>QSEM001–029</td></tr>
       <tr><td class="k">Monomorphizer</td><td>소스의 <code>Qubit[]</code> 파라미터를 호출부의 실제 크기로 특수화하고 <code>Count</code>를 정수로 치환. 복제 노드는 <code>ReId</code>로 새 Id.</td><td>모델 소유 검증 이후</td></tr>
@@ -230,7 +230,8 @@
     <table class="spec">
       <tr><th>장</th><th>패스</th><th>다루는 것</th></tr>
       <tr><td class="k">1</td><td><a href="ir-pass-01-qora-lowering.html"><code>QoraLowering</code> — AST를 Qora IR로 옮기는 경계</a></td><td>파서가 만든 AST를 후속 패스가 읽는 <code>QProgram</code>으로 바꾸는 과정과 자료구조</td></tr>
-      <tr><td class="k">2</td><td><a href="ir-pass-02-module-loader.html"><code>ModuleLoader</code> — import 그래프를 한 프로그램으로</a></td><td>상대 경로 정규화 → <code>chain</code> 순환 판별 → <code>loaded</code> 중복 생략 → 자식 import 우선 연산 추가 → namespace별 <code>open</code> 병합·중복 제거</td></tr>
+      <tr><td class="k">2</td><td><a href="ir-pass-02-module-loader.html"><code>ModuleLoader</code> — import 그래프를 한 프로그램으로</a></td><td>상대 경로 정규화 → <code>loaded</code> 사전 등록 → 순환 back-edge·중복 경로 생략 → 자식 import 우선 연산 추가 → namespace별 <code>open</code> 병합·중복 제거</td></tr>
+      <tr><td class="k">3</td><td><a href="ir-pass-03-measure-condition-lowering.html"><code>MeasureConditionLowering</code> — 조건 속 측정을 측정 문장과 비트 조건으로 분리</a></td><td><code>QIf</code>·<code>QWhile</code>·<code>QRepeat</code> 조건의 <code>M(q[i])</code>를 <code>QMeasure</code>와 임시 비트로 분리하고 평가 시점에 맞춰 배치</td></tr>
     </table>
   </div>
 
@@ -470,7 +471,8 @@
       <tr><td class="k">QSEM013 · 015</td><td>내장 가림 예약 이름 / 같은 스코프 중복 선언 (단일 삽입 문)</td></tr>
       <tr><td class="k">QSEM014</td><td>한 게이트의 중복 큐빗 피연산자 또는 한 호출에 겹쳐 전달한 가변 배열</td></tr>
       <tr><td class="k">QSEM016–017</td><td>잘못된 배열·큐빗 인덱스와 할당 크기 / 측정을 비-bit에 대입</td></tr>
-      <tr><td class="k">QSEM018–021</td><td>모호한 참조 / 미지 네임스페이스 (Resolver) · import 없음 / 순환 (ModuleLoader)</td></tr>
+      <tr><td class="k">QSEM018–020</td><td>모호한 참조 / 미지 네임스페이스 (Resolver) · import 파일 없음·읽기 실패·경로 문맥 없음 (ModuleLoader)</td></tr>
+      <tr><td class="k">QSEM021</td><td>폐기된 예약 코드 — 순환 back-edge는 <code>loaded.Add(full) = false</code>일 때 오류 없이 생략</td></tr>
       <tr><td class="k">QSEM024–026</td><td><code>const</code> 재대입 / 미해소·선언전 사용 / 큐빗을 고전값 자리에</td></tr>
       <tr><td class="k">QSEM027</td><td>역함수 없는 within 블록 (ConjugationLowering)</td></tr>
       <tr><td class="k">QSEM028</td><td>연산을 값으로 사용 (<code>var x = Foo</code>) — 연산은 호출만 가능</td></tr>
