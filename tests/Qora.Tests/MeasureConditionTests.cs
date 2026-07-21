@@ -48,12 +48,33 @@ public class MeasureConditionTests
     }
 
     [Fact]
-    public void SyntheticTempSkipsEveryTakenName()
+    public void SyntheticTempStaysDistinctFromUserNames()
     {
-        // both `__m0` and `__m1` are taken by the user, so the synthetic measure temp must skip to `__m2`
+        // The synthetic temp is a HoistName placeholder (base `__m0`); the mangler keeps the user's own
+        // `__m0`/`__m1` and splits the temp to a distinct spelling — no name-scanning, no collision.
         var r = Compiler.Compile("operation Main(){ use q=Qubit[1]; var __m0=1; var __m1=2; if(M(q[0])==1){ X(q[0]); } }");
         Assert.True(r.Success, string.Join(" | ", r.Errors.Select(e => $"{e.Code}: {e.Message}")));
-        Assert.Contains("__m2 = measure q[0];", r.Qasm);
+        Assert.Contains("int __m0 = 1;", r.Qasm);        // the user's names are preserved
+        Assert.Contains("int __m1 = 2;", r.Qasm);
+        Assert.Contains("__m0_ = measure q[0];", r.Qasm); // the temp is a distinct spelling
+        Assert.DoesNotContain("#hoist", r.Qasm);          // the placeholder never leaks into the final QASM
+    }
+
+    /// <summary>The masking hole (Codex R-report): a synthetic temp named exactly `__m0` used to become a
+    /// real declaration BEFORE validation, so a user's UNDECLARED `__m0 = …` silently bound to it and its
+    /// `QSEM025` was lost. With the placeholder temp, the user's `__m0` stays undeclared and is reported.</summary>
+    [Fact]
+    public void UndeclaredAssignmentToTempSpellingIsStillReported()
+    {
+        var masked = Compiler.Compile("operation Main(){ use q=Qubit[1]; if(M(q[0])==1){ X(q[0]); } __m0 = 1; }");
+        Assert.False(masked.Success);
+        Assert.Contains(masked.Errors, e => e.Code == "QSEM025");
+
+        // control: the identical shape with any other undeclared name already reported QSEM025 — the fix
+        // makes `__m0` behave the same, not specially.
+        var control = Compiler.Compile("operation Main(){ use q=Qubit[1]; if(M(q[0])==1){ X(q[0]); } foo = 1; }");
+        Assert.False(control.Success);
+        Assert.Contains(control.Errors, e => e.Code == "QSEM025");
     }
 
     [Theory]

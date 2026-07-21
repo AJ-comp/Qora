@@ -2,6 +2,12 @@
 
 All notable changes to the Qora Language extension.
 
+## 0.17.1
+
+- Bundles the **Qora v0.24** compiler — a hardening release over v0.23. Array-local hoisting now mints
+  collision-proof names (a minted global/parameter can never shadow a user variable, operation, or gate),
+  and a measurement lowered out of a condition no longer masks a user's undeclared `__mN` error.
+
 ## 0.17.0
 
 - Bundles the **Qora v0.23** compiler. Classical array locals may now be declared anywhere a scalar

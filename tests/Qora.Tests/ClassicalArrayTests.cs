@@ -583,6 +583,155 @@ public class ClassicalArrayTests
         Assert.True(result.Qasm.IndexOf("bit[2] f") < result.Qasm.IndexOf("if ("));
     }
 
+    // --- ArrayLocalHoisting name-uniqueness (R13/R14): the pass mints every global / parameter / storage
+    //     as a UNIQUE placeholder (#hoist#base#uid), so two distinct entities can never share a spelling
+    //     and a placeholder can never equal a user name — without enumerating the scope. NameMangler then
+    //     turns each placeholder into a pretty, collision-free name (distinct placeholders never trigger
+    //     its same-name MERGE; its per-key freshening splits a shared base into `x`/`x_`). These pin the
+    //     collision vectors that once emitted invalid QASM with success=true; semantics are Braket-verified
+    //     separately. When a base clashes, whichever name the mangler reaches SECOND takes the `_` — which
+    //     for a hoisted-vs-user clash is often the USER's name (the mangler notes the rename), and that is
+    //     fine: the two just need to differ and bind correctly. ---
+
+    /// <summary>Vector 2 — the `{op}_{var}` base is ambiguous (`A`+`b_c` and `A_b`+`c` both yield base
+    /// `A_b_c`); distinct placeholders make the mangler split them into two globals rather than merge them
+    /// into one storage.</summary>
+    [Fact]
+    public void MintedGlobalsThatWouldConcatenateAlikeAreDisambiguated()
+    {
+        var result = CompileSuccessfully("""
+            operation A(Qubit q) { int[] b_c = [1, 1]; if (b_c[1] == 1) { X(q); } }
+            operation A_b(Qubit q) { int[] c = [9]; if (c[0] == 9) { X(q); } }
+            operation Main() { use q = Qubit[2]; A(q[0]); A_b(q[1]); }
+            """);
+
+        Assert.Contains("array[int, 2] A_b_c = {0, 0};", result.Qasm);   // A's b_c
+        Assert.Contains("array[int, 1] A_b_c_ = {0};", result.Qasm);     // A_b's c — split apart
+        Assert.Contains("A(q[0], A_b_c);", result.Qasm);
+        Assert.Contains("A_b(q[1], A_b_c_);", result.Qasm);
+    }
+
+    /// <summary>Vector 1 — a minted backing global and a user top-level variable of the same spelling get
+    /// DISTINCT emitted names (here the user scalar takes the `_`), never one merged declaration.</summary>
+    [Fact]
+    public void MintedGlobalAndUserTopLevelNameGetDistinctNames()
+    {
+        var result = CompileSuccessfully("""
+            operation Foo(Qubit q) { int[] bar = [1]; if (bar[0] == 1) { X(q); } }
+            operation Main() { use q = Qubit[1]; int Foo_bar = 5; Foo(q[0]); if (Foo_bar == 5) { X(q[0]); } }
+            """);
+
+        Assert.Contains("array[int, 1] Foo_bar = {0};", result.Qasm);   // the backing global
+        Assert.Contains("int Foo_bar_ = 5;", result.Qasm);             // the user scalar, split apart
+        Assert.Contains("Foo(q[0], Foo_bar);", result.Qasm);           // the call supplies the backing global
+        Assert.Contains("Foo_bar_ == 5", result.Qasm);                 // the user scalar's own use follows its rename
+    }
+
+    /// <summary>Vector 3 — a pass-through parameter (named after the global it forwards) must be freshened
+    /// away from an owned parameter of the same spelling, so the def has no duplicate parameter.</summary>
+    [Fact]
+    public void PassThroughParameterIsFreshenedAwayFromAnOwnedParameter()
+    {
+        var result = CompileSuccessfully("""
+            operation D(Qubit q) { int[] g = [1]; if (g[0] == 1) { X(q); } }
+            operation Mid(Qubit q) { int[] D_g = [7]; if (D_g[0] == 7) { X(q); } D(q); }
+            operation Main() { use q = Qubit[1]; Mid(q[0]); }
+            """);
+
+        // Mid owns array `D_g` (its own param) AND forwards D's global `D_g` — the two params must differ.
+        Assert.Contains("def Mid(qubit q, mutable array[int, #dim = 1] D_g, mutable array[int, #dim = 1] D_g_) {", result.Qasm);
+        Assert.Contains("D(q, D_g_);", result.Qasm);              // D receives the forwarded (freshened) slot
+        Assert.Contains("Mid(q[0], Mid_D_g, D_g);", result.Qasm); // Main supplies Mid's own + D's backing
+    }
+
+    /// <summary>Vector 4 — an array local that shadows a same-named parameter gets a freshened parameter,
+    /// and ONLY the array's in-scope references are rewritten to it; the shadowed parameter's own
+    /// references (here the enclosing `if (a == 0)`) are left intact.</summary>
+    [Fact]
+    public void ArrayLocalShadowingAParameterRewritesOnlyItsOwnReferences()
+    {
+        var result = CompileSuccessfully("""
+            operation Helper(Qubit[] q, int a) {
+                if (a == 0) {
+                    int[] a = [1, 2];
+                    if (a[0] == 1) { X(q[0]); }
+                }
+            }
+            operation Main() { use q = Qubit[1]; Helper(q, 0); }
+            """);
+
+        Assert.Contains("if (a == 0)", result.Qasm);        // the PARAMETER comparison — untouched
+        Assert.Contains("a_[0] = 1;", result.Qasm);         // the ARRAY — freshened and rewritten
+        Assert.Contains("if (a_[0] == 1)", result.Qasm);
+        Assert.DoesNotContain("if (a_ == 0)", result.Qasm); // the rename must NOT leak to the param comparison
+    }
+
+    // --- ArrayLocalHoisting seed completeness (R14): the Namer that mints unique names must be seeded
+    //     with EVERY inhabitant of the emission scope — the full set NameMangler collects — not just op
+    //     names and parameters. A body-declared local (loop variable, scalar, measure bit) or a NESTED
+    //     entry declaration is in that scope too; omitting it let a minted name collide with it and the
+    //     mangler then merged the two. These pin the collisions against body-declared names. ---
+
+    /// <summary>A hidden parameter and a LOOP VARIABLE the body declares get DISTINCT names — the mangler
+    /// splits the placeholder-derived base from the loop variable (here the parameter base `g` avoids the
+    /// operation name `g` → `g_`, and the loop variable `g_` then avoids that → `g__`).</summary>
+    [Fact]
+    public void HiddenParameterAndABodyLoopVariableGetDistinctNames()
+    {
+        var result = CompileSuccessfully("""
+            operation g(Qubit q) { X(q); }
+            operation Helper(Qubit q) {
+                int[] g = [1];
+                for g_ in 0..0 { if (g[0] == 1) { X(q); } }
+            }
+            operation Main() { use q = Qubit[1]; Helper(q[0]); }
+            """);
+
+        Assert.Contains("mutable array[int, #dim = 1] g_)", result.Qasm);   // the array parameter
+        Assert.Contains("for int g__ in", result.Qasm);                     // the loop variable, split apart
+        Assert.Contains("g_[0] == 1", result.Qasm);                         // the array reference points at the parameter
+        Assert.Contains("Helper(q[0], Helper_g);", result.Qasm);            // the backing global is distinct too
+    }
+
+    /// <summary>A minted backing global and a user variable declared inside a NESTED block of the entry op
+    /// get DISTINCT names — the mangler flattens the whole entry body into one global scope, so the two
+    /// same-spelled entities are split (here the nested user scalar takes the `_`).</summary>
+    [Fact]
+    public void MintedGlobalAndNestedEntryDeclarationGetDistinctNames()
+    {
+        var result = CompileSuccessfully("""
+            operation SetTable(Qubit q) { int[] tbl = [1, 2, 3]; if (tbl[0] == 1) { X(q); } }
+            operation Main() {
+                use q = Qubit[2];
+                int flag = 1;
+                if (flag == 1) { int SetTable_tbl = 1; if (SetTable_tbl == 1) { X(q[1]); } }
+                SetTable(q[0]);
+            }
+            """);
+
+        Assert.Contains("array[int, 3] SetTable_tbl = {0, 0, 0};", result.Qasm);   // the backing global
+        Assert.Contains("int SetTable_tbl_ = 1;", result.Qasm);                    // the nested user scalar, split apart
+        Assert.Contains("if (SetTable_tbl_ == 1)", result.Qasm);                   // its own use follows the rename
+        Assert.Contains("SetTable(q[0], SetTable_tbl);", result.Qasm);
+    }
+
+    /// <summary>A pass-through parameter and a caller body-local of the same spelling get DISTINCT names
+    /// (here the body-local takes the `_`), so the def has no duplicate name.</summary>
+    [Fact]
+    public void PassThroughParameterAndCallerBodyLocalGetDistinctNames()
+    {
+        var result = CompileSuccessfully("""
+            operation Inner(Qubit q) { int[] t = [1, 2]; if (t[0] == 1) { X(q); } }
+            operation Outer(Qubit q) { int Inner_t = 0; Inner(q); if (Inner_t == 0) { X(q); } }
+            operation Main() { use q = Qubit[1]; Outer(q[0]); }
+            """);
+
+        Assert.Contains("mutable array[int, #dim = 1] Inner_t)", result.Qasm);   // Outer's pass-through parameter
+        Assert.Contains("int Inner_t_ = 0;", result.Qasm);                       // Outer's own scalar, split apart
+        Assert.Contains("Inner(q, Inner_t);", result.Qasm);                      // the pass-through is forwarded
+        Assert.Contains("Inner_t_ == 0", result.Qasm);                           // the scalar's use follows its rename
+    }
+
     private static string Explain(QoraParseResult result) =>
         string.Join(" | ", result.Errors.Select(e => $"{e.Code}: {e.Message}"));
 }

@@ -106,7 +106,8 @@
                                padding:7px 9px; font-size:.8rem; }
   .route-badge { display:inline-flex; align-items:center; justify-content:center; justify-self:start;
                  min-height:24px; padding:3px 11px; border-radius:999px; background:#1f2d40;
-                 color:#fff; font-size:.72rem; font-weight:850; line-height:1.25; white-space:nowrap; }
+                 color:#fff; font-size:.72rem; font-weight:850; line-height:1.25;
+                 text-decoration:none; white-space:nowrap; }
   .path-trace { display:grid; gap:8px; margin:11px 0; }
   .path-row { display:grid; grid-template-columns:minmax(0,1fr) 26px minmax(0,1.25fr);
               align-items:center; gap:6px; padding:9px 10px; border:1px solid #dfe4eb;
@@ -148,6 +149,13 @@
     fill:#1457d6; stroke:#93c5fd; stroke-width:3;
   }
   /* SVG를 문서 폭에 맞춰 축소해도 본문이 10px 아래로 내려가지 않도록 읽기 크기를 통일합니다. */
+  .module-map text[font-size="8.5"],
+  .module-map text[font-size="8.8"],
+  .module-map text[font-size="8.9"],
+  .module-map text[font-size="9.1"],
+  .module-map text[font-size="9.3"],
+  .module-map text[font-size="9.4"],
+  .module-map text[font-size="9.6"] { font-size:11.5px; }
   .module-map text[font-size="9"],
   .module-map text[font-size="9.2"],
   .module-map text[font-size="9.5"] { font-size:11.5px; }
@@ -242,8 +250,8 @@
   </nav>
 
   <p class="lead">
-    1장에서 <code>QoraLowering</code>은 엔트리 파일 하나를 <code>QProgram</code>으로 만들었습니다.<br>
-    <code>ModuleLoader</code>는 이 <code>QProgram</code>과 <code>baseDir</code>·<code>sourcePath</code>를 입력받아, <code>Imports</code>가 가리키는 파일을 하나의 <code>QProgram</code>으로 병합합니다.
+    1장에서 <code>QoraLowering</code>은 컴파일을 시작한 엔트리 파일 하나를 <code>QProgram</code>으로 만들었습니다.<br>
+    <code>ModuleLoader</code>는 그 안의 <code>Imports</code>를 따라가며 각 파일을 읽고, 모든 <code>Operations</code>와 <code>Opens</code>를 하나의 <code>QProgram</code>으로 합칩니다.
   </p>
 
   <section class="doc-meta" aria-label="ModuleLoader 사양 정보">
@@ -276,7 +284,7 @@
                   <path d="M36 82 H552 Q564 82 564 94 V126 H24 V94 Q24 82 36 82 Z" fill="#202b3c"/>
                   <rect x="42" y="94" width="94" height="22" rx="11" fill="none" stroke="#bfdbfe"/>
                   <text class="svg-ui" x="89" y="109" text-anchor="middle" fill="#dbeafe" font-size="10.5" font-weight="800">QProgram IR</text>
-                  <text class="svg-ui" x="151" y="109" fill="#f8fafc" font-size="12.5" font-weight="800">main.qor · QoraLowering 직후</text>
+                  <text class="svg-ui" x="151" y="109" fill="#f8fafc" font-size="12.5" font-weight="800">main.qor: QoraLowering 직후</text>
 
                   <rect x="52" y="146" width="484" height="48" rx="9" fill="#1f2d40" stroke="#64748b"/>
                   <rect x="68" y="158" width="82" height="24" rx="12" fill="#173657" stroke="#60a5fa"/>
@@ -286,14 +294,14 @@
 
                   <rect x="110" y="210" width="426" height="92" rx="9" fill="#342711" stroke="#b7791f"/>
                   <rect x="126" y="222" width="100" height="23" rx="11.5" fill="#b7791f"/>
-                  <text class="svg-code" x="176" y="238" text-anchor="middle" fill="#fff" font-size="10.5" font-weight="800">Imports · 2개</text>
-                  <text class="svg-code" x="130" y="267" fill="#ffedd5" font-size="11">├─ Imports[0] · QImport · Target = "lib/prepare.qor"</text>
-                  <text class="svg-code" x="130" y="288" fill="#ffedd5" font-size="11">└─ Imports[1] · QImport · Target = "lib/readout.qor"</text>
+                  <text class="svg-code" x="176" y="238" text-anchor="middle" fill="#fff" font-size="10.5" font-weight="800">Imports: 2개</text>
+                  <text class="svg-code" x="130" y="267" fill="#ffedd5" font-size="11">├─ Imports[0]: QImport, Target = "lib/prepare.qor"</text>
+                  <text class="svg-code" x="130" y="288" fill="#ffedd5" font-size="11">└─ Imports[1]: QImport, Target = "lib/readout.qor"</text>
 
                   <rect x="110" y="318" width="426" height="70" rx="9" fill="#132b48" stroke="#4c8bc7"/>
                   <rect x="126" y="330" width="120" height="23" rx="11.5" fill="#2563a8"/>
-                  <text class="svg-code" x="186" y="346" text-anchor="middle" fill="#fff" font-size="10.5" font-weight="800">Operations · 1개</text>
-                  <text class="svg-code" x="130" y="374" fill="#dbeafe" font-size="11">└─ Operations[0] · QOperation · Name = "Main"</text>
+                  <text class="svg-code" x="186" y="346" text-anchor="middle" fill="#fff" font-size="10.5" font-weight="800">Operations: 1개</text>
+                  <text class="svg-code" x="130" y="374" fill="#dbeafe" font-size="11">└─ Operations[0]: QOperation, Name = "Main"</text>
 
                   <rect x="110" y="406" width="426" height="48" rx="9" fill="#123528" stroke="#16805b"/>
                   <rect x="126" y="418" width="101" height="23" rx="11.5" fill="#16805b"/>
@@ -307,11 +315,15 @@
 
                   <rect x="612" y="150" width="160" height="72" rx="9" fill="#eef2f6" stroke="#94a3b8"/>
                   <text class="svg-code" x="628" y="176" fill="#475569" font-size="10.5" font-weight="800">baseDir</text>
-                  <text class="svg-code" x="628" y="200" fill="#0f172a" font-size="10.5">C:\work\app</text>
+                  <rect x="628" y="184" width="112" height="27" rx="7" fill="#0f766e"/>
+                  <text class="svg-code" x="684" y="202" text-anchor="middle" fill="#f0fdfa" font-size="9.7" font-weight="850">C:\work\app</text>
 
                   <rect x="788" y="150" width="164" height="72" rx="9" fill="#eef2f6" stroke="#94a3b8"/>
                   <text class="svg-code" x="804" y="176" fill="#475569" font-size="10.5" font-weight="800">sourcePath</text>
-                  <text class="svg-code" x="804" y="200" fill="#0f172a" font-size="9.7">C:\work\app\main.qor</text>
+                  <rect x="800" y="184" width="88" height="27" rx="7" fill="#0f766e"/>
+                  <text class="svg-code" x="844" y="202" text-anchor="middle" fill="#f0fdfa" font-size="8.8" font-weight="850">C:\work\app</text>
+                  <rect x="892" y="184" width="58" height="27" rx="7" fill="#173456"/>
+                  <text class="svg-code" x="921" y="202" text-anchor="middle" fill="#dbeafe" font-size="8.5" font-weight="850">\main.qor</text>
 
                   <!-- 세 입력이 다음 절에서 추적할 Expand 호출로 모임 -->
                   <path d="M294 486 V528" fill="none" stroke="#64748b" stroke-width="2.4" marker-end="url(#input-arrow-slate)"/>
@@ -319,21 +331,20 @@
                   <path d="M870 222 V528" fill="none" stroke="#94a3b8" stroke-width="2.2" marker-end="url(#input-arrow-slate)"/>
 
                   <rect x="170" y="528" width="760" height="72" rx="12" fill="#1f2d40" stroke="#b7791f" stroke-width="1.5"/>
-                  <rect x="190" y="552" width="170" height="24" rx="12" fill="#b7791f"/>
-                  <text class="svg-ui" x="275" y="568" text-anchor="middle" fill="#fff" font-size="10.5" font-weight="850">1절 · 초기 검사로 이동</text>
+                  <a class="svg-stage-link" href="#stage-1" aria-label="1절 초기 검사로 이동">
+                    <title>1절 초기 검사로 이동</title>
+                    <rect class="svg-stage-link-bg" x="190" y="552" width="170" height="24" rx="12" fill="#b7791f" stroke="#b7791f"/>
+                    <text class="svg-ui" x="275" y="568" text-anchor="middle" fill="#fff" font-size="10.5" font-weight="850">다음: 1절 초기 검사</text>
+                  </a>
                   <text class="svg-code" x="620" y="568" text-anchor="middle" fill="#f8fafc" font-size="11.5" font-weight="800">ModuleLoader.Expand(program, baseDir, sourcePath)</text>
 
                 </svg>
               </div>
               <figcaption id="module-input-caption">
-                <code>program</code>에는 1장에서 만든 단일 파일 IR이 들어가며, <code>baseDir</code>는 엔트리 파일에 작성된 import의 기준 폴더, <code>sourcePath</code>는 엔트리 파일 자체의 경로를 제공합니다.
+                <code>program</code>은 엔트리 파일 하나의 IR입니다.<br>
+                <code>baseDir</code>는 엔트리 import의 기준 폴더이고, <code>sourcePath</code>는 엔트리 파일 자체의 경로입니다.
               </figcaption>
             </figure>
-
-            <p>
-              <code>ModuleLoader</code>는 <code>Imports[0..1]</code>과 두 경로 값을 입력으로 받되, 각 값은 해당 조건에 도달했을 때만 사용합니다.<br>
-              이미 만들어진 <code>Operations[0]</code>의 <code>Main</code> 본문은 변경하지 않습니다.
-            </p>
           </div>
         </section>
 
@@ -348,7 +359,7 @@
               <div class="diagram-scroll" tabindex="0" aria-label="Imports를 먼저 검사하고 통과한 경우에만 baseDir를 검사하는 ModuleLoader의 두 단계 조기 반환 흐름">
                 <svg viewBox="0 0 1000 660" role="img" aria-labelledby="module-check-title module-check-desc" focusable="false">
                   <title id="module-check-title">Imports와 baseDir를 차례로 확인하는 두 단계 검사</title>
-                  <desc id="module-check-desc">첫 검사에서는 program Imports만 읽고 비어 있으면 입력 program을 그대로 반환하여 7절의 최종 반환 흐름으로 이동합니다. Imports가 있을 때만 두 번째 검사에서 baseDir를 읽으며, baseDir가 없으면 QSEM020 오류를 반환하고 후속 패스를 실행하지 않습니다. 두 검사를 모두 통과하면 2절의 경로 계산으로 이동합니다.</desc>
+                  <desc id="module-check-desc">첫 검사에서는 program Imports만 읽고 비어 있으면 입력 program을 그대로 반환하며 Expand 호출을 끝냅니다. Imports가 있을 때만 두 번째 검사에서 baseDir를 읽으며, baseDir가 없으면 QSEM020 오류를 반환하고 후속 패스를 실행하지 않습니다. 두 검사를 모두 통과하면 2절의 경로 계산으로 이동합니다.</desc>
                   <defs>
                     <marker id="check-arrow-slate" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
                       <path d="M0 0 L10 5 L0 10 Z" fill="#64748b"/>
@@ -370,7 +381,7 @@
                   <path d="M59 82 H477 Q488 82 488 93 V128 H48 V93 Q48 82 59 82 Z" fill="#475569"/>
                   <rect x="66" y="94" width="42" height="22" rx="11" fill="#64748b"/>
                   <text class="svg-ui" x="87" y="109" text-anchor="middle" fill="#fff" font-size="9.5" font-weight="850">1.1</text>
-                  <text class="svg-ui" x="122" y="109" fill="#f8fafc" font-size="11.5" font-weight="800">1차 검사 · import가 하나 이상 있는가?</text>
+                  <text class="svg-ui" x="122" y="109" fill="#f8fafc" font-size="11.5" font-weight="800">1차 검사: import가 하나 이상 있는가?</text>
                   <rect x="68" y="144" width="392" height="48" rx="8" fill="#fff7e8" stroke="#d39a2c"/>
                   <text class="svg-ui" x="84" y="164" fill="#7a5114" font-size="9.8" font-weight="800">읽는 값</text>
                   <text class="svg-code" x="162" y="164" fill="#4b3514" font-size="11" font-weight="800">program.Imports</text>
@@ -386,14 +397,14 @@
                   <text class="svg-ui" x="708" y="190" fill="#f8fafc" font-size="11" font-weight="800">입력 QProgram 그대로 반환</text>
                   <text class="svg-code" x="642" y="232" fill="#0f172a" font-size="11" font-weight="800">return (program, [])</text>
                   <rect x="642" y="242" width="268" height="26" rx="13" fill="#1f2d40"/>
-                  <text class="svg-code" x="776" y="259" text-anchor="middle" fill="#fff" font-size="9.4" font-weight="850">7절 · 최종 반환으로 이동</text>
+                  <text class="svg-code" x="776" y="259" text-anchor="middle" fill="#fff" font-size="9.4" font-weight="850">Expand 즉시 반환</text>
 
                   <!-- 2차 검사: baseDir만 추가 확인 -->
                   <rect x="48" y="270" width="440" height="146" rx="11" fill="#fffaf1" stroke="#d39a2c"/>
                   <path d="M59 270 H477 Q488 270 488 281 V316 H48 V281 Q48 270 59 270 Z" fill="#7a5114"/>
                   <rect x="66" y="282" width="42" height="22" rx="11" fill="#b7791f"/>
                   <text class="svg-ui" x="87" y="297" text-anchor="middle" fill="#fff" font-size="9.5" font-weight="850">1.2</text>
-                  <text class="svg-ui" x="122" y="297" fill="#fff" font-size="11.5" font-weight="800">2차 검사 · 상대 경로의 기준이 있는가?</text>
+                  <text class="svg-ui" x="122" y="297" fill="#fff" font-size="11.5" font-weight="800">2차 검사: 상대 경로의 기준이 있는가?</text>
                   <rect x="68" y="332" width="392" height="48" rx="8" fill="#fff" stroke="#dfb55f"/>
                   <text class="svg-ui" x="84" y="352" fill="#7a5114" font-size="9.8" font-weight="800">읽는 값</text>
                   <text class="svg-code" x="162" y="352" fill="#4b3514" font-size="11" font-weight="800">baseDir</text>
@@ -409,33 +420,36 @@
                   <text class="svg-ui" x="708" y="378" fill="#fff" font-size="11" font-weight="800">QSEM020 오류 반환</text>
                   <text class="svg-code" x="642" y="418" fill="#98243a" font-size="10.7" font-weight="800">각 import → QSEM020</text>
                   <text class="svg-code" x="642" y="446" fill="#7f1d31" font-size="10.5">return (program, errors)</text>
-                  <text class="svg-ui" x="642" y="474" fill="#7f1d31" font-size="9.8">Imports 유지 · 후속 패스 실행 안 함</text>
+                  <text class="svg-ui" x="642" y="474" fill="#7f1d31" font-size="9.8">Imports 유지, 후속 패스 실행 안 함</text>
 
                   <!-- 두 검사를 통과한 뒤 다음 절로 이어지는 결과 -->
                   <rect x="48" y="520" width="904" height="108" rx="12" fill="#1f2d40" stroke="#d39a2c" stroke-width="1.6"/>
                   <rect x="48" y="520" width="8" height="108" rx="4" fill="#b7791f"/>
                   <rect x="72" y="536" width="110" height="24" rx="12" fill="#b7791f"/>
                   <text class="svg-ui" x="127" y="552" text-anchor="middle" fill="#fff" font-size="10" font-weight="850">검사 완료</text>
-                  <text class="svg-code" x="200" y="553" fill="#f8fafc" font-size="11" font-weight="800">Imports 있음 · baseDir 있음</text>
+                  <text class="svg-code" x="200" y="553" fill="#f8fafc" font-size="11" font-weight="800">Imports 있음, baseDir 있음</text>
                   <line x1="72" y1="570" x2="928" y2="570" stroke="#475569"/>
-                  <text class="svg-ui" x="72" y="600" fill="#fcd58d" font-size="11.5" font-weight="850">import 확장 시작</text>
-                  <text class="svg-ui" x="198" y="600" fill="#e2e8f0" font-size="10.5">첫 <tspan class="svg-code">QImport.Target</tspan>의 절대 경로 계산으로 이동합니다.</text>
-                  <rect x="744" y="582" width="184" height="28" rx="14" fill="#111c2c"/>
-                  <text class="svg-ui" x="836" y="601" text-anchor="middle" fill="#fff" font-size="9.8" font-weight="850">2절 · 경로 계산으로 이동</text>
+                  <text class="svg-ui" x="72" y="600" fill="#fcd58d" font-size="11.5" font-weight="850">확장 준비 완료</text>
+                  <text class="svg-ui" x="198" y="600" fill="#e2e8f0" font-size="10.5"><tspan class="svg-code">Imports</tspan>와 <tspan class="svg-code">baseDir</tspan>를 확보했습니다.</text>
+                  <a class="svg-stage-link" href="#stage-2" aria-label="2절 경로 계산으로 이동">
+                    <title>2절 경로 계산으로 이동</title>
+                    <rect class="svg-stage-link-bg" x="744" y="582" width="184" height="28" rx="14" fill="#111c2c" stroke="#111c2c"/>
+                    <text class="svg-ui" x="836" y="601" text-anchor="middle" fill="#fff" font-size="9.8" font-weight="850">다음: 2절 경로 계산</text>
+                  </a>
 
                   <!-- 실제 제어 흐름 -->
                   <path d="M488 184 H620" fill="none" stroke="#64748b" stroke-width="2.3" marker-end="url(#check-arrow-slate)"/>
                   <rect x="494" y="150" width="120" height="22" rx="11" fill="#eef2f6" stroke="#94a3b8"/>
-                  <text class="svg-ui" x="554" y="165" text-anchor="middle" fill="#475569" font-size="9" font-weight="800">아니요 · Imports 없음</text>
+                  <text class="svg-ui" x="554" y="165" text-anchor="middle" fill="#475569" font-size="9" font-weight="800">아니요: Imports 없음</text>
                   <path d="M268 222 V270" fill="none" stroke="#b7791f" stroke-width="2.3" marker-end="url(#check-arrow-amber)"/>
                   <rect x="284" y="237" width="126" height="22" rx="11" fill="#fff1d5"/>
-                  <text class="svg-ui" x="347" y="252" text-anchor="middle" fill="#7a5114" font-size="9.5" font-weight="800">예 · Imports 있음</text>
+                  <text class="svg-ui" x="347" y="252" text-anchor="middle" fill="#7a5114" font-size="9.5" font-weight="800">예: Imports 있음</text>
                   <path d="M488 372 H620" fill="none" stroke="#b4233d" stroke-width="2.3" marker-end="url(#check-arrow-red)"/>
                   <rect x="494" y="338" width="120" height="22" rx="11" fill="#fff1f3" stroke="#d77a8c"/>
-                  <text class="svg-ui" x="554" y="353" text-anchor="middle" fill="#98243a" font-size="9" font-weight="800">아니요 · baseDir 없음</text>
+                  <text class="svg-ui" x="554" y="353" text-anchor="middle" fill="#98243a" font-size="9" font-weight="800">아니요: baseDir 없음</text>
                   <path d="M268 416 V520" fill="none" stroke="#b7791f" stroke-width="2.3" marker-end="url(#check-arrow-amber)"/>
                   <rect x="284" y="435" width="132" height="22" rx="11" fill="#fff1d5"/>
-                  <text class="svg-ui" x="350" y="450" text-anchor="middle" fill="#7a5114" font-size="9.5" font-weight="800">예 · baseDir 있음</text>
+                  <text class="svg-ui" x="350" y="450" text-anchor="middle" fill="#7a5114" font-size="9.5" font-weight="800">예: baseDir 있음</text>
                 </svg>
               </div>
               <figcaption id="module-check-caption">
@@ -448,7 +462,8 @@
               처리할 import가 없으면 입력 <code>QProgram</code>을 그대로 반환합니다.<span class="diagram-ref slate">1.1.1</span><br>
               첫 검사를 통과하면 <code>Imports</code>가 있다는 뜻이므로, 그때 <code>baseDir</code>를 확인합니다.<span class="diagram-ref amber">1.2</span><br>
               여기서 <code>baseDir</code>가 없으면 파일을 하나도 읽지 않고 각 <code>QImport</code>에 <code>QSEM020</code>을 기록한 뒤, 원래 <code>Imports</code>가 남은 입력 <code>QProgram</code>을 반환합니다.<span class="diagram-ref red">1.2.1</span><br>
-              두 검사를 모두 통과하면 빈 <code>loaded</code>를 만들고, <code>sourcePath</code>를 절대 경로로 정규화해 엔트리 <code>main.qor</code>를 먼저 등록합니다.<br>
+              두 검사를 모두 통과하면 이미 시도한 파일 경로를 기억할 <code>loaded</code> 집합을 만듭니다.<br>
+              <code>sourcePath</code>가 있으면 절대 경로로 정규화해 엔트리 <code>main.qor</code>를 먼저 등록합니다.<br>
               이 준비가 끝난 뒤 첫 import의 경로 계산으로 넘어갑니다.
             </p>
           </div>
@@ -506,19 +521,24 @@
                   <rect x="652" y="132" width="300" height="112" rx="9" fill="#fff7e8" stroke="#d39a2c"/>
                   <rect x="670" y="143" width="42" height="22" rx="11" fill="#b7791f"/>
                   <text class="svg-ui" x="691" y="158" text-anchor="middle" fill="#fff" font-size="9" font-weight="850">2.1</text>
-                  <text class="svg-code" x="724" y="158" fill="#7a5114" font-size="10.5" font-weight="800">계산된 절대 경로 · full</text>
+                  <text class="svg-code" x="724" y="158" fill="#7a5114" font-size="10.5" font-weight="800">계산된 절대 경로: full</text>
                   <rect x="670" y="173" width="94" height="26" rx="7" fill="#0f766e"/>
                   <text class="svg-code" x="717" y="191" text-anchor="middle" fill="#f0fdfa" font-size="10.5" font-weight="850">C:\work\app</text>
                   <rect x="768" y="173" width="138" height="26" rx="7" fill="#6d5bd0"/>
                   <text class="svg-code" x="837" y="191" text-anchor="middle" fill="#f5f3ff" font-size="10.5" font-weight="850">\lib\prepare.qor</text>
-                  <rect x="670" y="208" width="230" height="26" rx="13" fill="#1f2d40"/>
-                  <text class="svg-ui" x="785" y="225" text-anchor="middle" fill="#fff" font-size="9.3" font-weight="850">3절 · 첫 방문 확인으로 이동</text>
+                  <a class="svg-stage-link" href="#stage-3" aria-label="3절 첫 방문 확인으로 이동">
+                    <title>3절 첫 방문 확인으로 이동</title>
+                    <rect class="svg-stage-link-bg" x="670" y="208" width="230" height="26" rx="13" fill="#1f2d40" stroke="#1f2d40"/>
+                    <text class="svg-ui" x="785" y="225" text-anchor="middle" fill="#fff" font-size="9.3" font-weight="850">다음: 3절 첫 방문 확인</text>
+                  </a>
 
                   <rect x="48" y="266" width="332" height="58" rx="9" fill="#fffaf1" stroke="#dfb55f"/>
                   <text class="svg-code" x="68" y="292" fill="#7a5114" font-size="10.5" font-weight="800">QImport.Target는 변경하지 않습니다.</text>
                   <text class="svg-ui" x="68" y="312" fill="#6b5733" font-size="9.5">계산 결과는 별도 변수 full에 둡니다.</text>
 
-                  <path d="M635 188 V260" fill="none" stroke="#b4233d" stroke-width="2" stroke-dasharray="6 5" marker-end="url(#path-arrow-error)"/>
+                  <path d="M514 244 V266" fill="none" stroke="#b4233d" stroke-width="2.2" marker-end="url(#path-arrow-error)"/>
+                  <rect x="528" y="247" width="52" height="18" rx="9" fill="#fff1f3"/>
+                  <text class="svg-ui" x="554" y="260" text-anchor="middle" fill="#98243a" font-size="9" font-weight="850">실패</text>
                   <rect x="410" y="266" width="542" height="80" rx="9" fill="#fff7f8" stroke="#e4a0ad"/>
                   <rect x="428" y="279" width="56" height="22" rx="11" fill="#b4233d"/>
                   <text class="svg-ui" x="456" y="294" text-anchor="middle" fill="#fff" font-size="9" font-weight="850">2.1.1</text>
@@ -535,7 +555,8 @@
             <p>
               <code>Imports</code>는 소스 순서대로 방문하며, 각 <code>QImport.Target</code>을 현재 파일의 기준 폴더와 결합한 뒤 <code>Path.GetFullPath</code>로 정규화합니다.<span class="diagram-ref amber">2.1</span><br>
               이 계산은 경로 문자열을 절대 경로 형태로 정리할 뿐이며, 해당 위치에 파일이 실제로 존재하는지는 아직 확인하지 않습니다.<br>
-              경로를 결합하거나 정규화할 수 없으면 해당 import에 <code>QSEM020</code>을 기록하고 같은 목록의 다음 import로 넘어갑니다.<span class="diagram-ref red">2.1.1</span><br>
+              경로를 결합하거나 정규화할 수 없으면 해당 import에 <code>QSEM020</code>을 기록하고 현재 항목을 끝냅니다.<span class="diagram-ref red">2.1.1</span><br>
+              같은 목록에 다음 항목이 있으면 그 항목의 경로 계산을 반복합니다.<br>
               이 예제에서는 <code>Target = "lib/prepare.qor"</code>에서 계산한 <code>full = C:\work\app\lib\prepare.qor</code>이 3절의 입력이 됩니다.
             </p>
           </div>
@@ -547,17 +568,16 @@
           </div>
           <div class="walk-body">
             <p>
-              3절은 파일 하나를 통째로 처리하는 단계가 아니라, 현재 파일의 <code>QImport</code> 하나마다 실행되는 검사입니다.<br>
-              1절은 두 검사를 통과한 뒤 <code>sourcePath</code>를 정규화하여 엔트리 <code>main.qor</code>를 <code>loaded</code>에 먼저 등록합니다.<br>
-              이어서 2절이 첫 import의 절대 경로 <code>full</code>을 계산하면, 3절은 1절의 <code>loaded</code>와 2절의 <code>full</code>을 전달받아 첫 방문 여부를 판정합니다.
+              이 예제의 <code>loaded</code>에는 1절에서 미리 등록한 <code>main.qor</code> 경로가 있습니다.<br>
+              3절은 각 <code>QImport</code>의 <code>full</code>을 여기에 추가해 처음 시도하는 파일인지 확인합니다.
             </p>
 
             <figure class="module-map" aria-labelledby="loaded-first-title loaded-first-caption">
               <div class="diagram-scroll-hint" aria-hidden="true">↔ 좌우로 밀어 1절의 loaded와 2절의 full이 첫 방문 검사로 모이는 흐름을 확인합니다</div>
-              <div class="diagram-scroll" tabindex="0" aria-label="1절에서 준비한 loaded와 2절이 넘긴 full을 받아 loaded Add를 실행하고, false일 때 다음 QImport의 유무에 따라 Yes와 No로 다시 분기하는 도식">
-                <svg class="loaded-timeline" viewBox="0 0 1000 870" role="img" aria-labelledby="loaded-first-title loaded-first-desc" focusable="false">
+              <div class="diagram-scroll" tabindex="0" aria-label="1절에서 준비한 loaded와 2절이 넘긴 full을 받아 loaded Add를 실행하고, true이면 4절로, false이면 5절로 이동하는 도식">
+                <svg class="loaded-timeline" viewBox="0 0 1000 570" role="img" aria-labelledby="loaded-first-title loaded-first-desc" focusable="false">
                   <title id="loaded-first-title">1절의 loaded와 2절의 full을 받는 첫 방문 검사</title>
-                  <desc id="loaded-first-desc">1절은 sourcePath로 main qor의 절대 경로를 loaded에 사전 등록하고, 2절은 prepare qor의 full을 계산합니다. 3절은 QImport 하나마다 두 값을 받아 loaded Add full을 실행합니다. false이면 현재 import를 건너뛴 뒤 다음 QImport가 있는지 다시 묻습니다. Yes이면 다음 QImport를 2절부터 처리합니다. No이면 현재 LoadAll 호출을 끝내며, 재귀 호출이었다면 상위 파일로 돌아가 6절의 병합을 계속하고 엔트리 호출이었다면 7절의 최종 반환으로 이동합니다. true이면 prepare 경로가 추가된 상태로 4절에 들어갑니다.</desc>
+                  <desc id="loaded-first-desc">1절에서 sourcePath로 미리 등록한 main 경로와 2절에서 계산한 prepare 경로를 loaded Add로 비교합니다. true이면 prepare 경로를 등록하고 4절의 파일 확인으로 진행합니다. false이면 이미 시도한 경로이므로 5절에서 현재 import를 건너뜁니다.</desc>
                   <defs>
                     <marker id="loaded-time-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
                       <path d="M0 0 L10 5 L0 10 Z" fill="#718096"/>
@@ -589,7 +609,7 @@
                   <rect x="58" y="130" width="96" height="23" rx="11.5" fill="#2563a8"/>
                   <text class="svg-code" x="106" y="146" text-anchor="middle" fill="#fff" font-size="9.2" font-weight="850">loaded</text>
                   <text class="svg-code" x="170" y="147" font-size="9.7"><tspan fill="#475569">{ </tspan><tspan fill="#0f766e" font-weight="850">C:\work\app</tspan><tspan fill="#174f8a" font-weight="800">\main.qor</tspan><tspan fill="#475569"> }</tspan></text>
-                  <text class="svg-ui" x="696" y="147" fill="#526071" font-size="9.2">1절 종료 시 sourcePath로 사전 등록</text>
+                  <text class="svg-ui" x="696" y="147" fill="#526071" font-size="9.2">이 예제에서는 1절 종료 시 sourcePath로 사전 등록</text>
                   <path d="M500 184 V206" fill="none" stroke="#2563a8" stroke-width="2.5" marker-end="url(#loaded-flow-arrow-blue)"/>
 
                   <g display="none">
@@ -720,35 +740,44 @@
                   <rect x="618" y="661" width="322" height="76" rx="9" fill="#fff" stroke="#b8d2ee"/>
                   <text class="svg-ui" x="638" y="683" fill="#526071" font-size="9.2" font-weight="850">반환값이 다음 동작을 결정</text>
                   <rect x="638" y="696" width="132" height="25" rx="12.5" fill="#dbeafe"/>
-                  <text class="svg-code" x="704" y="713" text-anchor="middle" fill="#174f8a" font-size="9.1" font-weight="850">true · 처음 만남</text>
+                  <text class="svg-code" x="704" y="713" text-anchor="middle" fill="#174f8a" font-size="9.1" font-weight="850">true: 처음 만남</text>
                   <rect x="784" y="696" width="136" height="25" rx="12.5" fill="#e8edf4"/>
-                  <text class="svg-code" x="852" y="713" text-anchor="middle" fill="#475569" font-size="9.1" font-weight="850">false · 이미 있음</text>
+                  <text class="svg-code" x="852" y="713" text-anchor="middle" fill="#475569" font-size="9.1" font-weight="850">false: 이미 있음</text>
                   <text class="svg-ui" x="116" y="751" fill="#526071" font-size="9.1">3절에서는 경로의 첫 방문 여부만 판정합니다.</text>
 
                   <path d="M485 764 V790 H311 V812" fill="none" stroke="#2563a8" stroke-width="2.5" marker-end="url(#loaded-flow-arrow-blue)"/>
-                  <text class="svg-ui" x="362" y="786" fill="#174f8a" font-size="9.2" font-weight="850">true · 이 예제</text>
+                  <text class="svg-ui" x="362" y="786" fill="#174f8a" font-size="9.2" font-weight="850">true: 이 예제</text>
                   <path d="M485 764 V790 H765 V812" fill="none" stroke="#64748b" stroke-width="2.3" marker-end="url(#loaded-time-arrow)"/>
                   <text class="svg-ui" x="690" y="786" fill="#64748b" font-size="9.2" font-weight="850">false</text>
 
                   <rect x="96" y="812" width="430" height="156" rx="11" fill="#edf5ff" stroke="#8fbcec"/>
                   <rect x="116" y="828" width="58" height="23" rx="11.5" fill="#2563a8"/>
                   <text class="svg-ui" x="145" y="844" text-anchor="middle" fill="#fff" font-size="9.2" font-weight="850">3.1.1</text>
-                  <text class="svg-ui" x="190" y="844" fill="#174f8a" font-size="11" font-weight="850">처음 만난 경로 · 호출 순간 등록 완료</text>
+                  <text class="svg-ui" x="190" y="844" fill="#174f8a" font-size="11" font-weight="850">처음 만난 경로: 호출 순간 등록 완료</text>
                   <text class="svg-code" x="116" y="873" font-size="9.2"><tspan fill="#174f8a">loaded = { </tspan><tspan fill="#0f766e" font-weight="850">C:\work\app</tspan><tspan fill="#174f8a">\main.qor,</tspan></text>
                   <text class="svg-code" x="176" y="894" font-size="9.2"><tspan fill="#0f766e" font-weight="850">C:\work\app</tspan><tspan fill="#6d5bd0" font-weight="850">\lib\prepare.qor</tspan><tspan fill="#174f8a"> }</tspan></text>
                   <text class="svg-code" x="116" y="922" fill="#174f8a" font-size="9.4">!true = false → continue 실행 안 함</text>
-                  <rect x="336" y="932" width="168" height="26" rx="13" fill="#1f2d40"/>
-                  <text class="svg-code" x="420" y="949" text-anchor="middle" fill="#fff" font-size="9.1" font-weight="850">4절 · 파일 확인으로 이동</text>
+                  <a class="svg-stage-link" href="#stage-4" aria-label="4절 파일 확인으로 이동">
+                    <title>4절 파일 확인으로 이동</title>
+                    <rect class="svg-stage-link-bg" x="336" y="932" width="168" height="26" rx="13" fill="#1f2d40" stroke="#1f2d40"/>
+                    <text class="svg-code" x="420" y="949" text-anchor="middle" fill="#fff" font-size="9.1" font-weight="850">다음: 4절 파일 확인</text>
+                  </a>
 
-                  <rect x="570" y="812" width="390" height="118" rx="11" fill="#f8fafc" stroke="#a8b8cc" stroke-dasharray="6 5"/>
+                  <rect x="570" y="812" width="390" height="156" rx="11" fill="#f8fafc" stroke="#a8b8cc" stroke-dasharray="6 5"/>
                   <rect x="590" y="828" width="58" height="23" rx="11.5" fill="#64748b"/>
                   <text class="svg-ui" x="619" y="844" text-anchor="middle" fill="#fff" font-size="9.2" font-weight="850">3.1.2</text>
                   <text class="svg-ui" x="664" y="844" fill="#334155" font-size="11" font-weight="850">이미 등록된 경로</text>
                   <text class="svg-code" x="590" y="875" fill="#475569" font-size="9.7">loaded.Add(full) = false</text>
                   <text class="svg-code" x="590" y="897" fill="#475569" font-size="9.7">!false = true → continue 실행</text>
                   <text class="svg-ui" x="590" y="918" fill="#64748b" font-size="9.2">현재 QImport 처리 종료</text>
+                  <a class="svg-stage-link" href="#stage-5" aria-label="5절 재방문 처리로 이동">
+                    <title>5절 재방문 처리로 이동</title>
+                    <rect class="svg-stage-link-bg" x="770" y="932" width="168" height="26" rx="13" fill="#1f2d40" stroke="#1f2d40"/>
+                    <text class="svg-code" x="854" y="949" text-anchor="middle" fill="#fff" font-size="9.1" font-weight="850">다음: 5절 재방문 처리</text>
+                  </a>
 
                   <!-- continue 뒤의 실제 foreach 분기 -->
+                  <g display="none">
                   <path d="M765 930 V982" fill="none" stroke="#64748b" stroke-width="2.3" marker-end="url(#loaded-time-arrow)"/>
                   <polygon points="765,982 940,1020 765,1058 590,1020" fill="#1f2d40" stroke="#64748b" stroke-width="1.6"/>
                   <text class="svg-ui" x="765" y="1017" text-anchor="middle" fill="#f8fafc" font-size="11" font-weight="850">다음 QImport가 있는가?</text>
@@ -781,48 +810,30 @@
                   <rect x="740" y="1212" width="200" height="25" rx="12.5" fill="#1f2d40"/>
                   <text class="svg-code" x="840" y="1229" text-anchor="middle" fill="#fff" font-size="9.1" font-weight="850">7절 · 최종 반환으로 이동</text>
                   </g>
+                  </g>
                 </svg>
               </div>
               <figcaption id="loaded-first-caption">
-                <code>loaded.Add(full)</code>의 반환값이 <code>true</code>이면 4절로 진행하고, <code>false</code>이면 현재 <code>QImport</code>를 끝낸 뒤 같은 목록에 다음 항목이 있는지 확인합니다.
+                <code>true</code>이면 처음 시도하는 파일이므로 4절로 진행하고, <code>false</code>이면 5절에서 재방문 처리를 이어갑니다.
               </figcaption>
             </figure>
 
             <p>
-              <code>loaded.Add(full)</code>은 같은 절대 경로가 있는지 확인하고, 없으면 <code>full</code>을 집합에 넣은 뒤 <code>true</code>를 반환합니다.<span class="diagram-ref blue">3.1</span><br>
-              <code>true</code>이면 호출이 끝난 시점에 경로 등록까지 완료되어 있으며, <code>continue</code>를 실행하지 않고 4절로 진행합니다.<span class="diagram-ref blue">3.1.1</span><br>
-              반면에 <code>false</code>이면 이미 등록된 경로이므로 <code>continue</code>를 실행하여 현재 <code>QImport</code>를 끝냅니다.<span class="diagram-ref slate">3.1.2</span><br>
-              그러면 <code>foreach</code>는 같은 <code>Imports</code> 목록에 다음 <code>QImport</code>가 있는지 확인합니다.
+              <code>loaded.Add(full)</code>은 <code>loaded</code>에 같은 절대 경로가 있는지 확인하고, 없으면 <code>full</code>을 넣습니다.<span class="diagram-ref blue">3.1</span><br>
+              <code>true</code>이면 새 경로가 등록되었으므로 4절에서 파일을 확인합니다.<span class="diagram-ref blue">3.1.1</span><br>
+              반면에 <code>false</code>이면 이미 시도한 경로이므로 5절에서 현재 import를 건너뜁니다.<span class="diagram-ref slate">3.1.2</span>
             </p>
-
-            <div class="outcome-grid two branch-explain" aria-label="다음 QImport 유무에 따른 YES와 NO 처리">
-              <div class="outcome branch-yes">
-                <span class="outcome-title"><span class="diagram-ref blue">YES</span> 다음 <code>QImport</code> 있음</span>
-                <p>같은 목록의 다음 <code>QImport</code>를 선택합니다.</p>
-                <p><span class="route-badge">2절 · 경로 계산으로 이동</span></p>
-              </div>
-              <div class="outcome branch-no">
-                <span class="outcome-title"><span class="diagram-ref slate">NO</span> 다음 <code>QImport</code> 없음</span>
-                <p>현재 <code>LoadAll</code> 호출을 종료합니다.</p>
-                <div class="trace" aria-label="LoadAll 호출 위치에 따른 복귀 지점">
-                  <div class="trace-row"><b>재귀 호출</b><span class="route-badge">6절 · 병합으로 이동</span></div>
-                  <div class="trace-row"><b>엔트리 호출</b><span class="route-badge">7절 · 최종 반환으로 이동</span></div>
-                </div>
-              </div>
-            </div>
-
-            <p>두 분기 모두 1절의 초기 검사는 다시 실행하지 않습니다.</p>
           </div>
         </section>
         <section class="walk-stage" id="stage-4">
           <div class="walk-head">
             <div class="walk-number">4</div>
-            <h3>처음 만난 import 파일의 AST를 만들고, 그 AST를 자식 <code>QProgram</code>으로 옮깁니다</h3>
+            <h3>처음 만난 import 파일을 읽어 파일 하나의 <code>QProgram</code>으로 변환합니다</h3>
           </div>
           <div class="walk-body">
             <p>
-              <code>ModuleLoader</code>가 처음 전달받는 <code>program</code>은 1장에서 엔트리 <code>main.qor</code>의 Janglim AST를 <code>QoraLowering</code>으로 옮겨 만든 <code>QProgram</code>입니다.<br>
-              반면에 엔트리의 <code>QImport</code>에는 <code>Target = "lib/prepare.qor"</code>라는 경로 문자열만 있으므로, <code>prepare.qor</code>의 AST와 자식 <code>QProgram</code>은 4절에서 파일을 처음 읽은 뒤에 만들어집니다.
+              <code>QImport.Target</code>에는 경로만 있으므로 아직 import 파일의 소스나 IR은 없습니다.<br>
+              4절은 <code>full</code>에 있는 파일을 읽고, 파서가 만든 Janglim AST를 거쳐 그 파일 하나의 <code>QProgram</code>을 만듭니다.
             </p>
 
             <figure class="module-map" aria-labelledby="per-file-lowering-title per-file-lowering-caption">
@@ -830,7 +841,7 @@
               <div class="diagram-scroll" tabindex="0" aria-label="main qor는 ModuleLoader 진입 전에 QProgram으로 만들어지고 prepare qor는 QImport Target에서 출발해 4절에서 Janglim AST와 자식 QProgram으로 만들어지는 시간 순서 도식">
                 <svg viewBox="0 0 1000 520" role="img" aria-labelledby="per-file-lowering-title per-file-lowering-desc" focusable="false">
                   <title id="per-file-lowering-title">엔트리 파일과 import 파일에 QoraLowering이 적용되는 서로 다른 시점</title>
-                  <desc id="per-file-lowering-desc">위쪽은 main qor의 소스가 Janglim AST와 QoraLowering을 거쳐 엔트리 QProgram이 된 뒤 ModuleLoader로 들어오는 흐름입니다. 아래쪽은 그 QProgram의 QImport Target만 가지고 2절과 3절을 처리한 뒤, 4절에서 prepare qor를 처음 읽어 ParseToIr 내부에서 Janglim AST와 자식 QProgram을 만드는 흐름입니다. 같은 변환 규칙을 서로 다른 파일에 한 번씩 적용하며 main qor를 다시 변환하지 않습니다.</desc>
+                  <desc id="per-file-lowering-desc">위쪽은 main qor의 소스가 Janglim AST와 QoraLowering을 거쳐 엔트리 QProgram이 된 뒤 ModuleLoader로 들어오는 흐름입니다. 아래쪽은 그 QProgram의 QImport Target만 가지고 2절과 3절을 처리한 뒤, 4절에서 prepare qor를 처음 읽어 ParseToIr 내부에서 Janglim AST와 자식 QProgram을 만드는 흐름입니다. 이 예제에서는 sourcePath가 제공되어 main qor를 loaded에 미리 등록하므로 다시 변환하지 않습니다.</desc>
                   <defs>
                     <marker id="per-file-arrow-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
                       <path d="M0 0 L10 5 L0 10 Z" fill="#2563a8"/>
@@ -846,14 +857,14 @@
                   <rect x="1" y="1" width="998" height="518" rx="14" fill="#f8fafc" stroke="#d7dee8"/>
                   <path d="M15 1 H985 Q999 1 999 15 V54 H1 V15 Q1 1 15 1 Z" fill="#243145"/>
                   <rect x="22" y="14" width="144" height="27" rx="13.5" fill="#422d16" stroke="#f1cf91"/>
-                  <text class="svg-ui" x="94" y="32" text-anchor="middle" fill="#ffedd5" font-size="11" font-weight="850">1장 과정의 적용 시점</text>
-                  <text class="svg-ui" x="184" y="34" fill="#f8fafc" font-size="15" font-weight="850">처음 만난 import 파일에 1장의 단일 파일 변환을 적용합니다</text>
+                  <text class="svg-ui" x="94" y="32" text-anchor="middle" fill="#ffedd5" font-size="11" font-weight="850">파일별 변환 시점</text>
+                  <text class="svg-ui" x="184" y="34" fill="#f8fafc" font-size="15" font-weight="850">엔트리와 새 import 파일이 QProgram이 되는 시점을 비교합니다</text>
 
                   <!-- ModuleLoader 진입 전에 이미 끝난 엔트리 파일 변환 -->
                   <rect x="24" y="72" width="952" height="142" rx="12" fill="#fff" stroke="#a8c8ea"/>
                   <rect x="42" y="88" width="166" height="24" rx="12" fill="#422d16"/>
-                  <text class="svg-ui" x="125" y="104" text-anchor="middle" fill="#ffedd5" font-size="9.5" font-weight="850">1장 · 단일 파일 변환</text>
-                  <text class="svg-ui" x="226" y="105" fill="#174f88" font-size="11" font-weight="850">대상 · 엔트리 main.qor</text>
+                  <text class="svg-ui" x="125" y="104" text-anchor="middle" fill="#ffedd5" font-size="9.5" font-weight="850">엔트리 단일 파일 변환</text>
+                  <text class="svg-ui" x="226" y="105" fill="#174f88" font-size="11" font-weight="850">대상: main.qor</text>
                   <rect x="816" y="88" width="138" height="24" rx="12" fill="#e8edf4"/>
                   <text class="svg-ui" x="885" y="104" text-anchor="middle" fill="#475569" font-size="9.2" font-weight="850">ModuleLoader 전에 완료</text>
 
@@ -869,12 +880,13 @@
 
                   <rect x="444" y="132" width="150" height="62" rx="9" fill="#e7f1fc" stroke="#8fb8df"/>
                   <text class="svg-code" x="519" y="157" text-anchor="middle" fill="#164f82" font-size="9.5" font-weight="850">QoraLowering</text>
-                  <text class="svg-ui" x="519" y="179" text-anchor="middle" fill="#526071" font-size="9.2">AST → Qora IR</text>
+                  <text class="svg-ui" x="519" y="179" text-anchor="middle" fill="#526071" font-size="9.2">1장: AST → Qora IR</text>
                   <path d="M594 163 H636" fill="none" stroke="#2563a8" stroke-width="2.3" marker-end="url(#per-file-arrow-blue)"/>
 
                   <rect x="642" y="132" width="202" height="62" rx="9" fill="#173456" stroke="#58a1e5"/>
                   <text class="svg-code" x="743" y="157" text-anchor="middle" fill="#eaf5ff" font-size="10" font-weight="850">엔트리 QProgram</text>
-                  <text class="svg-code" x="743" y="179" text-anchor="middle" fill="#cfe7ff" font-size="9.2">prepare.qor는 Target 경로로만 존재</text>
+                  <text class="svg-code" x="743" y="173" text-anchor="middle" fill="#cfe7ff" font-size="9">prepare.qor의 내용은 아직 없고</text>
+                  <text class="svg-code" x="743" y="186" text-anchor="middle" fill="#cfe7ff" font-size="9">QImport.Target 경로만 있습니다</text>
 
                   <!-- 엔트리 QProgram이 ModuleLoader의 입력으로 내려감 -->
                   <path d="M743 194 V242" fill="none" stroke="#64748b" stroke-width="2.4" marker-end="url(#per-file-arrow-slate)"/>
@@ -885,12 +897,12 @@
                   <rect x="42" y="256" width="112" height="22" rx="11" fill="none" stroke="#bfdbfe"/>
                   <text class="svg-code" x="98" y="271" text-anchor="middle" fill="#dbeafe" font-size="9.5" font-weight="850">ModuleLoader</text>
                   <text class="svg-ui" x="170" y="272" fill="#f8fafc" font-size="11" font-weight="850">QImport.Target과 baseDir로 새 import 파일을 찾습니다</text>
-                  <text class="svg-ui" x="954" y="272" text-anchor="end" fill="#cbd5e1" font-size="9.2">main.qor를 다시 파싱하지 않음</text>
+                  <text class="svg-ui" x="954" y="272" text-anchor="end" fill="#cbd5e1" font-size="9.2">이 예제에서는 main.qor를 다시 파싱하지 않음</text>
 
                   <rect x="42" y="300" width="416" height="23" rx="11.5" fill="#fff1d5"/>
-                  <text class="svg-ui" x="250" y="316" text-anchor="middle" fill="#7a5114" font-size="9.2" font-weight="850">ModuleLoader 고유 과정 · 경로 계산 → 첫 방문 확인 → 파일 읽기</text>
+                  <text class="svg-ui" x="250" y="316" text-anchor="middle" fill="#7a5114" font-size="9.2" font-weight="850">ModuleLoader: 경로 계산 → 첫 방문 확인 → 파일 읽기</text>
                   <rect x="474" y="300" width="482" height="23" rx="11.5" fill="#dbeafe" stroke="#8fb8df"/>
-                  <text class="svg-ui" x="715" y="316" text-anchor="middle" fill="#174f8a" font-size="9.2" font-weight="850">1장 과정 재사용 · 대상: 처음 읽은 prepare.qor</text>
+                  <text class="svg-ui" x="715" y="316" text-anchor="middle" fill="#174f8a" font-size="9.2" font-weight="850">ParseToIr 범위: 처음 읽은 prepare.qor</text>
 
                   <rect x="42" y="340" width="122" height="92" rx="9" fill="#fff7e8" stroke="#d39a2c"/>
                   <text class="svg-code" x="103" y="364" text-anchor="middle" fill="#7a5114" font-size="9.5" font-weight="850">QImport</text>
@@ -913,13 +925,13 @@
                   <path d="M458 386 H482" fill="none" stroke="#2563a8" stroke-width="2.3" marker-end="url(#per-file-arrow-blue)"/>
 
                   <rect x="474" y="330" width="482" height="112" rx="10" fill="#fff" stroke="#8fb8df" stroke-width="1.6"/>
-                  <rect x="488" y="341" width="130" height="22" rx="11" fill="#422d16"/>
-                  <text class="svg-ui" x="553" y="356" text-anchor="middle" fill="#ffedd5" font-size="9" font-weight="850">1장 과정 재사용</text>
-                  <text class="svg-code" x="630" y="356" fill="#174f88" font-size="9" font-weight="850">QoraParser.ParseToIr(src) · 대상: prepare.qor</text>
+                  <rect x="488" y="341" width="94" height="22" rx="11" fill="#422d16"/>
+                  <text class="svg-ui" x="535" y="356" text-anchor="middle" fill="#ffedd5" font-size="9" font-weight="850">ParseToIr</text>
+                  <text class="svg-code" x="598" y="356" fill="#174f88" font-size="9" font-weight="850">대상: prepare.qor</text>
 
                   <rect x="488" y="374" width="96" height="54" rx="8" fill="#eef5ff" stroke="#a8c8ea"/>
                   <text class="svg-code" x="536" y="396" text-anchor="middle" fill="#174f88" font-size="9" font-weight="850">prepare.qor</text>
-                  <text class="svg-ui" x="536" y="416" text-anchor="middle" fill="#64748b" font-size="9">소스 · src</text>
+                  <text class="svg-ui" x="536" y="416" text-anchor="middle" fill="#64748b" font-size="9">입력: src</text>
                   <path d="M584 401 H594" fill="none" stroke="#2563a8" stroke-width="2.1" marker-end="url(#per-file-arrow-blue)"/>
 
                   <rect x="600" y="374" width="96" height="54" rx="8" fill="#eef5ff" stroke="#a8c8ea"/>
@@ -929,7 +941,7 @@
 
                   <rect x="712" y="374" width="108" height="54" rx="8" fill="#e7f1fc" stroke="#8fb8df"/>
                   <text class="svg-code" x="766" y="396" text-anchor="middle" fill="#164f82" font-size="9" font-weight="850">QoraLowering</text>
-                  <text class="svg-ui" x="766" y="416" text-anchor="middle" fill="#526071" font-size="9">AST → Qora IR</text>
+                  <text class="svg-ui" x="766" y="416" text-anchor="middle" fill="#526071" font-size="9">1장: AST → Qora IR</text>
                   <path d="M820 401 H830" fill="none" stroke="#2563a8" stroke-width="2.1" marker-end="url(#per-file-arrow-blue)"/>
 
                   <rect x="836" y="374" width="106" height="54" rx="8" fill="#173456" stroke="#58a1e5"/>
@@ -937,33 +949,25 @@
                   <text class="svg-code" x="889" y="416" text-anchor="middle" fill="#cfe7ff" font-size="9">prepare.qor</text>
 
                   <rect x="42" y="452" width="914" height="25" rx="12.5" fill="#eef2f6"/>
-                  <text class="svg-ui" x="499" y="469" text-anchor="middle" fill="#475569" font-size="9.2" font-weight="850">다시 수행되는 대상은 main.qor가 아니라, 4절에서 처음 읽은 prepare.qor입니다</text>
+                  <text class="svg-ui" x="499" y="469" text-anchor="middle" fill="#475569" font-size="9.2" font-weight="850">sourcePath가 제공된 이 예제에서는 main.qor를 다시 읽지 않고 prepare.qor만 새로 변환합니다</text>
                 </svg>
               </div>
               <figcaption id="per-file-lowering-caption">
-                <code>loaded.Add(full) = true</code>면 처음 시도하는 import 경로입니다. 파일 확인과 읽기에 성공하면, <code>ParseToIr</code> 안에서 1장의 <strong>Janglim AST → QoraLowering → QProgram</strong> 과정을 <code>prepare.qor</code>에 적용합니다.
+                <code>ParseToIr</code>는 <code>prepare.qor</code>를 파싱해 Janglim AST를 만들고, 그 AST에 1장의 <code>QoraLowering</code>을 적용합니다.
               </figcaption>
             </figure>
 
             <p>
-              먼저 2절의 <code>Path.GetFullPath</code>는 경로 문자열만 정규화했으므로, 실제 디스크의 파일 존재 여부를 이 절의 <code>File.Exists</code>에서 처음 확인합니다.<span class="diagram-ref slate">4.1</span><br>
-              <code>loaded.Add(full) = true</code>인 새 경로에 파일이 있으면 <code>File.ReadAllText</code>로 내용을 읽어 <code>src</code> 문자열을 얻습니다.<span class="diagram-ref slate">4.2</span><br>
-              이 <code>src</code>는 아직 IR이 아니라 import 파일의 원본 소스 문자열입니다.
-            </p>
-
-            <p>
-              이어서 <code>QoraParser.ParseToIr(src)</code>가 먼저 Janglim lexer와 parser로 <code>src</code>를 읽어 해당 import 파일의 Janglim AST를 만듭니다.<br>
-              파싱에 성공하면 <code>QoraLowering.Lower(ast, withSpans: false)</code>를 호출하여 그 AST를 import 파일 하나를 나타내는 자식 <code>QProgram</code>으로 옮깁니다.<span class="diagram-ref blue">4.3</span><br>
-              따라서 <code>ParseToIr</code>가 문자열을 곧바로 IR로 바꾸는 것이 아니라, 함수 내부에서 <strong>소스 → AST → Qora IR</strong>의 두 경계를 차례로 통과한다고 이해해야 합니다.
+              <code>full</code>은 아직 경로 문자열일 뿐입니다.<br>
+              먼저 <code>File.Exists(full)</code>로 파일을 확인하고, 있으면 <code>File.ReadAllText(full)</code>로 원문을 읽어 <code>src</code>에 둡니다.<span class="diagram-ref slate">4.1</span><span class="diagram-ref slate">4.2</span><br>
+              이어서 <code>ParseToIr(src)</code>가 Janglim AST를 만든 뒤 <code>QoraLowering</code>으로 파일 하나의 <code>QProgram</code>을 반환합니다.<span class="diagram-ref blue">4.3</span>
             </p>
 
             <div class="call">
-              <span class="h"><code>ParseToIr</code> 내부에서 수행하는 범위</span>
+              <span class="h"><code>ParseToIr</code>의 경계</span>
               <p>
-                <code>ParseToIr</code>는 전체 컴파일 파이프라인을 끝까지 다시 실행하는 함수가 아니라, 새 import 파일을 자식 <code>QProgram</code>으로 만드는 단일 파일 변환 구간만 수행하는 경량 진입점입니다.<br>
-                <strong><code>ParseToIr</code> 내부에서 수행:</strong> 렉싱, Janglim 파싱, AST 생성, <code>QoraLowering</code>, 단일 파일 <code>QProgram</code> 생성.<br>
-                <strong><code>ParseToIr</code> 밖에서 이어서 수행:</strong> 자식 <code>Imports</code>의 재귀 확장은 현재 <code>ModuleLoader</code>가 담당하며, 이름 해소·검증·후속 패스·QASM 생성은 병합이 끝난 뒤에 실행합니다.<br>
-                엔트리 <code>main.qor</code>는 이 과정에서 다시 변환하지 않습니다.
+                <code>ParseToIr</code>는 <code>src</code>를 파일 하나의 <code>QProgram</code>으로 바꾸는 데까지만 담당합니다.<br>
+                그 <code>QProgram</code> 안의 <code>Imports</code>를 따라가는 일은 <code>ModuleLoader</code>가 이어받습니다.
               </p>
             </div>
 
@@ -971,8 +975,8 @@
               <div class="diagram-scroll-hint" aria-hidden="true">↔ 좌우로 밀어 import 소스가 Janglim AST를 거쳐 자식 QProgram이 되는 과정을 확인합니다</div>
               <div class="diagram-scroll" tabindex="0" aria-label="prepare qor를 읽고 ParseToIr 내부에서 Janglim AST를 만든 뒤 QoraLowering으로 자식 QProgram을 만들어 그 Imports를 재귀 처리하는 도식">
                 <svg viewBox="0 0 1000 1960" role="img" aria-labelledby="parse-child-title parse-child-desc" focusable="false">
-                  <title id="parse-child-title">처음 읽은 prepare qor를 파일 확인부터 자식 QProgram 생성과 재귀 복귀까지 시간순으로 처리하는 과정</title>
-                  <desc id="parse-child-desc">2절에서 계산한 full과 3절에서 확인한 첫 방문 상태로 시작합니다. 성공 경로는 파일 존재 확인, 파일 읽기, src 생성, Janglim 파싱, AST 생성, QoraLowering, 자식 QProgram 생성 순으로 진행합니다. 생성한 QProgram에 Imports가 있으면 2장 2절의 경로 계산부터 재귀 처리하고, 없으면 재귀를 생략합니다. 두 경로는 모두 6절의 현재 파일 병합으로 이어집니다.</desc>
+                  <title id="parse-child-title">ModuleLoader가 ParseToIr를 호출하고 반환된 자식 QProgram을 처리하는 과정</title>
+                  <desc id="parse-child-desc">ModuleLoader가 prepare qor의 src를 ParseToIr에 전달합니다. ParseToIr는 Janglim parser로 AST를 만들고, 1장에서 설명한 QoraLowering으로 AST를 자식 QProgram으로 옮깁니다. ModuleLoader는 반환값을 sub로 받은 뒤 자식 Imports가 있으면 2절부터 재귀 처리하고, 없으면 6절의 현재 파일 병합으로 이동합니다.</desc>
                   <defs>
                     <marker id="parse-arrow-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
                       <path d="M0 0 L10 5 L0 10 Z" fill="#2563a8"/>
@@ -1076,27 +1080,35 @@
                   <rect x="397" y="806" width="236" height="23" rx="11.5" fill="#e8f2ff"/>
                   <text class="svg-ui" x="515" y="822" text-anchor="middle" fill="#174f88" font-size="9.1" font-weight="850">결과를 src에 넣고 ParseToIr에 전달</text>
 
-                  <!-- 4.3 ParseToIr: 1장의 단일 파일 변환을 새 파일에 적용 -->
-                  <rect x="50" y="850" width="670" height="660" rx="12" fill="#f8fbff" stroke="#8fb8df" stroke-width="1.5"/>
-                  <path d="M62 850 H708 Q720 850 720 862 V904 H50 V862 Q50 850 62 850 Z" fill="#263141"/>
-                  <rect x="68" y="863" width="48" height="24" rx="12" fill="#2563a8"/>
-                  <text class="svg-ui" x="92" y="879" text-anchor="middle" fill="#fff" font-size="9.2" font-weight="850">4.3</text>
-                  <text class="svg-code" x="132" y="880" fill="#f8fafc" font-size="10.5" font-weight="850">var (sub, parseErrors) =</text>
-                  <rect x="286" y="859" width="194" height="27" rx="7" fill="#174f88" stroke="#8fb8df"/>
-                  <text class="svg-code" x="298" y="878" fill="#fff" font-size="10.5" font-weight="850">QoraParser.ParseToIr(src)</text>
-                  <rect x="494" y="862" width="204" height="25" rx="12.5" fill="#422d16"/>
-                  <text class="svg-ui" x="596" y="879" text-anchor="middle" fill="#ffedd5" font-size="9.2" font-weight="850">1장의 단일 파일 변환 재사용</text>
+                  <!-- 4.3 ModuleLoader가 ParseToIr를 호출하고 반환값을 처리 -->
+                  <rect x="30" y="850" width="940" height="660" rx="12" fill="#f8fbff" stroke="#8fb8df" stroke-width="1.5"/>
+                  <path d="M42 850 H958 Q970 850 970 862 V904 H30 V862 Q30 850 42 850 Z" fill="#263141"/>
+                  <rect x="48" y="863" width="48" height="24" rx="12" fill="#2563a8"/>
+                  <text class="svg-ui" x="72" y="879" text-anchor="middle" fill="#fff" font-size="9.2" font-weight="850">4.3</text>
+                  <text class="svg-ui" x="112" y="880" fill="#f8fafc" font-size="10.5" font-weight="850">ModuleLoader 호출</text>
+                  <text class="svg-code" x="244" y="880" fill="#dbe5f1" font-size="10.2" font-weight="750">var (sub, parseErrors) =</text>
+                  <rect x="410" y="859" width="194" height="27" rx="7" fill="#174f88" stroke="#8fb8df"/>
+                  <text class="svg-code" x="422" y="878" fill="#fff" font-size="10.5" font-weight="850">QoraParser.ParseToIr(src)</text>
 
-                  <rect x="110" y="940" width="550" height="52" rx="9" fill="#eef5ff" stroke="#a8c8ea"/>
-                  <text class="svg-code" x="385" y="961" text-anchor="middle" fill="#174f88" font-size="10" font-weight="850">src</text>
-                  <text class="svg-ui" x="385" y="981" text-anchor="middle" fill="#64748b" font-size="9.2">prepare.qor의 원본 소스 문자열</text>
-                  <path d="M385 992 V1045" fill="none" stroke="#2563a8" stroke-width="2.3" marker-end="url(#parse-arrow-blue)"/>
-                  <rect x="397" y="1008" width="128" height="22" rx="11" fill="#e8f2ff"/>
-                  <text class="svg-ui" x="461" y="1023" text-anchor="middle" fill="#174f88" font-size="9" font-weight="850">src를 파서에 전달</text>
+                  <!-- ParseToIr 안에서 파싱 후 1장의 QoraLowering을 재사용 -->
+                  <rect x="90" y="908" width="590" height="452" rx="12" fill="#f4f9ff" stroke="#8fb8df" stroke-width="1.5"/>
+                  <rect x="108" y="916" width="94" height="22" rx="11" fill="#174f88"/>
+                  <text class="svg-ui" x="155" y="931" text-anchor="middle" fill="#fff" font-size="9" font-weight="850">ParseToIr 내부</text>
+                  <text class="svg-ui" x="220" y="931" fill="#174f88" font-size="9.5" font-weight="850">prepare.qor 하나를 QProgram으로 변환</text>
 
-                  <rect x="110" y="1045" width="550" height="70" rx="9" fill="#edf5fd" stroke="#8fb8df"/>
-                  <text class="svg-code" x="385" y="1073" text-anchor="middle" fill="#164f82" font-size="10.5" font-weight="850">Janglim lexer + parser</text>
-                  <text class="svg-ui" x="385" y="1098" text-anchor="middle" fill="#526071" font-size="9.5">src를 읽어 파싱 결과를 만듭니다</text>
+                  <rect x="110" y="948" width="550" height="48" rx="9" fill="#eef5ff" stroke="#a8c8ea"/>
+                  <text class="svg-code" x="385" y="968" text-anchor="middle" fill="#174f88" font-size="10" font-weight="850">입력: src</text>
+                  <text class="svg-ui" x="385" y="986" text-anchor="middle" fill="#64748b" font-size="9.2">prepare.qor의 원본 소스 문자열</text>
+                  <path d="M385 996 V1045" fill="none" stroke="#2563a8" stroke-width="2.3" marker-end="url(#parse-arrow-blue)"/>
+                  <rect x="397" y="1009" width="128" height="22" rx="11" fill="#e8f2ff"/>
+                  <text class="svg-ui" x="461" y="1024" text-anchor="middle" fill="#174f88" font-size="9" font-weight="850">src를 파서에 전달</text>
+
+                  <rect x="110" y="1045" width="550" height="70" rx="9" fill="#fffaf1" stroke="#dfb55f"/>
+                  <text class="svg-code" x="385" y="1073" text-anchor="middle" fill="#7a5114" font-size="10.5" font-weight="850">Janglim lexer + parser</text>
+                  <text class="svg-ui" x="385" y="1098" text-anchor="middle" fill="#6f614b" font-size="9.5">src를 읽어 AstRoot를 만듭니다</text>
+
+                  <rect x="740" y="1008" width="230" height="24" rx="12" fill="#243145"/>
+                  <text class="svg-ui" x="855" y="1024" text-anchor="middle" fill="#f8fafc" font-size="9" font-weight="850">2장: ParseToIr 결과 처리</text>
 
                   <path d="M660 1080 H740" fill="none" stroke="#b4233d" stroke-width="2.3" marker-end="url(#parse-arrow-red)"/>
                   <rect x="688" y="1059" width="50" height="17" rx="8.5" fill="#fbe1e6"/>
@@ -1105,7 +1117,7 @@
                   <rect x="756" y="1060" width="62" height="22" rx="11" fill="#b4233d"/>
                   <text class="svg-ui" x="787" y="1075" text-anchor="middle" fill="#fff" font-size="9" font-weight="850">4.3.1</text>
                   <text class="svg-code" x="832" y="1076" fill="#98243a" font-size="10" font-weight="850">파싱 오류</text>
-                  <text class="svg-ui" x="758" y="1105" fill="#7f1d31" font-size="9">원래 오류 코드 + prepare.qor</text>
+                  <text class="svg-ui" x="758" y="1105" fill="#7f1d31" font-size="9">코드 유지, 메시지에 prepare.qor 추가</text>
                   <rect x="758" y="1119" width="194" height="21" rx="10.5" fill="#fbe1e6"/>
                   <text class="svg-ui" x="855" y="1134" text-anchor="middle" fill="#98243a" font-size="9" font-weight="850">continue → 다음 QImport</text>
 
@@ -1129,19 +1141,21 @@
                   <text class="svg-ui" x="855" y="1246" text-anchor="middle" fill="#475569" font-size="9" font-weight="850">continue → 다음 QImport</text>
 
                   <path d="M385 1219 V1270" fill="none" stroke="#2563a8" stroke-width="2.3" marker-end="url(#parse-arrow-blue)"/>
-                  <rect x="397" y="1234" width="194" height="22" rx="11" fill="#e8f2ff"/>
-                  <text class="svg-ui" x="494" y="1249" text-anchor="middle" fill="#174f88" font-size="9" font-weight="850">AstRoot를 QoraLowering에 전달</text>
+                  <rect x="397" y="1234" width="168" height="22" rx="11" fill="#e8f2ff"/>
+                  <text class="svg-ui" x="481" y="1249" text-anchor="middle" fill="#174f88" font-size="9" font-weight="850">AstRoot를 QoraLowering에 전달</text>
                   <rect x="110" y="1270" width="550" height="70" rx="9" fill="#e7f1fc" stroke="#8fb8df"/>
-                  <text class="svg-code" x="385" y="1298" text-anchor="middle" fill="#164f82" font-size="10.5" font-weight="850">QoraLowering.Lower(ast, withSpans: false)</text>
+                  <rect x="128" y="1280" width="104" height="24" rx="12" fill="#174f88"/>
+                  <text class="svg-ui" x="180" y="1296" text-anchor="middle" fill="#fff" font-size="9" font-weight="850">1장 재사용</text>
+                  <text class="svg-code" x="246" y="1298" fill="#164f82" font-size="10.2" font-weight="850">QoraLowering.Lower(ast, withSpans: false)</text>
                   <text class="svg-ui" x="385" y="1324" text-anchor="middle" fill="#526071" font-size="9.5">Janglim AST를 현재 파일 하나의 QProgram으로 변환</text>
                   <path d="M385 1340 V1390" fill="none" stroke="#2563a8" stroke-width="2.3" marker-end="url(#parse-arrow-blue)"/>
-                  <rect x="397" y="1354" width="164" height="22" rx="11" fill="#e8f2ff"/>
-                  <text class="svg-ui" x="479" y="1369" text-anchor="middle" fill="#174f88" font-size="9" font-weight="850">변환 결과를 sub에 저장</text>
+                  <rect x="397" y="1354" width="164" height="22" rx="11" fill="#dbeafe" stroke="#8fb8df"/>
+                  <text class="svg-ui" x="479" y="1369" text-anchor="middle" fill="#174f88" font-size="9" font-weight="850">QoraLowering 출력: QProgram</text>
 
                   <rect x="90" y="1390" width="590" height="90" rx="10" fill="#fff" stroke="#8fb8df"/>
                   <rect x="106" y="1403" width="64" height="23" rx="11.5" fill="#2563a8"/>
                   <text class="svg-ui" x="138" y="1419" text-anchor="middle" fill="#fff" font-size="9" font-weight="850">4.3.3</text>
-                  <text class="svg-code" x="184" y="1420" fill="#164f82" font-size="10" font-weight="850">sub: 자식 QProgram (prepare.qor)</text>
+                  <text class="svg-code" x="184" y="1420" fill="#164f82" font-size="10" font-weight="850">2장 수신: sub = 자식 QProgram</text>
                   <rect x="106" y="1437" width="170" height="29" rx="7" fill="#fff7e8" stroke="#dfb55f"/>
                   <text class="svg-code" x="191" y="1456" text-anchor="middle" fill="#7a5114" font-size="9">Imports: shared/gates.qor</text>
                   <rect x="290" y="1437" width="170" height="29" rx="7" fill="#eef5ff" stroke="#a8c8ea"/>
@@ -1165,13 +1179,12 @@
                   <text class="svg-code" x="90" y="1719" fill="#7a5114" font-size="10.5" font-weight="850">자식 Imports를</text>
                   <a class="svg-stage-link" href="#stage-2" aria-label="2장 2절로 이동">
                     <title>2장 2절로 이동</title>
-                    <rect class="svg-stage-link-bg" x="190" y="1699" width="118" height="25" rx="12.5" fill="#b7791f" stroke="#b7791f"/>
-                    <text class="svg-ui" x="249" y="1716" text-anchor="middle" fill="#fff" font-size="9.2" font-weight="850">2장 2절부터</text>
+                    <rect class="svg-stage-link-bg" x="190" y="1699" width="184" height="25" rx="12.5" fill="#b7791f" stroke="#b7791f"/>
+                    <text class="svg-ui" x="282" y="1716" text-anchor="middle" fill="#fff" font-size="9.2" font-weight="850">다음: 2절 경로 계산</text>
                   </a>
-                  <text class="svg-code" x="324" y="1719" fill="#7a5114" font-size="10.5" font-weight="850">재귀 처리</text>
+                  <text class="svg-code" x="390" y="1719" fill="#7a5114" font-size="10.5" font-weight="850">재귀 처리</text>
                   <text class="svg-ui" x="90" y="1751" fill="#5f4a27" font-size="9.5">기준 폴더: <tspan class="svg-code" font-weight="850">C:\work\app\lib</tspan></text>
-                  <rect x="90" y="1768" width="590" height="24" rx="12" fill="#1f2d40"/>
-                  <text class="svg-code" x="385" y="1785" text-anchor="middle" fill="#fff" font-size="9.2" font-weight="850">각 QImport.Target의 절대 경로 계산부터 시작</text>
+                  <text class="svg-ui" x="90" y="1785" fill="#7a6a50" font-size="9.2">1절의 초기 검사는 반복하지 않습니다</text>
 
                   <!-- 없음: 재귀 생략 -->
                   <path d="M560 1585 H855 V1685" fill="none" stroke="#64748b" stroke-width="2.3" marker-end="url(#parse-arrow-slate)"/>
@@ -1189,33 +1202,35 @@
                   <rect x="70" y="1880" width="900" height="58" rx="11" fill="#fff" stroke="#dfb55f" stroke-width="1.5"/>
                   <a class="svg-stage-link" href="#stage-6" aria-label="2장 6절로 이동">
                     <title>2장 6절로 이동</title>
-                    <rect class="svg-stage-link-bg" x="88" y="1897" width="92" height="24" rx="12" fill="#1f2d40" stroke="#1f2d40"/>
-                    <text class="svg-ui" x="134" y="1913" text-anchor="middle" fill="#fff" font-size="9" font-weight="850">다음: 6절</text>
+                    <rect class="svg-stage-link-bg" x="88" y="1897" width="128" height="24" rx="12" fill="#1f2d40" stroke="#1f2d40"/>
+                    <text class="svg-ui" x="152" y="1913" text-anchor="middle" fill="#fff" font-size="9" font-weight="850">다음: 6절 병합</text>
                   </a>
-                  <text class="svg-code" x="202" y="1914" fill="#7a5114" font-size="10.5" font-weight="850">prepare.qor의 Operations와 Opens를 전체 결과에 병합</text>
+                  <text class="svg-code" x="234" y="1914" fill="#7a5114" font-size="10.5" font-weight="850">prepare.qor의 Operations와 Opens를 전체 결과에 병합</text>
                 </svg>
               </div>
               <figcaption id="parse-child-caption">
-                <code>ParseToIr</code>는 소스를 IR로 건너뛰어 변환하지 않습니다.<br>
-                새 import 파일의 Janglim AST를 만든 뒤 <code>QoraLowering</code>으로 자식 <code>QProgram</code>을 반환하며, 이후 재귀 처리는 그 <code>QProgram.Imports</code>에서 이어집니다.
+                <code>ParseToIr</code>는 먼저 Janglim AST를 만들고, AST가 있으면 1장의 <code>QoraLowering</code>으로 <code>QProgram</code>을 만듭니다.<br>
+                2장의 <code>ModuleLoader</code>는 반환된 <code>QProgram</code>을 <code>sub</code>로 받아 이후 처리를 이어갑니다.
               </figcaption>
             </figure>
 
             <p>
               파일이 없으면 <code>QSEM020</code>을 기록하고 현재 import를 끝냅니다.<span class="diagram-ref red">4.1.1</span><br>
               파일을 읽을 수 없는 경우에도 <code>QSEM020</code>을 기록하고 현재 import를 끝냅니다.<span class="diagram-ref red">4.2.1</span><br>
-              <code>ParseToIr</code> 안의 Janglim 파싱에 실패하면 <code>QoraLowering</code>은 호출하지 않으며, 원래 파서 오류 코드에 import 파일 이름을 붙여 기록합니다.<span class="diagram-ref red">4.3.1</span><br>
+              <code>ParseToIr</code> 안의 Janglim 파싱에 실패하면 <code>QoraLowering</code>은 호출하지 않습니다.<br>
+              이때 원래 오류 코드는 유지하고, 오류 메시지에 import 파일 이름을 붙여 기록합니다.<span class="diagram-ref red">4.3.1</span><br>
               이 세 경우에는 같은 목록의 다음 <code>QImport</code>가 있는지 확인하고, 다음 항목이 있으면 2절의 경로 계산부터 반복합니다.
             </p>
 
             <p>
-              빈 파일은 파싱할 AST 루트가 없으므로 <code>ParseToIr</code>가 <code>sub = null</code>을 반환하며, 현재 import에는 병합할 내용이 없는 것으로 처리합니다.<span class="diagram-ref slate">4.3.2</span><br>
-              반면에 AST가 만들어지면 <code>QoraLowering</code>이 <code>Imports</code>·<code>Operations</code>·<code>Opens</code>를 담은 <code>sub</code>, 즉 현재 import 파일 하나의 자식 <code>QProgram</code>을 반환합니다.<span class="diagram-ref blue">4.3.3</span>
+              비어 있거나 공백뿐인 파일은 AST 루트가 없으므로 <code>ParseToIr</code>가 <code>sub = null</code>을 반환하며, 현재 import에는 병합할 내용이 없는 것으로 처리합니다.<span class="diagram-ref slate">4.3.2</span><br>
+              반면에 AST가 만들어지면 <code>QoraLowering</code>이 파일 하나의 <code>QProgram</code>을 만들고, <code>ParseToIr</code>가 그 값을 반환합니다.<br>
+              <code>ModuleLoader</code>는 반환된 <code>QProgram</code>을 지역 변수 <code>sub</code>로 받습니다.<span class="diagram-ref blue">4.3.3</span>
             </p>
 
             <p>
               <code>ParseToIr</code>는 여기서 작업을 마치며, <code>sub.Imports</code>의 대상 파일까지 내부에서 읽지는 않습니다.<br>
-              자식 <code>Imports</code>가 있으면 바깥의 <code>ModuleLoader</code>가 <code>prepare.qor</code>의 폴더를 기준 경로로 전달하고, 각 자식 import를 <strong>2장 2절의 경로 계산부터</strong> 재귀적으로 처리합니다. 이때 1절의 초기 검사는 반복하지 않습니다.<span class="diagram-ref amber">4.4</span><br>
+              자식 <code>Imports</code>가 있으면 바깥의 <code>ModuleLoader</code>가 <code>prepare.qor</code>의 폴더를 기준 경로로 전달하고, 각 자식 import를 2장 2절의 경로 계산부터 재귀적으로 처리합니다. 이때 1절의 초기 검사는 반복하지 않습니다.<span class="diagram-ref amber">4.4</span><br>
               자식 import가 없으면 재귀 호출을 생략하며, 어느 경로든 다음에는 6절에서 현재 <code>prepare.qor</code>의 <code>Operations</code>와 <code>Opens</code>를 전체 결과에 병합합니다.
             </p>
           </div>
@@ -1223,16 +1238,17 @@
         <section class="walk-stage" id="stage-5">
           <div class="walk-head">
             <div class="walk-number">5</div>
-            <h3>이미 등록된 경로를 다시 만나면 현재 import를 건너뜁니다</h3>
+            <h3>재귀 처리 중 순환 import와 공유 파일을 같은 방식으로 건너뜁니다</h3>
           </div>
           <div class="walk-body">
             <p>
-              4절에서 만든 자식 <code>QProgram</code>의 <code>Imports</code>에도 2절의 경로 계산과 3절의 <code>loaded</code> 등록을 같은 순서로 적용합니다.<br>
-              이때 계산한 <code>full</code>이 이미 <code>loaded</code>에 있으면 <code>loaded.Add(full)</code>이 <code>false</code>가 되며, 해당 파일을 다시 읽지 않고 현재 import만 건너뜁니다.
+              <span class="diagram-ref slate">3.1.2에서 이어짐</span><br>
+              4절에서 받은 <code>sub</code>에 <code>Imports</code>가 있으면 각 항목에 2절과 3절을 반복합니다.<br>
+              이때 계산한 <code>full</code>이 이미 <code>loaded</code>에 있으면 파일 I/O 전에 현재 import만 건너뜁니다.
             </p>
 
             <p>
-              <span class="diagram-ref amber">5.1 · 사례 A · 순환 재방문</span><br>
+              <span class="diagram-ref amber">5.1: 순환 재방문</span><br>
               <code>main.qor → prepare.qor → gates.qor</code> 순서로 경로를 등록하며 재귀적으로 들어간 상태에서, 현재 처리 중인 <code>gates.qor</code>가 <code>../../main.qor</code>를 import하는 경우입니다.
             </p>
             <figure class="module-map" aria-labelledby="loaded-backedge-title loaded-backedge-caption">
@@ -1251,11 +1267,14 @@
                     <marker id="backedge-arrow-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
                       <path d="M0 0 L10 5 L0 10 Z" fill="#2563a8"/>
                     </marker>
+                    <marker id="backedge-arrow-violet" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+                      <path d="M0 0 L10 5 L0 10 Z" fill="#6d5bd0"/>
+                    </marker>
                   </defs>
 
                   <rect x="24" y="20" width="150" height="27" rx="13.5" fill="#422d16"/>
-                  <text class="svg-ui" x="99" y="38" text-anchor="middle" fill="#ffedd5" font-size="12" font-weight="850">5.1 · 순환 재방문</text>
-                  <text class="svg-ui" x="190" y="39" fill="#253044" font-size="18" font-weight="850">loaded가 만들어지는 순서부터 따라갑니다</text>
+                  <text class="svg-ui" x="99" y="38" text-anchor="middle" fill="#ffedd5" font-size="12" font-weight="850">5.1: 순환 재방문</text>
+                  <text class="svg-ui" x="190" y="39" fill="#253044" font-size="18" font-weight="850">loaded에 경로가 추가되는 순서부터 따라갑니다</text>
 
                   <rect x="24" y="76" width="952" height="146" rx="12" fill="#f8fafc" stroke="#b8c3d1"/>
                   <rect x="42" y="90" width="126" height="22" rx="11" fill="#263141"/>
@@ -1292,25 +1311,31 @@
                   <rect x="600" y="250" width="352" height="94" rx="10" fill="#fffaf1" stroke="#dfb55f"/>
                   <rect x="618" y="264" width="96" height="22" rx="11" fill="#b7791f"/>
                   <text class="svg-ui" x="666" y="279" text-anchor="middle" fill="#fff" font-size="9.4" font-weight="850">현재 import</text>
-                  <text class="svg-code" x="728" y="279" fill="#7a5114" font-size="10.2" font-weight="850">gates.qor · Imports[0]</text>
+                  <text class="svg-code" x="728" y="279" fill="#7a5114" font-size="10.2" font-weight="850">gates.qor: Imports[0]</text>
                   <text class="svg-code" x="618" y="319" fill="#4b3514" font-size="9.5">Target = "../../main.qor"</text>
-                  <text class="svg-code" x="618" y="337" fill="#6b5733" font-size="9.1">2절의 경로 계산 → full = C:\work\app\main.qor</text>
+                  <text class="svg-code" x="618" y="337" fill="#6b5733" font-size="9.1">2절 결과: full =</text>
+                  <rect x="742" y="320" width="194" height="24" rx="7" fill="#6d5bd0" stroke="#a99beb"/>
+                  <text class="svg-code" x="839" y="337" text-anchor="middle" fill="#fff" font-size="9.1" font-weight="850">C:\work\app\main.qor</text>
 
                   <path d="M776 344 V382" fill="none" stroke="#b7791f" stroke-width="2.3" marker-end="url(#backedge-arrow-amber)"/>
-                  <rect x="48" y="382" width="380" height="80" rx="10" fill="#edf5ff" stroke="#8fbcec"/>
+                  <rect x="48" y="382" width="380" height="80" rx="10" fill="#f5f3ff" stroke="#8b7adc"/>
                   <rect x="64" y="396" width="104" height="22" rx="11" fill="#2563a8"/>
                   <text class="svg-code" x="116" y="411" text-anchor="middle" fill="#fff" font-size="9.3" font-weight="850">loaded의 main</text>
-                  <text class="svg-code" x="64" y="446" fill="#174f8a" font-size="10" font-weight="850">C:\work\app\main.qor</text>
+                  <rect x="64" y="426" width="348" height="26" rx="7" fill="#6d5bd0"/>
+                  <text class="svg-code" x="238" y="444" text-anchor="middle" fill="#fff" font-size="10" font-weight="850">C:\work\app\main.qor</text>
 
-                  <rect x="572" y="382" width="380" height="80" rx="10" fill="#edf5ff" stroke="#8fbcec"/>
+                  <rect x="572" y="382" width="380" height="80" rx="10" fill="#f5f3ff" stroke="#8b7adc"/>
                   <rect x="588" y="396" width="56" height="22" rx="11" fill="#2563a8"/>
                   <text class="svg-code" x="616" y="411" text-anchor="middle" fill="#fff" font-size="9.3" font-weight="850">full</text>
-                  <text class="svg-code" x="588" y="446" fill="#174f8a" font-size="10" font-weight="850">C:\work\app\main.qor</text>
+                  <rect x="588" y="426" width="348" height="26" rx="7" fill="#6d5bd0"/>
+                  <text class="svg-code" x="762" y="444" text-anchor="middle" fill="#fff" font-size="10" font-weight="850">C:\work\app\main.qor</text>
 
-                  <path d="M572 422 H428" fill="none" stroke="#2563a8" stroke-width="2.5" marker-end="url(#backedge-arrow-blue)"/>
-                  <rect x="438" y="402" width="124" height="24" rx="12" fill="#edf5ff" stroke="#8fbcec"/>
-                  <text class="svg-ui" x="500" y="418" text-anchor="middle" fill="#174f8a" font-size="9.4" font-weight="850">절대 경로 일치</text>
-                  <path d="M500 462 V490" fill="none" stroke="#2563a8" stroke-width="2.5" marker-end="url(#backedge-arrow-blue)"/>
+                  <path d="M428 422 H474 M572 422 H526" fill="none" stroke="#6d5bd0" stroke-width="2.5"/>
+                  <rect x="474" y="404" width="52" height="36" rx="18" fill="#6d5bd0"/>
+                  <text class="svg-code" x="500" y="428" text-anchor="middle" fill="#fff" font-size="13" font-weight="900">=</text>
+                  <rect x="428" y="460" width="144" height="24" rx="12" fill="#f1efff" stroke="#a99beb"/>
+                  <text class="svg-ui" x="500" y="476" text-anchor="middle" fill="#5140aa" font-size="9.4" font-weight="850">같은 절대 경로</text>
+                  <path d="M500 440 V460 M500 484 V490" fill="none" stroke="#6d5bd0" stroke-width="2.5" marker-end="url(#backedge-arrow-violet)"/>
 
                   <rect x="48" y="496" width="904" height="54" rx="10" fill="#f5f9ff" stroke="#8fbcec"/>
                   <rect x="66" y="511" width="58" height="24" rx="12" fill="#2563a8"/>
@@ -1326,7 +1351,7 @@
             </figure>
 
             <p>
-              <span class="diagram-ref blue">5.2 · 사례 B · 공유 경로 재방문</span><br>
+              <span class="diagram-ref blue">5.2: 공유 파일 재방문</span><br>
               순환이 없어도 서로 다른 부모가 같은 자식 파일을 가리키면 같은 검사가 작동합니다.<br>
               아래에서는 <code>prepare.qor</code>와 <code>readout.qor</code>가 모두 같은 <code>gates.qor</code>를 가리킵니다.
             </p>
@@ -1346,10 +1371,13 @@
                     <marker id="loaded-arrow-slate" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
                       <path d="M0 0 L10 5 L0 10 Z" fill="#64748b"/>
                     </marker>
+                    <marker id="loaded-arrow-violet" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+                      <path d="M0 0 L10 5 L0 10 Z" fill="#7c63d8"/>
+                    </marker>
                   </defs>
 
                   <rect x="24" y="20" width="146" height="27" rx="13.5" fill="#422d16"/>
-                  <text class="svg-ui" x="97" y="38" text-anchor="middle" fill="#ffedd5" font-size="12" font-weight="850">5.2 · 중복 제거</text>
+                  <text class="svg-ui" x="97" y="38" text-anchor="middle" fill="#ffedd5" font-size="12" font-weight="850">5.2: 공유 파일</text>
                   <text class="svg-ui" x="186" y="39" fill="#253044" font-size="18" font-weight="850">같은 절대 경로는 처음 만났을 때만 파일 처리로 넘어갑니다</text>
 
                   <rect x="24" y="76" width="510" height="494" rx="12" fill="#0f1726" stroke="#334155"/>
@@ -1360,32 +1388,39 @@
 
                   <path d="M279 202 V230 H145 V260" fill="none" stroke="#2563a8" stroke-width="2.5" marker-end="url(#loaded-arrow-blue)"/>
                   <path d="M279 230 H413 V260" fill="none" stroke="#2563a8" stroke-width="2.5" marker-end="url(#loaded-arrow-blue)"/>
-                  <path d="M145 344 V418" fill="none" stroke="#b7791f" stroke-width="2.5" marker-end="url(#loaded-arrow-amber)"/>
-                  <path d="M413 344 V416" fill="none" stroke="#94a3b8" stroke-width="2.2" stroke-dasharray="6 5" marker-end="url(#loaded-arrow-slate)"/>
+                  <path d="M145 352 V380 H279" fill="none" stroke="#7c63d8" stroke-width="2.4"/>
+                  <path d="M413 352 V380 H279 V408" fill="none" stroke="#7c63d8" stroke-width="2.4" marker-end="url(#loaded-arrow-violet)"/>
 
                   <rect x="174" y="138" width="210" height="64" rx="9" fill="#132b48" stroke="#4c8bc7"/>
                   <rect x="190" y="151" width="74" height="21" rx="10.5" fill="#2563a8"/>
                   <text class="svg-code" x="227" y="165" text-anchor="middle" fill="#fff" font-size="9.5" font-weight="800">main IR</text>
                   <text class="svg-code" x="190" y="190" fill="#dbeafe" font-size="10.5">Imports → prepare, readout</text>
 
-                  <rect x="46" y="260" width="198" height="84" rx="9" fill="#132b48" stroke="#4c8bc7"/>
+                  <rect x="46" y="260" width="198" height="92" rx="9" fill="#132b48" stroke="#4c8bc7"/>
                   <text class="svg-code" x="64" y="284" fill="#bfdbfe" font-size="10.5" font-weight="800">prepare QProgram</text>
-                  <text class="svg-code" x="64" y="310" fill="#dbeafe" font-size="10">Imports[0].Target</text>
-                  <text class="svg-code" x="64" y="329" fill="#dbeafe" font-size="10">= "shared/gates.qor"</text>
+                  <text class="svg-code" x="64" y="306" fill="#dbeafe" font-size="9.5">Imports[0].Target =</text>
+                  <rect x="64" y="316" width="164" height="24" rx="7" fill="#6d5bd0" stroke="#a99beb"/>
+                  <text class="svg-code" x="146" y="332" text-anchor="middle" fill="#fff" font-size="9.5" font-weight="850">"shared/gates.qor"</text>
 
-                  <rect x="314" y="260" width="198" height="84" rx="9" fill="#132b48" stroke="#4c8bc7"/>
+                  <rect x="314" y="260" width="198" height="92" rx="9" fill="#132b48" stroke="#4c8bc7"/>
                   <text class="svg-code" x="332" y="284" fill="#bfdbfe" font-size="10.5" font-weight="800">readout QProgram</text>
-                  <text class="svg-code" x="332" y="310" fill="#dbeafe" font-size="10">Imports[0].Target</text>
-                  <text class="svg-code" x="332" y="329" fill="#dbeafe" font-size="10">= "shared/gates.qor"</text>
+                  <text class="svg-code" x="332" y="306" fill="#dbeafe" font-size="9.5">Imports[0].Target =</text>
+                  <rect x="332" y="316" width="164" height="24" rx="7" fill="#6d5bd0" stroke="#a99beb"/>
+                  <text class="svg-code" x="414" y="332" text-anchor="middle" fill="#fff" font-size="9.5" font-weight="850">"shared/gates.qor"</text>
 
-                  <rect x="46" y="418" width="198" height="94" rx="9" fill="#342711" stroke="#b7791f"/>
-                  <rect x="62" y="431" width="94" height="21" rx="10.5" fill="#b7791f"/>
-                  <text class="svg-code" x="109" y="445" text-anchor="middle" fill="#fff" font-size="9.5" font-weight="800">같은 full</text>
-                  <text class="svg-code" x="62" y="475" fill="#ffedd5" font-size="9.7">C:\work\app\lib\shared\</text>
-                  <text class="svg-code" x="62" y="497" fill="#ffedd5" font-size="9.7">gates.qor</text>
-                  <rect x="361" y="416" width="104" height="48" rx="8" fill="#263141" stroke="#64748b"/>
-                  <text class="svg-ui" x="413" y="435" text-anchor="middle" fill="#cbd5e1" font-size="9.5">두 번째 방문</text>
-                  <text class="svg-ui" x="413" y="455" text-anchor="middle" fill="#f8fafc" font-size="9.5" font-weight="800">파일 I/O 없음</text>
+                  <rect x="94" y="408" width="370" height="78" rx="10" fill="#272143" stroke="#8b7adc"/>
+                  <rect x="110" y="420" width="142" height="22" rx="11" fill="#6d5bd0"/>
+                  <text class="svg-code" x="181" y="435" text-anchor="middle" fill="#fff" font-size="9.5" font-weight="850">같은 절대 경로: full</text>
+                  <text class="svg-ui" x="268" y="435" fill="#ede9fe" font-size="9.2" font-weight="800">두 Target이 한 파일로 합쳐집니다</text>
+                  <rect x="110" y="447" width="338" height="30" rx="7" fill="#6d5bd0" stroke="#b7abef"/>
+                  <text class="svg-code" x="279" y="467" text-anchor="middle" fill="#fff" font-size="10.5" font-weight="850">C:\work\app\lib\shared\gates.qor</text>
+
+                  <path d="M279 486 V503 H145 V516" fill="none" stroke="#b7791f" stroke-width="2.2" marker-end="url(#loaded-arrow-amber)"/>
+                  <path d="M279 503 H413 V516" fill="none" stroke="#64748b" stroke-width="2.2" stroke-dasharray="6 5" marker-end="url(#loaded-arrow-slate)"/>
+                  <rect x="62" y="516" width="166" height="34" rx="8" fill="#4b3514" stroke="#b7791f"/>
+                  <text class="svg-ui" x="145" y="538" text-anchor="middle" fill="#ffedd5" font-size="9.5" font-weight="850">첫 방문 → 파일 처리</text>
+                  <rect x="330" y="516" width="166" height="34" rx="8" fill="#263141" stroke="#64748b"/>
+                  <text class="svg-ui" x="413" y="538" text-anchor="middle" fill="#f8fafc" font-size="9.5" font-weight="850">두 번째 방문 → I/O 없음</text>
 
                   <rect x="560" y="76" width="416" height="590" rx="12" fill="#f8fafc" stroke="#cbd5e1"/>
                   <path d="M572 76 H964 Q976 76 976 88 V116 H560 V88 Q560 76 572 76 Z" fill="#263141"/>
@@ -1428,7 +1463,7 @@
                   <text class="svg-code" x="795" y="618" fill="#334155" font-size="9.5">→ 파일 I/O 없음</text>
 
                   <rect x="48" y="686" width="904" height="44" rx="9" fill="#eef2f6" stroke="#94a3b8"/>
-                  <text class="svg-ui" x="68" y="713" fill="#475569" font-size="10.5" font-weight="800">같은 full을 두 번째로 만나면 현재 import만 건너뜁니다.</text>
+                  <text class="svg-ui" x="68" y="713" fill="#475569" font-size="10.5" font-weight="800">같은 절대 경로를 두 번째로 만나면 현재 import만 건너뜁니다.</text>
                 </svg>
               </div>
               <figcaption id="loaded-caption">
@@ -1439,24 +1474,43 @@
             <p>
               사례 A에서는 엔트리 <code>main.qor</code>로 돌아가는 import를 건너뜁니다.<span class="diagram-ref blue">5.1.1</span><br>
               사례 B에서는 <code>readout.qor</code>가 다시 가리킨 <code>gates.qor</code> import를 건너뜁니다.<span class="diagram-ref slate">5.2.4</span><br>
-              두 경우 모두 판단 기준은 정규화된 절대 경로 <code>full</code>이며, <code>loaded</code>에는 처음 만난 경로만 추가됩니다.
+              두 경우 모두 판단 기준은 정규화된 절대 경로 <code>full</code>이며, <code>loaded</code>에는 처음 만난 경로만 추가됩니다.<br>
+              현재 import를 건너뛴 뒤에는 같은 <code>Imports</code> 목록에 다음 항목이 있는지 확인합니다.
             </p>
+
+            <div class="outcome-grid two branch-explain" aria-label="현재 import를 건너뛴 뒤 다음 QImport 유무에 따른 처리">
+              <div class="outcome branch-yes">
+                <span class="outcome-title"><span class="diagram-ref blue">YES</span> 다음 <code>QImport</code> 있음</span>
+                <p>같은 목록의 다음 <code>QImport</code>를 선택합니다.</p>
+                <p><a class="route-badge" href="#stage-2">다음: 2절 경로 계산</a></p>
+              </div>
+              <div class="outcome branch-no">
+                <span class="outcome-title"><span class="diagram-ref slate">NO</span> 다음 <code>QImport</code> 없음</span>
+                <p>현재 <code>LoadAll</code> 호출을 종료합니다.</p>
+                <div class="trace" aria-label="LoadAll 호출 위치에 따른 복귀 지점">
+                  <div class="trace-row"><b>재귀 호출</b><a class="route-badge" href="#stage-6">다음: 6절 병합</a></div>
+                  <div class="trace-row"><b>엔트리 호출</b><a class="route-badge" href="#stage-7">다음: 7절 최종 반환</a></div>
+                </div>
+              </div>
+            </div>
+
+            <p>어느 분기에서도 1절의 초기 검사는 다시 실행하지 않습니다.</p>
           </div>
         </section>
         <section class="walk-stage" id="stage-6">
           <div class="walk-head">
             <div class="walk-number">6</div>
-            <h3>자식 처리가 끝난 뒤 현재 파일의 <code>Operations</code>와 <code>Opens</code>를 병합합니다</h3>
+            <h3>재귀 처리가 끝난 import 파일의 <code>Operations</code>와 <code>Opens</code>를 누적합니다</h3>
           </div>
           <div class="walk-body">
             <p>
-              이제 5절의 사례 B에서 각 경로의 방문 여부를 판정했으므로, 실제 필드가 어떤 순서로 병합되는지 확인합니다.<br>
+              5절 사례 B의 import 그래프를 그대로 이어서 실제 필드가 합쳐지는 순서를 확인합니다.<br>
               이 예제에서 <code>main.qor</code>는 <code>Main</code>, <code>prepare.qor</code>는 <code>Prepare</code>, <code>gates.qor</code>는 <code>Mark</code>, <code>readout.qor</code>는 <code>Readout</code>을 제공합니다.<br>
               또한 <code>prepare.qor</code>와 <code>readout.qor</code>에는 각각 <code>open Shared;</code>가 있습니다.
             </p>
             <p>
               결과 연산 목록은 엔트리 <code>Operations</code>의 복사본으로 시작하므로 <code>Main</code>은 처음부터 맨 앞에 보존됩니다.<br>
-              각 import 파일은 자식 그래프를 먼저 끝낸 뒤 자신의 연산을 추가하며, 같은 단계의 import는 원래 <code>Imports</code> 순서를 유지합니다.
+              각 import 파일은 자식 그래프를 먼저 끝낸 뒤 자신의 연산을 추가하며, 같은 <code>Imports</code> 목록에서는 원래 소스 순서를 유지합니다.
             </p>
 
             <figure class="module-map" aria-labelledby="module-loader-stage6-title module-loader-stage6-caption">
@@ -1499,7 +1553,7 @@
                       <rect x="22" y="14" width="176" height="27" rx="13.5" fill="#16375f" stroke="#8ac3ff"/>
                       <text x="110" y="32" text-anchor="middle" class="ml6-head" font-size="12">자식 우선 → Operations</text>
                       <text x="219" y="34" class="ml6-head">자식 QProgram을 끝낸 뒤 부모 연산을 추가합니다</text>
-                      <text x="974" y="33" text-anchor="end" font-size="10.5" fill="#cbd5e1">번호 = 실제 Operations 추가 순서</text>
+                      <text x="974" y="33" text-anchor="end" font-size="10.5" fill="#cbd5e1">번호 = 최종 Operations 순서</text>
 
                       <!-- import graph -->
                       <g filter="url(#ml6-shadow)">
@@ -1534,7 +1588,7 @@
                       <text x="301" y="273" text-anchor="middle" class="ml6-badge">4</text>
                       <text x="323" y="271" class="ml6-mono ml6-title" fill="#d9ecff">readout.qor</text>
                       <text x="301" y="294" class="ml6-mono" font-size="10.7" fill="#eef6ff">Operations [ Readout ]</text>
-                      <text x="301" y="307" class="ml6-small ml6-on-dark">gates 재방문 · 생략</text>
+                      <text x="301" y="307" class="ml6-small ml6-on-dark">gates 재방문: 생략</text>
 
                       <rect x="34" y="343" width="184" height="64" rx="9" fill="#162d49" stroke="#58a1e5"/>
                       <circle cx="62" cy="363" r="13" fill="#2369ad"/>
@@ -1548,7 +1602,7 @@
                         <path d="M506 76 H964 Q976 76 976 88 V119 H494 V88 Q494 76 506 76 Z" fill="#243145"/>
                       </g>
                       <rect x="509" y="87" width="140" height="23" rx="11.5" fill="#16375f" stroke="#8ac3ff"/>
-                      <text x="579" y="103" text-anchor="middle" class="ml6-title" fill="#eaf5ff">6.1 · Operations</text>
+                      <text x="579" y="103" text-anchor="middle" class="ml6-title" fill="#eaf5ff">6.1: Operations</text>
                       <text x="666" y="103" class="ml6-small ml6-on-dark">엔트리 보존 + 자식 처리 뒤 추가</text>
 
                       <path d="M540 150 V395" fill="none" stroke="#9fbcdc" stroke-width="2"/>
@@ -1580,13 +1634,17 @@
                       <rect x="570" y="397" width="368" height="30" rx="15" fill="#173456"/>
                       <text x="754" y="417" text-anchor="middle" class="ml6-mono" font-size="11.7" font-weight="800" fill="#eaf5ff">[ Main, Mark, Prepare, Readout ]</text>
 
+                      <path d="M500 444 V468" fill="none" stroke="#64748b" stroke-width="2.2" marker-end="url(#ml6-arrow-slate)"/>
+                      <rect x="518" y="447" width="136" height="20" rx="10" fill="#eef2f6"/>
+                      <text x="586" y="461" text-anchor="middle" class="ml6-small" fill="#475569" font-weight="800">이어서 Opens 병합</text>
+
                       <!-- Opens de-duplication -->
                       <g filter="url(#ml6-shadow)">
                         <rect x="24" y="468" width="952" height="187" rx="12" fill="#fff" stroke="#9ed7bf"/>
                         <path d="M36 468 H964 Q976 468 976 480 V509 H24 V480 Q24 468 36 468 Z" fill="#134c3d"/>
                       </g>
                       <rect x="39" y="479" width="116" height="23" rx="11.5" fill="#0f7658" stroke="#8ce2c2"/>
-                      <text x="97" y="495" text-anchor="middle" class="ml6-title" fill="#edfff9">6.2 · Opens</text>
+                      <text x="97" y="495" text-anchor="middle" class="ml6-title" fill="#edfff9">6.2: Opens</text>
                       <text x="174" y="495" class="ml6-small" style="fill:#caf8e8">namespace별로 모은 뒤 같은 Target을 한 번만 남깁니다</text>
 
                       <rect x="47" y="530" width="202" height="45" rx="8" fill="#eefbf6" stroke="#9ed7bf"/>
@@ -1610,13 +1668,17 @@
                       <text x="634" y="601" class="ml6-mono ml6-text">Demo → [ Shared ]</text>
 
                       <path d="M500 655 V675" fill="none" stroke="#64748b" stroke-width="2.2" marker-end="url(#ml6-arrow-slate)"/>
-                      <rect x="378" y="678" width="244" height="29" rx="14.5" fill="#1f2d40"/>
-                      <text x="500" y="697" text-anchor="middle" class="ml6-mono" font-size="10.3" font-weight="850" fill="#fff">7절 · 최종 반환으로 이동</text>
+                      <a class="svg-stage-link" href="#stage-7" aria-label="모든 LoadAll 처리가 끝난 뒤 7절 최종 반환으로 이동">
+                        <title>모든 LoadAll 처리가 끝난 뒤 7절 최종 반환으로 이동</title>
+                        <rect class="svg-stage-link-bg" x="378" y="678" width="244" height="29" rx="14.5" fill="#1f2d40" stroke="#1f2d40"/>
+                        <text x="500" y="697" text-anchor="middle" class="ml6-mono" font-size="9.4" font-weight="850" fill="#fff">모든 LoadAll 완료: 7절 최종 반환</text>
+                      </a>
                     </g>
                   </svg>
               </div>
               <figcaption id="module-loader-stage6-caption">
-    최종 <code>Operations</code>: <code>[Main, Mark, Prepare, Readout]</code> · 최종 <code>Opens</code>: <code>Demo → [Shared]</code>
+    최종 <code>Operations</code>: <code>[Main, Mark, Prepare, Readout]</code><br>
+    최종 <code>Opens</code>: <code>Demo → [Shared]</code>
   </figcaption>
             </figure>
 
@@ -1629,12 +1691,12 @@
         <section class="walk-stage" id="stage-7">
           <div class="walk-head">
             <div class="walk-number">7</div>
-            <h3>전체 또는 부분 <code>QProgram</code>을 오류 목록과 한 쌍으로 반환합니다</h3>
+            <h3>병합한 <code>QProgram</code>과 오류 목록을 함께 반환합니다</h3>
           </div>
           <div class="walk-body">
             <p>
-              <code>Expand</code>의 반환값은 처리 결과와 오류 목록을 묶은 <code>(Program, Errors)</code> 한 쌍입니다.<br>
-              아래에서는 모든 import를 처리한 반환값과 <code>gates.qor</code>를 찾지 못한 반환값을 각각 완전한 튜플로 비교합니다.
+              <code>Expand</code>는 병합한 <code>QProgram</code>과 처리 중 수집한 오류를 <code>(Program, Errors)</code>로 함께 반환합니다.<br>
+              아래에서는 성공한 경우와 <code>gates.qor</code>를 찾지 못한 경우를 비교합니다.
             </p>
             <figure class="module-map" aria-labelledby="module-loader-stage7-title module-loader-stage7-caption">
               <div class="diagram-scroll-hint" aria-hidden="true">↔ 좌우로 밀어 반환 QProgram과 Errors에 따른 호출자 분기를 확인합니다</div>
@@ -1695,11 +1757,15 @@
                       </g>
                       <rect x="40" y="201" width="56" height="24" rx="12" fill="#138a66"/>
                       <text x="68" y="217" text-anchor="middle" class="ml7-title" fill="#fff">7.1</text>
-                      <text x="112" y="217" class="ml7-mono ml7-title" fill="#f8fafc">성공 튜플 · return (Program, [])</text>
+                      <text x="112" y="217" class="ml7-mono ml7-title" fill="#f8fafc">성공 튜플: return (Program, [])</text>
 
                       <rect x="218" y="256" width="232" height="48" rx="10" fill="#173456" stroke="#58a1e5"/>
-                      <text x="334" y="277" text-anchor="middle" class="ml7-mono ml7-title" fill="#eaf5ff">QProgram</text>
+                      <text x="334" y="277" text-anchor="middle" class="ml7-mono ml7-title" fill="#eaf5ff">첫째 값: QProgram</text>
                       <text x="334" y="294" text-anchor="middle" class="ml7-small ml7-on-dark">import 그래프 전체를 대표하는 IR 루트</text>
+
+                      <rect x="480" y="256" width="144" height="48" rx="10" fill="#eefbf6" stroke="#66c2a2"/>
+                      <text x="552" y="277" text-anchor="middle" class="ml7-mono ml7-title" fill="#087358">둘째 값: Errors</text>
+                      <text x="552" y="294" text-anchor="middle" class="ml7-mono ml7-small" fill="#087358">[]</text>
 
                       <!-- Program tree connectors -->
                       <path d="M334 304 V329 H115 V348" fill="none" stroke="#69809c" stroke-width="2"/>
@@ -1731,10 +1797,6 @@
                       <text x="510" y="450" class="ml7-mono ml7-title" fill="#087358">Demo</text>
                       <text x="510" y="469" class="ml7-mono ml7-text">→ [Shared]</text>
 
-                      <rect x="496" y="520" width="128" height="70" rx="10" fill="#eefbf6" stroke="#66c2a2"/>
-                      <text x="510" y="546" class="ml7-mono ml7-title" fill="#087358">튜플의 Errors</text>
-                      <text x="510" y="568" class="ml7-mono ml7-text">[]</text>
-
                       <!-- Errors panel -->
                       <g filter="url(#ml7-shadow)">
                         <rect x="674" y="190" width="302" height="432" rx="12" fill="#fff" stroke="#c6d0dc"/>
@@ -1748,7 +1810,7 @@
                       <rect x="695" y="270" width="260" height="168" rx="10" fill="#fff8e8" stroke="#e4b760"/>
                       <circle cx="718" cy="293" r="13" fill="#b7791f"/>
                       <text x="718" y="297" text-anchor="middle" class="ml7-badge">P</text>
-                      <text x="742" y="296" class="ml7-mono ml7-title" fill="#8a5b0b">부분 Program</text>
+                      <text x="742" y="296" class="ml7-mono ml7-title" fill="#8a5b0b">부분 QProgram</text>
                       <text x="713" y="327" class="ml7-mono ml7-small">Imports = null</text>
                       <text x="713" y="349" class="ml7-mono ml7-small">Opens = Demo → [Shared]</text>
                       <text x="713" y="382" class="ml7-mono ml7-small">Operations</text>
@@ -1782,8 +1844,11 @@
                       <rect x="64" y="787" width="132" height="27" rx="13.5" fill="#138a66"/>
                       <text x="130" y="805" text-anchor="middle" class="ml7-title" fill="#fff">Errors.Count = 0</text>
                       <text x="211" y="805" class="ml7-title" fill="#087358">Program을 다음 패스로 전달</text>
-                      <rect x="196" y="816" width="268" height="26" rx="13" fill="#1f2d40"/>
-                      <text x="330" y="833" text-anchor="middle" class="ml7-mono" font-size="9.3" font-weight="850" fill="#fff">3장 · MeasureConditionLowering으로 이동</text>
+                      <a class="svg-stage-link" href="ir-pass-03-measure-condition-lowering.html" aria-label="3장 MeasureConditionLowering으로 이동">
+                        <title>3장 MeasureConditionLowering으로 이동</title>
+                        <rect class="svg-stage-link-bg" x="196" y="816" width="268" height="26" rx="13" fill="#1f2d40" stroke="#1f2d40"/>
+                        <text x="330" y="833" text-anchor="middle" class="ml7-mono" font-size="9.3" font-weight="850" fill="#fff">다음 패스: 3. MeasureConditionLowering</text>
+                      </a>
 
                       <rect x="520" y="772" width="432" height="80" rx="11" fill="#fff5f6" stroke="#e5a8b0"/>
                       <rect x="536" y="787" width="132" height="27" rx="13.5" fill="#b83a4b"/>
@@ -1800,8 +1865,8 @@
             </figure>
 
             <p>
-              모든 import를 처리하면 전체 연산과 <code>Errors = []</code>를 함께 반환합니다.<span class="diagram-ref green">7.1</span><br>
-              <code>gates.qor</code>를 찾지 못하면 <code>Mark</code>를 제외한 부분 <code>Program</code>과 <code>QSEM020</code>을 함께 반환합니다.<span class="diagram-ref red">7.2</span><br>
+              모든 import를 처리한 성공 사례에서는 병합된 <code>QProgram</code>과 빈 오류 목록을 함께 반환합니다.<span class="diagram-ref green">7.1</span><br>
+              <code>gates.qor</code>를 찾지 못하면 <code>Mark</code>를 제외한 부분 <code>QProgram</code>과 <code>QSEM020</code>을 함께 반환합니다.<span class="diagram-ref red">7.2</span><br>
               <code>QoraParser</code>는 <code>Errors.Count = 0</code>일 때만 <code>Program</code>을 다음 패스로 전달하며, 오류가 있으면 후속 패스를 실행하지 않습니다.<span class="diagram-ref slate">7.3</span>
             </p>
           </div>
@@ -1825,7 +1890,7 @@
         <td class="k"><code>program</code></td>
         <td><code>QoraLowering</code>이 현재 파일 하나로 만든 <code>QProgram</code></td>
         <td><code>Imports</code>를 탐색 출발점으로 삼고, 엔트리 <code>Operations</code>와 <code>Opens</code>를 결과의 시작값으로 보존합니다.</td>
-        <td><code>Imports</code>가 하나 이상이고 <code>baseDir</code>가 있어 확장 경로에 진입하면, 병합된 필드로 갱신되고 루트 <code>Imports = null</code>이 됩니다.</td>
+        <td><code>Imports</code>가 하나 이상이고 <code>baseDir</code>가 있어 import 처리를 시작하면, 병합된 필드로 갱신되고 루트 <code>Imports = null</code>이 됩니다.</td>
       </tr>
       <tr>
         <td class="k"><code>baseDir</code></td>
@@ -1837,7 +1902,7 @@
         <td class="k"><code>sourcePath</code></td>
         <td>엔트리 파일 자체의 경로<br>예: <code>C:\work\app\main.qor</code></td>
         <td>엔트리의 정규화된 절대 경로를 처음부터 <code>loaded</code>에 등록하여 자식이 엔트리를 다시 import해도 파일을 재시도하지 않게 합니다.</td>
-        <td>IR에는 저장하지 않습니다.<br><code>Imports</code>가 있을 때 <code>null</code>이어도 <code>baseDir</code>가 있으면 확장은 진행되지만 엔트리 사전 등록은 할 수 없습니다. 이 경우 엔트리로 돌아오는 첫 import는 새 경로처럼 처리되어, 엔트리 파일을 한 번 더 읽고 병합할 수 있습니다.<br>값을 전달한다면 <code>Path.GetFullPath</code>로 처리할 수 있는 경로여야 하며, 이 등록 단계의 예외는 <code>QSEM020</code>으로 변환되지 않습니다.</td>
+        <td>IR에는 저장하지 않습니다.<br><code>null</code>이면 엔트리 경로를 <code>loaded</code>에 미리 등록하지 않습니다.</td>
       </tr>
       <tr>
         <td class="k">반환 <code>(Program, Errors)</code></td>
@@ -1846,6 +1911,15 @@
         <td><code>Errors</code>가 비어 있을 때만 호출자가 <code>Program</code>을 다음 단계로 전달합니다.</td>
       </tr>
     </table>
+  </div>
+
+  <div class="call warn">
+    <span class="h"><code>sourcePath</code>가 없는 경우</span>
+    <p>
+      <code>sourcePath = null</code>이어도 <code>baseDir</code>가 있으면 import 처리는 진행합니다.<br>
+      다만 엔트리 경로를 <code>loaded</code>에 미리 넣을 수 없으므로, 자식이 엔트리를 다시 가리키면 그 파일을 한 번 더 읽고 병합할 수 있습니다.<br>
+      또한 <code>sourcePath</code>는 <code>Imports</code>와 <code>baseDir</code> 검사를 통과한 뒤에만 읽습니다. 이때 <code>Path.GetFullPath</code>로 처리할 수 없는 값을 전달하면 예외가 발생하며, 현재 구현은 이 예외를 <code>QSEM020</code>으로 바꾸지 않습니다.
+    </p>
   </div>
 
   <h3>재귀 처리 상태와 검사 순서</h3>
@@ -1858,7 +1932,7 @@
 <pre><code>Path.Combine(dir, QImport.Target) → Path.GetFullPath
 ├─ 실패 → QSEM020 → 다음 import
 └─ 성공 → <span class="hl">loaded.Add(full)</span>
-          ├─ false → 순환·중복 import 생략 · 진단 없음
+          ├─ false → 순환·중복 import 생략, 진단 없음
           └─ true  → File.Exists
                      ├─ false → QSEM020 → 다음 import
                      └─ true  → ReadAllText
@@ -1867,13 +1941,14 @@
                                            ├─ Janglim 파싱 실패
                                            │  └─ 파일 이름과 함께 파서 오류 기록 → 다음 import
                                            └─ Janglim 파싱 성공
-                                              ├─ AST 없음 · 빈 파일 → sub == null → 다음 import
+                                              ├─ AST 없음: 비어 있거나 공백뿐인 파일
+                                              │  └─ sub == null → 다음 import
                                               └─ AST 있음
                                                  └─ QoraLowering.Lower(ast, withSpans: false)
-                                                    └─ sub · 현재 import 파일의 QProgram
+                                                    └─ ParseToIr가 QProgram 반환 → ModuleLoader가 sub로 받음
                                                        ├─ 자식 Imports 있음 → ModuleLoader 재귀 처리
                                                        └─ 재귀가 없거나 끝남
-                                                          → 현재 파일의 Operations·Opens 병합</code></pre>
+                                                          → 현재 파일의 Operations와 Opens 병합</code></pre>
   </div>
 
   <div class="panel">
@@ -1882,7 +1957,7 @@
       <tr>
         <td class="k"><code>dir</code></td>
         <td>현재 처리 중인 <code>Imports</code>를 작성한 파일의 디렉터리</td>
-        <td>중첩 import가 엔트리가 아니라 자신을 작성한 파일을 기준으로 해석됩니다.</td>
+        <td>중첩 <code>QImport.Target</code>은 엔트리가 아니라 해당 import를 작성한 파일의 폴더를 기준으로 해석됩니다.</td>
       </tr>
       <tr>
         <td class="k"><code>full</code></td>
@@ -1892,7 +1967,7 @@
       <tr>
         <td class="k"><code>loaded</code></td>
         <td>정규화에 성공해 이미 한 번 처리 대상으로 등록한 절대 경로</td>
-        <td><code>loaded</code>에 이미 등록된 상위 파일로 되돌아가는 import, 직접 중복, 여러 부모가 공유하는 파일, 같은 누락·읽기·파싱 실패를 다시 처리하지 않도록 막습니다.<br>경로 비교에서는 대소문자를 무시합니다.</td>
+        <td><code>loaded</code>에 이미 등록된 상위 파일로 되돌아가는 import, 같은 목록의 중복 import, 여러 부모가 공유하는 파일, 같은 누락·읽기·파싱 실패를 다시 처리하지 않도록 막습니다.<br>경로 비교에서는 대소문자를 무시합니다.</td>
       </tr>
     </table>
   </div>
@@ -1900,11 +1975,11 @@
   <h3>생략과 오류 처리</h3>
   <div class="panel">
     <table class="spec">
-      <tr><th>상황</th><th>진단</th><th>현재 import 처리</th><th>반환 QProgram</th></tr>
+      <tr><th>상황</th><th>진단</th><th>처리 흐름</th><th>반환 QProgram</th></tr>
       <tr>
         <td class="k"><code>Imports = null</code> 또는 <code>Count = 0</code></td>
         <td>진단 없음</td>
-        <td><code>baseDir</code>·<code>sourcePath</code>를 확인하지 않고 파일 I/O 없이 종료</td>
+        <td><code>baseDir</code>와 <code>sourcePath</code>를 확인하지 않고 파일 I/O 없이 종료</td>
         <td>입력 <code>program</code>을 그대로 반환합니다.</td>
       </tr>
       <tr>
@@ -1940,7 +2015,7 @@
       <tr>
         <td class="k"><code>ParseToIr</code> 결과가 <code>null</code></td>
         <td>진단 없음</td>
-        <td>빈 파일로 보고 같은 목록의 다음 import로 이동</td>
+        <td>비어 있거나 공백뿐인 파일로 보고 같은 목록의 다음 import로 이동</td>
         <td>지금까지 누적한 결과를 그대로 보존합니다.</td>
       </tr>
     </table>
@@ -1963,7 +2038,7 @@
       <tr><th>반환 필드</th><th><code>ModuleLoader</code>가 보장하는 값</th><th>다음 단계에 남기는 판단</th></tr>
       <tr>
         <td class="k"><code>Operations</code></td>
-        <td>엔트리 연산을 먼저 보존하고, import 파일은 같은 단계의 소스 순서와 각 파일의 자식 우선 순서로 한 번씩 추가합니다.</td>
+        <td>엔트리 연산을 먼저 보존하고, import 파일은 같은 <code>Imports</code> 목록의 소스 순서와 각 파일의 자식 우선 순서로 한 번씩 추가합니다.</td>
         <td>연산 이름과 본문은 바꾸지 않으며, 그 해석은 후속 패스가 맡습니다.</td>
       </tr>
       <tr>
@@ -1973,7 +2048,7 @@
       </tr>
       <tr>
         <td class="k"><code>Imports</code></td>
-        <td><code>Imports</code>가 하나 이상이고 <code>baseDir</code>가 있어 확장 경로에 진입하면, 처리 오류 유무와 관계없이 루트 <code>Imports = null</code>입니다.</td>
+        <td><code>Imports</code>가 하나 이상이고 <code>baseDir</code>가 있어 import 처리를 시작하면, 처리 오류 유무와 관계없이 루트 <code>Imports = null</code>입니다.</td>
         <td>후속 패스는 파일을 다시 읽지 않고 병합된 <code>QProgram</code>만 사용합니다.</td>
       </tr>
       <tr>
@@ -1985,7 +2060,8 @@
   </div>
 
   <p>
-    <code>ModuleLoader</code>는 <code>loaded</code>에 이미 등록된 순환·중복 경로를 다시 열지 않으며, 처음 만난 경로 가운데 <code>ParseToIr</code> 결과가 있는 파일의 IR만 import 그래프의 순서에 따라 하나의 <code>QProgram</code>으로 병합합니다.
+    <code>ModuleLoader</code>는 <code>loaded</code>에 등록된 경로를 다시 열지 않습니다.<br>
+    처음 만난 파일 가운데 <code>ParseToIr</code>가 <code>QProgram</code>을 반환한 파일만 import 순서에 따라 하나로 병합합니다.
   </p>
   <nav class="doc-links" aria-label="IR 패스 데이터시트 내비게이션">
     <a class="doc-link" href="ir-pass-01-qora-lowering.html">← 1. QoraLowering</a>

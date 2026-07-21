@@ -56,6 +56,25 @@ emitted as **OpenQASM 3.0**.
   [M(q[1]), 0]` marks the qubit measured), so the uncompute planner can no longer misjudge an entangled
   qubit as a safe cleanup candidate.
 
+## 0.24 — 2026-07-21
+
+### Fixed
+- **Array-local hoisting mints collision-proof names.** Every backing global, hidden parameter, and
+  pass-through parameter the hoisting pass introduces is a unique placeholder carrying the desired
+  human-readable base name; the name mangler then turns each into a pretty, collision-free emitted name.
+  Because the placeholders are distinct by construction, the mangler never merges two unrelated arrays
+  (its same-name unification is meant for genuine same-variable locals), and its per-name freshening
+  splits two arrays that want the same base into `x` / `x_` and separates any clash with a user variable,
+  operation, or gate name — with references renamed in lockstep. This replaces the v0.23 scheme that
+  reserved names against an enumerated scope, whose incompleteness had let a minted name collide with a
+  loop variable or a nested declaration; nine collision vectors are now covered and Braket-verified. When
+  a hidden parameter's base clashes with a same-named parameter it shadows, only the array's own in-scope
+  references are rewritten to it.
+- **A measurement lowered out of a condition can no longer mask an undeclared-name error.** The synthetic
+  `bit` a measurement-in-condition desugars to (`if (M(q[0]) == 1)` → `bit __m0 = M(q[0]); if (__m0 == 1)`)
+  is now minted as an internal placeholder, so a user's own undeclared `__m0 = …` no longer silently binds
+  to it and keeps its `QSEM025` diagnostic. Emitted names are unchanged.
+
 ## 0.22 — 2026-07-18
 
 ### Added

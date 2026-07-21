@@ -28,48 +28,28 @@ namespace Qora.Ir.Passes;
 /// </list>
 /// Only <c>M(reg[index])</c> — the one registered measurement (no user op may be named <c>M</c>, QSEM013) — is
 /// extracted; any OTHER call left in a condition keeps <see cref="QCond.HasCall"/> set and is still rejected
-/// by QSEM005. Temp names (<c>__m0</c>, …) are minted per operation, skipping any name the operation already
-/// declares (so they never collide as QSEM015); per-op uniqueness suffices because mangler scopes are per-op
-/// (the entry op is the global scope, each def its own), and the NameMangler resolves any remaining clash.
+/// by QSEM005.
+///
+/// Temp names are minted as <see cref="HoistName"/> PLACEHOLDERS carrying the base <c>__mN</c>. A user can
+/// never write a placeholder (its <c>#</c> is not a legal identifier character), so a synthetic temp can
+/// never share a spelling with a user name — the <see cref="NameMangler"/> prettifies each placeholder back
+/// to <c>__mN</c> (or <c>__mN_</c> only if the user genuinely declared that name too). This closes a masking
+/// hole: a temp literally named <c>__m0</c> used to become a real declaration BEFORE validation, so a user's
+/// undeclared <c>__m0 = …</c> silently bound to it and its <c>QSEM025</c> was lost; now the user's <c>__m0</c>
+/// stays undeclared and is reported. Uniqueness is the placeholder's uid, so no name-scanning is needed.
 /// </summary>
 public static class MeasureConditionLowering
 {
     public static QProgram Run(QProgram program)
     {
+        var uid = 0;   // program-wide: makes each placeholder a distinct spelling by construction
         var ops = program.Operations.Select(op =>
         {
-            // A temp must not reuse a name already DECLARED in the op, or the two same-scope declarations
-            // would collide as QSEM015 and wrongly reject a valid program. `taken` seeds with the op's
-            // declared names and grows as temps are minted, so every `__mN` is fresh.
-            var taken = DeclaredNames(op);
-            var n = 0;
-            string Fresh() { string name; do name = $"__m{n++}"; while (!taken.Add(name)); return name; }
+            var n = 0;   // per-op base counter, so the mangler emits __m0, __m1, … within each scope
+            string Fresh() => HoistName.Make($"__m{n++}", uid++);
             return op with { Body = Lower(op.Body, Fresh) };
         }).ToList();
         return program with { Operations = ops };
-    }
-
-    /// <summary>Every name DECLARED anywhere in the operation (params, <c>use</c> registers, decls, loop
-    /// variables) — the set a synthetic temp must avoid to not collide (QSEM015).</summary>
-    private static HashSet<string> DeclaredNames(QOperation op)
-    {
-        var names = new HashSet<string>(op.Params.Select(p => p.Name));
-        void Walk(IReadOnlyList<QStmt> stmts)
-        {
-            foreach (var s in stmts)
-                switch (s)
-                {
-                    case QUse u: names.Add(u.Name); break;
-                    case QDecl d: names.Add(d.Name); break;
-                    case QFor f: names.Add(f.Var); Walk(f.Body); break;
-                    case QIf i: Walk(i.Then); Walk(i.Else); break;
-                    case QWhile w: Walk(w.Body); break;
-                    case QRepeat r: Walk(r.Body); break;
-                    case QConjugate c: Walk(c.Within); Walk(c.Apply); break;
-                }
-        }
-        Walk(op.Body);
-        return names;
     }
 
     private static List<QStmt> Lower(IReadOnlyList<QStmt> stmts, Func<string> fresh)

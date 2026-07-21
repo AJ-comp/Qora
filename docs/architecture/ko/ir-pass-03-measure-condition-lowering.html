@@ -414,7 +414,7 @@
               임시 번호는 연산마다 <code>0</code>부터 시작합니다.<br>
               파라미터와 <code>QUse</code>·<code>QDecl</code>·<code>QFor.Var</code>에서 수집한 이름을 후보 집합과 대조하며, 이미 있는 이름은 건너뜁니다.
             </p>
-            <figure class="pass-map" aria-labelledby="mc-name-title mc-name-caption">
+            <figure class="pass-map" id="temporary-name-selection" aria-labelledby="mc-name-title mc-name-caption">
               <div class="diagram-scroll-hint" aria-hidden="true">↔ 좌우로 밀어 임시 이름 후보를 고르는 순서를 확인합니다</div>
               <div class="diagram-scroll" tabindex="0" aria-label="이미 선언된 q __m0 __m1을 피하고 __m2를 선택하는 도식">
                 <svg viewBox="0 0 1000 310" role="img" aria-labelledby="mc-name-title mc-name-desc" focusable="false">
@@ -424,21 +424,24 @@
                     <marker id="mc-name-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
                       <path d="M0 0 L10 5 L0 10 Z" fill="#64748b"/>
                     </marker>
+                    <marker id="mc-name-arrow-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+                      <path d="M0 0 L10 5 L0 10 Z" fill="#13865f"/>
+                    </marker>
                   </defs>
                   <rect x="32" y="32" width="936" height="246" rx="12" fill="#f8fafc" stroke="#bdc9d8"/>
                   <rect x="54" y="56" width="270" height="86" rx="9" fill="#0f1726" stroke="#334155"/>
-                  <text class="svg-code" x="72" y="85" fill="#dbeafe" font-size="14" font-weight="850">taken · 이미 차지한 이름</text>
+                  <text class="svg-code" x="72" y="85" fill="#dbeafe" font-size="14" font-weight="850">taken: 이미 차지한 이름</text>
                   <text class="svg-code" x="72" y="119" fill="#f8fafc" font-size="14">{ q, __m0, __m1 }</text>
 
                   <path d="M324 99 H390" fill="none" stroke="#64748b" stroke-width="2.4" marker-end="url(#mc-name-arrow)"/>
                   <rect x="392" y="64" width="142" height="70" rx="10" fill="#fff4f5" stroke="#d67889"/>
                   <text class="svg-code" x="463" y="91" text-anchor="middle" fill="#98243a" font-size="14" font-weight="850">__m0</text>
-                  <text class="svg-ui" x="463" y="116" text-anchor="middle" fill="#a32135" font-size="12">사용 중 · 건너뜀</text>
+                  <text class="svg-ui" x="463" y="116" text-anchor="middle" fill="#a32135" font-size="12">사용 중: 건너뜀</text>
 
                   <path d="M534 99 H584" fill="none" stroke="#64748b" stroke-width="2.4" marker-end="url(#mc-name-arrow)"/>
                   <rect x="586" y="64" width="142" height="70" rx="10" fill="#fff4f5" stroke="#d67889"/>
                   <text class="svg-code" x="657" y="91" text-anchor="middle" fill="#98243a" font-size="14" font-weight="850">__m1</text>
-                  <text class="svg-ui" x="657" y="116" text-anchor="middle" fill="#a32135" font-size="12">사용 중 · 건너뜀</text>
+                  <text class="svg-ui" x="657" y="116" text-anchor="middle" fill="#a32135" font-size="12">사용 중: 건너뜀</text>
 
                   <path d="M728 99 H778" fill="none" stroke="#64748b" stroke-width="2.4" marker-end="url(#mc-name-arrow)"/>
                   <rect x="780" y="54" width="164" height="90" rx="10" fill="#eaf7f1" stroke="#4fad89" stroke-width="1.5"/>
@@ -446,7 +449,7 @@
                   <text class="svg-code" x="862" y="87" text-anchor="middle" fill="#fff" font-size="13" font-weight="850">__m2</text>
                   <text class="svg-ui" x="862" y="121" text-anchor="middle" fill="#116347" font-size="12.5" font-weight="800">선택 후 taken에 추가</text>
 
-                  <path d="M862 144 V184 H502" fill="none" stroke="#13865f" stroke-width="2.3" marker-end="url(#mc-name-arrow)"/>
+                  <path d="M862 144 V164 H502 V184" fill="none" stroke="#13865f" stroke-width="2.3" marker-end="url(#mc-name-arrow-green)"/>
                   <rect x="230" y="184" width="544" height="62" rx="9" fill="#fff7e8" stroke="#d9a23d"/>
                   <text class="svg-code" x="502" y="211" text-anchor="middle" fill="#7a5114" font-size="13.5" font-weight="850">QDecl(false, Bit, &quot;__m2&quot;, QMeasure(q[0]))</text>
                   <text class="svg-ui" x="502" y="233" text-anchor="middle" fill="#8a5b13" font-size="11.5">선택한 이름이 측정 선언과 새 조건에 함께 사용됩니다</text>
@@ -765,7 +768,7 @@
   <div class="panel">
     <table class="spec">
       <tr><th>항목</th><th>계약</th></tr>
-      <tr><td class="k">입력</td><td>import 오류 없이 병합된 <code>QProgram</code></td></tr>
+      <tr><td class="k">입력</td><td><code>ModuleLoader</code>가 병합한 <code>QProgram</code></td></tr>
       <tr><td class="k">탐색 대상</td><td>모든 <code>QOperation.Body</code>와 그 안의 제어문 본문</td></tr>
       <tr><td class="k">변환 대상</td><td><code>QIf.Cond</code>, <code>QWhile.Cond</code>, <code>QRepeat.Until</code> 안의 <code>M(register[index])</code></td></tr>
       <tr><td class="k">출력</td><td>측정이 <code>QMeasure</code> 문장으로 분리된 <code>QProgram</code></td></tr>

@@ -6,7 +6,7 @@ using Janglim.FrontEnd.RegularGrammar;
 namespace Qora;
 
 /// <summary>
-/// Qora v0.23 — a Q#/C#-flavored quantum language on the Janglim engine.
+/// Qora v0.24 — a Q#/C#-flavored quantum language on the Janglim engine.
 ///
 ///   operation Bell(Qubit[] q) {        // a subroutine, with C#-style array parameters
 ///       H(q[0]);
@@ -75,6 +75,9 @@ namespace Qora;
 /// to a <c>bit[]</c> parameter is <c>QSEM032</c> (bit registers pass by value — a write would be
 /// silently invisible to the caller). Whole bit-register comparisons emit through the spec cast
 /// (<c>int(r) == 0</c>), the form Braket executes.
+/// v0.24 hardens the v0.23 hoisting: every minted name is a collision-proof <see cref="Ir.HoistName"/>
+/// placeholder the mangler prettifies, so no minted name can shadow a user variable, and a
+/// measurement-in-condition temp can no longer mask a user's undeclared <c>__mN</c> (its <c>QSEM025</c>).
 /// </summary>
 public class QoraGrammar : Grammar
 {

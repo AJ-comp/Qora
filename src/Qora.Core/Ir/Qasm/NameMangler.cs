@@ -68,14 +68,20 @@ public static class NameMangler
             return program with { Operations = outOps };
         }
 
-        /// <summary>Append <c>_</c> to the dot-flattened name until it is free in <paramref name="scope"/>; note any rename.</summary>
+        /// <summary>Assign a unique emitted name in <paramref name="scope"/>: append <c>_</c> to the
+        /// dot-flattened candidate until free, then reserve it, noting any user-visible rename. A HOIST
+        /// PLACEHOLDER (<see cref="HoistName"/>) is prettified to its embedded base name here — that is how
+        /// two distinct hoisted arrays with the same desired base become <c>x</c> and <c>x_</c> (distinct
+        /// placeholders ⇒ distinct map keys ⇒ independent freshening), with no note, since a placeholder is
+        /// internal machinery rather than a name the user wrote.</summary>
         private string Fresh(string qoraName, HashSet<string> scope, string kind)
         {
-            var flat = qoraName.Replace(".", "_");
+            var isHoist = HoistName.Base(qoraName) is not null;
+            var flat = (HoistName.Base(qoraName) ?? qoraName).Replace(".", "_");
             var name = flat;
             while (scope.Contains(name)) name += "_";
             scope.Add(name);
-            if (name != flat)
+            if (name != flat && !isHoist)
                 Notes.Add($"{kind} `{qoraName}` emitted as `{name}` (renamed to avoid a name collision)");
             return name;
         }
