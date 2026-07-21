@@ -26,7 +26,7 @@ public class ContainerMapTests
     public void ChainsAreOutermostFirstAndContainersExcludeThemselves()
     {
         var main = CompileMain(
-            "operation Main(){ use a=Qubit[2]; bit c = M(a[0]); X(a[1]); " +
+            "operation Main(){ use a=Qubit[2]; var c: bit = M(a[0]); X(a[1]); " +
             "if (c == 1) { X(a[1]); if (c == 0) { H(a[1]); } else { Z(a[1]); } } " +
             "for i in 0..1 { Y(a[1]); } Z(a[1]); }");
         var map = ContainerMap.Build(main);
@@ -56,7 +56,7 @@ public class ContainerMapTests
     public void ZigzagDepthIsRecordedCorrectly()
     {
         var main = CompileMain(
-            "operation Main(){ use a=Qubit[2]; bit c = M(a[0]); X(a[1]); if (c == 1) { Y(a[1]); } Z(a[1]); }");
+            "operation Main(){ use a=Qubit[2]; var c: bit = M(a[0]); X(a[1]); if (c == 1) { Y(a[1]); } Z(a[1]); }");
         var map = ContainerMap.Build(main);
 
         var iff = Assert.IsType<QIf>(main.Body[3]);
@@ -98,7 +98,7 @@ public class ContainerMapTests
     public void WhileRepeatAndElseIfChainsAreMapped()
     {
         var main = CompileMain(
-            "operation Main(){ use a=Qubit[2]; bit c = M(a[0]); " +
+            "operation Main(){ use a=Qubit[2]; var c: bit = M(a[0]); " +
             "while (c == 0) { X(a[1]); } repeat { Y(a[1]); } until (c == 1); " +
             "if (c == 1) { X(a[1]); } else if (c == 0) { Z(a[1]); } }");
         var map = ContainerMap.Build(main);

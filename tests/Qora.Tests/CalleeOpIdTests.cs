@@ -26,7 +26,7 @@ public class CalleeOpIdTests
     [Fact]
     public void UserCallBindsToItsCalleeId()
     {
-        var r = Parse("operation Foo(Qubit p){ X(p); }\noperation Main(){ use a=Qubit[1]; Foo(a[0]); }");
+        var r = Parse("operation Foo(p: Qubit){ X(p); }\noperation Main(){ use a=Qubit[1]; Foo(a[0]); }");
         var foo = r.Ir!.Operations.Single(o => o.Name == "Foo");
         Assert.Equal(foo.Id, SoleUserCall(r.Ir!).CalleeOpId);
     }
@@ -44,7 +44,7 @@ public class CalleeOpIdTests
     [Fact]
     public void AdjointCallBindsToTheForwardOp()
     {
-        var r = Parse("operation Foo(Qubit p){ X(p); }\noperation Main(){ use a=Qubit[1]; Adjoint Foo(a[0]); }");
+        var r = Parse("operation Foo(p: Qubit){ X(p); }\noperation Main(){ use a=Qubit[1]; Adjoint Foo(a[0]); }");
         var foo = r.Ir!.Operations.Single(o => o.Name == "Foo");
         var call = SoleUserCall(r.Ir!);
         Assert.Equal("Adjoint", call.Functors.Single());
@@ -56,7 +56,7 @@ public class CalleeOpIdTests
     [Fact]
     public void GenericCallRepointsFromGenericToSpecialization()
     {
-        var r = Parse("operation Loop(Qubit[] p){ X(p[0]); }\noperation Main(){ use a=Qubit[2]; Loop(a); }");
+        var r = Parse("operation Loop(p: Qubit[]){ X(p[0]); }\noperation Main(){ use a=Qubit[2]; Loop(a); }");
 
         // pre-mono (r.Ir): bound to the GENERIC Loop
         var genLoop = r.Ir!.Operations.Single(o => o.Name == "Loop");

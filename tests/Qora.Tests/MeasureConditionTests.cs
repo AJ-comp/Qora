@@ -15,7 +15,7 @@ public class MeasureConditionTests
     [InlineData("operation Main(){ use q=Qubit[2]; if(M(q[0])==1 && M(q[1])==0){ X(q[0]); } }")] // two measurements
     [InlineData("operation Main(){ use q=Qubit[3]; for i in 0..2 { if(M(q[i])==1){ X(q[i]); } } }")] // loop-var index
     [InlineData("operation Main(){ use q=Qubit[2]; if(M(q[0])==1){ if(M(q[1])==0){ X(q[0]); } } }")] // nested
-    [InlineData("operation Foo(Qubit[] a){ if(M(a[0])==1){ X(a[0]); } }\noperation Main(){ use q=Qubit[1]; Foo(q); }")] // inside a def
+    [InlineData("operation Foo(a: Qubit[]){ if(M(a[0])==1){ X(a[0]); } }\noperation Main(){ use q=Qubit[1]; Foo(q); }")] // inside a def
     [InlineData("operation Main(){ use q=Qubit[1]; if(!M(q[0])){ X(q[0]); } }")]        // negated measurement
     [InlineData("operation Main(){ use q=Qubit[1]; var __m0 = 5; if(M(q[0])==1){ Rx(__m0, q[0]); } }")] // temp name avoids a user's __m0
     public void AcceptsMeasurementInCondition(string source) => Compiler.Accepts(source);
@@ -82,14 +82,14 @@ public class MeasureConditionTests
     [InlineData("operation Main(){ use q=Qubit[2]; for i in 0..M(q[0]) { X(q[1]); } }")] // a for bound
     [InlineData("operation Main(){ use q=Qubit[2]; Rx(M(q[0]), q[1]); }")]              // a rotation angle
     [InlineData("operation Main(){ use q=Qubit[1]; var x = M(q[0]) + 1; Rx(x, q[0]); }")] // a mixed initializer
-    [InlineData("operation Main(){ use q=Qubit[1]; H(q[0]); int[] a = [M(q[0]) + 1, 2]; X(q[0]); }")] // an array-literal ELEMENT
+    [InlineData("operation Main(){ use q=Qubit[1]; H(q[0]); var a: int[] = [M(q[0]) + 1, 2]; X(q[0]); }")] // an array-literal ELEMENT
     // a non-measurement call in a condition has no lowering and is rejected:
-    [InlineData("operation Foo(Qubit a){ H(a); }\noperation Main(){ use q=Qubit[1]; if(Foo(q[0])==1){ X(q[0]); } }")]
+    [InlineData("operation Foo(a: Qubit){ H(a); }\noperation Main(){ use q=Qubit[1]; if(Foo(q[0])==1){ X(q[0]); } }")]
     public void RejectsCallInWrongPlace(string source) => Compiler.Rejects(source, "QSEM005");
 
     [Theory]
     // conditions WITHOUT a measurement are untouched:
-    [InlineData("operation Main(){ use q=Qubit[2]; bit r=M(q[0]); if(r==1){ X(q[1]); } }")]
-    [InlineData("operation Main(){ use q=Qubit[2]; int c=0; if(c==0){ X(q[0]); } }")]
+    [InlineData("operation Main(){ use q=Qubit[2]; var r: bit = M(q[0]); if(r==1){ X(q[1]); } }")]
+    [InlineData("operation Main(){ use q=Qubit[2]; var c: int = 0; if(c==0){ X(q[0]); } }")]
     public void LeavesPlainConditionsAlone(string source) => Compiler.Accepts(source);
 }

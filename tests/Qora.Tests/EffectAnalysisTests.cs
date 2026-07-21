@@ -80,7 +80,7 @@ public class EffectAnalysisTests
     [Fact]
     public void MeasurementInsideAnArrayLiteralElementIsAMeasureEvent()
     {
-        var (r, m) = Compile("operation Main(){ use q=Qubit[2]; H(q[0]); CNOT(q[0], q[1]); bit[] res = [M(q[1]), 0]; }");
+        var (r, m) = Compile("operation Main(){ use q=Qubit[2]; H(q[0]); CNOT(q[0], q[1]); var res: bit[] = [M(q[1]), 0]; }");
         var main = Op(r, "Main");
         var evs = EventsOf(m, main, main.Body[3]);
         Assert.Contains(evs, e => e.Kind == QubitEventKind.Measure && e.Qubit == At("q", 1));
@@ -144,7 +144,7 @@ public class EffectAnalysisTests
     [Fact]
     public void MeasurementIsAMeasureEventAndMarksOpIrreversible()
     {
-        var (r, m) = Compile("operation Main(){ use q=Qubit[1]; const int x = 1; H(q[0]); bit r = M(q[0]); }");
+        var (r, m) = Compile("operation Main(){ use q=Qubit[1]; const x: int = 1; H(q[0]); var r: bit = M(q[0]); }");
         var main = Op(r, "Main");
 
         Assert.Empty(EventsOf(m, main, main.Body[1]));       // const int x — no qubit contact
@@ -206,7 +206,7 @@ public class EffectAnalysisTests
     public void IfBranchLeavesBothAppearContainerHasNone()
     {
         var (r, m) = Compile(
-            "operation Main(){ use q=Qubit[2]; bit r = M(q[0]); if (r == 1) { X(q[0]); } else { H(q[1]); } }");
+            "operation Main(){ use q=Qubit[2]; var r: bit = M(q[0]); if (r == 1) { X(q[0]); } else { H(q[1]); } }");
         var main = Op(r, "Main");
         var iff = Assert.IsType<QIf>(main.Body[2]);
 
@@ -222,8 +222,8 @@ public class EffectAnalysisTests
     public void CallEventsProjectThroughTwoLevels()
     {
         var (r, m) = Compile(
-            "operation Foo(Qubit a, Qubit b){ CNOT(a, b); }\n" +
-            "operation Bar(Qubit x, Qubit y){ Foo(x, y); }\n" +
+            "operation Foo(a: Qubit, b: Qubit){ CNOT(a, b); }\n" +
+            "operation Bar(x: Qubit, y: Qubit){ Foo(x, y); }\n" +
             "operation Main(){ use q=Qubit[2]; Bar(q[0], q[1]); }");
 
         var foo = m.FindOpEffects(Op(r, "Foo").Id)!;
@@ -244,7 +244,7 @@ public class EffectAnalysisTests
     public void SingleQubitParamProjectsLiteralPreciselyAndLoopVarAsBlanket()
     {
         var (r, m) = Compile(
-            "operation Foo(Qubit a){ X(a); }\n" +
+            "operation Foo(a: Qubit){ X(a); }\n" +
             "operation Main(){ use q=Qubit[3]; Foo(q[1]); for i in 0..2 { Foo(q[i]); } }");
         var main = Op(r, "Main");
         var body = main.Body;
@@ -260,7 +260,7 @@ public class EffectAnalysisTests
     public void AdjointCallHasSameEventsAsPlainCall()
     {
         var (r, m) = Compile(
-            "operation Foo(Qubit[] a){ H(a[0]); CNOT(a[0], a[1]); }\n" +
+            "operation Foo(a: Qubit[]){ H(a[0]); CNOT(a[0], a[1]); }\n" +
             "operation Main(){ use q=Qubit[2]; Foo(q); Adjoint Foo(q); }");
         var main = Op(r, "Main");
 
@@ -315,7 +315,7 @@ public class EffectAnalysisTests
             "  H(q[0]);\n" +
             "  Rz(pi/2, q[1]);\n" +
             "  for i in 0..1 { CNOT(q[0], q[1]); }\n" +
-            "  bit r = M(q[0]);\n" +
+            "  var r: bit = M(q[0]);\n" +
             "  if (r == 1) { X(q[1]); }\n" +
             "}");
         var main = Op(r, "Main");
@@ -382,8 +382,8 @@ public class EffectAnalysisTests
     public void IrreversibleFlagMarksResetAndIrreversibleCallButNotUnitaryWriteOrMeasure()
     {
         var (r, m) = Compile(
-            "operation Sink(Qubit a){ Reset(a); }\n" +
-            "operation Main(){ use q=Qubit[4]; H(q[0]); Reset(q[1]); bit b = M(q[2]); Sink(q[3]); }");
+            "operation Sink(a: Qubit){ Reset(a); }\n" +
+            "operation Main(){ use q=Qubit[4]; H(q[0]); Reset(q[1]); var b: bit = M(q[2]); Sink(q[3]); }");
         var main = Op(r, "Main");
 
         // H(q[0]) — a reversible unitary write: not irreversible
@@ -435,8 +435,8 @@ public class EffectAnalysisTests
     public void SuperpositionPropagatesThroughCallsPerParam()
     {
         var (r, m) = Compile(
-            "operation Super(Qubit a){ H(a); }\n" +
-            "operation Classical(Qubit a){ X(a); }\n" +
+            "operation Super(a: Qubit){ H(a); }\n" +
+            "operation Classical(a: Qubit){ X(a); }\n" +
             "operation Main(){ use q=Qubit[2]; Super(q[0]); Classical(q[1]); }");
         var main = Op(r, "Main");
 
@@ -455,8 +455,8 @@ public class EffectAnalysisTests
     public void AncillaIsBirthCleanupCandidateIsLiveness()
     {
         var (r, m) = Compile(
-            "operation Foo(Qubit p){ H(p); }\n" +
-            "operation Main(){ use a=Qubit[1]; use o=Qubit[1]; Foo(a[0]); H(o[0]); bit b = M(o[0]); }");
+            "operation Foo(p: Qubit){ H(p); }\n" +
+            "operation Main(){ use a=Qubit[1]; use o=Qubit[1]; Foo(a[0]); H(o[0]); var b: bit = M(o[0]); }");
         var main = Op(r, "Main");
         var foo = Op(r, "Foo");
 
@@ -529,7 +529,7 @@ public class EffectAnalysisTests
         Assert.Equal(main3.Body[2].Id, v3.Culprit!.StmtId);          // culprit = the H(a[0])
 
         // (unsafe: measured) a collapse cannot be replayed
-        var (r4, m4) = Compile("operation Main(){ use a=Qubit[1]; X(a[0]); bit c = M(a[0]); }");
+        var (r4, m4) = Compile("operation Main(){ use a=Qubit[1]; X(a[0]); var c: bit = M(a[0]); }");
         Assert.False(m4.IsSafelyUncomputable(Op(r4, "Main"), Whole("a")));
         Assert.Equal(UncomputeBlocker.Measured, m4.UncomputeSafety(Op(r4, "Main"), Whole("a")).Blocker);
 
@@ -560,8 +560,8 @@ public class EffectAnalysisTests
     public void UncomputeReportClassifiesQubitsAndNamesTheBlocker()
     {
         var (r, m) = Compile(
-            "operation Foo(Qubit p){ X(p); }\n" +
-            "operation Main(){ use a=Qubit[1]; use h=Qubit[1]; use o=Qubit[1]; X(a[0]); H(h[0]); bit b = M(o[0]); Foo(a[0]); }");
+            "operation Foo(p: Qubit){ X(p); }\n" +
+            "operation Main(){ use a=Qubit[1]; use h=Qubit[1]; use o=Qubit[1]; X(a[0]); H(h[0]); var b: bit = M(o[0]); Foo(a[0]); }");
         var report = UncomputeReport.Format(r.AnalyzedIr, m);
 
         Assert.Contains("p: input (parameter) — caller-owned, not an ancilla", report);                          // param = input
@@ -583,7 +583,7 @@ public class EffectAnalysisTests
     {
         // partner rewritten inside the window — the original attack; culprit = the SWAP's partner write
         var (r1, m1) = Compile(
-            "operation Main(){ use anc=Qubit[1]; use x=Qubit[1]; use o=Qubit[1]; X(x[0]); SWAP(anc[0], x[0]); X(x[0]); CNOT(anc[0], o[0]); bit b = M(o[0]); }");
+            "operation Main(){ use anc=Qubit[1]; use x=Qubit[1]; use o=Qubit[1]; X(x[0]); SWAP(anc[0], x[0]); X(x[0]); CNOT(anc[0], o[0]); var b: bit = M(o[0]); }");
         var main1 = Op(r1, "Main");
         var v1 = m1.UncomputeSafety(main1, Whole("anc"));
         Assert.Equal(UncomputeBlocker.CoWrittenPartner, v1.Blocker);
@@ -593,14 +593,14 @@ public class EffectAnalysisTests
         // clean window is NOT enough: the adjoint still reverts the partner at anc's death,
         // and the partner's next use (CNOT(x,p)) sits AFTER that death — must still block
         var (r2, m2) = Compile(
-            "operation Main(){ use anc=Qubit[1]; use x=Qubit[1]; use o=Qubit[1]; use p=Qubit[1]; X(x[0]); SWAP(anc[0], x[0]); CNOT(anc[0], o[0]); CNOT(x[0], p[0]); bit b1 = M(o[0]); bit b2 = M(p[0]); }");
+            "operation Main(){ use anc=Qubit[1]; use x=Qubit[1]; use o=Qubit[1]; use p=Qubit[1]; X(x[0]); SWAP(anc[0], x[0]); CNOT(anc[0], o[0]); CNOT(x[0], p[0]); var b1: bit = M(o[0]); var b2: bit = M(p[0]); }");
         Assert.Equal(UncomputeBlocker.CoWrittenPartner,
             m2.UncomputeSafety(Op(r2, "Main"), Whole("anc")).Blocker);
 
         // the same value-move hidden inside a call: Twist writes BOTH its params
         var (r3, m3) = Compile(
-            "operation Twist(Qubit a, Qubit s){ CNOT(s, a); X(s); }\n" +
-            "operation Main(){ use anc=Qubit[1]; use x=Qubit[1]; use o=Qubit[1]; X(x[0]); Twist(anc[0], x[0]); X(x[0]); CNOT(anc[0], o[0]); bit b = M(o[0]); }");
+            "operation Twist(a: Qubit, s: Qubit){ CNOT(s, a); X(s); }\n" +
+            "operation Main(){ use anc=Qubit[1]; use x=Qubit[1]; use o=Qubit[1]; X(x[0]); Twist(anc[0], x[0]); X(x[0]); CNOT(anc[0], o[0]); var b: bit = M(o[0]); }");
         Assert.Equal(UncomputeBlocker.CoWrittenPartner,
             m3.UncomputeSafety(Op(r3, "Main"), Whole("anc")).Blocker);
     }
@@ -628,7 +628,7 @@ public class EffectAnalysisTests
     public void TransitiveMeasureThroughACallMakesAnOutput()
     {
         var (r, m) = Compile(
-            "operation ReadOut(Qubit[] s){ bit r = M(s[0]); }\n" +
+            "operation ReadOut(s: Qubit[]){ var r: bit = M(s[0]); }\n" +
             "operation Main(){ use o=Qubit[1]; X(o[0]); ReadOut(o); }");
         var main = Op(r, "Main");
 
@@ -672,13 +672,13 @@ public class EffectAnalysisTests
     public void CulpritsNameTheMeasuringAndIrreversibleStatements()
     {
         var (r1, m1) = Compile(
-            "operation Main(){ use a=Qubit[1]; use s=Qubit[1]; use o=Qubit[1]; CNOT(s[0], a[0]); bit r = M(s[0]); CNOT(a[0], o[0]); }");
+            "operation Main(){ use a=Qubit[1]; use s=Qubit[1]; use o=Qubit[1]; CNOT(s[0], a[0]); var r: bit = M(s[0]); CNOT(a[0], o[0]); }");
         var v1 = m1.UncomputeSafety(Op(r1, "Main"), Whole("a"));
         Assert.Equal(UncomputeBlocker.SourceDied, v1.Blocker);
         Assert.Equal(QubitEventKind.Measure, v1.Culprit!.Kind);      // the killer was a measurement of the source
 
         var (r2, m2) = Compile(
-            "operation Zap(Qubit t){ Reset(t); }\n" +
+            "operation Zap(t: Qubit){ Reset(t); }\n" +
             "operation Main(){ use a=Qubit[1]; X(a[0]); Zap(a[0]); }");
         var main2 = Op(r2, "Main");
         var v2 = m2.UncomputeSafety(main2, Whole("a"));
@@ -692,7 +692,7 @@ public class EffectAnalysisTests
     public void AdjointCallPropagatesSuperpositionFlag()
     {
         var (r, m) = Compile(
-            "operation Sup(Qubit a){ H(a); }\n" +
+            "operation Sup(a: Qubit){ H(a); }\n" +
             "operation Main(){ use q=Qubit[1]; Adjoint Sup(q[0]); }");
         var main = Op(r, "Main");
 
@@ -759,7 +759,7 @@ public class EffectAnalysisTests
     public void ReportShowsMonomorphizedSpecializationsOfGenerics()
     {
         var (r, m) = Compile(
-            "operation Prep(Qubit[] p){ X(p[0]); }\n" +
+            "operation Prep(p: Qubit[]){ X(p[0]); }\n" +
             "operation Main(){ use w=Qubit[2]; Prep(w); }");
         var report = UncomputeReport.Format(r.AnalyzedIr, m);
 
@@ -797,7 +797,7 @@ public class EffectAnalysisTests
         // write inside an if → blocked, culprit = the contained CNOT
         var (r1, m1) = Compile(
             "operation Main(){ use a=Qubit[1]; use s=Qubit[1]; use o=Qubit[1]; use x=Qubit[1]; " +
-            "bit r = M(x[0]); if (r == 1) { CNOT(s[0], a[0]); } CNOT(a[0], o[0]); }");
+            "var r: bit = M(x[0]); if (r == 1) { CNOT(s[0], a[0]); } CNOT(a[0], o[0]); }");
         var main1 = Op(r1, "Main");
         var iff1 = Assert.IsType<QIf>(main1.Body[5]);
         var v1 = m1.UncomputeSafety(main1, Whole("a"));
@@ -812,7 +812,7 @@ public class EffectAnalysisTests
         // READ inside an if is harmless: a's writes are all unconditional, so the adjoint mirrors them
         var (r3, m3) = Compile(
             "operation Main(){ use a=Qubit[1]; use o=Qubit[1]; use x=Qubit[1]; " +
-            "bit r = M(x[0]); X(a[0]); if (r == 1) { CNOT(a[0], o[0]); } }");
+            "var r: bit = M(x[0]); X(a[0]); if (r == 1) { CNOT(a[0], o[0]); } }");
         Assert.True(m3.IsSafelyUncomputable(Op(r3, "Main"), Whole("a")));
     }
 
@@ -826,7 +826,7 @@ public class EffectAnalysisTests
         // if: a's death is the control Read inside the if; the source kill X(s) follows it inside the same if
         var (r1, m1) = Compile(
             "operation Main(){ use a=Qubit[1]; use s=Qubit[1]; use o=Qubit[1]; use x=Qubit[1]; " +
-            "H(x[0]); bit r = M(x[0]); X(s[0]); CNOT(s[0], a[0]); if (r == 1) { CNOT(a[0], o[0]); X(s[0]); } }");
+            "H(x[0]); var r: bit = M(x[0]); X(s[0]); CNOT(s[0], a[0]); if (r == 1) { CNOT(a[0], o[0]); X(s[0]); } }");
         var v1 = m1.UncomputeSafety(Op(r1, "Main"), Whole("a"));
         Assert.Equal(UncomputeBlocker.SourceDied, v1.Blocker);
         Assert.Equal(At("s", 0), v1.Culprit!.Qubit);                 // the in-container kill is the culprit
@@ -886,8 +886,8 @@ public class EffectAnalysisTests
     public void BlanketPartnerUnderElementQueryIsARealSource()
     {
         var (r, m) = Compile(
-            "operation Fold(Qubit[] p){ for i in 0..0 { CNOT(p[i], p[1]); } }\n" +
-            "operation Main(){ use a=Qubit[2]; use w=Qubit[1]; X(a[0]); Fold(a); X(a[0]); CNOT(a[1], w[0]); bit b = M(a[0]); }");
+            "operation Fold(p: Qubit[]){ for i in 0..0 { CNOT(p[i], p[1]); } }\n" +
+            "operation Main(){ use a=Qubit[2]; use w=Qubit[1]; X(a[0]); Fold(a); X(a[0]); CNOT(a[1], w[0]); var b: bit = M(a[0]); }");
         // a[1] = f(a[0]) via the Fold call (whose control blankets to the whole register); X(a[0]) kills the source
         var v = m.UncomputeSafety(Op(r, "Main"), At("a", 1));
         Assert.Equal(UncomputeBlocker.SourceDied, v.Blocker);
@@ -902,14 +902,14 @@ public class EffectAnalysisTests
     public void ReadThroughAMeasuringCalleeStaysCleanWriteStaysBlocked()
     {
         var (r1, m1) = Compile(
-            "operation Peek(Qubit ctl, Qubit[] res){ CNOT(ctl, res[0]); bit b = M(res[0]); }\n" +
+            "operation Peek(ctl: Qubit, res: Qubit[]){ CNOT(ctl, res[0]); var b: bit = M(res[0]); }\n" +
             "operation Main(){ use a=Qubit[1]; use o=Qubit[1]; X(a[0]); Peek(a[0], o); }");
         var main1 = Op(r1, "Main");
         Assert.True(m1.IsSafelyUncomputable(main1, Whole("a")));          // a: control only — clean
         Assert.False(m1.IsCleanupCandidate(main1.Id, Whole("o")));        // o: measured through the call
 
         var (r2, m2) = Compile(
-            "operation Mix(Qubit p, Qubit[] s){ CNOT(s[0], p); bit r = M(s[0]); }\n" +
+            "operation Mix(p: Qubit, s: Qubit[]){ CNOT(s[0], p); var r: bit = M(s[0]); }\n" +
             "operation Main(){ use a=Qubit[1]; use k=Qubit[1]; Mix(a[0], k); }");
         Assert.Equal(UncomputeBlocker.Irreversible,
             m2.UncomputeSafety(Op(r2, "Main"), Whole("a")).Blocker);      // a: WRITTEN by the measuring callee
@@ -921,7 +921,7 @@ public class EffectAnalysisTests
     public void WhileAndRepeatBodiesBlockContainedWrites()
     {
         var (r, m) = Compile(
-            "operation Main(){ use a=Qubit[1]; use b=Qubit[1]; use x=Qubit[1]; bit r = M(x[0]); " +
+            "operation Main(){ use a=Qubit[1]; use b=Qubit[1]; use x=Qubit[1]; var r: bit = M(x[0]); " +
             "while (r == 0) { X(a[0]); } repeat { X(b[0]); } until (r == 1); }");
         var main = Op(r, "Main");
         var wh = Assert.IsType<QWhile>(main.Body[4]);
@@ -973,7 +973,7 @@ public class EffectAnalysisTests
     [Fact]
     public void MeasuredRegisterStillNamesItsCleanElements()
     {
-        var (r, m) = Compile("operation Main(){ use q=Qubit[2]; X(q[1]); bit b = M(q[0]); }");
+        var (r, m) = Compile("operation Main(){ use q=Qubit[2]; X(q[1]); var b: bit = M(q[0]); }");
         Assert.Contains("q: ancilla, measured — promoted to output, not a cleanup candidate — per element: q[1] safe cleanup candidate",
             UncomputeReport.Format(r.AnalyzedIr, m));
     }
@@ -985,7 +985,7 @@ public class EffectAnalysisTests
     public void MeasureAndResetInOneCallSplitPerQubit()
     {
         var (r, m) = Compile(
-            "operation Both(Qubit[] a, Qubit b){ bit r = M(a[0]); Reset(b); }\n" +
+            "operation Both(a: Qubit[], b: Qubit){ var r: bit = M(a[0]); Reset(b); }\n" +
             "operation Main(){ use x=Qubit[1]; use y=Qubit[1]; Both(x, y[0]); }");
         var main = Op(r, "Main");
         var evs = EventsOf(m, main, main.Body[2]);
@@ -1012,8 +1012,8 @@ public class EffectAnalysisTests
     {
         // opaque call whose adjoint has the full statement breadth
         var (r1, m1) = Compile(
-            "operation Bcast(Qubit[] p){ for i in 0..1 { X(p[i]); } }\n" +
-            "operation Main(){ use a=Qubit[2]; Bcast(a); bit c = M(a[0]); }");
+            "operation Bcast(p: Qubit[]){ for i in 0..1 { X(p[i]); } }\n" +
+            "operation Main(){ use a=Qubit[2]; Bcast(a); var c: bit = M(a[0]); }");
         var main1 = Op(r1, "Main");
         var v1 = m1.UncomputeSafety(main1, At("a", 1));
         Assert.Equal(UncomputeBlocker.CoWrittenPartner, v1.Blocker);
@@ -1021,12 +1021,12 @@ public class EffectAnalysisTests
         Assert.DoesNotContain("a[1] safe cleanup candidate", UncomputeReport.Format(r1.AnalyzedIr, m1));
 
         // plain broadcast — same hole, same block
-        var (r2, m2) = Compile("operation Main(){ use a=Qubit[2]; X(a); bit c = M(a[0]); }");
+        var (r2, m2) = Compile("operation Main(){ use a=Qubit[2]; X(a); var c: bit = M(a[0]); }");
         Assert.Equal(UncomputeBlocker.CoWrittenPartner,
             m2.UncomputeSafety(Op(r2, "Main"), At("a", 1)).Blocker);
 
         // birth exemption: element-precise writes after the (blanket) birth are still per-element safe
-        var (r3, m3) = Compile("operation Main(){ use a=Qubit[2]; X(a[1]); bit c = M(a[0]); }");
+        var (r3, m3) = Compile("operation Main(){ use a=Qubit[2]; X(a[1]); var c: bit = M(a[0]); }");
         Assert.True(m3.IsSafelyUncomputable(Op(r3, "Main"), At("a", 1)));
     }
 
@@ -1038,7 +1038,7 @@ public class EffectAnalysisTests
     {
         var (r, m) = Compile(
             "operation Main(){ use a=Qubit[1]; use s=Qubit[1]; use o=Qubit[1]; use x=Qubit[1]; " +
-            "H(x[0]); bit r = M(x[0]); X(s[0]); CNOT(s[0], a[0]); " +
+            "H(x[0]); var r: bit = M(x[0]); X(s[0]); CNOT(s[0], a[0]); " +
             "if (r == 1) { if (r == 1) { CNOT(a[0], o[0]); } X(s[0]); } }");
         var v = m.UncomputeSafety(Op(r, "Main"), Whole("a"));
         Assert.Equal(UncomputeBlocker.SourceDied, v.Blocker);            // death in the INNER if,
@@ -1080,12 +1080,12 @@ public class EffectAnalysisTests
     public void YAndCYNonQfreePropagateThroughCallsAndFunctors()
     {
         // through a call
-        var (r1, m1) = Compile("operation Yer(Qubit a){ Y(a); }\noperation Main(){ use q=Qubit[1]; Yer(q[0]); }");
+        var (r1, m1) = Compile("operation Yer(a: Qubit){ Y(a); }\noperation Main(){ use q=Qubit[1]; Yer(q[0]); }");
         Assert.Equal(UncomputeBlocker.NonQfreeWrite, m1.UncomputeSafety(Op(r1, "Main"), Whole("q")).Blocker);
 
         // CY through a call — target blocked, control untouched by the flag
         var (r2, m2) = Compile(
-            "operation CYer(Qubit c, Qubit t){ CY(c, t); }\n" +
+            "operation CYer(c: Qubit, t: Qubit){ CY(c, t); }\n" +
             "operation Main(){ use c=Qubit[1]; use t=Qubit[1]; CYer(c[0], t[0]); }");
         var main2 = Op(r2, "Main");
         Assert.Equal(UncomputeBlocker.NonQfreeWrite, m2.UncomputeSafety(main2, Whole("t")).Blocker);
@@ -1153,8 +1153,8 @@ public class EffectAnalysisTests
     public void ReportRendersPerElementBlockReasonUnderABlanketHeadline()
     {
         var (r, m) = Compile(
-            "operation Bcast(Qubit[] p){ for i in 0..1 { X(p[i]); } }\n" +
-            "operation Main(){ use a=Qubit[2]; Bcast(a); bit c = M(a[0]); }");
+            "operation Bcast(p: Qubit[]){ for i in 0..1 { X(p[i]); } }\n" +
+            "operation Main(){ use a=Qubit[2]; Bcast(a); var c: bit = M(a[0]); }");
         var report = UncomputeReport.Format(r.AnalyzedIr, m);
         Assert.Contains("a: ancilla, measured — promoted to output, not a cleanup candidate", report);                    // headline: a[0] measured
         Assert.Contains("a[1] blocked: statement-wide write of `a`", report);        // element reason rendered
@@ -1169,13 +1169,13 @@ public class EffectAnalysisTests
     public void VerdictRelaysRungOneRulingsBeforeAnySafetyClause()
     {
         // a parameter is not an ancilla — the safety question does not apply to it
-        var (r1, m1) = Compile("operation Foo(Qubit p){ X(p); }\noperation Main(){ use q=Qubit[1]; Foo(q[0]); }");
+        var (r1, m1) = Compile("operation Foo(p: Qubit){ X(p); }\noperation Main(){ use q=Qubit[1]; Foo(q[0]); }");
         Assert.Equal(UncomputeBlocker.NotACleanupCandidate,
             m1.UncomputeSafety(Op(r1, "Foo"), Whole("p")).Blocker);
 
         // H (a non-qfree write, order 1) happens BEFORE the measurement (order 2) — the verdict still says
         // Measured: candidacy is ruled first, the scan never runs for a promoted output
-        var (r2, m2) = Compile("operation Main(){ use a=Qubit[1]; H(a[0]); bit c = M(a[0]); }");
+        var (r2, m2) = Compile("operation Main(){ use a=Qubit[1]; H(a[0]); var c: bit = M(a[0]); }");
         var main2 = Op(r2, "Main");
         var v = m2.UncomputeSafety(main2, Whole("a"));
         Assert.Equal(UncomputeBlocker.Measured, v.Blocker);
@@ -1183,7 +1183,7 @@ public class EffectAnalysisTests
 
         // Measured outranks EVERY scan clause, Irreversible included: the Reset (order 2) precedes the
         // measurement (order 3) in program order, yet the candidacy ruling still answers first
-        var (r3, m3) = Compile("operation Main(){ use a=Qubit[1]; X(a[0]); Reset(a[0]); bit c = M(a[0]); }");
+        var (r3, m3) = Compile("operation Main(){ use a=Qubit[1]; X(a[0]); Reset(a[0]); var c: bit = M(a[0]); }");
         var v3 = m3.UncomputeSafety(Op(r3, "Main"), Whole("a"));
         Assert.Equal(UncomputeBlocker.Measured, v3.Blocker);
         Assert.Equal(QubitEventKind.Measure, v3.Culprit!.Kind);
@@ -1199,14 +1199,14 @@ public class EffectAnalysisTests
         // H(b);CNOT(b,a);Y(a);H(b);M(b): a is entangled with b at the Y; injecting Y†;CNOT strips a
         // survivor-relative phase, turning a 50/50 m into a deterministic flip — a is NOT safe
         var (r1, m1) = Compile(
-            "operation Main(){ use a=Qubit[1]; use b=Qubit[1]; H(b[0]); CNOT(b[0], a[0]); Y(a[0]); H(b[0]); bit m = M(b[0]); }");
+            "operation Main(){ use a=Qubit[1]; use b=Qubit[1]; H(b[0]); CNOT(b[0], a[0]); Y(a[0]); H(b[0]); var m: bit = M(b[0]); }");
         var main1 = Op(r1, "Main");
         Assert.False(m1.IsSafelyUncomputable(main1, Whole("a")));
         Assert.Equal(UncomputeBlocker.NonQfreeWrite, m1.UncomputeSafety(main1, Whole("a")).Blocker);
 
         // CY variant — same hole through the controlled form
         var (r2, m2) = Compile(
-            "operation Main(){ use a=Qubit[1]; use b=Qubit[1]; H(b[0]); CY(b[0], a[0]); H(b[0]); bit m = M(b[0]); }");
+            "operation Main(){ use a=Qubit[1]; use b=Qubit[1]; H(b[0]); CY(b[0], a[0]); H(b[0]); var m: bit = M(b[0]); }");
         var main2 = Op(r2, "Main");
         Assert.False(m2.IsSafelyUncomputable(main2, Whole("a")));
         Assert.Equal(UncomputeBlocker.NonQfreeWrite, m2.UncomputeSafety(main2, Whole("a")).Blocker);

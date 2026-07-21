@@ -2,6 +2,15 @@
 
 All notable changes to the Qora Language extension.
 
+## 0.18.0
+
+- Bundles the **Qora v0.25** compiler. Type annotations are now **trailing** (`name: T`): a parameter is
+  `q: Qubit[]`, a declaration is `var x: int = 5` or `const a: int[] = [1, 2]`. The type stays optional
+  (`var x = 5` still infers it). The leading forms (`int n`, `Qubit[] q`, `bit r = M(q[0])`) are removed —
+  there is one way to write a type. Existing files update mechanically: move the type after the name with a
+  `:`, and prefix a keyword-less typed declaration with `var`. Snippets and the demo example ship in the
+  new syntax.
+
 ## 0.17.1
 
 - Bundles the **Qora v0.24** compiler — a hardening release over v0.23. Array-local hoisting now mints

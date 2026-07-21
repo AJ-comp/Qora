@@ -12,11 +12,11 @@ public class NegationTests
 {
     [Fact]
     public void NotOnBitBecomesEqualsFalse() =>
-        Compiler.Emits("operation Main(){ use q=Qubit[1]; bit r=M(q[0]); if(!r){ X(q[0]); } }", "r == false");
+        Compiler.Emits("operation Main(){ use q=Qubit[1]; var r: bit = M(q[0]); if(!r){ X(q[0]); } }", "r == false");
 
     [Fact]
     public void NotOnIntVarBecomesEqualsZero() =>
-        Compiler.Emits("operation Main(){ use q=Qubit[1]; int n=0; if(!n){ X(q[0]); } }", "n == 0");
+        Compiler.Emits("operation Main(){ use q=Qubit[1]; var n: int = 0; if(!n){ X(q[0]); } }", "n == 0");
 
     [Fact]
     public void NotOnLoopVarBecomesEqualsZero() =>
@@ -45,7 +45,7 @@ public class NegationTests
         // equality UNDER a relational, which the emitted token run would re-parse the other way
         // (`a == 0 < 2` groups as a == (0 < 2)). The renderer must parenthesize the synthesized
         // subtree so the QASM keeps the tree's grouping.
-        var r = Compiler.Compile("operation Main(){ use q=Qubit[1]; int a = 0; if (!a < 2) { X(q[0]); } }");
+        var r = Compiler.Compile("operation Main(){ use q=Qubit[1]; var a: int = 0; if (!a < 2) { X(q[0]); } }");
         Assert.True(r.Success, string.Join(" | ", r.Errors.Select(e => $"{e.Code}: {e.Message}")));
         Assert.Contains("( a == 0 ) < 2", r.Qasm);
     }
@@ -56,7 +56,7 @@ public class NegationTests
         // `n == !m` means n == (!m) — the rewrite synthesizes `m == 0` as the RIGHT child of `==`.
         // Unparenthesized, `n == m == 0` re-parses LEFT-associatively as (n == m) == 0 — the opposite
         // branch fires. A same-precedence RIGHT child must be parenthesized.
-        var r = Compiler.Compile("operation Main(){ use q=Qubit[1]; int n = 2; int m = 5; if (n == !m) { X(q[0]); } }");
+        var r = Compiler.Compile("operation Main(){ use q=Qubit[1]; var n: int = 2; var m: int = 5; if (n == !m) { X(q[0]); } }");
         Assert.True(r.Success, string.Join(" | ", r.Errors.Select(e => $"{e.Code}: {e.Message}")));
         Assert.Contains("n == ( m == 0 )", r.Qasm);
     }

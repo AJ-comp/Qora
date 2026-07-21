@@ -13,7 +13,7 @@ public class TypeInferenceTests
     {
         // `var res = mb` where mb is a bit must emit `bit res = mb;` — not `int res = mb;` — and the condition
         // that reads it must compare as a bit (`res == true`), matching an explicitly-typed `bit res`.
-        var r = Compiler.Compile("operation Main(){ use q=Qubit[1]; bit mb=M(q[0]); var res = mb; if(res==1){ X(q[0]); } }");
+        var r = Compiler.Compile("operation Main(){ use q=Qubit[1]; var mb: bit = M(q[0]); var res = mb; if(res==1){ X(q[0]); } }");
         Assert.True(r.Success, string.Join(" | ", r.Errors.Select(e => $"{e.Code}: {e.Message}")));
         Assert.Contains("bit res = mb;", r.Qasm);
         Assert.DoesNotContain("int res", r.Qasm);
@@ -22,7 +22,7 @@ public class TypeInferenceTests
 
     [Fact]
     public void UntypedVarFromIntIsEmittedAsInt() =>
-        Compiler.Emits("operation Main(){ use q=Qubit[1]; int cnt=5; var got = cnt; Rx(got, q[0]); }", "int got = cnt;");
+        Compiler.Emits("operation Main(){ use q=Qubit[1]; var cnt: int = 5; var got = cnt; Rx(got, q[0]); }", "int got = cnt;");
 
     [Fact]
     public void UntypedVarFromRealIsEmittedAsFloat() =>

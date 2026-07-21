@@ -66,7 +66,7 @@ public class QubitGraphTests
     public void ParameterValuesStartAtASeedNode()
     {
         var (r, m) = Compile(
-            "operation Foo(Qubit p){ X(p); }\n" +
+            "operation Foo(p: Qubit){ X(p); }\n" +
             "operation Main(){ use q=Qubit[1]; Foo(q[0]); }");
         var foo = Op(r, "Foo");
         var g = m.Graph(foo.Id)!;
@@ -117,7 +117,7 @@ public class QubitGraphTests
         Assert.True(r1.Success);
 
         var (r2, _) = Compile(
-            "operation Two(Qubit a, Qubit b){ X(a); X(b); }\n" +
+            "operation Two(a: Qubit, b: Qubit){ X(a); X(b); }\n" +
             "operation Main(){ use q=Qubit[2]; Two(q[0], q[1]); X(q); }");
         Assert.True(r2.Success);
 
@@ -152,7 +152,7 @@ public class QubitGraphTests
     public void BlanketReadBreadthLivesOnTheEdgeVia()
     {
         var (r, m) = Compile(
-            "operation Fold(Qubit[] p){ for i in 0..0 { CNOT(p[i], p[1]); } }\n" +
+            "operation Fold(p: Qubit[]){ for i in 0..0 { CNOT(p[i], p[1]); } }\n" +
             "operation Main(){ use a=Qubit[2]; X(a[0]); Fold(a); }");
         var main = Op(r, "Main");
         var g = m.Graph(main.Id)!;

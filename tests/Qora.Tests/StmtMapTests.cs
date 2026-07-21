@@ -27,7 +27,7 @@ public class StmtMapTests
     public void EveryStatementResolvesToItsOwnNode()
     {
         var main = CompileMain(
-            "operation Main(){ use a=Qubit[2]; bit c = M(a[0]); X(a[1]); " +
+            "operation Main(){ use a=Qubit[2]; var c: bit = M(a[0]); X(a[1]); " +
             "if (c == 1) { Y(a[1]); } for i in 0..1 { Z(a[1]); } }");
         var map = StmtMap.Build(main);
 

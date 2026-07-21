@@ -5,8 +5,8 @@ namespace Qora.Tests;
 public class QubitArrayTests
 {
     [Theory]
-    [InlineData("operation Bad(Qubit[2] q){} operation Main(){ use q=Qubit[2]; Bad(q); }")]
-    [InlineData("operation Bad(Qubit[n] q){} operation Main(){ use q=Qubit[2]; Bad(q); }")]
+    [InlineData("operation Bad(q: Qubit[2]){} operation Main(){ use q=Qubit[2]; Bad(q); }")]
+    [InlineData("operation Bad(q: Qubit[n]){} operation Main(){ use q=Qubit[2]; Bad(q); }")]
     public void RejectsLengthsInSourceParameterTypes(string source)
     {
         var result = Compiler.Compile(source);
@@ -19,7 +19,7 @@ public class QubitArrayTests
     public void CreatesOneHiddenSpecializationPerCallSize()
     {
         var result = Compile("""
-            operation Visit(Qubit[] qubits) {
+            operation Visit(qubits: Qubit[]) {
                 for i in 0..qubits.Count-1 { X(qubits[i]); }
             }
             operation Main() {
@@ -41,7 +41,7 @@ public class QubitArrayTests
     public void BindsMultipleQubitArraysIndependently()
     {
         var result = Compile("""
-            operation Pair(Qubit[] left, Qubit[] right) {
+            operation Pair(left: Qubit[], right: Qubit[]) {
                 for i in 0..left.Count-1 { X(left[i]); }
                 for j in 0..right.Count-1 { X(right[j]); }
             }
@@ -61,10 +61,10 @@ public class QubitArrayTests
     public void SpecializesNestedQubitArrayCalls()
     {
         var result = Compile("""
-            operation Inner(Qubit[] qubits) {
+            operation Inner(qubits: Qubit[]) {
                 for i in 0..qubits.Count-1 { X(qubits[i]); }
             }
-            operation Outer(Qubit[] qubits) { Inner(qubits); }
+            operation Outer(qubits: Qubit[]) { Inner(qubits); }
             operation Main() {
                 use work = Qubit[4];
                 Outer(work);
@@ -92,13 +92,13 @@ public class QubitArrayTests
     public void SpecializationLeavesClassicalArrayCountForSizeofLowering()
     {
         var result = Compile("""
-            operation Mix(Qubit[] q, int[] values) {
+            operation Mix(q: Qubit[], values: int[]) {
                 for i in 0..q.Count-1 { X(q[i]); }
                 for j in 0..values.Count-1 { values[j] = values[j] + 1; }
             }
             operation Main() {
                 use q = Qubit[2];
-                int[] values = [1, 2, 3];
+                var values: int[] = [1, 2, 3];
                 Mix(q, values);
             }
             """);
@@ -110,7 +110,7 @@ public class QubitArrayTests
     [Fact]
     public void RechecksLiteralBoundsAfterSpecialization() =>
         Compiler.Rejects(
-            "operation Bad(Qubit[] q){ X(q[2]); } operation Main(){ use q=Qubit[2]; Bad(q); }",
+            "operation Bad(q: Qubit[]){ X(q[2]); } operation Main(){ use q=Qubit[2]; Bad(q); }",
             "QSEM016");
 
     private static QoraParseResult Compile(string source)

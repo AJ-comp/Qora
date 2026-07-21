@@ -59,7 +59,7 @@ public class NodeIdentityTests
     public void PipelineWithSpecializationsAndAdjointHasUniqueIds()
     {
         var r = QoraParser.Parse(
-            "operation Flip(Qubit[] q){ for i in 0..q.Count-1 { X(q[i]); } }\n" +
+            "operation Flip(q: Qubit[]){ for i in 0..q.Count-1 { X(q[i]); } }\n" +
             "operation Main(){ use a=Qubit[2]; use b=Qubit[3]; Flip(a); Flip(b); Adjoint Flip(a); }");
         Assert.True(r.Success, string.Join(" | ", r.Errors));
         Assert.DoesNotContain(r.Errors, e => e.Code == "QINTERNAL");
@@ -71,7 +71,7 @@ public class NodeIdentityTests
     [Fact]
     public void SemanticsFindSymbolReturnsValidationTimeTypeById()
     {
-        var r = QoraParser.Parse("operation Main(){ use q=Qubit[1]; const int x = 1; H(q[0]); }");
+        var r = QoraParser.Parse("operation Main(){ use q=Qubit[1]; const x: int = 1; H(q[0]); }");
         Assert.True(r.Success, string.Join(" | ", r.Errors));
         Assert.NotNull(r.Semantics);
 
@@ -90,8 +90,8 @@ public class NodeIdentityTests
     public void ModelBasedSymbolFormatMatchesRebuildText()
     {
         var r = QoraParser.Parse(
-            "operation Flip(Qubit[] q){ for i in 0..q.Count-1 { X(q[i]); } }\n" +
-            "operation Main(){ use a=Qubit[2]; const int x = 1; Flip(a); }");
+            "operation Flip(q: Qubit[]){ for i in 0..q.Count-1 { X(q[i]); } }\n" +
+            "operation Main(){ use a=Qubit[2]; const x: int = 1; Flip(a); }");
         Assert.True(r.Success, string.Join(" | ", r.Errors));
         Assert.Equal(SymbolTableBuilder.Format(r.Ir), SymbolTableBuilder.Format(r.Ir, r.Semantics));
     }
@@ -105,7 +105,7 @@ public class NodeIdentityTests
     [Fact]
     public void ManglerRecordsEmittedNamesAndSourceNameStaysUserSpelling()
     {
-        var r = QoraParser.Parse("operation Main(){ use q=Qubit[1]; const int x = 1; H(q[0]); }");
+        var r = QoraParser.Parse("operation Main(){ use q=Qubit[1]; const x: int = 1; H(q[0]); }");
         Assert.True(r.Success, string.Join(" | ", r.Errors));
         Assert.NotNull(r.Semantics);
 
@@ -145,7 +145,7 @@ public class NodeIdentityTests
     public void ParameterAndOperationNodesCarryEmittedNameFacts()
     {
         var r = QoraParser.Parse(
-            "operation Foo(Qubit[] x){ H(x[0]); }\noperation Main(){ use q=Qubit[1]; Foo(q); }");
+            "operation Foo(x: Qubit[]){ H(x[0]); }\noperation Main(){ use q=Qubit[1]; Foo(q); }");
         Assert.True(r.Success, string.Join(" | ", r.Errors));
 
         var foo = r.AnalyzedIr!.Operations.Single(o => o.DisplayName == "Foo");
@@ -185,7 +185,7 @@ public class NodeIdentityTests
     public void OperationIsASymbolWithOneUsePerCallSite()
     {
         var r = QoraParser.Parse(
-            "operation Foo(Qubit[] q){ H(q[0]); }\n" +
+            "operation Foo(q: Qubit[]){ H(q[0]); }\n" +
             "operation Main(){ use a=Qubit[1]; use b=Qubit[1]; Foo(a); Foo(b); }");
         Assert.True(r.Success, string.Join(" | ", r.Errors));
 

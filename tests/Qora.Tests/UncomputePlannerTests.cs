@@ -86,7 +86,7 @@ public class UncomputePlannerTests
     [Theory]
     [InlineData("operation Main(){ use a=Qubit[1]; use b=Qubit[1]; Y(a[0]); CNOT(a[0], b[0]); }")] // phase-permutation write
     [InlineData("operation Main(){ use a=Qubit[1]; use b=Qubit[1]; H(a[0]); CNOT(a[0], b[0]); }")] // superposition write
-    [InlineData("operation Main(){ use a=Qubit[1]; X(a[0]); bit c = M(a[0]); }")]                   // measured → output
+    [InlineData("operation Main(){ use a=Qubit[1]; X(a[0]); var c: bit = M(a[0]); }")]              // measured → output
     public void UnsafeAncillaHasNoPlan(string src)
     {
         var (op, m, inv) = Compile(src);
@@ -130,9 +130,9 @@ public class UncomputePlannerTests
     //        just not auto-cleaned, never a crash (the QINTERNAL guard is now genuinely unreachable). ---
 
     [Theory]
-    [InlineData("operation Loop(Qubit p){ repeat { X(p); } until (1 == 1); }\n" +
+    [InlineData("operation Loop(p: Qubit){ repeat { X(p); } until (1 == 1); }\n" +
                 "operation Main(){ use a=Qubit[1]; use b=Qubit[1]; Loop(a[0]); CNOT(a[0], b[0]); }")]  // unknown-count loop
-    [InlineData("operation Mut(Qubit p){ int c = 0; c = c + 1; X(p); }\n" +
+    [InlineData("operation Mut(p: Qubit){ var c: int = 0; c = c + 1; X(p); }\n" +
                 "operation Main(){ use a=Qubit[1]; use b=Qubit[1]; Mut(a[0]); CNOT(a[0], b[0]); }")]    // classical mutation
     public void NonInvertibleCallWriteIsNotSafeAndPlanIsNull(string src)
     {
@@ -148,7 +148,7 @@ public class UncomputePlannerTests
     public void InvertibleHelperCallStillPlansItsAdjoint()
     {
         var (op, m, inv) = Compile(
-            "operation Flip(Qubit p){ X(p); }\n" +
+            "operation Flip(p: Qubit){ X(p); }\n" +
             "operation Main(){ use a=Qubit[1]; use b=Qubit[1]; Flip(a[0]); CNOT(a[0], b[0]); }");
         var plan = UncomputePlanner.Plan(m, inv, op, Whole("a"));
         Assert.NotNull(plan);
@@ -164,7 +164,7 @@ public class UncomputePlannerTests
     public void GenericNonInvertibleCalleeIsBlockedOnThePreMonoTree()
     {
         var (op, m, inv) = Compile(
-            "operation Loop(Qubit[] p){ repeat { X(p[0]); } until (1 == 1); }\n" +
+            "operation Loop(p: Qubit[]){ repeat { X(p[0]); } until (1 == 1); }\n" +
             "operation Main(){ use a=Qubit[2]; use b=Qubit[1]; Loop(a); CNOT(a[0], b[0]); }");
         // op is the PRE-MONO Main (r.Ir): its call gate is still named "Loop", not the mono "Loop__sz2"
         Assert.False(m.IsSafelyUncomputable(op, Whole("a")));

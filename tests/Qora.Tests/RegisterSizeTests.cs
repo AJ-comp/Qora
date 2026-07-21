@@ -30,6 +30,6 @@ public class RegisterSizeTests
     [Theory]
     [InlineData("operation Main(){ use q = Qubit[3]; H(q[0]); H(q[2]); }")]            // valid size + in-range indices
     [InlineData("operation Main(){ use q = Qubit[2]; H(q[1]); }")]
-    [InlineData("operation Foo(Qubit[] q){ H(q[3]); }\noperation Main(){ use q=Qubit[4]; Foo(q); }")]  // array parameter specialized to size 4
+    [InlineData("operation Foo(q: Qubit[]){ H(q[3]); }\noperation Main(){ use q=Qubit[4]; Foo(q); }")]  // array parameter specialized to size 4
     public void AcceptsValidSizesAndIndices(string source) => Compiler.Accepts(source);
 }

@@ -12,19 +12,19 @@ namespace Qora.Tests;
 public class ClassicalArrayTests
 {
     [Theory]
-    [InlineData("int", "1, 2", "int x = values[0]")]
-    [InlineData("float", "1.0, 2.5", "float x = values[0]")]
-    [InlineData("bit", "0, 1", "bit x = values[0]")]
-    [InlineData("angle", "0.0, pi/2", "angle x = values[0]")]
+    [InlineData("int", "1, 2", "var x: int = values[0]")]
+    [InlineData("float", "1.0, 2.5", "var x: float = values[0]")]
+    [InlineData("bit", "0, 1", "var x: bit = values[0]")]
+    [InlineData("angle", "0.0, pi/2", "var x: angle = values[0]")]
     public void AcceptsExplicitArrayParametersDeclarationsAndLiterals(
         string type, string elements, string read)
     {
         var source = $$"""
-            operation Read({{type}}[] values) {
+            operation Read(values: {{type}}[]) {
                 {{read}};
             }
             operation Main() {
-                {{type}}[] values = [{{elements}}];
+                var values: {{type}}[] = [{{elements}}];
                 Read(values);
             }
             """;
@@ -38,15 +38,15 @@ public class ClassicalArrayTests
     [InlineData("bit", "0")]
     [InlineData("angle", "0.0")]
     public void AcceptsPositiveLiteralNewForEveryArrayType(string type, string assignedValue) =>
-        Compiler.Accepts($"operation Main(){{ {type}[] values = new {type}[3]; values[2] = {assignedValue}; }}");
+        Compiler.Accepts($"operation Main(){{ var values: {type}[] = new {type}[3]; values[2] = {assignedValue}; }}");
 
     [Fact]
     public void AcceptsElementReadsWritesAndCount()
     {
         Compiler.Accepts("""
             operation Main() {
-                int[] values = [1, 2, 3];
-                int saved = values[1];
+                var values: int[] = [1, 2, 3];
+                var saved: int = values[1];
                 values[0] = saved;
                 for i in 0..values.Count-1 {
                     values[i] = values[i] + 1;
@@ -58,7 +58,7 @@ public class ClassicalArrayTests
     [Fact]
     public void AcceptsArrayElementAsScalarCallArgument()
     {
-        var result = CompileSuccessfully("operation Take(int value){} operation Main(){ int[] values=[1,2]; Take(values[0]); }");
+        var result = CompileSuccessfully("operation Take(value: int){} operation Main(){ var values: int[] = [1,2]; Take(values[0]); }");
 
         Assert.Contains("Take(values[0]);", result.Qasm);
     }
@@ -69,7 +69,7 @@ public class ClassicalArrayTests
         Compiler.Accepts("""
             operation Main() {
                 use q = Qubit[2];
-                bit[] results = new bit[2];
+                var results: bit[] = new bit[2];
                 results[0] = M(q[0]);
                 results[1] = M(q[1]);
             }
@@ -81,57 +81,57 @@ public class ClassicalArrayTests
     /// ArrayLocalHoisting pass now absorbs it (hidden-parameter threading / scope-top hoisting), so the
     /// language accepts all three shapes it once rejected.</summary>
     [Theory]
-    [InlineData("operation Work(){ int[] values=[1,2]; } operation Main(){ Work(); }")]
-    [InlineData("operation Main(){ int flag=1; if(flag==1){ int[] values=[1,2]; } }")]
-    [InlineData("operation Main(){ for i in 0..1 { int[] values=[1,2]; } }")]
+    [InlineData("operation Work(){ var values: int[] = [1,2]; } operation Main(){ Work(); }")]
+    [InlineData("operation Main(){ var flag: int = 1; if(flag==1){ var values: int[] = [1,2]; } }")]
+    [InlineData("operation Main(){ for i in 0..1 { var values: int[] = [1,2]; } }")]
     public void AcceptsArrayDeclarationsOutsideMainTopLevel(string source) => Compiler.Accepts(source);
 
     [Theory]
-    [InlineData("operation Main(){ int[] values = new int[0]; }")]
-    [InlineData("operation Main(){ int[] values = new int[-1]; }")]
-    [InlineData("operation Main(){ int n=3; int[] values = new int[n]; }")]
+    [InlineData("operation Main(){ var values: int[] = new int[0]; }")]
+    [InlineData("operation Main(){ var values: int[] = new int[-1]; }")]
+    [InlineData("operation Main(){ var n: int = 3; var values: int[] = new int[n]; }")]
     public void RejectsNewWithoutAPositiveLiteralLength(string source) => RejectsCleanly(source);
 
     [Theory]
-    [InlineData("operation Take(int[] values){} operation Main(){ int value=1; Take(value); }")]
-    [InlineData("operation Take(int value){} operation Main(){ int[] values=[1,2]; Take(values); }")]
-    [InlineData("operation Main(){ int value=1; int copy=value[0]; }")]
-    [InlineData("operation Main(){ int value=1; value[0]=2; }")]
-    [InlineData("operation Main(){ int[] values=1; }")]
-    [InlineData("operation Main(){ int value=[1,2]; }")]
+    [InlineData("operation Take(values: int[]){} operation Main(){ var value: int = 1; Take(value); }")]
+    [InlineData("operation Take(value: int){} operation Main(){ var values: int[] = [1,2]; Take(values); }")]
+    [InlineData("operation Main(){ var value: int = 1; var copy: int = value[0]; }")]
+    [InlineData("operation Main(){ var value: int = 1; value[0]=2; }")]
+    [InlineData("operation Main(){ var values: int[] = 1; }")]
+    [InlineData("operation Main(){ var value: int = [1,2]; }")]
     public void RejectsScalarArrayShapeMismatch(string source) => RejectsCleanly(source);
 
     [Fact]
     public void RejectsMismatchedArrayElementType() =>
-        RejectsCleanly("operation Take(int[] values){} operation Main(){ float[] values=[1.0,2.0]; Take(values); }");
+        RejectsCleanly("operation Take(values: int[]){} operation Main(){ var values: float[] = [1.0,2.0]; Take(values); }");
 
     [Theory]
-    [InlineData("operation Main(){ int[] values=[1,2]; int x=values[2]; }")]
-    [InlineData("operation Main(){ int[] values=[1,2]; values[2]=3; }")]
-    [InlineData("operation Main(){ int[] values=new int[1]; int x=values[1]; }")]
+    [InlineData("operation Main(){ var values: int[] = [1,2]; var x: int = values[2]; }")]
+    [InlineData("operation Main(){ var values: int[] = [1,2]; values[2]=3; }")]
+    [InlineData("operation Main(){ var values: int[] = new int[1]; var x: int = values[1]; }")]
     public void RejectsLiteralIndexOutsideKnownBounds(string source) => RejectsCleanly(source);
 
     [Fact]
     public void RejectsCountOnScalar() =>
-        RejectsCleanly("operation Main(){ int value=1; for i in 0..value.Count-1 { value=i; } }");
+        RejectsCleanly("operation Main(){ var value: int = 1; for i in 0..value.Count-1 { value=i; } }");
 
     [Fact]
     public void RejectsSameArrayPassedToTwoMutableParameters()
     {
         RejectsCleanly("""
-            operation Copy(int[] left, int[] right) {
+            operation Copy(left: int[], right: int[]) {
                 left[0] = right[0];
             }
             operation Main() {
-                int[] values = [1, 2];
+                var values: int[] = [1, 2];
                 Copy(values, values);
             }
             """);
     }
 
     [Theory]
-    [InlineData("operation Main(){ const int[] values=[1,2]; values[0]=3; }")]
-    [InlineData("operation Change(int[] values){ values[0]=3; } operation Main(){ const int[] values=[1,2]; Change(values); }")]
+    [InlineData("operation Main(){ const values: int[] = [1,2]; values[0]=3; }")]
+    [InlineData("operation Change(values: int[]){ values[0]=3; } operation Main(){ const values: int[] = [1,2]; Change(values); }")]
     public void RejectsMutationOfConstArray(string source)
     {
         var result = Compiler.Compile(source);
@@ -148,7 +148,7 @@ public class ClassicalArrayTests
     public void EmitsGeneralOpenQasmArrayAndBraceLiteral(
         string type, string sourceElements, string qasmElements)
     {
-        var result = CompileSuccessfully($"operation Main(){{ {type}[] values=[{sourceElements}]; }}");
+        var result = CompileSuccessfully($"operation Main(){{ var values: {type}[] = [{sourceElements}]; }}");
 
         Assert.Contains($"array[{type}, 2] values = {{{qasmElements}}};", result.Qasm);
     }
@@ -161,7 +161,7 @@ public class ClassicalArrayTests
     [Fact]
     public void EmitsBitArrayAsNativeBitRegister()
     {
-        var result = CompileSuccessfully("operation Main(){ bit[] flags=[0,1]; }");
+        var result = CompileSuccessfully("operation Main(){ var flags: bit[] = [0,1]; }");
 
         Assert.Contains("bit[2] flags;", result.Qasm);
         Assert.Contains("flags[0] = 0;", result.Qasm);
@@ -176,7 +176,7 @@ public class ClassicalArrayTests
     [Fact]
     public void EmitsNewBitArrayAsZeroInitializedBitRegister()
     {
-        var result = CompileSuccessfully("operation Main(){ bit[] flags=new bit[3]; }");
+        var result = CompileSuccessfully("operation Main(){ var flags: bit[] = new bit[3]; }");
 
         Assert.Contains("bit[3] flags = \"000\";", result.Qasm);
         Assert.DoesNotContain("array[bit", result.Qasm);
@@ -190,7 +190,7 @@ public class ClassicalArrayTests
         var result = CompileSuccessfully("""
             operation Main() {
                 use q = Qubit[2];
-                bit[] flags = new bit[2];
+                var flags: bit[] = new bit[2];
                 for i in 0..flags.Count-1 {
                     flags[i] = M(q[i]);
                 }
@@ -205,11 +205,11 @@ public class ClassicalArrayTests
     public void EmitsMutableOneDimensionalArrayParameter()
     {
         var result = CompileSuccessfully("""
-            operation SetFirst(int[] values) {
+            operation SetFirst(values: int[]) {
                 values[0] = 7;
             }
             operation Main() {
-                int[] values = [1, 2];
+                var values: int[] = [1, 2];
                 SetFirst(values);
             }
             """);
@@ -221,13 +221,13 @@ public class ClassicalArrayTests
     public void EmitsCountAsSizeof()
     {
         var result = CompileSuccessfully("""
-            operation Visit(int[] values) {
+            operation Visit(values: int[]) {
                 for i in 0..values.Count-1 {
                     values[i] = values[i] + 1;
                 }
             }
             operation Main() {
-                int[] values = [1, 2, 3];
+                var values: int[] = [1, 2, 3];
                 Visit(values);
             }
             """);
@@ -239,7 +239,7 @@ public class ClassicalArrayTests
     [Fact]
     public void EmitsNewAsZeroInitializedArray()
     {
-        var result = CompileSuccessfully("operation Main(){ int[] values=new int[3]; }");
+        var result = CompileSuccessfully("operation Main(){ var values: int[] = new int[3]; }");
 
         Assert.Contains("array[int, 3] values = {0, 0, 0};", result.Qasm);
     }
@@ -247,7 +247,7 @@ public class ClassicalArrayTests
     [Fact]
     public void EmitsIndexedReadsAndWrites()
     {
-        var result = CompileSuccessfully("operation Main(){ int[] values=[1,2]; int saved=values[1]; values[0]=saved; }");
+        var result = CompileSuccessfully("operation Main(){ var values: int[] = [1,2]; var saved: int = values[1]; values[0]=saved; }");
 
         Assert.Contains("int saved = values[1];", result.Qasm);
         Assert.Contains("values[0] = saved;", result.Qasm);
@@ -256,7 +256,7 @@ public class ClassicalArrayTests
     [Fact]
     public void EmitsBitArrayElementConditionsAsBooleanComparisons()
     {
-        var result = CompileSuccessfully("operation Main(){ bit[] flags=[0,1]; if(flags[1]==1){ flags[0]=1; } }");
+        var result = CompileSuccessfully("operation Main(){ var flags: bit[] = [0,1]; if(flags[1]==1){ flags[0]=1; } }");
 
         Assert.Contains("if (flags[1] == true)", result.Qasm);
     }
@@ -286,8 +286,8 @@ public class ClassicalArrayTests
     [Fact]
     public void RejectsLiteralOutOfBoundsThroughAnArrayParameter() =>
         Compiler.Rejects("""
-            operation Helper(int[] x) { x[5] = 99; }
-            operation Main() { use q=Qubit[1]; int[] a = [1, 2, 3]; Helper(a); H(q[0]); }
+            operation Helper(x: int[]) { x[5] = 99; }
+            operation Main() { use q=Qubit[1]; var a: int[] = [1, 2, 3]; Helper(a); H(q[0]); }
             """, "QSEM016");
 
     /// <summary>The requirement folds through a CHAIN: Middle never indexes `y` itself, but it hands it to
@@ -295,17 +295,17 @@ public class ClassicalArrayTests
     [Fact]
     public void RejectsLiteralOutOfBoundsThroughAChainOfArrayParameters() =>
         Compiler.Rejects("""
-            operation Deep(int[] x) { x[5] = 99; }
-            operation Middle(int[] y) { Deep(y); }
-            operation Main() { use q=Qubit[1]; int[] a = [1, 2, 3]; Middle(a); H(q[0]); }
+            operation Deep(x: int[]) { x[5] = 99; }
+            operation Middle(y: int[]) { Deep(y); }
+            operation Main() { use q=Qubit[1]; var a: int[] = [1, 2, 3]; Middle(a); H(q[0]); }
             """, "QSEM016");
 
     /// <summary>NOT over-broad: an array long enough for the callee's literal index is fine.</summary>
     [Fact]
     public void AcceptsAnArrayLongEnoughForTheCalleeLiteralIndex() =>
         Compiler.Accepts("""
-            operation Helper(int[] x) { x[5] = 99; }
-            operation Main() { use q=Qubit[1]; int[] a = new int[8]; Helper(a); H(q[0]); }
+            operation Helper(x: int[]) { x[5] = 99; }
+            operation Main() { use q=Qubit[1]; var a: int[] = new int[8]; Helper(a); H(q[0]); }
             """);
 
     /// <summary>A DYNAMIC index imposes no static floor — it stays a runtime concern, exactly as it does for a
@@ -313,8 +313,8 @@ public class ClassicalArrayTests
     [Fact]
     public void AcceptsDynamicIndexingOfAnArrayParameter() =>
         Compiler.Accepts("""
-            operation Helper(int[] x) { for i in 0..x.Count-1 { x[i] = 1; } }
-            operation Main() { use q=Qubit[1]; int[] a = [1, 2, 3]; Helper(a); H(q[0]); }
+            operation Helper(x: int[]) { for i in 0..x.Count-1 { x[i] = 1; } }
+            operation Main() { use q=Qubit[1]; var a: int[] = [1, 2, 3]; Helper(a); H(q[0]); }
             """);
 
     /// <summary>A WHOLE bit register compared to an int emits through the explicit spec cast
@@ -324,7 +324,7 @@ public class ClassicalArrayTests
     [Fact]
     public void WholeBitRegisterComparesViaAnIntCast()
     {
-        var r = Compiler.Compile("operation Main(){ use q=Qubit[1]; bit[] f = new bit[2]; if (f == 1) { X(q[0]); } }");
+        var r = Compiler.Compile("operation Main(){ use q=Qubit[1]; var f: bit[] = new bit[2]; if (f == 1) { X(q[0]); } }");
         Assert.True(r.Success, Explain(r));
         Assert.Contains("if (int(f) == 1)", r.Qasm);
         Assert.DoesNotContain("f == true", r.Qasm);
@@ -337,12 +337,12 @@ public class ClassicalArrayTests
     public void BitArrayParameterSpecializesToASizedRegister()
     {
         var r = Compiler.Compile("""
-            operation Read(bit[] values, Qubit q) {
+            operation Read(values: bit[], q: Qubit) {
                 if (values[0] == 1) { X(q); }
             }
             operation Main() {
                 use q = Qubit[1];
-                bit[] f = new bit[2];
+                var f: bit[] = new bit[2];
                 Read(f, q[0]);
             }
             """);
@@ -356,12 +356,12 @@ public class ClassicalArrayTests
     {
         // sizeof is undefined on a bit register, so `f.Count` must fold to the specialized length.
         var r = Compiler.Compile("""
-            operation Scan(bit[] f, Qubit q) {
+            operation Scan(f: bit[], q: Qubit) {
                 for i in 0..f.Count-1 { if (f[i] == 1) { X(q); } }
             }
             operation Main() {
                 use q = Qubit[1];
-                bit[] f = new bit[3];
+                var f: bit[] = new bit[3];
                 Scan(f, q[0]);
             }
             """);
@@ -374,13 +374,13 @@ public class ClassicalArrayTests
     public void TwoBitArrayLengthsMakeTwoSpecializations()
     {
         var r = Compiler.Compile("""
-            operation Read(bit[] values, Qubit q) {
+            operation Read(values: bit[], q: Qubit) {
                 if (values[0] == 1) { X(q); }
             }
             operation Main() {
                 use q = Qubit[2];
-                bit[] a = new bit[2];
-                bit[] b = new bit[3];
+                var a: bit[] = new bit[2];
+                var b: bit[] = new bit[3];
                 Read(a, q[0]);
                 Read(b, q[1]);
             }
@@ -394,8 +394,8 @@ public class ClassicalArrayTests
     /// silently never reach the caller — rejected loudly instead (int[] passes by mutable reference; the
     /// asymmetry is OpenQASM's, and the ban keeps it unobservable at the Qora surface).</summary>
     [Theory]
-    [InlineData("operation Zero(bit[] f, Qubit q){ f[0] = 0; H(q); }\noperation Main(){ use q=Qubit[1]; bit[] f = new bit[1]; Zero(f, q[0]); }")]
-    [InlineData("operation Store(bit[] f, Qubit[] qs){ f[0] = M(qs[0]); }\noperation Main(){ use q=Qubit[1]; bit[] f = new bit[1]; Store(f, q); }")]
+    [InlineData("operation Zero(f: bit[], q: Qubit){ f[0] = 0; H(q); }\noperation Main(){ use q=Qubit[1]; var f: bit[] = new bit[1]; Zero(f, q[0]); }")]
+    [InlineData("operation Store(f: bit[], qs: Qubit[]){ f[0] = M(qs[0]); }\noperation Main(){ use q=Qubit[1]; var f: bit[] = new bit[1]; Store(f, q); }")]
     public void RejectsWritingToABitArrayParameter(string source) =>
         Compiler.Rejects(source, "QSEM032");
 
@@ -406,8 +406,8 @@ public class ClassicalArrayTests
     public void DuplicateBitArrayArgumentsAreAcceptedReadsCannotConflict()
     {
         var r = Compiler.Compile("""
-            operation Both(bit[] a, bit[] b, Qubit q) { if (a[0] == 1) { X(q); } if (b[0] == 1) { X(q); } }
-            operation Main() { use q = Qubit[1]; bit[] f = new bit[2]; Both(f, f, q[0]); }
+            operation Both(a: bit[], b: bit[], q: Qubit) { if (a[0] == 1) { X(q); } if (b[0] == 1) { X(q); } }
+            operation Main() { use q = Qubit[1]; var f: bit[] = new bit[2]; Both(f, f, q[0]); }
             """);
         Assert.True(r.Success, Explain(r));
     }
@@ -416,8 +416,8 @@ public class ClassicalArrayTests
     public void ConstBitArrayIsAValidArgumentToAReadOnlyBitParameter()
     {
         var r = Compiler.Compile("""
-            operation Read(bit[] f, Qubit q) { if (f[0] == 1) { X(q); } }
-            operation Main() { use q = Qubit[1]; const bit[] f = [0, 1]; Read(f, q[0]); }
+            operation Read(f: bit[], q: Qubit) { if (f[0] == 1) { X(q); } }
+            operation Main() { use q = Qubit[1]; const f: bit[] = [0, 1]; Read(f, q[0]); }
             """);
         Assert.True(r.Success, Explain(r));
     }
@@ -429,13 +429,13 @@ public class ClassicalArrayTests
     public void BitArrayCrossCountLoopDefersAndProvesPostMono()
     {
         var r = Compiler.Compile("""
-            operation Zip(bit[] a, bit[] b, Qubit q) {
+            operation Zip(a: bit[], b: bit[], q: Qubit) {
                 for i in 0..a.Count-1 { if (b[i] == 1) { X(q); } }
             }
             operation Main() {
                 use q = Qubit[1];
-                bit[] a = new bit[2];
-                bit[] b = new bit[2];
+                var a: bit[] = new bit[2];
+                var b: bit[] = new bit[2];
                 Zip(a, b, q[0]);
             }
             """);
@@ -446,13 +446,13 @@ public class ClassicalArrayTests
     public void BitArrayConstGuardDefersAndProvesPostMono()
     {
         var r = Compiler.Compile("""
-            operation Pick(bit[] f, int n, Qubit q) {
+            operation Pick(f: bit[], n: int, q: Qubit) {
                 if (0 <= n && n < 2) { if (f[n] == 1) { X(q); } }
             }
             operation Main() {
                 use q = Qubit[1];
-                bit[] f = new bit[2];
-                int n = 1;
+                var f: bit[] = new bit[2];
+                var n: int = 1;
                 Pick(f, n, q[0]);
             }
             """);
@@ -468,8 +468,8 @@ public class ClassicalArrayTests
     public void ThreadsHelperArrayLocalAsHiddenParameter()
     {
         var result = CompileSuccessfully("""
-            operation SetTable(Qubit q) {
-                int[] tbl = [1, 2, 3];
+            operation SetTable(q: Qubit) {
+                var tbl: int[] = [1, 2, 3];
                 if (tbl[0] == 1) { X(q); }
             }
             operation Main() {
@@ -493,11 +493,11 @@ public class ClassicalArrayTests
     public void ThreadsHiddenParameterTransitivelyThroughIntermediateDefs()
     {
         var result = CompileSuccessfully("""
-            operation Inner(Qubit q) {
-                int[] t = [4, 5];
+            operation Inner(q: Qubit) {
+                var t: int[] = [4, 5];
                 if (t[1] == 5) { X(q); }
             }
-            operation Outer(Qubit q) {
+            operation Outer(q: Qubit) {
                 Inner(q);
             }
             operation Main() {
@@ -517,11 +517,11 @@ public class ClassicalArrayTests
         var result = CompileSuccessfully("""
             operation Main() {
                 use q = Qubit[1];
-                bit b = M(q[0]);
-                int n = b;
+                var b: bit = M(q[0]);
+                var n: int = b;
                 if (n == 1) {
-                    int[] a = [7, 8];
-                    int x = a[0];
+                    var a: int[] = [7, 8];
+                    var x: int = a[0];
                 }
             }
             """);
@@ -538,8 +538,8 @@ public class ClassicalArrayTests
     public void LeavesBitArrayLocalsInsideDefsUntouched()
     {
         var result = CompileSuccessfully("""
-            operation Flag(Qubit q) {
-                bit[] f = new bit[2];
+            operation Flag(q: Qubit) {
+                var f: bit[] = new bit[2];
                 f[0] = 1;
                 if (f[0] == 1) { X(q); }
             }
@@ -561,17 +561,17 @@ public class ClassicalArrayTests
     public void HoistsNestedBitArrayToItsOwnOpTop()
     {
         var result = CompileSuccessfully("""
-            operation Tally(Qubit q, int n) {
+            operation Tally(q: Qubit, n: int) {
                 if (n == 1) {
-                    bit[] f = new bit[2];
+                    var f: bit[] = new bit[2];
                     f[0] = 1;
                     if (f[0] == 1) { X(q); }
                 }
             }
             operation Main() {
                 use q = Qubit[1];
-                bit b = M(q[0]);
-                int n = b;
+                var b: bit = M(q[0]);
+                var n: int = b;
                 Tally(q[0], n);
             }
             """);
@@ -600,8 +600,8 @@ public class ClassicalArrayTests
     public void MintedGlobalsThatWouldConcatenateAlikeAreDisambiguated()
     {
         var result = CompileSuccessfully("""
-            operation A(Qubit q) { int[] b_c = [1, 1]; if (b_c[1] == 1) { X(q); } }
-            operation A_b(Qubit q) { int[] c = [9]; if (c[0] == 9) { X(q); } }
+            operation A(q: Qubit) { var b_c: int[] = [1, 1]; if (b_c[1] == 1) { X(q); } }
+            operation A_b(q: Qubit) { var c: int[] = [9]; if (c[0] == 9) { X(q); } }
             operation Main() { use q = Qubit[2]; A(q[0]); A_b(q[1]); }
             """);
 
@@ -617,8 +617,8 @@ public class ClassicalArrayTests
     public void MintedGlobalAndUserTopLevelNameGetDistinctNames()
     {
         var result = CompileSuccessfully("""
-            operation Foo(Qubit q) { int[] bar = [1]; if (bar[0] == 1) { X(q); } }
-            operation Main() { use q = Qubit[1]; int Foo_bar = 5; Foo(q[0]); if (Foo_bar == 5) { X(q[0]); } }
+            operation Foo(q: Qubit) { var bar: int[] = [1]; if (bar[0] == 1) { X(q); } }
+            operation Main() { use q = Qubit[1]; var Foo_bar: int = 5; Foo(q[0]); if (Foo_bar == 5) { X(q[0]); } }
             """);
 
         Assert.Contains("array[int, 1] Foo_bar = {0};", result.Qasm);   // the backing global
@@ -633,8 +633,8 @@ public class ClassicalArrayTests
     public void PassThroughParameterIsFreshenedAwayFromAnOwnedParameter()
     {
         var result = CompileSuccessfully("""
-            operation D(Qubit q) { int[] g = [1]; if (g[0] == 1) { X(q); } }
-            operation Mid(Qubit q) { int[] D_g = [7]; if (D_g[0] == 7) { X(q); } D(q); }
+            operation D(q: Qubit) { var g: int[] = [1]; if (g[0] == 1) { X(q); } }
+            operation Mid(q: Qubit) { var D_g: int[] = [7]; if (D_g[0] == 7) { X(q); } D(q); }
             operation Main() { use q = Qubit[1]; Mid(q[0]); }
             """);
 
@@ -651,9 +651,9 @@ public class ClassicalArrayTests
     public void ArrayLocalShadowingAParameterRewritesOnlyItsOwnReferences()
     {
         var result = CompileSuccessfully("""
-            operation Helper(Qubit[] q, int a) {
+            operation Helper(q: Qubit[], a: int) {
                 if (a == 0) {
-                    int[] a = [1, 2];
+                    var a: int[] = [1, 2];
                     if (a[0] == 1) { X(q[0]); }
                 }
             }
@@ -679,9 +679,9 @@ public class ClassicalArrayTests
     public void HiddenParameterAndABodyLoopVariableGetDistinctNames()
     {
         var result = CompileSuccessfully("""
-            operation g(Qubit q) { X(q); }
-            operation Helper(Qubit q) {
-                int[] g = [1];
+            operation g(q: Qubit) { X(q); }
+            operation Helper(q: Qubit) {
+                var g: int[] = [1];
                 for g_ in 0..0 { if (g[0] == 1) { X(q); } }
             }
             operation Main() { use q = Qubit[1]; Helper(q[0]); }
@@ -700,11 +700,11 @@ public class ClassicalArrayTests
     public void MintedGlobalAndNestedEntryDeclarationGetDistinctNames()
     {
         var result = CompileSuccessfully("""
-            operation SetTable(Qubit q) { int[] tbl = [1, 2, 3]; if (tbl[0] == 1) { X(q); } }
+            operation SetTable(q: Qubit) { var tbl: int[] = [1, 2, 3]; if (tbl[0] == 1) { X(q); } }
             operation Main() {
                 use q = Qubit[2];
-                int flag = 1;
-                if (flag == 1) { int SetTable_tbl = 1; if (SetTable_tbl == 1) { X(q[1]); } }
+                var flag: int = 1;
+                if (flag == 1) { var SetTable_tbl: int = 1; if (SetTable_tbl == 1) { X(q[1]); } }
                 SetTable(q[0]);
             }
             """);
@@ -721,8 +721,8 @@ public class ClassicalArrayTests
     public void PassThroughParameterAndCallerBodyLocalGetDistinctNames()
     {
         var result = CompileSuccessfully("""
-            operation Inner(Qubit q) { int[] t = [1, 2]; if (t[0] == 1) { X(q); } }
-            operation Outer(Qubit q) { int Inner_t = 0; Inner(q); if (Inner_t == 0) { X(q); } }
+            operation Inner(q: Qubit) { var t: int[] = [1, 2]; if (t[0] == 1) { X(q); } }
+            operation Outer(q: Qubit) { var Inner_t: int = 0; Inner(q); if (Inner_t == 0) { X(q); } }
             operation Main() { use q = Qubit[1]; Outer(q[0]); }
             """);
 

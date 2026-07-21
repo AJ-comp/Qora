@@ -6,7 +6,7 @@ namespace Qora.Tests;
 public class QoraLoweringTests
 {
     private const string Source = """
-        operation Probe(Qubit q, Qubit[] work, int[] counts, float weight) { }
+        operation Probe(q: Qubit, work: Qubit[], counts: int[], weight: float) { }
         operation Main() {
             use work = Qubit[3];
         }
@@ -21,12 +21,14 @@ public class QoraLoweringTests
         var parameters = nodes.Where(n => n.Name == "Param").ToList();
         var use = Assert.Single(nodes, n => n.Name == "Use");
 
+        // Trailing annotation (name: T): the name leaf comes first, then the type token (the `:` is
+        // excluded from the AST, so the order-independent lowering reads the same shape as before).
         Assert.Collection(
             parameters,
-            p => Assert.Equal(new[] { "Qubit", "q" }, Leaves(p)),
-            p => Assert.Equal(new[] { "Qubit", "work" }, Leaves(p)),
-            p => Assert.Equal(new[] { "int", "counts" }, Leaves(p)),
-            p => Assert.Equal(new[] { "float", "weight" }, Leaves(p)));
+            p => Assert.Equal(new[] { "q", "Qubit" }, Leaves(p)),
+            p => Assert.Equal(new[] { "work", "Qubit" }, Leaves(p)),
+            p => Assert.Equal(new[] { "counts", "int" }, Leaves(p)),
+            p => Assert.Equal(new[] { "weight", "float" }, Leaves(p)));
         Assert.DoesNotContain(parameters[0].Items.OfType<AstNonTerminal>(), n => n.Name == "ArrayType");
         Assert.Contains(parameters[1].Items.OfType<AstNonTerminal>(), n => n.Name == "ArrayType");
         Assert.Contains(parameters[2].Items.OfType<AstNonTerminal>(), n => n.Name == "ArrayType");
@@ -60,7 +62,7 @@ public class QoraLoweringTests
         const string source = """
             operation Main() {
                 use q = Qubit[1];
-                bit[] results = new bit[1];
+                var results: bit[] = new bit[1];
                 results[0] = M(q[0]);
             }
             """;

@@ -24,9 +24,9 @@ public class BoundsProofTests
             operation Main() {
                 use q = Qubit[2];
                 H(q[0]);
-                bit b = M(q[0]);
-                int n = b;
-                int[] a = [1, 2, 3];
+                var b: bit = M(q[0]);
+                var n: int = b;
+                var a: int[] = [1, 2, 3];
                 {{guard}} { a[n] = 1; }
                 H(q[1]);
             }
@@ -38,9 +38,9 @@ public class BoundsProofTests
             operation Main() {
                 use q = Qubit[2];
                 H(q[0]);
-                bit b = M(q[0]);
-                int n = b;
-                int[] a = [1, 2, 3];
+                var b: bit = M(q[0]);
+                var n: int = b;
+                var a: int[] = [1, 2, 3];
                 a[n] = 1;
                 H(q[1]);
             }
@@ -52,8 +52,8 @@ public class BoundsProofTests
             operation Main() {
                 use q = Qubit[3];
                 H(q[0]);
-                bit b = M(q[0]);
-                int n = b;
+                var b: bit = M(q[0]);
+                var n: int = b;
                 H(q[n]);
             }
             """, "QSEM030");
@@ -65,10 +65,10 @@ public class BoundsProofTests
             operation Main() {
                 use q = Qubit[2];
                 H(q[0]);
-                bit c = M(q[0]);
-                int n = c;
-                int[] a = [1, 2, 3];
-                int[] b = [1, 2];
+                var c: bit = M(q[0]);
+                var n: int = c;
+                var a: int[] = [1, 2, 3];
+                var b: int[] = [1, 2];
                 if (0 <= n && n < a.Count) { b[n] = 1; }
                 H(q[1]);
             }
@@ -81,9 +81,9 @@ public class BoundsProofTests
             operation Main() {
                 use q = Qubit[2];
                 H(q[0]);
-                bit b = M(q[0]);
-                int n = b;
-                int[] a = [1, 2, 3];
+                var b: bit = M(q[0]);
+                var n: int = b;
+                var a: int[] = [1, 2, 3];
                 if (0 <= n && n < a.Count) {
                     n = n + 9;
                     a[n] = 1;
@@ -99,7 +99,7 @@ public class BoundsProofTests
         Compiler.Rejects("""
             operation Main() {
                 use q = Qubit[1];
-                int[] a = [1, 2, 3];
+                var a: int[] = [1, 2, 3];
                 for i in 0..5 { a[i] = 1; }
                 H(q[0]);
             }
@@ -115,8 +115,8 @@ public class BoundsProofTests
         Compiler.Rejects("""
             operation Main() {
                 use q = Qubit[1];
-                const int k = 5;
-                int[] a = [1, 2, 3];
+                const k: int = 5;
+                var a: int[] = [1, 2, 3];
                 for i in 0..k { a[i] = 1; }
                 H(q[0]);
             }
@@ -127,7 +127,7 @@ public class BoundsProofTests
     [Fact]
     public void AcceptsACountBoundedLoopOverAParameter() =>
         Compiler.Accepts("""
-            operation Visit(Qubit[] q) {
+            operation Visit(q: Qubit[]) {
                 for i in 0..q.Count-1 { H(q[i]); }
             }
             operation Main() {
@@ -145,7 +145,7 @@ public class BoundsProofTests
         Compiler.Accepts("""
             operation Main() {
                 use q = Qubit[2];
-                bit[] results = new bit[2];
+                var results: bit[] = new bit[2];
                 for i in 0..results.Count-1 {
                     results[i] = M(q[i]);
                 }
@@ -159,8 +159,8 @@ public class BoundsProofTests
         Compiler.Rejects("""
             operation Main() {
                 use q = Qubit[1];
-                int[] a = [1, 2, 3];
-                int[] b = [1, 2];
+                var a: int[] = [1, 2, 3];
+                var b: int[] = [1, 2];
                 for i in 0..a.Count-1 { b[i] = 1; }
                 H(q[0]);
             }
@@ -174,9 +174,9 @@ public class BoundsProofTests
             operation Main() {
                 use q = Qubit[2];
                 H(q[0]);
-                bit b = M(q[0]);
-                int n = b;
-                int[] a = [1, 2, 3];
+                var b: bit = M(q[0]);
+                var n: int = b;
+                var a: int[] = [1, 2, 3];
                 if (0 <= n && n < a.Count) {
                     for i in 0..0 { n = n + 9; }
                     a[n] = 1;
@@ -192,9 +192,9 @@ public class BoundsProofTests
             operation Main() {
                 use q = Qubit[2];
                 H(q[0]);
-                bit b = M(q[0]);
-                int n = b;
-                int[] a = [1, 2, 3];
+                var b: bit = M(q[0]);
+                var n: int = b;
+                var a: int[] = [1, 2, 3];
                 if (0 <= n && n < a.Count) {
                     a[n] = 1;
                     n = n + 9;
@@ -210,7 +210,7 @@ public class BoundsProofTests
         Compiler.Accepts("""
             operation Main() {
                 use q = Qubit[1];
-                int[] a = [1, 2, 3];
+                var a: int[] = [1, 2, 3];
                 for i in 1..a.Count-1 { a[i] = 1; }
                 H(q[0]);
             }
@@ -218,7 +218,7 @@ public class BoundsProofTests
 
     [Fact]
     public void RejectsALoopStartingAboveZeroWhoseMaximumIsOutOfRange() =>
-        Compiler.Rejects("operation Main(){ use q=Qubit[1]; int[] a=[1,2,3]; for i in 2..5 { a[i]=1; } H(q[0]); }", "QSEM016");
+        Compiler.Rejects("operation Main(){ use q=Qubit[1]; var a: int[] = [1,2,3]; for i in 2..5 { a[i]=1; } H(q[0]); }", "QSEM016");
 
     // --- P5 through a monomorphized array: the guard's `.Count` becomes a concrete literal after
     //     specialization (`n < q.Count` -> `n < 2`) and must still prove the index ---
@@ -229,8 +229,8 @@ public class BoundsProofTests
             operation Main() {
                 use q = Qubit[2];
                 H(q[0]);
-                bit b = M(q[0]);
-                int n = b;
+                var b: bit = M(q[0]);
+                var n: int = b;
                 if (0 <= n && n < q.Count) { H(q[n]); }
             }
             """);
@@ -241,9 +241,9 @@ public class BoundsProofTests
             operation Main() {
                 use q = Qubit[2];
                 H(q[0]);
-                bit b = M(q[0]);
-                int n = b;
-                bit[] r = new bit[2];
+                var b: bit = M(q[0]);
+                var n: int = b;
+                var r: bit[] = new bit[2];
                 if (0 <= n && n < r.Count) { r[n] = 1; }
             }
             """);
@@ -254,11 +254,11 @@ public class BoundsProofTests
     [Fact]
     public void RejectsAConstLoopOverAParameterWhenTheArgumentIsTooShort() =>
         Compiler.Rejects("""
-            operation Helper(int[] x) {
+            operation Helper(x: int[]) {
                 for i in 0..5 { x[i] = 1; }
             }
             operation Main() {
-                int[] a = [1, 2];
+                var a: int[] = [1, 2];
                 Helper(a);
             }
             """, "QSEM016");
@@ -266,11 +266,11 @@ public class BoundsProofTests
     [Fact]
     public void AcceptsAConstLoopOverAParameterWhenTheArgumentIsLongEnough() =>
         Compiler.Accepts("""
-            operation Helper(int[] x) {
+            operation Helper(x: int[]) {
                 for i in 0..5 { x[i] = 1; }
             }
             operation Main() {
-                int[] a = [1, 2, 3, 4, 5, 6];
+                var a: int[] = [1, 2, 3, 4, 5, 6];
                 Helper(a);
             }
             """);
@@ -284,7 +284,7 @@ public class BoundsProofTests
         Compiler.Accepts("""
             operation Main() {
                 use q = Qubit[1];
-                int[] a = [1, 2, 3];
+                var a: int[] = [1, 2, 3];
                 for i in 0..a.Count*2-4 { a[i] = 1; }
                 H(q[0]);
             }
@@ -296,7 +296,7 @@ public class BoundsProofTests
         Compiler.Rejects("""
             operation Main() {
                 use q = Qubit[1];
-                int[] a = [1, 2, 3];
+                var a: int[] = [1, 2, 3];
                 for i in 0..a.Count*2-3 { a[i] = 1; }
                 H(q[0]);
             }
@@ -308,9 +308,9 @@ public class BoundsProofTests
         Compiler.Accepts("""
             operation Main() {
                 use q = Qubit[1];
-                const int k = 1;
-                const int l = 1;
-                int[] a = [1, 2, 3];
+                const k: int = 1;
+                const l: int = 1;
+                var a: int[] = [1, 2, 3];
                 for i in 0..a.Count-k-l { a[i] = 1; }
                 H(q[0]);
             }
@@ -324,9 +324,9 @@ public class BoundsProofTests
             operation Main() {
                 use q = Qubit[1];
                 H(q[0]);
-                bit b = M(q[0]);
-                int n = b;
-                int[] a = [1, 2, 3];
+                var b: bit = M(q[0]);
+                var n: int = b;
+                var a: int[] = [1, 2, 3];
                 for i in 0..a.Count-n { a[i] = 1; }
             }
             """, "QSEM030");
@@ -339,11 +339,11 @@ public class BoundsProofTests
     [Fact]
     public void RejectsACountBoundedLoopOverAParameterReachingCountItself() =>
         Compiler.Rejects("""
-            operation Helper(int[] a) {
+            operation Helper(a: int[]) {
                 for i in 0..a.Count { a[i] = 1; }
             }
             operation Main() {
-                int[] a = [1, 2, 3];
+                var a: int[] = [1, 2, 3];
                 Helper(a);
             }
             """, "QSEM016");
@@ -352,11 +352,11 @@ public class BoundsProofTests
     [Fact]
     public void AcceptsACountMinusTwoLoopOverAParameter() =>
         Compiler.Accepts("""
-            operation Helper(int[] a) {
+            operation Helper(a: int[]) {
                 for i in 0..a.Count-2 { a[i] = 1; }
             }
             operation Main() {
-                int[] a = [1, 2, 3];
+                var a: int[] = [1, 2, 3];
                 Helper(a);
             }
             """);
@@ -365,11 +365,11 @@ public class BoundsProofTests
     [Fact]
     public void RejectsADoubledCountLoopOverAParameter() =>
         Compiler.Rejects("""
-            operation Helper(int[] a) {
+            operation Helper(a: int[]) {
                 for i in 0..a.Count*2-1 { a[i] = 1; }
             }
             operation Main() {
-                int[] a = [1, 2, 3];
+                var a: int[] = [1, 2, 3];
                 Helper(a);
             }
             """, "QSEM016");
@@ -379,12 +379,12 @@ public class BoundsProofTests
     [Fact]
     public void RejectsACrossArrayLoopOverTwoParameters() =>
         Compiler.Rejects("""
-            operation Helper(int[] x, int[] y) {
+            operation Helper(x: int[], y: int[]) {
                 for i in 0..y.Count-1 { x[i] = 1; }
             }
             operation Main() {
-                int[] a = [1, 2, 3];
-                int[] b = [1, 2, 3];
+                var a: int[] = [1, 2, 3];
+                var b: int[] = [1, 2, 3];
                 Helper(a, b);
             }
             """, "QSEM030");
@@ -395,7 +395,7 @@ public class BoundsProofTests
     [Fact]
     public void AcceptsACrossRegisterLoopOverQubitParametersOfEqualSize() =>
         Compiler.Accepts("""
-            operation Visit(Qubit[] q, Qubit[] r) {
+            operation Visit(q: Qubit[], r: Qubit[]) {
                 for i in 0..r.Count-1 { H(q[i]); }
             }
             operation Main() {
@@ -408,7 +408,7 @@ public class BoundsProofTests
     [Fact]
     public void RejectsACrossRegisterLoopWhoseBoundRegisterIsLonger() =>
         Compiler.Rejects("""
-            operation Visit(Qubit[] q, Qubit[] r) {
+            operation Visit(q: Qubit[], r: Qubit[]) {
                 for i in 0..r.Count-1 { H(q[i]); }
             }
             operation Main() {
@@ -422,7 +422,7 @@ public class BoundsProofTests
     [Fact]
     public void RejectsACountBoundedLoopOverAQubitParameterReachingCountItself() =>
         Compiler.Rejects("""
-            operation Visit(Qubit[] q) {
+            operation Visit(q: Qubit[]) {
                 for i in 0..q.Count { H(q[i]); }
             }
             operation Main() {
@@ -442,10 +442,10 @@ public class BoundsProofTests
             operation Main() {
                 use q = Qubit[2];
                 H(q[0]);
-                bit b = M(q[0]);
-                int n = b;
-                int m = b * 9;
-                int[] a = [1, 2, 3];
+                var b: bit = M(q[0]);
+                var n: int = b;
+                var m: int = b * 9;
+                var a: int[] = [1, 2, 3];
                 if (0 <= n && n < a.Count) {
                     for n in 0..m { a[n] = 1; }
                 }
@@ -461,9 +461,9 @@ public class BoundsProofTests
             operation Main() {
                 use q = Qubit[2];
                 H(q[0]);
-                bit b = M(q[0]);
-                int n = b;
-                int[] a = [1, 2, 3];
+                var b: bit = M(q[0]);
+                var n: int = b;
+                var a: int[] = [1, 2, 3];
                 if (0 <= n && n < a.Count) {
                     for n in 0..a.Count-1 { a[n] = 1; }
                 }
@@ -478,12 +478,12 @@ public class BoundsProofTests
     public void KeepsASpecializedOpsContractReachableWhenThePostMonoValidationRejects()
     {
         var r = Compiler.Compile("""
-            operation Helper(Qubit[] q, int[] x) {
+            operation Helper(q: Qubit[], x: int[]) {
                 for i in 0..q.Count*2-2 { x[i] = 1; }
             }
             operation Main() {
                 use r = Qubit[5];
-                int[] a = [1, 2];
+                var a: int[] = [1, 2];
                 Helper(r, a);
             }
             """);
@@ -500,11 +500,11 @@ public class BoundsProofTests
 
     [Fact]
     public void RejectsAGateReceivingTheSameQubitSpelledAsAConstAndALiteral() =>
-        Compiler.Rejects("operation Main(){ use q=Qubit[3]; const int k = 2; CNOT(q[k], q[2]); }", "QSEM014");
+        Compiler.Rejects("operation Main(){ use q=Qubit[3]; const k: int = 2; CNOT(q[k], q[2]); }", "QSEM014");
 
     [Fact]
     public void AcceptsAGateWhoseConstIndexFoldsToADifferentQubit() =>
-        Compiler.Accepts("operation Main(){ use q=Qubit[3]; const int k = 1; CNOT(q[k], q[2]); }");
+        Compiler.Accepts("operation Main(){ use q=Qubit[3]; const k: int = 1; CNOT(q[k], q[2]); }");
 
     // --- bound arithmetic is 64-bit and CHECKED: a computation that wraps is not a value ---
 
@@ -518,7 +518,7 @@ public class BoundsProofTests
         Compiler.Rejects($$"""
             operation Main() {
                 use q = Qubit[1];
-                int[] a = [1, 2, 3];
+                var a: int[] = [1, 2, 3];
                 for i in {{range}} { a[i] = 1; }
                 H(q[0]);
             }
@@ -535,9 +535,9 @@ public class BoundsProofTests
             operation Main() {
                 use q = Qubit[2];
                 H(q[0]);
-                bit b = M(q[0]);
-                int n = b;
-                int[] a = [1, 2, 3];
+                var b: bit = M(q[0]);
+                var n: int = b;
+                var a: int[] = [1, 2, 3];
                 if (0 <= n && n < 2) {
                     if (0 <= n && n < 9) {
                         a[n] = 1;
@@ -553,7 +553,7 @@ public class BoundsProofTests
     /// (QSEM016), not "cannot be determined".</summary>
     [Fact]
     public void RejectsALoopStartingAtAProvablyNegativeIndexAsProvenWrong() =>
-        Compiler.Rejects("operation Main(){ use q=Qubit[1]; int[] a=[1,2,3]; for i in 0-1..2 { a[i]=1; } H(q[0]); }", "QSEM016");
+        Compiler.Rejects("operation Main(){ use q=Qubit[1]; var a: int[] = [1,2,3]; for i in 0-1..2 { a[i]=1; } H(q[0]); }", "QSEM016");
 
     /// <summary>When the FROM bound is the one that never settles, the recorded data (and so the QSEM030
     /// message) must blame From — not the innocent To.</summary>
@@ -564,9 +564,9 @@ public class BoundsProofTests
             operation Main() {
                 use q = Qubit[1];
                 H(q[0]);
-                bit b = M(q[0]);
-                int m = b;
-                int[] a = [1, 2, 3];
+                var b: bit = M(q[0]);
+                var m: int = b;
+                var a: int[] = [1, 2, 3];
                 for i in m..2 { a[i] = 1; }
             }
             """);
@@ -583,21 +583,21 @@ public class BoundsProofTests
         Compiler.Rejects("""
             operation Main() {
                 use q = Qubit[2];
-                int[] a = [M(q[0]), M(q[1])];
+                var a: int[] = [M(q[0]), M(q[1])];
                 H(q[0]);
             }
             """, "QSEM017");
 
     [Fact]
     public void AcceptsAMeasurementIntoABitArrayLiteral() =>
-        Compiler.Accepts("operation Main(){ use q=Qubit[2]; bit[] r = [M(q[0]), M(q[1])]; }");
+        Compiler.Accepts("operation Main(){ use q=Qubit[2]; var r: bit[] = [M(q[0]), M(q[1])]; }");
 
     /// <summary>A direct measure with an out-of-range target reports ONE diagnostic, not two — the measure
     /// index is bounds-checked once (via CheckExprIndexes), not also by a redundant dedicated check.</summary>
     [Fact]
     public void ReportsASingleDiagnosticForAnOutOfRangeMeasureTarget()
     {
-        var r = Compiler.Compile("operation Main(){ use q=Qubit[2]; bit x = M(q[5]); H(q[0]); }");
+        var r = Compiler.Compile("operation Main(){ use q=Qubit[2]; var x: bit = M(q[5]); H(q[0]); }");
         Assert.False(r.Success);
         Assert.Single(r.Errors.Where(e => e.Code == "QSEM016"));
     }
@@ -607,10 +607,10 @@ public class BoundsProofTests
     public void RecordsASingleUnprovenEntryForAnUnprovenMeasureTarget()
     {
         var r = Compiler.Compile("""
-            operation Foo(Qubit[] q) {
-                bit a = M(q[0]);
-                int n = a;
-                bit c = M(q[n]);
+            operation Foo(q: Qubit[]) {
+                var a: bit = M(q[0]);
+                var n: int = a;
+                var c: bit = M(q[n]);
             }
             operation Main() { use r = Qubit[3]; Foo(r); }
             """);
@@ -635,9 +635,9 @@ public class BoundsProofTests
     public void RecordsASingleUnprovenEntryForAMeasureInAWhileCondition()
     {
         var r = Compiler.Compile("""
-            operation Foo(Qubit[] q) {
-                bit a = M(q[0]);
-                int n = a;
+            operation Foo(q: Qubit[]) {
+                var a: bit = M(q[0]);
+                var n: int = a;
                 while (M(q[n]) == 1) { }
             }
             operation Main() { use r = Qubit[3]; Foo(r); }
@@ -655,9 +655,9 @@ public class BoundsProofTests
             operation Main() {
                 use q = Qubit[1];
                 H(q[0]);
-                bit b = M(q[0]);
-                int n = b;
-                int[] a = [1, 2, 3];
+                var b: bit = M(q[0]);
+                var n: int = b;
+                var a: int[] = [1, 2, 3];
                 while (0 <= n && n < a.Count) { a[n] = 1; }
                 H(q[0]);
             }
@@ -671,9 +671,9 @@ public class BoundsProofTests
             operation Main() {
                 use q = Qubit[1];
                 H(q[0]);
-                bit b = M(q[0]);
-                int n = b;
-                int[] a = [1, 2, 3];
+                var b: bit = M(q[0]);
+                var n: int = b;
+                var a: int[] = [1, 2, 3];
                 while (0 <= n && n < a.Count) { a[n] = 1; n = 0; }
                 H(q[0]);
             }
@@ -687,9 +687,9 @@ public class BoundsProofTests
             operation Main() {
                 use q = Qubit[1];
                 H(q[0]);
-                bit b = M(q[0]);
-                int n = b;
-                int[] a = [1, 2, 3];
+                var b: bit = M(q[0]);
+                var n: int = b;
+                var a: int[] = [1, 2, 3];
                 while (0 <= n && n < a.Count) { n = n + 100; a[n] = 1; }
                 H(q[0]);
             }
@@ -700,10 +700,10 @@ public class BoundsProofTests
     [Fact]
     public void AcceptsAConstOfQubitCountAsAGuardUpperBound() =>
         Compiler.Accepts("""
-            operation Foo(Qubit[] q) {
-                bit b = M(q[0]);
-                int n = b;
-                const int k = q.Count;
+            operation Foo(q: Qubit[]) {
+                var b: bit = M(q[0]);
+                var n: int = b;
+                const k: int = q.Count;
                 if (0 <= n && n < k) { H(q[n]); }
             }
             operation Main() {
@@ -723,7 +723,7 @@ public class BoundsProofTests
         Compiler.Rejects("""
             operation Main() {
                 use q = Qubit[2];
-                int[] a = [1, 2, 3];
+                var a: int[] = [1, 2, 3];
                 if (M(q[0]) == a[5]) { H(q[1]); }
             }
             """, "QSEM016");
@@ -736,9 +736,9 @@ public class BoundsProofTests
             operation Main() {
                 use q = Qubit[2];
                 H(q[0]);
-                bit c = M(q[0]);
-                int n = c;
-                int[] a = [1, 2, 3];
+                var c: bit = M(q[0]);
+                var n: int = c;
+                var a: int[] = [1, 2, 3];
                 if (M(q[1]) == 1 && 0 <= n && n < a.Count) { a[n] = 1; }
             }
             """);
@@ -750,7 +750,7 @@ public class BoundsProofTests
         Compiler.Rejects("""
             operation Main() {
                 use q = Qubit[1];
-                bit[] r = [M(q[3])];
+                var r: bit[] = [M(q[3])];
                 H(q[0]);
             }
             """, "QSEM016");
@@ -761,9 +761,9 @@ public class BoundsProofTests
     [Fact]
     public void AcceptsAConstGuardedIndexIntoAnUnsizedQubitParameter() =>
         Compiler.Accepts("""
-            operation Foo(Qubit[] q) {
-                bit b = M(q[0]);
-                int n = b;
+            operation Foo(q: Qubit[]) {
+                var b: bit = M(q[0]);
+                var n: int = b;
                 if (0 <= n && n < 3) { H(q[n]); }
             }
             operation Main() {
@@ -777,9 +777,9 @@ public class BoundsProofTests
     [Fact]
     public void RejectsAConstGuardedIndexWhenTheQubitParameterIsSmallerThanTheConstant() =>
         Compiler.Rejects("""
-            operation Foo(Qubit[] q) {
-                bit b = M(q[0]);
-                int n = b;
+            operation Foo(q: Qubit[]) {
+                var b: bit = M(q[0]);
+                var n: int = b;
                 if (0 <= n && n < 3) { H(q[n]); }
             }
             operation Main() {
@@ -798,10 +798,10 @@ public class BoundsProofTests
         Compiler.Rejects("""
             operation Main() {
                 use q = Qubit[3];
-                const int n = 9;
+                const n: int = 9;
                 if (true) {
                     H(q[n]);
-                    const int n = 0;
+                    const n: int = 0;
                 }
             }
             """, "QSEM025");
@@ -811,10 +811,10 @@ public class BoundsProofTests
         Compiler.Rejects("""
             operation Main() {
                 use q = Qubit[3];
-                const int n = 1;
+                const n: int = 1;
                 if (true) {
                     CNOT(q[n], q[1]);
-                    const int n = 0;
+                    const n: int = 0;
                 }
             }
             """, "QSEM025");
@@ -824,11 +824,11 @@ public class BoundsProofTests
         Compiler.Rejects("""
             operation Main() {
                 use q = Qubit[1];
-                const int k = 9;
-                int[] a = [1, 2, 3];
+                const k: int = 9;
+                var a: int[] = [1, 2, 3];
                 if (true) {
                     for i in 0..k { a[i] = 1; }
-                    const int k = 2;
+                    const k: int = 2;
                 }
                 H(q[0]);
             }
@@ -841,10 +841,10 @@ public class BoundsProofTests
         Compiler.Rejects("""
             operation Main() {
                 use q = Qubit[1];
-                int[] a = [1, 2, 3];
+                var a: int[] = [1, 2, 3];
                 for i in 0..5 {
                     a[i] = 1;
-                    const int i = 0;
+                    const i: int = 0;
                 }
                 H(q[0]);
             }
@@ -859,7 +859,7 @@ public class BoundsProofTests
                 use q = Qubit[3];
                 if (true) {
                     H(q[0]);
-                    const int q = 5;
+                    const q: int = 5;
                 }
             }
             """, "QSEM025");
@@ -870,10 +870,10 @@ public class BoundsProofTests
         Compiler.Accepts("""
             operation Main() {
                 use q = Qubit[3];
-                const int n = 1;
+                const n: int = 1;
                 H(q[n]);
                 if (true) {
-                    const int n = 2;
+                    const n: int = 2;
                     H(q[n]);
                 }
             }
@@ -886,9 +886,9 @@ public class BoundsProofTests
         Compiler.Accepts("""
             operation Main() {
                 use q = Qubit[5];
-                const int n = 1;
+                const n: int = 1;
                 if (true) {
-                    const int n = n + 1;
+                    const n: int = n + 1;
                     H(q[n]);
                 }
             }
@@ -908,7 +908,7 @@ public class BoundsProofTests
     [Fact]
     public void AcceptsTheFanInIdiomOverAQubitParameter() =>
         Compiler.Accepts("""
-            operation Foo(Qubit[] q) {
+            operation Foo(q: Qubit[]) {
                 for i in 0..q.Count-2 { CNOT(q[i], q[4]); }
             }
             operation Main() {
@@ -922,7 +922,7 @@ public class BoundsProofTests
     [Fact]
     public void RejectsAFanInWhoseLoopReachesTheFixedOperand() =>
         Compiler.Rejects("""
-            operation Foo(Qubit[] q) {
+            operation Foo(q: Qubit[]) {
                 for i in 0..q.Count-1 { CNOT(q[i], q[4]); }
             }
             operation Main() {
@@ -944,9 +944,9 @@ public class BoundsProofTests
     [Fact]
     public void AcceptsTheSameClassicalArrayElementPassedTwiceAsValueArguments() =>
         Compiler.Accepts("""
-            operation Use(int a, int b) { }
+            operation Use(a: int, b: int) { }
             operation Main() {
-                int[] x = [1, 2, 3];
+                var x: int[] = [1, 2, 3];
                 Use(x[0], x[0]);
             }
             """);
@@ -960,8 +960,8 @@ public class BoundsProofTests
             operation Main() {
                 use q = Qubit[3];
                 H(q[0]);
-                bit b = M(q[0]);
-                int n = b;
+                var b: bit = M(q[0]);
+                var n: int = b;
                 for i in 0..n {
                     if (0 <= i && i < q.Count) { CNOT(q[i], q[0]); }
                 }
@@ -976,8 +976,8 @@ public class BoundsProofTests
             operation Main() {
                 use q = Qubit[5];
                 H(q[0]);
-                bit b = M(q[0]);
-                int n = b;
+                var b: bit = M(q[0]);
+                var n: int = b;
                 for i in 1..n {
                     if (0 <= i && i < q.Count) { CNOT(q[i], q[0]); }
                 }
@@ -998,8 +998,8 @@ public class BoundsProofTests
         Compiler.Rejects("""
             operation Main() {
                 use q = Qubit[3];
-                const int m = 1;
-                if (true) { bit m = M(q[0]); }
+                const m: int = 1;
+                if (true) { var m: bit = M(q[0]); }
             }
             """, "QSEM015");
 
@@ -1008,8 +1008,8 @@ public class BoundsProofTests
         Compiler.Rejects("""
             operation Main() {
                 use q = Qubit[2];
-                int m = 7;
-                if (true) { bit m = M(q[0]); }
+                var m: int = 7;
+                if (true) { var m: bit = M(q[0]); }
             }
             """, "QSEM015");
 
@@ -1020,8 +1020,8 @@ public class BoundsProofTests
         Compiler.Accepts("""
             operation Main() {
                 use q = Qubit[3];
-                if (true) { const int m = 0; }
-                if (true) { bit m = M(q[0]); }
+                if (true) { const m: int = 0; }
+                if (true) { var m: bit = M(q[0]); }
             }
             """);
 
@@ -1032,11 +1032,11 @@ public class BoundsProofTests
     /// <summary>A const-named index is the literal access at its folded value.</summary>
     [Fact]
     public void AcceptsAConstIndexWithinRange() =>
-        Compiler.Accepts("operation Main(){ use q=Qubit[1]; int[] a=[1,2,3]; const int k = 1; a[k]=1; H(q[0]); }");
+        Compiler.Accepts("operation Main(){ use q=Qubit[1]; var a: int[] = [1,2,3]; const k: int = 1; a[k]=1; H(q[0]); }");
 
     [Fact]
     public void RejectsAConstIndexOutOfRange() =>
-        Compiler.Rejects("operation Main(){ use q=Qubit[1]; int[] a=[1,2,3]; const int k = 5; a[k]=1; H(q[0]); }", "QSEM016");
+        Compiler.Rejects("operation Main(){ use q=Qubit[1]; var a: int[] = [1,2,3]; const k: int = 5; a[k]=1; H(q[0]); }", "QSEM016");
 
     /// <summary>A const whose initializer is itself an expression folds too — `1 + 1` settles at the
     /// declaration, and chains (`m = k + 1`) settle through earlier folded consts.</summary>
@@ -1045,9 +1045,9 @@ public class BoundsProofTests
         Compiler.Accepts("""
             operation Main() {
                 use q = Qubit[1];
-                int[] a = [1, 2, 3];
-                const int k = 1 + 1;
-                const int m = k - 1;
+                var a: int[] = [1, 2, 3];
+                const k: int = 1 + 1;
+                const m: int = k - 1;
                 a[k] = 1;
                 a[m] = 1;
                 for i in 0..k { a[i] = 1; }
@@ -1058,29 +1058,29 @@ public class BoundsProofTests
     /// <summary>A negative folded index is out of range for ANY array — proven wrong, not unprovable.</summary>
     [Fact]
     public void RejectsANegativeConstIndex() =>
-        Compiler.Rejects("operation Main(){ use q=Qubit[1]; int[] a=[1,2,3]; const int k = 0 - 3; a[k]=1; H(q[0]); }", "QSEM016");
+        Compiler.Rejects("operation Main(){ use q=Qubit[1]; var a: int[] = [1,2,3]; const k: int = 0 - 3; a[k]=1; H(q[0]); }", "QSEM016");
 
     /// <summary>A negative const as a loop's To bound folds to an EMPTY loop (To &lt; From) — accepted.</summary>
     [Fact]
     public void AcceptsAnEmptyLoopBoundedByANegativeConst() =>
-        Compiler.Accepts("operation Main(){ use q=Qubit[1]; int[] a=[1,2,3]; const int k = 0 - 3; for i in 0..k { a[i]=1; } H(q[0]); }");
+        Compiler.Accepts("operation Main(){ use q=Qubit[1]; var a: int[] = [1,2,3]; const k: int = 0 - 3; for i in 0..k { a[i]=1; } H(q[0]); }");
 
     /// <summary>The boundary of value knowledge: a `var` is NOT tracked — its statically-obvious initial
     /// value is still no proof (constant propagation is deliberately not implemented; declare it const).</summary>
     [Fact]
     public void RejectsAVarIndexEvenWithAStaticInitializer() =>
-        Compiler.Rejects("operation Main(){ use q=Qubit[1]; int[] a=[1,2,3]; int n = 1; a[n]=1; H(q[0]); }", "QSEM030");
+        Compiler.Rejects("operation Main(){ use q=Qubit[1]; var a: int[] = [1,2,3]; var n: int = 1; a[n]=1; H(q[0]); }", "QSEM030");
 
     /// <summary>A const index on a classical-array PARAMETER raises the call-site floor like a literal.</summary>
     [Fact]
     public void RejectsAConstIndexOnAParameterWhenTheArgumentIsTooShort() =>
         Compiler.Rejects("""
-            operation Helper(int[] x) {
-                const int k = 5;
+            operation Helper(x: int[]) {
+                const k: int = 5;
                 x[k] = 1;
             }
             operation Main() {
-                int[] a = [1, 2];
+                var a: int[] = [1, 2];
                 Helper(a);
             }
             """, "QSEM016");
@@ -1092,13 +1092,13 @@ public class BoundsProofTests
     [Fact]
     public void AcceptsAConstBoundOfAQubitCountWhenTheArgumentIsLongEnough() =>
         Compiler.Accepts("""
-            operation Helper(Qubit[] q, int[] x) {
-                const int hi = q.Count;
+            operation Helper(q: Qubit[], x: int[]) {
+                const hi: int = q.Count;
                 for i in 0..hi { x[i] = 1; }
             }
             operation Main() {
                 use r = Qubit[3];
-                int[] a = [1, 2, 3, 4, 5];
+                var a: int[] = [1, 2, 3, 4, 5];
                 Helper(r, a);
             }
             """);
@@ -1108,13 +1108,13 @@ public class BoundsProofTests
     [Fact]
     public void RejectsAConstBoundOfAQubitCountWhenTheArgumentIsTooShort() =>
         Compiler.Rejects("""
-            operation Helper(Qubit[] q, int[] x) {
-                const int hi = q.Count;
+            operation Helper(q: Qubit[], x: int[]) {
+                const hi: int = q.Count;
                 for i in 0..hi { x[i] = 1; }
             }
             operation Main() {
                 use r = Qubit[3];
-                int[] a = [1, 2];
+                var a: int[] = [1, 2];
                 Helper(r, a);
             }
             """, "QSEM016");
@@ -1131,11 +1131,11 @@ public class BoundsProofTests
             operation Main() {
                 use q = Qubit[2];
                 H(q[0]);
-                bit b = M(q[0]);
-                int n = b;
-                int[] a = [1, 2, 3];
+                var b: bit = M(q[0]);
+                var n: int = b;
+                var a: int[] = [1, 2, 3];
                 if (0 <= n && n < a.Count) {
-                    int n = 9;
+                    var n: int = 9;
                     a[n] = 1;
                 }
                 H(q[1]);
@@ -1149,9 +1149,9 @@ public class BoundsProofTests
         Compiler.Rejects("""
             operation Main() {
                 use q = Qubit[1];
-                int[] a = [1, 2, 3];
+                var a: int[] = [1, 2, 3];
                 for i in 0..2 {
-                    int i = 9;
+                    var i: int = 9;
                     a[i] = 1;
                 }
                 H(q[0]);
@@ -1166,12 +1166,12 @@ public class BoundsProofTests
             operation Main() {
                 use q = Qubit[2];
                 H(q[0]);
-                bit b = M(q[0]);
-                int n = b;
-                int[] a = [1, 2, 3];
+                var b: bit = M(q[0]);
+                var n: int = b;
+                var a: int[] = [1, 2, 3];
                 if (0 <= n && n < a.Count) {
                     for j in 0..2 {
-                        int n = 0;
+                        var n: int = 0;
                         n = n + 9;
                     }
                     a[n] = 1;
@@ -1190,10 +1190,10 @@ public class BoundsProofTests
         Compiler.Rejects("""
             operation Main() {
                 use q = Qubit[1];
-                const int k = 9;
-                int[] a = [1, 2, 3];
+                const k: int = 9;
+                var a: int[] = [1, 2, 3];
                 for i in 0..k {
-                    const int k = 2;
+                    const k: int = 2;
                     a[i] = 1;
                 }
                 H(q[0]);
@@ -1207,10 +1207,10 @@ public class BoundsProofTests
         Compiler.Accepts("""
             operation Main() {
                 use q = Qubit[1];
-                const int k = 2;
-                int[] a = [1, 2, 3];
+                const k: int = 2;
+                var a: int[] = [1, 2, 3];
                 for i in 0..k {
-                    const int k = 9;
+                    const k: int = 9;
                     a[i] = 1;
                 }
                 H(q[0]);
@@ -1228,7 +1228,7 @@ public class BoundsProofTests
         Compiler.Accepts("""
             operation Main() {
                 use q = Qubit[1];
-                int[] a = [1, 2, 3];
+                var a: int[] = [1, 2, 3];
                 for i in 0..5 {
                     if (0 <= i && i < a.Count) { a[i] = 1; }
                 }
@@ -1243,7 +1243,7 @@ public class BoundsProofTests
         Compiler.Accepts("""
             operation Main() {
                 use q = Qubit[1];
-                int[] a = [1, 2, 3];
+                var a: int[] = [1, 2, 3];
                 for i in 0..a.Count {
                     if (0 <= i && i < a.Count) { a[i] = 1; }
                 }
@@ -1257,13 +1257,13 @@ public class BoundsProofTests
     public void AcceptsAGuardedClampOverAParameterAndRecordsNoFloor()
     {
         var r = Compiler.Compile("""
-            operation Helper(int[] x) {
+            operation Helper(x: int[]) {
                 for i in 0..5 {
                     if (0 <= i && i < x.Count) { x[i] = 1; }
                 }
             }
             operation Main() {
-                int[] a = [1, 2];
+                var a: int[] = [1, 2];
                 Helper(a);
             }
             """);
@@ -1279,8 +1279,8 @@ public class BoundsProofTests
         Compiler.Rejects("""
             operation Main() {
                 use q = Qubit[1];
-                int[] a = [1, 2, 3];
-                int[] b = [1, 2, 3, 4, 5, 6];
+                var a: int[] = [1, 2, 3];
+                var b: int[] = [1, 2, 3, 4, 5, 6];
                 for i in 0..5 {
                     if (0 <= i && i < b.Count) { a[i] = 1; }
                 }
@@ -1298,9 +1298,9 @@ public class BoundsProofTests
             operation Main() {
                 use q = Qubit[2];
                 H(q[0]);
-                bit b = M(q[0]);
-                int n = b;
-                int[] a = [1, 2, 3];
+                var b: bit = M(q[0]);
+                var n: int = b;
+                var a: int[] = [1, 2, 3];
                 if (0 <= n && n < a.Count) {
                     for i in 0..5 {
                         a[n] = 1;
@@ -1319,9 +1319,9 @@ public class BoundsProofTests
             operation Main() {
                 use q = Qubit[2];
                 H(q[0]);
-                bit b = M(q[0]);
-                int n = b;
-                int[] a = [1, 2, 3];
+                var b: bit = M(q[0]);
+                var n: int = b;
+                var a: int[] = [1, 2, 3];
                 if (0 <= n && n < a.Count) {
                     while (a[n] == 0) {
                         n = n + 9;
@@ -1339,9 +1339,9 @@ public class BoundsProofTests
             operation Main() {
                 use q = Qubit[2];
                 H(q[0]);
-                bit b = M(q[0]);
-                int n = b;
-                int[] a = [1, 2, 3];
+                var b: bit = M(q[0]);
+                var n: int = b;
+                var a: int[] = [1, 2, 3];
                 if (0 <= n && n < a.Count) {
                     repeat {
                         n = n + 9;
@@ -1359,9 +1359,9 @@ public class BoundsProofTests
             operation Main() {
                 use q = Qubit[2];
                 H(q[0]);
-                bit b = M(q[0]);
-                int n = b;
-                int[] a = [1, 2, 3];
+                var b: bit = M(q[0]);
+                var n: int = b;
+                var a: int[] = [1, 2, 3];
                 for i in 0..5 {
                     if (0 <= n && n < a.Count) {
                         a[n] = 1;
@@ -1380,9 +1380,9 @@ public class BoundsProofTests
             operation Main() {
                 use q = Qubit[2];
                 H(q[0]);
-                bit b = M(q[0]);
-                int n = b;
-                int[] a = [1, 2, 3];
+                var b: bit = M(q[0]);
+                var n: int = b;
+                var a: int[] = [1, 2, 3];
                 if (0 <= n && n < a.Count) {
                     for i in 0..5 {
                         a[n] = 1;
@@ -1403,11 +1403,11 @@ public class BoundsProofTests
     [InlineData("0..x.Count-x.Count+5")]
     public void RejectsAFoldableLoopBoundOverAParameterWhenTheArgumentIsTooShort(string range) =>
         Compiler.Rejects($$"""
-            operation Helper(int[] x) {
+            operation Helper(x: int[]) {
                 for i in {{range}} { x[i] = 1; }
             }
             operation Main() {
-                int[] a = [1, 2];
+                var a: int[] = [1, 2];
                 Helper(a);
             }
             """, "QSEM016");
@@ -1415,12 +1415,12 @@ public class BoundsProofTests
     [Fact]
     public void RejectsAConstNameBoundOverAParameterWhenTheArgumentIsTooShort() =>
         Compiler.Rejects("""
-            operation Helper(int[] x) {
-                const int k = 5;
+            operation Helper(x: int[]) {
+                const k: int = 5;
                 for i in 0..k { x[i] = 1; }
             }
             operation Main() {
-                int[] a = [1, 2];
+                var a: int[] = [1, 2];
                 Helper(a);
             }
             """, "QSEM016");
@@ -1430,12 +1430,12 @@ public class BoundsProofTests
     [Fact]
     public void RejectsAPostMonoArithmeticBoundOverAClassicalParameter() =>
         Compiler.Rejects("""
-            operation Helper(Qubit[] q, int[] x) {
+            operation Helper(q: Qubit[], x: int[]) {
                 for i in 0..q.Count*2-2 { x[i] = 1; }
             }
             operation Main() {
                 use r = Qubit[5];
-                int[] a = [1, 2];
+                var a: int[] = [1, 2];
                 Helper(r, a);
             }
             """, "QSEM016");
@@ -1445,14 +1445,14 @@ public class BoundsProofTests
     [Fact]
     public void RejectsATransitiveArithmeticFloorThroughAPassThroughCall() =>
         Compiler.Rejects("""
-            operation Inner(int[] x) {
+            operation Inner(x: int[]) {
                 for i in 0..2+3 { x[i] = 1; }
             }
-            operation Outer(int[] y) {
+            operation Outer(y: int[]) {
                 Inner(y);
             }
             operation Main() {
-                int[] a = [1, 2];
+                var a: int[] = [1, 2];
                 Outer(a);
             }
             """, "QSEM016");
@@ -1464,11 +1464,11 @@ public class BoundsProofTests
     [InlineData("3000000000")]
     public void RejectsALiteralIndexBeyondAnyPossibleArrayLength(string index) =>
         Compiler.Rejects($$"""
-            operation Helper(int[] x) {
+            operation Helper(x: int[]) {
                 x[{{index}}] = 1;
             }
             operation Main() {
-                int[] a = [1, 2];
+                var a: int[] = [1, 2];
                 Helper(a);
             }
             """, "QSEM016");
@@ -1478,11 +1478,11 @@ public class BoundsProofTests
     [Fact]
     public void AcceptsAnEmptyConstantLoopOverAParameterRegardlessOfArgumentLength() =>
         Compiler.Accepts("""
-            operation Helper(int[] x) {
+            operation Helper(x: int[]) {
                 for i in 5..2 { x[i] = 1; }
             }
             operation Main() {
-                int[] a = [1];
+                var a: int[] = [1];
                 Helper(a);
             }
             """);
@@ -1493,13 +1493,13 @@ public class BoundsProofTests
     [Fact]
     public void RejectsAShadowedInnerLoopWhoseBoundExceedsTheArgument() =>
         Compiler.Rejects("""
-            operation Helper(int[] x) {
+            operation Helper(x: int[]) {
                 for i in 0..1 {
                     for i in 0..5 { x[i] = 1; }
                 }
             }
             operation Main() {
-                int[] a = [1, 2];
+                var a: int[] = [1, 2];
                 Helper(a);
             }
             """, "QSEM016");
@@ -1507,13 +1507,13 @@ public class BoundsProofTests
     [Fact]
     public void AcceptsAShadowedInnerLoopWhoseBoundFitsTheArgument() =>
         Compiler.Accepts("""
-            operation Helper(int[] x) {
+            operation Helper(x: int[]) {
                 for i in 0..5 {
                     for i in 0..1 { x[i] = 1; }
                 }
             }
             operation Main() {
-                int[] a = [1, 2];
+                var a: int[] = [1, 2];
                 Helper(a);
             }
             """);
@@ -1524,11 +1524,11 @@ public class BoundsProofTests
     public void RecordsTheArrayArgumentContractOnTheSemanticModel()
     {
         var r = Compiler.Compile("""
-            operation Helper(int[] x) {
+            operation Helper(x: int[]) {
                 for i in 0..2+3 { x[i] = 1; }
             }
             operation Main() {
-                int[] a = [1, 2, 3, 4, 5, 6];
+                var a: int[] = [1, 2, 3, 4, 5, 6];
                 Helper(a);
             }
             """);
@@ -1550,9 +1550,9 @@ public class BoundsProofTests
             operation Main() {
                 use q = Qubit[2];
                 H(q[0]);
-                bit b = M(q[0]);
-                int n = b;
-                int[] a = [1, 2, 3];
+                var b: bit = M(q[0]);
+                var n: int = b;
+                var a: int[] = [1, 2, 3];
                 a[n] = 1;
                 for i in 0..a.Count-n { a[i] = 1; }
             }
@@ -1574,7 +1574,7 @@ public class BoundsProofTests
     public void DeferralLedgerIsEmptyOnTheFinalModelAndListsPreMonoPromises()
     {
         var r = Compiler.Compile("""
-            operation Flip(Qubit[] q, Qubit[] r) {
+            operation Flip(q: Qubit[], r: Qubit[]) {
                 X(q[5]);
                 for i in 0..q.Count-1 { H(q[i]); }
                 for i in 0..r.Count-1 { H(q[i]); }
@@ -1606,13 +1606,13 @@ public class BoundsProofTests
     public void DeferralLedgerCountsEverySiteEvenWhenEntriesAreValueEqual()
     {
         var r = Compiler.Compile("""
-            operation Pick(bit[] f, int n, Qubit q) {
+            operation Pick(f: bit[], n: int, q: Qubit) {
                 if (0 <= n && n < 2) { if (f[n] == 1 && f[n] == 1) { X(q); } }
             }
             operation Main() {
                 use q = Qubit[1];
-                bit[] f = new bit[2];
-                int n = 1;
+                var f: bit[] = new bit[2];
+                var n: int = 1;
                 Pick(f, n, q[0]);
             }
             """);
@@ -1634,9 +1634,9 @@ public class BoundsProofTests
     public void ModelRecordsWillBeRecheckedPerOp()
     {
         var r = Compiler.Compile("""
-            operation Flip(Qubit[] q) { X(q[5]); }
-            operation Dead1(Qubit[] q) { Dead2(q); }
-            operation Dead2(Qubit[] q) { X(q[5]); }
+            operation Flip(q: Qubit[]) { X(q[5]); }
+            operation Dead1(q: Qubit[]) { Dead2(q); }
+            operation Dead2(q: Qubit[]) { X(q[5]); }
             operation Main() {
                 use a = Qubit[6];
                 Flip(a);
@@ -1683,7 +1683,7 @@ public class BoundsProofTests
         // site there is no post-mono re-check, so the pre-mono walk must reject it (QSEM014), exactly as
         // it rejects the literal form `CNOT(qs[0], qs[0])`.
         var r = Compiler.Compile("""
-            operation Dead(Qubit[] qs) {
+            operation Dead(qs: Qubit[]) {
                 for i in 0..qs.Count-1 { CNOT(qs[i], qs[0]); }
             }
             operation Main() {
@@ -1703,10 +1703,10 @@ public class BoundsProofTests
         // mean transitive reachability from a CONCRETE op (mirroring what the Monomorphizer actually
         // specializes), not merely "has any call site".
         var r = Compiler.Compile("""
-            operation Dead2(Qubit[] b) {
+            operation Dead2(b: Qubit[]) {
                 for i in 0..b.Count-1 { CNOT(b[i], b[0]); }
             }
-            operation Dead1(Qubit[] a) {
+            operation Dead1(a: Qubit[]) {
                 Dead2(a);
             }
             operation Main() {
@@ -1725,7 +1725,7 @@ public class BoundsProofTests
         // argument never reaches q[4], so the fan-in does not alias — deferral is sound because the
         // re-check runs (the uncalled sibling above must NOT defer, having no re-check to defer to).
         var r = Compiler.Compile("""
-            operation FanIn(Qubit[] q) {
+            operation FanIn(q: Qubit[]) {
                 for i in 0..q.Count-2 { CNOT(q[i], q[4]); }
             }
             operation Main() {

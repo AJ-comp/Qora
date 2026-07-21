@@ -11,6 +11,20 @@ emitted as **OpenQASM 3.0**.
 > **Note:** Qora was renamed from **Ket** on 2026-07-01 (a "Ket" extension already existed). Versions
 > 0.1–0.7 below were authored under the old name.
 
+## 0.25 — 2026-07-21
+
+### Changed
+- **Type annotations move to trailing position (`name: T`).** A parameter is now written `q: Qubit[]`,
+  `n: int`, `a: float[]`; a declaration is `var x: int = 5` or `const a: int[] = [1, 2]`. The type stays
+  optional — `var x = 5` and `const c = M(q[0])` still infer it from the initializer — but when written,
+  it always follows the name after a `:`. This matches Q#, Rust, Kotlin, Swift, and TypeScript, and reads
+  the type left-to-right with the name it describes. The `:` is a structural separator excluded from the
+  AST (like `=`), so the compiler's order-independent lowering, every validation pass, and OpenQASM
+  emission are unchanged — the emitted QASM is byte-identical to the leading-syntax era.
+- **The leading forms (`int n`, `Qubit[] q`, `bit r = M(q[0])`) are removed.** There is exactly one way
+  to write a type annotation. Existing programs update mechanically: move the type after the name and add
+  a `:`, and prefix a keyword-less typed declaration with `var` (`bit r = …` → `var r: bit = …`).
+
 ## 0.23 — 2026-07-21
 
 ### Added

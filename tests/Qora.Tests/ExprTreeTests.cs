@@ -17,9 +17,9 @@ public class ExprTreeTests
         var r = Compiler.Compile($$"""
             operation Main() {
                 use q = Qubit[3];
-                int[] a = [1, 2, 3];
-                bit b = M(q[0]);
-                int n = b;
+                var a: int[] = [1, 2, 3];
+                var b: bit = M(q[0]);
+                var n: int = b;
                 if ({{condition}}) { H(q[0]); }
             }
             """);
@@ -76,7 +76,7 @@ public class ExprTreeTests
         var r = Compiler.Compile($$"""
             operation Main() {
                 use q = Qubit[1];
-                int[] a = [1, 2, 3];
+                var a: int[] = [1, 2, 3];
                 for i in 0..{{bound}} { a[i] = 1; }
                 H(q[0]);
             }
@@ -96,7 +96,7 @@ public class ExprTreeTests
         var r = Compiler.Compile($$"""
             operation Main() {
                 use q = Qubit[1];
-                int[] a = [{{element}}, 2];
+                var a: int[] = [{{element}}, 2];
                 H(q[0]);
             }
             """);
@@ -137,7 +137,7 @@ public class ExprTreeTests
     public void RejectsAPathologicallyDeepUnaryChainCleanly()
     {
         var expr = string.Concat(Enumerable.Repeat("- ", 6000)) + "1";
-        var r = Compiler.Compile($"operation Main() {{ use q = Qubit[1]; int x = {expr}; H(q[0]); }}");
+        var r = Compiler.Compile($"operation Main() {{ use q = Qubit[1]; var x: int = {expr}; H(q[0]); }}");
         Assert.False(r.Success);
         Assert.Contains(r.Errors, e => e.Code == "QSEM031");
         Assert.Null(r.Ir);

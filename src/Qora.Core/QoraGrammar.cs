@@ -6,9 +6,9 @@ using Janglim.FrontEnd.RegularGrammar;
 namespace Qora;
 
 /// <summary>
-/// Qora v0.24 — a Q#/C#-flavored quantum language on the Janglim engine.
+/// Qora v0.25 — a Q#/C#-flavored quantum language on the Janglim engine.
 ///
-///   operation Bell(Qubit[] q) {        // a subroutine, with C#-style array parameters
+///   operation Bell(q: Qubit[]) {        // a subroutine, with trailing-type parameters (name: T)
 ///       H(q[0]);
 ///       Controlled X(q[0], q[1]);       // add a control -> ctrl @ x  (CNOT)
 ///   }
@@ -16,7 +16,7 @@ namespace Qora;
 ///   operation Main() {                  // the entry point -> OpenQASM top-level
 ///       use q = Qubit[2];
 ///       Bell(q);                        // call (whole register) — or Bell(q[0], q[1])
-///       bit r = M(q[0]);
+///       var r: bit = M(q[0]);
 ///       if (r == 1) { Adjoint S(q[1]); } else { S(q[1]); }   // functor + if/else
 ///   }
 ///
@@ -78,6 +78,11 @@ namespace Qora;
 /// v0.24 hardens the v0.23 hoisting: every minted name is a collision-proof <see cref="Ir.HoistName"/>
 /// placeholder the mangler prettifies, so no minted name can shadow a user variable, and a
 /// measurement-in-condition temp can no longer mask a user's undeclared <c>__mN</c> (its <c>QSEM025</c>).
+/// v0.25 moves every type annotation to TRAILING position (<c>name: T</c>): a parameter is <c>q: Qubit[]</c>,
+/// a declaration is <c>var x: int = 5</c> / <c>const a: int[] = […]</c> (the type stays optional — <c>var x = 5</c>
+/// still infers). The <c>:</c> separator is structural (excluded from the AST like <c>=</c>), so the
+/// order-independent lowering reads the same shape it always did. The leading forms (<c>int n</c>, <c>Qubit[] q</c>)
+/// are removed — there is exactly one way to write a type.
 /// </summary>
 public class QoraGrammar : Grammar
 {
@@ -135,6 +140,10 @@ public class QoraGrammar : Grammar
     public Terminal RBracket { get; } = new Terminal(TokenType.Operator.PairClose, "]", false);
     public Terminal Comma { get; } = new Terminal(TokenType.Operator.Comma, ",", false);
     public Terminal Assign { get; } = new Terminal(TokenType.Operator, "=", false);
+    // The trailing type-annotation separator (`name: T`). Structural only — excluded from the AST like `=`,
+    // so the order-independent lowering (which finds the type by keyword and the name by what's left) reads
+    // `name: T` and `T name` identically.
+    public Terminal Colon { get; } = new Terminal(TokenType.Operator, ":", false);
     public Terminal DotDot { get; } = new Terminal(TokenType.Operator, "..", false);
     // single dot for qualified names (Lib.Op); ".." wins by longest match, "0.5" lexes as one Float.
     public Terminal Dot { get; } = new Terminal(TokenType.Operator, ".", "." , true, false);
@@ -244,12 +253,13 @@ public class QoraGrammar : Grammar
         operation.AddItem(Operation + Ident + LParen + paramList + RParen + LBrace + statement.ZeroOrMore() + RBrace, OperationM);
 
         paramList.AddItem(param + (Comma + param).ZeroOrMore());
-        // Qubit q / Qubit[] qs / int n / bit b / float theta / angle phi.
-        // Array length is intentionally absent from the source parameter type; use-allocation still has one.
-        param.AddItem(Qubit + Ident, ParamM);
-        param.AddItem(qubitArrayType + Ident, ParamM);
-        param.AddItem(typeName + Ident, ParamM);
-        param.AddItem(arrayType + Ident, ParamM);
+        // q: Qubit / qs: Qubit[] / n: int / b: bit / theta: float / phi: angle.
+        // The type is TRAILING (name: T), introduced by `:`. Array length is intentionally absent from the
+        // source parameter type; the use-allocation still carries one.
+        param.AddItem(Ident + Colon + Qubit, ParamM);            // q: Qubit
+        param.AddItem(Ident + Colon + qubitArrayType, ParamM);   // q: Qubit[]
+        param.AddItem(Ident + Colon + typeName, ParamM);         // n: int
+        param.AddItem(Ident + Colon + arrayType, ParamM);        // a: int[]
 
         statement.AddItem(useStmt | gateStmt | constDecl | varDecl | assignStmt | ifStmt | forStmt | whileStmt | repeatStmt);
 
@@ -272,15 +282,15 @@ public class QoraGrammar : Grammar
         // structured argument, allowing validation to decide whether its base is a qubit or T[].
         arg.AddItem(expr);
 
-        // const i = expr;   /   const int i = expr;
-        constDecl.AddItem(Const + Ident + Assign + expr + Semicolon, ConstDeclM);
-        constDecl.AddItem(Const + typeName + Ident + Assign + expr + Semicolon, ConstDeclM);
-        constDecl.AddItem(Const + arrayType + Ident + Assign + arrayInitializer + Semicolon, ConstDeclM);
+        // const x = expr;   /   const x: int = expr;   /   const a: int[] = […];   (immutable)
+        constDecl.AddItem(Const + Ident + Assign + expr + Semicolon, ConstDeclM);                                    // const x = 5
+        constDecl.AddItem(Const + Ident + Colon + typeName + Assign + expr + Semicolon, ConstDeclM);                 // const x: int = 5
+        constDecl.AddItem(Const + Ident + Colon + arrayType + Assign + arrayInitializer + Semicolon, ConstDeclM);    // const a: int[] = […]
 
-        // var i = expr;   /   int i = expr;   /   bit r = M(q[0]);   (all mutable)
-        varDecl.AddItem(Var + Ident + Assign + expr + Semicolon, VarDeclM);
-        varDecl.AddItem(typeName + Ident + Assign + expr + Semicolon, VarDeclM);
-        varDecl.AddItem(arrayType + Ident + Assign + arrayInitializer + Semicolon, VarDeclM);
+        // var x = expr;   /   var x: int = expr;   /   var r: bit = M(q[0]);   (all mutable)
+        varDecl.AddItem(Var + Ident + Assign + expr + Semicolon, VarDeclM);                                  // var x = 5
+        varDecl.AddItem(Var + Ident + Colon + typeName + Assign + expr + Semicolon, VarDeclM);               // var x: int = 5
+        varDecl.AddItem(Var + Ident + Colon + arrayType + Assign + arrayInitializer + Semicolon, VarDeclM);  // var a: int[] = […]
 
         // i = expr;
         assignStmt.AddItem(Ident + Assign + expr + Semicolon, AssignM);
