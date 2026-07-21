@@ -1,3 +1,5 @@
+using Qora.Ir.Passes;
+
 namespace Qora.Tests;
 
 /// <summary>
@@ -899,6 +901,36 @@ public class BoundsProofTests
     public void RejectsAGateAliasingViaASingletonLoopVariable() =>
         Compiler.Rejects("operation Main(){ use q=Qubit[3]; for i in 2..2 { CNOT(q[i], q[2]); } }", "QSEM014");
 
+    /// <summary>A loop bound that DEFERS to monomorphization (a `Qubit[].Count` upper) must not be
+    /// over-approximated to `[From..MaxValue]` for QSEM014 — the fan-in idiom `for i in 0..q.Count-2 {
+    /// CNOT(q[i], q[last]) }` never aliases the fixed last operand, and post-mono re-checks with the real
+    /// range. The aliasing check now defers exactly as the bounds check does.</summary>
+    [Fact]
+    public void AcceptsTheFanInIdiomOverAQubitParameter() =>
+        Compiler.Accepts("""
+            operation Foo(Qubit[] q) {
+                for i in 0..q.Count-2 { CNOT(q[i], q[4]); }
+            }
+            operation Main() {
+                use r = Qubit[5];
+                Foo(r);
+            }
+            """);
+
+    /// <summary>...but a loop that DOES reach the fixed operand still aliases and is rejected post-mono —
+    /// `0..q.Count-1` reaches `q[4]` on a 5-qubit register.</summary>
+    [Fact]
+    public void RejectsAFanInWhoseLoopReachesTheFixedOperand() =>
+        Compiler.Rejects("""
+            operation Foo(Qubit[] q) {
+                for i in 0..q.Count-1 { CNOT(q[i], q[4]); }
+            }
+            operation Main() {
+                use r = Qubit[5];
+                Foo(r);
+            }
+            """, "QSEM014");
+
     [Fact]
     public void RejectsAGateAliasingWhenTheLoopRangeContainsTheLiteralOperand() =>
         Compiler.Rejects("operation Main(){ use q=Qubit[2]; for i in 0..1 { CNOT(q[i], q[1]); } }", "QSEM014");
@@ -1531,5 +1563,176 @@ public class BoundsProofTests
             u => Assert.Equal(("Main", "a", "n", null), (u.Op, u.Array, u.Index, u.LoopBound)),
             u => Assert.Equal(("Main", "a", "i", "a . Count - n"), (u.Op, u.Array, u.Index, u.LoopBound)));   // bound text as the IR stores it (tokenizer-spaced)
         Assert.Equal(r.Semantics.UnprovenIndexes.Count, r.Errors.Count(e => e.Code == "QSEM030"));
+    }
+
+    // --- the deferral ledger: a "re-check after monomorphization" promise is itself recorded as DATA
+    //     (SemanticModel.DeferredSizeChecks), never a silent return. The pipeline's surviving model is
+    //     empty on success (the post-mono re-check answered every promise); validating the pre-mono
+    //     program directly exposes the outstanding entries a no-specialization backend must dispose of. ---
+
+    [Fact]
+    public void DeferralLedgerIsEmptyOnTheFinalModelAndListsPreMonoPromises()
+    {
+        var r = Compiler.Compile("""
+            operation Flip(Qubit[] q, Qubit[] r) {
+                X(q[5]);
+                for i in 0..q.Count-1 { H(q[i]); }
+                for i in 0..r.Count-1 { H(q[i]); }
+            }
+            operation Main() {
+                use a = Qubit[6];
+                use b = Qubit[6];
+                Flip(a, b);
+            }
+            """);
+        Assert.True(r.Success);
+        Assert.Empty(r.Semantics!.DeferredSizeChecks);   // the specialize→re-validate pair ran: every promise was answered
+
+        // The same (resolved, pre-mono) program validated directly: the literal index and the CROSS-array
+        // loop bound are postponed — and on the ledger. The same-array `0..q.Count-1` loop is NOT: P2
+        // proves it for ANY length, so there is no promise to record.
+        var preErrors = QoraValidator.Validate(r.Ir, out var pre);
+        Assert.Empty(preErrors);
+        Assert.Collection(pre!.DeferredSizeChecks,
+            d => Assert.Equal(("Flip", "q", "q[5]"), (d.Op, d.Array, d.Access)),
+            d => Assert.Equal(("Flip", "q", "q[i]"), (d.Op, d.Array, d.Access)));
+    }
+
+    /// <summary>The ledger is a per-SITE work list, never deduplicated: two deferring accesses stay two
+    /// entries even when the records are value-equal (here: one statement, one span, identical spelling —
+    /// the R12 finding was that Distinct silently under-counted exactly this, and any spanless imported
+    /// pair the same way). Diagnostics collapse value-equal records; promises must not.</summary>
+    [Fact]
+    public void DeferralLedgerCountsEverySiteEvenWhenEntriesAreValueEqual()
+    {
+        var r = Compiler.Compile("""
+            operation Pick(bit[] f, int n, Qubit q) {
+                if (0 <= n && n < 2) { if (f[n] == 1 && f[n] == 1) { X(q); } }
+            }
+            operation Main() {
+                use q = Qubit[1];
+                bit[] f = new bit[2];
+                int n = 1;
+                Pick(f, n, q[0]);
+            }
+            """);
+        Assert.True(r.Success);
+        Assert.Empty(r.Semantics!.DeferredSizeChecks);
+
+        var preErrors = QoraValidator.Validate(r.Ir, out var pre);
+        Assert.Empty(preErrors);
+        Assert.Collection(pre!.DeferredSizeChecks,
+            d => Assert.Equal(("Pick", "f", "f[n]"), (d.Op, d.Array, d.Access)),
+            d => Assert.Equal(("Pick", "f", "f[n]"), (d.Op, d.Array, d.Access)));
+    }
+
+    /// <summary>The walk's liveness prediction is recorded per op instead of discarded: WillBeRechecked
+    /// answers "does the post-mono re-check come for this op?" — the ledger's companion question (an entry
+    /// whose op answers false is a promise nothing will ever answer). Dead1→Dead2 pins the TRANSITIVE
+    /// closure: Dead2 has a caller, but that caller is itself dead, so no size ever reaches it.</summary>
+    [Fact]
+    public void ModelRecordsWillBeRecheckedPerOp()
+    {
+        var r = Compiler.Compile("""
+            operation Flip(Qubit[] q) { X(q[5]); }
+            operation Dead1(Qubit[] q) { Dead2(q); }
+            operation Dead2(Qubit[] q) { X(q[5]); }
+            operation Main() {
+                use a = Qubit[6];
+                Flip(a);
+            }
+            """);
+        Assert.True(r.Success);
+
+        QoraValidator.Validate(r.Ir, out var pre);
+        var ops = r.Ir!.Operations.ToDictionary(o => o.Name, o => o.Id);
+        Assert.True(pre!.WillBeRechecked(ops["Main"]));    // concrete: checks complete without deferral
+        Assert.True(pre.WillBeRechecked(ops["Flip"]));     // generic reached from Main
+        Assert.False(pre.WillBeRechecked(ops["Dead1"]));   // generic nothing calls
+        Assert.False(pre.WillBeRechecked(ops["Dead2"]));   // one caller — but a dead one
+        Assert.Null(pre.WillBeRechecked(-1));              // an op this validation never saw
+
+        // The FINAL (post-mono) model: every surviving op is concrete, so every verdict is true.
+        Assert.All(r.MonoIr!.Operations, o => Assert.True(r.Semantics!.WillBeRechecked(o.Id)));
+    }
+
+    /// <summary>A digit-run index too large for long lowers to a verbatim literal node — the diagnostic
+    /// must still SHOW it (the message once dropped it to an empty `q[]`).</summary>
+    [Fact]
+    public void HugeDigitIndexDiagnosticShowsTheLiteral()
+    {
+        var r = Compiler.Compile("""
+            operation Main() {
+                use q = Qubit[2];
+                X(q[99999999999999999999]);
+            }
+            """);
+        Assert.False(r.Success);
+        var e = Assert.Single(r.Errors, e => e.Code == "QSEM016");
+        Assert.Contains("99999999999999999999", e.Message);
+    }
+
+    // --- deferral soundness: "re-check after monomorphization" is only a proof when the re-check RUNS.
+    //     A generic op nothing calls is dropped by the Monomorphizer, so its deferred aliasing check
+    //     falls back to the conservative pre-mono judgement instead of silently skipping. ---
+
+    [Fact]
+    public void RejectsAliasingInAnUncalledGenericOperation()
+    {
+        // i reaches 0 on iteration 0 in every possible specialization — qs[i] aliases qs[0]. With no call
+        // site there is no post-mono re-check, so the pre-mono walk must reject it (QSEM014), exactly as
+        // it rejects the literal form `CNOT(qs[0], qs[0])`.
+        var r = Compiler.Compile("""
+            operation Dead(Qubit[] qs) {
+                for i in 0..qs.Count-1 { CNOT(qs[i], qs[0]); }
+            }
+            operation Main() {
+                use q = Qubit[2];
+                H(q[0]);
+            }
+            """);
+        Assert.False(r.Success);
+        Assert.Contains(r.Errors, e => e.Code == "QSEM014");
+    }
+
+    [Fact]
+    public void RejectsAliasingInAGenericReachableOnlyFromDeadGenerics()
+    {
+        // Dead2 HAS a caller — but that caller is itself a dead generic, so the Monomorphizer will
+        // specialize NEITHER and the deferred post-mono re-check never runs. "Will be re-checked" must
+        // mean transitive reachability from a CONCRETE op (mirroring what the Monomorphizer actually
+        // specializes), not merely "has any call site".
+        var r = Compiler.Compile("""
+            operation Dead2(Qubit[] b) {
+                for i in 0..b.Count-1 { CNOT(b[i], b[0]); }
+            }
+            operation Dead1(Qubit[] a) {
+                Dead2(a);
+            }
+            operation Main() {
+                use q = Qubit[2];
+                H(q[0]);
+            }
+            """);
+        Assert.False(r.Success);
+        Assert.Contains(r.Errors, e => e.Code == "QSEM014");
+    }
+
+    [Fact]
+    public void FanInOverACalledGenericOperationStillCompiles()
+    {
+        // the CALLED counterpart keeps the precise post-mono verdict: `i in 0..q.Count-2` on a 5-qubit
+        // argument never reaches q[4], so the fan-in does not alias — deferral is sound because the
+        // re-check runs (the uncalled sibling above must NOT defer, having no re-check to defer to).
+        var r = Compiler.Compile("""
+            operation FanIn(Qubit[] q) {
+                for i in 0..q.Count-2 { CNOT(q[i], q[4]); }
+            }
+            operation Main() {
+                use a = Qubit[5];
+                FanIn(a);
+            }
+            """);
+        Assert.True(r.Success, string.Join(" | ", r.Errors.Select(e => $"{e.Code}: {e.Message}")));
     }
 }

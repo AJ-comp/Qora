@@ -2,6 +2,15 @@
 
 All notable changes to the Qora Language extension.
 
+## 0.17.0
+
+- Bundles the **Qora v0.23** compiler. Classical array locals may now be declared anywhere a scalar
+  goes — helper operations, loops, branches; the OpenQASM backend handles the target's global-scope
+  rule automatically (hidden array-reference parameter / scope-top hoisting).
+- `bit[]` parameters are specialized per call-site length and emit as `bit[N]`; writing to a `bit[]`
+  parameter is reported as `QSEM032` (bit registers pass by value — the caller would never see it).
+- Whole bit-register comparisons emit as `int(r) == …`, the form Amazon Braket executes.
+
 ## 0.16.0
 
 - Bundles the **Qora v0.22** compiler. Every array and register index is now proven in bounds at compile

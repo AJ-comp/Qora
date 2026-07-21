@@ -1,5 +1,3 @@
-using System.Text.RegularExpressions;
-
 namespace Qora.Ir.Passes;
 
 /// <summary>
@@ -15,6 +13,10 @@ namespace Qora.Ir.Passes;
 /// a condition/angle/value slot. Rather than reject it (the old QSEM005), we lower it here — a source
 /// convenience (Q#-style <c>if M(q) == One</c>) that still emits valid OQ3. The grammar already parses a call
 /// in a condition; this pass runs BEFORE validation, so the validator only ever sees the desugared form.
+///
+/// A COMMON pass, though OpenQASM motivated it: the desugared shape is the IR invariant "a condition is a
+/// call-free classical expression", and every tree checker (guard reading, bounds proofs, QSEM005) leans
+/// on it — any future backend receives the same canonical form, so this pass outlives the constraint.
 ///
 /// Placement mirrors the loop's evaluation point:
 /// <list type="bullet">
@@ -32,10 +34,6 @@ namespace Qora.Ir.Passes;
 /// </summary>
 public static class MeasureConditionLowering
 {
-    // `M(` with a word boundary before it — never matches `Measure(` (M followed by 'e') or a suffix like
-    // `fooM(` (no boundary), and no user op can be named `M`. Groups: 1 = register, 2 = index.
-    private static readonly Regex Measurement = new(@"\bM\((\w+)\[([^\]]*)\]\)", RegexOptions.Compiled);
-
     public static QProgram Run(QProgram program)
     {
         var ops = program.Operations.Select(op =>
@@ -124,44 +122,38 @@ public static class MeasureConditionLowering
     }
 
     /// <summary>Pull every <c>M(reg[index])</c> out of a condition into a fresh <c>bit</c> declaration and
-    /// replace it with that bit's name. Returns the temp declarations and the rewritten condition (with
-    /// <see cref="QCond.HasCall"/> recomputed — still set if a non-measurement call remains, for QSEM005).</summary>
+    /// replace its node with that bit's name — one structural rewrite of the condition tree, left to right.
+    /// A non-measurement call node is left in place, so <see cref="QCond.HasCall"/> (derived from the tree)
+    /// stays set and the validator still rejects it (QSEM005).</summary>
     private static (List<QDecl> Temps, QCond Cond) Extract(QCond cond, QSpan? span, Func<string> fresh)
     {
-        if (!cond.HasCall) return (new List<QDecl>(), cond);
+        if (cond.Tree is null || !cond.HasCall) return (new List<QDecl>(), cond);
 
         var temps = new List<QDecl>();
-        var text = Measurement.Replace(cond.Text, m =>
+        QNode Rewrite(QNode node) => node switch
+        {
+            // only the registered measurement of an indexed target extracts (`M(q)` whole-register stays —
+            // it has no two-step lowering — and keeps HasCall set for QSEM005).
+            QCallNode { Name: QoraGates.Measurement, Arg: QIndexNode { Base: QNameRef reg, Index: { } idx } } =>
+                Hoist(reg.Name, idx),
+            QBinOp b => b with { Left = Rewrite(b.Left), Right = Rewrite(b.Right) },
+            QUnary u => u with { Operand = Rewrite(u.Operand) },
+            QMember m => m with { Base = Rewrite(m.Base) },
+            QIndexNode i => i with { Base = Rewrite(i.Base), Index = Rewrite(i.Index) },
+            QCallNode { Arg: { } a } c => c with { Arg = Rewrite(a) },
+            _ => node,
+        };
+        QNode Hoist(string reg, QNode index)
         {
             var name = fresh();
             temps.Add(new QDecl(false, QType.Bit, name,
-                new QMeasure(new QQubitArg(m.Groups[1].Value, m.Groups[2].Value))) { Span = span });
-            return name;
-        });
+                new QMeasure(new QQubitArg(reg, QNodes.Render(index)))) { Span = span });
+            return new QNameRef(name);
+        }
 
-        if (temps.Count == 0) return (new List<QDecl>(), cond);   // HasCall was some non-M call; leave it for QSEM005
-
-        // A remaining `name(` is a non-measurement call the validator must still reject; otherwise the
-        // condition is now call-free.
-        var stillHasCall = Regex.IsMatch(text, @"[A-Za-z_]\w*\s*\(");
-        // Keep the parsed TREE in sync with the rewritten text: replace each measurement node with the same
-        // hoisted bit name the regex used, in the same left-to-right order. Without this the rewritten
-        // condition would carry a null tree, and the tree-reading validator (bounds check, guard narrowing)
-        // would silently skip the whole condition — an out-of-bounds index escaping, a guard's facts lost.
-        var tree = cond.Tree is { } t ? RewriteMeasurements(t, temps, new[] { 0 }) : null;
-        return (temps, new QCond(text, stillHasCall) { Tree = tree });
+        var tree = Rewrite(cond.Tree);
+        return temps.Count == 0
+            ? (new List<QDecl>(), cond)          // HasCall was some non-M call; leave it for QSEM005
+            : (temps, new QCond(tree));
     }
-
-    /// <summary>Replace each measurement <c>M(reg[i])</c> node with a reference to its hoisted bit — visited
-    /// left-to-right so the i-th measurement gets <c>temps[i]</c>, matching the text regex exactly.</summary>
-    private static QNode RewriteMeasurements(QNode node, List<QDecl> temps, int[] cursor) => node switch
-    {
-        QCallNode { Name: "M", Arg: QIndexNode } when cursor[0] < temps.Count => new QNameRef(temps[cursor[0]++].Name),
-        QBinOp b => b with { Left = RewriteMeasurements(b.Left, temps, cursor), Right = RewriteMeasurements(b.Right, temps, cursor) },
-        QUnary u => u with { Operand = RewriteMeasurements(u.Operand, temps, cursor) },
-        QMember m => m with { Base = RewriteMeasurements(m.Base, temps, cursor) },
-        QIndexNode idx => idx with { Base = RewriteMeasurements(idx.Base, temps, cursor), Index = RewriteMeasurements(idx.Index, temps, cursor) },
-        QCallNode { Arg: { } a } c => c with { Arg = RewriteMeasurements(a, temps, cursor) },
-        _ => node,
-    };
 }

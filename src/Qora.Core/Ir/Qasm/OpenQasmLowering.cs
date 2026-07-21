@@ -39,7 +39,22 @@ public static class OpenQasmLowering
     };
 
     /// <summary>A compile-time-constant initializer: a literal or an expression whose only identifiers are
-    /// built-in constants (pi/tau/euler) — no reference to a runtime variable, and not a measurement.</summary>
+    /// built-in constants (pi/tau/euler) — no reference to a runtime variable, and not a measurement.
+    /// Judged on the expression TREE: every name (a bare reference, a member and its base, a call target)
+    /// must be reserved; numbers and verbatim literals are constant by nature; an absent tree is an empty
+    /// initializer, vacuously constant — the same verdicts the flat identifier scan produced.</summary>
     private static bool IsCompileTimeConstant(QExpr value) =>
-        value is QText t && SymbolTableBuilder.Identifiers(t.Text).All(SymbolTableBuilder.IsReservedName);
+        value is QText t && AllNamesReserved(t.Tree);
+
+    private static bool AllNamesReserved(QNode? node) => node switch
+    {
+        null or QNumLit or QLit => true,
+        QNameRef r => SymbolTableBuilder.IsReservedName(r.Name),
+        QMember m => AllNamesReserved(m.Base) && SymbolTableBuilder.IsReservedName(m.Member),
+        QUnary u => AllNamesReserved(u.Operand),
+        QBinOp b => AllNamesReserved(b.Left) && AllNamesReserved(b.Right),
+        QIndexNode i => AllNamesReserved(i.Base) && AllNamesReserved(i.Index),
+        QCallNode c => SymbolTableBuilder.IsReservedName(c.Name) && AllNamesReserved(c.Arg),
+        _ => true,
+    };
 }

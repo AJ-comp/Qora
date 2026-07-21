@@ -1,5 +1,4 @@
 using System.Text;
-using System.Text.RegularExpressions;
 
 namespace Qora.Ir;
 
@@ -20,11 +19,6 @@ namespace Qora.Ir;
 /// </summary>
 public static class QasmEmitter
 {
-    private static readonly Regex CountPattern = new(
-        @"\b(?<name>[_a-zA-Z][_a-zA-Z0-9]*)\s*\.\s*Count\b", RegexOptions.Compiled);
-    private static readonly Regex IndexPattern = new(
-        @"\b(?<name>[_a-zA-Z][_a-zA-Z0-9]*)\s*\[\s*(?<index>[_a-zA-Z][_a-zA-Z0-9]*|[0-9]+)\s*\]",
-        RegexOptions.Compiled);
     private static readonly Dictionary<string, string> FunctorMods = new()
     {
         ["Adjoint"] = "inv @ ",
@@ -245,7 +239,7 @@ public static class QasmEmitter
                     break;
 
                 case QAssign a:
-                    var target = a.Index is null ? a.Name : $"{a.Name}[{RenderText(a.Index)}]";
+                    var target = a.Index is null ? a.Name : $"{a.Name}[{RenderNode(a.Index)}]";
                     body.AppendLine($"{pad}{target} = {RenderExpr(a.Value)};");
                     break;
 
@@ -255,15 +249,15 @@ public static class QasmEmitter
 
                 case QFor f:
                     var range = f.Step is null
-                        ? $"[{RenderText(f.From)}:{RenderText(f.To)}]"
-                        : $"[{RenderText(f.From)}:{RenderText(f.Step)}:{RenderText(f.To)}]";
+                        ? $"[{RenderNode(f.From)}:{RenderNode(f.To)}]"
+                        : $"[{RenderNode(f.From)}:{RenderNode(f.Step)}:{RenderNode(f.To)}]";
                     body.AppendLine($"{pad}for int {f.Var} in {range} {{");
                     EmitStatements(f.Body, body, indent + 1, ctx, varTypes);
                     body.AppendLine($"{pad}}}");
                     break;
 
                 case QWhile w:
-                    body.AppendLine($"{pad}while ({RenderText(RewriteBitCond(w.Cond.Text, varTypes))}) {{");
+                    body.AppendLine($"{pad}while ({RenderCond(w.Cond, varTypes)}) {{");
                     EmitStatements(w.Body, body, indent + 1, ctx, varTypes);
                     body.AppendLine($"{pad}}}");
                     break;
@@ -271,7 +265,7 @@ public static class QasmEmitter
                 case QRepeat r:
                     body.AppendLine($"{pad}while (true) {{");
                     EmitStatements(r.Body, body, indent + 1, ctx, varTypes);
-                    body.AppendLine($"{pad}  if ({RenderText(RewriteBitCond(r.Until.Text, varTypes))}) {{ break; }}");
+                    body.AppendLine($"{pad}  if ({RenderCond(r.Until, varTypes)}) {{ break; }}");
                     body.AppendLine($"{pad}}}");
                     break;
 
@@ -290,7 +284,7 @@ public static class QasmEmitter
     {
         var pad = new string(' ', indent * 2);
 
-        body.AppendLine($"{pad}if ({RenderText(RewriteBitCond(node.Cond.Text, varTypes))}) {{");
+        body.AppendLine($"{pad}if ({RenderCond(node.Cond, varTypes)}) {{");
         EmitStatements(node.Then, body, indent + 1, ctx, varTypes);
         body.AppendLine($"{pad}}}");
 
@@ -343,8 +337,11 @@ public static class QasmEmitter
                 _ => throw new InvalidOperationException(
                     $"QINTERNAL: array `{d.Name}` reached emission without an array initializer"),
             };
-            // varTypes drives RewriteBitCond (`if (f[1] == true)`), so it is recorded for BOTH shapes below.
-            varTypes.TryAdd(d.Name, elementType);
+            // varTypes drives the bit-condition rewrite (`if (f[1] == true)`). The ARRAY marker matters:
+            // an ELEMENT of a bit array is a scalar bit (rewritten), but the WHOLE register compared to an
+            // int (`f == 1`) is a numeric register comparison — valid QASM that must NOT be rewritten to
+            // a bool. Recording the bare element type under the array's name once conflated the two.
+            varTypes.TryAdd(d.Name, elementType + "[]");
 
             // `bit` is the one element type that cannot take the general form: "bit, bit[n] and stretch are
             // not valid array base types" (OpenQASM 3, types.rst). Bits get the dedicated register type.
@@ -424,11 +421,22 @@ public static class QasmEmitter
     private static string InferDefaultType(QExpr value, Dictionary<string, string> varTypes)
     {
         if (value is not QText t) return "int";
-        var tokens = t.Text.Split(' ');
-        if (tokens.Any(tok => tok is "pi" or "tau" or "euler" || tok.Contains('.')
-                              || (varTypes.TryGetValue(tok, out var vt) && vt is "float" or "angle")))
-            return "float";
-        if (tokens.Length == 1 && varTypes.TryGetValue(tokens[0], out var t0) && t0 == "bit")
+
+        // Structurally: a float literal, a built-in constant, a float/angle name, or a float-array element
+        // anywhere makes the whole initializer float. A member (.Count) is an integer length — the token
+        // scan misread its DOT as a float marker; the structure cannot.
+        bool IsFloaty(QNode? n) => n switch
+        {
+            QLit l => l.Text.Contains('.'),
+            QNameRef r => r.Name is "pi" or "tau" or "euler"
+                || (varTypes.TryGetValue(r.Name, out var vt) && vt is "float" or "angle" or "float[]" or "angle[]"),
+            QUnary u => IsFloaty(u.Operand),
+            QBinOp b => IsFloaty(b.Left) || IsFloaty(b.Right),
+            QIndexNode i => IsFloaty(i.Base),   // a float-array ELEMENT is a float
+            _ => false,   // QNumLit, QMember (.Count is an int), QCallNode
+        };
+        if (IsFloaty(t.Tree)) return "float";
+        if (t.Tree is QNameRef single && varTypes.TryGetValue(single.Name, out var st) && st == "bit")
             return "bit";
         return "int";
     }
@@ -460,7 +468,7 @@ public static class QasmEmitter
             {
                 var sym = model.FindSymbol(nodeId);
                 if (sym is null) { complete = false; return; }
-                if (TypeName(sym.Type) is { } t) map[currentName] = t;
+                if (TypeName(sym.Type) is { } t) map[currentName] = sym.IsArray ? t + "[]" : t;
             }
             void Level(IReadOnlyList<QStmt> stmts)
             {
@@ -486,60 +494,77 @@ public static class QasmEmitter
         var root = Passes.SymbolTableBuilder.Build(op, sink);
         var rebuilt = new Dictionary<string, string>();
         foreach (var s in root.AllSymbols())
-            if (TypeName(s.Type) is { } t) rebuilt[s.SourceName] = t;   // Int/Bit/Float/Angle; Qubit and untyped → null → skipped; the rebuild ran over the CURRENT tree, so its "source" IS the mangled program
+            if (TypeName(s.Type) is { } t) rebuilt[s.SourceName] = s.IsArray ? t + "[]" : t;   // Int/Bit/Float/Angle (arrays marked); Qubit and untyped → null → skipped; the rebuild ran over the CURRENT tree, so its "source" IS the mangled program
         return rebuilt;
     }
 
+    /// <summary>Render a condition for emission: the tree is bit-rewritten (<see cref="RewriteBits"/>)
+    /// then printed.</summary>
+    private static string RenderCond(QCond cond, Dictionary<string, string> varTypes) =>
+        cond.Tree is null ? string.Empty : RenderNode(RewriteBits(cond.Tree, varTypes));
+
     /// <summary>
-    /// Bit comparisons emit against BOOL literals: `r == 1` → `r == true`, `r != 0` → `r != false`
-    /// (either operand order) whenever the name is a known bit. Both spellings are valid OpenQASM 3,
-    /// but the dominant consumer (Qiskit's qasm3 importer) accepts only `bit == const bool` — so emit
-    /// the one that actually loads. Ints and unknown names are left untouched.
+    /// The bit-condition adjustments, on the tree. WHY: OpenQASM has no logical <c>!</c> on a classical
+    /// scalar, so a negated known-classical value <c>!x</c> becomes <c>x == 0</c>; and bit comparisons
+    /// emit against BOOL literals — <c>r == 1</c> → <c>r == true</c>, <c>r != 0</c> → <c>r != false</c>
+    /// (either operand order) — because the dominant consumer (Qiskit's qasm3 importer) accepts only
+    /// <c>bit == const bool</c>. Applied bottom-up so every comparison under <c>&amp;&amp;</c>/<c>||</c>
+    /// is rewritten, and the negation's <c>== 0</c> result immediately becomes <c>== false</c> for a bit.
+    /// Ints and unknown names are left untouched.
     /// </summary>
-    private static string RewriteBitCond(string text, Dictionary<string, string> varTypes)
+    private static QNode RewriteBits(QNode node, Dictionary<string, string> varTypes)
     {
-        // Compact indexed references first so `flags [ i ]` is one token and can inherit the array's
-        // element type during the same bit-condition rewrite used for scalar bits.
-        text = RenderText(text);
-        var toks = text.Split(' ');
-
-        // OpenQASM has no logical `!` on a classical scalar (it reads a bit/int/float as a numeric
-        // literal, not a bool): rewrite a negated classical value `! ( x )` to `x == 0` (a bit then
-        // becomes `x == false` via the loop below). Qora source keeps `!x`; only the emitted QASM changes
-        // — the same emit-time adjustment as `s == 1` -> `s == true`.
-        var neg = new List<string>(toks.Length);
-        for (var i = 0; i < toks.Length; i++)
-            if (toks[i] == "!" && i + 3 < toks.Length && toks[i + 1] == "(" && TypeOf(toks[i + 2]) is not null && toks[i + 3] == ")")
-            {
-                neg.Add(toks[i + 2]); neg.Add("=="); neg.Add("0");
-                i += 3;
-            }
-            else neg.Add(toks[i]);
-        toks = neg.ToArray();
-
-        for (var i = 0; i + 2 < toks.Length; i++)
+        node = node switch
         {
-            if (toks[i + 1] is not ("==" or "!=")) continue;
-            if (IsBit(toks[i]) && toks[i + 2] is "0" or "1") toks[i + 2] = toks[i + 2] == "1" ? "true" : "false";
-            else if (IsBit(toks[i + 2]) && toks[i] is "0" or "1") toks[i] = toks[i] == "1" ? "true" : "false";
-        }
-        return string.Join(" ", toks);
-
-        bool IsBit(string tok) => TypeOf(tok) == "bit";
-
-        string? TypeOf(string token)
+            QUnary u => u with { Operand = RewriteBits(u.Operand, varTypes) },
+            QBinOp b => b with { Left = RewriteBits(b.Left, varTypes), Right = RewriteBits(b.Right, varTypes) },
+            _ => node,
+        };
+        if (node is QUnary { Op: "!", Operand: { } inner } && TypeOfNode(inner, varTypes) is not null)
+            node = new QBinOp("==", inner, new QNumLit(0));
+        if (node is QBinOp { Op: "==" or "!=" } cmp)
         {
-            if (varTypes.TryGetValue(token, out var direct)) return direct;
-            var indexed = IndexPattern.Match(token);
-            return indexed.Success && indexed.Index == 0 && indexed.Length == token.Length
-                && varTypes.TryGetValue(indexed.Groups["name"].Value, out var elementType)
-                    ? elementType
-                    : null;
+            if (TypeOfNode(cmp.Left, varTypes) == "bit" && cmp.Right is QNumLit { Value: 0 or 1 } rn)
+                return cmp with { Right = new QLit(rn.Value == 1 ? "true" : "false") };
+            if (TypeOfNode(cmp.Right, varTypes) == "bit" && cmp.Left is QNumLit { Value: 0 or 1 } ln)
+                return cmp with { Left = new QLit(ln.Value == 1 ? "true" : "false") };
         }
+        // A WHOLE bit register compared numerically (`r == 0` — "all bits zero"): neither the bare
+        // register-vs-int form (the Braket LocalSimulator's interpreter crashes on it) nor the old
+        // bool form `r == true` (Braket and Qiskit both reject) actually RUNS on the execution
+        // targets. The portable spelling is the explicit spec cast `int(r) == 0` — verified against
+        // Braket, and rendered from a synthesized call node (which prints exactly as the cast).
+        if (node is QBinOp { Op: "==" or "!=" or "<" or "<=" or ">" or ">=" } reg)
+        {
+            QNode CastRegister(QNode operand) =>
+                operand is QNameRef r2 && varTypes.TryGetValue(r2.Name, out var vt) && vt == "bit[]"
+                    ? new QCallNode("int", operand) : operand;
+            var left = CastRegister(reg.Left);
+            var right = CastRegister(reg.Right);
+            if (!ReferenceEquals(left, reg.Left) || !ReferenceEquals(right, reg.Right))
+                return reg with { Left = left, Right = right };
+        }
+        return node;
     }
+
+    /// <summary>The emitted SCALAR type of a directly-referenced value — a bare scalar name, or one array
+    /// element (whose type is the array's element type, stored as <c>"T[]"</c> under the array's name).
+    /// A bare ARRAY name has no scalar type (a whole-register comparison is numeric, never bit-rewritten);
+    /// compound expressions have no single lookup type.</summary>
+    private static string? TypeOfNode(QNode node, Dictionary<string, string> varTypes) => node switch
+    {
+        QNameRef r => varTypes.TryGetValue(r.Name, out var t) && !t.EndsWith("[]") ? t : null,
+        QIndexNode { Base: QNameRef b } => varTypes.TryGetValue(b.Name, out var t) && t.EndsWith("[]") ? t[..^2] : null,
+        _ => null,
+    };
 
     private static string EmitParam(QParam p) => p.Type switch
     {
+        // bit is not a valid array base type (types.rst) — a bit[] parameter's only legal form is the
+        // SIZED register, so monomorphization stamps its length exactly as it does for Qubit[].
+        QType.Bit when p.IsArray && p.RegisterSize is int bits => $"bit[{bits}] {p.Name}",
+        QType.Bit when p.IsArray => throw new InvalidOperationException(
+            $"QINTERNAL: unspecialized bit[] parameter `{p.Name}` reached OpenQASM emission"),
         _ when p.Type != QType.Qubit && p.IsArray => $"mutable array[{TypeName(p.Type)}, #dim = 1] {p.Name}",
         QType.Int => $"int {p.Name}",
         QType.Bit => $"bit {p.Name}",
@@ -553,27 +578,70 @@ public static class QasmEmitter
 
     private static string RenderArg(QArg arg) => arg switch
     {
-        QQubitArg q => $"{q.Reg}[{q.Index}]",
-        QTextArg t => RenderText(t.Text),
+        QQubitArg q => $"{q.Reg}[{RenderNode(q.Index)}]",
+        QTextArg t => RenderNode(t.Tree),
         _ => string.Empty,
     };
 
     private static string RenderExpr(QExpr expr) => expr switch
     {
-        QMeasure m => m.Target is null ? "measure" : $"measure {m.Target.Reg}[{m.Target.Index}]",
-        QText t => RenderText(t.Text),
+        QMeasure m => m.Target is null ? "measure" : $"measure {m.Target.Reg}[{RenderNode(m.Target.Index)}]",
+        QText t => RenderNode(t.Tree),
         QArrayLiteral literal => $"{{{string.Join(", ", literal.Elements.Select(RenderExpr))}}}",
         QArrayNew allocation => $"{{{string.Join(", ", Enumerable.Repeat(DefaultValue(allocation.ElementType), allocation.Length))}}}",
         _ => string.Empty,
     };
 
-    private static string RenderText(string text)
+    /// <summary>
+    /// Render an expression TREE as OpenQASM text — the emitter's own spelling, distinct from the
+    /// canonical IR spelling (<see cref="QNodes.Render"/>): <c>.Count</c> becomes <c>sizeof(base)</c> and
+    /// an indexed access glues (<c>q[i]</c>) — exactly the two rewrites the historical text path applied
+    /// by regex over the stored text. Operators keep their single-space joins; no precedence parens are
+    /// inserted (trees come from a paren-free grammar and rewrites substitute leaves only, so the in-order
+    /// token run re-parses to the same structure).
+    /// </summary>
+    private static string RenderNode(QNode? node) => node switch
     {
-        var rendered = CountPattern.Replace(text, match => $"sizeof({match.Groups["name"].Value})");
-        rendered = IndexPattern.Replace(rendered,
-            match => $"{match.Groups["name"].Value}[{match.Groups["index"].Value}]");
-        return rendered;
-    }
+        null => string.Empty,
+        QNumLit n => n.Value.ToString(System.Globalization.CultureInfo.InvariantCulture),
+        QLit l => l.Text,
+        QNameRef r => r.Name,
+        QMember { Member: "Count" } m => $"sizeof({RenderNode(m.Base)})",
+        QMember m => $"{RenderNode(m.Base)} . {m.Member}",   // non-Count members never survive validation
+        QUnary { Op: "!" } u => $"! ( {RenderNode(u.Operand)} )",
+        QUnary u => $"{u.Op} {RenderOperand(u.Operand, parent: 5, isRight: true)}",
+        QBinOp b => $"{RenderOperand(b.Left, Prec(b.Op))} {b.Op} {RenderOperand(b.Right, Prec(b.Op), isRight: true)}",
+        QIndexNode i => $"{RenderNode(i.Base)}[{RenderNode(i.Index)}]",
+        QCallNode { Arg: { } a } c => $"{c.Name}({RenderNode(a)})",
+        QCallNode c => $"{c.Name}()",
+        _ => string.Empty,
+    };
+
+    /// <summary>Render a binary/unary operand, parenthesizing ONLY when the emitted token run would
+    /// re-parse to a different grouping than the tree: a child that binds strictly LOOSER than its parent
+    /// (any side), or a SAME-precedence child on the RIGHT (the operators are left-associative, so
+    /// <c>n == m == 0</c> re-parses as <c>(n == m) == 0</c> — the opposite of a tree holding
+    /// <c>n == (m == 0)</c>). No PARSED tree holds either shape (the precedence parse builds left-leaning
+    /// trees whose right children always bind strictly tighter), but a REWRITE can synthesize both —
+    /// <see cref="RewriteBits"/> substitutes <c>m == 0</c> for <c>!m</c> wherever the negation sat.
+    /// Natural trees never trigger this, so their emitted bytes are unchanged.</summary>
+    private static string RenderOperand(QNode child, int parent, bool isRight = false) =>
+        child is QBinOp cb && (Prec(cb.Op) < parent || (isRight && Prec(cb.Op) == parent))
+            ? $"( {RenderNode(child)} )"
+            : RenderNode(child);
+
+    /// <summary>OpenQASM 3's (C-style) binding strength: <c>||</c> &lt; <c>&amp;&amp;</c> &lt; equality
+    /// &lt; relational &lt; additive &lt; multiplicative — the ladder the emitted text re-parses under.</summary>
+    private static int Prec(string op) => op switch
+    {
+        "||" => 1,
+        "&&" => 2,
+        "==" or "!=" => 3,
+        "<" or "<=" or ">" or ">=" => 4,
+        "+" or "-" => 5,
+        "*" or "/" => 6,
+        _ => 7,
+    };
 
     private static string MapGate(string name) =>
         QoraGates.Names.TryGetValue(name, out var qasm) ? qasm : name.ToLowerInvariant();

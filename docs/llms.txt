@@ -57,10 +57,12 @@ operation Main()                // global namespace; the entry point; takes NO p
 - `int`, `float`, `bit`, `angle` are classical scalar types. Measurement produces a `bit`, which holds
   a 0/1 result.
 - `use name = Qubit[N];` — allocate a register. Entry operation only, not inside loops/branches.
-- Classical arrays use `int[]`, `float[]`, `bit[]`, or `angle[]`. Declare them only at the top level
-  of `Main`, either with a non-empty literal (`int[] xs = [1, 2, 3];`) or a positive literal-sized,
-  zero-initialized allocation (`int[] xs = new int[3];`). Helper operations may receive matching
-  `T[]` parameters. Read/write elements with `xs[i]`, and read the length with `xs.Count`.
+- Classical arrays use `int[]`, `float[]`, `bit[]`, or `angle[]`. Declare them anywhere a scalar
+  declaration goes — `Main`, helper operations, loops, branches — either with a non-empty literal
+  (`int[] xs = [1, 2, 3];`) or a positive literal-sized, zero-initialized allocation
+  (`int[] xs = new int[3];`); the compiler handles OpenQASM's global-scope rule automatically. Helper
+  operations may also receive matching `T[]` parameters. Read/write elements with `xs[i]`, and read
+  the length with `xs.Count`.
 - Classical arrays are mutable when declared without `const`. Do not pass the same array to two array
   parameters in one call, because array parameters are mutable and may not overlap. Whole-array
   reassignment is not supported; update individual elements instead. A `const T[]` cannot be updated
@@ -122,7 +124,7 @@ QSEM004 bare measurement statement            QSEM005 call inside an expression/
 QSEM006 wrong argument count/kind/type for a call
 QSEM007 unknown gate/operation name           QSEM008 duplicate global operation name
 QSEM009 calling the entry operation           QSEM010 entry operation has parameters
-QSEM011 recursive operation calls             QSEM012 `use`/array declaration outside `Main` top level
+QSEM011 recursive operation calls             QSEM012 `use` outside `Main` top level
 QSEM013 name shadows a built-in where qualification cannot disambiguate
 QSEM014 same qubit (or overlapping register/element) twice in one gate; overlapping mutable arrays
 QSEM015 duplicate declared names in one operation
@@ -220,7 +222,5 @@ operation Main() {
 - `qubit` lowercase as a type — the keyword is `Qubit` (capital Q).
 - `Qubit[2] q` as a parameter — register parameters omit the length: `Qubit[] q`; allocate the
   concrete size in `Main` with `use q = Qubit[2];`.
-- Declaring a classical array inside a helper/loop/branch — declare it at `Main` top level and pass it
-  to helpers through a matching `T[]` parameter.
 - Calling `Main` (QSEM009), giving `Main` parameters (QSEM010), recursion (QSEM011).
 - Expecting `open` to load a file — only `import` loads; `open` shortens names.

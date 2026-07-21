@@ -11,6 +11,51 @@ emitted as **OpenQASM 3.0**.
 > **Note:** Qora was renamed from **Ket** on 2026-07-01 (a "Ket" extension already existed). Versions
 > 0.1–0.7 below were authored under the old name.
 
+## 0.23 — 2026-07-21
+
+### Added
+- **Array locals live anywhere a scalar does** — a helper operation, a loop, a branch. OpenQASM requires
+  arrays at global scope and hides mutable globals from `def` bodies, so the backend now absorbs the
+  target rule instead of the language exporting it (`QSEM012` no longer restricts array placement): a
+  def-local `int[]`/`float[]`/`angle[]` is threaded as a hidden `mutable array[T, #dim = 1]` reference
+  parameter backed by a global (declaration site becomes per-entry element-wise re-initialization, so
+  "fresh value on every entry" is preserved; intermediate defs pass the reference through), and a
+  `bit[]` declared inside a control-flow block hoists to the top of its own scope
+  (`Ir/Qasm/ArrayLocalHoisting.cs`).
+- **`bit[]` parameters are length-specialized per call site**, exactly like `Qubit[]`, and emit as the
+  sized register `bit[N]` — the only parameter form OpenQASM allows for bits (the previous
+  `array[bit, …]` emission was spec-invalid). Writing to a `bit[]` parameter is rejected (`QSEM032`):
+  bit registers pass by value, so a write would be silently invisible to the caller — unlike the other
+  array parameters, which are mutable references. A const-bounded guard (`if (n < 2)`) and a
+  cross-array `0..f.Count-1` loop bound over a `bit[]` parameter now defer to the post-specialization
+  re-check instead of being rejected outright.
+
+### Changed
+- **Whole bit-register comparisons emit through the spec cast**: `if (r == 0)` on a `bit[N]` becomes
+  `if (int(r) == 0)` — the one spelling the Braket oracle actually executes (both the bare form and the
+  earlier bool-literal rewrite fail there). Element comparisons (`r[0] == 1`) are unchanged.
+- **The fan-in idiom no longer false-positives the aliasing check**: `for i in 0..q.Count-2
+  { CNOT(q[i], q[4]); }` on a generic register defers `QSEM014` to the post-specialization re-check,
+  which knows the loop's real range — a genuinely overlapping operand is still rejected there. An
+  uncalled generic operation keeps the conservative pre-specialization judgement (its re-check never
+  runs).
+- **Emitted parentheses respect associativity**: a same-precedence right operand is parenthesized
+  (`n == (m == 0)` no longer re-reads as `(n == m) == 0`), completing the minimal-parenthesis rule that
+  already handled precedence.
+- **`SemanticModel` records two new fact families**: `DeferredSizeChecks` — every size-dependent
+  verdict the pre-specialization validation postponed (the deferral ledger; empty on the surviving model
+  of every successful compile), and `WillBeRechecked(opId)` — whether the post-specialization
+  re-validation will run for an operation (false for a generic op nothing reaches).
+
+### Fixed
+- **Deep expressions can no longer crash the compiler.** Parsing runs on a wide-stack worker, an
+  over-deep program is a clean `QSEM031` (with no partial IR exposed to `--stages`), and array-literal
+  elements count toward the same depth limit — previously a machine-generated deep expression could
+  overflow the process stack.
+- **A measurement inside an array-literal initializer participates in effect analysis** (`bit[] r =
+  [M(q[1]), 0]` marks the qubit measured), so the uncompute planner can no longer misjudge an entangled
+  qubit as a safe cleanup candidate.
+
 ## 0.22 — 2026-07-18
 
 ### Added

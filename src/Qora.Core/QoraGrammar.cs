@@ -6,7 +6,7 @@ using Janglim.FrontEnd.RegularGrammar;
 namespace Qora;
 
 /// <summary>
-/// Qora v0.22 — a Q#/C#-flavored quantum language on the Janglim engine.
+/// Qora v0.23 — a Q#/C#-flavored quantum language on the Janglim engine.
 ///
 ///   operation Bell(Qubit[] q) {        // a subroutine, with C#-style array parameters
 ///       H(q[0]);
@@ -66,6 +66,15 @@ namespace Qora;
 /// cannot be proven is <c>QSEM030</c> (OpenQASM 3 has no runtime bounds check). Expressions are parsed to a
 /// tree (<c>Ir/ExprTree.cs</c>) once at lowering, and every consumer reads that tree rather than re-parsing
 /// text. A name used before its own-scope declaration is <c>QSEM025</c> (point-of-declaration scoping).
+/// v0.23 lets array locals live anywhere a scalar does — helper operations, loops, branches. OpenQASM
+/// wants arrays at global scope and hides mutable globals from defs, so the backend's
+/// <c>Ir/Qasm/ArrayLocalHoisting.cs</c> threads a def-local classical array as a hidden
+/// <c>mutable array[T, #dim = 1]</c> reference parameter backed by a global (the declaration site becomes
+/// per-entry element-wise re-initialization; a nested <c>bit[]</c> hoists to its scope top). <c>bit[]</c>
+/// parameters are length-specialized per call site like <c>Qubit[]</c> and emit as <c>bit[N]</c>; writing
+/// to a <c>bit[]</c> parameter is <c>QSEM032</c> (bit registers pass by value — a write would be
+/// silently invisible to the caller). Whole bit-register comparisons emit through the spec cast
+/// (<c>int(r) == 0</c>), the form Braket executes.
 /// </summary>
 public class QoraGrammar : Grammar
 {

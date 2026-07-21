@@ -83,10 +83,10 @@ public class QoraLoweringTests
         var measurement = Assert.IsType<QMeasure>(assignment.Value);
 
         Assert.Equal("results", assignment.Name);
-        Assert.Equal("0", assignment.Index);
+        Assert.Equal(new QNumLit(0), assignment.Index);   // the index atom is settled at lowering
         Assert.NotNull(measurement.Target);
         Assert.Equal("q", measurement.Target.Reg);
-        Assert.Equal("0", measurement.Target.Index);
+        Assert.Equal(new QNumLit(0), measurement.Target.Index);
     }
 
     private static void AssertParam(QParam param, string name, QType type, bool isArray)

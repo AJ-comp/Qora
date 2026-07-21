@@ -42,17 +42,6 @@ internal static class BoundFolder
         _ => null,   // a float literal, an index/call, a comparison/boolean op, a runtime variable: no value
     };
 
-    /// <summary>Fold a bare index token — the grammar restricts an index to a number or a single identifier,
-    /// so there is no arithmetic to parse: a digit run is its value, a <c>const</c> its folded value, and a
-    /// runtime name is null. A thin front for the atomic index position (no expression tree there yet).</summary>
-    internal static Bound? FoldAtom(string atom, Scope scope)
-    {
-        var t = atom.Trim();
-        if (t.Length > 0 && t.All(char.IsDigit))
-            return long.TryParse(t, out var v) ? new BoundNum(v) : null;
-        return scope.Lookup(t) is { IsConst: true, FoldedBound: { } fb } ? fb : null;
-    }
-
     private static Bound? Apply(Bound? l, string op, Bound? r)
     {
         if (l is null || r is null) return null;
@@ -90,10 +79,13 @@ internal static class BoundFolder
             coeff == 0 ? new BoundNum(offset) : new BoundCount(array, coeff, offset);
     }
 
-    /// <summary>True when a folded bound is <c>k·q.Count + c</c> over an UNSIZED Qubit[] parameter — the one
-    /// case a loop-bound access defers to the post-monomorphization pass (the size becomes concrete per call
-    /// site). Reading the folded bound instead of a text regex sees through a const: <c>const hi = q.Count</c>
+    /// <summary>True when a folded bound is <c>k·p.Count + c</c> over a parameter whose length ONLY
+    /// monomorphization can supply — the cases a loop-bound access defers to the post-monomorphization
+    /// pass, where the size is concrete. The judgement is the <see cref="Symbol.MonoSized"/> STAMP, which
+    /// the symbol table copies once from <see cref="QParam.NeedsMonoSizing"/> — the same single answer
+    /// the monomorphizer's trigger reads, so this gate can never drift from what actually specializes.
+    /// Reading the folded bound instead of a text regex sees through a const: <c>const hi = q.Count</c>
     /// used as a bound defers exactly as the direct <c>q.Count</c> does.</summary>
     internal static bool DefersToUnsizedQubit(Bound? b, Scope scope) =>
-        b is BoundCount c && scope.Lookup(c.Array) is { IsArray: true, Type: QType.Qubit, RegisterSize: null };
+        b is BoundCount c && scope.Lookup(c.Array) is { MonoSized: true };
 }

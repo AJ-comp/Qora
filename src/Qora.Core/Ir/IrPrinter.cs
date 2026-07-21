@@ -126,10 +126,10 @@ public static class IrPrinter
                     sb.AppendLine($"{indent}QDecl(const={d.IsConst}, type={d.Type?.ToString() ?? "?"}{(d.IsArray ? "[]" : "")}, name={d.Name}, value={PrintExpr(d.Value)})");
                     break;
                 case QAssign a:
-                    sb.AppendLine($"{indent}QAssign({a.Name}{(a.Index is null ? "" : $"[{a.Index}]")} = {PrintExpr(a.Value)})");
+                    sb.AppendLine($"{indent}QAssign({a.Name}{(a.Index is null ? "" : $"[{QNodes.Render(a.Index)}]")} = {PrintExpr(a.Value)})");
                     break;
                 case QIf i:
-                    sb.AppendLine($"{indent}QIf(cond=\"{i.Cond.Text}\")");
+                    sb.AppendLine($"{indent}QIf(cond=\"{QNodes.Render(i.Cond.Tree)}\")");
                     sb.AppendLine($"{indent}  then:");
                     PrintBody(i.Then, sb, indent + "    ");
                     if (i.Else.Count > 0)
@@ -139,15 +139,15 @@ public static class IrPrinter
                     }
                     break;
                 case QFor f:
-                    sb.AppendLine($"{indent}QFor({f.Var} in {f.From}..{f.To}{(f.Step is null ? string.Empty : $", step={f.Step}")})");
+                    sb.AppendLine($"{indent}QFor({f.Var} in {QNodes.Render(f.From)}..{QNodes.Render(f.To)}{(f.Step is null ? string.Empty : $", step={QNodes.Render(f.Step)}")})");
                     PrintBody(f.Body, sb, indent + "  ");
                     break;
                 case QWhile w:
-                    sb.AppendLine($"{indent}QWhile(cond=\"{w.Cond.Text}\")");
+                    sb.AppendLine($"{indent}QWhile(cond=\"{QNodes.Render(w.Cond.Tree)}\")");
                     PrintBody(w.Body, sb, indent + "  ");
                     break;
                 case QRepeat r:
-                    sb.AppendLine($"{indent}QRepeat(until=\"{r.Until.Text}\")");
+                    sb.AppendLine($"{indent}QRepeat(until=\"{QNodes.Render(r.Until.Tree)}\")");
                     PrintBody(r.Body, sb, indent + "  ");
                     break;
                 case QConjugate c:
@@ -163,15 +163,15 @@ public static class IrPrinter
 
     private static string PrintArg(QArg arg) => arg switch
     {
-        QQubitArg q => $"{q.Reg}[{q.Index}]",
-        QTextArg t => t.Text,
+        QQubitArg q => $"{q.Reg}[{QNodes.Render(q.Index)}]",
+        QTextArg t => QNodes.Render(t.Tree),
         _ => string.Empty,
     };
 
     private static string PrintExpr(QExpr expr) => expr switch
     {
-        QMeasure m => m.Target is null ? "QMeasure()" : $"QMeasure({m.Target.Reg}[{m.Target.Index}])",
-        QText t => t.Text,
+        QMeasure m => m.Target is null ? "QMeasure()" : $"QMeasure({m.Target.Reg}[{QNodes.Render(m.Target.Index)}])",
+        QText t => QNodes.Render(t.Tree),
         QArrayLiteral literal => $"[{string.Join(", ", literal.Elements.Select(PrintExpr))}]",
         QArrayNew allocation => $"new {allocation.ElementType.ToString().ToLowerInvariant()}[{allocation.Length}]",
         _ => string.Empty,

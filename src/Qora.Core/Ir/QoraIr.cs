@@ -3,7 +3,7 @@ namespace Qora.Ir;
 /// <summary>The compiler's version, stamped into emitted QASM for provenance.</summary>
 public static class QoraVersion
 {
-    public const string Value = "0.22";
+    public const string Value = "0.23";
 }
 
 /// <summary>
@@ -45,9 +45,10 @@ public static class QNodeIds
 ///         on the node type — the compiler flags an unhandled case instead of a string <c>switch</c>.</item>
 ///   <item>Everything is an immutable record, so a pass is a pure IR→IR function and can rebuild a node
 ///         cheaply with a <c>with</c> expression.</item>
-///   <item>Expressions and conditions are kept as already-rendered text (<see cref="QExpr"/>/<see cref="QCond"/>)
-///         for now: the current pipeline never restructures them, only the statement/gate/control-flow
-///         layer. They can graduate to a real expression tree later without touching the rest.</item>
+///   <item>Expressions and conditions are parsed ONCE at lowering into <see cref="QNode"/> trees — the
+///         single stored representation. Any spelling a consumer needs (diagnostics, the IR printer, QASM
+///         emission) is rendered from the tree on demand (<see cref="QNodes.Render"/> / the emitter's own
+///         renderer), so no second text ledger exists to fall out of sync.</item>
 /// </list>
 /// </summary>
 /// <param name="Operations">The program's operations (global namespace, until resolution lands).</param>
@@ -152,7 +153,8 @@ public sealed record QParam(string Name, QType Type, int? RegisterSize) : IParam
     public int Id { get; init; } = QNodeIds.Next();
 
     /// <summary>
-    /// True for any source <c>T[]</c> parameter. A source <c>Qubit[]</c> deliberately carries no length;
+    /// True for any source <c>T[]</c> parameter. A source <c>Qubit[]</c> — and a <c>bit[]</c>, whose only
+    /// legal OpenQASM parameter form is the sized register <c>bit[N]</c> — deliberately carries no length;
     /// <see cref="Passes.Monomorphizer"/> fills <see cref="RegisterSize"/> only on the hidden per-call-size
     /// copy used by the OpenQASM backend. A concrete register size also implies array shape for hand-built IR.
     /// </summary>
@@ -160,6 +162,23 @@ public sealed record QParam(string Name, QType Type, int? RegisterSize) : IParam
 
     /// <summary>Convenience view used by quantum passes; classical arrays keep this false.</summary>
     public bool IsQubitArray => Type == QType.Qubit && IsArray;
+
+    /// <summary>
+    /// THE single definition of "monomorphization supplies this parameter's length": an unsized
+    /// <c>Qubit[]</c> (OpenQASM registers need concrete widths) or a <c>bit[]</c> (its only legal QASM
+    /// parameter form is the sized register <c>bit[N]</c>). Everyone who needs the answer ASKS here —
+    /// the monomorphizer's specialization trigger, the validator's generic-op test, and (stamped onto the
+    /// symbol as <c>Symbol.MonoSized</c>) the bounds prover's deferral gates — so the set can never drift
+    /// apart across sites again. <c>int[]</c>/<c>float[]</c>/<c>angle[]</c> are NEVER specialized: their
+    /// length-generic array form is legal QASM, so a deferred fact about them would have no re-check.
+    ///
+    /// The SET's membership is TARGET POLICY, not a language truth — full QIR would specialize nothing
+    /// (dynamic arrays, <c>i1</c> arrays legal), hardware QIR profiles roughly the Qubit[] half. With one
+    /// backend this encodes the OpenQASM requirements; a second backend parameterizes THIS one property
+    /// (the recorded multi-backend seam, alongside "does the mono/re-validate sandwich run at all") —
+    /// having exactly one place to parameterize is why the definition was centralized.
+    /// </summary>
+    public bool NeedsMonoSizing => (IsQubitArray || Type == QType.Bit && IsArray) && RegisterSize is null;
 
     /// <summary>A user-operation qubit parameter matches its declared shape exactly — no register broadcast.</summary>
     public bool QubitBroadcast => false;
@@ -210,28 +229,22 @@ public sealed record QDecl(bool IsConst, QType? Type, string Name, QExpr Value) 
     public bool IsArray { get; init; }
 }
 
-/// <summary><c>name = e;</c>, or <c>name[index] = e;</c> when <see cref="Index"/> is present.</summary>
+/// <summary><c>name = e;</c>, or <c>name[index] = e;</c> when <see cref="Index"/> is present.
+/// The index is a grammar-atomic token — a <see cref="QNumLit"/> or <see cref="QNameRef"/>.</summary>
 public sealed record QAssign(string Name, QExpr Value) : QStmt
 {
-    public string? Index { get; init; }
+    public QNode? Index { get; init; }
 }
 
 public sealed record QIf(QCond Cond, IReadOnlyList<QStmt> Then, IReadOnlyList<QStmt> Else) : QStmt;
 
 /// <summary>
-/// <c>for Var in From..To { Body }</c>. Bounds are expressions such as <c>0</c> and
-/// <c>values.Count - 1</c>, kept as text until OpenQASM emission.
+/// <c>for Var in From..To { Body }</c>. Bounds are expression TREES (<c>0</c>, <c>values.Count - 1</c>),
+/// parsed once at lowering; the bounds prover folds them and every consumer renders its own spelling.
 /// <see cref="Step"/> has no surface syntax: the surface form always steps by +1 (null); the inversion
-/// pass sets <c>"-1"</c> to run a loop backwards, which emits OpenQASM's <c>[From:Step:To]</c> range.
+/// pass sets <c>-1</c> to run a loop backwards, which emits OpenQASM's <c>[From:Step:To]</c> range.
 /// </summary>
-public sealed record QFor(string Var, string From, string To, IReadOnlyList<QStmt> Body, string? Step = null) : QStmt
-{
-    /// <summary>The <see cref="From"/>/<see cref="To"/> bounds parsed to trees (see <see cref="QNode"/>),
-    /// built once at lowering — the structured companion the bounds prover folds instead of re-parsing the
-    /// text. Null on synthesized loops (e.g. the inverter's step-flip) that set only the text.</summary>
-    public QNode? FromTree { get; init; }
-    public QNode? ToTree { get; init; }
-}
+public sealed record QFor(string Var, QNode From, QNode To, IReadOnlyList<QStmt> Body, QNode? Step = null) : QStmt;
 
 public sealed record QWhile(QCond Cond, IReadOnlyList<QStmt> Body) : QStmt;
 
@@ -251,24 +264,28 @@ public abstract record QArg;
 /// <summary>
 /// A syntactically indexed argument <c>name[Index]</c>. It usually denotes a qubit; after arrays were
 /// added it may also denote a classical array element in a classical parameter slot. Validation resolves
-/// the base symbol before quantum analyses run.
+/// the base symbol before quantum analyses run. The index is grammar-atomic — a <see cref="QNumLit"/> or
+/// <see cref="QNameRef"/>, settled ONCE here so no consumer re-derives number-vs-name from a spelling.
 /// </summary>
-public sealed record QQubitArg(string Reg, string Index) : QArg;
-
-/// <summary>
-/// A non-qubit argument already rendered to text: a whole register <c>q</c>, or an angle like
-/// <c>pi / 2</c>. <see cref="HasCall"/> marks that a call (e.g. <c>M(q[0])</c>) appeared inside — no
-/// such argument can lower to OpenQASM, so the validator rejects it before emission.
-/// </summary>
-public sealed record QTextArg(string Text, bool HasCall = false) : QArg
+public sealed record QQubitArg(string Reg, QNode Index) : QArg
 {
-    /// <summary>The argument expression parsed to a tree (see <see cref="QNode"/>) — the structured
-    /// companion the validator walks to find any indexed access (e.g. a classical element in an angle).
-    /// Null for a bare register name or synthesized text.</summary>
-    public QNode? Tree { get; init; }
+    /// <summary>Construction convenience (tests, hand-built IR): the token is atomized immediately —
+    /// nothing stores the string.</summary>
+    public QQubitArg(string reg, string index) : this(reg, ExprTree.Atom(index)) { }
 }
 
-// ---- expressions / conditions (rendered text for now) ----
+/// <summary>
+/// A non-qubit argument as its expression tree: a whole register (<see cref="QNameRef"/> <c>q</c>) or an
+/// angle expression (<c>pi / 2</c>). <see cref="HasCall"/> derives from the tree — a call inside an
+/// argument (e.g. <c>M(q[0])</c>) cannot lower to OpenQASM, so the validator rejects it before emission.
+/// Null tree = synthesized empty argument.
+/// </summary>
+public sealed record QTextArg(QNode? Tree = null) : QArg
+{
+    public bool HasCall => QNodes.ContainsCall(Tree);
+}
+
+// ---- expressions / conditions (parsed trees) ----
 
 public abstract record QExpr;
 
@@ -276,16 +293,14 @@ public abstract record QExpr;
 public sealed record QMeasure(QQubitArg? Target) : QExpr;
 
 /// <summary>
-/// Any other expression, kept as its rendered text (e.g. <c>pi / 4</c>, <c>count + 1</c>).
-/// <see cref="HasCall"/> marks that a call appeared inside (mixed with arithmetic, or a non-<c>M</c>
-/// call) — unexpressible in OpenQASM, rejected by the validator.
+/// Any other expression, as its parsed tree (e.g. <c>pi / 4</c>, <c>count + 1</c>), built once at
+/// lowering; the folder folds it and the emitter renders it — nothing re-parses a spelling.
+/// <see cref="HasCall"/> derives from the tree: a call mixed into an expression (or a non-<c>M</c> call)
+/// is unexpressible in OpenQASM, rejected by the validator. Null tree = empty initializer.
 /// </summary>
-public sealed record QText(string Text, bool HasCall = false) : QExpr
+public sealed record QText(QNode? Tree = null) : QExpr
 {
-    /// <summary>The expression parsed to a tree (see <see cref="QNode"/>), built once at lowering — the
-    /// structured companion the folder reads instead of re-parsing <see cref="Text"/>. Preserved verbatim
-    /// through monomorphization (names resolve to now-sized symbols at fold time), null on synthesized text.</summary>
-    public QNode? Tree { get; init; }
+    public bool HasCall => QNodes.ContainsCall(Tree);
 }
 
 /// <summary>A source array initializer such as <c>[1, 2, 3]</c>.</summary>
@@ -295,15 +310,14 @@ public sealed record QArrayLiteral(IReadOnlyList<QExpr> Elements) : QExpr;
 public sealed record QArrayNew(QType ElementType, int Length) : QExpr;
 
 /// <summary>
-/// A boolean condition, kept as rendered text (e.g. <c>r == 1</c>). <see cref="HasCall"/> marks a call
-/// inside the condition (e.g. <c>while (M(q[0]) == 0)</c>) — OpenQASM has no measurement expressions,
-/// so the validator rejects it (assign to a bit first).
+/// A boolean condition, as its parsed tree (e.g. <c>r == 1</c>), built once at lowering.
+/// <see cref="HasCall"/> derives from the tree: a call left in a condition (a non-measurement one —
+/// <c>M(q[i])</c> is desugared to a bit by <see cref="Passes.MeasureConditionLowering"/> first) has no
+/// OpenQASM form and is rejected by the validator. Null tree = an empty (missing) condition.
 /// </summary>
-public sealed record QCond(string Text, bool HasCall = false)
+public sealed record QCond(QNode? Tree = null)
 {
-    /// <summary>The condition parsed to a tree (see <see cref="QNode"/>) — the structured companion to
-    /// <see cref="Text"/>, built once at lowering. Null until the tree-migration wires it in.</summary>
-    public QNode? Tree { get; init; }
+    public bool HasCall => QNodes.ContainsCall(Tree);
 }
 
 // ---- expression tree (QNode) ----

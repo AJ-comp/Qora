@@ -76,11 +76,15 @@ public class ClassicalArrayTests
             """);
     }
 
+    /// <summary>Array locals go wherever a scalar goes — a helper op, a branch, a loop. The old QSEM012
+    /// arm rejecting these was OpenQASM's placement rule leaking into the language; the QASM backend's
+    /// ArrayLocalHoisting pass now absorbs it (hidden-parameter threading / scope-top hoisting), so the
+    /// language accepts all three shapes it once rejected.</summary>
     [Theory]
     [InlineData("operation Work(){ int[] values=[1,2]; } operation Main(){ Work(); }")]
     [InlineData("operation Main(){ int flag=1; if(flag==1){ int[] values=[1,2]; } }")]
     [InlineData("operation Main(){ for i in 0..1 { int[] values=[1,2]; } }")]
-    public void RejectsArrayDeclarationsOutsideMainTopLevel(string source) => RejectsCleanly(source);
+    public void AcceptsArrayDeclarationsOutsideMainTopLevel(string source) => Compiler.Accepts(source);
 
     [Theory]
     [InlineData("operation Main(){ int[] values = new int[0]; }")]
@@ -312,6 +316,272 @@ public class ClassicalArrayTests
             operation Helper(int[] x) { for i in 0..x.Count-1 { x[i] = 1; } }
             operation Main() { use q=Qubit[1]; int[] a = [1, 2, 3]; Helper(a); H(q[0]); }
             """);
+
+    /// <summary>A WHOLE bit register compared to an int emits through the explicit spec cast
+    /// (`int(f) == 1`) — the one spelling the Braket execution oracle actually runs (it crashes on the
+    /// bare register-vs-int form, and both targets reject the old bool form). An ELEMENT stays a scalar
+    /// bit with the bool rewrite.</summary>
+    [Fact]
+    public void WholeBitRegisterComparesViaAnIntCast()
+    {
+        var r = Compiler.Compile("operation Main(){ use q=Qubit[1]; bit[] f = new bit[2]; if (f == 1) { X(q[0]); } }");
+        Assert.True(r.Success, Explain(r));
+        Assert.Contains("if (int(f) == 1)", r.Qasm);
+        Assert.DoesNotContain("f == true", r.Qasm);
+    }
+
+    // --- bit[] PARAMETERS: length-specialized like Qubit[] (bit is not a valid array base type, so the
+    //     only legal QASM parameter form is the sized register `bit[N]`) ---
+
+    [Fact]
+    public void BitArrayParameterSpecializesToASizedRegister()
+    {
+        var r = Compiler.Compile("""
+            operation Read(bit[] values, Qubit q) {
+                if (values[0] == 1) { X(q); }
+            }
+            operation Main() {
+                use q = Qubit[1];
+                bit[] f = new bit[2];
+                Read(f, q[0]);
+            }
+            """);
+        Assert.True(r.Success, Explain(r));
+        Assert.Contains("def Read__sz2(bit[2] values, qubit q)", r.Qasm);
+        Assert.DoesNotContain("array[bit", r.Qasm);   // the invalid base type never appears
+    }
+
+    [Fact]
+    public void BitArrayParameterCountFoldsToALiteralNotSizeof()
+    {
+        // sizeof is undefined on a bit register, so `f.Count` must fold to the specialized length.
+        var r = Compiler.Compile("""
+            operation Scan(bit[] f, Qubit q) {
+                for i in 0..f.Count-1 { if (f[i] == 1) { X(q); } }
+            }
+            operation Main() {
+                use q = Qubit[1];
+                bit[] f = new bit[3];
+                Scan(f, q[0]);
+            }
+            """);
+        Assert.True(r.Success, Explain(r));
+        Assert.Contains("[0:3 - 1]", r.Qasm);
+        Assert.DoesNotContain("sizeof", r.Qasm);
+    }
+
+    [Fact]
+    public void TwoBitArrayLengthsMakeTwoSpecializations()
+    {
+        var r = Compiler.Compile("""
+            operation Read(bit[] values, Qubit q) {
+                if (values[0] == 1) { X(q); }
+            }
+            operation Main() {
+                use q = Qubit[2];
+                bit[] a = new bit[2];
+                bit[] b = new bit[3];
+                Read(a, q[0]);
+                Read(b, q[1]);
+            }
+            """);
+        Assert.True(r.Success, Explain(r));
+        Assert.Contains("def Read__sz2(bit[2] values, qubit q)", r.Qasm);
+        Assert.Contains("def Read__sz3(bit[3] values, qubit q)", r.Qasm);
+    }
+
+    /// <summary>A bit[] parameter is READ-ONLY: its QASM form is a by-value register, so a write would
+    /// silently never reach the caller — rejected loudly instead (int[] passes by mutable reference; the
+    /// asymmetry is OpenQASM's, and the ban keeps it unobservable at the Qora surface).</summary>
+    [Theory]
+    [InlineData("operation Zero(bit[] f, Qubit q){ f[0] = 0; H(q); }\noperation Main(){ use q=Qubit[1]; bit[] f = new bit[1]; Zero(f, q[0]); }")]
+    [InlineData("operation Store(bit[] f, Qubit[] qs){ f[0] = M(qs[0]); }\noperation Main(){ use q=Qubit[1]; bit[] f = new bit[1]; Store(f, q); }")]
+    public void RejectsWritingToABitArrayParameter(string source) =>
+        Compiler.Rejects(source, "QSEM032");
+
+    /// <summary>bit[] parameters are read-only by-value registers (QSEM032), so the MUTABLE-array rules
+    /// must not apply to them: the same register may feed two bit[] slots (reads cannot conflict), and a
+    /// const array is a perfectly fine argument.</summary>
+    [Fact]
+    public void DuplicateBitArrayArgumentsAreAcceptedReadsCannotConflict()
+    {
+        var r = Compiler.Compile("""
+            operation Both(bit[] a, bit[] b, Qubit q) { if (a[0] == 1) { X(q); } if (b[0] == 1) { X(q); } }
+            operation Main() { use q = Qubit[1]; bit[] f = new bit[2]; Both(f, f, q[0]); }
+            """);
+        Assert.True(r.Success, Explain(r));
+    }
+
+    [Fact]
+    public void ConstBitArrayIsAValidArgumentToAReadOnlyBitParameter()
+    {
+        var r = Compiler.Compile("""
+            operation Read(bit[] f, Qubit q) { if (f[0] == 1) { X(q); } }
+            operation Main() { use q = Qubit[1]; const bit[] f = [0, 1]; Read(f, q[0]); }
+            """);
+        Assert.True(r.Success, Explain(r));
+    }
+
+    /// <summary>bit[] parameters specialize like Qubit[], so their bounds facts DEFER to the post-mono
+    /// re-check the same way: a loop bounded by ANOTHER bit[] param's Count, and a constant guard
+    /// `n &lt; K`, must both prove post-specialization instead of rejecting pre-mono (QSEM030).</summary>
+    [Fact]
+    public void BitArrayCrossCountLoopDefersAndProvesPostMono()
+    {
+        var r = Compiler.Compile("""
+            operation Zip(bit[] a, bit[] b, Qubit q) {
+                for i in 0..a.Count-1 { if (b[i] == 1) { X(q); } }
+            }
+            operation Main() {
+                use q = Qubit[1];
+                bit[] a = new bit[2];
+                bit[] b = new bit[2];
+                Zip(a, b, q[0]);
+            }
+            """);
+        Assert.True(r.Success, Explain(r));
+    }
+
+    [Fact]
+    public void BitArrayConstGuardDefersAndProvesPostMono()
+    {
+        var r = Compiler.Compile("""
+            operation Pick(bit[] f, int n, Qubit q) {
+                if (0 <= n && n < 2) { if (f[n] == 1) { X(q); } }
+            }
+            operation Main() {
+                use q = Qubit[1];
+                bit[] f = new bit[2];
+                int n = 1;
+                Pick(f, n, q[0]);
+            }
+            """);
+        Assert.True(r.Success, Explain(r));
+    }
+
+    // --- ArrayLocalHoisting: a classical-array LOCAL in a def-emitted op is inexpressible in OpenQASM
+    //     (arrays are global-or-parameter only, and defs cannot see mutable globals — scope.rst), so the
+    //     QASM backend threads it as a hidden array-reference parameter backed by a global, with the
+    //     declaration site becoming element-wise re-initialization (fresh value on every entry). ---
+
+    [Fact]
+    public void ThreadsHelperArrayLocalAsHiddenParameter()
+    {
+        var result = CompileSuccessfully("""
+            operation SetTable(Qubit q) {
+                int[] tbl = [1, 2, 3];
+                if (tbl[0] == 1) { X(q); }
+            }
+            operation Main() {
+                use q = Qubit[1];
+                SetTable(q[0]);
+            }
+            """);
+
+        Assert.Contains("array[int, 3] SetTable_tbl = {0, 0, 0};", result.Qasm);   // global backing, default-init
+        Assert.Contains("mutable array[int, #dim = 1] tbl", result.Qasm);          // hidden parameter on the def
+        Assert.Contains("tbl[0] = 1;", result.Qasm);                               // declaration site = re-init
+        Assert.Contains("tbl[2] = 3;", result.Qasm);
+        Assert.Contains("SetTable(q[0], SetTable_tbl);", result.Qasm);             // caller supplies the backing
+        Assert.DoesNotContain("array[int, 3] tbl", result.Qasm);                   // no array DECLARATION inside the def
+        // the backing declaration precedes the call that hands it over
+        Assert.True(result.Qasm.IndexOf("array[int, 3] SetTable_tbl")
+                    < result.Qasm.IndexOf("SetTable(q[0], SetTable_tbl);"));
+    }
+
+    [Fact]
+    public void ThreadsHiddenParameterTransitivelyThroughIntermediateDefs()
+    {
+        var result = CompileSuccessfully("""
+            operation Inner(Qubit q) {
+                int[] t = [4, 5];
+                if (t[1] == 5) { X(q); }
+            }
+            operation Outer(Qubit q) {
+                Inner(q);
+            }
+            operation Main() {
+                use q = Qubit[1];
+                Outer(q[0]);
+            }
+            """);
+
+        Assert.Contains("array[int, 2] Inner_t = {0, 0};", result.Qasm);   // one backing global
+        Assert.Contains("Inner(q, Inner_t);", result.Qasm);                // Outer hands its pass-through on
+        Assert.Contains("Outer(q[0], Inner_t);", result.Qasm);             // Main names the global directly
+    }
+
+    [Fact]
+    public void HoistsEntryNestedArrayDeclarationToTheGlobalTop()
+    {
+        var result = CompileSuccessfully("""
+            operation Main() {
+                use q = Qubit[1];
+                bit b = M(q[0]);
+                int n = b;
+                if (n == 1) {
+                    int[] a = [7, 8];
+                    int x = a[0];
+                }
+            }
+            """);
+
+        Assert.Contains("array[int, 2] a = {0, 0};", result.Qasm);   // declaration at global top…
+        Assert.Contains("a[0] = 7;", result.Qasm);                   // …site keeps element-wise re-init
+        Assert.Contains("a[1] = 8;", result.Qasm);
+        Assert.True(result.Qasm.IndexOf("array[int, 2] a") < result.Qasm.IndexOf("if ("));
+    }
+
+    /// <summary>bit[] locals are sized REGISTERS in OpenQASM — legal inside a def, not "arrays" — so the
+    /// hoisting pass must leave them exactly where they are.</summary>
+    [Fact]
+    public void LeavesBitArrayLocalsInsideDefsUntouched()
+    {
+        var result = CompileSuccessfully("""
+            operation Flag(Qubit q) {
+                bit[] f = new bit[2];
+                f[0] = 1;
+                if (f[0] == 1) { X(q); }
+            }
+            operation Main() {
+                use q = Qubit[1];
+                Flag(q[0]);
+            }
+            """);
+
+        Assert.Contains("bit[2] f = \"00\";", result.Qasm);   // register declaration stays in the def
+        Assert.Contains("Flag(q[0]);", result.Qasm);          // no hidden parameter added
+        Assert.DoesNotContain("Flag_f", result.Qasm);         // no backing global minted
+    }
+
+    /// <summary>A bit[] NESTED in a control-flow block hoists only to the top of its own op (importers
+    /// reject classical declarations inside blocks) — a register declaration is legal at def scope, so
+    /// no threading and no backing global.</summary>
+    [Fact]
+    public void HoistsNestedBitArrayToItsOwnOpTop()
+    {
+        var result = CompileSuccessfully("""
+            operation Tally(Qubit q, int n) {
+                if (n == 1) {
+                    bit[] f = new bit[2];
+                    f[0] = 1;
+                    if (f[0] == 1) { X(q); }
+                }
+            }
+            operation Main() {
+                use q = Qubit[1];
+                bit b = M(q[0]);
+                int n = b;
+                Tally(q[0], n);
+            }
+            """);
+
+        Assert.Contains("bit[2] f = \"00\";", result.Qasm);          // storage at the def's top
+        Assert.Contains("f[0] = 0;", result.Qasm);                   // site re-initializes per entry
+        Assert.Contains("Tally(q[0], n);", result.Qasm);             // signature unchanged — no threading
+        Assert.DoesNotContain("Tally_f", result.Qasm);
+        Assert.True(result.Qasm.IndexOf("bit[2] f") < result.Qasm.IndexOf("if ("));
+    }
 
     private static string Explain(QoraParseResult result) =>
         string.Join(" | ", result.Errors.Select(e => $"{e.Code}: {e.Message}"));

@@ -97,39 +97,41 @@ public static class ReferentialCheck
     private static void CheckBody(IReadOnlyList<QStmt> stmts, string opName, HashSet<string> known, HashSet<string> opNames, List<QoraError> errors)
     {
         foreach (var s in stmts)
+        {
+            // Every EXPRESSION the statement holds, from the one canonical enumeration (QNodes) — this
+            // pass can never miss a position a hand-rolled list would forget. The remaining cases below
+            // check what expressions don't carry: statement-level NAMES (targets, registers) and bodies.
+            foreach (var tree in QNodes.ExpressionSites(s))
+                CheckNode(tree, opName, known, errors, s.Span);
+
             switch (s)
             {
                 case QGate g:
                     // a call target must be a user operation or a built-in gate.
                     if (!opNames.Contains(g.Name) && !QoraGates.Names.ContainsKey(g.Name))
                         Report(g.Name, opName, "call target", g.Span, errors);
-                    foreach (var a in g.Args) CheckArg(a, opName, known, errors, g.Span);
+                    foreach (var a in g.Args)
+                        if (a is QQubitArg q) Check(q.Reg, opName, known, errors, g.Span);
                     break;
                 case QDecl d:
-                    CheckExpr(d.Value, opName, known, errors, d.Span);
+                    CheckValueRegs(d.Value, opName, known, errors, d.Span);
                     break;
                 case QAssign a:
                     Check(a.Name, opName, known, errors, a.Span);
-                    if (a.Index is not null) CheckTokens(a.Index, opName, known, errors, a.Span);
-                    CheckExpr(a.Value, opName, known, errors, a.Span);
+                    CheckValueRegs(a.Value, opName, known, errors, a.Span);
                     break;
                 case QIf i:
-                    CheckTokens(i.Cond.Text, opName, known, errors, i.Span);
                     CheckBody(i.Then, opName, known, opNames, errors);
                     CheckBody(i.Else, opName, known, opNames, errors);
                     break;
                 case QFor f:
-                    CheckTokens(f.From, opName, known, errors, f.Span);
-                    CheckTokens(f.To, opName, known, errors, f.Span);
                     CheckBody(f.Body, opName, known, opNames, errors);
                     break;
                 case QWhile w:
-                    CheckTokens(w.Cond.Text, opName, known, errors, w.Span);
                     CheckBody(w.Body, opName, known, opNames, errors);
                     break;
                 case QRepeat r:
                     CheckBody(r.Body, opName, known, opNames, errors);
-                    CheckTokens(r.Until.Text, opName, known, errors, r.Span);
                     break;
                 case QConjugate c:
                     // ConjugationLowering flattens every QConjugate into straight-line gates + a synthesized
@@ -141,46 +143,56 @@ public static class ReferentialCheck
                         "QINTERNAL", c.Span?.Start ?? -1, c.Span?.End ?? -1));
                     break;
             }
-    }
-
-    private static void CheckArg(QArg arg, string opName, HashSet<string> known, List<QoraError> errors, QSpan? span)
-    {
-        switch (arg)
-        {
-            case QQubitArg q:
-                Check(q.Reg, opName, known, errors, span);
-                Check(q.Index, opName, known, errors, span);
-                break;
-            case QTextArg t:
-                CheckTokens(t.Text, opName, known, errors, span);
-                break;
         }
     }
 
-    private static void CheckExpr(QExpr expr, string opName, HashSet<string> known, List<QoraError> errors, QSpan? span)
+    /// <summary>The measured REGISTER names a value references (directly or as array-literal elements) —
+    /// the one thing a value holds that is a name rather than an expression tree.</summary>
+    private static void CheckValueRegs(QExpr expr, string opName, HashSet<string> known, List<QoraError> errors, QSpan? span)
     {
         switch (expr)
         {
             case QMeasure { Target: { } t }:
                 Check(t.Reg, opName, known, errors, span);
-                Check(t.Index, opName, known, errors, span);
-                break;
-            case QText t:
-                CheckTokens(t.Text, opName, known, errors, span);
                 break;
             case QArrayLiteral literal:
                 foreach (var element in literal.Elements)
-                    CheckExpr(element, opName, known, errors, span);
+                    CheckValueRegs(element, opName, known, errors, span);
                 break;
         }
     }
 
-    private static void CheckTokens(string text, string opName, HashSet<string> known, List<QoraError> errors, QSpan? span)
+    /// <summary>Every free name a tree references, checked structurally: a bare name and a call's target
+    /// name resolve like identifiers; a member NAME is never a free reference (only its base is); numbers
+    /// and verbatim literals reference nothing.</summary>
+    private static void CheckNode(QNode? node, string opName, HashSet<string> known, List<QoraError> errors, QSpan? span)
     {
-        foreach (var member in SymbolTableBuilder.MemberAccesses(text))
-            Check(member.Base, opName, known, errors, span);
-        foreach (var name in SymbolTableBuilder.ExpressionIdentifiers(text))
-            Check(name, opName, known, errors, span);
+        switch (node)
+        {
+            case null or QNumLit or QLit:
+                break;
+            case QNameRef r:
+                Check(r.Name, opName, known, errors, span);
+                break;
+            case QMember m:
+                CheckNode(m.Base, opName, known, errors, span);
+                break;
+            case QUnary u:
+                CheckNode(u.Operand, opName, known, errors, span);
+                break;
+            case QBinOp b:
+                CheckNode(b.Left, opName, known, errors, span);
+                CheckNode(b.Right, opName, known, errors, span);
+                break;
+            case QIndexNode i:
+                CheckNode(i.Base, opName, known, errors, span);
+                CheckNode(i.Index, opName, known, errors, span);
+                break;
+            case QCallNode c:
+                Check(c.Name, opName, known, errors, span);
+                CheckNode(c.Arg, opName, known, errors, span);
+                break;
+        }
     }
 
     /// <summary>Check ONE token: strip surrounding parentheses, and flag it only if the core is an

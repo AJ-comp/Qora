@@ -61,6 +61,7 @@ public class MeasureConditionTests
     [InlineData("operation Main(){ use q=Qubit[2]; for i in 0..M(q[0]) { X(q[1]); } }")] // a for bound
     [InlineData("operation Main(){ use q=Qubit[2]; Rx(M(q[0]), q[1]); }")]              // a rotation angle
     [InlineData("operation Main(){ use q=Qubit[1]; var x = M(q[0]) + 1; Rx(x, q[0]); }")] // a mixed initializer
+    [InlineData("operation Main(){ use q=Qubit[1]; H(q[0]); int[] a = [M(q[0]) + 1, 2]; X(q[0]); }")] // an array-literal ELEMENT
     // a non-measurement call in a condition has no lowering and is rejected:
     [InlineData("operation Foo(Qubit a){ H(a); }\noperation Main(){ use q=Qubit[1]; if(Foo(q[0])==1){ X(q[0]); } }")]
     public void RejectsCallInWrongPlace(string source) => Compiler.Rejects(source, "QSEM005");

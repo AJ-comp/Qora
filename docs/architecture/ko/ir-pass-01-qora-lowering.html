@@ -309,7 +309,8 @@
                 <line x1="24" y1="258" x2="896" y2="258" stroke="#315274"/>
                 <rect x="36" y="287" width="28" height="18" rx="9" fill="#2563a8"/>
                 <text class="svg-ui" x="50" y="300" text-anchor="middle" fill="#fff" font-size="9.5" font-weight="850">2</text>
-                <text class="svg-code" x="76" y="301" fill="#f5f7fb" font-size="10.8">operation Main() {</text>
+                <text class="svg-code" x="76" y="301" fill="#f5f7fb" font-size="10.8">operation Main()</text>
+                <text class="svg-code" x="76" y="320" fill="#f5f7fb" font-size="10.8">{</text>
                 <text class="svg-ui" x="338" y="301" text-anchor="end" fill="#9fc7ef" font-size="8.8">부모 범위</text>
 
                 <!-- Main: AST 부모 -->
@@ -416,7 +417,8 @@
                 <rect x="40" y="870" width="298" height="296" rx="8" fill="#132b48" stroke="#4c8bc7"/>
                 <rect x="50" y="883" width="38" height="18" rx="9" fill="#2563a8"/>
                 <text class="svg-ui" x="69" y="896" text-anchor="middle" fill="#fff" font-size="9" font-weight="850">2.5</text>
-                <text class="svg-code" x="82" y="934" fill="#f5f7fb" font-size="10.4">if (results[0] == 1) {</text>
+                <text class="svg-code" x="82" y="934" fill="#f5f7fb" font-size="10.4">if (results[0] == 1)</text>
+                <text class="svg-code" x="82" y="951" fill="#f5f7fb" font-size="10.4">{</text>
                 <rect x="58" y="953" width="264" height="54" rx="7" fill="#173657" stroke="#4c8bc7"/>
                 <rect x="68" y="964" width="48" height="18" rx="9" fill="#2563a8"/>
                 <text class="svg-ui" x="92" y="977" text-anchor="middle" fill="#fff" font-size="8.5" font-weight="850">2.5.1</text>
@@ -454,7 +456,8 @@
                 <g transform="translate(0 118)">
                 <rect x="24" y="1122" width="872" height="740" fill="#0e2924"/>
                 <line x1="24" y1="1122" x2="896" y2="1122" stroke="#285b4c"/>
-                <text class="svg-code" x="42" y="1165" fill="#f5f7fb" font-size="10.8">namespace Demo {</text>
+                <text class="svg-code" x="42" y="1165" fill="#f5f7fb" font-size="10.8">namespace Demo</text>
+                <text class="svg-code" x="42" y="1184" fill="#f5f7fb" font-size="10.8">{</text>
                 <text class="svg-ui" x="338" y="1165" text-anchor="end" fill="#9fdbc5" font-size="8.8">부모 범위</text>
 
                 <!-- Namespace: AST 부모 -->
@@ -478,7 +481,8 @@
                 <rect x="40" y="1282" width="298" height="566" rx="9" fill="#0e2924" stroke="#2f9b77" stroke-dasharray="5 4"/>
                 <rect x="50" y="1297" width="28" height="18" rx="9" fill="#16805b"/>
                 <text class="svg-ui" x="64" y="1310" text-anchor="middle" fill="#fff" font-size="9.5" font-weight="850">4</text>
-                <text class="svg-code" x="92" y="1311" fill="#f5f7fb" font-size="9.8">operation Prepare(Qubit[] q) {</text>
+                <text class="svg-code" x="92" y="1311" fill="#f5f7fb" font-size="9.8">operation Prepare(Qubit[] q)</text>
+                <text class="svg-code" x="92" y="1330" fill="#f5f7fb" font-size="9.8">{</text>
 
                 <rect x="398" y="1282" width="482" height="566" rx="9" fill="#0e2924" stroke="#2f9b77" stroke-dasharray="5 4"/>
                 <rect x="840" y="1292" width="28" height="18" rx="9" fill="#16805b"/>
@@ -505,7 +509,8 @@
                 <rect x="56" y="1448" width="266" height="284" rx="8" fill="#123d32" stroke="#2f9b77"/>
                 <rect x="66" y="1461" width="38" height="18" rx="9" fill="#16805b"/>
                 <text class="svg-ui" x="85" y="1474" text-anchor="middle" fill="#fff" font-size="9" font-weight="850">4.2</text>
-                <text class="svg-code" x="118" y="1490" fill="#f5f7fb" font-size="10.1">for i in 0..q.Count-1 {</text>
+                <text class="svg-code" x="118" y="1490" fill="#f5f7fb" font-size="10.1">for i in 0..q.Count-1</text>
+                <text class="svg-code" x="118" y="1510" fill="#f5f7fb" font-size="10.1">{</text>
                 <rect x="72" y="1514" width="234" height="58" rx="7" fill="#17513f" stroke="#2f9b77"/>
                 <rect x="82" y="1526" width="48" height="18" rx="9" fill="#16805b"/>
                 <text class="svg-ui" x="106" y="1539" text-anchor="middle" fill="#fff" font-size="8.5" font-weight="850">4.2.1</text>
@@ -627,56 +632,61 @@
                   <rect x="20" y="793" width="4" height="467" rx="2" fill="#16805b"/>
 
                   <!-- 중첩 노드가 시작되는 실제 토큰만 작게 강조 -->
-                  <rect x="184" y="210" width="84" height="21" rx="5" fill="#173657" stroke="#60a5fa"/>
-                  <rect x="165" y="234" width="63" height="21" rx="5" fill="#173657" stroke="#60a5fa"/>
-                  <rect x="102" y="282" width="62" height="21" rx="5" fill="#173657" stroke="#60a5fa"/>
-                  <rect x="203" y="876" width="64" height="21" rx="5" fill="#124738" stroke="#34b98b"/>
-                  <rect x="137" y="924" width="62" height="21" rx="5" fill="#124738" stroke="#34b98b"/>
+                  <rect x="184" y="233" width="84" height="21" rx="5" fill="#173657" stroke="#60a5fa"/>
+                  <rect x="165" y="257" width="63" height="21" rx="5" fill="#173657" stroke="#60a5fa"/>
+                  <rect x="102" y="329" width="62" height="21" rx="5" fill="#173657" stroke="#60a5fa"/>
+                  <rect x="203" y="900" width="64" height="21" rx="5" fill="#124738" stroke="#34b98b"/>
+                  <rect x="137" y="948" width="62" height="21" rx="5" fill="#124738" stroke="#34b98b"/>
 
                   <!-- 왼쪽: main.qor 전체 코드를 소스 순서대로 한 번만 표시 -->
                   <g class="svg-code" fill="#f5f7fb" font-size="11.5">
                     <text x="68" y="93">import "lib/gates.qor";</text>
 
-                    <text x="68" y="132">operation Main() {</text>
-                    <text x="92" y="157">use q = Qubit[2];</text>
-                    <text x="92" y="181">Demo.Prepare(q);</text>
-                    <text x="92" y="225">bit[] results = new bit[2];</text>
-                    <text x="92" y="249">results[0] = M(q[0]);</text>
-                    <text x="92" y="273">if (results[0] == 1) {</text>
-                    <text x="116" y="297">X(q[1]);</text>
-                    <text x="92" y="321">}</text>
-                    <text x="68" y="345">}</text>
+                    <text x="68" y="132">operation Main()</text>
+                    <text x="68" y="156">{</text>
+                    <text x="92" y="180">use q = Qubit[2];</text>
+                    <text x="92" y="204">Demo.Prepare(q);</text>
+                    <text x="92" y="248">bit[] results = new bit[2];</text>
+                    <text x="92" y="272">results[0] = M(q[0]);</text>
+                    <text x="92" y="296">if (results[0] == 1)</text>
+                    <text x="92" y="320">{</text>
+                    <text x="116" y="344">X(q[1]);</text>
+                    <text x="92" y="368">}</text>
+                    <text x="68" y="392">}</text>
 
-                    <text x="68" y="824">namespace Demo {</text>
-                    <text x="92" y="848">open Shared;</text>
-                    <text x="92" y="892">operation Prepare(Qubit[] q) {</text>
-                    <text x="116" y="916">for i in 0..q.Count-1 {</text>
-                    <text x="140" y="940">H(q[i]);</text>
-                    <text x="116" y="964">}</text>
-                    <text x="116" y="988">Flip(q);</text>
-                    <text x="92" y="1012">}</text>
-                    <text x="68" y="1036">}</text>
+                    <text x="68" y="824">namespace Demo</text>
+                    <text x="68" y="848">{</text>
+                    <text x="92" y="872">open Shared;</text>
+                    <text x="92" y="916">operation Prepare(Qubit[] q)</text>
+                    <text x="92" y="940">{</text>
+                    <text x="116" y="964">for i in 0..q.Count-1</text>
+                    <text x="116" y="988">{</text>
+                    <text x="140" y="1012">H(q[i]);</text>
+                    <text x="116" y="1036">}</text>
+                    <text x="116" y="1060">Flip(q);</text>
+                    <text x="92" y="1084">}</text>
+                    <text x="68" y="1108">}</text>
                   </g>
 
                   <!-- 왼쪽 코드의 대응 번호 -->
                   <g class="svg-ui" fill="#fff" font-size="8.4" font-weight="850" text-anchor="middle">
                     <rect x="28" y="81" width="28" height="18" rx="9" fill="#b7791f"/><text x="42" y="94">1</text>
                     <rect x="28" y="120" width="28" height="18" rx="9" fill="#2563a8"/><text x="42" y="133">2</text>
-                    <rect x="34" y="145" width="38" height="18" rx="9" fill="#2563a8"/><text x="53" y="158">2.1</text>
-                    <rect x="34" y="169" width="38" height="18" rx="9" fill="#2563a8"/><text x="53" y="182">2.2</text>
-                    <rect x="34" y="213" width="38" height="18" rx="9" fill="#2563a8"/><text x="53" y="226">2.3</text>
-                    <rect x="272" y="212" width="48" height="18" rx="9" fill="#2563a8"/><text x="296" y="225">2.3.1</text>
-                    <rect x="34" y="237" width="38" height="18" rx="9" fill="#2563a8"/><text x="53" y="250">2.4</text>
-                    <rect x="232" y="236" width="48" height="18" rx="9" fill="#2563a8"/><text x="256" y="249">2.4.1</text>
-                    <rect x="34" y="261" width="38" height="18" rx="9" fill="#2563a8"/><text x="53" y="274">2.5</text>
-                    <rect x="168" y="284" width="48" height="18" rx="9" fill="#2563a8"/><text x="192" y="297">2.5.1</text>
+                    <rect x="34" y="168" width="38" height="18" rx="9" fill="#2563a8"/><text x="53" y="181">2.1</text>
+                    <rect x="34" y="192" width="38" height="18" rx="9" fill="#2563a8"/><text x="53" y="205">2.2</text>
+                    <rect x="34" y="236" width="38" height="18" rx="9" fill="#2563a8"/><text x="53" y="249">2.3</text>
+                    <rect x="272" y="235" width="48" height="18" rx="9" fill="#2563a8"/><text x="296" y="248">2.3.1</text>
+                    <rect x="34" y="260" width="38" height="18" rx="9" fill="#2563a8"/><text x="53" y="273">2.4</text>
+                    <rect x="232" y="259" width="48" height="18" rx="9" fill="#2563a8"/><text x="256" y="272">2.4.1</text>
+                    <rect x="34" y="284" width="38" height="18" rx="9" fill="#2563a8"/><text x="53" y="297">2.5</text>
+                    <rect x="168" y="331" width="48" height="18" rx="9" fill="#2563a8"/><text x="192" y="344">2.5.1</text>
 
-                    <rect x="34" y="836" width="28" height="18" rx="9" fill="#16805b"/><text x="48" y="849">3</text>
-                    <rect x="34" y="880" width="28" height="18" rx="9" fill="#16805b"/><text x="48" y="893">4</text>
-                    <rect x="288" y="879" width="38" height="18" rx="9" fill="#16805b"/><text x="307" y="892">4.1</text>
-                    <rect x="68" y="904" width="38" height="18" rx="9" fill="#16805b"/><text x="87" y="917">4.2</text>
-                    <rect x="205" y="927" width="48" height="18" rx="9" fill="#16805b"/><text x="229" y="940">4.2.1</text>
-                    <rect x="68" y="976" width="38" height="18" rx="9" fill="#16805b"/><text x="87" y="989">4.3</text>
+                    <rect x="34" y="860" width="28" height="18" rx="9" fill="#16805b"/><text x="48" y="873">3</text>
+                    <rect x="34" y="904" width="28" height="18" rx="9" fill="#16805b"/><text x="48" y="917">4</text>
+                    <rect x="288" y="903" width="38" height="18" rx="9" fill="#16805b"/><text x="307" y="916">4.1</text>
+                    <rect x="68" y="952" width="38" height="18" rx="9" fill="#16805b"/><text x="87" y="965">4.2</text>
+                    <rect x="205" y="999" width="48" height="18" rx="9" fill="#16805b"/><text x="229" y="1012">4.2.1</text>
+                    <rect x="68" y="1048" width="38" height="18" rx="9" fill="#16805b"/><text x="87" y="1061">4.3</text>
                   </g>
 
                   <!-- 오른쪽: 현재 파서 출력의 모든 AST 노드를 평면 트리로 표시 -->
@@ -995,7 +1005,7 @@
             <figure class="lowering-map" aria-labelledby="operation-head-map-title operation-head-map-caption">
               <div class="diagram-scroll-hint" aria-hidden="true">↔ 좌우로 밀어 연산 선언부와 생성된 IR을 이어서 확인합니다</div>
               <div class="diagram-scroll" tabindex="0" aria-label="Main과 Prepare의 실제 선언부가 QOperation과 QParam으로 변환되는 도식, 작은 화면에서는 좌우로 스크롤할 수 있습니다">
-                <svg class="lowering-flow" viewBox="0 0 920 748" role="img"
+                <svg class="lowering-flow" viewBox="0 0 920 796" role="img"
                      aria-labelledby="operation-head-map-title operation-head-map-desc" focusable="false">
                 <title id="operation-head-map-title">실제 연산 선언부에서 QOperation과 QParam 필드를 만드는 흐름</title>
                 <desc id="operation-head-map-desc">Main이 속한 이름 없는 전역 namespace와 Prepare를 감싼 Demo namespace를 실제 코드 위에서 구분하고, 강조한 선언부에서 대응하는 QOperation 및 QParam 필드로 직접 연결했습니다.</desc>
@@ -1013,14 +1023,14 @@
                     <path d="M 0 0 L 10 5 L 0 10 z" fill="#b7791f"/>
                   </marker>
                   <clipPath id="op-main-card-clip">
-                    <rect x="24" y="78" width="871" height="290" rx="11"/>
+                    <rect x="24" y="78" width="871" height="338" rx="11"/>
                   </clipPath>
                   <clipPath id="op-prepare-card-clip">
                     <rect x="24" y="365" width="871" height="338" rx="11"/>
                   </clipPath>
                 </defs>
 
-                <rect x="1" y="1" width="918" height="746" rx="14" fill="#f8fafc" stroke="#d7dee8"/>
+                <rect x="1" y="1" width="918" height="794" rx="14" fill="#f8fafc" stroke="#d7dee8"/>
                 <rect x="24" y="20" width="142" height="27" rx="13.5" fill="#422d16"/>
                 <text class="svg-ui" x="95" y="38" text-anchor="middle" fill="#ffedd5" font-size="12" font-weight="800">AST → QOperation</text>
                 <text class="svg-ui" x="181" y="39" fill="#253044" font-size="17.5" font-weight="800">실제 선언부에서 IR 필드가 만들어지는 위치를 따라갑니다</text>
@@ -1028,12 +1038,12 @@
 
                 <!-- Main: 하나의 카드 안에서 AST 선언부와 QOperation을 직접 연결 -->
                 <g clip-path="url(#op-main-card-clip)">
-                  <rect x="24" y="78" width="385" height="290" fill="#111827"/>
-                  <rect x="409" y="78" width="486" height="290" fill="#fff"/>
+                  <rect x="24" y="78" width="385" height="338" fill="#111827"/>
+                  <rect x="409" y="78" width="486" height="338" fill="#fff"/>
                   <rect x="24" y="78" width="385" height="42" fill="#422d16"/>
                   <rect x="409" y="78" width="486" height="42" fill="#263141"/>
                 </g>
-                <rect x="24" y="78" width="871" height="290" rx="11" fill="none" stroke="#cfd7e2"/>
+                <rect x="24" y="78" width="871" height="338" rx="11" fill="none" stroke="#cfd7e2"/>
                 <rect x="39" y="89" width="86" height="22" rx="11" fill="none" stroke="#ffedd5"/>
                 <text class="svg-ui" x="82" y="104" text-anchor="middle" fill="#ffedd5" font-size="10.5" font-weight="800">Qora 소스</text>
                 <text class="svg-ui" x="138" y="104" fill="#ffedd5" font-size="12" font-weight="750">전역 연산의 실제 코드</text>
@@ -1052,15 +1062,16 @@
                   <text x="42" y="181" fill="#e8edf5">operation</text>
                   <text x="106" y="181" fill="#fff" font-weight="800">Main</text>
                   <text x="139" y="181" fill="#fff8e8" font-weight="800">()</text>
-                  <text x="158" y="181" fill="#e8edf5">{</text>
-                  <text x="58" y="205" fill="#aeb9c9">use q = Qubit[2];</text>
-                  <text x="58" y="223" fill="#aeb9c9">Demo.Prepare(q);</text>
-                  <text x="58" y="251" fill="#aeb9c9">bit[] results = new bit[2];</text>
-                  <text x="58" y="269" fill="#aeb9c9">results[0] = M(q[0]);</text>
-                  <text x="58" y="287" fill="#aeb9c9">if (results[0] == 1) {</text>
-                  <text x="74" y="305" fill="#aeb9c9">X(q[1]);</text>
-                  <text x="58" y="323" fill="#aeb9c9">}</text>
-                  <text x="42" y="341" fill="#aeb9c9">}</text>
+                  <text x="42" y="199" fill="#e8edf5">{</text>
+                  <text x="58" y="217" fill="#aeb9c9">use q = Qubit[2];</text>
+                  <text x="58" y="235" fill="#aeb9c9">Demo.Prepare(q);</text>
+                  <text x="58" y="263" fill="#aeb9c9">bit[] results = new bit[2];</text>
+                  <text x="58" y="281" fill="#aeb9c9">results[0] = M(q[0]);</text>
+                  <text x="58" y="299" fill="#aeb9c9">if (results[0] == 1)</text>
+                  <text x="58" y="317" fill="#aeb9c9">{</text>
+                  <text x="74" y="335" fill="#aeb9c9">X(q[1]);</text>
+                  <text x="58" y="353" fill="#aeb9c9">}</text>
+                  <text x="42" y="371" fill="#aeb9c9">}</text>
                 </g>
                 </g>
 
@@ -1101,7 +1112,7 @@
                 </g>
                 </g>
 
-                <g transform="translate(0 20)">
+                <g transform="translate(0 68)">
                 <!-- Prepare: 하나의 카드 안에서 AST 선언부와 QOperation을 직접 연결 -->
                 <g clip-path="url(#op-prepare-card-clip)">
                   <rect x="24" y="365" width="385" height="338" fill="#111827"/>
@@ -1117,26 +1128,28 @@
 
                 <rect x="38" y="414" width="112" height="25" rx="6" fill="#102d27" stroke="#2f9b77"/>
                 <rect x="103" y="417" width="35" height="19" rx="4" fill="#16805b"/>
-                <rect x="54" y="465" width="225" height="25" rx="6" fill="#132b48" stroke="#4c8bc7"/>
-                <rect x="119" y="468" width="48" height="19" rx="4" fill="#2563a8"/>
-                <rect x="173" y="468" width="72" height="19" rx="4" fill="#8a5b13"/>
+                <rect x="54" y="483" width="225" height="25" rx="6" fill="#132b48" stroke="#4c8bc7"/>
+                <rect x="119" y="486" width="48" height="19" rx="4" fill="#2563a8"/>
+                <rect x="173" y="486" width="72" height="19" rx="4" fill="#8a5b13"/>
 
                 <g class="svg-code" font-size="10.5">
                   <text x="42" y="432" fill="#e8edf5">namespace</text>
                   <text x="106" y="432" fill="#fff" font-weight="800">Demo</text>
-                  <text x="142" y="432" fill="#e8edf5">{</text>
-                  <text x="58" y="455" fill="#aeb9c9">open Shared;</text>
-                  <text x="58" y="483" fill="#e8edf5">operation</text>
-                  <text x="122" y="483" fill="#fff" font-weight="800">Prepare</text>
-                  <text x="169" y="483" fill="#e8edf5">(</text>
-                  <text x="176" y="483" fill="#fff8e8" font-weight="800">Qubit[] q</text>
-                  <text x="247" y="483" fill="#e8edf5">) {</text>
-                  <text x="74" y="509" fill="#aeb9c9">for i in 0..q.Count-1 {</text>
-                  <text x="90" y="527" fill="#aeb9c9">H(q[i]);</text>
-                  <text x="74" y="545" fill="#aeb9c9">}</text>
-                  <text x="74" y="563" fill="#aeb9c9">Flip(q);</text>
-                  <text x="58" y="581" fill="#aeb9c9">}</text>
-                  <text x="42" y="599" fill="#aeb9c9">}</text>
+                  <text x="42" y="450" fill="#e8edf5">{</text>
+                  <text x="58" y="473" fill="#aeb9c9">open Shared;</text>
+                  <text x="58" y="501" fill="#e8edf5">operation</text>
+                  <text x="122" y="501" fill="#fff" font-weight="800">Prepare</text>
+                  <text x="169" y="501" fill="#e8edf5">(</text>
+                  <text x="176" y="501" fill="#fff8e8" font-weight="800">Qubit[] q</text>
+                  <text x="247" y="501" fill="#e8edf5">)</text>
+                  <text x="58" y="519" fill="#e8edf5">{</text>
+                  <text x="74" y="545" fill="#aeb9c9">for i in 0..q.Count-1</text>
+                  <text x="74" y="563" fill="#aeb9c9">{</text>
+                  <text x="90" y="581" fill="#aeb9c9">H(q[i]);</text>
+                  <text x="74" y="599" fill="#aeb9c9">}</text>
+                  <text x="74" y="617" fill="#aeb9c9">Flip(q);</text>
+                  <text x="58" y="635" fill="#aeb9c9">}</text>
+                  <text x="42" y="653" fill="#aeb9c9">}</text>
                 </g>
 
                 <!-- Prepare: 같은 카드 안의 QOperation과 QParam 결과 -->
@@ -1200,9 +1213,9 @@
                   <path d="M258 143 C330 143 410 149 480 149" stroke="#64748b" marker-end="url(#op-arrow-slate)"/>
                   <path d="M118.5 186 C136.5 164 285 170 350 188 C395 197 440 201 480 201" stroke="#2563a8" marker-end="url(#op-arrow-blue)"/>
                   <path d="M145.5 204 C145.5 234 400 262 480 262" stroke="#b7791f" marker-end="url(#op-arrow-amber)"/>
-                  <path d="M150 427 C250 427 400 436 480 436" transform="translate(0 20)" stroke="#16805b" marker-end="url(#op-arrow-green)"/>
-                  <path d="M143 468 C161 444 315 454 375 477 C415 488 450 490 480 490" transform="translate(0 20)" stroke="#2563a8" marker-end="url(#op-arrow-blue)"/>
-                  <path d="M209 487 C209 515 400 541 480 541" transform="translate(0 20)" stroke="#b7791f" marker-end="url(#op-arrow-amber)"/>
+                  <path d="M150 427 C250 427 400 436 480 436" transform="translate(0 68)" stroke="#16805b" marker-end="url(#op-arrow-green)"/>
+                  <path d="M143 486 C161 462 315 472 375 477 C415 488 450 490 480 490" transform="translate(0 68)" stroke="#2563a8" marker-end="url(#op-arrow-blue)"/>
+                  <path d="M209 505 C209 515 400 541 480 541" transform="translate(0 68)" stroke="#b7791f" marker-end="url(#op-arrow-amber)"/>
                 </g>
                 </svg>
               </div>
@@ -1262,7 +1275,7 @@
             <figure class="lowering-map" aria-labelledby="statement-map-title statement-map-caption">
               <div class="diagram-scroll-hint" aria-hidden="true">↔ 좌우로 밀어 실제 문장과 생성된 QStmt를 이어서 확인합니다</div>
               <div class="diagram-scroll" tabindex="0" aria-label="Main과 Prepare의 실제 코드 문장이 QOperation Body의 QStmt로 변환되는 도식, 작은 화면에서는 좌우로 스크롤할 수 있습니다">
-                <svg class="lowering-flow" viewBox="0 0 920 1034" role="img"
+                <svg class="lowering-flow" viewBox="0 0 920 1102" role="img"
                      aria-labelledby="statement-map-title statement-map-desc" focusable="false">
                 <title id="statement-map-title">연산 본문의 실제 문장이 QStmt로 변환되는 흐름</title>
                 <desc id="statement-map-desc">Main과 Prepare의 실제 코드를 생략 없이 표시하고, 각 문장이 QOperation Body의 어느 QStmt로 저장되는지 연결합니다. 선언과 대입의 값은 부모 문장 안에, if와 for의 자식 문장은 각 부모의 자식 목록 안에 표시합니다.</desc>
@@ -1273,11 +1286,11 @@
                   <marker id="stmt-arrow-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
                     <path d="M0 0 L10 5 L0 10 z" fill="#16805b"/>
                   </marker>
-                  <clipPath id="stmt-main-card-clip"><rect x="24" y="78" width="871" height="580" rx="11"/></clipPath>
-                  <clipPath id="stmt-prepare-card-clip"><rect x="24" y="676" width="871" height="332" rx="11"/></clipPath>
+                  <clipPath id="stmt-main-card-clip"><rect x="24" y="78" width="871" height="608" rx="11"/></clipPath>
+                  <clipPath id="stmt-prepare-card-clip"><rect x="24" y="676" width="871" height="360" rx="11"/></clipPath>
                 </defs>
 
-                <rect x="1" y="1" width="918" height="1032" rx="14" fill="#f8fafc" stroke="#d7dee8"/>
+                <rect x="1" y="1" width="918" height="1100" rx="14" fill="#f8fafc" stroke="#d7dee8"/>
                 <rect x="24" y="20" width="126" height="27" rx="13.5" fill="#422d16"/>
                 <text class="svg-ui" x="87" y="38" text-anchor="middle" fill="#ffedd5" font-size="12" font-weight="800">AST → QStmt</text>
                 <text class="svg-ui" x="166" y="39" fill="#253044" font-size="17.5" font-weight="800">실제 본문의 각 문장이 저장되는 Body 위치를 따라갑니다</text>
@@ -1285,12 +1298,12 @@
 
                 <!-- Main: 실제 본문과 Main.Body를 하나의 카드에서 연결 -->
                 <g clip-path="url(#stmt-main-card-clip)">
-                  <rect x="24" y="78" width="385" height="580" fill="#111827"/>
-                  <rect x="409" y="78" width="486" height="580" fill="#fff"/>
+                  <rect x="24" y="78" width="385" height="608" fill="#111827"/>
+                  <rect x="409" y="78" width="486" height="608" fill="#fff"/>
                   <rect x="24" y="78" width="385" height="42" fill="#183153"/>
                   <rect x="409" y="78" width="486" height="42" fill="#263141"/>
                 </g>
-                <rect x="24" y="78" width="871" height="580" rx="11" fill="none" stroke="#cfd7e2"/>
+                <rect x="24" y="78" width="871" height="608" rx="11" fill="none" stroke="#cfd7e2"/>
 
                 <rect x="39" y="89" width="86" height="22" rx="11" fill="none" stroke="#bfdbfe"/>
                 <text class="svg-ui" x="82" y="104" text-anchor="middle" fill="#dbeafe" font-size="10.5" font-weight="800">Qora 소스</text>
@@ -1300,11 +1313,13 @@
                 <text class="svg-code" x="485" y="104" text-anchor="middle" fill="#f7f9fc" font-size="10.2" font-weight="750">QOperation.Body</text>
                 <text class="svg-ui" x="560" y="104" fill="#f7f9fc" font-size="12" font-weight="750">Main.Body에 저장되는 값</text>
 
-                <text class="svg-code" x="42" y="145" fill="#d8e2ef" font-size="10.5">operation Main() {</text>
+                <text class="svg-code" x="42" y="145" fill="#d8e2ef" font-size="10.5">operation Main()</text>
+                <text class="svg-code" x="42" y="169" fill="#d8e2ef" font-size="10.5">{</text>
                 <rect x="480" y="128" width="210" height="26" rx="7" fill="#f5f7fa" stroke="#d4dae3"/>
                 <text class="svg-code" x="493" y="145" fill="#526071" font-size="10.5">QOperation("Main").Body</text>
                 <text class="svg-ui" x="704" y="145" fill="#718096" font-size="9.5">소스 순서대로 추가</text>
 
+                <g transform="translate(0 28)">
                 <!-- Main 1 · QUse -->
                 <rect x="54" y="160" width="325" height="44" rx="7" fill="#132b48" stroke="#4c8bc7"/>
                 <rect x="62" y="173" width="28" height="18" rx="9" fill="#2563a8"/>
@@ -1381,12 +1396,13 @@
                 <rect x="54" y="488" width="325" height="156" rx="9" fill="#0f2035" stroke="#4c8bc7" stroke-dasharray="5 4"/>
                 <rect x="62" y="497" width="28" height="18" rx="9" fill="#2563a8"/>
                 <text class="svg-ui" x="76" y="510" text-anchor="middle" fill="#fff" font-size="9.5" font-weight="850">5</text>
-                <text class="svg-code" x="102" y="513" fill="#f5f7fb" font-size="9.8">if (results[0] == 1) {</text>
+                <text class="svg-code" x="102" y="513" fill="#f5f7fb" font-size="9.8">if (results[0] == 1)</text>
+                <text class="svg-code" x="102" y="535" fill="#d5deea" font-size="10.2">{</text>
                 <rect x="70" y="549" width="295" height="40" rx="7" fill="#132b48" stroke="#4c8bc7"/>
                 <rect x="78" y="560" width="38" height="18" rx="9" fill="#2563a8"/>
                 <text class="svg-ui" x="97" y="573" text-anchor="middle" fill="#fff" font-size="8.5" font-weight="850">5.1</text>
                 <text class="svg-code" x="128" y="574" fill="#f5f7fb" font-size="10">X(q[1]);</text>
-                <text class="svg-code" x="70" y="620" fill="#d5deea" font-size="10.2">}</text>
+                <text class="svg-code" x="102" y="620" fill="#d5deea" font-size="10.2">}</text>
 
                 <rect x="480" y="488" width="399" height="156" rx="9" fill="#f2f7fd" stroke="#4c8bc7" stroke-dasharray="5 4"/>
                 <rect x="492" y="497" width="28" height="18" rx="9" fill="#2563a8"/>
@@ -1413,15 +1429,17 @@
                 </g>
                 <text class="svg-code" x="550" y="638" fill="#354052" font-size="9.8">Else = []</text>
                 <text class="svg-code" x="42" y="652" fill="#d5deea" font-size="10.5">}</text>
+                </g>
 
                 <!-- Prepare: 실제 본문과 Prepare.Body를 하나의 카드에서 연결 -->
+                <g transform="translate(0 40)">
                 <g clip-path="url(#stmt-prepare-card-clip)">
-                  <rect x="24" y="676" width="385" height="332" fill="#111827"/>
-                  <rect x="409" y="676" width="486" height="332" fill="#fff"/>
+                  <rect x="24" y="676" width="385" height="360" fill="#111827"/>
+                  <rect x="409" y="676" width="486" height="360" fill="#fff"/>
                   <rect x="24" y="676" width="385" height="42" fill="#124c3f"/>
                   <rect x="409" y="676" width="486" height="42" fill="#263141"/>
                 </g>
-                <rect x="24" y="676" width="871" height="332" rx="11" fill="none" stroke="#cfd7e2"/>
+                <rect x="24" y="676" width="871" height="360" rx="11" fill="none" stroke="#cfd7e2"/>
 
                 <rect x="39" y="687" width="86" height="22" rx="11" fill="none" stroke="#a7f3d0"/>
                 <text class="svg-ui" x="82" y="702" text-anchor="middle" fill="#d1fae5" font-size="10.5" font-weight="800">Qora 소스</text>
@@ -1431,21 +1449,24 @@
                 <text class="svg-code" x="485" y="702" text-anchor="middle" fill="#f7f9fc" font-size="10.2" font-weight="750">QOperation.Body</text>
                 <text class="svg-ui" x="560" y="702" fill="#f7f9fc" font-size="12" font-weight="750">Prepare.Body에 저장되는 값</text>
 
-                <text class="svg-code" x="42" y="743" fill="#d8e2ef" font-size="10.5">operation Prepare(Qubit[] q) {</text>
+                <text class="svg-code" x="42" y="743" fill="#d8e2ef" font-size="10.5">operation Prepare(Qubit[] q)</text>
+                <text class="svg-code" x="42" y="767" fill="#d8e2ef" font-size="10.5">{</text>
                 <rect x="480" y="726" width="226" height="26" rx="7" fill="#f5f7fa" stroke="#d4dae3"/>
                 <text class="svg-code" x="493" y="743" fill="#526071" font-size="10.5">QOperation("Prepare").Body</text>
                 <text class="svg-ui" x="720" y="743" fill="#718096" font-size="9.5">소스 순서대로 추가</text>
 
+                <g transform="translate(0 28)">
                 <!-- Prepare 1 · QFor와 Body[0] -->
                 <rect x="54" y="758" width="325" height="156" rx="9" fill="#0e2924" stroke="#2f9b77" stroke-dasharray="5 4"/>
                 <rect x="62" y="767" width="28" height="18" rx="9" fill="#16805b"/>
                 <text class="svg-ui" x="76" y="780" text-anchor="middle" fill="#fff" font-size="9.5" font-weight="850">1</text>
-                <text class="svg-code" x="102" y="783" fill="#f5f7fb" font-size="9.8">for i in 0..q.Count-1 {</text>
+                <text class="svg-code" x="102" y="783" fill="#f5f7fb" font-size="9.8">for i in 0..q.Count-1</text>
+                <text class="svg-code" x="102" y="805" fill="#d5deea" font-size="10.2">{</text>
                 <rect x="70" y="819" width="295" height="40" rx="7" fill="#123d32" stroke="#2f9b77"/>
                 <rect x="78" y="830" width="38" height="18" rx="9" fill="#16805b"/>
                 <text class="svg-ui" x="97" y="843" text-anchor="middle" fill="#fff" font-size="8.5" font-weight="850">1.1</text>
                 <text class="svg-code" x="128" y="844" fill="#f5f7fb" font-size="10">H(q[i]);</text>
-                <text class="svg-code" x="70" y="890" fill="#d5deea" font-size="10.2">}</text>
+                <text class="svg-code" x="102" y="890" fill="#d5deea" font-size="10.2">}</text>
 
                 <rect x="480" y="758" width="399" height="156" rx="9" fill="#f3faf7" stroke="#2f9b77" stroke-dasharray="5 4"/>
                 <rect x="492" y="767" width="28" height="18" rx="9" fill="#16805b"/>
@@ -1480,18 +1501,24 @@
                 <text class="svg-code" x="532" y="942" fill="#116347" font-size="10.5" font-weight="800">Body[1]: QGate</text>
                 <text class="svg-code" x="532" y="958" fill="#354052" font-size="9.4">Name = "Flip" · Args[0] = QTextArg("q")</text>
                 <text class="svg-code" x="42" y="990" fill="#d5deea" font-size="10.5">}</text>
+                </g>
+                </g>
 
                 <!-- 실제 문장과 생성된 QStmt를 같은 높이에서 연결 -->
                 <g fill="none" stroke-width="2.5" stroke-linecap="round">
-                  <path d="M379 182 H480" stroke="#2563a8" marker-end="url(#stmt-arrow-blue)"/>
-                  <path d="M379 234 H480" stroke="#2563a8" marker-end="url(#stmt-arrow-blue)"/>
-                  <path d="M379 282 H480" stroke="#2563a8" marker-end="url(#stmt-arrow-blue)"/>
-                  <path d="M379 398 H480" stroke="#2563a8" marker-end="url(#stmt-arrow-blue)"/>
-                  <path d="M379 510 H480" stroke="#2563a8" marker-end="url(#stmt-arrow-blue)"/>
-                  <path d="M365 569 H566" stroke="#2563a8" marker-end="url(#stmt-arrow-blue)"/>
-                  <path d="M379 780 H480" stroke="#16805b" marker-end="url(#stmt-arrow-green)"/>
-                  <path d="M365 839 H566" stroke="#16805b" marker-end="url(#stmt-arrow-green)"/>
-                  <path d="M379 944 H480" stroke="#16805b" marker-end="url(#stmt-arrow-green)"/>
+                  <g transform="translate(0 28)">
+                    <path d="M379 182 H480" stroke="#2563a8" marker-end="url(#stmt-arrow-blue)"/>
+                    <path d="M379 234 H480" stroke="#2563a8" marker-end="url(#stmt-arrow-blue)"/>
+                    <path d="M379 282 H480" stroke="#2563a8" marker-end="url(#stmt-arrow-blue)"/>
+                    <path d="M379 398 H480" stroke="#2563a8" marker-end="url(#stmt-arrow-blue)"/>
+                    <path d="M379 510 H480" stroke="#2563a8" marker-end="url(#stmt-arrow-blue)"/>
+                    <path d="M365 569 H566" stroke="#2563a8" marker-end="url(#stmt-arrow-blue)"/>
+                  </g>
+                  <g transform="translate(0 68)">
+                    <path d="M379 780 H480" stroke="#16805b" marker-end="url(#stmt-arrow-green)"/>
+                    <path d="M365 839 H566" stroke="#16805b" marker-end="url(#stmt-arrow-green)"/>
+                    <path d="M379 944 H480" stroke="#16805b" marker-end="url(#stmt-arrow-green)"/>
+                  </g>
                 </g>
                 </svg>
               </div>
@@ -1616,7 +1643,8 @@
                 <text class="svg-code" x="82" y="435" fill="#f5f7fb" font-size="10.3">if (</text>
                 <rect x="108" y="418" width="124" height="24" rx="5" fill="#176a55" stroke="#34b88b"/>
                 <text class="svg-code" x="115" y="435" fill="#fff" font-size="10.3" font-weight="800">results[0] == 1</text>
-                <text class="svg-code" x="235" y="435" fill="#f5f7fb" font-size="10.3">) {</text>
+                <text class="svg-code" x="235" y="435" fill="#f5f7fb" font-size="10.3">)</text>
+                <text class="svg-code" x="82" y="453" fill="#f5f7fb" font-size="10.3">{</text>
 
                 <rect x="480" y="382" width="399" height="80" rx="8" fill="#f3faf7" stroke="#9bcbb8"/>
                 <rect x="492" y="391" width="28" height="18" rx="9" fill="#16805b"/>

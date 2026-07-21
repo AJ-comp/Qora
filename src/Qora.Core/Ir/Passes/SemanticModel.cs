@@ -182,6 +182,19 @@ public sealed record UncomputeVerdict(UncomputeBlocker Blocker, QubitEvent? Culp
 /// <c>for</c> variable, and null when the index is a bare runtime value.</summary>
 public sealed record UnprovenIndex(string Op, string Array, string Index, string? LoopBound, QSpan? Span);
 
+/// <summary>One outstanding "re-check after monomorphization" PROMISE (the deferral ledger): a size-dependent
+/// judgement the validator postponed because <see cref="Array"/> is a parameter whose length only
+/// specialization can supply (<see cref="QParam.NeedsMonoSizing"/>). On the pipeline that runs the
+/// specialize/re-validate pair, every entry is resolved there or MOOTED there — an uncalled generic op is
+/// DROPPED by the Monomorphizer, so its promises die with the op (no size ever exists to judge against;
+/// the code is never emitted) — so the FINAL model's ledger is empty and
+/// the list means "promises still outstanding". A future backend that SKIPS the pair (full QIR: dynamic
+/// arrays) reads this ledger as its work list, wrapping each site in a runtime bounds check — without it,
+/// the postponed judgements would silently evaporate on any no-specialization path. (Deferred ALIASING
+/// precision — QSEM014's post-mono domain re-check — is NOT ledgered yet: a no-pair backend must decide
+/// its own distinctness policy before it can dispose of those.)</summary>
+public sealed record DeferredSizeCheck(string Op, string Array, string Access, string Reason, QSpan? Span);
+
 /// <summary>
 /// The PERSISTENT semantic side table: everything <see cref="SymbolTableBuilder"/> proved during the final
 /// validation, keyed by stable node <see cref="QStmt.Id"/>s and carried to the END of the pipeline instead
@@ -207,6 +220,8 @@ public sealed class SemanticModel
     private readonly Dictionary<int, string> _emittedNameByDeclId = new(); // declaring node Id → emitted (post-mangling) name
     private readonly HashSet<int> _nonInvertibleCallStmts = new();      // StmtIds of CALL statements whose callee the Inverter cannot invert
     private readonly List<UnprovenIndex> _unprovenIndexes = new();      // rung B′: accesses whose bounds proof never settled
+    private readonly List<DeferredSizeCheck> _deferredSizeChecks = new(); // rung B′: judgements postponed to the post-mono re-check (empty on the final model today)
+    private readonly Dictionary<int, bool> _willBeRecheckedByOp = new();  // rung B′: the walk's per-op liveness prediction — does the post-mono re-check come?
     private readonly Dictionary<int, IReadOnlyDictionary<string, long>> _requiredArgLengthsByOp = new(); // rung B′/P4: op → classical-array param → min length
     private Scope? _programScope;   // the top-level symbol table: one Operation symbol per op
 
@@ -289,6 +304,41 @@ public sealed class SemanticModel
     /// the whole program is proven. Non-empty NEVER coexists with a successful OpenQASM compile (each entry
     /// became a QSEM030); a future QIR backend reads this list as its runtime-check insertion plan.</summary>
     public IReadOnlyList<UnprovenIndex> UnprovenIndexes => _unprovenIndexes;
+
+    /// <summary>The deferral ledger (see <see cref="DeferredSizeCheck"/>): the size-dependent judgements
+    /// THIS validation postponed to the post-monomorphization re-check, in walk order. On a SUCCESSFUL
+    /// compile the pipeline's surviving model always holds an EMPTY ledger — either the post-mono
+    /// re-validation ran on concrete sizes (nothing left to postpone) or the program had no generics to
+    /// postpone for. A program rejected AT the pre-mono validation keeps that model, so its ledger may
+    /// carry the promises still outstanding at rejection; a program rejected at the POST-mono
+    /// re-validation keeps the post-mono model, whose ledger is empty like any sized program's. A backend
+    /// that skips specialization must dispose of every entry (runtime checks) instead of letting them
+    /// evaporate.</summary>
+    public IReadOnlyList<DeferredSizeCheck> DeferredSizeChecks => _deferredSizeChecks;
+
+    /// <summary>Deferral-ledger sink (rung B′): single producer (<see cref="QoraValidator"/>), recorded
+    /// during the bounds walk, add-only like every other fact.</summary>
+    internal void AddDeferredSizeCheck(DeferredSizeCheck deferred) => _deferredSizeChecks.Add(deferred);
+
+    /// <summary>Will the post-monomorphization re-validation come for this operation? The validator's own
+    /// PREDICTION, made BEFORE the Monomorphizer runs, from the same transitive reachability (concrete ops
+    /// outward through the call graph) the Monomorphizer acts on — so it cannot disagree with the actual
+    /// drop. True: a concrete op (its checks complete without deferral) or a generic reached from concrete
+    /// code (its specializations get the re-check). FALSE: a dead generic — dropped, so its postponed
+    /// judgements are MOOTED, never judged at any size (harmless: the code is never emitted). Null: an op
+    /// this validation never saw. This is the ledger's companion question — a <see cref="DeferredSizeCheck"/>
+    /// whose op answers false is a promise nothing will ever answer.</summary>
+    public bool? WillBeRechecked(int opId) =>
+        _willBeRecheckedByOp.TryGetValue(opId, out var will) ? will : null;
+
+    /// <summary>Liveness-prediction sink (rung B′): single producer (<see cref="QoraValidator"/>, once per
+    /// op), add-only — recording the same op twice is a pipeline bug, not a merge.</summary>
+    internal void SetWillBeRechecked(int opId, bool willBeRechecked)
+    {
+        if (!_willBeRecheckedByOp.TryAdd(opId, willBeRechecked))
+            throw new System.InvalidOperationException(
+                $"QINTERNAL: op {opId} already has a WillBeRechecked verdict — re-recording would silently replace an add-only fact");
+    }
 
     /// <summary>The operation's value-genealogy graph (see <see cref="QubitNode"/>), or null when the op was
     /// never analyzed — same key discipline as <see cref="QubitEvents"/> (no derivation walk: a synthesized

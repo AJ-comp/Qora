@@ -151,11 +151,16 @@ public static class NameMangler
             QAssign a => a with
             {
                 Name = L(a.Name, map),
-                Index = a.Index is null ? null : MangleTokens(a.Index, map),
+                Index = a.Index is null ? null : MangleIndex(a.Index, map),
                 Value = MangleExpr(a.Value, map),
             },
             QIf i => i with { Cond = MangleCond(i.Cond, map), Then = MangleBody(i.Then, map), Else = MangleBody(i.Else, map) },
-            QFor f => f with { Var = L(f.Var, map), From = MangleTokens(f.From, map), To = MangleTokens(f.To, map), Body = MangleBody(f.Body, map) },
+            QFor f => f with
+            {
+                Var = L(f.Var, map),
+                From = MangleTree(f.From, map)!, To = MangleTree(f.To, map)!,
+                Body = MangleBody(f.Body, map),
+            },
             QWhile w => w with { Cond = MangleCond(w.Cond, map), Body = MangleBody(w.Body, map) },
             QRepeat r => r with { Body = MangleBody(r.Body, map), Until = MangleCond(r.Until, map) },
             QConjugate c => c with { Within = MangleBody(c.Within, map), Apply = MangleBody(c.Apply, map) },
@@ -165,14 +170,14 @@ public static class NameMangler
         private QArg MangleArg(QArg arg, Dictionary<string, string> map) => arg switch
         {
             QQubitArg q => new QQubitArg(L(q.Reg, map), MangleIndex(q.Index, map)),
-            QTextArg t => t with { Text = MangleTokens(t.Text, map) },
+            QTextArg t => t with { Tree = MangleTree(t.Tree, map) },
             _ => arg,
         };
 
         private QExpr MangleExpr(QExpr expr, Dictionary<string, string> map) => expr switch
         {
             QMeasure { Target: { } t } mm => mm with { Target = new QQubitArg(L(t.Reg, map), MangleIndex(t.Index, map)) },
-            QText t => t with { Text = MangleTokens(t.Text, map) },
+            QText t => t with { Tree = MangleTree(t.Tree, map) },
             QArrayLiteral literal => literal with
             {
                 Elements = literal.Elements.Select(element => MangleExpr(element, map)).ToList(),
@@ -180,32 +185,29 @@ public static class NameMangler
             _ => expr,
         };
 
-        private static QCond MangleCond(QCond cond, Dictionary<string, string> map) => cond with { Text = MangleTokens(cond.Text, map) };
-
-        /// <summary>A qubit index is a numeric literal (kept) or a loop variable (renamed via the local map).</summary>
-        private static string MangleIndex(string index, Dictionary<string, string> map) =>
-            index.Length > 0 && index.All(char.IsDigit) ? index : L(index, map);
+        private static QCond MangleCond(QCond cond, Dictionary<string, string> map) =>
+            cond with { Tree = MangleTree(cond.Tree, map) };
 
         /// <summary>
-        /// Rendered expression/condition text is space-joined tokens: rename each identifier token that this
-        /// def declares (via the local map); built-in constants, numbers, operators and anything not declared
-        /// locally pass through unchanged.
+        /// Rename every free name an expression tree references, structurally: a bare name this def
+        /// declares is renamed via the local map; built-in constants pass through; a member NAME is
+        /// structural (never a local); numbers and literals are untouched. A call node cannot survive to
+        /// mangling in a validated program (QSEM005 / measure-condition lowering), so it passes through.
         /// </summary>
-        private static string MangleTokens(string text, Dictionary<string, string> map)
+        private static QNode? MangleTree(QNode? node, Dictionary<string, string> map) => node switch
         {
-            var tokens = text.Split(' ');
-            for (var i = 0; i < tokens.Length; i++)
-            {
-                // In `array . Count`, Count names a member rather than a local declaration.
-                if (i > 0 && tokens[i - 1] == ".") continue;
-                if (IsIdentifier(tokens[i]) && !BuiltinConstants.Contains(tokens[i]))
-                    tokens[i] = L(tokens[i], map);
-            }
-            return string.Join(" ", tokens);
-        }
+            null => null,
+            QNameRef r when !BuiltinConstants.Contains(r.Name) => new QNameRef(L(r.Name, map)),
+            QMember m => m with { Base = MangleTree(m.Base, map)! },
+            QIndexNode i => i with { Base = MangleTree(i.Base, map)!, Index = MangleTree(i.Index, map)! },
+            QUnary u => u with { Operand = MangleTree(u.Operand, map)! },
+            QBinOp b => b with { Left = MangleTree(b.Left, map)!, Right = MangleTree(b.Right, map)! },
+            _ => node,   // QNameRef(pi/tau/euler), QNumLit, QLit, QCallNode
+        };
 
-        private static bool IsIdentifier(string tok) =>
-            tok.Length > 0 && (char.IsLetter(tok[0]) || tok[0] == '_')
-                           && tok.All(c => char.IsLetterOrDigit(c) || c == '_');
+        /// <summary>A qubit index is a numeric literal (kept) or a loop-variable name (renamed via the
+        /// local map) — the node kind says which; no digit-scan re-derivation.</summary>
+        private static QNode MangleIndex(QNode index, Dictionary<string, string> map) =>
+            index is QNameRef r ? new QNameRef(L(r.Name, map)) : index;
     }
 }

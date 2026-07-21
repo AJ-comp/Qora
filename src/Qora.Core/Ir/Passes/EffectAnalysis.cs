@@ -167,6 +167,24 @@ public static class EffectAnalysis
                     leaf = true;
                     break;
 
+                // A measurement may also sit inside an ARRAY LITERAL element (`bit[] r = [M(q[1]), 0]`)
+                // — the same collapse as the direct form, and it must land in the same summaries, or the
+                // measured (possibly entangled) qubit would be judged a safe cleanup candidate and the
+                // uncompute ladder would plan around wrong facts.
+                case QDecl { Value: QArrayLiteral dl } when dl.Elements.Any(e => e is QMeasure):
+                    foreach (var element in dl.Elements.OfType<QMeasure>())
+                        ApplyMeasure(element, touched, modified, measured);
+                    irreversible = true;
+                    leaf = true;
+                    break;
+
+                case QAssign { Value: QArrayLiteral al } when al.Elements.Any(e => e is QMeasure):
+                    foreach (var element in al.Elements.OfType<QMeasure>())
+                        ApplyMeasure(element, touched, modified, measured);
+                    irreversible = true;
+                    leaf = true;
+                    break;
+
                 // containers aggregate their children conservatively (union over all paths)
                 case QIf i:
                     var (tt, tm, ts, tme, ti) = AnalyzeBlock(i.Then, log);
@@ -308,8 +326,11 @@ public static class EffectAnalysis
                 switch (args[i])
                 {
                     case QTextArg whole: // whole register actual: indices carry over 1:1
+                        // a bare register argument is a QNameRef since lowering (QSEM006 rejects anything
+                        // else in a qubit slot); render covers malformed hand-built IR without crashing.
+                        var wholeName = whole.Tree is QNameRef nr ? nr.Name : QNodes.Render(whole.Tree);
                         foreach (var r in refs)
-                            if (r.Reg == param.Name) result.Add(r with { Reg = whole.Text });
+                            if (r.Reg == param.Name) result.Add(r with { Reg = wholeName });
                         break;
                     case QQubitArg single: // single-qubit binding: everything done to the param lands here
                         // INVARIANT: a QQubitArg actual binds only to a SINGLE-qubit param (QSEM006), whose
@@ -343,11 +364,16 @@ public static class EffectAnalysis
         }
 
         /// <summary>A literal index stays precise; a loop-variable (or otherwise unknown) index is
-        /// conservatively blanketed to the whole register — same split the validator's index check makes.</summary>
+        /// conservatively blanketed to the whole register — same split the validator's index check makes.
+        /// Number-vs-name was settled ONCE at lowering (the index IS a QNumLit or QNameRef) — no
+        /// re-parsing here, so this can never classify a token differently than any other pass.</summary>
         private static QubitRef RefOf(QArg arg) => arg switch
         {
-            QQubitArg q => int.TryParse(q.Index, out var i) ? new QubitRef(q.Reg, i) : new QubitRef(q.Reg, null),
-            QTextArg t => new QubitRef(t.Text, null),
+            QQubitArg { Index: QNumLit { Value: >= int.MinValue and <= int.MaxValue } n } q =>
+                new QubitRef(q.Reg, (int)n.Value),
+            QQubitArg q => new QubitRef(q.Reg, null),
+            QTextArg { Tree: QNameRef nr } => new QubitRef(nr.Name, null),
+            QTextArg t => new QubitRef(QNodes.Render(t.Tree), null),   // malformed hand-built IR, rendered
             _ => throw new System.InvalidOperationException($"unexpected argument kind: {arg}"),
         };
 

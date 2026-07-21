@@ -147,7 +147,8 @@ repeat {  H(q[0]);  r = M(q[0]);  } until (r == 1);
 ```
 
 **Classical arrays** use the familiar `T[]` form for `int`, `float`, `bit`, and `angle` values.
-Declare them at the top level of `Main`, then read or update elements by index and use `.Count` when iterating.
+Declare them anywhere a scalar goes — `Main`, helper operations, loops, branches (the compiler handles
+OpenQASM's global-scope rule automatically) — then read or update elements by index and use `.Count` when iterating.
 
 ```qora
 int[] counts = [1, 2, 3];

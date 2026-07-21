@@ -35,6 +35,11 @@ public sealed class Symbol
     /// carries the count through), or null when it does not settle (or the symbol is not a const). A const
     /// can never be reassigned (QSEM024), so this value has no time axis: true wherever the symbol is visible.</summary>
     internal Bound? FoldedBound { get; init; }
+    /// <summary>The <see cref="QParam.NeedsMonoSizing"/> answer, stamped ONCE at declaration — true only
+    /// for a parameter whose length monomorphization will supply (unsized <c>Qubit[]</c> / <c>bit[]</c>).
+    /// The bounds prover's deferral gates read this stamp instead of re-deriving the set, so they can
+    /// never drift from the monomorphizer's own trigger.</summary>
+    internal bool MonoSized { get; init; }
     public QSpan? DeclSpan { get; }
     public int DeclNodeId { get; }              // stable Id of the declaring node (QParam / QUse / QDecl / QFor)
     public int? RegisterSize { get; }           // concrete qubit count: `use q = Qubit[N]` or a specialized Qubit[] param
@@ -107,9 +112,6 @@ public sealed class Scope
 /// </summary>
 public static class SymbolTableBuilder
 {
-    private static readonly Regex MemberAccessPattern = new(
-        @"\b(?<base>[_a-zA-Z][_a-zA-Z0-9]*)\s*\.\s*(?<member>[_a-zA-Z][_a-zA-Z0-9]*)\b",
-        RegexOptions.Compiled);
 
     /// <summary>Build the PROGRAM scope: the top-level symbol table whose entries are the operation symbols
     /// (one per op, kind <see cref="SymbolKind.Operation"/>, keyed by the op's declaring node Id). They go
@@ -157,7 +159,14 @@ public static class SymbolTableBuilder
             Declare(root, new Symbol(p.Name, SymbolKind.Parameter, p.Type, declSpan: p.Span,
                 registerSize: p.Type == QType.Qubit ? p.RegisterSize : null,
                 isArray: p.IsArray,
-                declNodeId: p.Id));
+                // a CLASSICAL array parameter's RegisterSize is its specialized length (bit[] gets one from
+                // monomorphization, like Qubit[]) — exposing it as ArrayLength gives the post-mono bounds
+                // proofs the same precision they have for sized registers; null pre-mono = P4 floors as ever.
+                arrayLength: p.Type != QType.Qubit ? p.RegisterSize : null,
+                declNodeId: p.Id)
+            {
+                MonoSized = p.NeedsMonoSizing,   // the ONE answer, stamped for the deferral gates
+            });
 
         void SeedRegisters(IReadOnlyList<QStmt> stmts)
         {
@@ -196,38 +205,61 @@ public static class SymbolTableBuilder
                 Add(errors, "QSEM025", $"in `{opName}`: `{name}` is not declared in scope here — an unknown name, or a name used before its declaration", span);
         }
 
-        // Resolve every identifier inside a TEXT expression — a condition, a range bound, a qubit index
-        // (`q[i]`), an angle (`a * pi`), an initializer (`x = a + b`). Each goes through Record, so an
+        // Resolve every identifier inside an EXPRESSION TREE — a condition, a range bound, a qubit index
+        // (`q[i]`), an angle (`a * pi`), an initializer (`x = a + b`). Each name goes through Record, so an
         // unknown / used-before-declared name in ANY expression position is caught (QSEM025), not silently
         // emitted. <paramref name="classicalOnly"/> marks a position that must hold a CLASSICAL value; a qubit
         // there is QSEM026, raised at most ONCE per expression (mirroring the validator's FirstQubitIn, so
-        // `if (q == q)` reports once — not once per token). Numeric literals aren't identifiers; pi/tau/euler
-        // /true/false are exempt.
-        void RecordExpr(Scope scope, string? text, string detail, QSpan? span, bool classicalOnly = false)
+        // `if (q == q)` reports once — not once per token). A member access is one semantic value, not two
+        // free identifiers: `q.Count` records q as used, while Count is a member (QSEM029 when it is not
+        // `.Count` on an array), never a standalone name — the structure says so, no after-dot heuristic.
+        // Numeric/verbatim literals aren't names; pi/tau/euler/true/false are exempt (inside Record).
+        void RecordExpr(Scope scope, QNode? node, string detail, QSpan? span, bool classicalOnly = false)
         {
-            if (string.IsNullOrEmpty(text)) return;
-            // A member access is one semantic value, not two free identifiers. `q.Count` reads classical
-            // shape metadata: q is recorded as used, while Count is not resolved as a standalone variable.
-            foreach (var member in MemberAccesses(text))
+            switch (node)
             {
-                Record(scope, member.Base, detail, span);
-                if (scope.Lookup(member.Base) is not { } owner) continue; // Record already produced QSEM025
-                if (member.Member != "Count")
-                    Add(errors, "QSEM029", $"in `{opName}`: `{member.Base}.{member.Member}` is not a supported member; arrays expose `.Count`", span);
-                else if (!owner.IsArray)
-                    Add(errors, "QSEM029", $"in `{opName}`: `{member.Base}.Count` is invalid because `{member.Base}` is not an array", span);
-            }
-
-            foreach (var name in ExpressionIdentifiers(text))
-            {
-                Record(scope, name, detail, span);
-                // QSEM026 at most once per statement span: `reported026.Add` is false on a repeat, so
-                // `if (q == q)` and a `for`'s `q..q` (From/To share the span) each report a single diagnostic.
-                if (classicalOnly && scope.Lookup(name) is { Type: QType.Qubit }
-                    && reported026.Add((span?.Start ?? -1, span?.End ?? -1)))
-                    Add(errors, "QSEM026", $"in `{opName}`: `{name}` is a qubit and cannot be used as a classical value here — a qubit has no numeric value to compare, index, or compute with", span);
+                case null or QNumLit or QLit:
+                    return;
+                case QNameRef r:
+                    Record(scope, r.Name, detail, span);
+                    // QSEM026 at most once per statement span: `reported026.Add` is false on a repeat, so
+                    // `if (q == q)` and a `for`'s `q..q` (From/To share the span) each report one diagnostic.
+                    if (classicalOnly && scope.Lookup(r.Name) is { Type: QType.Qubit }
+                        && reported026.Add((span?.Start ?? -1, span?.End ?? -1)))
+                        Add(errors, "QSEM026", $"in `{opName}`: `{r.Name}` is a qubit and cannot be used as a classical value here — a qubit has no numeric value to compare, index, or compute with", span);
+                    return;
+                case QMember { Base: QNameRef b } m:
+                    Record(scope, b.Name, detail, span);
+                    if (scope.Lookup(b.Name) is not { } owner) return; // Record already produced QSEM025
+                    if (m.Member != "Count")
+                        Add(errors, "QSEM029", $"in `{opName}`: `{b.Name}.{m.Member}` is not a supported member; arrays expose `.Count`", span);
+                    else if (!owner.IsArray)
+                        Add(errors, "QSEM029", $"in `{opName}`: `{b.Name}.Count` is invalid because `{b.Name}` is not an array", span);
+                    return;
+                case QMember m:   // non-name base — grammar-unreachable; still resolve what is resolvable
+                    RecordExpr(scope, m.Base, detail, span, classicalOnly);
+                    return;
+                case QUnary u:
+                    RecordExpr(scope, u.Operand, detail, span, classicalOnly);
+                    return;
+                case QBinOp b2:
+                    RecordExpr(scope, b2.Left, detail, span, classicalOnly);
+                    RecordExpr(scope, b2.Right, detail, span, classicalOnly);
+                    return;
+                case QIndexNode i:
+                    RecordExpr(scope, i.Base, detail, span, classicalOnly);
+                    RecordExpr(scope, i.Index, detail, span, classicalOnly);
+                    return;
+                case QCallNode c:
+                    // a call's name resolves like any identifier (an operation name yields QSEM028, an
+                    // unknown one QSEM025 — the same verdicts the flat text scan produced); its argument
+                    // is an ordinary expression.
+                    Record(scope, c.Name, detail, span);
+                    RecordExpr(scope, c.Arg, detail, span, classicalOnly);
+                    return;
             }
         }
+
 
         // A block-local declaration of <paramref name="name"/> is being made in <paramref name="scope"/>.
         // If an ENCLOSING value of that name was already USED earlier in THIS block (a use whose program
@@ -261,11 +293,11 @@ public static class SymbolTableBuilder
                             switch (a)
                             {
                                 case QQubitArg q:
-                                    Record(scope, q.Reg, $"{g.Name} @ {q.Reg}[{q.Index}]", g.Span);                 // the register itself
-                                    RecordExpr(scope, q.Index, $"{g.Name} index @ {q.Reg}[{q.Index}]", g.Span);     // vars inside [ i ]
+                                    Record(scope, q.Reg, $"{g.Name} @ {q.Reg}[{QNodes.Render(q.Index)}]", g.Span);  // the register itself
+                                    RecordExpr(scope, q.Index, $"{g.Name} index @ {q.Reg}[{QNodes.Render(q.Index)}]", g.Span); // vars inside [ i ]
                                     break;
                                 case QTextArg t:
-                                    RecordExpr(scope, t.Text, $"{g.Name} @ {t.Text}", g.Span);                      // whole register OR angle expr (theta, a*pi, …)
+                                    RecordExpr(scope, t.Tree, $"{g.Name} @ {QNodes.Render(t.Tree)}", g.Span);       // whole register OR angle expr (theta, a*pi, …)
                                     break;
                             }
                         break;
@@ -274,8 +306,8 @@ public static class SymbolTableBuilder
                         // resolves the target `r` to the register (chain lookup), not the bit declared here.
                         if (md.Value is QMeasure { Target: { } mt })
                         {
-                            Record(scope, mt.Reg, $"measure @ {mt.Reg}[{mt.Index}]", md.Span);                      // the measured qubit COLLAPSES here
-                            RecordExpr(scope, mt.Index, $"measure index @ {mt.Reg}[{mt.Index}]", md.Span);
+                            Record(scope, mt.Reg, $"measure @ {mt.Reg}[{QNodes.Render(mt.Index)}]", md.Span);       // the measured qubit COLLAPSES here
+                            RecordExpr(scope, mt.Index, $"measure index @ {mt.Reg}[{QNodes.Render(mt.Index)}]", md.Span);
                         }
                         // The measure bit is BLOCK-SCOPED like var/const for VISIBILITY: declared into the
                         // CURRENT scope in program order, so referencing it before this line is QSEM025.
@@ -304,7 +336,7 @@ public static class SymbolTableBuilder
                         // consts are already in scope, so chains like `const int m = k + 1` settle too).
                         // From now on the value is DATA on the symbol; no consumer re-reads the text.
                         Declare(scope, new Symbol(d.Name, d.IsConst ? SymbolKind.Const : SymbolKind.Var, d.Type,
-                            d.IsConst, d.IsConst && d.Value is QText qt ? qt.Text : null, d.Span,
+                            d.IsConst, d.IsConst && d.Value is QText qt ? QNodes.Render(qt.Tree) : null, d.Span,
                             isArray: d.IsArray, arrayLength: ArrayLengthOf(d), declNodeId: d.Id)
                         {
                             FoldedBound = d is { IsConst: true, IsArray: false, Value: QText ct }
@@ -313,39 +345,39 @@ public static class SymbolTableBuilder
                         break;
                     case QAssign { Value: QMeasure { Target: { } at } } ma:
                         Record(scope, ma.Name, $"assign {ma.Name}", ma.Span);
-                        RecordExpr(scope, ma.Index, $"assign index {ma.Name}[{ma.Index}]", ma.Span, classicalOnly: true);
-                        Record(scope, at.Reg, $"measure @ {at.Reg}[{at.Index}]", ma.Span);
-                        RecordExpr(scope, at.Index, $"measure index @ {at.Reg}[{at.Index}]", ma.Span);
+                        RecordExpr(scope, ma.Index, $"assign index {ma.Name}[{QNodes.Render(ma.Index)}]", ma.Span, classicalOnly: true);
+                        Record(scope, at.Reg, $"measure @ {at.Reg}[{QNodes.Render(at.Index)}]", ma.Span);
+                        RecordExpr(scope, at.Index, $"measure index @ {at.Reg}[{QNodes.Render(at.Index)}]", ma.Span);
                         break;
                     case QAssign a:
                         Record(scope, a.Name, $"assign {a.Name}", a.Span);                                          // the target is referenced (written)
-                        RecordExpr(scope, a.Index, $"assign index {a.Name}[{a.Index}]", a.Span, classicalOnly: true);
+                        RecordExpr(scope, a.Index, $"assign index {a.Name}[{QNodes.Render(a.Index)}]", a.Span, classicalOnly: true);
                         RecordValue(scope, a.Value, $"assign {a.Name}", a.Span);
                         break;
                     case QFor f:
-                        RecordExpr(scope, f.From, $"for bound {f.From}", f.Span, classicalOnly: true);              // range bounds are classical (read in the ENCLOSING scope)…
-                        RecordExpr(scope, f.To, $"for bound {f.To}", f.Span, classicalOnly: true);
-                        RecordExpr(scope, f.Step, $"for step {f.Step}", f.Span, classicalOnly: true);
+                        RecordExpr(scope, f.From, $"for bound {QNodes.Render(f.From)}", f.Span, classicalOnly: true);   // range bounds are classical (read in the ENCLOSING scope)…
+                        RecordExpr(scope, f.To, $"for bound {QNodes.Render(f.To)}", f.Span, classicalOnly: true);
+                        RecordExpr(scope, f.Step, $"for step {QNodes.Render(f.Step)}", f.Span, classicalOnly: true);
                         var loop = new Scope(scope);                                                        // …then the loop var gets its own scope
                         Declare(loop, new Symbol(f.Var, SymbolKind.LoopVar, QType.Int, declSpan: f.Span, declNodeId: f.Id));
                         Walk(f.Body, new Scope(loop));                                                      // body is a CHILD of the loop-var scope
                         break;
                     case QIf i:
                         var ifCond = new Scope(scope);                                                      // the condition () IS a scope (its own table)
-                        RecordExpr(ifCond, i.Cond.Text, $"if ({i.Cond.Text})", i.Span, classicalOnly: true);  // a condition is classical (a bit/bool)
+                        RecordExpr(ifCond, i.Cond.Tree, $"if ({QNodes.Render(i.Cond.Tree)})", i.Span, classicalOnly: true);  // a condition is classical (a bit/bool)
                         Walk(i.Then, new Scope(ifCond));                                                    // branches nest UNDER the condition scope (C++17 if-init ready)
                         Walk(i.Else, new Scope(ifCond));
                         break;
                     case QWhile w:
                         var whileCond = new Scope(scope);
-                        RecordExpr(whileCond, w.Cond.Text, $"while ({w.Cond.Text})", w.Span, classicalOnly: true);
+                        RecordExpr(whileCond, w.Cond.Tree, $"while ({QNodes.Render(w.Cond.Tree)})", w.Span, classicalOnly: true);
                         Walk(w.Body, new Scope(whileCond));
                         break;
                     case QRepeat r:
                         var repeatBody = new Scope(scope);
                         Walk(r.Body, repeatBody);
                         currentStmtId = r.Id;   // the nested Walk moved it; the until belongs to the repeat itself
-                        RecordExpr(repeatBody, r.Until.Text, $"until ({r.Until.Text})", r.Span, classicalOnly: true);  // until runs AFTER the body, so it sees body-local names
+                        RecordExpr(repeatBody, r.Until.Tree, $"until ({QNodes.Render(r.Until.Tree)})", r.Span, classicalOnly: true);  // until runs AFTER the body, so it sees body-local names
                         break;
                     case QConjugate c:
                         Walk(c.Within, new Scope(scope));
@@ -380,11 +412,11 @@ public static class SymbolTableBuilder
             switch (value)
             {
                 case QText text:
-                    RecordExpr(valueScope, text.Text, detail, span, classicalOnly: true);
+                    RecordExpr(valueScope, text.Tree, detail, span, classicalOnly: true);
                     break;
                 case QMeasure { Target: { } target }:
-                    Record(valueScope, target.Reg, $"measure @ {target.Reg}[{target.Index}]", span);
-                    RecordExpr(valueScope, target.Index, $"measure index @ {target.Reg}[{target.Index}]", span);
+                    Record(valueScope, target.Reg, $"measure @ {target.Reg}[{QNodes.Render(target.Index)}]", span);
+                    RecordExpr(valueScope, target.Index, $"measure index @ {target.Reg}[{QNodes.Render(target.Index)}]", span);
                     break;
                 case QArrayLiteral literal:
                     foreach (var element in literal.Elements)
@@ -421,59 +453,6 @@ public static class SymbolTableBuilder
         SymbolKind.Operation => "operation",
         _ => "variable",
     };
-
-    /// <summary>Yield each identifier token in a text expression — a run of letters/digits/underscore that
-    /// starts with a letter or underscore. Numbers, operators, brackets and whitespace are skipped. Callers
-    /// filter to real symbols via <see cref="Scope.Lookup"/>, so bare literals (<c>pi</c>, <c>tau</c>, numbers)
-    /// that aren't declared never produce a use. Also used by the validator to find a qubit hidden inside a
-    /// value-slot expression (QSEM026).</summary>
-    internal readonly record struct MemberAccess(string Base, string Member, int Start, int Length);
-
-    // MemberAccesses + ExpressionIdentifiers scan the FINAL EMITTED (post-mangling) QASM text for
-    // ReferentialCheck — where the pre-mangle expression trees no longer apply (the mangler renamed the
-    // text, not the trees), so a text scan of the emitted artifact is the correct tool, not a mole. The
-    // pre-mangle consumers (bounds checking, guard reading, const folding) all read the QNode tree instead.
-    internal static IEnumerable<MemberAccess> MemberAccesses(string text)
-    {
-        foreach (Match match in MemberAccessPattern.Matches(text))
-            yield return new MemberAccess(
-                match.Groups["base"].Value,
-                match.Groups["member"].Value,
-                match.Index,
-                match.Length);
-    }
-
-    /// <summary>Identifiers that are ordinary values, excluding both tokens in a member access. The
-    /// owner is handled once through <see cref="MemberAccesses"/> and the member is not a free name.</summary>
-    internal static IEnumerable<string> ExpressionIdentifiers(string text)
-    {
-        var members = MemberAccesses(text).ToList();
-        for (var i = 0; i < text.Length;)
-        {
-            if (char.IsLetter(text[i]) || text[i] == '_')
-            {
-                var start = i;
-                while (i < text.Length && (char.IsLetterOrDigit(text[i]) || text[i] == '_')) i++;
-                if (!members.Any(m => start >= m.Start && start < m.Start + m.Length))
-                    yield return text.Substring(start, i - start);
-            }
-            else i++;
-        }
-    }
-
-    internal static IEnumerable<string> Identifiers(string text)
-    {
-        for (var i = 0; i < text.Length;)
-        {
-            if (char.IsLetter(text[i]) || text[i] == '_')
-            {
-                var start = i;
-                while (i < text.Length && (char.IsLetterOrDigit(text[i]) || text[i] == '_')) i++;
-                yield return text.Substring(start, i - start);
-            }
-            else i++;
-        }
-    }
 
     // --- debug rendering (the --stages view) ---
 

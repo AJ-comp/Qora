@@ -1,22 +1,24 @@
-using System.Text.RegularExpressions;
-
 namespace Qora.Ir.Passes;
 
 /// <summary>
 /// Gives a source-level <c>Qubit[]</c> operation the concrete register widths required by OpenQASM.
 /// The length stays out of the source type: each distinct tuple of call-site lengths produces one hidden
-/// specialization, and <c>q.Count</c> becomes the matching integer literal inside that copy.
+/// specialization, and <c>q.Count</c> becomes the matching integer literal inside that copy — a
+/// structural substitution on the expression trees (<see cref="QMember"/> → <see cref="QNumLit"/>).
+///
+/// A COMMON pass, though OpenQASM motivated it: the bounds prover's architecture is
+/// <c>validate(symbolic) → monomorphize → validate(concrete)</c>, and the second validation is where
+/// every "defer to mono" bounds/aliasing fact gets its precise re-check — so the prover owns this pass
+/// as much as any emitter does, and static-width hardware backends (Base-profile QIR fixes its qubit
+/// count too) would want the same specialization.
 /// </summary>
 public static class Monomorphizer
 {
-    private static readonly Regex CountPattern = new(
-        @"\b(?<reg>[_a-zA-Z][_a-zA-Z0-9]*)\s*\.\s*Count\b",
-        RegexOptions.Compiled);
-
     public static QProgram Run(QProgram program)
     {
-        static bool IsUnsizedArray(QParam p) =>
-            p.Type == QType.Qubit && p.IsQubitArray && p.RegisterSize is null;
+        // The specialization trigger IS QParam.NeedsMonoSizing — the one definition every consumer of
+        // "monomorphization supplies this length" shares (validator generic test, prover deferral gates).
+        static bool IsUnsizedArray(QParam p) => p.NeedsMonoSizing;
         static bool NeedsSpecialization(QOperation o) => o.Params.Any(IsUnsizedArray);
 
         var genericById = program.Operations.Where(NeedsSpecialization).ToDictionary(o => o.Id);
@@ -38,8 +40,8 @@ public static class Monomorphizer
         {
             var regs = new Dictionary<string, int>();
             foreach (var p in op.Params)
-                if (p.Type == QType.Qubit && p.IsQubitArray && p.RegisterSize is int n)
-                    regs[p.Name] = n;
+                if ((p.IsQubitArray || p is { Type: QType.Bit, IsArray: true }) && p.RegisterSize is int n)
+                    regs[p.Name] = n;   // sized Qubit[]/bit[] params: their .Count folds, and they can size a callee's slot
 
             // `use` declarations are semantically hoisted. Seed every allocation before rewriting so a
             // legal call/Count that textually precedes its `use` still resolves.
@@ -66,29 +68,31 @@ public static class Monomorphizer
             return regs;
         }
 
-        string ResolveCounts(string text, IReadOnlyDictionary<string, int> regs) =>
-            CountPattern.Replace(text, match =>
-            {
-                var reg = match.Groups["reg"].Value;
-                return regs.TryGetValue(reg, out var size) ? size.ToString() : match.Value;
-            });
+        // `q.Count` with a known size becomes the literal, structurally: QMember(reg, Count) → QNumLit.
+        // (A qubit index / assign index / step is a single Num-or-Ident token by grammar, so it can never
+        // contain a `.Count` — those fields need no rewrite.)
+        QNode? SubstCounts(QNode? node, IReadOnlyDictionary<string, int> regs) => node switch
+        {
+            null => null,
+            QMember { Base: QNameRef r, Member: "Count" } when regs.TryGetValue(r.Name, out var size) =>
+                new QNumLit(size),
+            QMember m => m with { Base = SubstCounts(m.Base, regs)! },
+            QBinOp b => b with { Left = SubstCounts(b.Left, regs)!, Right = SubstCounts(b.Right, regs)! },
+            QUnary u => u with { Operand = SubstCounts(u.Operand, regs)! },
+            QIndexNode i => i with { Base = SubstCounts(i.Base, regs)!, Index = SubstCounts(i.Index, regs)! },
+            QCallNode { Arg: { } a } c => c with { Arg = SubstCounts(a, regs) },
+            _ => node,
+        };
 
         QArg ResolveArg(QArg arg, IReadOnlyDictionary<string, int> regs) => arg switch
         {
-            QQubitArg q => new QQubitArg(q.Reg, ResolveCounts(q.Index, regs)),
-            QTextArg t => t with { Text = ResolveCounts(t.Text, regs) },   // `with` preserves the parsed Tree
+            QTextArg t => t with { Tree = SubstCounts(t.Tree, regs) },
             _ => arg,
         };
 
         QExpr ResolveExpr(QExpr expr, IReadOnlyDictionary<string, int> regs) => expr switch
         {
-            // `with` preserves the parsed Tree: its names resolve to the now-sized symbols at fold time, so
-            // it needs no rewrite — a `new QText` would drop the tree and break post-mono const folding.
-            QText t => t with { Text = ResolveCounts(t.Text, regs) },
-            QMeasure { Target: { } q } m => m with
-            {
-                Target = new QQubitArg(q.Reg, ResolveCounts(q.Index, regs)),
-            },
+            QText t => t with { Tree = SubstCounts(t.Tree, regs) },
             QArrayLiteral literal => literal with
             {
                 Elements = literal.Elements.Select(element => ResolveExpr(element, regs)).ToList(),
@@ -105,33 +109,28 @@ public static class Monomorphizer
                 {
                     QGate g => g with { Args = g.Args.Select(a => ResolveArg(a, regs)).ToList() },
                     QDecl d => d with { Value = ResolveExpr(d.Value, regs) },
-                    QAssign a => a with
-                    {
-                        Index = a.Index is null ? null : ResolveCounts(a.Index, regs),
-                        Value = ResolveExpr(a.Value, regs),
-                    },
+                    QAssign a => a with { Value = ResolveExpr(a.Value, regs) },
                     QIf i => i with
                     {
-                        Cond = i.Cond with { Text = ResolveCounts(i.Cond.Text, regs) },
+                        Cond = i.Cond with { Tree = SubstCounts(i.Cond.Tree, regs) },
                         Then = Rewrite(i.Then, regs),
                         Else = Rewrite(i.Else, regs),
                     },
                     QFor f => f with
                     {
-                        From = ResolveCounts(f.From, regs),
-                        To = ResolveCounts(f.To, regs),
-                        Step = f.Step is null ? null : ResolveCounts(f.Step, regs),
+                        From = SubstCounts(f.From, regs)!,
+                        To = SubstCounts(f.To, regs)!,
                         Body = Rewrite(f.Body, regs),
                     },
                     QWhile w => w with
                     {
-                        Cond = w.Cond with { Text = ResolveCounts(w.Cond.Text, regs) },
+                        Cond = w.Cond with { Tree = SubstCounts(w.Cond.Tree, regs) },
                         Body = Rewrite(w.Body, regs),
                     },
                     QRepeat r => r with
                     {
                         Body = Rewrite(r.Body, regs),
-                        Until = r.Until with { Text = ResolveCounts(r.Until.Text, regs) },
+                        Until = r.Until with { Tree = SubstCounts(r.Until.Tree, regs) },
                     },
                     QConjugate c => c with
                     {
@@ -155,8 +154,11 @@ public static class Monomorphizer
             {
                 var parameter = callee.Params[i];
                 if (!IsUnsizedArray(parameter)) continue;
-                if (i >= gate.Args.Count || gate.Args[i] is not QTextArg actual
-                    || !regs.TryGetValue(actual.Text.Trim(), out var size))
+                // the actual for a Qubit[] slot is a bare register name — a QNameRef since lowering.
+                var actualName = i < gate.Args.Count && gate.Args[i] is QTextArg { Tree: QNameRef nr }
+                    ? nr.Name
+                    : null;
+                if (actualName is null || !regs.TryGetValue(actualName, out var size))
                     throw new InvalidOperationException(
                         $"QINTERNAL: call to `{callee.Name}` cannot bind the size of Qubit[] parameter `{parameter.Name}` after validation");
                 bindings[parameter.Id] = size;
@@ -230,38 +232,33 @@ public static class Monomorphizer
 
     private static bool HasCount(QProgram program) => program.Operations.Any(op => HasCount(op.Body));
 
-    private static bool HasCount(IReadOnlyList<QStmt> body)
+    /// <summary>Does any expression tree mention a <c>.Count</c>? <paramref name="owners"/> null = any
+    /// base name counts; otherwise only members whose base is one of the given (qubit-array) names.
+    /// (Index/step tokens are grammar-atomic and can never carry a member access.)</summary>
+    private static bool MentionsCount(QNode? node, IReadOnlySet<string>? owners) => node switch
     {
-        bool Text(string? value) => value is not null && CountPattern.IsMatch(value);
-        bool Arg(QArg arg) => arg switch
-        {
-            QQubitArg q => Text(q.Index),
-            QTextArg t => Text(t.Text),
-            _ => false,
-        };
-        bool Expr(QExpr expr) => expr switch
-        {
-            QText t => Text(t.Text),
-            QMeasure { Target: { } q } => Text(q.Index),
-            QArrayLiteral literal => literal.Elements.Any(Expr),
-            _ => false,
-        };
+        null => false,
+        QMember { Base: QNameRef r, Member: "Count" } => owners is null || owners.Contains(r.Name),
+        QMember m => MentionsCount(m.Base, owners),
+        QBinOp b => MentionsCount(b.Left, owners) || MentionsCount(b.Right, owners),
+        QUnary u => MentionsCount(u.Operand, owners),
+        QIndexNode i => MentionsCount(i.Base, owners) || MentionsCount(i.Index, owners),
+        QCallNode c => MentionsCount(c.Arg, owners),
+        _ => false,
+    };
 
-        foreach (var stmt in body)
-            if (stmt switch
+    private static bool HasCount(IReadOnlyList<QStmt> body, IReadOnlySet<string>? owners = null) =>
+        body.Any(stmt =>
+            QNodes.ExpressionSites(stmt).Any(n => MentionsCount(n, owners))   // every expression position, canonically
+            || stmt switch                                                     // plus the nested bodies
             {
-                QGate g => g.Args.Any(Arg),
-                QDecl d => Expr(d.Value),
-                QAssign a => Text(a.Index) || Expr(a.Value),
-                QIf i => Text(i.Cond.Text) || HasCount(i.Then) || HasCount(i.Else),
-                QFor f => Text(f.From) || Text(f.To) || Text(f.Step) || HasCount(f.Body),
-                QWhile w => Text(w.Cond.Text) || HasCount(w.Body),
-                QRepeat r => HasCount(r.Body) || Text(r.Until.Text),
-                QConjugate c => HasCount(c.Within) || HasCount(c.Apply),
+                QIf i => HasCount(i.Then, owners) || HasCount(i.Else, owners),
+                QFor f => HasCount(f.Body, owners),
+                QWhile w => HasCount(w.Body, owners),
+                QRepeat r => HasCount(r.Body, owners),
+                QConjugate c => HasCount(c.Within, owners) || HasCount(c.Apply, owners),
                 _ => false,
-            }) return true;
-        return false;
-    }
+            });
 
     private static bool HasUnresolvedQubitCount(QProgram program)
     {
@@ -285,37 +282,5 @@ public static class Monomorphizer
             if (HasCount(op.Body, qubitArrays)) return true;
         }
         return false;
-    }
-
-    private static bool HasCount(IReadOnlyList<QStmt> body, IReadOnlySet<string> owners)
-    {
-        bool Text(string? value) => value is not null && CountPattern.Matches(value)
-            .Cast<Match>().Any(match => owners.Contains(match.Groups["reg"].Value));
-        bool Arg(QArg arg) => arg switch
-        {
-            QQubitArg indexed => Text(indexed.Index),
-            QTextArg text => Text(text.Text),
-            _ => false,
-        };
-        bool Expr(QExpr expr) => expr switch
-        {
-            QText text => Text(text.Text),
-            QMeasure { Target: { } target } => Text(target.Index),
-            QArrayLiteral literal => literal.Elements.Any(Expr),
-            _ => false,
-        };
-
-        return body.Any(statement => statement switch
-        {
-            QGate gate => gate.Args.Any(Arg),
-            QDecl declaration => Expr(declaration.Value),
-            QAssign assignment => Text(assignment.Index) || Expr(assignment.Value),
-            QIf branch => Text(branch.Cond.Text) || HasCount(branch.Then, owners) || HasCount(branch.Else, owners),
-            QFor loop => Text(loop.From) || Text(loop.To) || Text(loop.Step) || HasCount(loop.Body, owners),
-            QWhile loop => Text(loop.Cond.Text) || HasCount(loop.Body, owners),
-            QRepeat loop => HasCount(loop.Body, owners) || Text(loop.Until.Text),
-            QConjugate conjugate => HasCount(conjugate.Within, owners) || HasCount(conjugate.Apply, owners),
-            _ => false,
-        });
     }
 }

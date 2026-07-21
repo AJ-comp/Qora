@@ -74,6 +74,18 @@ public class EffectAnalysisTests
         AssertRefs(Modified(evs), At("q", 0));
     }
 
+    /// <summary>A measurement inside an ARRAY LITERAL element collapses its qubit exactly like the direct
+    /// form — it must land in the same event stream, or the measured (possibly entangled) qubit would be
+    /// judged a safe cleanup candidate and the uncompute ladder would plan around wrong facts.</summary>
+    [Fact]
+    public void MeasurementInsideAnArrayLiteralElementIsAMeasureEvent()
+    {
+        var (r, m) = Compile("operation Main(){ use q=Qubit[2]; H(q[0]); CNOT(q[0], q[1]); bit[] res = [M(q[1]), 0]; }");
+        var main = Op(r, "Main");
+        var evs = EventsOf(m, main, main.Body[3]);
+        Assert.Contains(evs, e => e.Kind == QubitEventKind.Measure && e.Qubit == At("q", 1));
+    }
+
     // --- 2. controlled gate: the control is a Read (value preserved), the target a Write ---
 
     [Fact]
@@ -1100,7 +1112,7 @@ public class EffectAnalysisTests
         // QUse("n") nested inside an if; a top-level X(n[0]) then writes n with no hoisted birth and no seed
         var op = new QOperation("Main", new List<QParam>(), new List<QStmt>
         {
-            new QIf(new QCond("true"),
+            new QIf(new QCond(new QNameRef("true")),
                 Then: new List<QStmt> { new QUse("n", 1) },
                 Else: new List<QStmt>()),
             new QGate(new List<string>(), "X", new List<QArg> { new QQubitArg("n", "0") }),

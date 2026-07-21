@@ -186,11 +186,12 @@ public static class QoraLowering
             {
                 if (nt.Items.Count == 1 && nt.Items[0] is AstNonTerminal { Name: "IndexAccess" } indexed)
                     return new QQubitArg(Child(indexed, 0), Child(indexed, 1));
-                var (text, hasCall) = RenderExpr(nt);
-                return new QTextArg(text, hasCall) { Tree = ExprTree.Expression(nt) };
+                return new QTextArg(ExprTree.Expression(nt));
             }
         }
-        return new QTextArg(sym.ToString() ?? string.Empty);
+        // A bare terminal argument — a whole register `H(q)`, an angle name — is an atom.
+        var bare = sym.ToString() ?? string.Empty;
+        return new QTextArg(bare.Length == 0 ? null : ExprTree.Atom(bare));
     }
 
     private static QDecl LowerDecl(AstNonTerminal node, bool isConst)
@@ -213,7 +214,7 @@ public static class QoraLowering
         var indexed = node.Items.OfType<AstNonTerminal>().FirstOrDefault(n => n.Name == "IndexAccess");
         return indexed is null
             ? new QAssign(FirstIdent(node), LowerExpr(ExprOf(node)))
-            : new QAssign(Child(indexed, 0), LowerExpr(ExprOf(node))) { Index = Child(indexed, 1) };
+            : new QAssign(Child(indexed, 0), LowerExpr(ExprOf(node))) { Index = ExprTree.Atom(Child(indexed, 1)) };
     }
 
     private static QArrayLiteral LowerArrayLiteral(AstNonTerminal node) =>
@@ -251,98 +252,41 @@ public static class QoraLowering
     private static QFor LowerFor(AstNonTerminal node)
     {
         // The loop variable is the first meaning terminal (for/in/braces are dropped). The two bounds are
-        // the direct "Expr" children — now full expressions (e.g. `0 .. n - 1`), rendered to text.
+        // the direct "Expr" children — full expressions (e.g. `0 .. n - 1`), parsed once (see ExprTree).
+        // A missing first bound defaults to 0; a missing second bound repeats the first (grammar
+        // guarantees a bound's Expr is non-empty, so a null parse is a compiler bug).
         var loopVar = node.Items.OfType<AstTerminal>().FirstOrDefault()?.ToString() ?? string.Empty;
         var bounds = node.Items.OfType<AstNonTerminal>().Where(n => n.Name == "Expr").ToList();
-        var from = bounds.Count > 0 ? RenderItems(bounds[0]) : "0";
-        var to = bounds.Count > 1 ? RenderItems(bounds[1]) : from;
-        // Structured companions, parsed once (see ExprTree); the bounds prover reads these, not the text.
-        var fromTree = bounds.Count > 0 ? ExprTree.Expression(bounds[0]) : new QNumLit(0);
-        var toTree = bounds.Count > 1 ? ExprTree.Expression(bounds[1]) : fromTree;
-        return new QFor(loopVar, from, to, BodyStmts(node).Select(LowerSpanned).ToList())
-        {
-            FromTree = fromTree,
-            ToTree = toTree,
-        };
+        var from = bounds.Count > 0
+            ? ExprTree.Expression(bounds[0]) ?? throw new InvalidOperationException("QINTERNAL: a for-bound Expr lowered to no tree")
+            : new QNumLit(0);
+        var to = bounds.Count > 1
+            ? ExprTree.Expression(bounds[1]) ?? throw new InvalidOperationException("QINTERNAL: a for-bound Expr lowered to no tree")
+            : from;
+        return new QFor(loopVar, from, to, BodyStmts(node).Select(LowerSpanned).ToList());
     }
 
     // A decl/assign RHS. The only legal call form is a LONE call to the registered measurement
     // function (`bit r = M(q[i]);`), which becomes QMeasure — exact name, no aliases. Any other call —
-    // a different name, or a call mixed with arithmetic — has no OpenQASM lowering: keep the full
-    // rendered text and set HasCall so the validator rejects it. (Nothing is silently dropped: the old
-    // code truncated `M(q) + 1` to just the measure, and read ANY call name as a measurement.)
+    // a different name, or a call mixed with arithmetic — has no OpenQASM lowering: the tree keeps the
+    // call node and the validator rejects it (QText.HasCall derives from the tree). Nothing is silently
+    // dropped: the old code truncated `M(q) + 1` to just the measure, and read ANY call name as a
+    // measurement.
     private static QExpr LowerExpr(AstNonTerminal? expr)
     {
-        if (expr is null) return new QText(string.Empty);
+        if (expr is null) return new QText();
 
         var call = Descendants(expr).FirstOrDefault(n => n.Name == "Call");
-        if (call is null)
-            return new QText(RenderItems(expr)) { Tree = ExprTree.Expression(expr) };
-
-        var isLoneCall = expr.Items.Count == 1;
-        if (isLoneCall && CallName(call) == QoraGates.Measurement)
+        if (call is not null && expr.Items.Count == 1 && CallName(call) == QoraGates.Measurement)
         {
             var target = call.Items.OfType<AstNonTerminal>().FirstOrDefault(q => q.Name == "IndexAccess");
             return new QMeasure(target is null ? null : new QQubitArg(Child(target, 0), Child(target, 1)));
         }
-        return new QText(RenderItems(expr), HasCall: true) { Tree = ExprTree.Expression(expr) };
+        return new QText(ExprTree.Expression(expr));
     }
 
-    /// <summary>Render an expression to text, reporting whether a call appeared anywhere inside it.</summary>
-    private static (string Text, bool HasCall) RenderExpr(AstNonTerminal expr)
-    {
-        var hasCall = Descendants(expr).Any(n => n.Name == "Call");
-        return (RenderItems(expr), hasCall);
-    }
-
-    private static QCond LowerCondition(AstNonTerminal? cond)
-    {
-        if (cond is null) return new QCond(string.Empty);
-
-        var parts = new List<string>();
-        var hasCall = false;
-        var negateNext = false;   // a `!` binds to the WHOLE following expr in Qora's grammar
-        foreach (var item in cond.Items)
-        {
-            if (item is AstNonTerminal nt && nt.Name == "Expr")
-            {
-                var (text, call) = RenderExpr(nt);
-                // Qora's `!expr` negates the whole expression, but the flat re-parsed QASM would bind
-                // `!` to the first token only (`! a + 1` -> (!a)+1) — parenthesize to keep the meaning.
-                // Pad the parens with spaces so every identifier stays a standalone space-delimited token
-                // (NameMangler renames only bare tokens; a glued `(s)` would leave the inner name un-mangled).
-                parts.Add(negateNext ? $"( {text} )" : text);
-                negateNext = false;
-                hasCall |= call;
-            }
-            else
-            {
-                var tok = item.ToString() ?? string.Empty;
-                parts.Add(tok);
-                negateNext = tok == "!";
-            }
-        }
-        // The structured companion, built ONCE here (see ExprTree). Carried alongside the text while
-        // consumers migrate off the string; nothing reads it yet, so behaviour is unchanged.
-        return new QCond(string.Join(" ", parts), hasCall) { Tree = ExprTree.Condition(cond) };
-    }
-
-    private static string RenderItems(AstNonTerminal expr) =>
-        string.Join(" ", expr.Items.Select(RenderItem).Where(s => s.Length > 0));
-
-    private static string RenderItem(AstSymbol item) => item switch
-    {
-        AstNonTerminal { Name: "Call" } call => RenderCall(call),
-        AstNonTerminal { Name: "IndexAccess" } indexed => $"{Child(indexed, 0)} [ {Child(indexed, 1)} ]",
-        AstNonTerminal nt => RenderItems(nt),
-        _ => item.ToString() ?? string.Empty,
-    };
-
-    private static string RenderCall(AstNonTerminal call)
-    {
-        var target = call.Items.OfType<AstNonTerminal>().FirstOrDefault(q => q.Name == "IndexAccess");
-        return target is null ? $"{CallName(call)}()" : $"{CallName(call)}({Child(target, 0)}[{Child(target, 1)}])";
-    }
+    private static QCond LowerCondition(AstNonTerminal? cond) =>
+        new(ExprTree.Condition(cond));
 
     private static string CallName(AstNonTerminal call) =>
         call.Items.OfType<AstTerminal>().FirstOrDefault()?.ToString() ?? string.Empty;

@@ -37,4 +37,27 @@ public class NegationTests
     public void NotOnQubitIsRejected() =>
         // a qubit has no boolean/numeric value; negating it is QSEM026, not a broken emission
         Compiler.Rejects("operation Main(){ use q=Qubit[1]; if(!q){ X(q[0]); } }", "QSEM026");
+
+    [Fact]
+    public void NegationUnderARelationalKeepsItsGroupingInQasm()
+    {
+        // `!a < 2` means (!a) < 2. The bit rewrite substitutes `a == 0` for `!a` — a synthesized
+        // equality UNDER a relational, which the emitted token run would re-parse the other way
+        // (`a == 0 < 2` groups as a == (0 < 2)). The renderer must parenthesize the synthesized
+        // subtree so the QASM keeps the tree's grouping.
+        var r = Compiler.Compile("operation Main(){ use q=Qubit[1]; int a = 0; if (!a < 2) { X(q[0]); } }");
+        Assert.True(r.Success, string.Join(" | ", r.Errors.Select(e => $"{e.Code}: {e.Message}")));
+        Assert.Contains("( a == 0 ) < 2", r.Qasm);
+    }
+
+    [Fact]
+    public void NegationAsTheRightOperandOfAnEqualityKeepsItsGroupingInQasm()
+    {
+        // `n == !m` means n == (!m) — the rewrite synthesizes `m == 0` as the RIGHT child of `==`.
+        // Unparenthesized, `n == m == 0` re-parses LEFT-associatively as (n == m) == 0 — the opposite
+        // branch fires. A same-precedence RIGHT child must be parenthesized.
+        var r = Compiler.Compile("operation Main(){ use q=Qubit[1]; int n = 2; int m = 5; if (n == !m) { X(q[0]); } }");
+        Assert.True(r.Success, string.Join(" | ", r.Errors.Select(e => $"{e.Code}: {e.Message}")));
+        Assert.Contains("n == ( m == 0 )", r.Qasm);
+    }
 }

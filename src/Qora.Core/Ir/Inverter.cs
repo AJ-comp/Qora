@@ -126,7 +126,9 @@ public sealed class Inverter
                 var (body, reason) = InvertBody(f.Body);
                 if (body is null) return (null, reason);
                 // forward runs U(From)…U(To); the inverse runs U(To)†…U(From)† — iterate backwards.
-                return (f with { From = f.To, To = f.From, Step = "-1", Body = body }, string.Empty);
+                // The bounds ARE the trees, so one swap swaps everything a reader can see (the historical
+                // text/tree split once let a swap cross the two ledgers).
+                return (f with { From = f.To, To = f.From, Step = new QNumLit(-1), Body = body }, string.Empty);
             }
 
             case QConjugate c:

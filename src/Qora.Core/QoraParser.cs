@@ -30,13 +30,19 @@ public sealed class QoraParseResult
 {
     public bool Success { get; init; }
     public IReadOnlyList<QoraToken> Tokens { get; init; } = new List<QoraToken>();
-    public string TreeText { get; init; } = string.Empty;
+    /// <summary>The parse tree rendered to text — computed on demand from <see cref="Tree"/>. Only the
+    /// stages/playground view reads it, and the engine's renderer is O(depth²) on deeply nested input; the
+    /// hot live-diagnostics path (errors + QASM only) never touches it, so it never pays that cost.</summary>
+    public string TreeText => Tree?.ToTreeString() ?? string.Empty;
     /// <summary>The parse-tree root, for visual rendering (null when parsing failed).</summary>
     public ParseTreeSymbol? Tree { get; init; }
     /// <summary>The semantic AST root (MeaningUnit-tagged; null when parsing failed).</summary>
     public AstSymbol? Ast { get; init; }
-    public string AstText { get; init; } = string.Empty;
-    /// <summary>The lowered IR (null when parsing failed) — present even when semantic errors block emission.</summary>
+    /// <summary>The semantic AST rendered to text — computed on demand from <see cref="Ast"/> (see
+    /// <see cref="TreeText"/>).</summary>
+    public string AstText => Ast?.ToTreeString() ?? string.Empty;
+    /// <summary>The lowered IR (null when parsing failed, or when the program was rejected as too deep to
+    /// walk — QSEM031) — otherwise present even when semantic errors block emission.</summary>
     public Ir.QProgram? Ir { get; init; }
     /// <summary>The AST emitted as OpenQASM 3.0 (empty when parsing failed).</summary>
     public string Qasm { get; init; } = string.Empty;
@@ -63,8 +69,12 @@ public sealed class QoraParseResult
 }
 
 /// <summary>
-/// The front door for Qora: source string in, parse result out. A fresh grammar/lexer/parser
-/// is built per call (cheap for a playground, and sidesteps any shared parser state).
+/// The front door for Qora: source string in, parse result out. A fresh grammar/lexer/parser is built
+/// per call (cheap for a playground) — but NOT concurrency-safe: the Janglim engine keeps process-GLOBAL
+/// key state (<c>KeyManager</c>) that grammar construction mutates, so concurrent <c>Parse</c> calls
+/// from multiple threads corrupt it. Every current consumer parses one-at-a-time per process (the CLI,
+/// the extension's spawned processes); a future resident host (LSP server) needs an engine-side fix
+/// first — flagged on the engine, not worked around here (engine-boundary rule).
 /// </summary>
 public static class QoraParser
 {
@@ -75,6 +85,28 @@ public static class QoraParser
     /// <param name="sourcePath">The entry file's own path when known — lets the loader register its
     /// canonical path up front, so an import back-edge to the entry is skipped without reading it again.</param>
     public static QoraParseResult Parse(string source, string? baseDir, string? sourcePath = null)
+    {
+        // The whole compilation runs on a dedicated WIDE-STACK thread. Why: the depth guard (QSEM031)
+        // can only run AFTER the engine parse and lowering, but the engine's own parse-stack teardown
+        // and the per-block walkers recurse too — and on the default 1 MB stack, input the engine's
+        // token cap still admits (a few thousand tokens) could overflow BEFORE any guard sees it: an
+        // uncatchable process death with no JSON reply. 64 MB holds every recursion the token cap can
+        // produce with a wide margin, so the "always one reply" contract holds for every byte stream;
+        // QSEM031 remains the DIAGNOSTIC bound for what is reasonable, not the survival bound.
+        QoraParseResult? parsed = null;
+        System.Exception? failure = null;
+        var worker = new System.Threading.Thread(() =>
+        {
+            try { parsed = ParseCore(source, baseDir, sourcePath); }
+            catch (System.Exception ex) { failure = ex; }
+        }, maxStackSize: 64 * 1024 * 1024);
+        worker.Start();
+        worker.Join();
+        if (failure is not null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failure).Throw();
+        return parsed!;
+    }
+
+    private static QoraParseResult ParseCore(string source, string? baseDir, string? sourcePath)
     {
         source ??= string.Empty;
 
@@ -102,6 +134,7 @@ public static class QoraParser
         Ir.QProgram? expanded = null;
         Ir.QProgram? resolved = null;
         Ir.QProgram? monoProgram = null;   // program after monomorphization — what actually gets emitted
+        var tooDeep = false;               // QSEM031: the lowered IR is unrenderable, expose no IR at all
         Ir.Passes.SemanticModel? semantics = null;   // side table from the FINAL validation (post-monomorphize)
         List<QoraError> semanticErrors;
         if (ir != null)
@@ -111,6 +144,21 @@ public static class QoraParser
             if (importErrors.Count > 0)
             {
                 semanticErrors = importErrors;
+            }
+            // Depth guard BEFORE every recursive pass (measure-condition lowering, resolution, validation,
+            // monomorphization). Pathologically deep input would otherwise overflow the stack into an
+            // uncatchable crash that bypasses the JSON contract; this rejects it with a clean diagnostic.
+            // The rejected IR is NOT exposed on the result: every downstream renderer (the IR printer, the
+            // symbol-table formatter, the canonical renderer) recurses the tree it prints, so handing a
+            // too-deep tree to the --stages view would crash exactly the way this guard exists to prevent.
+            else if (QoraValidator.ExceedsDepthLimit(merged, out var deepOp))
+            {
+                expanded = null;
+                tooDeep = true;
+                semanticErrors = new List<QoraError>
+                {
+                    new($"in `{deepOp}`: an expression or nested-block structure is too deep for the compiler; simplify or split it", "QSEM031", -1, -1),
+                };
             }
             else
             {
@@ -159,21 +207,18 @@ public static class QoraParser
             semanticErrors = new List<QoraError>();
         }
 
-        // emission runs on the MANGLED program; NameMangler auto-resolves any name collision by appending
-        // `_` and returns one note per rename, surfaced as a `// Qora:` comment in the emitted QASM.
+        // The tail of the COMMON front end. Effect analysis first (pure model data, the auto-uncompute
+        // ladder's seed — before any tree-copying pass so every recorded Id is one the model knows), then
+        // backend-shared MATERIALIZATION: within/apply flattens to straight-line gates + a synthesized
+        // inverse (a non-invertible `within` is a clean QSEM027 here), and whole-op Adjoint becomes real
+        // inverse defs. Any backend needs materialized defs — only what comes AFTER is target-specific.
+        // The front's output contract: a validated, monomorphized, MATERIALIZED program.
         string qasm = string.Empty;
         Ir.QProgram? analyzedIr = null;   // the program effect analysis ran on (null when it never ran)
         if (monoProgram != null && semanticErrors.Count == 0)
         {
-            // Effect analysis (pure, model-only): per-statement qubit touched/modified sets recorded on
-            // the final SemanticModel — the seed data for the auto-uncompute ladder. Runs here, before
-            // any tree-copying pass, so every recorded Id is one the model itself knows.
             if (semantics is not null) { EffectAnalysis.Run(monoProgram, semantics); analyzedIr = monoProgram; }
 
-            // Flatten within/apply conjugations (QConjugate) into straight-line gates + a synthesized inverse
-            // of the `within` block, BEFORE AdjointMaterializer — so a reversal's `Adjoint Foo` becomes a real
-            // Foo__adj that the mangler then owns (nothing minted at emit time). A within block with no inverse
-            // is a clean QSEM027 here; emission is skipped rather than dropping the uncompute silently.
             var (conjugated, conjErrors) = ConjugationLowering.Run(monoProgram, semantics);
             if (conjErrors.Count > 0)
             {
@@ -181,19 +226,13 @@ public static class QoraParser
             }
             else
             {
-                // Materialize whole-op Adjoint into real inverse-def ops BEFORE mangling, so every synthesized
-                // name flows through the mangler's collision resolution (nothing is minted at emit time).
                 var materialized = AdjointMaterializer.Run(conjugated, semantics);
-                var mangled = NameMangler.Mangle(materialized.Program, semantics);
-                // referential-integrity gate: after mangling, every used identifier must resolve to a
-                // declaration/op/built-in. A dangling reference here is a COMPILER bug (a name not renamed
-                // consistently) — fail loudly (QINTERNAL) instead of emitting silently-broken QASM.
-                var refErrors = ReferentialCheck.Verify(mangled.Program);
-                if (refErrors.Count > 0) semanticErrors = refErrors;
-                // both passes may rename to dodge a collision; surface every note in the QASM header. The final
-                // OpenQASM target-lowering (e.g. demoting a runtime `const` to a plain var — OQ3 `const` is
-                // compile-time only) runs right before emission, adapting the IR to OpenQASM's specifics.
-                else qasm = QasmEmitter.Emit(OpenQasmLowering.Run(mangled.Program), materialized.Notes.Concat(mangled.Notes).ToList(), semantics);
+
+                // Hand the materialized program to the TARGET backend (see <see cref="Ir.QasmBackend"/>:
+                // name mangle → referential gate → const demotion → emit).
+                var backend = Ir.QasmBackend.Run(materialized.Program, materialized.Notes, semantics);
+                if (backend.Errors.Count > 0) semanticErrors = backend.Errors.ToList();
+                else qasm = backend.Qasm;
             }
         }
 
@@ -203,11 +242,9 @@ public static class QoraParser
             Tokens = tokens
                 .Select(c => new QoraToken(c.Data, c.PatternInfo?.Terminal?.ToString() ?? "?"))
                 .ToList(),
-            TreeText = tree?.ToTreeString() ?? string.Empty,
             Tree = tree,
             Ast = ast,
-            AstText = ast?.ToTreeString() ?? string.Empty,
-            Ir = resolved ?? expanded ?? ir,
+            Ir = tooDeep ? null : resolved ?? expanded ?? ir,
             Qasm = qasm,
             Semantics = semantics,
             AnalyzedIr = analyzedIr,

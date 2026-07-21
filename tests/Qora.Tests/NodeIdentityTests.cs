@@ -37,7 +37,7 @@ public class NodeIdentityTests
     public void ReIdMintsFreshIdsRecursivelyAndRecordsLineage()
     {
         var inner = Gate("X", Q("q", 0));
-        var loop = new QFor("i", "0", "1", new List<QStmt> { inner });
+        var loop = new QFor("i", new QNumLit(0), new QNumLit(1), new List<QStmt> { inner });
         var lineage = new Dictionary<int, int>();    // freshId -> sourceId
 
         var fresh = ReId.Run(new List<QStmt> { loop }, (src, fr) => lineage[fr] = src);
@@ -208,7 +208,7 @@ public class NodeIdentityTests
     [Fact]
     public void ConjugationInverseHasFreshIdsAndLineageReachesSource()
     {
-        var withinDecl = new QDecl(true, QType.Int, "k", new QText("1"));
+        var withinDecl = new QDecl(true, QType.Int, "k", new QText(new QNumLit(1)));
         var withinGate = Gate("X", Q("a", 0));
         var program = new QProgram(new List<QOperation>
         {
