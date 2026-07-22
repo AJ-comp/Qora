@@ -203,13 +203,13 @@
     <strong>게이트, 고전 선언, for 루프, if 분기, 중첩 호출</strong> — 를 하나의 프로그램에 전부 넣었어요.
   </p>
 
-<pre><code>operation Inner(Qubit[] q) {           <span class="cm">// 중첩 호출의 대상</span>
+<pre><code>operation Inner(q: Qubit[]) {           <span class="cm">// 중첩 호출의 대상</span>
     H(q[0]);
     T(q[1]);
 }
 
-operation Outer(Qubit[] q, bit b) {
-    int k = 2;                         <span class="cm">// ① 고전 선언</span>
+operation Outer(q: Qubit[], b: bit) {
+    var k: int = 2;                         <span class="cm">// ① 고전 선언</span>
     Inner(q);                          <span class="cm">// ② 중첩 호출</span>
     Rx(pi/k, q[0]);                    <span class="cm">// ③ 게이트 (선언값을 각도로 사용)</span>
     for i in 0..q.Count-1 {            <span class="cm">// ④ 전달받은 배열을 순회하는 for 루프</span>
@@ -223,7 +223,7 @@ operation Outer(Qubit[] q, bit b) {
 
 operation Main() {
     use q = Qubit[2];
-    bit r = M(q[0]);
+    var r: bit = M(q[0]);
     Outer(q, r);
     <span class="hl">Adjoint Outer(q, r);</span>               <span class="cm">// ★ 이 한 줄이 전체 역합성을 일으킨다</span>
 }</code></pre>

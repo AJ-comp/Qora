@@ -203,13 +203,13 @@
     <strong>gates, classical declarations, for loops, if branches, and nested calls</strong> — into a single program.
   </p>
 
-<pre><code>operation Inner(Qubit[] q) {           <span class="cm">// target of the nested call</span>
+<pre><code>operation Inner(q: Qubit[]) {          <span class="cm">// target of the nested call</span>
     H(q[0]);
     T(q[1]);
 }
 
-operation Outer(Qubit[] q, bit b) {
-    int k = 2;                         <span class="cm">// ① classical declaration</span>
+operation Outer(q: Qubit[], b: bit) {
+    var k: int = 2;                    <span class="cm">// ① classical declaration</span>
     Inner(q);                          <span class="cm">// ② nested call</span>
     Rx(pi/k, q[0]);                    <span class="cm">// ③ gate (uses the declared value as an angle)</span>
     for i in 0..q.Count-1 {            <span class="cm">// ④ for loop over the received array</span>
@@ -223,7 +223,7 @@ operation Outer(Qubit[] q, bit b) {
 
 operation Main() {
     use q = Qubit[2];
-    bit r = M(q[0]);
+    var r: bit = M(q[0]);
     Outer(q, r);
     <span class="hl">Adjoint Outer(q, r);</span>               <span class="cm">// ★ this one line triggers the entire inverse synthesis</span>
 }</code></pre>
@@ -312,7 +312,7 @@ QGate(functors=[<span class="hl">Adjoint</span>], name=Inner, args=[q])         
       <tr><th>Construct</th><th>Forward</th><th>Inverse</th><th>Rule</th></tr>
       <tr><td>Gate</td><td><code>X</code></td><td><code>Adjoint X</code></td><td>Toggle the Adjoint functor</td></tr>
       <tr><td>Gate already carrying Adjoint</td><td><code>Adjoint S</code></td><td><code>S</code></td><td>inverse of the inverse = the original</td></tr>
-      <tr><td>Classical declaration</td><td><code>int k = 2;</code></td><td><code>int k = 2;</code> (kept first)</td><td>single assignment, so position does not matter — not inverted</td></tr>
+      <tr><td>Classical declaration</td><td><code>var k: int = 2;</code></td><td><code>var k: int = 2;</code> (kept first)</td><td>single assignment, so position does not matter — not inverted</td></tr>
       <tr><td>for loop</td><td><code>for i in 0..1</code></td><td><code>for i in 1..0, step −1</code></td><td>reverse iteration + inverted body</td></tr>
       <tr><td>if branch</td><td><code>if (b == 1) { … }</code></td><td>condition unchanged, only the body inverted</td><td>safe because the value the condition reads never changes inside the body</td></tr>
       <tr><td>Nested call</td><td><code>Inner(q)</code></td><td><code>Adjoint Inner(q)</code></td><td>the target op's inverse is also required <strong>transitively</strong></td></tr>
@@ -322,7 +322,7 @@ QGate(functors=[<span class="hl">Adjoint</span>], name=Inner, args=[q])         
 
   <div class="call why">
     <span class="h">Why aren't declarations inverted?</span>
-    A classical computation like <code>int k = 2;</code> has no such thing as an "inverse." And because Qora rejects
+    A classical computation like <code>var k: int = 2;</code> has no such thing as an "inverse." And because Qora rejects
     variable reassignment inside anything targeted for inverse synthesis, a declared value stays the same to the very end.
     So by leaving the declaration in place at the front, the inverse-direction gates
     (<code>inv @ rx(pi / k)</code>) read <strong>exactly the same angle</strong> as the forward direction.

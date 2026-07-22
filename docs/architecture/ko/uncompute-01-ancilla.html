@@ -174,7 +174,7 @@ use t = Qubit[1];       <span class="cm">// 이 연산이 소유하고 |0⟩로 
 <pre><code>use q = Qubit[1];
 H(q[0]);           <span class="cm">// |0⟩을 두 기저 상태의 중첩으로 만듦</span>
 H(q[0]);           <span class="cm">// |0⟩ 진폭 기여는 보강, |1⟩ 진폭 기여는 상쇄 (간섭)</span>
-bit m = M(q[0]);
+var m: bit = M(q[0]);
 <span class="result-ok">// m = 0 (확률 100%) — 언제 돌려도 같은 결과</span></code></pre>
   <p>
     측정 결과는 언제나 0입니다.<br>
@@ -193,7 +193,7 @@ bit m = M(q[0]);
 H(q[0]);
 <span class="rd">CNOT(q[0], t[0]);</span>  <span class="cm">// ← 추가된 한 줄: t가 q의 값을 기록 (얽힘)</span>
 H(q[0]);           <span class="cm">// t는 그대로 방치</span>
-bit m = M(q[0]);
+var m: bit = M(q[0]);
 <span class="result-bad">// m = 0 또는 1 (각 50%) — 결정론이 동전 던지기로</span></code></pre>
   <p>
     결과가 "항상 0"에서 "반반 무작위"로 변했습니다.<br>
@@ -223,7 +223,7 @@ H(q[0]);
 CNOT(q[0], t[0]);  <span class="cm">// t가 q의 값을 기록 (얽힘)</span>
 <span class="add">CNOT(q[0], t[0]);</span>  <span class="cm">// ← 추가된 정리: t의 기록을 지움 (얽힘 해제)</span>
 H(q[0]);
-bit m = M(q[0]);
+var m: bit = M(q[0]);
 <span class="cm">// m = 0 (확률 100%) — 1단계와 똑같이 복구</span></code></pre>
   <p>
     두 번째 CNOT 게이트가 실행되는 순간의 상태벡터를 따라가면, <code>t</code>가 |0⟩로 돌아가면서 얽힘이 풀리는

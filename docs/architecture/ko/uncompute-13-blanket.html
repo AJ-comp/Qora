@@ -158,7 +158,7 @@
     아래 프로그램은 두 원소짜리 앤실라 <code>a</code>를 담요 호출 하나로 기록하고, 아무도 측정하지
     않습니다.
   </p>
-<pre><code>operation Bcast(Qubit[2] p){
+<pre><code>operation Bcast(p: Qubit[2]){
     for i in 0..1 { X(p[i]); }
 }
 operation Main(){
@@ -188,13 +188,13 @@ a: ancilla, cleanup candidate — safe to uncompute</code></pre>
     그렇다면 두 원소의 처리가 나뉘는 순간에는 무슨 일이 벌어질까요.<br>
     기준선 프로그램에 딱 한 줄, <code>a[0]</code>만 측정하는 문장을 끼워 넣겠습니다.
   </p>
-<pre><code>operation Bcast(Qubit[2] p){
+<pre><code>operation Bcast(p: Qubit[2]){
     for i in 0..1 { X(p[i]); }
 }
 operation Main(){
     use a = Qubit[2];
     Bcast(a);                 <span class="cm">// 담요 쓰기 — 문장 폭 = a[0]·a[1] 전부</span>
-    <span class="rd">bit c = M(a[0]);</span>          <span class="cm">// ← 추가된 한 줄: a[0]만 측정</span>
+    <span class="rd">var c: bit = M(a[0]);</span>          <span class="cm">// ← 추가된 한 줄: a[0]만 측정</span>
     <span class="cm">// c = 1 (확률 100%) — Bcast가 a[0]을 |1⟩로 만들어 두었기 때문입니다</span>
 }</code></pre>
   <p>
@@ -251,12 +251,12 @@ operation Main(){
     그러면 <code>a[1]</code>의 이력은 원소 폭 문장만으로 이루어지므로, 원소 폭 질의와 폭이 일치해
     컴파일러가 자동으로 치울 수 있게 됩니다.
   </p>
-<pre><code>operation FlipOne(Qubit p){ X(p); }
+<pre><code>operation FlipOne(p: Qubit){ X(p); }
 operation Main(){
     use a = Qubit[2];
     <span class="add">FlipOne(a[0]);</span>           <span class="cm">// 문장 폭 = a[0] 하나</span>
     <span class="add">FlipOne(a[1]);</span>           <span class="cm">// 문장 폭 = a[1] 하나</span>
-    bit c = M(a[0]);         <span class="cm">// c = 1 (확률 100%) — a[0]만 측정 → 출력으로 승격</span>
+    var c: bit = M(a[0]);         <span class="cm">// c = 1 (확률 100%) — a[0]만 측정 → 출력으로 승격</span>
     <span class="cm">// a[1]: 이력이 원소 폭뿐이라 청소 후보로 판정되고,</span>
     <span class="cm">// 컴파일러가 마지막 사용 직후에 역연산을 자동 삽입합니다</span>
 }</code></pre>
@@ -278,8 +278,8 @@ operation Main(){
 operation Main(){
     use a = Qubit[2];
     Bcast(a);
-    bit c = M(a[0]);          <span class="cm">// c = 1 (확률 100%)</span>
-    <span class="add">bit d = M(a[1]);</span>          <span class="cm">// ← 추가: a[1]도 측정 → 출력으로 승격</span>
+    var c: bit = M(a[0]);          <span class="cm">// c = 1 (확률 100%)</span>
+    <span class="add">var d: bit = M(a[1]);</span>          <span class="cm">// ← 추가: a[1]도 측정 → 출력으로 승격</span>
     <span class="cm">// d = 1 (확률 100%) — Bcast가 a[1]도 |1⟩로 만들어 두었기 때문입니다</span>
 }</code></pre>
   <p>
@@ -298,7 +298,7 @@ operation Main(){
 operation Main(){
     use a = Qubit[2];
     Bcast(a);
-    bit c = M(a[0]);          <span class="cm">// c = 1 (확률 100%)</span>
+    var c: bit = M(a[0]);          <span class="cm">// c = 1 (확률 100%)</span>
     <span class="add">Reset(a[1]);</span>              <span class="cm">// ← 추가: 비가역 지우기를 코드로 선언</span>
     <span class="cm">// a[1]은 |0⟩로 — 이 프로그램에서는 얽힘이 없어 무해합니다</span>
 }</code></pre>
@@ -320,7 +320,7 @@ operation Main(){
 operation Main(){
     use a = Qubit[2];
     Bcast(a);
-    bit c = M(a[0]);          <span class="cm">// c = 1 (확률 100%)</span>
+    var c: bit = M(a[0]);          <span class="cm">// c = 1 (확률 100%)</span>
     <span class="add">X(a[1]);</span>                  <span class="cm">// ← 추가: 손으로 쓴 역연산 — a[1]은 |0⟩로</span>
 }</code></pre>
   <p>
@@ -340,7 +340,7 @@ operation Main(){
     <table class="spec">
       <tr><th>수정</th><th>코드</th><th>의미</th></tr>
       <tr><td class="k">① 구조 변경 (권장)</td><td><code>FlipOne(a[0]); FlipOne(a[1]);</code> 원소별 호출, 또는 운명별로 레지스터 분리 선언</td><td>이력이 정밀해져 컴파일러가 자동으로 치웁니다</td></tr>
-      <tr><td class="k">② 측정</td><td><code>bit d = M(a[1]);</code></td><td>출력으로 승격되어 반납 의무가 사라집니다</td></tr>
+      <tr><td class="k">② 측정</td><td><code>var d: bit = M(a[1]);</code></td><td>출력으로 승격되어 반납 의무가 사라집니다</td></tr>
       <tr><td class="k">③ 명시적 Reset</td><td><code>Reset(a[1]);</code></td><td>비가역 지우기를 코드로 선언합니다 (얽힌 큐빗에서는 다른 큐빗까지 오염될 수 있으니 주의; 컴파일러 판정은 아직 바뀌지 않습니다)</td></tr>
       <tr><td class="k">④ 직접 역연산</td><td><code>X(a[1]);</code></td><td>물리적으로 완전한 수정입니다 (컴파일러 판정은 아직 바뀌지 않습니다)</td></tr>
     </table>

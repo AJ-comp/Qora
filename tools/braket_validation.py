@@ -49,25 +49,25 @@ def load_and_run(name, src, expect_keys=None, subset=False, shots=1000):
 print("== Qiskit이 거부했던 케이스들을 Braket LocalSimulator에 ==")
 
 load_and_run("B1 def Bell (서브루틴)", """
-operation Bell(Qubit[] q) {
+operation Bell(q: Qubit[]) {
     H(q[0]);
     CNOT(q[0], q[1]);
 }
 operation Main() {
     use q = Qubit[2];
     Bell(q);
-    bit r0 = M(q[0]);
-    bit r1 = M(q[1]);
+    var r0: bit = M(q[0]);
+    var r1: bit = M(q[1]);
 }""", {"00", "11"})
 
 load_and_run("B2 int/const 선언 + 산술 각도", """
 operation Main() {
     use q = Qubit[1];
-    const int k = 2;
+    const k: int = 2;
     H(q[0]);
     Rz(pi/k, q[0]);
     H(q[0]);
-    bit r = M(q[0]);
+    var r: bit = M(q[0]);
 }""", {"0", "1"}, subset=True)
 
 load_and_run("B3 for 루프 + 변수 인덱스 q[i]", """
@@ -76,12 +76,12 @@ operation Main() {
     for i in 0..q.Count - 1 {
         X(q[i]);
     }
-    bit r0 = M(q[0]);
-    bit r1 = M(q[1]);
+    var r0: bit = M(q[0]);
+    var r1: bit = M(q[1]);
 }""", {"11"})
 
 load_and_run("B4 전연산 Adjoint 항등성 (합성 ___adj def)", """
-operation Prep(Qubit[] q) {
+operation Prep(q: Qubit[]) {
     H(q[0]);
     T(q[1]);
     CNOT(q[0], q[1]);
@@ -90,13 +90,13 @@ operation Main() {
     use q = Qubit[2];
     Prep(q);
     Adjoint Prep(q);
-    bit r0 = M(q[0]);
-    bit r1 = M(q[1]);
+    var r0: bit = M(q[0]);
+    var r1: bit = M(q[1]);
 }""", {"00"})
 
 load_and_run("B5 네임스페이스 맹글명 def", """
 namespace MyLib {
-    operation Bell(Qubit[] q) {
+    operation Bell(q: Qubit[]) {
         H(q[0]);
         CNOT(q[0], q[1]);
     }
@@ -104,25 +104,25 @@ namespace MyLib {
 operation Main() {
     use q = Qubit[2];
     MyLib.Bell(q);
-    bit r0 = M(q[0]);
-    bit r1 = M(q[1]);
+    var r0: bit = M(q[0]);
+    var r1: bit = M(q[1]);
 }""", {"00", "11"})
 
 load_and_run("B6 측정→if 피드백", """
 operation Main() {
     use q = Qubit[2];
     X(q[0]);
-    bit r = M(q[0]);
+    var r: bit = M(q[0]);
     if (r == 1) {
         X(q[1]);
     }
-    bit r1 = M(q[1]);
+    var r1: bit = M(q[1]);
 }""", {"11"})
 
 load_and_run("B7 while (측정 의존 동적 루프!)", """
 operation Main() {
     use q = Qubit[1];
-    bit r = M(q[0]);
+    var r: bit = M(q[0]);
     while (r == 0) {
         H(q[0]);
         r = M(q[0]);

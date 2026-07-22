@@ -156,7 +156,7 @@ public sealed class Inverter
 
         // name-based irreversibles from the shared registry: non-unitary built-ins (reset, plus its
         // lowercase passthrough as defense) and a bare measurement statement (`M(q);` outside the
-        // `bit r = M(q);` decl form the QDecl check catches).
+        // `var r: bit = M(q);` decl form the QDecl check catches).
         if (!isUserOp && (QoraGates.NonUnitary.Contains(g.Name) || g.Name == "reset"))
             return (null, "it resets a qubit, and reset is irreversible");
         if (!isUserOp && QoraGates.MeasureLike.Contains(g.Name))

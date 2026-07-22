@@ -223,7 +223,7 @@
   </p>
 
 <pre><code>namespace Prep {
-    operation Fanout(Qubit[] q) {        <span class="cm">// 배열 길이는 호출부마다 정해짐</span>
+    operation Fanout(q: Qubit[]) {        <span class="cm">// 배열 길이는 호출부마다 정해짐</span>
         for i in 0..q.Count-1 { H(q[i]); }
     }
 }
@@ -232,7 +232,7 @@ operation Main() {
     use reg = Qubit[3];
     Prep.Fanout(reg);                    <span class="cm">// 네임스페이스를 넘나드는 호출</span>
     <span class="hl">Adjoint Prep.Fanout(reg);</span>            <span class="cm">// 되돌리기 — 컴파일러가 역연산을 합성</span>
-    bit r = M(reg[0]);
+    var r: bit = M(reg[0]);
 }</code></pre>
 
   <p>
@@ -426,7 +426,7 @@ qubit[2] q;
   <p class="stagehead">in: 검증된 IR &nbsp;·&nbsp; out: 구체적 크기의 op을 가진 IR &nbsp;·&nbsp; 패스: <code>Monomorphizer</code></p>
 
   <p>
-    표면 타입 <code>Fanout(Qubit[] q)</code>에는 배열 길이를 적지 않습니다.<br>
+    표면 타입 <code>Fanout(q: Qubit[])</code>에는 배열 길이를 적지 않습니다.<br>
     단형화기(monomorphizer)는 각 호출부에서 실제 레지스터 크기를 읽어 <strong>구체적인 내부 복사본을 만들고</strong>,
     그 복사본의 <code>q.Count</code>를 실제 크기로 치환한 뒤 호출이 해당 복사본을 가리키도록 다시 씁니다.<br>
     예제의 호출은 <code>reg</code>(큐비트 3개)를 넘기므로:

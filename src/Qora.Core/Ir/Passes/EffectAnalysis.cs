@@ -167,7 +167,7 @@ public static class EffectAnalysis
                     leaf = true;
                     break;
 
-                // A measurement may also sit inside an ARRAY LITERAL element (`bit[] r = [M(q[1]), 0]`)
+                // A measurement may also sit inside an ARRAY LITERAL element (`var r: bit[] = [M(q[1]), 0]`)
                 // — the same collapse as the direct form, and it must land in the same summaries, or the
                 // measured (possibly entangled) qubit would be judged a safe cleanup candidate and the
                 // uncompute ladder would plan around wrong facts.

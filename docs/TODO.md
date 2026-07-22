@@ -22,7 +22,7 @@ work · **hard** = needs a self-contained compiler pass · **not-expressible** =
 - **First-class `Reset` / `ResetAll`** — → OpenQASM `reset`. (clean)
 
 Earlier: operations + C#-style params + calls, `use`/`Qubit`, gates (H/X/Y/Z/S/T/CX/CY/CZ/SWAP/CCX,
-Rx/Ry/Rz), measurement (`bit r = M(q)`), classical vars (const/var/int/bit) + reassignment + arithmetic,
+Rx/Ry/Rz), measurement (`var r: bit = M(q)`), classical vars (const/var/int/bit) + reassignment + arithmetic,
 `for`-in-range, `while`, `repeat`-`until`. Emits OpenQASM 3.
 
 Also shipped: **size-independent qubit-register parameters and classical arrays**. Helpers receive

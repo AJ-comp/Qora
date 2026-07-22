@@ -62,22 +62,22 @@ operation Main() {
     use q = Qubit[2];
     H(q[0]);
     CNOT(q[0], q[1]);
-    bit r0 = M(q[0]);
-    bit r1 = M(q[1]);
+    var r0: bit = M(q[0]);
+    var r1: bit = M(q[1]);
 }""", {"00", "11"})
 
 load_and_run("F2 deterministic X -> 1", """
 operation Main() {
     use q = Qubit[1];
     X(q[0]);
-    bit r = M(q[0]);
+    var r: bit = M(q[0]);
 }""", {"1"})
 
 load_and_run("F3 Rx(pi) -> 1 (rotation w/ pi expr)", """
 operation Main() {
     use q = Qubit[1];
     Rx(pi, q[0]);
-    bit r = M(q[0]);
+    var r: bit = M(q[0]);
 }""", {"1"})
 
 load_and_run("F4 for loop flips both -> 11", """
@@ -86,19 +86,19 @@ operation Main() {
     for i in 0..q.Count - 1 {
         X(q[i]);
     }
-    bit r0 = M(q[0]);
-    bit r1 = M(q[1]);
+    var r0: bit = M(q[0]);
+    var r1: bit = M(q[1]);
 }""", {"11"})
 
 load_and_run("F5 mid-circuit measure + if -> 11", """
 operation Main() {
     use q = Qubit[2];
     X(q[0]);
-    bit r = M(q[0]);
+    var r: bit = M(q[0]);
     if (r == 1) {
         X(q[1]);
     }
-    bit r1 = M(q[1]);
+    var r1: bit = M(q[1]);
 }""", {"111", "11"}, subset=True)  # key = r,r1 registers; both 1 whatever grouping
 
 load_and_run("F6 single-gate functors identity (H S S† H = I) -> 0", """
@@ -108,7 +108,7 @@ operation Main() {
     S(q[0]);
     Adjoint S(q[0]);
     H(q[0]);
-    bit r = M(q[0]);
+    var r: bit = M(q[0]);
 }""", {"0"})
 
 load_and_run("F6b Controlled X -> 11", """
@@ -116,8 +116,8 @@ operation Main() {
     use q = Qubit[2];
     X(q[0]);
     Controlled X(q[0], q[1]);
-    bit r0 = M(q[0]);
-    bit r1 = M(q[1]);
+    var r0: bit = M(q[0]);
+    var r1: bit = M(q[1]);
 }""", {"11"})
 
 load_and_run("F7 Reset after X -> 0", """
@@ -125,36 +125,36 @@ operation Main() {
     use q = Qubit[1];
     X(q[0]);
     Reset(q[0]);
-    bit r = M(q[0]);
+    var r: bit = M(q[0]);
 }""", {"0"})
 
 load_and_run("F8 const + arithmetic angle (Rz(pi/k)) loads+runs", """
 operation Main() {
     use q = Qubit[1];
-    const int k = 2;
+    const k: int = 2;
     H(q[0]);
     Rz(pi/k, q[0]);
     H(q[0]);
-    bit r = M(q[0]);
+    var r: bit = M(q[0]);
 }""", {"0", "1"}, subset=True)
 
 print()
 print("== DEF programs (subroutines: the known consumer-support question) ==")
 
 load_and_run("D1 Bell via def", """
-operation Bell(Qubit[] q) {
+operation Bell(q: Qubit[]) {
     H(q[0]);
     CNOT(q[0], q[1]);
 }
 operation Main() {
     use q = Qubit[2];
     Bell(q);
-    bit r0 = M(q[0]);
-    bit r1 = M(q[1]);
+    var r0: bit = M(q[0]);
+    var r1: bit = M(q[1]);
 }""", {"00", "11"})
 
 load_and_run("D2 whole-op Adjoint identity (Prep; Adjoint Prep -> 00)", """
-operation Prep(Qubit[] q) {
+operation Prep(q: Qubit[]) {
     H(q[0]);
     T(q[1]);
     CNOT(q[0], q[1]);
@@ -163,13 +163,13 @@ operation Main() {
     use q = Qubit[2];
     Prep(q);
     Adjoint Prep(q);
-    bit r0 = M(q[0]);
-    bit r1 = M(q[1]);
+    var r0: bit = M(q[0]);
+    var r1: bit = M(q[1]);
 }""", {"00"})
 
 load_and_run("D3 namespaced call (def MyLib__Bell_)", """
 namespace MyLib {
-    operation Bell(Qubit[] q) {
+    operation Bell(q: Qubit[]) {
         H(q[0]);
         CNOT(q[0], q[1]);
     }
@@ -177,17 +177,17 @@ namespace MyLib {
 operation Main() {
     use q = Qubit[2];
     MyLib.Bell(q);
-    bit r0 = M(q[0]);
-    bit r1 = M(q[1]);
+    var r0: bit = M(q[0]);
+    var r1: bit = M(q[1]);
 }""", {"00", "11"})
 
 load_and_run("D4 adjoint-pipeline doc example (defs + ___adj + reversed for)", """
-operation Inner(Qubit[] q) {
+operation Inner(q: Qubit[]) {
     H(q[0]);
     T(q[1]);
 }
-operation Outer(Qubit[] q, bit b) {
-    int k = 2;
+operation Outer(q: Qubit[], b: bit) {
+    var k: int = 2;
     Inner(q);
     Rx(pi/k, q[0]);
     for i in 0..q.Count - 1 {
@@ -200,11 +200,11 @@ operation Outer(Qubit[] q, bit b) {
 }
 operation Main() {
     use q = Qubit[2];
-    bit r = M(q[0]);
+    var r: bit = M(q[0]);
     Outer(q, r);
     Adjoint Outer(q, r);
-    bit r0 = M(q[0]);
-    bit r1 = M(q[1]);
+    var r0: bit = M(q[0]);
+    var r1: bit = M(q[1]);
 }""", None)  # load-only: contents statistical; identity check is D2's job
 
 print()

@@ -302,7 +302,7 @@ public static class SymbolTableBuilder
                             }
                         break;
                     case QDecl { Value: QMeasure } md:
-                        // Record the measured target FIRST — before the bit is in scope — so `bit r = M(r[0])`
+                        // Record the measured target FIRST — before the bit is in scope — so `var r: bit = M(r[0])`
                         // resolves the target `r` to the register (chain lookup), not the bit declared here.
                         if (md.Value is QMeasure { Target: { } mt })
                         {
@@ -329,11 +329,11 @@ public static class SymbolTableBuilder
                         // Point-of-declaration scoping: this name may not have been used earlier in its own
                         // block (that use would bind to the outer value, which this local shadows). The
                         // initializer's own use of the name (order == this statement) is exempt, so a const
-                        // chain reading the outer — `const int n = n + 1` — is still fine.
+                        // chain reading the outer — `const n: int = n + 1` — is still fine.
                         if (UsedBeforeShadow(scope, d.Name, scopeStart))
                             Add(errors, "QSEM025", $"in `{opName}`: `{d.Name}` is used earlier in this block but declared here, shadowing an outer `{d.Name}` — a name cannot be used before its declaration in its own scope; move this declaration above the first use or rename it", d.Span);
                         // A const's initializer folds HERE — the owner's site, the owner's scope (earlier
-                        // consts are already in scope, so chains like `const int m = k + 1` settle too).
+                        // consts are already in scope, so chains like `const m: int = k + 1` settle too).
                         // From now on the value is DATA on the symbol; no consumer re-reads the text.
                         Declare(scope, new Symbol(d.Name, d.IsConst ? SymbolKind.Const : SymbolKind.Var, d.Type,
                             d.IsConst, d.IsConst && d.Value is QText qt ? QNodes.Render(qt.Tree) : null, d.Span,

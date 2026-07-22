@@ -564,18 +564,18 @@ public static class QoraValidator
                         Add(ctx.Errors, "QSEM029", $"in `{opName}`: scalar `{d.Name}` cannot be initialized with an array value; declare it as `T[]`", d.Span);
 
                     // A call has no OpenQASM expression form — wherever it sits in the value (the whole
-                    // initializer, or an array literal's ELEMENT: `int[] b = [f(x), 2]` would otherwise
+                    // initializer, or an array literal's ELEMENT: `var b: int[] = [f(x), 2]` would otherwise
                     // ship a call inside a `{…}` initializer — invalid OpenQASM, and misleading QSEM025
                     // noise for `M`). TreesOf is the canonical value enumeration, so no shape hides one.
                     if (QNodes.TreesOf(d.Value).Any(QNodes.ContainsCall))
-                        Add(ctx.Errors, "QSEM005", $"in `{opName}`: the initializer of `{d.Name}` contains a call; only the lone form `bit r = M(q[i]);` is supported", d.Span);
+                        Add(ctx.Errors, "QSEM005", $"in `{opName}`: the initializer of `{d.Name}` contains a call; only the lone form `var r: bit = M(q[i]);` is supported", d.Span);
                     // CheckExprIndexes bounds-checks every index in the value, INCLUDING a measurement target
                     // (direct or nested in an array literal) — the single measure-index check, so no dedicated
                     // CheckQubitIndex is repeated here (that duplicated the diagnostic).
                     CheckExprIndexes(d.Value, scope, opName, ctx.Errors, ctx.Unproven, ctx.Deferred, ctx.ParamNeeds, d.Span, flow);
                     // QSEM017 — a measurement result is a `bit`, so measuring into a non-bit target is a type
-                    // error, whether the measurement is the whole value (`int x = M(q)`) or an element of an
-                    // array literal (`int[] a = [M(q)]`, which would otherwise emit `measure` inside a `{…}`
+                    // error, whether the measurement is the whole value (`var x: int = M(q)`) or an element of an
+                    // array literal (`var a: int[] = [M(q)]`, which would otherwise emit `measure` inside a `{…}`
                     // initializer — invalid OpenQASM).
                     if (d.Type is not null && d.Type != QType.Bit
                         && (d.Value is QMeasure || d.Value is QArrayLiteral { Elements: { } els } && els.Any(e => e is QMeasure)))
@@ -612,7 +612,7 @@ public static class QoraValidator
                     else if (target is { Type: QType.Qubit })
                         Add(ctx.Errors, "QSEM026", $"in `{opName}`: `{a.Name}` is a qubit and cannot be assigned to — a qubit is not a classical variable; change its state with a gate or measurement", a.Span);
                     // QSEM017 — a measurement result is a `bit`; assigning it to a non-bit classical is the
-                    // same type error as declaring `int r = M(...)`.
+                    // same type error as declaring `var r: int = M(...)`.
                     else if (a.Value is QMeasure && target is { Type: { } tt } && tt != QType.Bit)
                         Add(ctx.Errors, "QSEM017", $"in `{opName}`: `{a.Name}` is `{tt.ToString()!.ToLowerInvariant()}` but a measurement result is a `bit`", a.Span);
                     if (QNodes.TreesOf(a.Value).Any(QNodes.ContainsCall))
@@ -853,7 +853,7 @@ public static class QoraValidator
 
         // QSEM014 — the same qubit twice in one gate. Whole registers count: `CNOT(q, q)` broadcasts to
         // duplicate operands, and `CNOT(q, q[0])` overlaps the register with its own element. Indexes are
-        // compared by FOLDED VALUE, never by spelling: `CNOT(q[k], q[2])` with `const int k = 2` is the
+        // compared by FOLDED VALUE, never by spelling: `CNOT(q[k], q[2])` with `const k: int = 2` is the
         // same qubit twice — the same calculator the bounds prover uses, so no two spellings of one index
         // can slip past as "different" qubits.
         // Each qubit operand's index resolves to a DOMAIN of possible values: a const/literal folds to one
@@ -892,7 +892,7 @@ public static class QoraValidator
         // QSEM004 — measurement only exists in the assignment forms.
         if (!ctx.Ops.Contains(g.Name) && QoraGates.MeasureLike.Contains(g.Name))
         {
-            Add(errors, "QSEM004", $"in `{opName}`: a bare measurement statement is not supported: assign the result instead: `bit r = {QoraGates.Measurement}(q[i]);`", g.Span);
+            Add(errors, "QSEM004", $"in `{opName}`: a bare measurement statement is not supported: assign the result instead: `var r: bit = {QoraGates.Measurement}(q[i]);`", g.Span);
             return;
         }
 
@@ -1140,7 +1140,7 @@ public static class QoraValidator
                     CheckExprIndexes(element, scope, opName, errors, unproven, deferred, paramNeeds, span, bounds);
                 break;
             // A measurement's target index must be bounds-checked here too — a measurement NESTED in an
-            // array-literal initializer (`bit[] r = [M(q[3])]`) reaches this recursion, whereas the QDecl
+            // array-literal initializer (`var r: bit[] = [M(q[3])]`) reaches this recursion, whereas the QDecl
             // handler's measurement branch only fires for a DIRECT `M(...)` value.
             case QMeasure { Target: { } target }:
                 CheckQubitIndex(target, scope, opName, errors, unproven, deferred, paramNeeds, span, bounds);

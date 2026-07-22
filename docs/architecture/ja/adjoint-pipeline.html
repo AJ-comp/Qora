@@ -203,13 +203,13 @@
     <strong>ゲート、古典宣言、for ループ、if 分岐、ネスト呼び出し</strong> — を 1 つのプログラムにすべて詰め込みました。
   </p>
 
-<pre><code>operation Inner(Qubit[] q) {           <span class="cm">// ネスト呼び出しの対象</span>
+<pre><code>operation Inner(q: Qubit[]) {           <span class="cm">// ネスト呼び出しの対象</span>
     H(q[0]);
     T(q[1]);
 }
 
-operation Outer(Qubit[] q, bit b) {
-    int k = 2;                         <span class="cm">// ① 古典宣言</span>
+operation Outer(q: Qubit[], b: bit) {
+    var k: int = 2;                    <span class="cm">// ① 古典宣言</span>
     Inner(q);                          <span class="cm">// ② ネスト呼び出し</span>
     Rx(pi/k, q[0]);                    <span class="cm">// ③ ゲート(宣言値を角度として使用)</span>
     for i in 0..q.Count-1 {            <span class="cm">// ④ 受け取った配列を回る for ループ</span>
@@ -223,7 +223,7 @@ operation Outer(Qubit[] q, bit b) {
 
 operation Main() {
     use q = Qubit[2];
-    bit r = M(q[0]);
+    var r: bit = M(q[0]);
     Outer(q, r);
     <span class="hl">Adjoint Outer(q, r);</span>               <span class="cm">// ★ この 1 行が逆合成の全体を引き起こす</span>
 }</code></pre>

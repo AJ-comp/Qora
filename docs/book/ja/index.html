@@ -596,7 +596,7 @@
       <tr><th>標準的な概念</th><th>このドキュメントですること</th><th>Qoraで見える形</th></tr>
       <tr><td>状態ベクトル</td><td>キュービットがどんな振幅を持っているかを読みます</td><td><code>use q = Qubit[1];</code></td></tr>
       <tr><td>ユニタリゲート</td><td>状態ベクトルを保存できる形で変えます</td><td><code>H(q[0]);</code>, <code>X(q[0]);</code></td></tr>
-      <tr><td>測定</td><td>振幅の絶対値の2乗から結果の確率を得ます</td><td><code>bit r = M(q[0]);</code></td></tr>
+      <tr><td>測定</td><td>振幅の絶対値の2乗から結果の確率を得ます</td><td><code>var r: bit = M(q[0]);</code></td></tr>
       <tr><td>複数のキュービットと量子もつれ</td><td>基底状態の数が増え、全体の状態が個々のキュービット状態へ分かれない場合もあることを見ます</td><td><code>CNOT(q[0], q[1]);</code></td></tr>
     </table>
   </div>

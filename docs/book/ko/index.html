@@ -596,7 +596,7 @@
       <tr><th>정석 개념</th><th>이 문서에서 하는 일</th><th>Qora에서 보이는 형태</th></tr>
       <tr><td>상태 벡터</td><td>큐비트가 어떤 진폭을 가지고 있는지 읽어요</td><td><code>use q = Qubit[1];</code></td></tr>
       <tr><td>유니터리 게이트</td><td>상태 벡터를 보존 가능한 방식으로 바꿔요</td><td><code>H(q[0]);</code>, <code>X(q[0]);</code></td></tr>
-      <tr><td>측정</td><td>진폭의 절댓값 제곱으로 결과 확률을 얻어요</td><td><code>bit r = M(q[0]);</code></td></tr>
+      <tr><td>측정</td><td>진폭의 절댓값 제곱으로 결과 확률을 얻어요</td><td><code>var r: bit = M(q[0]);</code></td></tr>
       <tr><td>여러 큐비트와 얽힘</td><td>기저 상태 수가 늘어나고, 전체 상태가 각 큐비트로 분리되지 않을 수도 있다는 점을 봐요</td><td><code>CNOT(q[0], q[1]);</code></td></tr>
     </table>
   </div>

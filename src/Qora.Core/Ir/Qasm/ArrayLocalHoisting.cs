@@ -21,8 +21,8 @@ namespace Qora.Ir;
 ///
 ///   R1  classical array (<c>int[]/float[]/angle[]</c>) in a def-emitted op — hidden-parameter threading
 ///       (the C++ hidden-<c>this</c> shape):
-///         operation Helper(Qubit q) {              array[int, 3] Helper_tbl = {0, 0, 0};   // global backing
-///             int[] tbl = [1, 2, 3];        →      def Helper(qubit q, mutable array[int, #dim = 1] tbl) {
+///         operation Helper(q: Qubit) {             array[int, 3] Helper_tbl = {0, 0, 0};   // global backing
+///             var tbl: int[] = [1, 2, 3];   →      def Helper(qubit q, mutable array[int, #dim = 1] tbl) {
 ///             …                                        tbl[0] = 1; tbl[1] = 2; tbl[2] = 3; // re-init in place
 ///         }                                            …
 ///         Helper(q[0]);                            Helper(q[0], Helper_tbl);               // caller supplies it

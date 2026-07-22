@@ -211,7 +211,7 @@
     CNOT(q[0], t[0]);   <span class="cm">// t의 마지막 사용 = 사망점</span>
     <span class="add">CNOT(q[0], t[0]);</span>   <span class="cm">// ← 컴파일러가 자동 주입</span>
     H(q[0]);
-    bit m = M(q[0]);
+    var m: bit = M(q[0]);
     <span class="cm">// m = 0 (확률 100%)</span>
 }</code></pre>
   <p>
@@ -233,7 +233,7 @@
     CNOT(q[0], t[0]);
     <span class="rd">Y(t[0]);</span>            <span class="cm">// ← 추가된 한 줄</span>
     H(q[0]);
-    bit m = M(q[0]);
+    var m: bit = M(q[0]);
 }
 <span class="cm">// 컴파일 에러: t를 자동으로 치울 수 없음</span></code></pre>
   <p>
@@ -293,7 +293,7 @@
     use out = Qubit[1];
     <span class="rd">for i in 0..2 { X(a[i]); }</span>   <span class="cm">// 벌거벗은 루프</span>
     CNOT(a[0], out[0]);
-    bit c = M(out[0]);
+    var c: bit = M(out[0]);
 }
 <span class="cm">// a 청소 불가 (ContainedWrite) — 루프를 연산으로 감싸면 통과합니다 (12장)</span></code></pre>
   <p>
@@ -309,13 +309,13 @@
     아래 프로그램에서 측정된 <code>a[0]</code>은 출력으로 승격되고, <code>a[1]</code>만 청소 후보로
     판정되어 역연산이 자동 주입됩니다.
   </p>
-<pre><code>operation FlipOne(Qubit p){ X(p); }
+<pre><code>operation FlipOne(p: Qubit){ X(p); }
 operation Main(){
     use a = Qubit[2];
     FlipOne(a[0]);             <span class="cm">// 문장 폭 = a[0] 하나</span>
     FlipOne(a[1]);             <span class="cm">// a[1]의 마지막 사용 = 사망점</span>
     <span class="add">Adjoint FlipOne(a[1]);</span>     <span class="cm">// ← a[1]만 골라서 자동 주입</span>
-    bit c = M(a[0]);           <span class="cm">// c = 1 (확률 100%) — a[0]은 출력으로 승격</span>
+    var c: bit = M(a[0]);           <span class="cm">// c = 1 (확률 100%) — a[0]은 출력으로 승격</span>
 }</code></pre>
   <p>
     Classiq Qmod에서 배열은 수명상 한 덩어리라서, 같은 상황이 오면 사용자가 배열을 수동으로

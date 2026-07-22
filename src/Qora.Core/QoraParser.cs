@@ -163,7 +163,7 @@ public static class QoraParser
             else
             {
                 // Desugar a measurement written inside a condition (`if (M(q[i]) == v)`) into the two-step
-                // form OpenQASM needs (`bit t = M(q[i]); if (t == v)`). Runs before resolution/validation, so
+                // form OpenQASM needs (`var t: bit = M(q[i]); if (t == v)`). Runs before resolution/validation, so
                 // everything downstream sees only the lowered form.
                 merged = MeasureConditionLowering.Run(merged);
                 expanded = merged;

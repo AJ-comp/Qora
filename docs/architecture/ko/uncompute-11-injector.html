@@ -259,7 +259,7 @@ CCX(t, c, d);    <span class="cm">// ② action:   d ^= t AND c   ← t의 마�
     이번에는 앤실라 <code>t</code>를 게이트로 한
     번, 호출로 한 번, 총 두 번 편집해 봅니다.
   </p>
-<pre><code>operation Mix(Qubit s, Qubit d){
+<pre><code>operation Mix(s: Qubit, d: Qubit){
     X(d);                    <span class="cm">// d를 뒤집고</span>
     CNOT(s, d);              <span class="cm">// s를 XOR</span>
 }
@@ -272,8 +272,8 @@ operation Main(){
     CNOT(t[0], q[1]);        <span class="cm">// ③ action: q[1] ^= t  ← t의 마지막 사용 = 사망점</span>
     <span class="add">Adjoint Mix(q[0], t[0]);</span> <span class="cm">// 주입 1: ②의 역 — 호출은 Adjoint 호출로</span>
     <span class="add">X(t[0]);</span>                 <span class="cm">// 주입 2: ①의 역 — t가 |0⟩로 복귀</span>
-    bit m0 = M(q[0]);
-    bit m1 = M(q[1]);
+    var m0: bit = M(q[0]);
+    var m1: bit = M(q[1]);
     <span class="cm">// 항상 m0 == m1 (00 또는 11, 각각 50%)</span>
 }</code></pre>
   <p>

@@ -168,7 +168,7 @@
 X(a[0]);              <span class="cm">// a: |0⟩ → |1⟩ (기저 값만)</span>
 CNOT(a[0], out[0]);   <span class="cm">// a의 값을 out에 복사한다. 이후 a는 쓰이지 않는다</span>
 <span class="add">X(a[0]);</span>              <span class="cm">// ← 자동 주입될 청소: a → |0⟩</span>
-bit c = M(out[0]);    <span class="cm">// 결과 1, 결정론 — 주입 전과 완전 동일</span></code></pre>
+var c: bit = M(out[0]);    <span class="cm">// 결과 1, 결정론 — 주입 전과 완전 동일</span></code></pre>
   <div class="panel">
     <table class="spec">
       <tr><th>시점</th><th>상태벡터 (<code>|a,out⟩</code>)</th><th>일어난 일</th></tr>
@@ -205,7 +205,7 @@ CNOT(q[0], a[0]);     <span class="cm">// a가 q의 값을 기록 (기저 값만
 Z(a[0]);              <span class="cm">// a=1인 줄의 부호만 −로 (진폭만 — 읽기)</span>
 <span class="add">CNOT(q[0], a[0]);</span>     <span class="cm">// ← 자동 주입될 청소: a → |0⟩ (Z는 쓰기 이력에 없음)</span>
 H(q[0]);
-bit m = M(q[0]);      <span class="cm">// m = 1 (확률 100%)</span></code></pre>
+var m: bit = M(q[0]);      <span class="cm">// m = 1 (확률 100%)</span></code></pre>
   <div class="panel">
     <table class="spec">
       <tr><th>시점</th><th>상태벡터 (<code>|q,a⟩</code>)</th><th>일어난 일</th></tr>

@@ -160,7 +160,7 @@
     <code>a</code> 값이 다른 상태벡터를 만든 다음, 그 <code>a</code>에 Y 게이트를 적용합니다.
   </p>
 <pre><code>use a = Qubit[1];  use b = Qubit[1];
-H(b[0]);  CNOT(b[0], a[0]);  Y(a[0]);  H(b[0]);  bit m = M(b[0]);</code></pre>
+H(b[0]);  CNOT(b[0], a[0]);  Y(a[0]);  H(b[0]);  var m: bit = M(b[0]);</code></pre>
   <div class="panel">
     <table class="spec">
       <tr><th>시점</th><th>상태벡터 (<code>|b,a⟩</code>)</th><th>설명</th></tr>
@@ -240,7 +240,7 @@ H(b[0]);  CNOT(b[0], a[0]);  Y(a[0]);  H(b[0]);  bit m = M(b[0]);</code></pre>
 <pre><code>use a = Qubit[1];  use b = Qubit[1];
 H(b[0]);  CNOT(b[0], a[0]);  Y(a[0]);
 <span class="add">Y(a[0]);  CNOT(b[0], a[0]);</span>  <span class="cm">// ← 역연산 청소 (Y† = Y, CNOT† = CNOT)</span>
-H(b[0]);  bit m = M(b[0]);   <span class="cm">// m = 0 (확률 100%)</span></code></pre>
+H(b[0]);  var m: bit = M(b[0]);   <span class="cm">// m = 0 (확률 100%)</span></code></pre>
   <div class="panel">
     <table class="spec">
       <tr><th>시점</th><th>상태벡터 (<code>|b,a⟩</code>)</th><th>설명</th></tr>
@@ -294,7 +294,7 @@ H(b[0]);  bit m = M(b[0]);   <span class="cm">// m = 0 (확률 100%)</span></cod
   </p>
 <pre><code>use q = Qubit[1];
 Y(q[0]);            <span class="cm">// |0⟩ → +i|1⟩ — 줄이 하나뿐이므로 +i는 전역 위상</span>
-bit m = M(q[0]);    <span class="cm">// m = 1 (확률 100%) — X(q[0])를 썼을 때와 완전히 같은 결과</span></code></pre>
+var m: bit = M(q[0]);    <span class="cm">// m = 1 (확률 100%) — X(q[0])를 썼을 때와 완전히 같은 결과</span></code></pre>
   <p>
     다만 현재 판정은 이 구분을 아직 활용하지 않습니다.<br>
     얽힘 여부와 무관하게 Y·CY 쓰기를 일괄 차단하는 보수적 형태이며, 확정 기저값 위의 Y 게이트를 다시

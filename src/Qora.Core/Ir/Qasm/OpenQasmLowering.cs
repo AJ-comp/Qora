@@ -10,7 +10,7 @@ namespace Qora.Ir.Passes;
 ///
 /// Current job — <b>const demotion</b>: a Qora <c>const</c> is a Q#-<c>let</c>-style IMMUTABLE BINDING that
 /// accepts ANY value (QSEM024), but OpenQASM's <c>const</c> requires a COMPILE-TIME-constant initializer. So
-/// a <c>const</c> bound to a runtime value (<c>const int c = x;</c>) is demoted to a plain declaration
+/// a <c>const</c> bound to a runtime value (<c>const c: int = x;</c>) is demoted to a plain declaration
 /// (<c>int c = x;</c>) for emission. Immutability is NOT lost: the source-level check (QSEM024) already
 /// forbids reassignment, so the emitted variable is never written again — effectively immutable, exactly how
 /// QIR/LLVM represents such a binding (an SSA value, which is single-assignment but not a <c>constant</c>).

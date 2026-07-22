@@ -145,7 +145,7 @@
     앤실라 <code>a</code>는 |111⟩이 된 뒤 첫 원소의 값을 <code>out</code>에 복사하고, 프로그램은
     <code>out</code>만 측정합니다.
   </p>
-<pre><code>operation Flip(Qubit[3] p){
+<pre><code>operation Flip(p: Qubit[]){
     for i in 0..2 { X(p[i]); }   <span class="cm">// 루프는 연산 안에 삽니다</span>
 }
 operation Main(){
@@ -153,7 +153,7 @@ operation Main(){
     use out = Qubit[1];
     Flip(a);                     <span class="cm">// a를 편집한 유일한 문장 — a는 |111⟩</span>
     CNOT(a[0], out[0]);          <span class="cm">// a의 값을 out에 복사한다. 이후 a는 쓰이지 않는다</span>
-    bit c = M(out[0]);           <span class="cm">// c = 1 (확률 100%)</span>
+    var c: bit = M(out[0]);           <span class="cm">// c = 1 (확률 100%)</span>
 }</code></pre>
   <p>
     11장의 절차를 그대로 밟아 보겠습니다.<br>
@@ -167,7 +167,7 @@ operation Main(){
 <pre><code>    Flip(a);                     <span class="cm">// a는 |111⟩</span>
     CNOT(a[0], out[0]);          <span class="cm">// 사망점</span>
     <span class="add">Adjoint Flip(a);</span>             <span class="cm">// ← 주입된 역 — 문장 하나, 실행 한 번, a는 |000⟩로 복귀</span>
-    bit c = M(out[0]);           <span class="cm">// c = 1 (확률 100%) — 주입 전과 동일</span></code></pre>
+    var c: bit = M(out[0]);           <span class="cm">// c = 1 (확률 100%) — 주입 전과 동일</span></code></pre>
   <p>
     <code>a</code>는 safe 판정을 받고, 이 주입으로 |000⟩까지 되돌아가 반납됩니다.<br>
     주입된 문장 하나가 세 번의 X 게이트를 전부 되돌릴 수 있는 근거는 유니터리의 성질입니다.<br>
@@ -214,7 +214,7 @@ operation Main(){
     use out = Qubit[1];
     <span class="rd">for i in 0..2 { X(a[i]); }</span>   <span class="cm">// ← 바뀐 한 줄: 호출 대신 벌거벗은 루프</span>
     CNOT(a[0], out[0]);          <span class="cm">// 사망점 — 계산 내용은 1단계와 완전히 같음</span>
-    bit c = M(out[0]);
+    var c: bit = M(out[0]);
 }</code></pre>
   <p>
     계산의 내용은 조금도 변하지 않았습니다.<br>
@@ -232,7 +232,7 @@ operation Main(){
 <pre><code>    for i in 0..2 { X(a[i]); }   <span class="cm">// i는 이 중괄호 안에서만 존재하는 이름</span>
     CNOT(a[0], out[0]);          <span class="cm">// 사망점</span>
     <span class="rd">X(a[i]);</span>                     <span class="cm">// ← 붙여넣기 시도 — i가 루프 밖에 없음 (성립하지 않는 텍스트)</span>
-    bit c = M(out[0]);           <span class="cm">// 게다가 문장 1개의 역 1개 ≠ 실행 3번</span></code></pre>
+    var c: bit = M(out[0]);           <span class="cm">// 게다가 문장 1개의 역 1개 ≠ 실행 3번</span></code></pre>
   <p>
     실패가 두 겹으로 겹쳐 있습니다.<br>
     첫째, 붙여넣은 문장 속의 <code>i</code>는 루프 안에서만 존재하는 이름이라서, 루프 밖에 놓인
@@ -283,7 +283,7 @@ operation Main(){
   <div class="grid2">
     <div class="card good">
       <h4>연산으로 감싼 루프 — ✅ safe</h4>
-<pre><code>operation Flip(Qubit[3] p){
+<pre><code>operation Flip(p: Qubit[]){
   for i in 0..2 { X(p[i]); }
 }
 use a = Qubit[3];

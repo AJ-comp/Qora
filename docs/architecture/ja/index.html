@@ -221,7 +221,7 @@
   </p>
 
 <pre><code>namespace Prep {
-    operation Fanout(Qubit[] q) {        <span class="cm">// 配列長は呼び出しごとに決まる</span>
+    operation Fanout(q: Qubit[]) {        <span class="cm">// 配列長は呼び出しごとに決まる</span>
         for i in 0..q.Count-1 { H(q[i]); }
     }
 }
@@ -230,7 +230,7 @@ operation Main() {
     use reg = Qubit[3];
     Prep.Fanout(reg);                    <span class="cm">// 名前空間をまたぐ呼び出し</span>
     <span class="hl">Adjoint Prep.Fanout(reg);</span>            <span class="cm">// 元に戻す — コンパイラが逆演算を合成</span>
-    bit r = M(reg[0]);
+    var r: bit = M(reg[0]);
 }</code></pre>
 
   <p>

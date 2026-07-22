@@ -221,7 +221,7 @@
   </p>
 
 <pre><code>namespace Prep {
-    operation Fanout(Qubit[] q) {        <span class="cm">// the array length comes from each call site</span>
+    operation Fanout(q: Qubit[]) {        <span class="cm">// the array length comes from each call site</span>
         for i in 0..q.Count-1 { H(q[i]); }
     }
 }
@@ -230,7 +230,7 @@ operation Main() {
     use reg = Qubit[3];
     Prep.Fanout(reg);                    <span class="cm">// call across a namespace</span>
     <span class="hl">Adjoint Prep.Fanout(reg);</span>            <span class="cm">// undo it — the compiler synthesizes the inverse</span>
-    bit r = M(reg[0]);
+    var r: bit = M(reg[0]);
 }</code></pre>
 
   <p>
@@ -428,7 +428,7 @@ qubit[2] q;
   <p class="stagehead">in: validated IR &nbsp;·&nbsp; out: IR with concrete-size ops &nbsp;·&nbsp; pass: <code>Monomorphizer</code></p>
 
   <p>
-    The surface type <code>Fanout(Qubit[] q)</code> deliberately omits the array length. At each call site,
+    The surface type <code>Fanout(q: Qubit[])</code> deliberately omits the array length. At each call site,
     the monomorphizer reads the actual register size, <strong>stamps out a concrete internal copy</strong>,
     replaces <code>q.Count</code> with that size, and rewrites the call to point at the copy. Our call passes
     <code>reg</code> (3 qubits), so:

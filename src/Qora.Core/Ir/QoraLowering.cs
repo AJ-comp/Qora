@@ -267,7 +267,7 @@ public static class QoraLowering
     }
 
     // A decl/assign RHS. The only legal call form is a LONE call to the registered measurement
-    // function (`bit r = M(q[i]);`), which becomes QMeasure — exact name, no aliases. Any other call —
+    // function (`var r: bit = M(q[i]);`), which becomes QMeasure — exact name, no aliases. Any other call —
     // a different name, or a call mixed with arithmetic — has no OpenQASM lowering: the tree keeps the
     // call node and the validator rejects it (QText.HasCall derives from the tree). Nothing is silently
     // dropped: the old code truncated `M(q) + 1` to just the measure, and read ANY call name as a

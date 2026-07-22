@@ -168,10 +168,10 @@
     use q = Qubit[2];
     H(q[1]);                    <span class="cm">// q[1]을 중첩으로 준비 — 기다리는 동안 "상할 수 있는" 상태</span>
     H(q[0]);
-    bit m = M(q[0]);            <span class="cm">// 측정 — 여기서 시계가 돌기 시작합니다</span>
+    var m: bit = M(q[0]);       <span class="cm">// 측정 — 여기서 시계가 돌기 시작합니다</span>
     if (m == 1) { Z(q[1]); }    <span class="cm">// 결과가 1이면 같은 코히어런스 창 안에서 위상 보정</span>
     H(q[1]);                    <span class="cm">// 보정이 제때 됐다면 중첩이 확정값으로 접힘</span>
-    bit r = M(q[1]);            <span class="cm">// 제때 실행되면 항상 r == m</span>
+    var r: bit = M(q[1]);       <span class="cm">// 제때 실행되면 항상 r == m</span>
 }</code></pre>
   <p>
     보정이 제때 적용되었을 때 왜 항상 <code>r == m</code>이 되는지는, <code>m</code>이 0인 경우와 1인
@@ -220,7 +220,7 @@
     <code>if</code> 한 줄을 회로로 컴파일해 내려보내는 대신, 호스트에 남겨 두고 인터프리터가
     실행하게 합니다.
   </p>
-<pre><code>    bit m = M(q[0]);
+<pre><code>    var m: bit = M(q[0]);
     <span class="rd">if (m == 1) { Z(q[1]); }</span>    <span class="cm">// ← 이 한 줄만 호스트의 인터프리터가 실행하도록 바뀜</span>
     H(q[1]);</code></pre>
   <p>

@@ -222,7 +222,7 @@ public sealed record QGate(IReadOnlyList<string> Functors, string Name, IReadOnl
     public int? CalleeOpId { get; init; }
 }
 
-/// <summary><c>const int n = e;</c> / <c>int n = e;</c> / <c>bit r = M(q);</c> (measurement when Value is <see cref="QMeasure"/>).</summary>
+/// <summary><c>const n: int = e;</c> / <c>var n: int = e;</c> / <c>var r: bit = M(q);</c> (measurement when Value is <see cref="QMeasure"/>).</summary>
 public sealed record QDecl(bool IsConst, QType? Type, string Name, QExpr Value) : QStmt
 {
     /// <summary>True when <see cref="Type"/> is the element type of a source <c>T[]</c>.</summary>
@@ -289,7 +289,7 @@ public sealed record QTextArg(QNode? Tree = null) : QArg
 
 public abstract record QExpr;
 
-/// <summary>A measurement as a whole initializer/RHS — the one legal call-in-expression form (<c>bit r = M(q[i]);</c>).</summary>
+/// <summary>A measurement as a whole initializer/RHS — the one legal call-in-expression form (<c>var r: bit = M(q[i]);</c>).</summary>
 public sealed record QMeasure(QQubitArg? Target) : QExpr;
 
 /// <summary>
@@ -473,7 +473,7 @@ public static class QoraGates
 
     /// <summary>
     /// The one registered measurement function. Only a lone <c>M(q[i])</c> is a legal value
-    /// (<c>bit r = M(q[i]);</c>); no alias is accepted.
+    /// (<c>var r: bit = M(q[i]);</c>); no alias is accepted.
     /// </summary>
     public const string Measurement = "M";
 

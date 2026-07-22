@@ -596,7 +596,7 @@
       <tr><th>Standard concept</th><th>What this book does with it</th><th>How it appears in Qora</th></tr>
       <tr><td>State vector</td><td>Read which amplitudes a qubit is carrying</td><td><code>use q = Qubit[1];</code></td></tr>
       <tr><td>Unitary gate</td><td>Change the state vector in a way that can be reversed</td><td><code>H(q[0]);</code>, <code>X(q[0]);</code></td></tr>
-      <tr><td>Measurement</td><td>Get outcome probabilities from the squared absolute values of amplitudes</td><td><code>bit r = M(q[0]);</code></td></tr>
+      <tr><td>Measurement</td><td>Get outcome probabilities from the squared absolute values of amplitudes</td><td><code>var r: bit = M(q[0]);</code></td></tr>
       <tr><td>Multiple qubits and entanglement</td><td>The number of basis states grows, and the overall state may not separate into individual qubit states</td><td><code>CNOT(q[0], q[1]);</code></td></tr>
     </table>
   </div>

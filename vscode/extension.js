@@ -35,19 +35,19 @@ const DOCS = {
   'Ry': '**Ry(θ, q)** — Y축 회전\n\n큐비트를 Y축으로 각도 θ만큼 회전.\n\n`Ry(0.5, q[0]);` → `ry(0.5) q[0];`',
   'Rz': '**Rz(θ, q)** — Z축 회전\n\n큐비트의 **위상**을 각도 θ만큼 회전.\n\n`Rz(pi/4, q[0]);` → `rz(pi/4) q[0];`',
   // measurement
-  'M': '**M(q)** — 측정\n\n큐비트를 측정해서 **0 또는 1로 확정**(붕괴)시키고, 그 값을 비트로 돌려줘요.\n\n`bit r = M(q[0]);` → `r = measure q[0];`',
+  'M': '**M(q)** — 측정\n\n큐비트를 측정해서 **0 또는 1로 확정**(붕괴)시키고, 그 값을 비트로 돌려줘요.\n\n`var r: bit = M(q[0]);` → `r = measure q[0];`',
   // constants & keywords
   'pi': '**pi** — 원주율 π ≈ 3.14159\n\n회전 각도에 써요: `Rx(pi/2, q)`(90°), `Rz(pi/4, q)`(45°).',
   'operation': '**operation** — 함수(서브루틴) 정의\n\n`operation 이름(파라미터) { … }`\n`Main`이 진입점, 나머지는 OpenQASM `def`가 돼요.',
   'use': '**use** — 큐비트 할당\n\n`use q = Qubit[n];` — 큐비트 n개를 빌려 q로.\n\n→ `qubit[n] q;`',
-  'Qubit': '**Qubit** — 양자 비트 타입\n\n연산 파라미터는 `Qubit[] q`, 할당은 `use q = Qubit[2];`처럼 써요. 파라미터의 크기는 `q.Count`로 확인해요.',
-  'new': '**new T[N]** — 고전 배열 만들기\n\n`int[] values = new int[3];`처럼 쓰면 0으로 초기화된 원소 N개를 만들어요.',
-  'const': '**const** — 불변 변수\n\n`const int n = 3;` / `const k = 5`. 한 번 정하면 못 바꿔요.',
+  'Qubit': '**Qubit** — 양자 비트 타입\n\n연산 파라미터는 `q: Qubit[]`, 할당은 `use q = Qubit[2];`처럼 써요. 파라미터의 크기는 `q.Count`로 확인해요.',
+  'new': '**new T[N]** — 고전 배열 만들기\n\n`var values: int[] = new int[3];`처럼 쓰면 0으로 초기화된 원소 N개를 만들어요.',
+  'const': '**const** — 불변 변수\n\n`const n: int = 3;` / `const k = 5`. 한 번 정하면 못 바꿔요.',
   'var': '**var** — 가변 변수\n\n`var i = 0;` 후 `i = i + 1;`로 바꿀 수 있어요.',
-  'bit': '**bit** — 고전 비트 (0/1)\n\n측정 결과를 담아요. `bit r = M(q[0]);`',
-  'int': '**int** — 정수\n\n`int i = 0;` / `const int n = 3;`',
-  'float': '**float** — 실수\n\n`float[] values = [0.25, 0.5];`처럼 스칼라나 배열 원소에 써요.',
-  'angle': '**angle** — 회전 각도\n\n`angle theta = pi/2;`처럼 양자 게이트의 각도를 나타내요.',
+  'bit': '**bit** — 고전 비트 (0/1)\n\n측정 결과를 담아요. `var r: bit = M(q[0]);`',
+  'int': '**int** — 정수\n\n`var i: int = 0;` / `const n: int = 3;`',
+  'float': '**float** — 실수\n\n`var values: float[] = [0.25, 0.5];`처럼 스칼라나 배열 원소에 써요.',
+  'angle': '**angle** — 회전 각도\n\n`var theta: angle = pi/2;`처럼 양자 게이트의 각도를 나타내요.',
   'Count': '**Count** — 배열 길이\n\n`q.Count`나 `values.Count`처럼 읽으며, 인덱스 반복 범위는 보통 `0..array.Count-1`로 써요.',
   'if': '**if** — 조건 분기\n\n`if (r == 1) { … }`. 보통 측정 결과 r로 분기(측정 피드백).',
   'for': '**for** — 범위 반복\n\n`for i in 0..2 { … }` — i가 0,1,2 (양끝 포함).',
@@ -57,7 +57,7 @@ const DOCS = {
 
 const WALKTHROUGH_ID = 'qora-lang.qora-language#qora.gettingStarted';
 
-const BELL_EXAMPLE = `operation Bell(Qubit[] q) {
+const BELL_EXAMPLE = `operation Bell(q: Qubit[]) {
     H(q[0]);
     CNOT(q[0], q[1]);
 }
@@ -66,8 +66,8 @@ operation Main() {
     use q = Qubit[2];
     Bell(q);
 
-    bit r0 = M(q[0]);
-    bit r1 = M(q[1]);
+    var r0: bit = M(q[0]);
+    var r1: bit = M(q[1]);
 }
 `;
 

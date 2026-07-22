@@ -142,7 +142,7 @@
 <pre><code>use q = Qubit[1];
 X(q[0]);       <span class="cm">// 상태벡터: (1)→1, 줄 하나</span>
 Z(q[0]);       <span class="cm">// 유일한 줄에 부호 − → 전역 위상</span>
-bit m = M(q[0]);
+var m: bit = M(q[0]);
 <span class="cm">// m = 1 (확률 100%) — Z를 지워도 동일</span></code></pre>
   <div class="panel">
     <table class="spec">
@@ -167,7 +167,7 @@ bit m = M(q[0]);
 H(q[0]);       <span class="cm">// 상태벡터: (0)→1/√2, (1)→1/√2</span>
 <span class="rd">Z(q[0]);</span>       <span class="cm">// ← 추가된 한 줄: 1인 줄에만 부호 −</span>
 H(q[0]);
-bit m = M(q[0]);
+var m: bit = M(q[0]);
 <span class="cm">// m = 1 (확률 100%) — Z가 없으면 m = 0</span></code></pre>
   <div class="panel">
     <table class="spec">
