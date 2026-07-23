@@ -27,7 +27,7 @@
     },
     "keywords": {
       "name": "keyword.control.qor",
-      "match": "\\b(import|namespace|open|operation|use|new|const|var|if|for|in|while|repeat|until)\\b"
+      "match": "\\b(import|namespace|open|operation|function|return|use|new|const|var|if|for|in|while|repeat|until)\\b"
     },
     "types": {
       "name": "storage.type.qor",
@@ -35,7 +35,7 @@
     },
     "gates": {
       "name": "support.function.qor",
-      "match": "\\b(CNOT|CCX|SWAP|CX|CY|CZ|Rx|Ry|Rz|H|X|Y|Z|S|T|M)\\b"
+      "match": "\\b(CNOT|CCX|SWAP|CX|CY|CZ|Rx|Ry|Rz|H|X|Y|Z|S|T|M|AsInt)\\b"
     },
     "constants": {
       "name": "constant.language.qor",

@@ -80,6 +80,21 @@ namespace Qora.Ir.Passes;
 ///         <c>bit[N]</c> register (references exist only for array-typed parameters, which bit cannot
 ///         be), so the write would silently never reach the caller — banned so the value/reference
 ///         asymmetry between <c>bit[]</c> and the other <c>T[]</c> parameters stays unobservable.</item>
+///   <item><b>QSEM036</b> — a WHOLE <c>bit[]</c> register read as a NUMBER (assigned to an <c>int</c>, used
+///         in arithmetic, used as a bare truth condition, compared against a number), or compared to a
+///         register of a different width, or ordered (<c>&lt;</c>/<c>&gt;</c>) against another register. A bit
+///         pattern carries no sign, so it has no numeric value on its own — the same bits read 2 unsigned and
+///         −2 in two's complement — and the language refuses to choose one silently. <c>AsInt(f)</c> is the
+///         one explicit reading. Raised in <see cref="SymbolTableBuilder"/>'s expression walk, the single
+///         place that pairs each position with its own scope, so no position can be forgotten; the four spots
+///         where a whole register IS legitimate (index base, <c>.Count</c> base, an argument, and
+///         <c>==</c>/<c>!=</c> against an equal-width register) are carved out by the PARENT node.</item>
+///   <item><b>QSEM035</b> — a <c>return</c> in an <c>operation</c> (void), or a <c>function</c> with a path
+///         that produces no value. Nothing is said about WHERE a return stands: it may sit anywhere a
+///         statement may, and <see cref="ReturnFlattening"/> reshapes the function into the single-bottom-
+///         return form the execution target needs. The coverage predicate is literally the pass's own
+///         (<c>ReturnFlattening.AlwaysReturns</c>), so what validation accepts is exactly what it can
+///         reshape — the two can never drift apart.</item>
 /// </list>
 /// Earlier pipeline steps own the remaining codes, and each step's errors preempt this validator:
 /// QSEM020 (import file not found/unreadable) comes from <see cref="ModuleLoader"/>;
@@ -173,6 +188,11 @@ public static class QoraValidator
         void CollectCallTargets(IReadOnlyList<QStmt> body, HashSet<int> ids, HashSet<string> names)
         {
             foreach (var s in body)
+            {
+                // Function calls in expressions (value/condition/argument/return) are call edges too.
+                foreach (var tree in QNodes.ExpressionSites(s))
+                    foreach (var call in QNodes.CallsIn(tree))
+                        names.Add(call.Name);
                 switch (s)
                 {
                     case QGate g:
@@ -185,6 +205,7 @@ public static class QoraValidator
                     case QRepeat r: CollectCallTargets(r.Body, ids, names); break;
                     case QConjugate c: CollectCallTargets(c.Within, ids, names); CollectCallTargets(c.Apply, ids, names); break;
                 }
+            }
         }
 
         // worklist closure: seed with every CONCRETE op's call targets, then follow reached generics.
@@ -213,7 +234,8 @@ public static class QoraValidator
             // gate-named one could never be referenced. Inside a namespace a gate name is legal
             // (Q#-style): the resolver makes any ambiguous USE an explicit QSEM018, never a silent pick.
             var simpleName = Simple(op.Name);
-            if (QoraGates.MeasureLike.Contains(simpleName) || SymbolTableBuilder.IsReservedName(simpleName))
+            if (QoraGates.MeasureLike.Contains(simpleName) || QoraGates.Functions.ContainsKey(simpleName)
+                || SymbolTableBuilder.IsReservedName(simpleName))
                 Add(errors, "QSEM013", $"operation name `{simpleName}` shadows the built-in `{simpleName}`; choose another name", op.Span);
             else if (!op.Name.Contains('.') && QoraGates.Names.ContainsKey(simpleName))
                 Add(errors, "QSEM013", $"global operation `{simpleName}` shadows the built-in gate `{simpleName}` (the global namespace shares one scope with the built-ins, so it has no qualifier to disambiguate with); move it into a namespace or rename it", op.Span);
@@ -245,6 +267,7 @@ public static class QoraValidator
             var ctx = new Ctx(op, entry.Name, ops, opByName, opById, inverter, errors, unproven,
                 deferred, opNeeds, new ArrayFloorSink(op.Id, calls), scopeOf, willBeRechecked);
             Walk(op.Body, root, ctx, inControlFlow: false);
+            if (op.IsFunction) ValidateFunctionShape(op, ctx);
         }
 
         // Rung B'/P4 disposition, derived from the recorded facts. First PROPAGATE: a caller that hands its
@@ -375,7 +398,7 @@ public static class QoraValidator
                 case QUnary u: stack.Push((u.Operand, d + 1)); break;
                 case QMember m: stack.Push((m.Base, d + 1)); break;
                 case QIndexNode ix: stack.Push((ix.Base, d + 1)); stack.Push((ix.Index, d + 1)); break;
-                case QCallNode { Arg: { } arg }: stack.Push((arg, d + 1)); break;
+                case QCallNode c: foreach (var a in c.Args) stack.Push((a, d + 1)); break;
             }
         }
         return false;
@@ -563,12 +586,14 @@ public static class QoraValidator
                     else if (d.Value is QArrayLiteral or QArrayNew)
                         Add(ctx.Errors, "QSEM029", $"in `{opName}`: scalar `{d.Name}` cannot be initialized with an array value; declare it as `T[]`", d.Span);
 
-                    // A call has no OpenQASM expression form — wherever it sits in the value (the whole
-                    // initializer, or an array literal's ELEMENT: `var b: int[] = [f(x), 2]` would otherwise
-                    // ship a call inside a `{…}` initializer — invalid OpenQASM, and misleading QSEM025
-                    // noise for `M`). TreesOf is the canonical value enumeration, so no shape hides one.
-                    if (QNodes.TreesOf(d.Value).Any(QNodes.ContainsCall))
-                        Add(ctx.Errors, "QSEM005", $"in `{opName}`: the initializer of `{d.Name}` contains a call; only the lone form `var r: bit = M(q[i]);` is supported", d.Span);
+                    // A FUNCTION call is a legal scalar value (`var k: int = two();`), checked by CheckExprCalls.
+                    // A measurement or operation call is not; nor is a call inside an array-literal ELEMENT
+                    // (`var b: int[] = [f(x), 2]` would ship a call inside a `{…}` initializer — invalid
+                    // OpenQASM), which stays QSEM005 via the TreesOf enumeration.
+                    if (d.Value is QText { Tree: { } declTree })
+                        CheckExprCalls(declTree, scope, ctx, opName, d.Span);
+                    else if (QNodes.TreesOf(d.Value).Any(QNodes.ContainsCall))
+                        Add(ctx.Errors, "QSEM005", $"in `{opName}`: the initializer of `{d.Name}` contains a call; only the lone form `var r: bit = M(q[i]);` or a `function` call is supported here", d.Span);
                     // CheckExprIndexes bounds-checks every index in the value, INCLUDING a measurement target
                     // (direct or nested in an array literal) — the single measure-index check, so no dedicated
                     // CheckQubitIndex is repeated here (that duplicated the diagnostic).
@@ -615,15 +640,17 @@ public static class QoraValidator
                     // same type error as declaring `var r: int = M(...)`.
                     else if (a.Value is QMeasure && target is { Type: { } tt } && tt != QType.Bit)
                         Add(ctx.Errors, "QSEM017", $"in `{opName}`: `{a.Name}` is `{tt.ToString()!.ToLowerInvariant()}` but a measurement result is a `bit`", a.Span);
-                    if (QNodes.TreesOf(a.Value).Any(QNodes.ContainsCall))
-                        Add(ctx.Errors, "QSEM005", $"in `{opName}`: the value assigned to `{a.Name}` contains a call; only the lone form `{a.Name} = M(q[i]);` is supported", a.Span);
+                    if (a.Value is QText { Tree: { } assignTree })
+                        CheckExprCalls(assignTree, scope, ctx, opName, a.Span);
+                    else if (QNodes.TreesOf(a.Value).Any(QNodes.ContainsCall))
+                        Add(ctx.Errors, "QSEM005", $"in `{opName}`: the value assigned to `{a.Name}` contains a call; only the lone form `{a.Name} = M(q[i]);` or a `function` call is supported here", a.Span);
                     // CheckExprIndexes bounds-checks the measure target too (via its QMeasure case) — the
                     // single measure-index check, so no dedicated CheckQubitIndex is repeated (it duplicated).
                     CheckExprIndexes(a.Value, scope, opName, ctx.Errors, ctx.Unproven, ctx.Deferred, ctx.ParamNeeds, a.Span, flow);
                     break;
 
                 case QIf i:
-                    CheckCondition(i.Cond, opName, ctx.Errors, i.Span);
+                    CheckCondition(i.Cond, scope, ctx, opName, i.Span);
                     CheckTextIndexes(i.Cond.Tree, scope, opName, ctx.Errors, ctx.Unproven, ctx.Deferred, ctx.ParamNeeds, i.Span, flow);
                     // P5 — the then-branch runs only when the guard held, so a guarded index is proven there.
                     // The guard's names resolve HERE, at the if's own scope: the facts are about these
@@ -635,8 +662,11 @@ public static class QoraValidator
                     // A `for` bound is a plain expression; a call/measurement there has no OpenQASM lowering.
                     // Judged structurally (a call is a NODE, QSEM005). The bounds ARE trees now — the old
                     // dropped-tree desync is unrepresentable, so no tree-presence guard exists to need.
+                    // A `for` bound must be statically foldable (the bounds prover ranges the loop variable
+                    // over it), so it stays call-free — a measurement OR a function call is rejected; compute
+                    // the bound into a variable first and use that.
                     if (QNodes.ContainsCall(f.From) || QNodes.ContainsCall(f.To))
-                        Add(ctx.Errors, "QSEM005", $"in `{opName}`: a `for` bound cannot contain a call or measurement; measure into a bit first and use a numeric or variable bound", f.Span);
+                        Add(ctx.Errors, "QSEM005", $"in `{opName}`: a `for` bound cannot contain a call or measurement; compute it into a variable first and use a numeric or variable bound", f.Span);
                     CheckTextIndexes(f.From, scope, opName, ctx.Errors, ctx.Unproven, ctx.Deferred, ctx.ParamNeeds, f.Span, flow);
                     CheckTextIndexes(f.To, scope, opName, ctx.Errors, ctx.Unproven, ctx.Deferred, ctx.ParamNeeds, f.Span, flow);
                     // Step has no surface syntax (synthesized "-1" by the inverter, post-validation) and carries no index.
@@ -671,7 +701,7 @@ public static class QoraValidator
                 case QWhile w:
                     // The condition re-evaluates after EVERY pass through the body, so it too must hold with
                     // the body's reassignments invalidated — not just on the pre-loop first evaluation.
-                    CheckCondition(w.Cond, opName, ctx.Errors, w.Span);
+                    CheckCondition(w.Cond, scope, ctx, opName, w.Span);
                     // Back-edge: pre-loop facts about a name the body reassigns cannot survive into the body.
                     var whileWiped = WithoutBodyAssigned(flow, w.Body, Child(w.Body), ctx.ScopeOf);
                     // The condition's own indexes are checked under those wiped facts (not its own guard).
@@ -689,12 +719,27 @@ public static class QoraValidator
                     // reads the mutated n on the very first pass.
                     var repeatFlow = WithoutBodyAssigned(flow, r.Body, Child(r.Body), ctx.ScopeOf);
                     Walk(r.Body, Child(r.Body), ctx, inControlFlow: true, repeatFlow);
-                    CheckCondition(r.Until, opName, ctx.Errors, r.Span);
+                    // …and it therefore RESOLVES in the body's scope too: an `until` may read a name the body
+                    // declared, exactly as the symbol table records it (and as CheckTextIndexes below already
+                    // did). Checking it against the enclosing scope made a legal body-local argument look like
+                    // an undeclared one.
+                    CheckCondition(r.Until, Child(r.Body), ctx, opName, r.Span);
                     CheckTextIndexes(r.Until.Tree, Child(r.Body), opName, ctx.Errors, ctx.Unproven, ctx.Deferred, ctx.ParamNeeds, r.Span, repeatFlow);
                     break;
                 case QConjugate c:
                     Walk(c.Within, Child(c.Within), ctx, inControlFlow, flow);
                     Walk(c.Apply, Child(c.Apply), ctx, inControlFlow, flow);
+                    break;
+                case QReturn ret:
+                    // QSEM035 — `return` is only meaningful inside a function (an operation is void).
+                    if (!ctx.Op.IsFunction)
+                        Add(ctx.Errors, "QSEM035", $"in `{opName}`: `return` is only allowed inside a function; an operation is void", ret.Span);
+                    // The returned value is an ordinary classical expression: a function call is a legal value,
+                    // a measurement/operation call is not. (A `return M(q)` is caught as impure by
+                    // ValidateFunctionShape too — this covers a return nested in a returned sub-expression.)
+                    if (ret.Value is QText { Tree: { } retTree })
+                        CheckExprCalls(retTree, scope, ctx, opName, ret.Span);
+                    CheckExprIndexes(ret.Value, scope, opName, ctx.Errors, ctx.Unproven, ctx.Deferred, ctx.ParamNeeds, ret.Span, flow);
                     break;
             }
 
@@ -823,15 +868,134 @@ public static class QoraValidator
     /// <summary>The simple (last) segment of a possibly fully-qualified name.</summary>
     private static string Simple(string name) => name.Contains('.') ? name[(name.LastIndexOf('.') + 1)..] : name;
 
-    // QSEM005 — a measurement in a condition IS allowed (MeasureConditionLowering hoists it to a bit before
-    // validation), so a call still here is a non-measurement one (a user op) — which has no place in a
-    // condition. OpenQASM has no call/measurement EXPRESSIONS; only `M(q[i])` is lowered for you.
-    // (The historical dropped-tree QINTERNAL guard is gone with the text ledger: the tree IS the condition,
-    // so a "text without a tree" desync is no longer representable.)
-    private static void CheckCondition(QCond cond, string opName, List<QoraError> errors, QSpan? span)
+    /// <summary>
+    /// Validate every call inside an expression that sits in a VALUE position (a decl/assign RHS, a
+    /// condition, a gate argument, a returned value). A <c>function</c> call is a legal value — its argument
+    /// count is checked (QSEM006). Anything else has no OpenQASM expression form: a measurement outside a
+    /// whole <c>var r: bit = M(q[i]);</c>, an <c>operation</c> (void) call, or an unknown name → QSEM005.
+    /// Global functions resolve by name; a namespaced function called by simple name in an expression is a
+    /// deferred case (its call would not resolve here and reads as unknown).
+    /// </summary>
+    private static void CheckExprCalls(QNode? tree, Scope scope, Ctx ctx, string opName, QSpan? span)
     {
-        if (cond.HasCall)
-            Add(errors, "QSEM005", $"in `{opName}`: a condition cannot call an operation; only a measurement `M(q[i])` is allowed here (it is lowered to a bit automatically)", span);
+        foreach (var c in QNodes.CallsIn(tree))
+        {
+            if (QoraGates.Functions.TryGetValue(c.Name, out var builtin))
+                CheckBuiltinCall(c, builtin, scope, ctx, opName, span);
+            else if (ctx.OpByName.TryGetValue(c.Name, out var callee) && callee.IsFunction)
+                // The SAME signature check the statement form runs (a function is an ICallableSig like any
+                // callable), so both call forms of one callee agree. Checking only the argument COUNT here let
+                // a whole `bit[]` register — or any array — reach a scalar parameter with no diagnostic, while
+                // the identical call written as a statement was rejected. Each argument is wrapped as the
+                // value-shaped QTextArg it is: an expression-position call has no qubit-operand form.
+                CheckCall(callee, c.Args.Select(a => (QArg)new QTextArg(a)).ToList(), "",
+                    scope, opName, ctx.Errors, span, ctx.Floors);
+            else if (QoraGates.MeasureLike.Contains(c.Name))
+                Add(ctx.Errors, "QSEM005", $"in `{opName}`: a measurement `M(q[i])` can only be a whole assignment (`var r: bit = M(q[i]);`), never part of a larger expression", span);
+            else if (ctx.OpByName.TryGetValue(c.Name, out var op) && !op.IsFunction)
+                Add(ctx.Errors, "QSEM005", $"in `{opName}`: `{Simple(c.Name)}` is an operation (void) — only a `function` returns a value that an expression can use", span);
+            else
+                Add(ctx.Errors, "QSEM007", $"in `{opName}`: `{Simple(c.Name)}` is not a known function", span);
+        }
+    }
+
+    /// <summary>
+    /// A BUILT-IN function call. Its argument shape is deliberately NOT run through the shared
+    /// <see cref="IParamSpec"/> path: <c>AsInt</c> takes a WHOLE <c>bit[]</c> register, and a whole register is
+    /// precisely the thing that is not a value in any ordinary slot (QSEM036) — there is no value slot that
+    /// could describe it. Passing anything else leaves the target lowering with no width to emit, so it is
+    /// rejected here, at the source, rather than becoming a QINTERNAL later.
+    /// </summary>
+    private static void CheckBuiltinCall(QCallNode c, BuiltinFunction fn, Scope scope, Ctx ctx, string opName, QSpan? span)
+    {
+        if (c.Args.Count != 1)
+        {
+            Add(ctx.Errors, "QSEM006", $"in `{opName}`: `{c.Name}` expects 1 argument but got {c.Args.Count}", span);
+            return;
+        }
+        if (!fn.TakesBitRegister) return;
+        if (c.Args[0] is QNameRef r && scope.Lookup(r.Name) is { Type: QType.Bit, IsArray: true }) return;
+        Add(ctx.Errors, "QSEM006", $"in `{opName}`: `{c.Name}` reads a whole `bit[]` register, but `{QNodes.Render(c.Args[0])}` is not one — pass the register itself (`{c.Name}(results)`); a single bit `results[i]` is already a value and needs no conversion", span);
+    }
+
+    /// <summary>
+    /// Validate a <c>function</c>'s shape: its parameters and return are classical (QSEM034), its body is
+    /// pure — no gates, no <c>use</c>, no measurement, no operation calls (QSEM033, a function may only call
+    /// other functions) — and it returns a value (QSEM035). Purity is what makes a function call a safe
+    /// expression value: with no quantum side effect, its position in an expression carries no ordering.
+    /// </summary>
+    private static void ValidateFunctionShape(QOperation fn, Ctx ctx)
+    {
+        foreach (var p in fn.Params)
+            if (p.Type == QType.Qubit)
+                Add(ctx.Errors, "QSEM034", $"in function `{Simple(fn.Name)}`: parameter `{p.Name}` cannot be a qubit; a function is classical (its parameters and return are `int`/`bit`/`float`/`angle`)", p.Span ?? fn.Span);
+
+        CheckFunctionPurity(fn.Body, fn, ctx);
+        if (!ReturnTerminal(fn.Body, fn, ctx) && fn.ReturnType is { } rt)
+            Add(ctx.Errors, "QSEM035", $"function `{Simple(fn.Name)}` must return a value of type `{TypeName(rt)}` on every path (an `if` that returns must also cover the other path — with an `else`, or with a `return` after it)", fn.Span);
+    }
+
+    /// <summary>Recursively flag any QUANTUM statement in a function body (QSEM033). A statement-form call
+    /// to ANOTHER function is allowed (it discards the return); a gate, a functor, an operation call, a
+    /// <c>use</c>, or a measurement is not.</summary>
+    private static void CheckFunctionPurity(IReadOnlyList<QStmt> body, QOperation fn, Ctx ctx)
+    {
+        var name = Simple(fn.Name);
+        foreach (var s in body)
+            switch (s)
+            {
+                case QUse u:
+                    Add(ctx.Errors, "QSEM033", $"in function `{name}`: `use {u.Name} = ...` is not allowed; a function is classical and cannot allocate qubits", u.Span ?? fn.Span);
+                    break;
+                case QGate g when g.Functors.Count == 0 && ctx.OpByName.TryGetValue(g.Name, out var callee) && callee.IsFunction:
+                    break;   // fn -> fn statement call (discards the return) is fine
+                case QGate g:
+                    Add(ctx.Errors, "QSEM033", $"in function `{name}`: `{Simple(g.Name)}` applies a gate or calls an operation; a function is classical — no gates, no `use`, no measurement, and it may only call other functions", g.Span ?? fn.Span);
+                    break;
+                case QDecl { Value: QMeasure } d:
+                    Add(ctx.Errors, "QSEM033", $"in function `{name}`: a measurement `M(...)` is not allowed; a function is classical", d.Span ?? fn.Span);
+                    break;
+                case QAssign { Value: QMeasure } a:
+                    Add(ctx.Errors, "QSEM033", $"in function `{name}`: a measurement `M(...)` is not allowed; a function is classical", a.Span ?? fn.Span);
+                    break;
+                case QReturn { Value: QMeasure } r:
+                    Add(ctx.Errors, "QSEM033", $"in function `{name}`: a measurement `M(...)` is not allowed; a function is classical", r.Span ?? fn.Span);
+                    break;
+                case QIf i: CheckFunctionPurity(i.Then, fn, ctx); CheckFunctionPurity(i.Else, fn, ctx); break;
+                case QFor f: CheckFunctionPurity(f.Body, fn, ctx); break;
+                case QWhile w: CheckFunctionPurity(w.Body, fn, ctx); break;
+                case QRepeat rp: CheckFunctionPurity(rp.Body, fn, ctx); break;
+            }
+    }
+
+    /// <summary>
+    /// Whether a block produces a value on EVERY path — the LANGUAGE rule behind QSEM035, true or false
+    /// regardless of any target: a function that can reach its end without a <c>return</c> is ill-formed no
+    /// matter what runs it. A block always returns iff SOME statement in it is a <c>return</c>, or an
+    /// <c>if</c>/<c>else</c> whose branches both always return. A loop never counts — it may run zero times.
+    ///
+    /// This is deliberately the SAME predicate <see cref="ReturnFlattening"/> uses to decide where a skipped
+    /// tail belongs, so a function the validator accepts is exactly one the pass can reshape — but the rule
+    /// lives HERE, in the language layer, because it is the language's. The QASM pass reads it; if that pass
+    /// is ever removed (a target that runs a <c>return</c> from a nested block needs no reshaping), this check
+    /// stays exactly as is.
+    /// </summary>
+    internal static bool AlwaysReturns(IReadOnlyList<QStmt> body) =>
+        body.Any(s => s switch
+        {
+            QReturn => true,
+            QIf i when i.Else.Count > 0 => AlwaysReturns(i.Then) && AlwaysReturns(i.Else),
+            _ => false,
+        });
+
+    private static bool ReturnTerminal(IReadOnlyList<QStmt> body, QOperation fn, Ctx ctx) => AlwaysReturns(body);
+
+    // QSEM005 — a measurement in a condition IS allowed (MeasureConditionLowering hoists it to a bit before
+    // validation), so a call still here is either a FUNCTION call (a legal value) or a non-measurement
+    // operation call (rejected). CheckExprCalls sorts them out.
+    private static void CheckCondition(QCond cond, Scope scope, Ctx ctx, string opName, QSpan? span)
+    {
+        if (cond.HasCall) CheckExprCalls(cond.Tree, scope, ctx, opName, span);
     }
 
     private static void CheckGate(QGate g, Scope scope, Ctx ctx, BoundsCtx bounds = default)
@@ -839,10 +1003,11 @@ public static class QoraValidator
         var opName = ctx.Op.DisplayName ?? ctx.Op.Name;
         var errors = ctx.Errors;
 
-        // QSEM005 — calls inside gate arguments have no OpenQASM form.
+        // A gate argument may contain a FUNCTION call (`Rx(angleOf(k), q[0])` — a classical value); a
+        // measurement or operation call there has no OpenQASM form. CheckExprCalls sorts them out.
         foreach (var arg in g.Args)
-            if (arg is QTextArg { HasCall: true })
-                Add(errors, "QSEM005", $"in `{opName}`: an argument of `{g.Name}` contains a call; measure into a bit first and pass the bit", g.Span);
+            if (arg is QTextArg { Tree: { } argTree, HasCall: true })
+                CheckExprCalls(argTree, scope, ctx, opName, g.Span);
 
         // QSEM016/030 — an index must be provably in bounds.
         foreach (var arg in g.Args)
@@ -1102,7 +1267,7 @@ public static class QoraValidator
         QUnary u => FirstQubitIn(u.Operand, scope),
         QBinOp b => FirstQubitIn(b.Left, scope) ?? FirstQubitIn(b.Right, scope),
         QIndexNode i => FirstQubitIn(i.Base, scope) ?? FirstQubitIn(i.Index, scope),
-        QCallNode c => FirstQubitIn(c.Arg, scope),
+        QCallNode c => c.Args.Select(a => FirstQubitIn(a, scope)).FirstOrDefault(x => x is not null),
         _ => null,   // literals; QMember (classical shape metadata)
     };
 
@@ -1142,8 +1307,22 @@ public static class QoraValidator
             // A measurement's target index must be bounds-checked here too — a measurement NESTED in an
             // array-literal initializer (`var r: bit[] = [M(q[3])]`) reaches this recursion, whereas the QDecl
             // handler's measurement branch only fires for a DIRECT `M(...)` value.
-            case QMeasure { Target: { } target }:
-                CheckQubitIndex(target, scope, opName, errors, unproven, deferred, paramNeeds, span, bounds);
+            // An ELEMENT measurement (`M(q[i])`) must have a provably in-range index.
+            case QMeasure m when QNodes.IndexOf(m.Target) is { } measuredIndex:
+                CheckQubitIndex(new QQubitArg(QNodes.RegOf(m.Target), measuredIndex), scope, opName, errors, unproven, deferred, paramNeeds, span, bounds);
+                break;
+            // A WHOLE-reference measurement (`M(a)`) is legal for exactly one shape: a SINGLE qubit. A whole
+            // REGISTER would collapse many qubits into one bit, and a classical is not measurable at all —
+            // both are QSEM006 (wrong argument for the `M` call), not a silently emitted `measure q;`.
+            case QMeasure m:
+                var measuredName = QNodes.RegOf(m.Target);
+                if (scope.Lookup(measuredName) is { } measuredSym)
+                {
+                    if (measuredSym.Type != QType.Qubit)
+                        Add(errors, "QSEM006", $"in `{opName}`: `M({measuredName})` needs a qubit, but `{measuredName}` is `{TypeName(measuredSym.Type ?? QType.Int)}`", span);
+                    else if (measuredSym.IsArray)
+                        Add(errors, "QSEM006", $"in `{opName}`: `M({measuredName})` measures a whole qubit register into one `bit`; measure a single qubit instead (`M({measuredName}[i])`)", span);
+                }
                 break;
         }
     }
@@ -1166,7 +1345,7 @@ public static class QoraValidator
                 break;
             case QUnary u: CheckTextIndexes(u.Operand, scope, opName, errors, unproven, deferred, paramNeeds, span, bounds); break;
             case QMember m: CheckTextIndexes(m.Base, scope, opName, errors, unproven, deferred, paramNeeds, span, bounds); break;
-            case QCallNode { Arg: { } callArg }: CheckTextIndexes(callArg, scope, opName, errors, unproven, deferred, paramNeeds, span, bounds); break;
+            case QCallNode c: foreach (var callArg in c.Args) CheckTextIndexes(callArg, scope, opName, errors, unproven, deferred, paramNeeds, span, bounds); break;
         }
     }
 
@@ -1498,6 +1677,13 @@ public static class QoraValidator
     {
         foreach (var stmt in stmts)
         {
+            // A FUNCTION call lives in an expression (a value/condition/argument/return), not a QGate — so a
+            // recursive function (`function f(x) { return f(x); }`) has its edge only here. Every call node
+            // in every direct expression site is a call edge for the cycle check.
+            foreach (var tree in QNodes.ExpressionSites(stmt))
+                foreach (var call in QNodes.CallsIn(tree))
+                    if (ops.Contains(call.Name)) into.Add(call.Name);
+
             switch (stmt)
             {
                 case QGate g when ops.Contains(g.Name):

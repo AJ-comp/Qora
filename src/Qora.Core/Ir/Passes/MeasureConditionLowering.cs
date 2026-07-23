@@ -114,20 +114,20 @@ public static class MeasureConditionLowering
         {
             // only the registered measurement of an indexed target extracts (`M(q)` whole-register stays —
             // it has no two-step lowering — and keeps HasCall set for QSEM005).
-            QCallNode { Name: QoraGates.Measurement, Arg: QIndexNode { Base: QNameRef reg, Index: { } idx } } =>
+            QCallNode { Name: QoraGates.Measurement, Args: [QIndexNode { Base: QNameRef reg, Index: { } idx }] } =>
                 Hoist(reg.Name, idx),
             QBinOp b => b with { Left = Rewrite(b.Left), Right = Rewrite(b.Right) },
             QUnary u => u with { Operand = Rewrite(u.Operand) },
             QMember m => m with { Base = Rewrite(m.Base) },
             QIndexNode i => i with { Base = Rewrite(i.Base), Index = Rewrite(i.Index) },
-            QCallNode { Arg: { } a } c => c with { Arg = Rewrite(a) },
+            QCallNode c => c with { Args = c.Args.Select(Rewrite).ToList() },
             _ => node,
         };
         QNode Hoist(string reg, QNode index)
         {
             var name = fresh();
             temps.Add(new QDecl(false, QType.Bit, name,
-                new QMeasure(new QQubitArg(reg, QNodes.Render(index)))) { Span = span });
+                new QMeasure(new QIndexNode(new QNameRef(reg), index))) { Span = span });
             return new QNameRef(name);
         }
 

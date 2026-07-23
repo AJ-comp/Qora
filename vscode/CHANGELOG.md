@@ -2,6 +2,29 @@
 
 All notable changes to the Qora Language extension.
 
+## 0.20.0
+
+- Bundles the **Qora v0.27** compiler. A whole `bit[]` register is now a container of bits rather than a
+  number: `var n: int = f;`, `f + 1`, `if (f)` and `f == 1` are rejected (`QSEM036`), because a bit pattern
+  has no sign and the same bits read `2` unsigned or `-2` signed. Write `AsInt(f)` to read a register as an
+  unsigned integer — it emits the width-qualified `uint[N](f)`. Comparing two registers of the same width
+  (`f == g`) stays legal, and a single bit (`f[i]`) or a scalar `bit` is unchanged. `AsInt` is highlighted
+  and hover-documented.
+- `return` may now stand anywhere a statement may — an early return, one inside `if`/`else`, one inside a
+  `for`/`while`. The compiler reshapes the function into the form the execution target needs, so the
+  "a `return` must be the last statement of its block" error is gone.
+
+## 0.19.0
+
+- Bundles the **Qora v0.26** compiler. Adds `function` — a classical, pure, value-returning subroutine
+  (`function angleOf(k: int): angle { return pi / k; }`) alongside the quantum, void `operation`. A function
+  is pure (no gates, no `use`, no measurement, no operation calls), so its call is a value you can use
+  anywhere in an expression: `var k: int = two();`, `Rx(angleOf(4), q[0])`, `if (c == g())`. Measurement stays
+  the one side-effecting value form (`var r: bit = M(q[i]);`) and an operation stays void. Functions emit as
+  OpenQASM `def Name(...) -> T { … }` and run on the Braket local simulator, including `if`/`else`-returning
+  ones. New diagnostics: QSEM033 (impure function), QSEM034 (qubit in a function signature), QSEM035 (return
+  placement / coverage).
+
 ## 0.18.0
 
 - Bundles the **Qora v0.25** compiler. Type annotations are now **trailing** (`name: T`): a parameter is

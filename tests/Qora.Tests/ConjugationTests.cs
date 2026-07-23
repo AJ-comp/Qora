@@ -17,6 +17,9 @@ namespace Qora.Tests;
 public class ConjugationTests
 {
     private static QQubitArg Q(string reg, int i) => new(reg, i.ToString());
+
+    /// <summary>A measurement target in the IR's canonical reference form (a register element).</summary>
+    private static QNode MTarget(string reg, int i) => new QIndexNode(new QNameRef(reg), new QNumLit(i));
     private static QGate Gate(string name, params QArg[] args) => new(new List<string>(), name, args.ToList());
     private static QProgram Prog(params QStmt[] body) =>
         new(new List<QOperation> { new("Main", new List<QParam>(), body.ToList()) });
@@ -73,7 +76,7 @@ public class ConjugationTests
         var program = Prog(
             new QUse("a", 1),
             new QConjugate(
-                Within: new List<QStmt> { new QDecl(false, QType.Bit, "r", new QMeasure(Q("a", 0))) },
+                Within: new List<QStmt> { new QDecl(false, QType.Bit, "r", new QMeasure(MTarget("a", 0))) },
                 Apply: new List<QStmt> { Gate("X", Q("a", 0)) }));
 
         var (_, errors) = ConjugationLowering.Run(program);

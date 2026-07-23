@@ -6,7 +6,7 @@ using Janglim.FrontEnd.RegularGrammar;
 namespace Qora;
 
 /// <summary>
-/// Qora v0.25 — a Q#/C#-flavored quantum language on the Janglim engine.
+/// Qora v0.26 — a Q#/C#-flavored quantum language on the Janglim engine.
 ///
 ///   operation Bell(q: Qubit[]) {        // a subroutine, with trailing-type parameters (name: T)
 ///       H(q[0]);
@@ -73,8 +73,7 @@ namespace Qora;
 /// per-entry element-wise re-initialization; a nested <c>bit[]</c> hoists to its scope top). <c>bit[]</c>
 /// parameters are length-specialized per call site like <c>Qubit[]</c> and emit as <c>bit[N]</c>; writing
 /// to a <c>bit[]</c> parameter is <c>QSEM032</c> (bit registers pass by value — a write would be
-/// silently invisible to the caller). Whole bit-register comparisons emit through the spec cast
-/// (<c>int(r) == 0</c>), the form Braket executes.
+/// silently invisible to the caller).
 /// v0.24 hardens the v0.23 hoisting: every minted name is a collision-proof <see cref="Ir.HoistName"/>
 /// placeholder the mangler prettifies, so no minted name can shadow a user variable, and a
 /// measurement-in-condition temp can no longer mask a user's undeclared <c>__mN</c> (its <c>QSEM025</c>).
@@ -83,6 +82,33 @@ namespace Qora;
 /// still infers). The <c>:</c> separator is structural (excluded from the AST like <c>=</c>), so the
 /// order-independent lowering reads the same shape it always did. The leading forms (<c>int n</c>, <c>Qubit[] q</c>)
 /// are removed — there is exactly one way to write a type.
+/// v0.26 adds <c>function</c> — a classical, pure, value-returning subroutine (Q#'s function vs the quantum,
+/// void operation): <c>function Name(classical params): T { … return e; }</c>. A function is pure (no gates,
+/// no <c>use</c>, no measurement, no operation calls — only classical statements, other function calls, and
+/// <c>return</c>), so its CALL is a value usable anywhere in an expression (<c>var k: int = f(x);</c>,
+/// <c>Rx(angleOf(k), q[0])</c>, <c>if (c == g())</c>). A measurement stays the one side-effecting value form
+/// (whole <c>var r: bit = M(q[i]);</c> only) and an operation stays void. Functions emit as OpenQASM
+/// <c>def Name(...) -&gt; T { … }</c>; a return inside a branch is restructured to one bottom return (Braket
+/// cannot return from a nested block). New codes: QSEM033 (impure function body), QSEM034 (qubit in a function
+/// signature), QSEM035 (return outside a function / a non-tail or missing return).
+/// v0.27 makes a WHOLE <c>bit[]</c> register a CONTAINER OF BITS rather than a number. A bit pattern carries
+/// no sign, so it has no numeric value on its own — the same <c>"10"</c> reads 2 unsigned and −2 in two's
+/// complement — and the language no longer picks one silently: every numeric use of a whole register
+/// (<c>var n: int = f</c>, <c>f + 1</c>, <c>if (f)</c>, <c>f == 1</c>) is <c>QSEM036</c>, as is comparing
+/// registers of different widths or ordering them. What stays legal needs no numeric reading: <c>f[i]</c>,
+/// <c>f.Count</c>, passing the register as an argument, and <c>f == g</c> between equal widths (which emits
+/// bare — OpenQASM compares bit patterns). The one explicit reading is the built-in <c>AsInt(f)</c>, which
+/// lowers to the width-qualified unsigned cast <c>uint[N](f)</c> (the spec allows <c>bit[n]</c> →
+/// <c>uint[m]</c> only when <c>n == m</c>). Scalar <c>bit</c> is untouched: the spec makes it interchangeable
+/// with <c>bool</c>, so it IS a value.
+/// v0.27 also lets <c>return</c> stand ANYWHERE a statement may — an early return, one inside <c>if</c>/
+/// <c>else</c>, one inside a <c>for</c>/<c>while</c>. The execution target cannot leave a <c>def</c> from a
+/// nested block, but that is the target's shape, not the language's: <c>Ir/Qasm/ReturnFlattening.cs</c>
+/// rewrites each function into one bottom return (a return becomes an assignment to a result variable, and
+/// the code it would have skipped moves into the <c>else</c> that did not return; a return inside a LOOP
+/// <c>break</c>s out of it, with a done flag only for the statements AFTER the loop, which no <c>break</c>
+/// can reach). <c>QSEM035</c> keeps just the two real errors: a <c>return</c> in an
+/// <c>operation</c> (void), and a function with a path that produces no value.
 /// </summary>
 public class QoraGrammar : Grammar
 {
@@ -95,6 +121,8 @@ public class QoraGrammar : Grammar
     public Terminal New { get; } = new Terminal(TokenType.Keyword, "new", false);
     public Terminal Const { get; } = new Terminal(TokenType.Keyword, "const", false);
     public Terminal Var { get; } = new Terminal(TokenType.Keyword, "var", false);
+    public Terminal Function { get; } = new Terminal(TokenType.Keyword, "function", false);
+    public Terminal Return { get; } = new Terminal(TokenType.Keyword, "return", false);
     public Terminal If { get; } = new Terminal(TokenType.Keyword, "if", false);
     public Terminal For { get; } = new Terminal(TokenType.Keyword, "for", false);
     public Terminal In { get; } = new Terminal(TokenType.Keyword, "in", false);
@@ -178,6 +206,8 @@ public class QoraGrammar : Grammar
     private NonTerminal openStmt = new NonTerminal("openStmt");
     private NonTerminal qname = new NonTerminal("qname");
     private NonTerminal operation = new NonTerminal("operation");
+    private NonTerminal functionDecl = new NonTerminal("functionDecl");
+    private NonTerminal returnStmt = new NonTerminal("returnStmt");
     private NonTerminal paramList = new NonTerminal("paramList");
     private NonTerminal param = new NonTerminal("param");
     private NonTerminal statement = new NonTerminal("statement");
@@ -212,6 +242,8 @@ public class QoraGrammar : Grammar
     public static MeaningUnit NamespaceM { get; } = new MeaningUnit("Namespace");
     public static MeaningUnit OpenM { get; } = new MeaningUnit("Open");
     public static MeaningUnit OperationM { get; } = new MeaningUnit("Operation");
+    public static MeaningUnit FunctionM { get; } = new MeaningUnit("Function");
+    public static MeaningUnit ReturnM { get; } = new MeaningUnit("Return");
     public static MeaningUnit ParamM { get; } = new MeaningUnit("Param");
     public static MeaningUnit ArrayTypeM { get; } = new MeaningUnit("ArrayType");
     public static MeaningUnit ArrayLiteralM { get; } = new MeaningUnit("ArrayLiteral");
@@ -236,7 +268,7 @@ public class QoraGrammar : Grammar
     {
         program.AddItem(operationList, ProgramM);
         operationList.AddItem(topItem | operationList + topItem);
-        topItem.AddItem(operation | importStmt | namespaceDecl);
+        topItem.AddItem(operation | functionDecl | importStmt | namespaceDecl);
 
         // module system — one import form only: a quoted relative path including the extension.
         //   import "gates lib.qor";  // sibling file
@@ -244,13 +276,20 @@ public class QoraGrammar : Grammar
         //   namespace Lib.Sub { open Other; operation Foo() { … } }  // open = C#-`using` namespace visibility
         importStmt.AddItem(Import + StringLit + Semicolon, ImportM);
         namespaceDecl.AddItem(Namespace + qname + LBrace + nsItem.ZeroOrMore() + RBrace, NamespaceM);
-        nsItem.AddItem(openStmt | operation);
+        nsItem.AddItem(openStmt | operation | functionDecl);
         openStmt.AddItem(Open + qname + Semicolon, OpenM);
         qname.AddItem(Ident + (Dot + Ident).ZeroOrMore());
 
         // operation Name() { … }   /   operation Name(params) { … }
         operation.AddItem(Operation + Ident + LParen + RParen + LBrace + statement.ZeroOrMore() + RBrace, OperationM);
         operation.AddItem(Operation + Ident + LParen + paramList + RParen + LBrace + statement.ZeroOrMore() + RBrace, OperationM);
+
+        // function Name(): T { … }  /  function Name(params): T { … } — a classical, pure, value-returning
+        // subroutine (Q#'s `function`). The return type is TRAILING (`): T`), a scalar classical type only
+        // (int/bit/float/angle). Unlike an operation, a function may be CALLED inside an expression (its call
+        // is a value); the validator enforces its purity (no gates / use / measurement / operation calls).
+        functionDecl.AddItem(Function + Ident + LParen + RParen + Colon + typeName + LBrace + statement.ZeroOrMore() + RBrace, FunctionM);
+        functionDecl.AddItem(Function + Ident + LParen + paramList + RParen + Colon + typeName + LBrace + statement.ZeroOrMore() + RBrace, FunctionM);
 
         paramList.AddItem(param + (Comma + param).ZeroOrMore());
         // q: Qubit / qs: Qubit[] / n: int / b: bit / theta: float / phi: angle.
@@ -261,7 +300,10 @@ public class QoraGrammar : Grammar
         param.AddItem(Ident + Colon + typeName, ParamM);         // n: int
         param.AddItem(Ident + Colon + arrayType, ParamM);        // a: int[]
 
-        statement.AddItem(useStmt | gateStmt | constDecl | varDecl | assignStmt | ifStmt | forStmt | whileStmt | repeatStmt);
+        statement.AddItem(useStmt | gateStmt | constDecl | varDecl | assignStmt | ifStmt | forStmt | whileStmt | repeatStmt | returnStmt);
+
+        // return e;  — only meaningful inside a function (the validator rejects it elsewhere).
+        returnStmt.AddItem(Return + expr + Semicolon, ReturnM);
 
         // use q = Qubit[2];
         useStmt.AddItem(Use + Ident + Assign + Qubit + LBracket + Num + RBracket + Semicolon, UseM);
@@ -328,7 +370,11 @@ public class QoraGrammar : Grammar
         // Semantic validation currently exposes exactly one member, Array.Count. Keeping the grammar
         // general lets it produce a precise diagnostic for `q.Length` instead of a low-level parse error.
         memberAccess.AddItem(Ident + Dot + Ident);
-        call.AddItem(Ident + LParen + indexAccess + RParen, CallM);   // M(q[0])
+        // A call in expression position: the measurement `M(q[0])` (one indexed argument) OR a function call
+        // `Foo(a, b)` (classical value arguments). One production covers both — the lowering/validator tell
+        // them apart by name. `M(q[0])`'s argument is an `expr` that is a lone index access.
+        call.AddItem(Ident + LParen + RParen, CallM);                                       // Foo()
+        call.AddItem(Ident + LParen + expr + (Comma + expr).ZeroOrMore() + RParen, CallM);   // Foo(a, b) / M(q[0])
 
         // Type-neutral indexed access. Semantic validation later decides whether the base symbol is a
         // qubit register or a classical array.

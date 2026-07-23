@@ -102,7 +102,7 @@ public static class ReferentialCheck
             // pass can never miss a position a hand-rolled list would forget. The remaining cases below
             // check what expressions don't carry: statement-level NAMES (targets, registers) and bodies.
             foreach (var tree in QNodes.ExpressionSites(s))
-                CheckNode(tree, opName, known, errors, s.Span);
+                CheckNode(tree, opName, known, opNames, errors, s.Span);
 
             switch (s)
             {
@@ -152,8 +152,8 @@ public static class ReferentialCheck
     {
         switch (expr)
         {
-            case QMeasure { Target: { } t }:
-                Check(t.Reg, opName, known, errors, span);
+            case QMeasure m:
+                Check(QNodes.RegOf(m.Target), opName, known, errors, span);
                 break;
             case QArrayLiteral literal:
                 foreach (var element in literal.Elements)
@@ -165,7 +165,7 @@ public static class ReferentialCheck
     /// <summary>Every free name a tree references, checked structurally: a bare name and a call's target
     /// name resolve like identifiers; a member NAME is never a free reference (only its base is); numbers
     /// and verbatim literals reference nothing.</summary>
-    private static void CheckNode(QNode? node, string opName, HashSet<string> known, List<QoraError> errors, QSpan? span)
+    private static void CheckNode(QNode? node, string opName, HashSet<string> known, HashSet<string> opNames, List<QoraError> errors, QSpan? span)
     {
         switch (node)
         {
@@ -175,22 +175,29 @@ public static class ReferentialCheck
                 Check(r.Name, opName, known, errors, span);
                 break;
             case QMember m:
-                CheckNode(m.Base, opName, known, errors, span);
+                CheckNode(m.Base, opName, known, opNames, errors, span);
                 break;
             case QUnary u:
-                CheckNode(u.Operand, opName, known, errors, span);
+                CheckNode(u.Operand, opName, known, opNames, errors, span);
                 break;
             case QBinOp b:
-                CheckNode(b.Left, opName, known, errors, span);
-                CheckNode(b.Right, opName, known, errors, span);
+                CheckNode(b.Left, opName, known, opNames, errors, span);
+                CheckNode(b.Right, opName, known, opNames, errors, span);
                 break;
             case QIndexNode i:
-                CheckNode(i.Base, opName, known, errors, span);
-                CheckNode(i.Index, opName, known, errors, span);
+                CheckNode(i.Base, opName, known, opNames, errors, span);
+                CheckNode(i.Index, opName, known, opNames, errors, span);
                 break;
             case QCallNode c:
-                Check(c.Name, opName, known, errors, span);
-                CheckNode(c.Arg, opName, known, errors, span);
+                // A call's target is a CALLABLE — a user function/operation, a built-in gate, or a built-in
+                // function — resolved like a call, never against the op's local declarations. (A measurement
+                // is desugared/rejected before emission, so a QCallNode surviving to here is a function call.)
+                // This gate runs BEFORE OpenQasmLowering, so a built-in function is still spelled by its Qora
+                // name here; the target cast it lowers to is minted afterwards and never passes through.
+                if (!opNames.Contains(c.Name) && !QoraGates.Names.ContainsKey(c.Name)
+                    && !QoraGates.Functions.ContainsKey(c.Name))
+                    Report(c.Name, opName, "call target", span, errors);
+                foreach (var a in c.Args) CheckNode(a, opName, known, opNames, errors, span);
                 break;
         }
     }

@@ -128,6 +128,12 @@ public static class IrPrinter
                 case QAssign a:
                     sb.AppendLine($"{indent}QAssign({a.Name}{(a.Index is null ? "" : $"[{QNodes.Render(a.Index)}]")} = {PrintExpr(a.Value)})");
                     break;
+                case QReturn r:
+                    sb.AppendLine($"{indent}QReturn({PrintExpr(r.Value)})");
+                    break;
+                case QBreak:
+                    sb.AppendLine($"{indent}QBreak");
+                    break;
                 case QIf i:
                     sb.AppendLine($"{indent}QIf(cond=\"{QNodes.Render(i.Cond.Tree)}\")");
                     sb.AppendLine($"{indent}  then:");
@@ -170,7 +176,7 @@ public static class IrPrinter
 
     private static string PrintExpr(QExpr expr) => expr switch
     {
-        QMeasure m => m.Target is null ? "QMeasure()" : $"QMeasure({m.Target.Reg}[{QNodes.Render(m.Target.Index)}])",
+        QMeasure m => $"QMeasure({QNodes.RegOf(m.Target)}{(QNodes.IndexOf(m.Target) is { } mi ? $"[{QNodes.Render(mi)}]" : string.Empty)})",
         QText t => QNodes.Render(t.Tree),
         QArrayLiteral literal => $"[{string.Join(", ", literal.Elements.Select(PrintExpr))}]",
         QArrayNew allocation => $"new {allocation.ElementType.ToString().ToLowerInvariant()}[{allocation.Length}]",

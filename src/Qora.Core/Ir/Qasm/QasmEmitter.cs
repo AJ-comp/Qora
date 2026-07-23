@@ -163,7 +163,11 @@ public static class QasmEmitter
         var body = new StringBuilder();
         EmitStatements(op.Body, body, 1, ctx, SeedVarTypes(op, model));
 
-        sb.AppendLine($"def {op.Name}({ps}) {{");
+        // A function emits its trailing return type (`def two() -> int { … }`); an operation is void. The
+        // emitter is a PURE PRINTER: it renders the IR as-is. A `return` that OpenQASM/Braket cannot lower
+        // from inside a nested block is restructured by a dedicated QASM pass BEFORE emission, never here.
+        var ret = op.IsFunction && op.ReturnType is { } rt ? $" -> {TypeName(rt)}" : string.Empty;
+        sb.AppendLine($"def {op.Name}({ps}){ret} {{");
         foreach (var line in decls.ToString().Split('\n'))
             if (line.Trim().Length > 0) sb.AppendLine($"  {line.TrimEnd()}");
         sb.Append(body);
@@ -267,6 +271,14 @@ public static class QasmEmitter
                     EmitStatements(r.Body, body, indent + 1, ctx, varTypes);
                     body.AppendLine($"{pad}  if ({RenderCond(r.Until, varTypes)}) {{ break; }}");
                     body.AppendLine($"{pad}}}");
+                    break;
+
+                case QReturn ret:
+                    body.AppendLine($"{pad}return {RenderExpr(ret.Value)};");
+                    break;
+
+                case QBreak:
+                    body.AppendLine($"{pad}break;");
                     break;
 
                 default:
@@ -520,7 +532,13 @@ public static class QasmEmitter
             QBinOp b => b with { Left = RewriteBits(b.Left, varTypes), Right = RewriteBits(b.Right, varTypes) },
             _ => node,
         };
-        if (node is QUnary { Op: "!", Operand: { } inner } && TypeOfNode(inner, varTypes) is not null)
+        // `!x` is Qora's "x is zero/false" and OpenQASM has no logical NOT on a numeric value, so it is
+        // ALWAYS rewritten to the comparison `x == 0` — a BLANKET rule, never conditional on being able to
+        // type the operand. Gating it on a known type silently emitted `! ( sizeof(a) )` for a compound
+        // operand (a `.Count`, a function call, arithmetic), which the target rejects
+        // ("Invalid operator ! for IntegerLiteral"). A `bit` operand is then further rewritten to
+        // `x == false` by the comparison handling below, exactly as before.
+        if (node is QUnary { Op: "!", Operand: { } inner })
             node = new QBinOp("==", inner, new QNumLit(0));
         if (node is QBinOp { Op: "==" or "!=" } cmp)
         {
@@ -529,21 +547,11 @@ public static class QasmEmitter
             if (TypeOfNode(cmp.Right, varTypes) == "bit" && cmp.Left is QNumLit { Value: 0 or 1 } ln)
                 return cmp with { Left = new QLit(ln.Value == 1 ? "true" : "false") };
         }
-        // A WHOLE bit register compared numerically (`r == 0` — "all bits zero"): neither the bare
-        // register-vs-int form (the Braket LocalSimulator's interpreter crashes on it) nor the old
-        // bool form `r == true` (Braket and Qiskit both reject) actually RUNS on the execution
-        // targets. The portable spelling is the explicit spec cast `int(r) == 0` — verified against
-        // Braket, and rendered from a synthesized call node (which prints exactly as the cast).
-        if (node is QBinOp { Op: "==" or "!=" or "<" or "<=" or ">" or ">=" } reg)
-        {
-            QNode CastRegister(QNode operand) =>
-                operand is QNameRef r2 && varTypes.TryGetValue(r2.Name, out var vt) && vt == "bit[]"
-                    ? new QCallNode("int", operand) : operand;
-            var left = CastRegister(reg.Left);
-            var right = CastRegister(reg.Right);
-            if (!ReferenceEquals(left, reg.Left) || !ReferenceEquals(right, reg.Right))
-                return reg with { Left = left, Right = right };
-        }
+        // NOTE: a WHOLE bit register needs NO adjustment here, and deliberately gets none. It can only have
+        // reached an expression at all as `f == g` against another register of the same width (QSEM036), which
+        // OpenQASM compares as bit patterns — exactly Qora's meaning — so it prints as written. Every reading
+        // of a register AS A NUMBER is spelled `AsInt(f)` in the source and became a width-qualified
+        // `uint[N](f)` in OpenQasmLowering, before this printer ever saw it.
         return node;
     }
 
@@ -585,7 +593,7 @@ public static class QasmEmitter
 
     private static string RenderExpr(QExpr expr) => expr switch
     {
-        QMeasure m => m.Target is null ? "measure" : $"measure {m.Target.Reg}[{RenderNode(m.Target.Index)}]",
+        QMeasure m => $"measure {RenderNode(m.Target)}",
         QText t => RenderNode(t.Tree),
         QArrayLiteral literal => $"{{{string.Join(", ", literal.Elements.Select(RenderExpr))}}}",
         QArrayNew allocation => $"{{{string.Join(", ", Enumerable.Repeat(DefaultValue(allocation.ElementType), allocation.Length))}}}",
@@ -612,8 +620,7 @@ public static class QasmEmitter
         QUnary u => $"{u.Op} {RenderOperand(u.Operand, parent: 5, isRight: true)}",
         QBinOp b => $"{RenderOperand(b.Left, Prec(b.Op))} {b.Op} {RenderOperand(b.Right, Prec(b.Op), isRight: true)}",
         QIndexNode i => $"{RenderNode(i.Base)}[{RenderNode(i.Index)}]",
-        QCallNode { Arg: { } a } c => $"{c.Name}({RenderNode(a)})",
-        QCallNode c => $"{c.Name}()",
+        QCallNode c => $"{c.Name}({string.Join(", ", c.Args.Select(RenderNode))})",
         _ => string.Empty,
     };
 

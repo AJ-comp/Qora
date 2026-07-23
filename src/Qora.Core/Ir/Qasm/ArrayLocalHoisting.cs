@@ -67,7 +67,7 @@ public static class ArrayLocalHoisting
     /// looked up in <c>storageName</c> (where it is DECLARED — a global for R1, a scope-top decl for R2/R3)
     /// and <c>refName</c> (how the OWNER's body refers to it — the parameter for R1, the same storage for
     /// R2/R3).</summary>
-    private sealed record Hoisted(string Op, string Var, QType ElemType, int MaxLen, bool Threaded);
+    private sealed record Hoisted(string Op, int DeclId, string Var, QType ElemType, int Len, bool Threaded);
 
     public static Result Run(QProgram program)
     {
@@ -76,24 +76,26 @@ public static class ArrayLocalHoisting
         var opNames = program.Operations.Select(o => o.Name).ToHashSet();
         var notes = new List<string>();
 
-        // ── 1. Collect and classify. Groups are per (op, name) — one parameter / one storage per name,
-        //       sized to the longest declaration (see the header).
-        var byOp = new Dictionary<string, List<Hoisted>>();       // op → its hoisted arrays, decl order
-        var replaced = new Dictionary<string, HashSet<string>>(); // per op: names whose decl sites become re-inits
+        // ── 1. Collect and classify — ONE entry per DECLARATION, keyed by its stable node Id. Two
+        //       declarations that merely share a name (disjoint sibling blocks) are DIFFERENT variables:
+        //       merging them into one storage sized to the longest silently gave the shorter one the
+        //       other's length (its `.Count` lowers to `sizeof(storage)`) and the first one's element type.
+        var byOp = new Dictionary<string, List<Hoisted>>();    // op → its hoisted arrays, decl order
+        var replaced = new Dictionary<string, HashSet<int>>(); // per op: DECL IDS whose sites become re-inits
         foreach (var op in program.Operations)
         {
-            var groups = new List<(string Var, QType ElemType, int MaxLen, bool AllTopLevel)>();
-            Collect(op.Body, topLevel: true, groups);
-            foreach (var g in groups)
+            var decls = new List<(int DeclId, string Var, QType ElemType, int Len, bool TopLevel)>();
+            Collect(op.Body, topLevel: true, decls);
+            foreach (var g in decls)
             {
                 var isEntry = op == entry;
                 var isBit = g.ElemType == QType.Bit;
-                if (g.AllTopLevel && (isEntry || isBit)) continue;   // already legal where it stands
+                if (g.TopLevel && (isEntry || isBit)) continue;      // already legal where it stands
 
                 var threaded = !isEntry && !isBit;                   // R1 vs R2/R3
                 (byOp.TryGetValue(op.Name, out var list) ? list : byOp[op.Name] = new())
-                    .Add(new Hoisted(op.Name, g.Var, g.ElemType, g.MaxLen, threaded));
-                (replaced.TryGetValue(op.Name, out var set) ? set : replaced[op.Name] = new()).Add(g.Var);
+                    .Add(new Hoisted(op.Name, g.DeclId, g.Var, g.ElemType, g.Len, threaded));
+                (replaced.TryGetValue(op.Name, out var set) ? set : replaced[op.Name] = new()).Add(g.DeclId);
             }
         }
         if (byOp.Count == 0) return new(program, Array.Empty<string>());
@@ -106,21 +108,21 @@ public static class ArrayLocalHoisting
         //       its base and disambiguates any clash; see the header.
         var uid = 0;
         string Ph(string baseName) => HoistName.Make(baseName, uid++);
-        var storageName = new Dictionary<(string Op, string Var), string>();
-        var refName = new Dictionary<(string Op, string Var), string>();
+        var storageName = new Dictionary<(string Op, int DeclId), string>();
+        var refName = new Dictionary<(string Op, int DeclId), string>();
         foreach (var (opName, hs) in byOp)
             foreach (var h in hs)
             {
                 if (h.Threaded)                                      // R1: separate global backing + parameter
                 {
-                    storageName[(h.Op, h.Var)] = Ph($"{h.Op.Replace('.', '_')}_{h.Var}");
-                    refName[(h.Op, h.Var)] = Ph(h.Var);
+                    storageName[(h.Op, h.DeclId)] = Ph($"{h.Op.Replace('.', '_')}_{h.Var}");
+                    refName[(h.Op, h.DeclId)] = Ph(h.Var);
                     notes.Add($"array local `{h.Var}` in `{h.Op}` lowered to a hidden array-reference parameter backed by a global (OpenQASM: arrays enter a def only by reference)");
                 }
                 else                                                 // R2/R3: one placeholder, declared-as and referred-by
                 {
                     var p = Ph(h.Var);
-                    storageName[(h.Op, h.Var)] = refName[(h.Op, h.Var)] = p;
+                    storageName[(h.Op, h.DeclId)] = refName[(h.Op, h.DeclId)] = p;
                     notes.Add($"array local `{h.Var}` in `{h.Op}` hoisted to the top of its scope (OpenQASM: no classical declaration inside a control-flow block)");
                 }
             }
@@ -130,9 +132,9 @@ public static class ArrayLocalHoisting
         //       appended-parameter ORDER — own arrays first (decl order), then pass-throughs (stable) —
         //       keyed by the owning (op, var) so the callee's storage is unambiguous. Fixpoint over the
         //       call DAG (cycles are QSEM011-rejected). Parameter NAMES are assigned per op in step 4.
-        var extras = new Dictionary<string, List<(string Op, string Var)>>();   // op → appended params, in order, as owner keys
+        var extras = new Dictionary<string, List<(string Op, int DeclId)>>();   // op → appended params, in order, as owner keys
         foreach (var (opName, hs) in byOp)
-            extras[opName] = hs.Where(h => h.Threaded).Select(h => (h.Op, h.Var)).ToList();
+            extras[opName] = hs.Where(h => h.Threaded).Select(h => (h.Op, h.DeclId)).ToList();
 
         for (var changed = true; changed;)
         {
@@ -162,12 +164,12 @@ public static class ArrayLocalHoisting
         // ── 4. Each threaded array's forwarding SLOT in each holder op gets a name. An OWNED slot reuses the
         //       array's own parameter placeholder (refName); a PASS-THROUGH gets its own placeholder based
         //       on the backing global's name, for a readable emitted signature.
-        var paramName = new Dictionary<(string Op, (string Op, string Var) Key), string>();  // (holder op, owner key) → slot name
+        var paramName = new Dictionary<(string Op, (string Op, int DeclId) Key), string>();  // (holder op, owner key) → slot name
         foreach (var (opName, appended) in extras)
             foreach (var key in appended)
                 paramName[(opName, key)] = key.Op == opName
                     ? refName[key]
-                    : Ph($"{key.Op.Replace('.', '_')}_{key.Var}");
+                    : Ph($"{key.Op.Replace('.', '_')}_{byOp[key.Op].First(h => h.DeclId == key.DeclId).Var}");
 
         // ── 5. Rewrite every op: append hidden parameters, prepend hoisted storage, turn owned declaration
         //       sites into element-wise re-initialization (under the chosen refName), and hand the right
@@ -176,7 +178,7 @@ public static class ArrayLocalHoisting
         foreach (var op in program.Operations)
         {
             var isEntry = op == entry;
-            var owned = replaced.TryGetValue(op.Name, out var set) ? set : new HashSet<string>();
+            var owned = replaced.TryGetValue(op.Name, out var set) ? set : new HashSet<int>();
             // Every hoisted array's body references are rewritten from its source name to its placeholder,
             // in effect only FROM the array's declaration onward (see Rewrite): the map starts EMPTY and
             // gains each rename when its decl is reached, so a reference to a same-named shadowed PARAMETER
@@ -189,19 +191,19 @@ public static class ArrayLocalHoisting
             if (isEntry)                                                  // R1 backing globals — helper arrays, source order
                 storage.AddRange(program.Operations.Where(o => o != entry)
                     .SelectMany(o => byOp.TryGetValue(o.Name, out var hs) ? hs.Where(h => h.Threaded) : Enumerable.Empty<Hoisted>())
-                    .Select(h => StorageDecl(h, storageName[(h.Op, h.Var)])));
+                    .Select(h => StorageDecl(h, storageName[(h.Op, h.DeclId)])));
             if (byOp.TryGetValue(op.Name, out var mine))                  // R2/R3 storage at this op's own top
                 storage.AddRange(mine.Where(h => !h.Threaded)
-                    .Select(h => StorageDecl(h, storageName[(h.Op, h.Var)])));
+                    .Select(h => StorageDecl(h, storageName[(h.Op, h.DeclId)])));
             if (storage.Count > 0) body = storage.Concat(body).ToList();
 
-            var appended = extras.TryGetValue(op.Name, out var ap) ? ap : new List<(string Op, string Var)>();
+            var appended = extras.TryGetValue(op.Name, out var ap) ? ap : new List<(string Op, int DeclId)>();
             outOps.Add(op with
             {
                 Params = appended.Count == 0
                     ? op.Params
                     : op.Params.Concat(appended.Select(key =>
-                        new QParam(paramName[(op.Name, key)], byOp[key.Op].First(h => h.Var == key.Var).ElemType, null) { IsArray = true })).ToList(),
+                        new QParam(paramName[(op.Name, key)], byOp[key.Op].First(h => h.DeclId == key.DeclId).ElemType, null) { IsArray = true })).ToList(),
                 Body = body,
             });
         }
@@ -209,7 +211,7 @@ public static class ArrayLocalHoisting
     }
 
     private static QStmt StorageDecl(Hoisted h, string name) =>
-        new QDecl(false, h.ElemType, name, new QArrayNew(h.ElemType, h.MaxLen)) { IsArray = true };
+        new QDecl(false, h.ElemType, name, new QArrayNew(h.ElemType, h.Len)) { IsArray = true };
 
     /// <summary>The declarations this pass owns: any typed array local. (An untyped or uninitialized
     /// array is QSEM029 — validation rejects it long before the backend runs.)</summary>
@@ -226,28 +228,37 @@ public static class ArrayLocalHoisting
         _ => throw new InvalidOperationException($"QINTERNAL: array `{d.Name}` reached hoisting without an array initializer"),
     };
 
+    /// <summary>Every array-local DECLARATION in an operation, one entry each, carrying its OWN length,
+    /// element type and placement. Declarations are never merged by name: two same-named arrays in disjoint
+    /// blocks are distinct variables and each gets its own storage.</summary>
     private static void Collect(IReadOnlyList<QStmt> stmts, bool topLevel,
-        List<(string Var, QType ElemType, int MaxLen, bool AllTopLevel)> groups)
+        List<(int DeclId, string Var, QType ElemType, int Len, bool TopLevel)> decls)
     {
         foreach (var s in stmts)
             switch (s)
             {
                 case QDecl when IsArrayLocal(s, out var d):
-                    var i = groups.FindIndex(g => g.Var == d.Name);
-                    if (i < 0) groups.Add((d.Name, d.Type!.Value, LengthOf(d), topLevel));
-                    else groups[i] = (d.Name, groups[i].ElemType, Math.Max(groups[i].MaxLen, LengthOf(d)), false);
+                    decls.Add((d.Id, d.Name, d.Type!.Value, LengthOf(d), topLevel));
                     break;
-                case QIf f: Collect(f.Then, false, groups); Collect(f.Else, false, groups); break;
-                case QFor f: Collect(f.Body, false, groups); break;
-                case QWhile w: Collect(w.Body, false, groups); break;
-                case QRepeat r: Collect(r.Body, false, groups); break;
-                case QConjugate c: Collect(c.Within, false, groups); Collect(c.Apply, false, groups); break;
+                case QIf f: Collect(f.Then, false, decls); Collect(f.Else, false, decls); break;
+                case QFor f: Collect(f.Body, false, decls); break;
+                case QWhile w: Collect(w.Body, false, decls); break;
+                case QRepeat r: Collect(r.Body, false, decls); break;
+                case QConjugate c: Collect(c.Within, false, decls); Collect(c.Apply, false, decls); break;
             }
     }
 
     private static void CollectCalls(IReadOnlyList<QStmt> stmts, HashSet<string> opNames, HashSet<string> into)
     {
         foreach (var s in stmts)
+        {
+            // A `function` is called as a QCallNode INSIDE AN EXPRESSION, never as a QGate statement, so the
+            // statement switch below cannot see it. Missing those edges left a caller unthreaded, and the
+            // hidden argument it owed its callee was then never supplied. Uses the shared enumerators rather
+            // than a second hand-rolled expression walk.
+            foreach (var tree in QNodes.ExpressionSites(s))
+                foreach (var call in QNodes.CallsIn(tree))
+                    if (opNames.Contains(call.Name)) into.Add(call.Name);
             switch (s)
             {
                 case QGate g when opNames.Contains(g.Name): into.Add(g.Name); break;
@@ -257,6 +268,7 @@ public static class ArrayLocalHoisting
                 case QRepeat r: CollectCalls(r.Body, opNames, into); break;
                 case QConjugate c: CollectCalls(c.Within, opNames, into); CollectCalls(c.Apply, opNames, into); break;
             }
+        }
     }
 
     /// <summary><paramref name="active"/> maps a shadowed source variable to its freshened array name, IN
@@ -265,15 +277,18 @@ public static class ArrayLocalHoisting
     /// untouched). <paramref name="forceApply"/> is false in the overwhelmingly common no-shadow case, where
     /// every renaming call short-circuits and statements pass through unchanged.</summary>
     private static IReadOnlyList<QStmt> Rewrite(IReadOnlyList<QStmt> stmts, QOperation op, bool isEntry,
-        HashSet<string> owned,
-        Dictionary<string, List<(string Op, string Var)>> extras,
-        Dictionary<(string Op, (string Op, string Var) Key), string> paramName,
-        Dictionary<(string Op, string Var), string> storageName,
-        Dictionary<(string Op, string Var), string> refName,
+        HashSet<int> owned,
+        Dictionary<string, List<(string Op, int DeclId)>> extras,
+        Dictionary<(string Op, (string Op, int DeclId) Key), string> paramName,
+        Dictionary<(string Op, int DeclId), string> storageName,
+        Dictionary<(string Op, int DeclId), string> refName,
         HashSet<string> opNames,
         Dictionary<string, string> inherited, bool forceApply)
     {
         var active = new Dictionary<string, string>(inherited);
+        // The facts a call site needs to be COMPLETED, gathered once for this body. Statement calls are
+        // completed by the QGate arm below; expression calls are completed inside the reference walk.
+        var fix = new CallFix(op, isEntry, extras, paramName, storageName);
         var result = new List<QStmt>(stmts.Count);
         foreach (var s in stmts)
             switch (s)
@@ -282,13 +297,13 @@ public static class ArrayLocalHoisting
                 // refName). Element expressions are rewritten with the CURRENT active map and emitted IN
                 // PLACE, so initializers referencing other locals (or measured values) evaluate exactly
                 // where the source evaluated them. The array's own rename takes effect for LATER references.
-                case QDecl when IsArrayLocal(s, out var d) && owned.Contains(d.Name):
-                    var target = refName.TryGetValue((op.Name, d.Name), out var rn) ? rn : d.Name;
+                case QDecl when IsArrayLocal(s, out var d) && owned.Contains(d.Id):
+                    var target = refName.TryGetValue((op.Name, d.Id), out var rn) ? rn : d.Name;
                     switch (d.Value)
                     {
                         case QArrayLiteral l:
                             for (var i = 0; i < l.Elements.Count; i++)
-                                result.Add(new QAssign(target, RenameExpr(l.Elements[i], active, forceApply)) { Index = new QNumLit(i) });
+                                result.Add(new QAssign(target, RenameExpr(l.Elements[i], active, forceApply, fix)) { Index = new QNumLit(i) });
                             break;
                         case QArrayNew n:
                             for (var i = 0; i < n.Length; i++)
@@ -302,7 +317,7 @@ public static class ArrayLocalHoisting
                 // entry names the global backing directly; a def hands on its own forwarding parameter. The
                 // original arguments are rewritten with active (they may reference a renamed local array).
                 case QGate g when opNames.Contains(g.Name) && extras.TryGetValue(g.Name, out var calleeExtras) && calleeExtras.Count > 0:
-                    var args = g.Args.Select(a => RenameArg(a, active, forceApply)).ToList();
+                    var args = g.Args.Select(a => RenameArg(a, active, forceApply, fix)).ToList();
                     foreach (var key in calleeExtras)
                         args.Add(new QTextArg(new QNameRef(ArgNameFor(key, op, isEntry, paramName, storageName))));
                     result.Add(g with { Args = args });
@@ -311,7 +326,7 @@ public static class ArrayLocalHoisting
                 case QIf i:
                     result.Add(i with
                     {
-                        Cond = RenameCond(i.Cond, active, forceApply),
+                        Cond = RenameCond(i.Cond, active, forceApply, fix),
                         Then = Rewrite(i.Then, op, isEntry, owned, extras, paramName, storageName, refName, opNames, active, forceApply),
                         Else = Rewrite(i.Else, op, isEntry, owned, extras, paramName, storageName, refName, opNames, active, forceApply),
                     });
@@ -319,15 +334,15 @@ public static class ArrayLocalHoisting
                 case QFor f:
                     result.Add(f with
                     {
-                        From = RenameNode(f.From, active, forceApply)!, To = RenameNode(f.To, active, forceApply)!,
+                        From = RenameNode(f.From, active, forceApply, fix)!, To = RenameNode(f.To, active, forceApply, fix)!,
                         Body = Rewrite(f.Body, op, isEntry, owned, extras, paramName, storageName, refName, opNames, active, forceApply),
                     });
                     break;
                 case QWhile w:
-                    result.Add(w with { Cond = RenameCond(w.Cond, active, forceApply), Body = Rewrite(w.Body, op, isEntry, owned, extras, paramName, storageName, refName, opNames, active, forceApply) });
+                    result.Add(w with { Cond = RenameCond(w.Cond, active, forceApply, fix), Body = Rewrite(w.Body, op, isEntry, owned, extras, paramName, storageName, refName, opNames, active, forceApply) });
                     break;
                 case QRepeat r:
-                    result.Add(r with { Body = Rewrite(r.Body, op, isEntry, owned, extras, paramName, storageName, refName, opNames, active, forceApply), Until = RenameCond(r.Until, active, forceApply) });
+                    result.Add(r with { Body = Rewrite(r.Body, op, isEntry, owned, extras, paramName, storageName, refName, opNames, active, forceApply), Until = RenameCond(r.Until, active, forceApply, fix) });
                     break;
                 case QConjugate c:
                     result.Add(c with
@@ -337,7 +352,7 @@ public static class ArrayLocalHoisting
                     });
                     break;
 
-                default: result.Add(RenameStmt(s, active, forceApply)); break;
+                default: result.Add(RenameStmt(s, active, forceApply, fix)); break;
             }
         return result;
     }
@@ -346,9 +361,9 @@ public static class ArrayLocalHoisting
     /// backing global directly; a def uses its own (owner or pass-through) parameter for that array. A def
     /// calling an owner without a matching parameter is a threading bug — fail loudly, never a dangling
     /// name.</summary>
-    private static string ArgNameFor((string Op, string Var) key, QOperation caller, bool isEntry,
-        Dictionary<(string Op, (string Op, string Var) Key), string> paramName,
-        Dictionary<(string Op, string Var), string> storageName)
+    private static string ArgNameFor((string Op, int DeclId) key, QOperation caller, bool isEntry,
+        Dictionary<(string Op, (string Op, int DeclId) Key), string> paramName,
+        Dictionary<(string Op, int DeclId), string> storageName)
     {
         if (isEntry) return storageName[key];
         return paramName.TryGetValue((caller.Name, key), out var slot) ? slot
@@ -361,54 +376,88 @@ public static class ArrayLocalHoisting
 
     // --- reference renaming (only ever non-trivial in the rare shadow case; short-circuits otherwise) ---
 
-    private static QStmt RenameStmt(QStmt s, Dictionary<string, string> map, bool on)
+    /// <summary>What COMPLETING a call needs: a callee owning array locals gained hidden reference
+    /// parameters, and every call site must supply them. The statement form is completed in <c>Rewrite</c>;
+    /// this carries the same facts into the reference walk so an EXPRESSION-position call (a <c>function</c>
+    /// call, which is a <see cref="QCallNode"/> inside a tree) is completed identically. Default-constructed
+    /// (<c>Extras</c> null) means "nothing to complete".</summary>
+    private readonly record struct CallFix(
+        QOperation Caller, bool IsEntry,
+        Dictionary<string, List<(string Op, int DeclId)>> Extras,
+        Dictionary<(string Op, (string Op, int DeclId) Key), string> ParamName,
+        Dictionary<(string Op, int DeclId), string> StorageName)
     {
-        if (!on || map.Count == 0) return s;
+        /// <summary>The hidden arguments this callee needs, or null when it needs none.</summary>
+        public List<(string Op, int DeclId)>? For(string callee) =>
+            Extras is not null && Extras.TryGetValue(callee, out var e) && e.Count > 0 ? e : null;
+
+        /// <summary>True when nothing in this walk can change — no rename in effect AND no call to complete —
+        /// so every visitor may short-circuit. Renaming alone is the common case and used to gate the whole
+        /// walk; completing a call is a separate obligation that must not be skipped along with it.</summary>
+        public bool Idle(Dictionary<string, string> map, bool on) =>
+            (!on || map.Count == 0) && (Extras is null || Extras.Count == 0);
+    }
+
+    private static QStmt RenameStmt(QStmt s, Dictionary<string, string> map, bool on, CallFix fix)
+    {
+        if (fix.Idle(map, on)) return s;
         return s switch
         {
-            QGate g => g with { Args = g.Args.Select(a => RenameArg(a, map, on)).ToList() },
-            QAssign a => a with { Name = N(a.Name, map), Index = RenameNode(a.Index, map, on), Value = RenameExpr(a.Value, map, on) },
-            QDecl d => d with { Value = RenameExpr(d.Value, map, on) },
+            QGate g => g with { Args = g.Args.Select(a => RenameArg(a, map, on, fix)).ToList() },
+            QAssign a => a with { Name = N(a.Name, map), Index = RenameNode(a.Index, map, on, fix), Value = RenameExpr(a.Value, map, on, fix) },
+            QDecl d => d with { Value = RenameExpr(d.Value, map, on, fix) },
+            // A `return` VALUE is an ordinary expression and must be renamed like any other. Omitting it let a
+            // returned array reference keep its source name while a shadowing declaration had taken that name
+            // over — so the function returned a DIFFERENT array's contents, with no diagnostic anywhere.
+            QReturn r => r with { Value = RenameExpr(r.Value, map, on, fix) },
             _ => s,
         };
     }
 
-    private static QArg RenameArg(QArg arg, Dictionary<string, string> map, bool on)
+    private static QArg RenameArg(QArg arg, Dictionary<string, string> map, bool on, CallFix fix)
     {
-        if (!on || map.Count == 0) return arg;
+        if (fix.Idle(map, on)) return arg;
         return arg switch
         {
-            QQubitArg q => new QQubitArg(N(q.Reg, map), RenameNode(q.Index, map, on)!),
-            QTextArg t => t with { Tree = RenameNode(t.Tree, map, on) },
+            QQubitArg q => new QQubitArg(N(q.Reg, map), RenameNode(q.Index, map, on, fix)!),
+            QTextArg t => t with { Tree = RenameNode(t.Tree, map, on, fix) },
             _ => arg,
         };
     }
 
-    private static QExpr RenameExpr(QExpr expr, Dictionary<string, string> map, bool on)
+    private static QExpr RenameExpr(QExpr expr, Dictionary<string, string> map, bool on, CallFix fix)
     {
-        if (!on || map.Count == 0) return expr;
+        if (fix.Idle(map, on)) return expr;
         return expr switch
         {
-            QText t => t with { Tree = RenameNode(t.Tree, map, on) },
-            QArrayLiteral l => l with { Elements = l.Elements.Select(e => RenameExpr(e, map, on)).ToList() },
+            QText t => t with { Tree = RenameNode(t.Tree, map, on, fix) },
+            QArrayLiteral l => l with { Elements = l.Elements.Select(e => RenameExpr(e, map, on, fix)).ToList() },
             _ => expr,
         };
     }
 
-    private static QCond RenameCond(QCond cond, Dictionary<string, string> map, bool on) =>
-        !on || map.Count == 0 ? cond : cond with { Tree = RenameNode(cond.Tree, map, on) };
+    private static QCond RenameCond(QCond cond, Dictionary<string, string> map, bool on, CallFix fix) =>
+        fix.Idle(map, on) ? cond : cond with { Tree = RenameNode(cond.Tree, map, on, fix) };
 
-    private static QNode? RenameNode(QNode? node, Dictionary<string, string> map, bool on)
+    private static QNode? RenameNode(QNode? node, Dictionary<string, string> map, bool on, CallFix fix)
     {
-        if (!on || map.Count == 0 || node is null) return node;
+        if (node is null || fix.Idle(map, on)) return node;
         return node switch
         {
             QNameRef r => map.TryGetValue(r.Name, out var m) ? new QNameRef(m) : r,
-            QUnary u => u with { Operand = RenameNode(u.Operand, map, on)! },
-            QBinOp b => b with { Left = RenameNode(b.Left, map, on)!, Right = RenameNode(b.Right, map, on)! },
-            QMember m => m with { Base = RenameNode(m.Base, map, on)! },
-            QIndexNode ix => ix with { Base = RenameNode(ix.Base, map, on)!, Index = RenameNode(ix.Index, map, on)! },
-            QCallNode c => c with { Arg = RenameNode(c.Arg, map, on) },
+            QUnary u => u with { Operand = RenameNode(u.Operand, map, on, fix)! },
+            QBinOp b => b with { Left = RenameNode(b.Left, map, on, fix)!, Right = RenameNode(b.Right, map, on, fix)! },
+            QMember m => m with { Base = RenameNode(m.Base, map, on, fix)! },
+            QIndexNode ix => ix with { Base = RenameNode(ix.Base, map, on, fix)!, Index = RenameNode(ix.Index, map, on, fix)! },
+            // Rename the written arguments, then APPEND the callee's hidden array references in its own
+            // appended order — the same completion the statement arm performs in Rewrite.
+            QCallNode c => c with
+            {
+                Args = c.Args.Select(a => RenameNode(a, map, on, fix)!)
+                    .Concat((fix.For(c.Name) ?? Enumerable.Empty<(string Op, int DeclId)>())
+                        .Select(key => (QNode)new QNameRef(ArgNameFor(key, fix.Caller, fix.IsEntry, fix.ParamName, fix.StorageName))))
+                    .ToList(),
+            },
             _ => node,   // QNumLit, QLit
         };
     }

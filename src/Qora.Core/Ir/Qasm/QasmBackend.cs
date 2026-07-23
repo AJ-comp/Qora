@@ -32,10 +32,14 @@ public static class QasmBackend
     /// them.</summary>
     public static Result Run(QProgram program, IReadOnlyList<string> materializationNotes, SemanticModel? semantics)
     {
-        // 1. Def-local classical arrays are inexpressible in OpenQASM (arrays are global-or-parameter
+        // 1. A `return` may stand anywhere in Qora (and in the OpenQASM grammar), but the execution target
+        //    cannot leave a def from inside a nested block: give each function exactly one, at its end.
+        var flattened = ReturnFlattening.Run(program);
+
+        // 2. Def-local classical arrays are inexpressible in OpenQASM (arrays are global-or-parameter
         //    only, and defs cannot see mutable globals): thread each as a hidden array-reference
         //    parameter backed by a global, before any renaming so the minted names mangle like user names.
-        var hoisted = ArrayLocalHoisting.Run(program);
+        var hoisted = ArrayLocalHoisting.Run(flattened);
 
         // 2. Map every Qora name to a valid, collision-free OpenQASM identifier (reserved words,
         //    stdgates names, QASM's flat global scope).

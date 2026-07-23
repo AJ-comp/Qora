@@ -190,6 +190,13 @@ public static class SymbolTableBuilder
         // Expression literals (pi/tau/euler/true/false) are legitimate non-symbols and never error.
         var currentStmtId = 0;   // set by Walk to the statement being visited, so uses carry their node Id
         var measureBits = new List<(string Name, QSpan? Span)>();   // every measure bit, for the post-walk top-level collision check
+        var reported036 = new HashSet<(int, int)>();   // QSEM036 spans already flagged — one diagnostic per statement span, like reported026
+
+        // A WHOLE `bit[]` register, if that is what this node denotes. The discriminator is IsArray, NOT Type:
+        // a scalar measure bit and a bit register are both QType.Bit, and the scalar one is untouched by the
+        // register rule (OpenQASM makes scalar `bit` interchangeable with `bool`, so it IS a value).
+        Symbol? WholeBitRegister(Scope scope, QNode? node) =>
+            node is QNameRef r && scope.Lookup(r.Name) is { Type: QType.Bit, IsArray: true } sym ? sym : null;
         void Record(Scope scope, string name, string detail, QSpan? span)
         {
             // pi/tau/euler/true/false mean something in an expression but are never declared, so they are
@@ -214,7 +221,8 @@ public static class SymbolTableBuilder
         // free identifiers: `q.Count` records q as used, while Count is a member (QSEM029 when it is not
         // `.Count` on an array), never a standalone name — the structure says so, no after-dot heuristic.
         // Numeric/verbatim literals aren't names; pi/tau/euler/true/false are exempt (inside Record).
-        void RecordExpr(Scope scope, QNode? node, string detail, QSpan? span, bool classicalOnly = false)
+        void RecordExpr(Scope scope, QNode? node, string detail, QSpan? span, bool classicalOnly = false,
+            bool registerOk = false)
         {
             switch (node)
             {
@@ -227,6 +235,15 @@ public static class SymbolTableBuilder
                     if (classicalOnly && scope.Lookup(r.Name) is { Type: QType.Qubit }
                         && reported026.Add((span?.Start ?? -1, span?.End ?? -1)))
                         Add(errors, "QSEM026", $"in `{opName}`: `{r.Name}` is a qubit and cannot be used as a classical value here — a qubit has no numeric value to compare, index, or compute with", span);
+                    // QSEM036 — a WHOLE bit register is a container of bits, not a number. It reached a
+                    // position that reads a VALUE, and no position hands it a meaning: `registerOk` is set by
+                    // the PARENT for the four places a whole register legitimately appears (index base,
+                    // `.Count` base, an argument, and `==`/`!=` against another register). Everywhere else the
+                    // register would have to be read as a number, and a bit pattern carries no sign — the same
+                    // bits read 2 unsigned and −2 in two's complement — so the language refuses to choose.
+                    if (!registerOk && WholeBitRegister(scope, r) is not null
+                        && reported036.Add((span?.Start ?? -1, span?.End ?? -1)))
+                        Add(errors, "QSEM036", $"in `{opName}`: `{r.Name}` is a whole `bit[]` register, not a number — a bit pattern has no sign, so it has no numeric value on its own; write `{QoraGates.BitsAsInt}({r.Name})` to read it as an unsigned integer, or index a single bit (`{r.Name}[i]`)", span);
                     return;
                 case QMember { Base: QNameRef b } m:
                     Record(scope, b.Name, detail, span);
@@ -243,19 +260,40 @@ public static class SymbolTableBuilder
                     RecordExpr(scope, u.Operand, detail, span, classicalOnly);
                     return;
                 case QBinOp b2:
+                    // Register-to-register comparison is the ONE whole-register operation that needs no
+                    // numeric reading: it matches bit patterns. OpenQASM defines it only for equal widths —
+                    // `bit[2] "10"` and `bit[3] "010"` are NOT equal there even though both read as 2 — so
+                    // unequal widths are rejected rather than silently answering "different". ORDERING
+                    // (`<`/`>`) is deliberately excluded: the target compares those NUMERICALLY, ignoring
+                    // width, so `f == g` and `f < g` would disagree about the same pair. Ordering is a
+                    // numeric question and must be asked with an explicit conversion on both sides.
+                    if (WholeBitRegister(scope, b2.Left) is { } lhs && WholeBitRegister(scope, b2.Right) is { } rhs
+                        && b2.Op is "==" or "!=")
+                    {
+                        if (lhs.ArrayLength is int ln && rhs.ArrayLength is int rn && ln != rn
+                            && reported036.Add((span?.Start ?? -1, span?.End ?? -1)))
+                            Add(errors, "QSEM036", $"in `{opName}`: `{QNodes.Render(b2.Left)}` is `bit[{ln}]` and `{QNodes.Render(b2.Right)}` is `bit[{rn}]` — registers of different widths are never equal, whatever bits they hold; compare equal-width registers, or compare their values with `{QoraGates.BitsAsInt}(…)` on both sides", span);
+                        RecordExpr(scope, b2.Left, detail, span, classicalOnly, registerOk: true);
+                        RecordExpr(scope, b2.Right, detail, span, classicalOnly, registerOk: true);
+                        return;
+                    }
                     RecordExpr(scope, b2.Left, detail, span, classicalOnly);
                     RecordExpr(scope, b2.Right, detail, span, classicalOnly);
                     return;
                 case QIndexNode i:
-                    RecordExpr(scope, i.Base, detail, span, classicalOnly);
+                    // `f[0]` READS one bit out of the register — the register itself is addressed, not valued.
+                    RecordExpr(scope, i.Base, detail, span, classicalOnly, registerOk: true);
                     RecordExpr(scope, i.Index, detail, span, classicalOnly);
                     return;
                 case QCallNode c:
-                    // a call's name resolves like any identifier (an operation name yields QSEM028, an
-                    // unknown one QSEM025 — the same verdicts the flat text scan produced); its argument
-                    // is an ordinary expression.
-                    Record(scope, c.Name, detail, span);
-                    RecordExpr(scope, c.Arg, detail, span, classicalOnly);
+                    // A call's name is a CALLABLE (a function, or the measurement M), resolved against the
+                    // function/gate table by validation — not a value identifier, so it is not recorded as a
+                    // use here. Its arguments are ordinary expressions, except that a whole register IS a
+                    // legal ARGUMENT: what an argument may be is decided by the callee's signature (QSEM006),
+                    // which is how `AsInt(f)` and a `bit[]` parameter are both reached. The allowance covers
+                    // the argument ITSELF only — `AsInt(f + 1)` still reports, because the register there sits
+                    // inside an arithmetic expression, not in the argument position.
+                    foreach (var a in c.Args) RecordExpr(scope, a, detail, span, classicalOnly, registerOk: true);
                     return;
             }
         }
@@ -296,8 +334,12 @@ public static class SymbolTableBuilder
                                     Record(scope, q.Reg, $"{g.Name} @ {q.Reg}[{QNodes.Render(q.Index)}]", g.Span);  // the register itself
                                     RecordExpr(scope, q.Index, $"{g.Name} index @ {q.Reg}[{QNodes.Render(q.Index)}]", g.Span); // vars inside [ i ]
                                     break;
+                                // whole register OR angle expr (theta, a*pi, …). A bare whole `bit[]` here is an
+                                // ARGUMENT, so the callee's signature judges it (QSEM006) — but a register
+                                // buried in an angle expression (`Rx(f * pi, q)`) is being read as a number and
+                                // still reports, because registerOk covers only the argument node itself.
                                 case QTextArg t:
-                                    RecordExpr(scope, t.Tree, $"{g.Name} @ {QNodes.Render(t.Tree)}", g.Span);       // whole register OR angle expr (theta, a*pi, …)
+                                    RecordExpr(scope, t.Tree, $"{g.Name} @ {QNodes.Render(t.Tree)}", g.Span, registerOk: true);
                                     break;
                             }
                         break;
@@ -306,8 +348,8 @@ public static class SymbolTableBuilder
                         // resolves the target `r` to the register (chain lookup), not the bit declared here.
                         if (md.Value is QMeasure { Target: { } mt })
                         {
-                            Record(scope, mt.Reg, $"measure @ {mt.Reg}[{QNodes.Render(mt.Index)}]", md.Span);       // the measured qubit COLLAPSES here
-                            RecordExpr(scope, mt.Index, $"measure index @ {mt.Reg}[{QNodes.Render(mt.Index)}]", md.Span);
+                            Record(scope, QNodes.RegOf(mt), $"measure @ {QNodes.Render(mt)}", md.Span);       // the measured qubit COLLAPSES here
+                            RecordExpr(scope, QNodes.IndexOf(mt), $"measure index @ {QNodes.Render(mt)}", md.Span);
                         }
                         // The measure bit is BLOCK-SCOPED like var/const for VISIBILITY: declared into the
                         // CURRENT scope in program order, so referencing it before this line is QSEM025.
@@ -325,7 +367,7 @@ public static class SymbolTableBuilder
                         Declare(scope, new Symbol(md.Name, SymbolKind.MeasureBit, QType.Bit, isConst: md.IsConst, declSpan: md.Span, declNodeId: md.Id));
                         break;
                     case QDecl d:
-                        RecordValue(scope, d.Value, $"init {d.Name}", d.Span);
+                        RecordValue(scope, d.Value, $"init {d.Name}", d.Span, targetIsArray: d.IsArray);
                         // Point-of-declaration scoping: this name may not have been used earlier in its own
                         // block (that use would bind to the outer value, which this local shadows). The
                         // initializer's own use of the name (order == this statement) is exempt, so a const
@@ -346,13 +388,20 @@ public static class SymbolTableBuilder
                     case QAssign { Value: QMeasure { Target: { } at } } ma:
                         Record(scope, ma.Name, $"assign {ma.Name}", ma.Span);
                         RecordExpr(scope, ma.Index, $"assign index {ma.Name}[{QNodes.Render(ma.Index)}]", ma.Span, classicalOnly: true);
-                        Record(scope, at.Reg, $"measure @ {at.Reg}[{QNodes.Render(at.Index)}]", ma.Span);
-                        RecordExpr(scope, at.Index, $"measure index @ {at.Reg}[{QNodes.Render(at.Index)}]", ma.Span);
+                        Record(scope, QNodes.RegOf(at), $"measure @ {QNodes.Render(at)}", ma.Span);
+                        RecordExpr(scope, QNodes.IndexOf(at), $"measure index @ {QNodes.Render(at)}", ma.Span);
                         break;
                     case QAssign a:
                         Record(scope, a.Name, $"assign {a.Name}", a.Span);                                          // the target is referenced (written)
                         RecordExpr(scope, a.Index, $"assign index {a.Name}[{QNodes.Render(a.Index)}]", a.Span, classicalOnly: true);
-                        RecordValue(scope, a.Value, $"assign {a.Name}", a.Span);
+                        RecordValue(scope, a.Value, $"assign {a.Name}", a.Span,
+                            targetIsArray: a.Index is null && scope.Lookup(a.Name) is { IsArray: true });
+                        break;
+                    case QReturn ret:
+                        // A `return` value is an ordinary value position. Without this case it was walked by
+                        // nothing here, so QSEM025 (unknown name), QSEM026 (qubit as a value), QSEM028
+                        // (operation as a value) and QSEM036 all silently skipped every returned expression.
+                        RecordValue(scope, ret.Value, "return", ret.Span);
                         break;
                     case QFor f:
                         RecordExpr(scope, f.From, $"for bound {QNodes.Render(f.From)}", f.Span, classicalOnly: true);   // range bounds are classical (read in the ENCLOSING scope)…
@@ -407,16 +456,20 @@ public static class SymbolTableBuilder
                 Add(errors, "QSEM013", $"in `{opName}`: {KindLabel(sym.Kind)} name `{sym.SourceName}` shadows the built-in `{sym.SourceName}`; choose another name", sym.DeclSpan);
         return root;
 
-        void RecordValue(Scope valueScope, QExpr value, string detail, QSpan? span)
+        // <paramref name="targetIsArray"/> suppresses the whole-register rule when the value is being bound to
+        // an ARRAY target (`var g: bit[] = f;`, `g = f;`). Those are already rejected, more precisely, as
+        // QSEM029 ("an array must be initialized with an array literal or `new T[N]`") — the register there is
+        // not being read as a number, so QSEM036's advice to write `AsInt(f)` would be wrong guidance.
+        void RecordValue(Scope valueScope, QExpr value, string detail, QSpan? span, bool targetIsArray = false)
         {
             switch (value)
             {
                 case QText text:
-                    RecordExpr(valueScope, text.Tree, detail, span, classicalOnly: true);
+                    RecordExpr(valueScope, text.Tree, detail, span, classicalOnly: true, registerOk: targetIsArray);
                     break;
                 case QMeasure { Target: { } target }:
-                    Record(valueScope, target.Reg, $"measure @ {target.Reg}[{QNodes.Render(target.Index)}]", span);
-                    RecordExpr(valueScope, target.Index, $"measure index @ {target.Reg}[{QNodes.Render(target.Index)}]", span);
+                    Record(valueScope, QNodes.RegOf(target), $"measure @ {QNodes.Render(target)}", span);
+                    RecordExpr(valueScope, QNodes.IndexOf(target), $"measure index @ {QNodes.Render(target)}", span);
                     break;
                 case QArrayLiteral literal:
                     foreach (var element in literal.Elements)

@@ -11,6 +11,90 @@ emitted as **OpenQASM 3.0**.
 > **Note:** Qora was renamed from **Ket** on 2026-07-01 (a "Ket" extension already existed). Versions
 > 0.1–0.7 below were authored under the old name.
 
+## 0.27 — 2026-07-23
+
+### Changed
+- **A whole `bit[]` register is a container of bits, not a number.** A bit pattern carries no sign, so it
+  has no numeric value on its own: the same `"10"` reads `2` unsigned and `-2` in two's complement. Rather
+  than pick one silently, Qora now rejects every reading of a whole register as a number and provides one
+  explicit conversion. This is a **breaking change** — `if (f == 1)` on a `bit[]` previously compiled.
+- **`AsInt(f)` is the one reading**, and it emits the width-qualified unsigned cast `uint[N](f)`. The width
+  is mandatory: OpenQASM allows `bit[n]` → `uint[m]` only when `n == m`, and an execution target may accept
+  a wrong width silently, so the compiler supplies it from the register's own declaration.
+- **`f == g` between registers of the same width stays legal and now emits bare** (`if (f == g)`), because
+  OpenQASM compares registers as bit patterns — exactly Qora's meaning — and needs no cast to do it.
+- A **scalar `bit`** is unaffected. OpenQASM makes a scalar bit interchangeable with `bool`, so it is a
+  value, and `if (r == 1)` still emits as `if (r == true)`.
+
+### Added
+- **`return` may stand anywhere a statement may** — an early return, a return inside `if`/`else`, a return
+  inside a `for`/`while`. Previously a `return` had to be its block's last statement, which was never a
+  language rule: it was the emitter's limitation showing through. The new `Ir/Qasm/ReturnFlattening` pass
+  gives each function the single-bottom-return shape the execution target requires — a `return` becomes an
+  assignment to one result variable, and the statements it would have skipped move into the `else` of the
+  branch that did not return. A return inside a LOOP `break`s out of it, which is what makes the first one
+  win; `break` cannot say "and skip what comes after the loop" — those statements are not inside any branch
+  to move into — so that one case also carries a done flag, which guards them and leaves each ENCLOSING loop
+  as well. Everything else re-nests with no bookkeeping at all.
+- `AsInt(f)` — a built-in classical function reading a whole `bit[]` register as an unsigned integer. The
+  name is reserved: an expression-position call is spelled by bare name, so no qualifier could disambiguate
+  a user callable that reused it (`QSEM013`).
+
+### Errors
+- `QSEM035` now reports only the two real errors: a `return` in an `operation` (void), and a function with
+  a path that produces no value. The placement rule is gone. Its coverage test is the flattening pass's own
+  predicate, so a function validation accepts is exactly one the pass can reshape.
+- `QSEM036` — a whole `bit[]` register read as a number (`var n: int = f;`, `f + 1`, `if (f)`, `f == 1`),
+  compared to a register of a **different width** (registers of unequal width are never equal in OpenQASM,
+  whatever bits they hold), or **ordered** against another register (`f < g` — the target orders registers
+  numerically while `==` matches bit patterns, so the two would disagree about the same pair; ask an
+  ordering question with `AsInt(...)` on both sides).
+- A `return` value is now walked by the symbol table, so `QSEM025`/`QSEM026`/`QSEM028`/`QSEM036` apply
+  inside `return` as they do everywhere else.
+
+### Fixed
+A `function` (0.26) introduced a second call form — a call inside an EXPRESSION, where every other callable
+is a statement — and a `return` statement. Passes written before those existed matched only the older shapes
+and skipped the new ones without a word. Each of these was a silent miscompile: a successful build whose
+output was wrong or unrunnable.
+
+- **A returned array reference now follows the nearest declaration.** The hoisting pass renames array
+  references when a nested declaration shadows an outer one, but never rewrote a `return` value — so the
+  returned name could bind to a *different* array than the one in scope, and the function returned the wrong
+  contents with no diagnostic from either the compiler or the target.
+- **A function with a classical array local is now called with its hidden array argument.** Such a function
+  gains a hidden reference parameter (OpenQASM lets arrays enter a `def` only by reference); the argument was
+  supplied only at statement call sites, so the expression call — the only way a function is ever invoked —
+  emitted a `def`/call arity mismatch that the target rejected.
+- **A function call in an expression now runs the same signature check as the statement form.** Only the
+  argument *count* was checked, so a whole `bit[]` register (or any array) reached a scalar parameter with no
+  diagnostic, while the identical call written as a statement was rejected — one callee, two answers.
+- **A `repeat`'s `until` condition now resolves in the body's scope.** The condition runs after the body and
+  may read what the body declared; checking it against the enclosing scope rejected legal programs.
+- The `--stages` IR view no longer drops `return` statements.
+
+## 0.26 — 2026-07-22
+
+### Added
+- **`function` — a classical, pure, value-returning subroutine** (Q#'s `function`, alongside the quantum,
+  void `operation`): `function Name(params): T { … return e; }`. Its parameters and return type are classical
+  scalars (`int`/`bit`/`float`/`angle`), and its body is pure — no gates, no `use`, no measurement, no
+  operation calls; only classical statements, calls to other functions, and `return`. Because a function has
+  no quantum side effect, **its call is a value usable anywhere in an expression**: a declaration initializer
+  (`var k: int = two();`), an assignment, a gate argument (`Rx(angleOf(k), q[0])`), a condition
+  (`if (c == g())`), and another function's body (`return inner(y) + 1;`). A measurement remains the one
+  side-effecting value form — allowed only as a whole `var r: bit = M(q[i]);` — and an `operation` remains
+  void (calling one in an expression is `QSEM005`).
+- Functions emit as OpenQASM `def Name(...) -> T { … }`. A `return` written inside a branch is restructured
+  to a single bottom return through a temporary (OpenQASM/Braket cannot `return` from within a nested block),
+  so every function — including `if`/`else`-returning ones — runs on the Braket local simulator.
+
+### Errors
+- `QSEM033` — a function body is not pure (a gate, `use`, measurement, or operation call).
+- `QSEM034` — a function parameter or return type is a qubit (a function is classical).
+- `QSEM035` — a `return` outside a function, or a function whose `return` is not its tail statement / does not
+  cover every path. (Recursion stays `QSEM011`; a function call in an expression is now counted as a call edge.)
+
 ## 0.25 — 2026-07-21
 
 ### Changed

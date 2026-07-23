@@ -224,8 +224,16 @@ internal static class ExprTree
     private static QNode CallNode(AstNonTerminal call)
     {
         var name = call.Items.OfType<AstTerminal>().FirstOrDefault()?.ToString() ?? string.Empty;
-        var target = call.Items.OfType<AstNonTerminal>().FirstOrDefault(q => q.Name == "IndexAccess");
-        return new QCallNode(name, target is null ? null : IndexNode(target));
+        // Grammar: `Ident(expr, …)`. Each argument is an `Expr` nonterminal — parse each to a subtree.
+        // `M(q[0])`'s single argument is an `Expr` that is a lone index access, so it becomes one QIndexNode
+        // (matching the measurement pattern the desugarer/validator expect: `Args: [QIndexNode …]`).
+        var args = call.Items.OfType<AstNonTerminal>()
+            .Where(n => n.Name == "Expr")
+            .Select(Expression)
+            .Where(n => n is not null)
+            .Select(n => n!)
+            .ToList();
+        return new QCallNode(name, args);
     }
 
     /// <summary>A single index/atom token (the grammar limits an index to a number or bare identifier).

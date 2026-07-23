@@ -2,7 +2,7 @@
   "name": "qora-language",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.18.0",
+  "version": "0.20.0",
   "publisher": "qora-lang",
   "icon": "icon.png",
   "license": "MIT",

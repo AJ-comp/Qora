@@ -16,7 +16,7 @@
     monaco.languages.setMonarchTokensProvider('qora', {
         keywords: ['operation', 'use', 'new', 'const', 'var', 'if', 'for', 'in', 'while', 'repeat', 'until'],
         types: ['Qubit', 'int', 'float', 'bit', 'angle'],
-        gates: ['H', 'X', 'Y', 'Z', 'S', 'T', 'CNOT', 'CX', 'CZ', 'SWAP', 'CCX', 'Rx', 'Ry', 'Rz', 'M'],
+        gates: ['H', 'X', 'Y', 'Z', 'S', 'T', 'CNOT', 'CX', 'CZ', 'SWAP', 'CCX', 'Rx', 'Ry', 'Rz', 'M', 'AsInt'],
         constants: ['pi'],
         tokenizer: {
             root: [
@@ -74,9 +74,12 @@
         'Rz': '**Rz(θ, q)** — Z축 회전\n\n큐비트의 **위상**을 각도 θ만큼 회전.\n\n`Rz(pi/4, q[0]);` → `rz(pi/4) q[0];`',
         // measurement
         'M': '**M(q)** — 측정\n\n큐비트를 측정해서 **0 또는 1로 확정**(붕괴)시키고, 그 값을 비트로 돌려줘요.\n\n`var r: bit = M(q[0]);` → `r = measure q[0];`',
+        'AsInt': '**AsInt(f)** \u2014 \ube44\ud2b8 \ub808\uc9c0\uc2a4\ud130\ub97c \uc22b\uc790\ub85c \uc77d\uae30\n\n\ud1b5\uc9dc `bit[]`\ub294 **\ube44\ud2b8 \ubb36\uc74c\uc774\uc9c0 \uc22b\uc790\uac00 \uc544\ub2c8\uc5d0\uc694** \u2014 \ubd80\ud638\uac00 \uc5c6\uc5b4\uc11c \uac19\uc740 \ube44\ud2b8\uac00 2\ub85c\ub3c4 \u22122\ub85c\ub3c4 \uc77d\ud790 \uc218 \uc788\uac70\ub4e0\uc694. \uadf8\ub798\uc11c \uc22b\uc790\ub85c \uc4f8 \ub550 **\ubb34\ubd80\ud638\ub85c \uc77d\uaca0\ub2e4\uace0 \uba85\uc2dc**\ud574\uc57c \ud574\uc694.\n\n`if (AsInt(f) == 2)` \u2192 `if (uint[2](f) == 2)`',
         // constants & keywords
         'pi': '**pi** — 원주율 π ≈ 3.14159\n\n회전 각도에 써요: `Rx(pi/2, q)`(90°), `Rz(pi/4, q)`(45°).',
-        'operation': '**operation** — 함수(서브루틴) 정의\n\n`operation 이름(파라미터) { … }`\n`Main`이 진입점, 나머지는 OpenQASM `def`가 돼요.',
+        'operation': '**operation** — 양자 연산(서브루틴) 정의\n\n`operation 이름(파라미터) { … }`\n`Main`이 진입점, 나머지는 OpenQASM `def`가 돼요. 반환값이 없어요(void).',
+        'function': '**function** — 고전 순수 함수\n\n`function 이름(파라미터): 반환타입 { … return 값; }`. 값을 돌려줘서 식 어디에나 쓸 수 있어요(`Rx(angleOf(4), q[0])`). 큐비트·게이트·측정은 못 써요(순수 고전).',
+        'return': '**return** — 함수의 반환\n\n`return 식;` — `function` 안에서만. 모든 경로가 return해야 하고, 블록의 마지막 문이어야 해요.',
         'use': '**use** — 큐비트 할당\n\n`use q = Qubit[n];` — 큐비트 n개를 빌려 q로.\n\n→ `qubit[n] q;`',
         'Qubit': '**Qubit** — 양자 비트 타입\n\n연산 파라미터는 `q: Qubit[]`, 할당은 `use q = Qubit[2];`처럼 써요. 파라미터의 크기는 `q.Count`로 확인해요.',
         'new': '**new T[N]** — 고전 배열 만들기\n\n`var values: int[] = new int[3];`처럼 쓰면 0으로 초기화된 원소 N개를 만들어요.',

@@ -3,7 +3,7 @@ namespace Qora.Ir;
 /// <summary>The compiler's version, stamped into emitted QASM for provenance.</summary>
 public static class QoraVersion
 {
-    public const string Value = "0.25";
+    public const string Value = "0.27";
 }
 
 /// <summary>
@@ -89,6 +89,20 @@ public sealed record QOperation(string Name, IReadOnlyList<QParam> Params, IRead
 {
     /// <summary>Stable node identity (see <see cref="QNodeIds"/>): fresh at <c>new</c>, inherited by <c>with</c>.</summary>
     public int Id { get; init; } = QNodeIds.Next();
+
+    /// <summary>
+    /// True for a <c>function</c> (classical, pure, value-returning) rather than an <c>operation</c>
+    /// (quantum, void). A function takes only classical parameters, its body applies no gates / no
+    /// <c>use</c> / no measurement / no operation calls, and it <c>return</c>s a value of
+    /// <see cref="ReturnType"/>. Because it is pure, a function CALL is a legal value anywhere in an
+    /// expression (unlike an operation, whose call is statement-only). Emitted as an OpenQASM
+    /// <c>def Name(...) -&gt; T { … }</c>.
+    /// </summary>
+    public bool IsFunction { get; init; }
+
+    /// <summary>The value type a <c>function</c> returns (<see cref="IsFunction"/> is true); null for an
+    /// <c>operation</c> (void). A scalar classical type only — <c>int</c>/<c>bit</c>/<c>float</c>/<c>angle</c>.</summary>
+    public QType? ReturnType { get; init; }
 
     /// <summary>
     /// The name to SHOW in diagnostics, when it differs from the emitted <see cref="Name"/>. Null means
@@ -238,6 +252,19 @@ public sealed record QAssign(string Name, QExpr Value) : QStmt
 
 public sealed record QIf(QCond Cond, IReadOnlyList<QStmt> Then, IReadOnlyList<QStmt> Else) : QStmt;
 
+/// <summary><c>return e;</c> — only inside a <c>function</c>; <see cref="Value"/> is the returned expression,
+/// whose type must match the function's declared <see cref="QOperation.ReturnType"/>. Emits <c>return …;</c>.</summary>
+public sealed record QReturn(QExpr Value) : QStmt;
+
+/// <summary>
+/// <c>break;</c> — leave the innermost enclosing loop. NOT a Qora statement: there is no source syntax for
+/// it, and no front-end pass ever sees one. It is minted only by <see cref="Passes.ReturnFlattening"/>, the
+/// first step of the OpenQASM backend, to stop a loop whose body has already produced the function's result.
+/// Deliberately kept out of the language: every statement kind is one more shape each pass must handle, and
+/// this one needs to travel through five backend passes only, none of which read or rename anything in it.
+/// </summary>
+public sealed record QBreak : QStmt;
+
 /// <summary>
 /// <c>for Var in From..To { Body }</c>. Bounds are expression TREES (<c>0</c>, <c>values.Count - 1</c>),
 /// parsed once at lowering; the bounds prover folds them and every consumer renders its own spelling.
@@ -289,8 +316,18 @@ public sealed record QTextArg(QNode? Tree = null) : QArg
 
 public abstract record QExpr;
 
-/// <summary>A measurement as a whole initializer/RHS — the one legal call-in-expression form (<c>var r: bit = M(q[i]);</c>).</summary>
-public sealed record QMeasure(QQubitArg? Target) : QExpr;
+/// <summary>
+/// A measurement as a whole initializer/RHS — the one legal call-in-expression form
+/// (<c>var r: bit = M(q[i]);</c> or <c>var r: bit = M(a);</c> on a single-qubit parameter).
+/// <para><see cref="Target"/> is the measured QUBIT REFERENCE in the IR's ONE canonical reference form:
+/// a <see cref="QNameRef"/> for a whole single qubit (<c>M(a)</c>) or a <see cref="QIndexNode"/> for a
+/// register element (<c>M(q[i])</c>). It is NOT nullable: a measurement without a qubit is not a thing,
+/// so the state is unrepresentable rather than guarded for at every consumer (an earlier nullable target
+/// let <c>M(a)</c> lower to "no target" and emit the operand-less <c>measure;</c> with no diagnostic).
+/// Lowering only builds a QMeasure when the argument IS one of those two reference shapes; anything else
+/// stays a call for the validator to reject.</para>
+/// </summary>
+public sealed record QMeasure(QNode Target) : QExpr;
 
 /// <summary>
 /// Any other expression, as its parsed tree (e.g. <c>pi / 4</c>, <c>count + 1</c>), built once at
@@ -361,9 +398,17 @@ public sealed record QMember(QNode Base, string Member) : QNode;
 /// restriction is lifted.</summary>
 public sealed record QIndexNode(QNode Base, QNode Index) : QNode;
 
-/// <summary>A call <c>Name(Arg)</c> — the surface grammar allows only the measurement form <c>M(q[i])</c>;
-/// any other call is carried so the reader can reject it (no OpenQASM expression form).</summary>
-public sealed record QCallNode(string Name, QNode? Arg) : QNode;
+/// <summary>A call <c>Name(Args…)</c> inside an expression. Two kinds share this node: the measurement
+/// <c>M(q[i])</c> (exactly one <see cref="QIndexNode"/> argument — lowered to <see cref="QMeasure"/> when it
+/// is a whole decl/assign RHS, otherwise carried here and either desugared out of a condition or rejected),
+/// and a <c>function</c> call <c>Foo(a, b)</c> (a legal value — the reader resolves it to a declared
+/// function and type-checks its arguments). A call to an <c>operation</c> or an unknown name left here is
+/// rejected (no OpenQASM expression form). <see cref="Args"/> is empty for a zero-argument call.</summary>
+public sealed record QCallNode(string Name, IReadOnlyList<QNode> Args) : QNode
+{
+    /// <summary>Construction convenience for the single-argument measurement form <c>M(q[i])</c>.</summary>
+    public QCallNode(string name, QNode? arg) : this(name, arg is null ? System.Array.Empty<QNode>() : new[] { arg }) { }
+}
 
 // ---- the built-in gate table (single source of truth for emitter + validator + inverter) ----
 
@@ -421,6 +466,13 @@ public sealed record GateSig(string CalleeName, IReadOnlyList<IParamSpec> Params
 /// the emitter's name mapping, the validator's arity/unitarity checks, the inverter's irreversibility
 /// rejection, and the reserved-name set all derive from this table automatically.
 /// </summary>
+/// <summary>
+/// One built-in FUNCTION. <see cref="TakesBitRegister"/> marks a callable whose single argument is a WHOLE
+/// <c>bit[]</c> register — a shape no ordinary value slot can express, precisely because a whole register is
+/// not a value of any scalar type (that is what the conversion exists to bridge).
+/// </summary>
+public sealed record BuiltinFunction(QType Returns, bool TakesBitRegister);
+
 public static class QoraGates
 {
     public static readonly IReadOnlyDictionary<string, GateInfo> Gates = new Dictionary<string, GateInfo>
@@ -476,6 +528,26 @@ public static class QoraGates
     /// (<c>var r: bit = M(q[i]);</c>); no alias is accepted.
     /// </summary>
     public const string Measurement = "M";
+
+    /// <summary>
+    /// Qora's built-in FUNCTION registry — classical, pure, value-returning callables usable anywhere an
+    /// expression is legal. THE single source of truth: to add one, add ONE entry here, and the reserved-name
+    /// rule, the call check and the target lowering all follow. Kept separate from <see cref="Gates"/> because
+    /// a gate is a void quantum statement while a function IS a value.
+    /// </summary>
+    public static readonly IReadOnlyDictionary<string, BuiltinFunction> Functions =
+        new Dictionary<string, BuiltinFunction>
+        {
+            [BitsAsInt] = new(QType.Int, TakesBitRegister: true),
+        };
+
+    /// <summary>
+    /// The reading of a whole <c>bit[]</c> register as a number — the ONE explicit conversion, because a bit
+    /// register carries no sign and so has no single numeric meaning on its own (the same pattern reads 2
+    /// unsigned and −2 in two's complement). Every implicit reading is a compile error (QSEM036); this is how
+    /// a program says which one it means. Lowers to OpenQASM's width-qualified unsigned cast, <c>uint[N](f)</c>.
+    /// </summary>
+    public const string BitsAsInt = "AsInt";
 
     /// <summary>
     /// The namespace the built-in gates live in, implicitly opened everywhere (Q#'s

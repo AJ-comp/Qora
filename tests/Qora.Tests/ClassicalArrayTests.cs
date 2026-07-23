@@ -317,18 +317,135 @@ public class ClassicalArrayTests
             operation Main() { use q=Qubit[1]; var a: int[] = [1, 2, 3]; Helper(a); H(q[0]); }
             """);
 
-    /// <summary>A WHOLE bit register compared to an int emits through the explicit spec cast
-    /// (`int(f) == 1`) — the one spelling the Braket execution oracle actually runs (it crashes on the
-    /// bare register-vs-int form, and both targets reject the old bool form). An ELEMENT stays a scalar
-    /// bit with the bool rewrite.</summary>
-    [Fact]
-    public void WholeBitRegisterComparesViaAnIntCast()
+    // --- A WHOLE bit[] register is a CONTAINER OF BITS, not a number (QSEM036) ---
+    //
+    // A bit pattern carries no sign, so it has no single numeric meaning: the same "10" reads 2 unsigned and
+    // −2 in two's complement (both verified on the Braket oracle). Rather than pick one silently, every
+    // numeric use of a whole register is rejected and `AsInt(f)` is the one way to ask for a reading. What a
+    // register may still do without any numeric interpretation: be indexed (`f[0]`), report `.Count`, be
+    // passed as an argument, and be compared to another register OF THE SAME WIDTH.
+
+    /// <summary>Every position that would read a whole register AS A NUMBER is a compile error — the rule is
+    /// on the VALUE, not on a list of syntactic positions, so assignment, arithmetic, a bare truth condition
+    /// and comparison-against-a-number are all one rule. Before this, `int n = f;` compiled and silently
+    /// evaluated to −2 on the execution oracle.</summary>
+    [Theory]
+    [InlineData("var n: int = f;", "int assignment")]
+    [InlineData("var n: int = f + 1;", "arithmetic")]
+    [InlineData("if (f) { X(q[0]); }", "bare truth condition")]
+    [InlineData("if (f == 1) { X(q[0]); }", "comparison against a number")]
+    [InlineData("if (f > 1) { X(q[0]); }", "ordering against a number")]
+    [InlineData("for i in 0..f { X(q[0]); }", "range bound")]
+    [InlineData("Rx(f * pi, q[0]);", "angle expression")]
+    public void RejectsAWholeBitRegisterUsedAsANumber(string statement, string why)
     {
-        var r = Compiler.Compile("operation Main(){ use q=Qubit[1]; var f: bit[] = new bit[2]; if (f == 1) { X(q[0]); } }");
-        Assert.True(r.Success, Explain(r));
-        Assert.Contains("if (int(f) == 1)", r.Qasm);
-        Assert.DoesNotContain("f == true", r.Qasm);
+        var r = Compiler.Compile($"operation Main(){{ use q=Qubit[1]; var f: bit[] = new bit[2]; {statement} }}");
+        Assert.False(r.Success, $"{why}: expected QSEM036 but the program compiled");
+        Assert.Contains(r.Errors, e => e.Code == "QSEM036");
     }
+
+    /// <summary>`AsInt(f)` is the ONE reading, and it emits the WIDTH-QUALIFIED unsigned cast: the spec allows
+    /// `bit[n]` → `uint[m]` only when `n == m`, and Braket accepts a wrong width silently, so the compiler
+    /// must supply it. UNSIGNED because `int[2]("10")` is −2 while `uint[2]("10")` is 2.</summary>
+    [Fact]
+    public void AsIntEmitsTheWidthQualifiedUnsignedCast()
+    {
+        var r = Compiler.Compile("operation Main(){ use q=Qubit[1]; var f: bit[] = new bit[2]; if (AsInt(f) == 1) { X(q[0]); } }");
+        Assert.True(r.Success, Explain(r));
+        Assert.Contains("if (uint[2](f) == 1)", r.Qasm);
+        Assert.DoesNotContain("(int[2](f)", r.Qasm);   // never the SIGNED cast (`uint[2](f)` contains `int[2](f)`)
+        Assert.DoesNotContain("uint(f)", r.Qasm);      // never width-less: the spec requires n == m
+    }
+
+    /// <summary>The width follows the REGISTER, not a single op-wide guess — two same-named registers in
+    /// disjoint blocks are different arrays, and each cast carries its own width.</summary>
+    [Fact]
+    public void AsIntTakesTheWidthOfTheNearestDeclaration()
+    {
+        var r = Compiler.Compile("""
+            operation Main() {
+                use q = Qubit[1];
+                if (1 == 1) { var f: bit[] = new bit[2]; if (AsInt(f) == 1) { X(q[0]); } }
+                else        { var f: bit[] = new bit[5]; if (AsInt(f) == 1) { X(q[0]); } }
+            }
+            """);
+        Assert.True(r.Success, Explain(r));
+        Assert.Contains("uint[2](", r.Qasm);
+        Assert.Contains("uint[5](", r.Qasm);
+    }
+
+    /// <summary>Register-to-register comparison needs no numeric reading — it matches bit patterns — so it
+    /// stays legal and emits BARE, with no cast at all.</summary>
+    [Fact]
+    public void EqualWidthRegistersCompareDirectly()
+    {
+        var r = Compiler.Compile("operation Main(){ use q=Qubit[1]; var f: bit[] = new bit[2]; var g: bit[] = new bit[2]; if (f == g) { X(q[0]); } }");
+        Assert.True(r.Success, Explain(r));
+        Assert.Contains("if (f == g)", r.Qasm);
+        Assert.DoesNotContain("uint", r.Qasm);
+    }
+
+    /// <summary>Different widths are never equal in OpenQASM whatever bits they hold — `bit[2] "10"` and
+    /// `bit[3] "010"` both read as 2 yet compare unequal — so the comparison is rejected instead of silently
+    /// answering "different".</summary>
+    [Fact]
+    public void RejectsComparingRegistersOfDifferentWidths()
+    {
+        var r = Compiler.Compile("operation Main(){ use q=Qubit[1]; var f: bit[] = new bit[2]; var g: bit[] = new bit[3]; if (f == g) { X(q[0]); } }");
+        Assert.False(r.Success);
+        Assert.Contains(r.Errors, e => e.Code == "QSEM036");
+    }
+
+    /// <summary>ORDERING between registers is rejected even at equal width: the target compares `&lt;`/`&gt;`
+    /// NUMERICALLY while `==` compares bit patterns, so the two would disagree about the same pair. Ordering
+    /// is a numeric question and must be asked with an explicit reading on both sides.</summary>
+    [Fact]
+    public void RejectsOrderingBetweenRegisters()
+    {
+        var r = Compiler.Compile("operation Main(){ use q=Qubit[1]; var f: bit[] = new bit[2]; var g: bit[] = new bit[2]; if (f < g) { X(q[0]); } }");
+        Assert.False(r.Success);
+        Assert.Contains(r.Errors, e => e.Code == "QSEM036");
+    }
+
+    /// <summary>`AsInt` reads a whole register; anything else has no width to cast with, so it is refused at
+    /// the source rather than becoming a QINTERNAL in the target lowering. A single bit is already a value.</summary>
+    [Theory]
+    [InlineData("var n: int = AsInt(k);", "an int variable")]
+    [InlineData("var n: int = AsInt(f[0]);", "a single bit")]
+    [InlineData("var n: int = AsInt(4);", "a literal")]
+    [InlineData("var n: int = AsInt(f, f);", "two arguments")]
+    public void RejectsAsIntOnAnythingButAWholeRegister(string statement, string why)
+    {
+        var r = Compiler.Compile($"operation Main(){{ use q=Qubit[1]; var f: bit[] = new bit[2]; var k: int = 3; {statement} }}");
+        Assert.False(r.Success, $"{why}: expected QSEM006 but the program compiled");
+        Assert.Contains(r.Errors, e => e.Code == "QSEM006");
+    }
+
+    /// <summary>The built-in name is reserved: an expression-position call is spelled by BARE name, so no
+    /// qualifier could ever disambiguate a user callable that reused it.</summary>
+    [Fact]
+    public void RejectsAUserCallableNamedAsInt() =>
+        Compiler.Rejects("operation AsInt() { } operation Main(){ use q=Qubit[1]; X(q[0]); }", "QSEM013");
+
+    /// <summary>A `repeat`'s `until` runs AFTER the body, so it reads the body's names — including a register
+    /// the body declared. Resolving it against the ENCLOSING scope instead made a legal body-local argument
+    /// look like something that is not a register at all.</summary>
+    [Fact]
+    public void AnUntilConditionSeesARegisterTheRepeatBodyDeclared()
+    {
+        var r = Compiler.Compile("operation Main(){ use q=Qubit[1]; repeat { var f: bit[] = new bit[2]; f[0] = M(q[0]); } until (AsInt(f) == 1); }");
+        Assert.True(r.Success, Explain(r));
+        Assert.Contains("uint[2](f) == 1", r.Qasm);
+    }
+
+    /// <summary>A whole register passed as an ARGUMENT is judged by the callee's signature, not by the rule —
+    /// a `bit[]` parameter still accepts it.</summary>
+    [Fact]
+    public void AWholeRegisterIsStillALegalArgument() =>
+        Compiler.Accepts("""
+            operation Helper(f: bit[], q: Qubit) { if (f[0] == 1) { X(q); } }
+            operation Main() { use q=Qubit[1]; var f: bit[] = new bit[2]; Helper(f, q[0]); }
+            """);
 
     // --- bit[] PARAMETERS: length-specialized like Qubit[] (bit is not a valid array base type, so the
     //     only legal QASM parameter form is the sized register `bit[N]`) ---

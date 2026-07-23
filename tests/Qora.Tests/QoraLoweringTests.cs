@@ -86,9 +86,9 @@ public class QoraLoweringTests
 
         Assert.Equal("results", assignment.Name);
         Assert.Equal(new QNumLit(0), assignment.Index);   // the index atom is settled at lowering
-        Assert.NotNull(measurement.Target);
-        Assert.Equal("q", measurement.Target.Reg);
-        Assert.Equal(new QNumLit(0), measurement.Target.Index);
+        // the measure target is the IR's canonical reference form (QIndexNode for a register element)
+        Assert.Equal("q", QNodes.RegOf(measurement.Target));
+        Assert.Equal(new QNumLit(0), QNodes.IndexOf(measurement.Target));
     }
 
     private static void AssertParam(QParam param, string name, QType type, bool isArray)

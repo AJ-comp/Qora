@@ -33,12 +33,29 @@ public static class QNodes
         QUnary u => $"{u.Op} {Render(u.Operand)}",
         QBinOp b => $"{Render(b.Left)} {b.Op} {Render(b.Right)}",
         QIndexNode i => $"{Render(i.Base)} [ {Render(i.Index)} ]",
-        // calls glue their argument (the historical RenderCall shape), unlike the spaced bare index form.
-        QCallNode { Arg: QIndexNode idx } c => $"{c.Name}({Render(idx.Base)}[{Render(idx.Index)}])",
-        QCallNode { Arg: null } c => $"{c.Name}()",
-        QCallNode c => $"{c.Name}({Render(c.Arg)})",
+        // A measurement glues its single index argument (the historical RenderCall shape, `M(q[0])`),
+        // unlike the spaced bare index form; a function call renders its arguments comma-separated.
+        QCallNode { Args: [QIndexNode idx] } c => $"{c.Name}({Render(idx.Base)}[{Render(idx.Index)}])",
+        QCallNode c => $"{c.Name}({string.Join(", ", c.Args.Select(Render))})",
         _ => string.Empty,
     };
+
+    // ---- measurement target accessors ----
+    //
+    // A QMeasure target is the IR's canonical reference form: QNameRef (a whole single qubit, `M(a)`) or
+    // QIndexNode (a register element, `M(q[i])`). These two accessors are the ONE place that splits it, so
+    // no consumer re-derives "which register" / "which element" from a spelling or a shape of its own.
+
+    /// <summary>The qubit/register NAME a measurement target refers to: <c>q[i]</c> → <c>q</c>, <c>a</c> → <c>a</c>.</summary>
+    public static string RegOf(QNode target) => target switch
+    {
+        QIndexNode { Base: QNameRef r } => r.Name,
+        QNameRef r => r.Name,
+        _ => string.Empty,
+    };
+
+    /// <summary>The element index of a measurement target, or NULL when it names a whole single qubit.</summary>
+    public static QNode? IndexOf(QNode target) => target is QIndexNode i ? i.Index : null;
 
     /// <summary>True when the tree contains a call node anywhere — the structural form of the historical
     /// <c>HasCall</c> flag (a flag can contradict its content; the walk cannot).</summary>
@@ -52,6 +69,36 @@ public static class QNodes
         QIndexNode i => ContainsCall(i.Base) || ContainsCall(i.Index),
         _ => false,
     };
+
+    /// <summary>Every call node in a tree, in pre-order — so the validator can resolve each against the
+    /// function table (a function call is a legal value; an operation/unknown call, or a stray measurement,
+    /// is not). Recurses through call arguments too, so a call nested in another call's arguments is seen.</summary>
+    public static IEnumerable<QCallNode> CallsIn(QNode? node)
+    {
+        switch (node)
+        {
+            case null: yield break;
+            case QCallNode c:
+                yield return c;
+                foreach (var a in c.Args)
+                    foreach (var nested in CallsIn(a)) yield return nested;
+                break;
+            case QUnary u:
+                foreach (var n in CallsIn(u.Operand)) yield return n;
+                break;
+            case QBinOp b:
+                foreach (var n in CallsIn(b.Left)) yield return n;
+                foreach (var n in CallsIn(b.Right)) yield return n;
+                break;
+            case QMember m:
+                foreach (var n in CallsIn(m.Base)) yield return n;
+                break;
+            case QIndexNode i:
+                foreach (var n in CallsIn(i.Base)) yield return n;
+                foreach (var n in CallsIn(i.Index)) yield return n;
+                break;
+        }
+    }
 
     // ---- the canonical "where do expressions live" enumeration ----
     //
@@ -101,6 +148,9 @@ public static class QNodes
                 yield return f.To;
                 if (f.Step is { } st) yield return st;
                 break;
+            case QReturn r:
+                foreach (var t in TreesOf(r.Value)) yield return t;
+                break;
             // QUse and QConjugate carry no expressions of their own (a conjugate is bodies only).
         }
     }
@@ -115,8 +165,8 @@ public static class QNodes
             case QText { Tree: { } t }:
                 yield return t;
                 break;
-            case QMeasure { Target: { } target }:
-                yield return target.Index;
+            case QMeasure m:
+                yield return m.Target;
                 break;
             case QArrayLiteral literal:
                 foreach (var element in literal.Elements)

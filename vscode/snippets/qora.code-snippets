@@ -7,7 +7,12 @@
   "operation": {
     "prefix": "operation",
     "body": ["operation ${1:Name}(${2}) {", "\t$0", "}"],
-    "description": "operation(서브루틴) 정의"
+    "description": "operation(양자 서브루틴) 정의"
+  },
+  "function": {
+    "prefix": "function",
+    "body": ["function ${1:Name}(${2}): ${3|int,bit,float,angle|} {", "\treturn ${0};", "}"],
+    "description": "function(고전 순수 함수) — 값 반환"
   },
   "Main entry": {
     "prefix": "main",

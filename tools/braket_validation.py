@@ -133,6 +133,71 @@ operation Main() {
 load_and_run("B8 demo.qor as-is (for+const+measure+if)",
     open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "vscode", "examples", "demo.qor"), encoding="utf-8").read(), None)
 
+# B9/B10 — a WHOLE bit[] register is a container, not a number (QSEM036). These pin the two things a
+# register may still do, END TO END, with an outcome that DISCRIMINATES a right answer from a wrong one.
+#
+# Reading order: f[0] is the register's most significant bit, so f = "100" reads as 4. The marker qubit is
+# measured INTO f on purpose — Braket reports only the qubits measured into a register that the program
+# later reads classically, so a marker in any other register would vanish from the counts.
+
+load_and_run("B9 AsInt -> uint[N] (무부호 폭 캐스트)", """
+operation Main() {
+    use q = Qubit[3];
+    var f: bit[] = new bit[3];
+    X(q[0]);
+    f[0] = M(q[0]);
+    f[1] = M(q[1]);
+    if (AsInt(f) == 4) {
+        X(q[2]);
+    }
+    f[2] = M(q[2]);
+}""", {"101"})   # 100 would mean the cast read something other than 4 (a signed read gives -4)
+
+load_and_run("B11 조기 return (꼬리를 else로)", """
+function sign(x: int): int {
+    if (x == 0) { return 7; }
+    return 4;
+}
+operation Main() {
+    use q = Qubit[1];
+    var k: int = sign(0);
+    if (k == 7) {
+        X(q[0]);
+    }
+    var m: bit = M(q[0]);
+}""", {"1"})   # 0 would mean the skipped tail ran and overwrote the early return
+
+load_and_run("B12 루프 안 return (첫 일치가 이김)", """
+function first(n: int): int {
+    for i in 0..4 {
+        if (i >= n) { return i; }
+    }
+    return 9;
+}
+operation Main() {
+    use q = Qubit[1];
+    var k: int = first(2);
+    if (k == 2) {
+        X(q[0]);
+    }
+    var m: bit = M(q[0]);
+}""", {"1"})   # 0 would mean the LAST match (4) or the post-loop fallback (9) won
+
+load_and_run("B10 같은 폭 레지스터 직접 비교", """
+operation Main() {
+    use q = Qubit[3];
+    var f: bit[] = new bit[3];
+    var g: bit[] = new bit[3];
+    X(q[0]);
+    f[0] = M(q[0]);
+    f[1] = M(q[1]);
+    g[0] = 1;
+    if (f == g) {
+        X(q[2]);
+    }
+    f[2] = M(q[2]);
+}""", {"101"})   # f = "100" = g; 100 would mean the registers compared unequal
+
 print()
 print(f"{PASS} passed, {FAIL} failed")
 

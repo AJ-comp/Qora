@@ -51,12 +51,10 @@ public static class Monomorphizer
                     switch (stmt)
                     {
                         case QUse u: regs[u.Name] = u.Size; break;
-                        // A `bit[]` lowers to OpenQASM's dedicated `bit[N]` register (bit is not a legal array
-                        // base type), and `sizeof` is not defined on a bit register — so a bit array's `.Count`
-                        // must fold to its literal length here. Every other element type keeps the general
-                        // `array[T, N]` form, where `sizeof` IS defined, and is deliberately left alone.
-                        case QDecl { IsArray: true, Type: QType.Bit } d when BitArrayLength(d) is int len:
-                            regs[d.Name] = len; break;
+                        // NOTE: `bit[]` DECLARATIONS are deliberately NOT seeded here. They are block-scoped,
+                        // so two same-named ones in disjoint blocks are different arrays with different
+                        // lengths; a flat op-wide entry made every `.Count` fold to whichever came last.
+                        // Each is bound at its own declaration site instead — see Rewrite.
                         case QIf i: CollectUses(i.Then); CollectUses(i.Else); break;
                         case QFor f: CollectUses(f.Body); break;
                         case QWhile w: CollectUses(w.Body); break;
@@ -80,7 +78,7 @@ public static class Monomorphizer
             QBinOp b => b with { Left = SubstCounts(b.Left, regs)!, Right = SubstCounts(b.Right, regs)! },
             QUnary u => u with { Operand = SubstCounts(u.Operand, regs)! },
             QIndexNode i => i with { Base = SubstCounts(i.Base, regs)!, Index = SubstCounts(i.Index, regs)! },
-            QCallNode { Arg: { } a } c => c with { Arg = SubstCounts(a, regs) },
+            QCallNode c => c with { Args = c.Args.Select(a => SubstCounts(a, regs)!).ToList() },
             _ => node,
         };
 
@@ -100,15 +98,45 @@ public static class Monomorphizer
             _ => expr,
         };
 
-        List<QStmt> Rewrite(IReadOnlyList<QStmt> body, Dictionary<string, int> regs)
+        /// <summary>A `bit[]` declaration binds its literal length HERE, at its own site: the initializer is
+        /// folded first (it is evaluated before the name is bound), then the length enters the CURRENT block
+        /// map, in effect for the rest of this block and any block nested inside it.</summary>
+        QStmt ResolveDecl(QDecl d, Dictionary<string, int> regs)
         {
+            var rewritten = d with { Value = ResolveExpr(d.Value, regs) };
+            // A declaration SHADOWS any enclosing binding of the same name — that is what a scope chain
+            // means. A `bit[]` binds its own literal length: it lowers to OpenQASM's dedicated `bit[N]`
+            // register (bit is not a legal array base type) and `sizeof` is not defined on a bit register,
+            // so its `.Count` must fold. EVERY OTHER declaration removes the inherited entry instead, so a
+            // `.Count` on it can never fold to an enclosing `use` register's size (it keeps the general
+            // `array[T, N]` form, where `sizeof` IS defined and the emitter renders it).
+            if (d is { IsArray: true, Type: QType.Bit } && BitArrayLength(d) is int len) regs[d.Name] = len;
+            else regs.Remove(d.Name);
+            return rewritten;
+        }
+
+        /// <summary>The enclosing length map with one name SHADOWED — a declaration of that name in the
+        /// inner block means a different thing, so the outer binding must not leak into it.</summary>
+        static Dictionary<string, int> Shadow(Dictionary<string, int> outer, string name)
+        {
+            var inner = new Dictionary<string, int>(outer);
+            inner.Remove(name);
+            return inner;
+        }
+
+        List<QStmt> Rewrite(IReadOnlyList<QStmt> body, Dictionary<string, int> outer)
+        {
+            // A BLOCK gets its OWN length map, seeded from the enclosing one — the ordinary scope chain,
+            // the same shape the mangler's rename map and ArrayLocalHoisting's active map use. Params and
+            // `use` registers arrive already seeded at op level (they are hoisted / forward-referenceable).
+            var regs = new Dictionary<string, int>(outer);
             var output = new List<QStmt>(body.Count);
             foreach (var stmt in body)
             {
                 QStmt rewritten = stmt switch
                 {
                     QGate g => g with { Args = g.Args.Select(a => ResolveArg(a, regs)).ToList() },
-                    QDecl d => d with { Value = ResolveExpr(d.Value, regs) },
+                    QDecl d => ResolveDecl(d, regs),
                     QAssign a => a with { Value = ResolveExpr(a.Value, regs) },
                     QIf i => i with
                     {
@@ -118,9 +146,9 @@ public static class Monomorphizer
                     },
                     QFor f => f with
                     {
-                        From = SubstCounts(f.From, regs)!,
+                        From = SubstCounts(f.From, regs)!,   // bounds evaluate in the ENCLOSING block
                         To = SubstCounts(f.To, regs)!,
-                        Body = Rewrite(f.Body, regs),
+                        Body = Rewrite(f.Body, Shadow(regs, f.Var)),   // the loop variable shadows in the body
                     },
                     QWhile w => w with
                     {
@@ -243,22 +271,44 @@ public static class Monomorphizer
         QBinOp b => MentionsCount(b.Left, owners) || MentionsCount(b.Right, owners),
         QUnary u => MentionsCount(u.Operand, owners),
         QIndexNode i => MentionsCount(i.Base, owners) || MentionsCount(i.Index, owners),
-        QCallNode c => MentionsCount(c.Arg, owners),
+        QCallNode c => c.Args.Any(a => MentionsCount(a, owners)),
         _ => false,
     };
 
-    private static bool HasCount(IReadOnlyList<QStmt> body, IReadOnlySet<string>? owners = null) =>
-        body.Any(stmt =>
-            QNodes.ExpressionSites(stmt).Any(n => MentionsCount(n, owners))   // every expression position, canonically
-            || stmt switch                                                     // plus the nested bodies
+    /// <summary>The owner set with one name SHADOWED (null keeps the "any base name" meaning).</summary>
+    private static IReadOnlySet<string>? Shadowed(IReadOnlySet<string>? owners, string name)
+    {
+        if (owners is null) return null;
+        var inner = new HashSet<string>(owners);
+        inner.Remove(name);
+        return inner;
+    }
+
+    /// <summary>Does a body still mention a <c>.Count</c> owned by <paramref name="owners"/>? The set
+    /// NARROWS as the block declares names: a declaration shadows the outer meaning, so a <c>.Count</c>
+    /// written after it belongs to the inner variable, not to the enclosing qubit array. This mirrors the
+    /// scope chain <c>Rewrite</c> folds with — a name-only test would flag a legitimately unfolded
+    /// <c>sizeof</c> on a shadowing classical array as an unresolved qubit count.</summary>
+    private static bool HasCount(IReadOnlyList<QStmt> body, IReadOnlySet<string>? owners = null)
+    {
+        var live = owners;
+        foreach (var stmt in body)
+        {
+            if (QNodes.ExpressionSites(stmt).Any(n => MentionsCount(n, live))) return true;   // canonical positions
+            var nested = stmt switch                                                          // plus nested bodies
             {
-                QIf i => HasCount(i.Then, owners) || HasCount(i.Else, owners),
-                QFor f => HasCount(f.Body, owners),
-                QWhile w => HasCount(w.Body, owners),
-                QRepeat r => HasCount(r.Body, owners),
-                QConjugate c => HasCount(c.Within, owners) || HasCount(c.Apply, owners),
+                QIf i => HasCount(i.Then, live) || HasCount(i.Else, live),
+                QFor f => HasCount(f.Body, Shadowed(live, f.Var)),
+                QWhile w => HasCount(w.Body, live),
+                QRepeat r => HasCount(r.Body, live),
+                QConjugate c => HasCount(c.Within, live) || HasCount(c.Apply, live),
                 _ => false,
-            });
+            };
+            if (nested) return true;
+            if (stmt is QDecl d) live = Shadowed(live, d.Name);   // in effect for the REST of this block
+        }
+        return false;
+    }
 
     private static bool HasUnresolvedQubitCount(QProgram program)
     {

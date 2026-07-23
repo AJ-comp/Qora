@@ -37,6 +37,9 @@ public static class QoraLowering
                 case "Operation":
                     operations.Add(LowerOperation(item));
                     break;
+                case "Function":
+                    operations.Add(LowerFunction(item));
+                    break;
                 // import "lib/gates.qor";  — the only import form: a quoted relative path. The StringLit
                 // token keeps its quotes, so trim them to recover the literal path.
                 case "Import":
@@ -52,6 +55,8 @@ public static class QoraLowering
                     {
                         if (nested.Name == "Operation")
                             operations.Add(LowerOperation(nested) with { Namespace = nsName });
+                        else if (nested.Name == "Function")
+                            operations.Add(LowerFunction(nested) with { Namespace = nsName });
                         else if (nested.Name == "Open")
                             nsOpens.Add(new QOpen(QnameText(nested), SpanOf(nested)));
                     }
@@ -97,6 +102,24 @@ public static class QoraLowering
         return new QOperation(name, ps, body) { Span = SpanOf(op.Items.OfType<AstTerminal>().FirstOrDefault()) };
     }
 
+    /// <summary>A <c>function</c> lowers to a <see cref="QOperation"/> flagged <see cref="QOperation.IsFunction"/>
+    /// with a <see cref="QOperation.ReturnType"/>. The return type is the one direct type-keyword terminal (the
+    /// <c>): T</c> tail); the name is the first terminal; params and body come out exactly as for an operation.</summary>
+    private static QOperation LowerFunction(AstNonTerminal fn)
+    {
+        var name = OpName(fn);
+        var ps = Params(fn).Select(LowerParam).ToList();
+        var returnKw = fn.Items.OfType<AstTerminal>().Select(t => t.ToString() ?? string.Empty)
+            .FirstOrDefault(t => TypeKeywords.Contains(t));
+        var body = Body(fn).Select(LowerSpanned).ToList();
+        return new QOperation(name, ps, body)
+        {
+            IsFunction = true,
+            ReturnType = ParseType(returnKw),
+            Span = SpanOf(fn.Items.OfType<AstTerminal>().FirstOrDefault()),
+        };
+    }
+
     /// <summary>Every statement gets its source span here, in ONE place, whatever its kind.</summary>
     private static QStmt LowerSpanned(AstNonTerminal node) => LowerStmt(node) with { Span = SpanOf(node) };
 
@@ -137,6 +160,7 @@ public static class QoraLowering
         "For" => LowerFor(node),
         "While" => new QWhile(LowerCondition(CondOf(node)), BodyStmts(node).Select(LowerSpanned).ToList()),
         "Repeat" => new QRepeat(BodyStmts(node).Select(LowerSpanned).ToList(), LowerCondition(CondOf(node))),
+        "Return" => new QReturn(LowerExpr(ExprOf(node))),
         _ => new QGate(new List<string>(), node.Name, new List<QArg>()), // defensive: unknown node -> inert
     };
 
@@ -279,10 +303,31 @@ public static class QoraLowering
         var call = Descendants(expr).FirstOrDefault(n => n.Name == "Call");
         if (call is not null && expr.Items.Count == 1 && CallName(call) == QoraGates.Measurement)
         {
-            var target = call.Items.OfType<AstNonTerminal>().FirstOrDefault(q => q.Name == "IndexAccess");
-            return new QMeasure(target is null ? null : new QQubitArg(Child(target, 0), Child(target, 1)));
+            // The call's argument is an `expr` (grammar: `Ident(expr, …)`). A measurement target must be a
+            // plain qubit REFERENCE — a register element `q[i]` or a whole single qubit `a`. Anything else
+            // (arithmetic, a nested call) is NOT a measurement: it stays a call node for the validator to
+            // reject, rather than lowering to a target-less measurement that emitted a bare `measure;`.
+            var argExpr = call.Items.OfType<AstNonTerminal>().FirstOrDefault(n => n.Name == "Expr");
+            if (MeasureTarget(argExpr) is { } target) return new QMeasure(target);
         }
         return new QText(ExprTree.Expression(expr));
+    }
+
+    /// <summary>The measured qubit reference of <c>M(…)</c>, in the IR's canonical reference form: a register
+    /// element <c>q[i]</c> becomes a <see cref="QIndexNode"/>, a whole single qubit <c>a</c> becomes a
+    /// <see cref="QNameRef"/>. Null when the argument is neither — the caller then does NOT build a
+    /// measurement, so "a measurement with no qubit" never enters the IR.</summary>
+    private static QNode? MeasureTarget(AstNonTerminal? argExpr)
+    {
+        if (argExpr is null || argExpr.Items.Count != 1) return null;
+        if (argExpr.Items[0] is AstNonTerminal { Name: "IndexAccess" } idx)
+            return new QIndexNode(new QNameRef(Child(idx, 0)), ExprTree.Atom(Child(idx, 1)));
+        if (argExpr.Items[0] is AstTerminal term)
+        {
+            var name = term.ToString() ?? string.Empty;
+            if (name.Length > 0 && (char.IsLetter(name[0]) || name[0] == '_')) return new QNameRef(name);
+        }
+        return null;
     }
 
     private static QCond LowerCondition(AstNonTerminal? cond) =>

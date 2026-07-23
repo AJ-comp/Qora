@@ -1,4 +1,4 @@
-# Qora v0.25 — complete language reference for AI assistants
+# Qora v0.27 — complete language reference for AI assistants
 
 Qora is a quantum programming language (Q#/C#-flavored syntax) that compiles to OpenQASM 3.
 File extension: `.qor`. This file is the full, authoritative surface spec: everything below is
@@ -65,6 +65,14 @@ operation Main()                // global namespace; the entry point; takes NO p
   (`var xs: int[] = new int[3];`); the compiler handles OpenQASM's global-scope rule automatically. Helper
   operations may also receive matching `T[]` parameters. Read/write elements with `xs[i]`, and read
   the length with `xs.Count`.
+- A WHOLE `bit[]` register is a CONTAINER OF BITS, not a number. A bit pattern carries no sign, so
+  the same bits read 2 unsigned and -2 in two's complement; the language will not pick one silently.
+  Using a whole register as a number is QSEM036: `var n: int = f;`, `f + 1`, `if (f)`, `f == 1`, and
+  ordering (`f < g`). Legal without any numeric reading: `f[i]`, `f.Count`, passing `f` as an argument,
+  and `f == g` / `f != g` between registers OF THE SAME WIDTH (compared as bit patterns, emitted bare).
+  To read a register as a number, write `AsInt(f)` — the one explicit unsigned reading, emitted as the
+  width-qualified `uint[N](f)`. A SCALAR `bit` (one measurement result) is unaffected: it is a value, and
+  `r == 1` emits as `r == true`.
 - Classical arrays are mutable when declared with `var`. Do not pass the same array to two array
   parameters in one call, because array parameters are mutable and may not overlap. Whole-array
   reassignment is not supported; update individual elements instead. A `const T[]` cannot be updated
@@ -76,8 +84,33 @@ operation Main()                // global namespace; the entry point; takes NO p
 - `var r: bit = M(q[i]);` — measure qubit i into a fresh bit. `r = M(q[i]);` re-measures.
   M() is legal ONLY as the whole right-hand side of a declaration/assignment. Never in conditions,
   arguments, or arithmetic (measure into a bit first).
-- No return values (operations are void). No calls in expressions. Qubit allocation sizes and
-  `new T[N]` array lengths must be positive literal integers.
+- An `operation` is void (no return value); its call is a STATEMENT only. To return a value, use a
+  `function` (see below). Qubit allocation sizes and `new T[N]` array lengths must be positive literal integers.
+
+## Functions (classical, value-returning)
+
+- `function Name(params): T { … return e; }` — a classical, pure subroutine (Q#'s `function`). Parameters
+  and the return type `T` are classical scalars (`int`/`bit`/`float`/`angle`), never qubits. The body is
+  PURE: only classical statements (`var`/`const`/`if`/`for`/`while`), calls to OTHER functions, and `return`.
+  A function may NOT apply a gate, `use` qubits, measure, or call an operation (QSEM033).
+- Because a function is pure, its CALL is a value — usable anywhere in an expression: an initializer
+  (`var k: int = two();`), an assignment RHS, a gate argument (`Rx(angleOf(k), q[0])`), a condition
+  (`if (c == g()) { … }`), or another function's body (`return inner(y) + 1;`). An `operation` call has no
+  value (QSEM005); only a function's does.
+- A `return` may stand ANYWHERE a statement may — an early return, a return inside `if`/`else`, a return
+  inside a `for`/`while`. The compiler rewrites the function into the single-bottom-return form the execution
+  target needs; you never write around that. A function must still `return` on every path (a lone `if` with no
+  `else` and nothing after it does not) — QSEM035 otherwise. Recursion is not allowed
+  (QSEM011), same as operations.
+- Example:
+  ```qora
+  function angleOf(k: int): angle { return pi / k; }
+  operation Main() {
+      use q = Qubit[1];
+      Rx(angleOf(4), q[0]);
+      var r: bit = M(q[0]);
+  }
+  ```
 
 ## Statements
 
@@ -143,6 +176,10 @@ QSEM025 identifier not declared in scope here (unknown name, or classical used b
 QSEM026 qubit used as a classical value       QSEM027 non-invertible `within` body
 QSEM028 operation name used as a value
 QSEM029 invalid array shape, initializer, member, or whole-array assignment
+QSEM033 impure function body (a gate, `use`, measurement, or operation call inside a function)
+QSEM034 a qubit in a function signature (function parameters/return are classical)
+QSEM035 `return` outside a function (an operation is void), or a function has a path that returns nothing
+QSEM036 a whole `bit[]` register used as a number, compared across widths, or ordered (use `AsInt(f)`)
 
 ## CLI contract (for tooling/agents)
 
@@ -154,7 +191,7 @@ qora --json [file] [--stages] [--base-dir <dir>]
   `{"success":bool,"qasm":"...","errors":[{"message","code","start","end"}]}`
   `start`/`end` are half-open character offsets into the entry document (-1 = no location).
 - `--stages` adds `"ast"`, `"ir"`, `"irInverse"`, `"symbols"` (pipeline snapshots; original/FQN names, unmangled).
-- Emitted QASM starts with `// generated by Qora v0.25`.
+- Emitted QASM starts with `// generated by Qora v0.27`.
 
 ## Executing programs
 
@@ -221,6 +258,8 @@ operation Main() {
 - `use` inside a non-entry operation or inside a loop/branch (QSEM012) — allocate in Main, pass
   qubits as parameters.
 - `if (M(q[0]) == 1)` (QSEM005) — measure into a bit first, then test the bit.
+- `var n: int = f;` / `f + 1` / `if (f)` / `f == 1` on a `bit[]` (QSEM036) — a whole register is not a
+  number; write `AsInt(f)`. (A single bit `f[i]` is already a value and needs no conversion.)
 - `Rx(q[0], pi/2)` (QSEM006) — rotations take the ANGLE first.
 - `qubit` lowercase as a type — the keyword is `Qubit` (capital Q).
 - Type BEFORE the name (`int n`, `Qubit[] q`) — annotations are trailing: `n: int`, `q: Qubit[]`.

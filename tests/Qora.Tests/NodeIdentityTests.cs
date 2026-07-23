@@ -119,13 +119,13 @@ public class NodeIdentityTests
         Assert.Contains("x_", r.Qasm);                               // and the QASM really uses the emitted name
     }
 
-    // --- 4d. the record deliberately sits OUTSIDE CollectDecls' ContainsKey guard: same-name decls in
-    //         disjoint sibling blocks share ONE map entry (they dedup into one emitted name), but every
-    //         declaring NODE must still get its own emitted-name fact — a null on the second sibling
-    //         would read as "the mangler never saw this node", i.e. a compiler bug. ---
+    // --- 4d. every declaring NODE gets its OWN emitted name. Same-name declarations in DISJOINT sibling
+    //         blocks are different variables, and QASM's def scope is flat, so they must not share one
+    //         emitted identifier — sharing merged two variables into one storage (silently wrong results).
+    //         Each still records a fact; a null would read as "the mangler never saw this node". ---
 
     [Fact]
-    public void SiblingSameNameDeclsEachGetTheirOwnEmittedNameFact()
+    public void SiblingSameNameDeclsGetDistinctEmittedNames()
     {
         var r = QoraParser.Parse(
             "operation Main(){ use q=Qubit[2]; for i in 0..1 { H(q[i]); } for i in 0..1 { X(q[i]); } }");
@@ -133,8 +133,11 @@ public class NodeIdentityTests
 
         var fors = r.Ir!.Operations.Single().Body.OfType<QFor>().ToList();
         Assert.Equal(2, fors.Count);
-        Assert.Equal("i", r.Semantics!.FindEmittedName(fors[0].Id));
-        Assert.Equal("i", r.Semantics.FindEmittedName(fors[1].Id));   // the guard-shared entry still records node 2
+        var first = r.Semantics!.FindEmittedName(fors[0].Id);
+        var second = r.Semantics.FindEmittedName(fors[1].Id);
+        Assert.False(string.IsNullOrEmpty(first));    // every declaring node records a fact
+        Assert.False(string.IsNullOrEmpty(second));
+        Assert.NotEqual(first, second);               // ...and two distinct declarations never share one
     }
 
     // --- 4e. the parameter and operation record sites (separate code from CollectDecls): a def-local

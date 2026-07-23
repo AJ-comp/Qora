@@ -99,21 +99,25 @@ public static class NameMangler
                 if (!map.ContainsKey(p.Name)) map[p.Name] = Fresh(p.Name, scope, "parameter");
                 _model?.RecordEmittedName(p.Id, map[p.Name]);
             }
-            CollectDecls(op.Body, scope, map);
+            // Qubit REGISTERS are hoisted to the def top and may be forward-referenced, so they are named
+            // up front, at OP level. Everything else (var/const, measure bits, loop variables) is named AT
+            // ITS DECLARATION during the walk below — see MangleBody.
+            CollectRegisters(op.Body, scope, map);
 
             return op with
             {
                 Name = isEntry ? op.Name : _opMap[op.Name],
                 Params = op.Params.Select(p => p with { Name = map[p.Name] }).ToList(),
-                Body = MangleBody(op.Body, map),
+                Body = MangleBody(op.Body, map, scope),
             };
         }
 
-        /// <summary>Assign a fresh name to every identifier a body DECLARES (registers, variables, loop
-        /// variables), recording each declaring node's emitted name into the model. The record sits OUTSIDE
-        /// the ContainsKey guard on purpose: same-name declarations in disjoint sibling blocks share one map
-        /// entry, but every declaring NODE still gets its own emitted-name fact.</summary>
-        private void CollectDecls(IReadOnlyList<QStmt> stmts, HashSet<string> scope, Dictionary<string, string> map)
+        /// <summary>Name the qubit REGISTERS a body declares, at OP level. Registers alone are pre-named:
+        /// the emitter hoists their declaration to the def top and the language lets a gate textually precede
+        /// its <c>use</c>, so a reference can appear before the declaration. Every OTHER declaration is named
+        /// at its own site (MangleBody), so two same-named locals in disjoint blocks get DISTINCT emitted
+        /// identifiers — QASM's def scope is flat, so sharing one identifier merged two variables.</summary>
+        private void CollectRegisters(IReadOnlyList<QStmt> stmts, HashSet<string> scope, Dictionary<string, string> map)
         {
             foreach (var s in stmts)
                 switch (s)
@@ -122,30 +126,57 @@ public static class NameMangler
                         if (!map.ContainsKey(u.Name)) map[u.Name] = Fresh(u.Name, scope, "register");
                         _model?.RecordEmittedName(u.Id, map[u.Name]);
                         break;
-                    case QDecl d:
-                        if (!map.ContainsKey(d.Name)) map[d.Name] = Fresh(d.Name, scope, "variable");
-                        _model?.RecordEmittedName(d.Id, map[d.Name]);
-                        break;
-                    case QFor f:
-                        if (!map.ContainsKey(f.Var)) map[f.Var] = Fresh(f.Var, scope, "loop variable");
-                        _model?.RecordEmittedName(f.Id, map[f.Var]);
-                        CollectDecls(f.Body, scope, map);
-                        break;
-                    case QIf i: CollectDecls(i.Then, scope, map); CollectDecls(i.Else, scope, map); break;
-                    case QWhile w: CollectDecls(w.Body, scope, map); break;
-                    case QRepeat r: CollectDecls(r.Body, scope, map); break;
-                    case QConjugate c: CollectDecls(c.Within, scope, map); CollectDecls(c.Apply, scope, map); break;
+                    case QFor f: CollectRegisters(f.Body, scope, map); break;
+                    case QIf i: CollectRegisters(i.Then, scope, map); CollectRegisters(i.Else, scope, map); break;
+                    case QWhile w: CollectRegisters(w.Body, scope, map); break;
+                    case QRepeat r: CollectRegisters(r.Body, scope, map); break;
+                    case QConjugate c: CollectRegisters(c.Within, scope, map); CollectRegisters(c.Apply, scope, map); break;
                 }
         }
 
         // --- body rewriting: `map` renames this def's locals; _opMap renames calls; built-ins stay ---
 
-        private IReadOnlyList<QStmt> MangleBody(IReadOnlyList<QStmt> stmts, Dictionary<string, string> map) =>
-            stmts.Select(s => MangleStmt(s, map)).ToList();
+        /// <summary>Rewrite a BLOCK. It gets its OWN rename map, seeded from the enclosing block: a
+        /// declaration inserts its entry when reached, in effect from that point through the rest of this
+        /// block and any block nested inside it. That is the ordinary scope chain — the same shape the
+        /// symbol table models and ArrayLocalHoisting already uses — so a reference always resolves to the
+        /// NEAREST declaration and two disjoint same-named declarations never collapse onto one name.</summary>
+        private IReadOnlyList<QStmt> MangleBody(IReadOnlyList<QStmt> stmts, Dictionary<string, string> map, HashSet<string> scope)
+        {
+            var local = new Dictionary<string, string>(map);
+            var result = new List<QStmt>(stmts.Count);
+            foreach (var s in stmts) result.Add(MangleStmt(s, local, scope));
+            return result;
+        }
+
+        /// <summary>A declaration is named HERE, at its own site: its initializer is rewritten FIRST (it is
+        /// evaluated before the name is bound, so it still sees the enclosing meaning), then the new name
+        /// enters this block map and is recorded as this declaring node's emitted name.</summary>
+        private QStmt MangleDecl(QDecl d, Dictionary<string, string> map, HashSet<string> scope)
+        {
+            var value = MangleExpr(d.Value, map);
+            var name = Fresh(d.Name, scope, "variable");
+            map[d.Name] = name;
+            _model?.RecordEmittedName(d.Id, name);
+            return d with { Name = name, Value = value };
+        }
+
+        /// <summary>A loop header declares its variable for the BODY only; the bounds are evaluated in the
+        /// ENCLOSING block, so they are rewritten before the loop variable enters scope.</summary>
+        private QStmt MangleFor(QFor f, Dictionary<string, string> map, HashSet<string> scope)
+        {
+            var from = MangleTree(f.From, map)!;
+            var to = MangleTree(f.To, map)!;
+            var step = f.Step is null ? null : MangleTree(f.Step, map);
+            var loopName = Fresh(f.Var, scope, "loop variable");
+            _model?.RecordEmittedName(f.Id, loopName);
+            var inner = new Dictionary<string, string>(map) { [f.Var] = loopName };
+            return f with { Var = loopName, From = from, To = to, Step = step, Body = MangleBody(f.Body, inner, scope) };
+        }
 
         private static string L(string name, Dictionary<string, string> map) => map.TryGetValue(name, out var m) ? m : name;
 
-        private QStmt MangleStmt(QStmt s, Dictionary<string, string> map) => s switch
+        private QStmt MangleStmt(QStmt s, Dictionary<string, string> map, HashSet<string> scope) => s switch
         {
             QUse u => u with { Name = L(u.Name, map) },
             QGate g => g with
@@ -153,23 +184,19 @@ public static class NameMangler
                 Name = _opNames.Contains(g.Name) ? _opMap[g.Name] : g.Name,
                 Args = g.Args.Select(a => MangleArg(a, map)).ToList(),
             },
-            QDecl d => d with { Name = L(d.Name, map), Value = MangleExpr(d.Value, map) },
+            QDecl d => MangleDecl(d, map, scope),
             QAssign a => a with
             {
                 Name = L(a.Name, map),
                 Index = a.Index is null ? null : MangleIndex(a.Index, map),
                 Value = MangleExpr(a.Value, map),
             },
-            QIf i => i with { Cond = MangleCond(i.Cond, map), Then = MangleBody(i.Then, map), Else = MangleBody(i.Else, map) },
-            QFor f => f with
-            {
-                Var = L(f.Var, map),
-                From = MangleTree(f.From, map)!, To = MangleTree(f.To, map)!,
-                Body = MangleBody(f.Body, map),
-            },
-            QWhile w => w with { Cond = MangleCond(w.Cond, map), Body = MangleBody(w.Body, map) },
-            QRepeat r => r with { Body = MangleBody(r.Body, map), Until = MangleCond(r.Until, map) },
-            QConjugate c => c with { Within = MangleBody(c.Within, map), Apply = MangleBody(c.Apply, map) },
+            QIf i => i with { Cond = MangleCond(i.Cond, map), Then = MangleBody(i.Then, map, scope), Else = MangleBody(i.Else, map, scope) },
+            QFor f => MangleFor(f, map, scope),
+            QWhile w => w with { Cond = MangleCond(w.Cond, map), Body = MangleBody(w.Body, map, scope) },
+            QRepeat r => r with { Body = MangleBody(r.Body, map, scope), Until = MangleCond(r.Until, map) },
+            QConjugate c => c with { Within = MangleBody(c.Within, map, scope), Apply = MangleBody(c.Apply, map, scope) },
+            QReturn r => r with { Value = MangleExpr(r.Value, map) },
             _ => s,
         };
 
@@ -182,7 +209,7 @@ public static class NameMangler
 
         private QExpr MangleExpr(QExpr expr, Dictionary<string, string> map) => expr switch
         {
-            QMeasure { Target: { } t } mm => mm with { Target = new QQubitArg(L(t.Reg, map), MangleIndex(t.Index, map)) },
+            QMeasure mm => mm with { Target = MangleTree(mm.Target, map)! },
             QText t => t with { Tree = MangleTree(t.Tree, map) },
             QArrayLiteral literal => literal with
             {
@@ -191,16 +218,18 @@ public static class NameMangler
             _ => expr,
         };
 
-        private static QCond MangleCond(QCond cond, Dictionary<string, string> map) =>
+        private QCond MangleCond(QCond cond, Dictionary<string, string> map) =>
             cond with { Tree = MangleTree(cond.Tree, map) };
 
         /// <summary>
         /// Rename every free name an expression tree references, structurally: a bare name this def
         /// declares is renamed via the local map; built-in constants pass through; a member NAME is
-        /// structural (never a local); numbers and literals are untouched. A call node cannot survive to
-        /// mangling in a validated program (QSEM005 / measure-condition lowering), so it passes through.
+        /// structural (never a local); numbers and literals are untouched. A FUNCTION call node renames its
+        /// ARGUMENTS (which reference locals); its NAME is a global function name that can never collide
+        /// (QSEM013/QSEM008 forbid a function taking a reserved/gate/duplicate name), so it stays as-is. A
+        /// measurement call never reaches mangling (QMeasure / measure-condition lowering handle it first).
         /// </summary>
-        private static QNode? MangleTree(QNode? node, Dictionary<string, string> map) => node switch
+        private QNode? MangleTree(QNode? node, Dictionary<string, string> map) => node switch
         {
             null => null,
             QNameRef r when !BuiltinConstants.Contains(r.Name) => new QNameRef(L(r.Name, map)),
@@ -208,12 +237,21 @@ public static class NameMangler
             QIndexNode i => i with { Base = MangleTree(i.Base, map)!, Index = MangleTree(i.Index, map)! },
             QUnary u => u with { Operand = MangleTree(u.Operand, map)! },
             QBinOp b => b with { Left = MangleTree(b.Left, map)!, Right = MangleTree(b.Right, map)! },
-            _ => node,   // QNameRef(pi/tau/euler), QNumLit, QLit, QCallNode
+            // A call's NAME is a reference to an operation/function — it goes through the SAME `_opMap`
+            // a QGate call target does, so a renamed callee can never keep an un-renamed call site. (An
+            // earlier version left it alone on the assumption that a function name can never collide; a
+            // namespaced operation flattening onto that name disproved it.)
+            QCallNode c => c with
+            {
+                Name = _opNames.Contains(c.Name) ? _opMap[c.Name] : c.Name,
+                Args = c.Args.Select(a => MangleTree(a, map)!).ToList(),
+            },
+            _ => node,   // QNameRef(pi/tau/euler), QNumLit, QLit
         };
 
         /// <summary>A qubit index is a numeric literal (kept) or a loop-variable name (renamed via the
         /// local map) — the node kind says which; no digit-scan re-derivation.</summary>
-        private static QNode MangleIndex(QNode index, Dictionary<string, string> map) =>
+        private QNode MangleIndex(QNode index, Dictionary<string, string> map) =>
             index is QNameRef r ? new QNameRef(L(r.Name, map)) : index;
     }
 }

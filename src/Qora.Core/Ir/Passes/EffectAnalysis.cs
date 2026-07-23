@@ -356,8 +356,7 @@ public static class EffectAnalysis
         private static void ApplyMeasure(QMeasure m, HashSet<QubitRef> touched, HashSet<QubitRef> modified,
             HashSet<QubitRef> measured)
         {
-            if (m.Target is null) return;
-            var r = RefOf(m.Target);
+            var r = RefOfTarget(m.Target);
             touched.Add(r);
             modified.Add(r);
             measured.Add(r);
@@ -367,6 +366,14 @@ public static class EffectAnalysis
         /// conservatively blanketed to the whole register — same split the validator's index check makes.
         /// Number-vs-name was settled ONCE at lowering (the index IS a QNumLit or QNameRef) — no
         /// re-parsing here, so this can never classify a token differently than any other pass.</summary>
+        /// <summary>A measurement target (QNameRef for a whole single qubit, QIndexNode for an element)
+        /// reduced to a QubitRef with the SAME literal-vs-blanket split <see cref="RefOf"/> makes.</summary>
+        private static QubitRef RefOfTarget(QNode target) => QNodes.IndexOf(target) switch
+        {
+            QNumLit { Value: >= int.MinValue and <= int.MaxValue } n => new QubitRef(QNodes.RegOf(target), (int)n.Value),
+            _ => new QubitRef(QNodes.RegOf(target), null),
+        };
+
         private static QubitRef RefOf(QArg arg) => arg switch
         {
             QQubitArg { Index: QNumLit { Value: >= int.MinValue and <= int.MaxValue } n } q =>
