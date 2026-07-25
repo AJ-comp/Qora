@@ -141,11 +141,17 @@ public static class NameMangler
         /// block and any block nested inside it. That is the ordinary scope chain — the same shape the
         /// symbol table models and ArrayLocalHoisting already uses — so a reference always resolves to the
         /// NEAREST declaration and two disjoint same-named declarations never collapse onto one name.</summary>
-        private IReadOnlyList<QStmt> MangleBody(IReadOnlyList<QStmt> stmts, Dictionary<string, string> map, HashSet<string> scope)
+        private IReadOnlyList<QStmt> MangleBody(IReadOnlyList<QStmt> stmts, Dictionary<string, string> map,
+            HashSet<string> scope, Dictionary<string, string>? finalMap = null)
         {
             var local = new Dictionary<string, string>(map);
             var result = new List<QStmt>(stmts.Count);
             foreach (var s in stmts) result.Add(MangleStmt(s, local, scope));
+            if (finalMap is not null)
+            {
+                finalMap.Clear();
+                foreach (var (name, emittedName) in local) finalMap[name] = emittedName;
+            }
             return result;
         }
 
@@ -174,6 +180,16 @@ public static class NameMangler
             return f with { Var = loopName, From = from, To = to, Step = step, Body = MangleBody(f.Body, inner, scope) };
         }
 
+        private QStmt MangleRepeat(QRepeat repeat, Dictionary<string, string> map, HashSet<string> scope)
+        {
+            // The until-condition is evaluated after the body and belongs to the body's lexical scope.
+            // Keep the map after its top-level declarations instead of resolving the condition through
+            // the enclosing map as a while-condition would.
+            var bodyFinal = new Dictionary<string, string>();
+            var body = MangleBody(repeat.Body, map, scope, bodyFinal);
+            return repeat with { Body = body, Until = MangleCond(repeat.Until, bodyFinal) };
+        }
+
         private static string L(string name, Dictionary<string, string> map) => map.TryGetValue(name, out var m) ? m : name;
 
         private QStmt MangleStmt(QStmt s, Dictionary<string, string> map, HashSet<string> scope) => s switch
@@ -188,13 +204,13 @@ public static class NameMangler
             QAssign a => a with
             {
                 Name = L(a.Name, map),
-                Index = a.Index is null ? null : MangleIndex(a.Index, map),
+                Index = MangleTree(a.Index, map),
                 Value = MangleExpr(a.Value, map),
             },
             QIf i => i with { Cond = MangleCond(i.Cond, map), Then = MangleBody(i.Then, map, scope), Else = MangleBody(i.Else, map, scope) },
             QFor f => MangleFor(f, map, scope),
             QWhile w => w with { Cond = MangleCond(w.Cond, map), Body = MangleBody(w.Body, map, scope) },
-            QRepeat r => r with { Body = MangleBody(r.Body, map, scope), Until = MangleCond(r.Until, map) },
+            QRepeat r => MangleRepeat(r, map, scope),
             QConjugate c => c with { Within = MangleBody(c.Within, map, scope), Apply = MangleBody(c.Apply, map, scope) },
             QReturn r => r with { Value = MangleExpr(r.Value, map) },
             _ => s,
@@ -202,7 +218,7 @@ public static class NameMangler
 
         private QArg MangleArg(QArg arg, Dictionary<string, string> map) => arg switch
         {
-            QQubitArg q => new QQubitArg(L(q.Reg, map), MangleIndex(q.Index, map)),
+            QQubitArg q => new QQubitArg(L(q.Reg, map), MangleTree(q.Index, map)!),
             QTextArg t => t with { Tree = MangleTree(t.Tree, map) },
             _ => arg,
         };
@@ -249,9 +265,5 @@ public static class NameMangler
             _ => node,   // QNameRef(pi/tau/euler), QNumLit, QLit
         };
 
-        /// <summary>A qubit index is a numeric literal (kept) or a loop-variable name (renamed via the
-        /// local map) — the node kind says which; no digit-scan re-derivation.</summary>
-        private QNode MangleIndex(QNode index, Dictionary<string, string> map) =>
-            index is QNameRef r ? new QNameRef(L(r.Name, map)) : index;
     }
 }

@@ -1,36 +1,30 @@
 namespace Qora.Ir.Passes;
 
 /// <summary>
-/// The name-resolution pass (IR→IR): turns every user-operation reference into its FULLY-QUALIFIED
-/// name, so every later stage (validation, inversion, mangling, emission) works on one unambiguous
-/// name and the half-shadowing class of bug is structurally impossible.
-///
-/// The algorithm (docs/namespaces-design.md — standard C#/Q# rules) for an unqualified callee used
-/// inside namespace <c>NS</c>:
+/// Resolves every user-callable reference to one declaration. Program ownership lives in a
+/// <see cref="ProgramSymbolGraph"/>:
 /// <code>
-/// 0. a measurement-family name (M/Measure/measure) → always the built-in (fully reserved: QSEM013)
-/// 1. NS's own declarations (NS.name exists)  → the local namespace wins
-/// 2. the enclosing global namespace (name)   → like C#'s outward search
-/// 3. the namespaces NS opened:
-///      exactly one match  → use it
-///      two or more        → QSEM018 ambiguity error (candidates listed, qualify to fix)
-///      none               → left as written (the validator reports QSEM007 unknown-name)
+/// global namespace symbol
+/// ├─ global callables
+/// └─ namespace A
+///    ├─ A's callables
+///    └─ namespace B
+///       └─ A.B's callables
 /// </code>
-/// A qualified name (<c>MyLib.Bell</c>) bypasses all steps and must exist (else QSEM019). <c>open</c>
-/// is non-transitive by construction: only NS's own opens are consulted.
+/// Each ownership edge is the child's <see cref="Symbol.OwnerSymbolId"/>. Thus an unqualified call in
+/// <c>A.B</c> walks <c>A.B -&gt; A -&gt; global</c>, while a qualified call starts at the global symbol
+/// and follows every namespace segment exactly. <c>open</c> is deliberately not another ownership edge:
+/// only direct callable members of the namespaces opened by the caller's exact namespace are inspected,
+/// so two matches remain an explicit QSEM018 ambiguity and opens never become transitive.
 ///
-/// BUILT-IN GATE NAMES (Q#-style, the "declaration allowed, ambiguous use is an error" rule): the
-/// built-ins live in the implicit <see cref="QoraGates.IntrinsicNamespace"/>, open everywhere. A
-/// namespaced operation MAY reuse a gate name (<c>namespace L { operation Rx … }</c>), but an
-/// unqualified use that could mean both the user op and the built-in NEVER silently picks one — it is
-/// a QSEM018 ambiguity, resolved by qualifying (<c>L.Rx(…)</c> for the user op,
-/// <c>Qora.Intrinsic.Rx(…)</c> for the gate). With no user candidate in scope, the bare name is the
-/// built-in, exactly as the book teaches. Global operations cannot take gate names (they share one
-/// scope with the built-ins and have no qualifier — the validator's QSEM013 explains).
+/// Lexical <see cref="Scope"/> objects are separate: they contain parameters, registers, variables and
+/// block-local declarations only. Callable resolution never walks a lexical scope, and operation root
+/// scopes therefore need no namespace/global parent.
 ///
-/// After this pass, <see cref="QOperation.Name"/> is the FQN (global ops keep their plain name, so a
-/// namespace-free program is byte-identical through the rest of the pipeline), and the entry op is
-/// the global <c>Main</c> as before.
+/// Both statement calls (<see cref="QGate"/>) and calls nested anywhere in an expression
+/// (<see cref="QCallNode"/>) receive the canonical name and the declaring operation's stable node Id.
+/// Later passes follow that Id instead of re-matching a spelling that may change during specialization
+/// or mangling.
 /// </summary>
 public static class Resolver
 {
@@ -38,153 +32,314 @@ public static class Resolver
     {
         var errors = new List<QoraError>();
 
-        // symbol table: fully-qualified name -> declared (namespaces contribute "NS.Op", global "Op").
-        var table = new HashSet<string>();
-        foreach (var op in program.Operations) table.Add(Fqn(op));
+        // Build the declaration graph before resolving any body, so forward calls and declarations across
+        // repeated namespace blocks share the same namespace/callable symbols.
+        var programSymbols = SymbolTableBuilder.BuildProgramSymbols(program);
 
-        // every namespace the program KNOWS: ones that contain operations, plus every declared block —
-        // lowering records a key in Opens for each `namespace N { … }`, so an empty (or opens-only)
-        // namespace still counts as existing and `open`ing it is not an error.
-        var namespaces = program.Operations.Select(o => o.Namespace).Where(n => n.Length > 0).ToHashSet();
+        // Empty/open-only namespace blocks are represented by Opens keys; operation-bearing namespaces
+        // come from declarations. The intrinsic namespace exists implicitly but users may not declare it.
+        var declaredNamespacePaths = program.Operations.Select(operation => operation.Namespace)
+            .Where(namespacePath => namespacePath.Length > 0)
+            .ToHashSet(StringComparer.Ordinal);
         if (program.Opens is not null)
-            foreach (var declared in program.Opens.Keys) namespaces.Add(declared);
+            foreach (var declared in program.Opens.Keys)
+                declaredNamespacePaths.Add(declared);
 
-        // the built-ins' home may not be (re)declared — users cannot add to or shadow the intrinsics.
-        foreach (var ns in namespaces.Where(n =>
-                     n == QoraGates.IntrinsicNamespace || n.StartsWith(QoraGates.IntrinsicNamespace + ".", StringComparison.Ordinal)))
-            Add(errors, "QSEM013", $"namespace `{ns}` is reserved for the built-in gates; choose another name",
-                program.Operations.FirstOrDefault(o => o.Namespace == ns)?.Span);
+        foreach (var namespacePath in declaredNamespacePaths.Where(namespacePath =>
+                     namespacePath == QoraGates.IntrinsicNamespace
+                     || namespacePath.StartsWith(QoraGates.IntrinsicNamespace + ".", StringComparison.Ordinal)))
+            Add(errors, "QSEM013",
+                $"namespace `{namespacePath}` is reserved for the built-in gates; choose another name",
+                program.Operations.FirstOrDefault(operation => operation.Namespace == namespacePath)?.Span);
 
-        // …but it EXISTS everywhere: `open Qora.Intrinsic;` is legal (and a no-op — it is already open).
-        namespaces.Add(QoraGates.IntrinsicNamespace);
-
-        // `open X;` must name a namespace that exists in this program — i.e. declared in the entry
-        // file or in an IMPORTED one. The most common miss is forgetting the import, so say so.
+        // `open` only shortens names from a namespace that is already loaded into this program.
         if (program.Opens is not null)
-            foreach (var (ns, opens) in program.Opens)
-                foreach (var open in opens.DistinctBy(o => o.Target).Where(o => !namespaces.Contains(o.Target)))
+            foreach (var (owner, opens) in program.Opens)
+                foreach (var open in opens.DistinctBy(item => item.Target)
+                             .Where(item =>
+                             {
+                                 var target = programSymbols.FindNamespace(item.Target);
+                                 return target is null
+                                        || (target.Origin == SymbolOrigin.Builtin
+                                            && item.Target != QoraGates.IntrinsicNamespace);
+                             }))
                     Add(errors, "QSEM019",
-                        $"in namespace `{ns}`: `open {open.Target};` names an unknown namespace — `open` only makes loaded names shorter; if `{open.Target}` lives in another file, `import` that file first",
+                        $"in namespace `{owner}`: `open {open.Target};` names an unknown namespace — `open` only makes loaded names shorter; if `{open.Target}` lives in another file, `import` that file first",
                         open.Span);
 
-        // each user op's fully-qualified name -> its stable node Id, so a resolved CALL is BOUND to its callee
-        // by reference (QGate.CalleeOpId) instead of re-matching the name later. TryAdd tolerates a duplicate
-        // Fqn (reported as a duplicate-operation error by validation, which runs next — no throw here).
-        var opIdByFqn = new Dictionary<string, int>();
-        foreach (var op in program.Operations) opIdByFqn.TryAdd(Fqn(op), op.Id);
-
-        var resolvedOps = program.Operations
-            .Select(op => (op with { Name = Fqn(op) })
-                with { Body = ResolveBody(op.Body, op.Namespace, op.Name, program, table, namespaces, errors, opIdByFqn) })
-            .ToList();
-
-        return (program with { Operations = resolvedOps }, errors);
-    }
-
-    private static string Fqn(QOperation op) => op.Namespace.Length > 0 ? $"{op.Namespace}.{op.Name}" : op.Name;
-
-    private static IReadOnlyList<QStmt> ResolveBody(IReadOnlyList<QStmt> stmts, string ns, string opName,
-        QProgram program, HashSet<string> table, HashSet<string> namespaces, List<QoraError> errors,
-        IReadOnlyDictionary<string, int> opIds) =>
-        stmts.Select(s => ResolveStmt(s, ns, opName, program, table, namespaces, errors, opIds)).ToList();
-
-    private static QStmt ResolveStmt(QStmt s, string ns, string opName,
-        QProgram program, HashSet<string> table, HashSet<string> namespaces, List<QoraError> errors,
-        IReadOnlyDictionary<string, int> opIds) => s switch
-    {
-        QGate g => ResolveCall(g, ns, opName, program, table, namespaces, errors, opIds),
-        QIf i => i with
+        var resolvedOperations = new List<QOperation>(program.Operations.Count);
+        foreach (var operation in program.Operations)
         {
-            Then = ResolveBody(i.Then, ns, opName, program, table, namespaces, errors, opIds),
-            Else = ResolveBody(i.Else, ns, opName, program, table, namespaces, errors, opIds),
-        },
-        QFor f => f with { Body = ResolveBody(f.Body, ns, opName, program, table, namespaces, errors, opIds) },
-        QWhile w => w with { Body = ResolveBody(w.Body, ns, opName, program, table, namespaces, errors, opIds) },
-        QRepeat r => r with { Body = ResolveBody(r.Body, ns, opName, program, table, namespaces, errors, opIds) },
-        QConjugate c => c with
-        {
-            Within = ResolveBody(c.Within, ns, opName, program, table, namespaces, errors, opIds),
-            Apply = ResolveBody(c.Apply, ns, opName, program, table, namespaces, errors, opIds),
-        },
-        _ => s,
-    };
-
-    // Resolve a call's name, then BIND it to its callee by reference (CalleeOpId): a user op resolves to its
-    // node Id; a built-in gate resolves to no op and stays null. Bound once HERE so no later pass has to
-    // re-match the (mono/mangle-shifting) name to find the callee.
-    private static QGate ResolveCall(QGate g, string ns, string opName, QProgram program, HashSet<string> table,
-        HashSet<string> namespaces, List<QoraError> errors, IReadOnlyDictionary<string, int> opIds)
-    {
-        var name = ResolveCallee(g.Name, ns, opName, program, table, namespaces, errors, g.Span);
-        return g with { Name = name, CalleeOpId = opIds.TryGetValue(name, out var id) ? id : (int?)null };
-    }
-
-    private static string ResolveCallee(string name, string ns, string opName,
-        QProgram program, HashSet<string> table, HashSet<string> namespaces, List<QoraError> errors, QSpan? span)
-    {
-        // qualified name: resolve directly, bypassing scope search (and its ambiguity handling).
-        if (name.Contains('.'))
-        {
-            // Qora.Intrinsic.H names the BUILT-IN explicitly — rewrite to the bare (canonical) name.
-            if (name.StartsWith(QoraGates.IntrinsicNamespace + ".", StringComparison.Ordinal))
+            var operationSymbol = programSymbols.FindDeclaration(operation.Id)
+                ?? throw new InvalidOperationException(
+                    $"QINTERNAL: operation `{operation.Name}` has no program symbol");
+            var callerNamespace = operation.Namespace.Length == 0
+                ? programSymbols.RootSymbol
+                : programSymbols.FindNamespace(operation.Namespace) ?? programSymbols.RootSymbol;
+            var operationResolver = new OperationResolver(
+                program, programSymbols, callerNamespace, operation.Namespace, operation.Name,
+                errors);
+            resolvedOperations.Add(operation with
             {
-                var member = name[(QoraGates.IntrinsicNamespace.Length + 1)..];
-                if (QoraGates.Names.ContainsKey(member)) return member;
-                Add(errors, "QSEM019", $"in `{opName}`: namespace `{QoraGates.IntrinsicNamespace}` has no operation `{member}`", span);
-                return name;
-            }
-            if (table.Contains(name)) return name;
-            var lastDot = name.LastIndexOf('.');
-            var nsPart = name[..lastDot];
-            Add(errors, "QSEM019", namespaces.Contains(nsPart)
-                ? $"in `{opName}`: namespace `{nsPart}` has no operation `{name[(lastDot + 1)..]}`"
-                : $"in `{opName}`: unknown namespace `{nsPart}` in `{name}` — if it lives in another file, `import` that file first", span);
-            return name;
+                Name = programSymbols.QualifiedName(operationSymbol),
+                Body = operationResolver.ResolveBody(operation.Body),
+            });
         }
 
-        // 0) the measurement family is fully reserved (no user op can take these names — QSEM013).
-        if (QoraGates.MeasureLike.Contains(name)) return name;
-
-        var isBuiltinGate = QoraGates.Names.ContainsKey(name);
-
-        // 1) the local namespace wins — among USER names. A gate-named hit never wins silently:
-        //    the built-in is in scope too, so the use is ambiguous (Q#-style; qualify to pick).
-        if (ns.Length > 0 && table.Contains($"{ns}.{name}"))
-        {
-            if (!isBuiltinGate) return $"{ns}.{name}";
-            Add(errors, "QSEM018", Ambiguous(opName, name, $"`{ns}.{name}`"), span);
-            return name;
-        }
-
-        // 2) the enclosing global namespace. Gate-named GLOBAL ops are declaration errors (QSEM013 —
-        //    the global scope has no qualifier), so the built-in meaning is not consulted here.
-        if (!isBuiltinGate && table.Contains(name)) return name;
-
-        // 3) opened namespaces — exactly one match resolves; several is an ambiguity error, and for a
-        //    gate name the implicitly-open built-in is always one of the candidates.
-        var opens = program.Opens is not null && ns.Length > 0 && program.Opens.TryGetValue(ns, out var o)
-            ? o : (IReadOnlyList<QOpen>)Array.Empty<QOpen>();
-        var candidates = opens.Where(open => table.Contains($"{open.Target}.{name}"))
-                              .Select(open => $"{open.Target}.{name}")
-                              .Distinct().ToList();
-        if (isBuiltinGate)
-        {
-            if (candidates.Count == 0) return name; // no user candidate in scope: the built-in, as taught
-            Add(errors, "QSEM018", Ambiguous(opName, name, string.Join(" or ", candidates.Select(c => $"`{c}`"))), span);
-            return name;
-        }
-        if (candidates.Count == 1) return candidates[0];
-        if (candidates.Count > 1)
-            Add(errors, "QSEM018",
-                $"in `{opName}`: `{name}` is ambiguous here: it could be {string.Join(" or ", candidates.Select(c => $"`{c}`"))} — qualify the call (e.g. `{candidates[0]}(...)`)", span);
-
-        // none: leave as written; the validator reports it as an unknown name (QSEM007).
-        return name;
+        return (program with { Operations = resolvedOperations }, errors);
     }
 
-    /// <summary>The user-op-vs-built-in ambiguity message (Q#-style: never silently pick either).</summary>
-    private static string Ambiguous(string opName, string name, string userCandidates) =>
-        $"in `{opName}`: `{name}` is ambiguous here: it could be {userCandidates} or the built-in `{name}` — qualify the call (`{QoraGates.IntrinsicNamespace}.{name}(...)` names the built-in)";
+    private enum CallForm
+    {
+        Statement,
+        Expression,
+    }
+
+    private readonly record struct ResolvedCallee(string Name, int? OperationId);
+
+    private sealed class OperationResolver
+    {
+        private readonly QProgram _program;
+        private readonly ProgramSymbolGraph _programSymbols;
+        private readonly Symbol _callerNamespace;
+        private readonly string _namespace;
+        private readonly string _operationName;
+        private readonly List<QoraError> _errors;
+
+        internal OperationResolver(
+            QProgram program,
+            ProgramSymbolGraph programSymbols,
+            Symbol callerNamespace,
+            string namespacePath,
+            string operationName,
+            List<QoraError> errors)
+        {
+            _program = program;
+            _programSymbols = programSymbols;
+            _callerNamespace = callerNamespace;
+            _namespace = namespacePath;
+            _operationName = operationName;
+            _errors = errors;
+        }
+
+        internal IReadOnlyList<QStmt> ResolveBody(IReadOnlyList<QStmt> statements) =>
+            statements.Select(ResolveStatement).ToList();
+
+        private QStmt ResolveStatement(QStmt statement) => statement switch
+        {
+            QGate gate => ResolveGate(gate),
+            QDecl declaration => declaration with { Value = ResolveExpression(declaration.Value, declaration.Span) },
+            QAssign assignment => assignment with
+            {
+                Index = ResolveNode(assignment.Index, assignment.Span),
+                Value = ResolveExpression(assignment.Value, assignment.Span),
+            },
+            QReturn returned => returned with { Value = ResolveExpression(returned.Value, returned.Span) },
+            QIf branch => branch with
+            {
+                Cond = ResolveCondition(branch.Cond, branch.Span),
+                Then = ResolveBody(branch.Then),
+                Else = ResolveBody(branch.Else),
+            },
+            QFor loop => loop with
+            {
+                From = ResolveNode(loop.From, loop.Span)!,
+                To = ResolveNode(loop.To, loop.Span)!,
+                Step = ResolveNode(loop.Step, loop.Span),
+                Body = ResolveBody(loop.Body),
+            },
+            QWhile loop => loop with
+            {
+                Cond = ResolveCondition(loop.Cond, loop.Span),
+                Body = ResolveBody(loop.Body),
+            },
+            QRepeat loop => loop with
+            {
+                Body = ResolveBody(loop.Body),
+                Until = ResolveCondition(loop.Until, loop.Span),
+            },
+            QConjugate conjugate => conjugate with
+            {
+                Within = ResolveBody(conjugate.Within),
+                Apply = ResolveBody(conjugate.Apply),
+            },
+            _ => statement,
+        };
+
+        private QGate ResolveGate(QGate gate)
+        {
+            var arguments = gate.Args.Select(argument => ResolveArgument(argument, gate.Span)).ToList();
+            var callee = ResolveCallee(gate.Name, CallForm.Statement, gate.Span);
+            return gate with
+            {
+                Args = arguments,
+                Name = callee.Name,
+                CalleeOpId = callee.OperationId,
+            };
+        }
+
+        private QArg ResolveArgument(QArg argument, QSpan? span) => argument switch
+        {
+            QTextArg text => text with { Tree = ResolveNode(text.Tree, span) },
+            QQubitArg qubit => qubit with { Index = ResolveNode(qubit.Index, span)! },
+            _ => argument,
+        };
+
+        private QExpr ResolveExpression(QExpr expression, QSpan? span) => expression switch
+        {
+            QText text => text with { Tree = ResolveNode(text.Tree, span) },
+            QMeasure measurement => measurement with { Target = ResolveNode(measurement.Target, span)! },
+            QArrayLiteral literal => literal with
+            {
+                Elements = literal.Elements.Select(element => ResolveExpression(element, span)).ToList(),
+            },
+            _ => expression,
+        };
+
+        private QCond ResolveCondition(QCond condition, QSpan? span) =>
+            condition with { Tree = ResolveNode(condition.Tree, span) };
+
+        private QNode? ResolveNode(QNode? node, QSpan? span) => node switch
+        {
+            null => null,
+            QUnary unary => unary with { Operand = ResolveNode(unary.Operand, span)! },
+            QBinOp binary => binary with
+            {
+                Left = ResolveNode(binary.Left, span)!,
+                Right = ResolveNode(binary.Right, span)!,
+            },
+            QMember member => member with { Base = ResolveNode(member.Base, span)! },
+            QIndexNode index => index with
+            {
+                Base = ResolveNode(index.Base, span)!,
+                Index = ResolveNode(index.Index, span)!,
+            },
+            QCallNode call => ResolveExpressionCall(call, span),
+            _ => node,
+        };
+
+        private QCallNode ResolveExpressionCall(QCallNode call, QSpan? span)
+        {
+            var arguments = call.Args.Select(argument => ResolveNode(argument, span)!).ToList();
+            var callee = ResolveCallee(call.Name, CallForm.Expression, span);
+            return call with
+            {
+                Args = arguments,
+                Name = callee.Name,
+                CalleeOpId = callee.OperationId,
+            };
+        }
+
+        private ResolvedCallee ResolveCallee(string name, CallForm form, QSpan? span)
+        {
+            if (name.Contains('.'))
+                return ResolveQualified(name, span);
+
+            if (QoraGates.MeasureLike.Contains(name))
+                return new ResolvedCallee(name, null);
+            if (form == CallForm.Expression && QoraGates.Functions.ContainsKey(name))
+                return new ResolvedCallee(name, null);
+
+            var isBuiltinGate = QoraGates.Names.ContainsKey(name);
+            var enclosing = _programSymbols.LookupCallableOutward(_callerNamespace.Id, name);
+            if (enclosing is not null)
+            {
+                var isGlobal = enclosing.OwnerSymbolId == _programSymbols.RootSymbol.Id;
+                if (!isBuiltinGate) return Bound(enclosing);
+                if (!isGlobal)
+                {
+                    Add(_errors, "QSEM018",
+                        BuiltinAmbiguity(name, $"`{_programSymbols.QualifiedName(enclosing)}`"), span);
+                    return new ResolvedCallee(name, null);
+                }
+                // A same-named global declaration is invalid on its own (QSEM013), so the built-in
+                // remains the only usable meaning while validation reports that declaration.
+            }
+
+            var opens = _program.Opens is not null
+                        && _namespace.Length > 0
+                        && _program.Opens.TryGetValue(_namespace, out var declaredOpens)
+                ? declaredOpens
+                : (IReadOnlyList<QOpen>)Array.Empty<QOpen>();
+            var candidates = opens
+                .Select(open => _programSymbols.FindNamespace(open.Target))
+                .Where(namespaceSymbol => namespaceSymbol is not null)
+                .Select(namespaceSymbol => _programSymbols.LookupMember(
+                    namespaceSymbol!.Id,
+                    name,
+                    SymbolKind.Operation))
+                .OfType<Symbol>()
+                .Select(Bound)
+                .DistinctBy(candidate => candidate.OperationId)
+                .ToList();
+
+            if (isBuiltinGate)
+            {
+                if (candidates.Count == 0) return new ResolvedCallee(name, null);
+                Add(_errors, "QSEM018",
+                    BuiltinAmbiguity(name,
+                        string.Join(" or ", candidates.Select(candidate => $"`{candidate.Name}`"))),
+                    span);
+                return new ResolvedCallee(name, null);
+            }
+
+            if (candidates.Count == 1) return candidates[0];
+            if (candidates.Count > 1)
+                Add(_errors, "QSEM018",
+                    $"in `{_operationName}`: `{name}` is ambiguous here: it could be {string.Join(" or ", candidates.Select(candidate => $"`{candidate.Name}`"))} — qualify the call (e.g. `{candidates[0].Name}(...)`)",
+                    span);
+
+            return new ResolvedCallee(name, null);
+        }
+
+        private ResolvedCallee ResolveQualified(string name, QSpan? span)
+        {
+            var segments = name.Split('.');
+            var owner = _programSymbols.RootSymbol;
+            for (var i = 0; i < segments.Length - 1; i++)
+            {
+                if (_programSymbols.LookupMember(
+                        owner.Id,
+                        segments[i],
+                        SymbolKind.Namespace) is { } next)
+                {
+                    owner = next;
+                    continue;
+                }
+
+                var failedPath = string.Join(".", segments.Take(i + 1));
+                Add(_errors, "QSEM019",
+                    $"in `{_operationName}`: unknown namespace `{failedPath}` in `{name}` — if it lives in another file, `import` that file first",
+                    span);
+                return new ResolvedCallee(name, null);
+            }
+
+            var memberName = segments[^1];
+            if (_programSymbols.LookupMember(
+                    owner.Id,
+                    memberName,
+                    SymbolKind.Operation) is { } sourceCallable)
+                return Bound(sourceCallable);
+
+            if (_programSymbols.LookupMember(owner.Id, memberName, SymbolKind.BuiltinGate) is not null
+                || _programSymbols.LookupMember(owner.Id, memberName, SymbolKind.BuiltinFunction) is not null)
+                return new ResolvedCallee(memberName, null);
+
+            Add(_errors, "QSEM019",
+                $"in `{_operationName}`: namespace `{_programSymbols.QualifiedName(owner)}` has no callable `{memberName}`",
+                span);
+            return new ResolvedCallee(name, null);
+        }
+
+        private ResolvedCallee Bound(Symbol symbol) =>
+            symbol.DeclarationNodeId is { } declarationId
+                ? new ResolvedCallee(_programSymbols.QualifiedName(symbol), declarationId)
+                : throw new InvalidOperationException(
+                    $"QINTERNAL: source callable `{_programSymbols.QualifiedName(symbol)}` has no declaration node");
+
+        private string BuiltinAmbiguity(string name, string userCandidates) =>
+            $"in `{_operationName}`: `{name}` is ambiguous here: it could be {userCandidates} or the built-in `{name}` — qualify the call (`{QoraGates.IntrinsicNamespace}.{name}(...)` names the built-in)";
+    }
 
     private static void Add(List<QoraError> errors, string code, string message, QSpan? span = null) =>
         errors.Add(new QoraError(message, code, span?.Start ?? -1, span?.End ?? -1));

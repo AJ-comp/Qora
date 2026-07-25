@@ -11,6 +11,49 @@ emitted as **OpenQASM 3.0**.
 > **Note:** Qora was renamed from **Ket** on 2026-07-01 (a "Ket" extension already existed). Versions
 > 0.1–0.7 below were authored under the old name.
 
+## 0.28 — 2026-07-25
+
+### Fixed
+- **Function result types now have one semantic path.** Expression typing resolves a function through its
+  program symbol's operation Id and reads `QOperation.ReturnType`; the return type is not copied into a
+  second table. Every `return`, explicitly typed scalar receiving a function result, and scalar/whole-array
+  boundary is checked through the same type-and-shape rule (**QSEM037**).
+- **Untyped variables keep a called function's declared return type.** `var x = f()` now emits `int`,
+  `float`, `angle`, or `bit` according to `f`, including calls inside arithmetic. The inferred fact is stored
+  on the declaration symbol and survives backend-synthesized return variables and hidden array storage.
+- **Untyped declarations now keep one initializer type from validation through emission.** The same
+  expression reader covers literals, names, operators, array elements, and calls, so values such as
+  `var truth = true` and `var copy = anAngle` no longer fall back to emitter-only `int`/`float` guesses.
+- A malformed function call reports its call error first without a cascading QSEM037 for the unusable
+  result. Once the call itself is valid, the shared result-type contract is checked normally.
+- **`bit[]` functions are now specialized from every expression call site.** The monomorphizer rewrites
+  `QCallNode` values in declarations, assignments, returns, conditions, gate arguments, and nested calls
+  through the same width-keyed cache as statement calls. A specialized function retains its return contract,
+  equal widths reuse one generated function, and different widths produce distinct specializations. A
+  `repeat` condition also keeps the body-final scope through array hoisting and name mangling, so a body-local
+  array or scalar that shadows an enclosing name remains the argument selected by specialization.
+- **Namespace resolution now covers function calls inside expressions.** Calls such as `L.two()` parse in
+  every expression position, while `two()` inside `namespace L` and calls reached through `open L` resolve
+  to the same declaration. The resolver records both the canonical name and stable callee Id on every
+  `QCallNode`. Namespace and callable ownership now lives in `ProgramSymbolGraph`, with
+  `Symbol.OwnerSymbolId` as the authoritative edge; dotted namespaces form real segment chains and bare
+  lookup walks `A.B -> A -> global`. Lexical `Scope` is reserved for callable bodies and blocks, whose
+  roots have no namespace parent. Statement and expression calls share the same graph resolution and
+  ambiguity diagnostics, and definition ordering counts expression-call dependencies so a function such
+  as `wrapper` is emitted after the namespaced function it calls.
+- **An array or qubit index is now a full integer expression.** Reads, writes, gate operands, and
+  measurement targets all lower `xs[idx()]`, `q[i + 1]`, and nested forms such as `xs[ys[j]]` through the
+  same `QNode` path. Calls in an index receive normal name resolution, signature checking, return-type
+  checking, specialization, and backend renaming; nested indexed reads receive their own bounds checks.
+  A non-`int` result is QSEM016 rather than a misleading failed-proof error.
+- **Failed bounds proofs are now facts before they are OpenQASM errors.** `QoraValidator` records each
+  unresolved access in `SemanticModel.UnprovenIndexes` without emitting QSEM030.
+  `OpenQasmBoundsValidation` owns the target policy and derives QSEM030 because OpenQASM has no portable
+  runtime bounds-failure channel. The compiler applies that policy after each validation (preserving
+  collect-all diagnostics and checks in uncalled declarations), and `QasmBackend` repeats it as a
+  fail-safe. Definite type/out-of-range errors remain common QSEM016. The model preserves each lowered
+  access site, while the QASM policy de-duplicates source-identical diagnostics.
+
 ## 0.27 — 2026-07-23
 
 ### Changed

@@ -205,17 +205,23 @@ public static class QoraLowering
     {
         if (sym is AstNonTerminal nt)
         {
-            if (nt.Name == "IndexAccess") return new QQubitArg(Child(nt, 0), Child(nt, 1));
+            if (nt.Name == "IndexAccess") return LowerIndexedArg(nt);
             if (nt.Name == "Expr")
             {
                 if (nt.Items.Count == 1 && nt.Items[0] is AstNonTerminal { Name: "IndexAccess" } indexed)
-                    return new QQubitArg(Child(indexed, 0), Child(indexed, 1));
+                    return LowerIndexedArg(indexed);
                 return new QTextArg(ExprTree.Expression(nt));
             }
         }
         // A bare terminal argument — a whole register `H(q)`, an angle name — is an atom.
         var bare = sym.ToString() ?? string.Empty;
         return new QTextArg(bare.Length == 0 ? null : ExprTree.Atom(bare));
+    }
+
+    private static QQubitArg LowerIndexedArg(AstNonTerminal indexed)
+    {
+        var access = ExprTree.IndexNode(indexed);
+        return new QQubitArg(((QNameRef)access.Base).Name, access.Index);
     }
 
     private static QDecl LowerDecl(AstNonTerminal node, bool isConst)
@@ -238,7 +244,13 @@ public static class QoraLowering
         var indexed = node.Items.OfType<AstNonTerminal>().FirstOrDefault(n => n.Name == "IndexAccess");
         return indexed is null
             ? new QAssign(FirstIdent(node), LowerExpr(ExprOf(node)))
-            : new QAssign(Child(indexed, 0), LowerExpr(ExprOf(node))) { Index = ExprTree.Atom(Child(indexed, 1)) };
+            : LowerIndexedAssign(indexed, LowerExpr(ExprOf(node)));
+    }
+
+    private static QAssign LowerIndexedAssign(AstNonTerminal indexed, QExpr value)
+    {
+        var access = ExprTree.IndexNode(indexed);
+        return new QAssign(((QNameRef)access.Base).Name, value) { Index = access.Index };
     }
 
     private static QArrayLiteral LowerArrayLiteral(AstNonTerminal node) =>
@@ -321,7 +333,7 @@ public static class QoraLowering
     {
         if (argExpr is null || argExpr.Items.Count != 1) return null;
         if (argExpr.Items[0] is AstNonTerminal { Name: "IndexAccess" } idx)
-            return new QIndexNode(new QNameRef(Child(idx, 0)), ExprTree.Atom(Child(idx, 1)));
+            return ExprTree.IndexNode(idx);
         if (argExpr.Items[0] is AstTerminal term)
         {
             var name = term.ToString() ?? string.Empty;
@@ -333,8 +345,10 @@ public static class QoraLowering
     private static QCond LowerCondition(AstNonTerminal? cond) =>
         new(ExprTree.Condition(cond));
 
+    // A Call's direct terminals are exactly its qname segments and dots; arguments are Expr children.
+    // Keep measurement classification on the same complete spelling that ExprTree.CallNode stores.
     private static string CallName(AstNonTerminal call) =>
-        call.Items.OfType<AstTerminal>().FirstOrDefault()?.ToString() ?? string.Empty;
+        string.Concat(call.Items.OfType<AstTerminal>().Select(t => t.ToString() ?? string.Empty));
 
     // --- helpers (ported from the old emitter's AST accessors) ---
 

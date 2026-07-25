@@ -40,6 +40,9 @@ public static class QasmEmitter
 
         var opByName = new Dictionary<string, QOperation>();
         foreach (var o in operations) opByName[o.Name] = o;
+        var opById = new Dictionary<int, QOperation>();
+        foreach (var o in operations) opById.TryAdd(o.Id, o);
+        var programSymbols = Passes.SymbolTableBuilder.BuildProgramSymbols(program);
         var ctx = new Ctx(ops);
 
         var sb = new StringBuilder();
@@ -57,14 +60,14 @@ public static class QasmEmitter
         foreach (var name in OrderDefs(subroutines, entry.Name, opByName, ctx))
         {
             sb.AppendLine();
-            EmitDef(opByName[name], ctx, sb, model);
+            EmitDef(opByName[name], ctx, sb, model, programSymbols, opById);
         }
 
         sb.AppendLine();
         var decls = new StringBuilder();
         HoistDecls(entry.Body, decls);
         var body = new StringBuilder();
-        EmitStatements(entry.Body, body, 0, ctx, SeedVarTypes(entry, model));
+        EmitStatements(entry.Body, body, 0, ctx, SeedVarTypes(entry, model, programSymbols, opById));
         sb.Append(decls);
         sb.Append(body);
 
@@ -121,12 +124,21 @@ public static class QasmEmitter
         return result;
     }
 
-    /// <summary>Collect which defs a body's call sites reference: every plain call to a user op (functors
-    /// on a user op never reach here — Adjoint is materialized away, Controlled is a validation error).</summary>
+    /// <summary>
+    /// Collect which defs a body's call sites reference. Statement calls live on <see cref="QGate"/>;
+    /// function calls live inside any expression-bearing statement as <see cref="QCallNode"/>. Both edges
+    /// participate in definition ordering, so a caller is never emitted before a function it invokes.
+    /// Functors on user operations never reach here: Adjoint is materialized and Controlled is invalid.
+    /// </summary>
     private static void CollectCallDeps(IReadOnlyList<QStmt> stmts, string entryName, Ctx ctx, HashSet<string> into)
     {
         foreach (var stmt in stmts)
         {
+            foreach (var tree in QNodes.ExpressionSites(stmt))
+                foreach (var call in QNodes.CallsIn(tree))
+                    if (ctx.Ops.Contains(call.Name) && call.Name != entryName)
+                        into.Add(call.Name);
+
             switch (stmt)
             {
                 case QGate g when ctx.Ops.Contains(g.Name) && g.Name != entryName && g.Functors.Count == 0:
@@ -155,13 +167,14 @@ public static class QasmEmitter
 
     // --- def emission ---
 
-    private static void EmitDef(QOperation op, Ctx ctx, StringBuilder sb, Passes.SemanticModel? model)
+    private static void EmitDef(QOperation op, Ctx ctx, StringBuilder sb, Passes.SemanticModel? model,
+        Passes.ProgramSymbolGraph programSymbols, IReadOnlyDictionary<int, QOperation> opById)
     {
         var ps = string.Join(", ", op.Params.Select(EmitParam));
         var decls = new StringBuilder();
         HoistDecls(op.Body, decls);
         var body = new StringBuilder();
-        EmitStatements(op.Body, body, 1, ctx, SeedVarTypes(op, model));
+        EmitStatements(op.Body, body, 1, ctx, SeedVarTypes(op, model, programSymbols, opById));
 
         // A function emits its trailing return type (`def two() -> int { … }`); an operation is void. The
         // emitter is a PURE PRINTER: it renders the IR as-is. A `return` that OpenQASM/Braket cannot lower
@@ -382,7 +395,13 @@ public static class QasmEmitter
             return;
         }
 
-        var type = TypeName(d.Type) ?? InferDefaultType(d.Value, varTypes);
+        // A validated untyped declaration already has one inferred type on its declaration Symbol. The
+        // model-seeded map is therefore authoritative; InferDefaultType remains only for standalone emission
+        // of hand-built IR that has no semantic model.
+        var type = TypeName(d.Type)
+            ?? (varTypes.TryGetValue(d.Name, out var inferred) && !inferred.EndsWith("[]")
+                ? inferred
+                : InferDefaultType(d.Value, varTypes));
         varTypes.TryAdd(d.Name, type);
         var prefix = d.IsConst ? "const " : string.Empty;
         body.AppendLine($"{pad}{prefix}{type} {d.Name} = {RenderExpr(d.Value)};");
@@ -419,8 +438,8 @@ public static class QasmEmitter
     };
 
     /// <summary>
-    /// The emitted type of an untyped `var`/`const`, inferred from its initializer using the type map (which
-    /// the symbol table seeds, so a referenced name's type — including a bit — is known):
+    /// Standalone-emitter fallback for an untyped `var`/`const` when no semantic model supplied its inferred
+    /// declaration type. The normal compiler path reads the validation-built symbol instead:
     /// <list type="bullet">
     ///   <item><b>float</b> — a real-valued initializer: a float literal, a built-in constant, or a name
     ///         already known float/angle (so floatness propagates: `var a = pi; var b = a / 2;`). `int t = pi
@@ -458,55 +477,62 @@ public static class QasmEmitter
     /// name→type — the symbol table — rather than re-scanned by hand, so NO declaration kind can be missed:
     /// parameters, <c>use</c> registers, vars, consts, measure bits AND loop variables all carry their type
     /// there (a hand-rolled scan previously forgot loop variables, so `!i` emitted an invalid `! ( i )`).
-    /// Qubits and untyped <c>var</c>s are absent — a qubit is never a classical value, and an untyped var's
-    /// type is inferred at its declaration by <see cref="InferDefaultType"/> and added then. It is a flat
-    /// whole-op superset, so bit-typed rendering (`r == 1` → `r == true`) and the classical `!x` → `x == 0`
-    /// rewrite are consistent wherever the name resolves; block scoping guarantees no use before declaration.
+    /// Qubits are absent because a qubit is never a classical value. Untyped declarations are present when
+    /// validation inferred them; only a standalone, model-less emitter falls back to
+    /// <see cref="InferDefaultType"/>. It is a flat whole-op superset, so bit-typed rendering
+    /// (`r == 1` → `r == true`) and the classical `!x` → `x == 0` rewrite are consistent wherever the name
+    /// resolves; block scoping guarantees no use before declaration.
     ///
     /// With a <see cref="Passes.SemanticModel"/> the map is READ, not rebuilt: each declaring node's CURRENT
     /// (post-mangling) name is paired with its validation-time type through the node's stable Id — the exact
     /// current-name ↔ proven-type join a rebuild cannot express (a rebuild sees mangled names only). The
     /// walk mirrors the scope tree's <see cref="Passes.Scope.AllSymbols"/> order (this level's declarations,
     /// then nested blocks in program order) so shadowed names resolve to the same final entry either way.
-    /// Without a model (standalone <see cref="Emit"/> call), the old full rebuild remains as the fallback.
+    /// Backend-synthesized declarations have no validation symbol; their explicit IR type is merged per node
+    /// instead of discarding the model map. Without a model (standalone <see cref="Emit"/> call), the old full
+    /// rebuild remains as the fallback.
     /// </summary>
-    private static Dictionary<string, string> SeedVarTypes(QOperation op, Passes.SemanticModel? model)
+    private static Dictionary<string, string> SeedVarTypes(QOperation op, Passes.SemanticModel? model,
+        Passes.ProgramSymbolGraph programSymbols, IReadOnlyDictionary<int, QOperation> opById)
     {
         if (model is not null && model.FindRootScope(op.Id) is not null)
         {
             var map = new Dictionary<string, string>();
-            var complete = true;
-            void AddNamed(string currentName, int nodeId)
+            void AddNamed(string currentName, int nodeId, QType? fallbackType, bool isArray)
             {
                 var sym = model.FindSymbol(nodeId);
-                if (sym is null) { complete = false; return; }
-                if (TypeName(sym.Type) is { } t) map[currentName] = sym.IsArray ? t + "[]" : t;
+                var type = sym?.Type ?? fallbackType;
+                if (TypeName(type) is { } t)
+                    map[currentName] = (sym?.IsArray ?? isArray) ? t + "[]" : t;
             }
             void Level(IReadOnlyList<QStmt> stmts)
             {
-                foreach (var s in stmts) if (s is QDecl d) AddNamed(d.Name, d.Id);
+                foreach (var s in stmts)
+                    if (s is QDecl d)
+                        AddNamed(d.Name, d.Id, d.Type, d.IsArray);
                 foreach (var s in stmts)
                     switch (s)
                     {
-                        case QFor f: AddNamed(f.Var, f.Id); Level(f.Body); break;
+                        case QFor f: AddNamed(f.Var, f.Id, QType.Int, isArray: false); Level(f.Body); break;
                         case QIf i: Level(i.Then); Level(i.Else); break;
                         case QWhile w: Level(w.Body); break;
                         case QRepeat r: Level(r.Body); break;
                         case QConjugate c: Level(c.Within); Level(c.Apply); break;
                     }
             }
-            foreach (var p in op.Params) AddNamed(p.Name, p.Id);
+            foreach (var p in op.Params) AddNamed(p.Name, p.Id, p.Type, p.IsArray);
             Level(op.Body);
-            if (complete) return map;
-            // a node the model has never seen (no Id hit, no derivation chain) — fall through to a rebuild
-            // rather than emit from a partial map.
+            // Backend passes add declarations (the flattened return/result variables and hidden array
+            // storage) whose Ids validation never saw. Those nodes have explicit IR types and are merged
+            // above; one synthetic node must never make us discard every inferred source declaration.
+            return map;
         }
 
         var sink = new List<QoraError>();                 // types only — any diagnostics are the validator's job
-        var root = Passes.SymbolTableBuilder.Build(op, sink);
+        var root = Passes.SymbolTableBuilder.Build(op, sink, programSymbols: programSymbols, opById: opById);
         var rebuilt = new Dictionary<string, string>();
         foreach (var s in root.AllSymbols())
-            if (TypeName(s.Type) is { } t) rebuilt[s.SourceName] = s.IsArray ? t + "[]" : t;   // Int/Bit/Float/Angle (arrays marked); Qubit and untyped → null → skipped; the rebuild ran over the CURRENT tree, so its "source" IS the mangled program
+            if (TypeName(s.Type) is { } t) rebuilt[s.SourceName] = s.IsArray ? t + "[]" : t;   // explicit/inferred classical types (arrays marked); qubits skipped; the rebuild ran over the CURRENT tree, so its "source" IS the mangled program
         return rebuilt;
     }
 

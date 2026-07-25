@@ -362,10 +362,9 @@ public static class EffectAnalysis
             measured.Add(r);
         }
 
-        /// <summary>A literal index stays precise; a loop-variable (or otherwise unknown) index is
-        /// conservatively blanketed to the whole register — same split the validator's index check makes.
-        /// Number-vs-name was settled ONCE at lowering (the index IS a QNumLit or QNameRef) — no
-        /// re-parsing here, so this can never classify a token differently than any other pass.</summary>
+        /// <summary>A literal index stays precise; every non-literal expression is conservatively blanketed
+        /// to the whole register. The expression was parsed once at lowering and is inspected structurally;
+        /// effect analysis deliberately does not try to re-evaluate it.</summary>
         /// <summary>A measurement target (QNameRef for a whole single qubit, QIndexNode for an element)
         /// reduced to a QubitRef with the SAME literal-vs-blanket split <see cref="RefOf"/> makes.</summary>
         private static QubitRef RefOfTarget(QNode target) => QNodes.IndexOf(target) switch

@@ -2,6 +2,18 @@
 
 All notable changes to the Qora Language extension.
 
+## 0.21.0
+
+- Bundles the **Qora v0.28** compiler. Function results now follow one declared return-type path through
+  validation, inference, specialization, and OpenQASM emission. Invalid returns and incompatible
+  assignments report QSEM037, while `var x = f()` preserves the function's actual scalar type.
+- Function calls inside expressions now receive the same complete treatment everywhere: `bit[]` functions
+  specialize by argument width, calls resolve through simple, qualified, and nested namespace names, and
+  each call keeps a stable link to its declaration.
+- Array and qubit indexes now accept complete integer expressions such as `xs[idx()]`, `q[i + 1]`, and
+  nested indexed reads. The common semantic model records an unresolved bounds proof as data, while the
+  OpenQASM policy reports QSEM030 when the access cannot safely be emitted.
+
 ## 0.20.0
 
 - Bundles the **Qora v0.27** compiler. A whole `bit[]` register is now a container of bits rather than a

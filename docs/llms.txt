@@ -1,4 +1,4 @@
-# Qora v0.27 — complete language reference for AI assistants
+# Qora v0.28 — complete language reference for AI assistants
 
 Qora is a quantum programming language (Q#/C#-flavored syntax) that compiles to OpenQASM 3.
 File extension: `.qor`. This file is the full, authoritative surface spec: everything below is
@@ -32,7 +32,8 @@ import "a b.qor";               // spaces are fine inside the quoted path
 
 namespace MyLib                 // optional; may be dotted: namespace A.B
 {
-    open OtherLib;              // unqualified access to OtherLib's operations (namespace-scope only)
+    open OtherLib;              // unqualified access to OtherLib's callables (namespace-scope only)
+    function two(): int { return 2; }
     operation Bell(q: Qubit[])
     {
         H(q[0]);
@@ -44,6 +45,7 @@ operation Main()                // global namespace; the entry point; takes NO p
 {
     use q = Qubit[2];           // qubit allocation: ONLY in the entry op, top level only
     MyLib.Bell(q);              // qualified call
+    var n: int = MyLib.two();   // qualified function call is also valid in an expression
     var r: bit = M(q[0]);       // measurement (the only way to get a bit)
     if (r == 1) { X(q[1]); }
 }
@@ -65,6 +67,11 @@ operation Main()                // global namespace; the entry point; takes NO p
   (`var xs: int[] = new int[3];`); the compiler handles OpenQASM's global-scope rule automatically. Helper
   operations may also receive matching `T[]` parameters. Read/write elements with `xs[i]`, and read
   the length with `xs.Count`.
+- An index is a full expression whose result must be one scalar `int`: `xs[i + 1]`, `xs[idx()]`, and
+  `q[choose(k)]` all parse and use ordinary function name/signature/type resolution. OpenQASM emission
+  still requires an in-bounds proof. A function result is not currently evaluated at compile time, so
+  `xs[idx()]` is QSEM030 unless it is evaluated once into an `int` variable and that variable is guarded,
+  for example `var i: int = idx(); if (0 <= i && i < xs.Count) { var x: int = xs[i]; }`.
 - A WHOLE `bit[]` register is a CONTAINER OF BITS, not a number. A bit pattern carries no sign, so
   the same bits read 2 unsigned and -2 in two's complement; the language will not pick one silently.
   Using a whole register as a number is QSEM036: `var n: int = f;`, `f + 1`, `if (f)`, `f == 1`, and
@@ -81,6 +88,9 @@ operation Main()                // global namespace; the entry point; takes NO p
   `var x = expr;` / `var x: int = expr;` — mutable variable. `const x = expr;` / `const x: int = expr;` —
   IMMUTABLE binding (JS-const/Q#-let style): may hold any value including a measurement result
   (`const r = M(q[0]);`), but can never be assigned again (QSEM024).
+- When the type is omitted, the declaration keeps the initializer's semantic type through emission.
+  Literals, referenced variables, operators, array elements, and function calls use the same rule:
+  `var truth = true` is `bit`, `var copy = anAngle` is `angle`, and `var x = f()` uses `f`'s return type.
 - `var r: bit = M(q[i]);` — measure qubit i into a fresh bit. `r = M(q[i]);` re-measures.
   M() is legal ONLY as the whole right-hand side of a declaration/assignment. Never in conditions,
   arguments, or arithmetic (measure into a bit first).
@@ -90,18 +100,28 @@ operation Main()                // global namespace; the entry point; takes NO p
 ## Functions (classical, value-returning)
 
 - `function Name(params): T { … return e; }` — a classical, pure subroutine (Q#'s `function`). Parameters
-  and the return type `T` are classical scalars (`int`/`bit`/`float`/`angle`), never qubits. The body is
+  are classical scalars or arrays, while the return type `T` is a classical scalar
+  (`int`/`bit`/`float`/`angle`); neither may be a qubit. A `bit[]` parameter is specialized to the concrete
+  argument width at every expression call site, so width-2 and width-3 calls receive separate generated
+  definitions while repeated calls of the same width reuse one. The body is
   PURE: only classical statements (`var`/`const`/`if`/`for`/`while`), calls to OTHER functions, and `return`.
   A function may NOT apply a gate, `use` qubits, measure, or call an operation (QSEM033).
 - Because a function is pure, its CALL is a value — usable anywhere in an expression: an initializer
   (`var k: int = two();`), an assignment RHS, a gate argument (`Rx(angleOf(k), q[0])`), a condition
   (`if (c == g()) { … }`), or another function's body (`return inner(y) + 1;`). An `operation` call has no
   value (QSEM005); only a function's does.
+- Function calls follow the same namespace rules as operation calls. Inside `namespace L`, `two()` first
+  searches `L`; `open Other;` makes `Other.two()` available as `two()` when it is the only match; and
+  `L.two()` may be written explicitly in any expression position.
 - A `return` may stand ANYWHERE a statement may — an early return, a return inside `if`/`else`, a return
   inside a `for`/`while`. The compiler rewrites the function into the single-bottom-return form the execution
   target needs; you never write around that. A function must still `return` on every path (a lone `if` with no
   `else` and nothing after it does not) — QSEM035 otherwise. Recursion is not allowed
   (QSEM011), same as operations.
+- Every returned value must be compatible with the function's declared return type (QSEM037). The same
+  signature supplies the type of an untyped result: `var x = f();` gives `x` the declared return type of `f`.
+  A whole array is never one scalar value, and an incompatible function result cannot be stored in an
+  explicitly typed scalar.
 - Example:
   ```qora
   function angleOf(k: int): angle { return pi / k; }
@@ -140,17 +160,24 @@ operation Main()                // global namespace; the entry point; takes NO p
 
 ## Name resolution (C#/Q# rules)
 
-For an unqualified call inside namespace NS, in order:
-1. NS's own operations; 2. the global namespace; 3. the `open`ed namespaces — exactly one match
-wins, two+ is error QSEM018 (qualify to fix), zero falls through to QSEM007.
-- Qualified names (`MyLib.Bell`) resolve directly. `open` is NOT transitive and does NOT load
-  files (import does). Namespaces merge across files; the same operation name twice in one
-  namespace is QSEM022 (in the global namespace, QSEM008).
+For an unqualified call inside namespace `A.B`, in order:
+1. `A.B`'s own operations/functions; 2. containing namespace `A`; 3. the global namespace;
+4. namespaces opened by exact namespace `A.B` — exactly one open candidate wins, two+ is QSEM018
+(qualify to fix), and zero falls through to QSEM007.
+- Qualified names (`MyLib.Bell`, `MyLib.two()`, `A.B.f()`) are absolute and walk every namespace
+  segment from the program root in statement and expression calls. `open A` exposes only A's direct
+  callables: it does not expose `A.B`, inherit a containing namespace's opens, or re-export what A opened.
+  `open` does NOT load files (import does). Namespaces merge across files; the same operation name twice
+  in one namespace is QSEM022 (in the global namespace, QSEM008).
+- A dotted namespace creates one symbol per segment, so declaring `namespace A.B` makes `A` a valid
+  namespace too; opening A still does not expose B's members. Namespace and callable members with the
+  same spelling can coexist because intermediate path segments select namespaces and call endpoints
+  select callables.
 - Built-in gates live in the implicit namespace `Qora.Intrinsic` (always open). A NAMESPACED
   operation may reuse a gate name (`namespace L { operation Rx ... }`); an unqualified use that
   could mean both is QSEM018 — write `L.Rx(...)` or `Qora.Intrinsic.Rx(...)`. Global operations
   may NOT take gate names (QSEM013). Reserved everywhere: `M`, `Measure`, `measure`, `pi`, `tau`,
-  `euler`, and declaring namespace `Qora.Intrinsic`.
+  `euler`, `AsInt`, and declaring namespace `Qora.Intrinsic`.
 
 ## Error codes (collect-all; every error carries a source span)
 
@@ -164,7 +191,7 @@ QSEM011 recursive operation calls             QSEM012 `use` outside `Main` top l
 QSEM013 name shadows a built-in where qualification cannot disambiguate
 QSEM014 same qubit (or overlapping register/element) twice in one gate; overlapping mutable arrays
 QSEM015 duplicate declared names in one operation
-QSEM016 literal array/qubit index out of range / indexing a scalar or single qubit
+QSEM016 non-integer or proven-out-of-range array/qubit index / indexing a scalar or single qubit
 QSEM017 measurement assigned to a non-bit     QSEM018 ambiguous unqualified name (candidates listed)
 QSEM019 unknown namespace/member in qualified name or `open`
 QSEM020 import file not found/unreadable/no file context
@@ -176,10 +203,12 @@ QSEM025 identifier not declared in scope here (unknown name, or classical used b
 QSEM026 qubit used as a classical value       QSEM027 non-invertible `within` body
 QSEM028 operation name used as a value
 QSEM029 invalid array shape, initializer, member, or whole-array assignment
+QSEM030 OpenQASM target cannot emit an index whose in-bounds proof remains unresolved
 QSEM033 impure function body (a gate, `use`, measurement, or operation call inside a function)
 QSEM034 a qubit in a function signature (function parameters/return are classical)
 QSEM035 `return` outside a function (an operation is void), or a function has a path that returns nothing
 QSEM036 a whole `bit[]` register used as a number, compared across widths, or ordered (use `AsInt(f)`)
+QSEM037 incompatible function return/result type, or a whole classical array used as one scalar
 
 ## CLI contract (for tooling/agents)
 
@@ -191,7 +220,7 @@ qora --json [file] [--stages] [--base-dir <dir>]
   `{"success":bool,"qasm":"...","errors":[{"message","code","start","end"}]}`
   `start`/`end` are half-open character offsets into the entry document (-1 = no location).
 - `--stages` adds `"ast"`, `"ir"`, `"irInverse"`, `"symbols"` (pipeline snapshots; original/FQN names, unmangled).
-- Emitted QASM starts with `// generated by Qora v0.27`.
+- Emitted QASM starts with `// generated by Qora v0.28`.
 
 ## Executing programs
 

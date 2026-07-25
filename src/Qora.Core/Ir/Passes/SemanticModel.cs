@@ -175,11 +175,12 @@ public sealed record UncomputeVerdict(UncomputeBlocker Blocker, QubitEvent? Culp
 
 /// <summary>An indexed access whose in-bounds proof FAILED (rung B′): the bound never settles to a value at
 /// compile time, so the access is neither proven safe nor proven wrong. Recorded by <see cref="QoraValidator"/>
-/// as DATA, not as a diagnostic — the verdict is target-independent, only its disposition differs per backend:
-/// the OpenQASM backend derives one QSEM030 per entry (OpenQASM 3 has no runtime failure channel, so an
-/// unproven access cannot ship), while a QIR backend would instead wrap each site in a runtime bounds check
-/// that aborts. <see cref="LoopBound"/> is the undetermined loop upper bound when <see cref="Index"/> is a
-/// <c>for</c> variable, and null when the index is a bare runtime value.</summary>
+/// as DATA, not as a diagnostic — the verdict is target-independent, only its disposition differs per backend.
+/// The OpenQASM backend derives QSEM030 because an unproven access cannot ship. This record intentionally
+/// carries diagnostic context, not stable expression-site identity; a future runtime-check lowering must
+/// extend the model with such identity (and dynamic-alias policy) before using failed proofs as a rewrite
+/// work list. <see cref="LoopBound"/> is the undetermined loop upper bound when <see cref="Index"/> is a
+/// <c>for</c> variable, and null for any other runtime index expression.</summary>
 public sealed record UnprovenIndex(string Op, string Array, string Index, string? LoopBound, QSpan? Span);
 
 /// <summary>One outstanding "re-check after monomorphization" PROMISE (the deferral ledger): a size-dependent
@@ -211,6 +212,7 @@ public sealed record DeferredSizeCheck(string Op, string Array, string Access, s
 /// </summary>
 public sealed class SemanticModel
 {
+    private readonly Dictionary<ScopeId, Scope> _scopeById = new();
     private readonly Dictionary<int, Scope> _rootScopeByOp = new();     // QOperation.Id → root scope
     private readonly Dictionary<int, Symbol> _symbolByDeclId = new();   // declaring node Id → Symbol
     private readonly Dictionary<int, int> _derivedFrom = new();         // copied node Id → source node Id
@@ -223,26 +225,34 @@ public sealed class SemanticModel
     private readonly List<DeferredSizeCheck> _deferredSizeChecks = new(); // rung B′: judgements postponed to the post-mono re-check (empty on the final model today)
     private readonly Dictionary<int, bool> _willBeRecheckedByOp = new();  // rung B′: the walk's per-op liveness prediction — does the post-mono re-check come?
     private readonly Dictionary<int, IReadOnlyDictionary<string, long>> _requiredArgLengthsByOp = new(); // rung B′/P4: op → classical-array param → min length
-    private Scope? _programScope;   // the top-level symbol table: one Operation symbol per op
+    private ProgramSymbolGraph? _programSymbols;
 
     internal void AddOperation(QOperation op, Scope root)
     {
         _rootScopeByOp[op.Id] = root;
+        RegisterScopeTree(root);
         foreach (var sym in root.AllSymbols())
-            if (sym.DeclNodeId != 0) _symbolByDeclId[sym.DeclNodeId] = sym;
+            if (sym.DeclarationNodeId is int declarationId)
+                _symbolByDeclId[declarationId] = sym;
     }
 
-    /// <summary>Register the PROGRAM scope — the top-level symbol table whose entries are the operation
-    /// symbols. One call stores it (for the symbol view / by-name lookup) AND flattens its symbols into the
-    /// Id→Symbol index (so <see cref="FindSymbol"/> resolves <c>op.Id</c>), exactly as
-    /// <see cref="AddOperation"/> does for a per-operation scope. The operation symbols enter that scope
-    /// through the same <see cref="Scope.TryAdd"/> door every other declaration uses — nothing registers a
-    /// symbol by a side path.</summary>
-    internal void SetProgramScope(Scope programScope)
+    private void RegisterScopeTree(Scope scope)
     {
-        _programScope = programScope;
-        foreach (var sym in programScope.AllSymbols())
-            if (sym.DeclNodeId != 0) _symbolByDeclId[sym.DeclNodeId] = sym;
+        foreach (var item in scope.ScopeTree())
+            _scopeById[item.Id] = item;
+    }
+
+    /// <summary>
+    /// Register the program declaration graph and index every source declaration by its QIR node Id.
+    /// Namespace/callable ownership remains in <see cref="ProgramSymbolGraph"/>; this index only joins a
+    /// declaration node to the corresponding semantic symbol.
+    /// </summary>
+    internal void SetProgramSymbols(ProgramSymbolGraph programSymbols)
+    {
+        _programSymbols = programSymbols;
+        foreach (var sym in programSymbols.AllSymbols)
+            if (sym.DeclarationNodeId is int declarationId)
+                _symbolByDeclId[declarationId] = sym;
     }
 
     /// <summary>Store an operation's qubit-event stream — its leaf statements' reads/writes/measures in
@@ -280,8 +290,8 @@ public sealed class SemanticModel
     }
 
     /// <summary>Record one unproven indexed access (rung B′) — produced by <see cref="QoraValidator"/> during
-    /// the bounds-proof walk, add-only like every other fact. The backend decides the disposition: the
-    /// OpenQASM path derives QSEM030 from each entry; a QIR path would lower each to a checked access.</summary>
+    /// the bounds-proof walk, add-only like every other fact. The backend decides the disposition; the
+    /// OpenQASM path derives source-distinct QSEM030 diagnostics from this list.</summary>
     internal void AddUnprovenIndex(UnprovenIndex access) => _unprovenIndexes.Add(access);
 
     /// <summary>Record an operation's array-argument CONTRACT (rung B′/P4): the minimum length each of its
@@ -301,8 +311,9 @@ public sealed class SemanticModel
         _requiredArgLengthsByOp.TryGetValue(opId, out var needs) ? needs : null;
 
     /// <summary>Every indexed access this validation could not prove in bounds, in walk order — empty when
-    /// the whole program is proven. Non-empty NEVER coexists with a successful OpenQASM compile (each entry
-    /// became a QSEM030); a future QIR backend reads this list as its runtime-check insertion plan.</summary>
+    /// the whole program is proven. Non-empty NEVER coexists with a successful OpenQASM compile because its
+    /// target-policy pass derives QSEM030. Entries currently provide diagnostic context only, not the stable
+    /// site identity a future checked-access lowering would require.</summary>
     public IReadOnlyList<UnprovenIndex> UnprovenIndexes => _unprovenIndexes;
 
     /// <summary>The deferral ledger (see <see cref="DeferredSizeCheck"/>): the size-dependent judgements
@@ -367,6 +378,13 @@ public sealed class SemanticModel
 
     /// <summary>The root scope of this operation (or of the operation it was derived from), if any.</summary>
     public Scope? FindRootScope(int opId) => Resolve(opId, _rootScopeByOp);
+
+    /// <summary>One lexical scope by semantic scope identity.</summary>
+    public Scope? FindScope(ScopeId scopeId) =>
+        _scopeById.TryGetValue(scopeId, out var scope) ? scope : null;
+
+    /// <summary>Every lexical scope in the model, keyed by semantic scope identity.</summary>
+    public IReadOnlyDictionary<ScopeId, Scope> Scopes => _scopeById;
 
     /// <summary>This operation's qubit-event stream (leaf reads/writes/measures in program order), or an
     /// empty list if the model never analyzed this op. Keyed by <c>op.Id</c> directly — events are emitted
@@ -631,9 +649,11 @@ public sealed class SemanticModel
     /// <summary>Every operation root scope in the model, keyed by operation Id.</summary>
     public IReadOnlyDictionary<int, Scope> RootScopes => _rootScopeByOp;
 
-    /// <summary>The program-level symbol table — the scope whose symbols are the operations themselves
-    /// (kind <see cref="SymbolKind.Operation"/>). Null until an operation-bearing program is validated.</summary>
-    public Scope? ProgramScope => _programScope;
+    /// <summary>
+    /// The program declaration graph. Namespace and callable ownership lives here; lexical scopes remain
+    /// separately available through <see cref="RootScopes"/> and <see cref="FindScope"/>.
+    /// </summary>
+    public ProgramSymbolGraph? ProgramSymbols => _programSymbols;
 
     private T? Resolve<T>(int id, Dictionary<int, T> table) where T : class
     {

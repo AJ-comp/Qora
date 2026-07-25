@@ -283,7 +283,8 @@ public static class ArrayLocalHoisting
         Dictionary<(string Op, int DeclId), string> storageName,
         Dictionary<(string Op, int DeclId), string> refName,
         HashSet<string> opNames,
-        Dictionary<string, string> inherited, bool forceApply)
+        Dictionary<string, string> inherited, bool forceApply,
+        Dictionary<string, string>? finalActive = null)
     {
         var active = new Dictionary<string, string>(inherited);
         // The facts a call site needs to be COMPLETED, gathered once for this body. Statement calls are
@@ -311,6 +312,15 @@ public static class ArrayLocalHoisting
                             break;
                     }
                     if (target != d.Name) active[d.Name] = target;
+                    else active.Remove(d.Name);
+                    break;
+
+                // Any declaration shadows the enclosing meaning from this point onward. Its initializer
+                // still resolves through the pre-declaration map, so rewrite it before removing a possible
+                // inherited hoisted-array replacement for the same source name.
+                case QDecl d:
+                    result.Add(RenameStmt(d, active, forceApply, fix));
+                    active.Remove(d.Name);
                     break;
 
                 // A call to an op with hidden parameters: supply them, in the callee's appended order. The
@@ -332,17 +342,31 @@ public static class ArrayLocalHoisting
                     });
                     break;
                 case QFor f:
+                    var forActive = new Dictionary<string, string>(active);
+                    forActive.Remove(f.Var);
                     result.Add(f with
                     {
                         From = RenameNode(f.From, active, forceApply, fix)!, To = RenameNode(f.To, active, forceApply, fix)!,
-                        Body = Rewrite(f.Body, op, isEntry, owned, extras, paramName, storageName, refName, opNames, active, forceApply),
+                        Step = RenameNode(f.Step, active, forceApply, fix),
+                        Body = Rewrite(f.Body, op, isEntry, owned, extras, paramName, storageName, refName,
+                            opNames, forActive, forceApply),
                     });
                     break;
                 case QWhile w:
                     result.Add(w with { Cond = RenameCond(w.Cond, active, forceApply, fix), Body = Rewrite(w.Body, op, isEntry, owned, extras, paramName, storageName, refName, opNames, active, forceApply) });
                     break;
                 case QRepeat r:
-                    result.Add(r with { Body = Rewrite(r.Body, op, isEntry, owned, extras, paramName, storageName, refName, opNames, active, forceApply), Until = RenameCond(r.Until, active, forceApply, fix) });
+                    // Unlike while, `until` resolves AFTER the repeat body and in that body's scope.
+                    // Preserve the rename map after its top-level declarations so a hoisted array that
+                    // shadows an enclosing name remains the value the condition actually references.
+                    var untilActive = new Dictionary<string, string>();
+                    var repeatBody = Rewrite(r.Body, op, isEntry, owned, extras, paramName, storageName,
+                        refName, opNames, active, forceApply, untilActive);
+                    result.Add(r with
+                    {
+                        Body = repeatBody,
+                        Until = RenameCond(r.Until, untilActive, forceApply, fix),
+                    });
                     break;
                 case QConjugate c:
                     result.Add(c with
@@ -354,6 +378,11 @@ public static class ArrayLocalHoisting
 
                 default: result.Add(RenameStmt(s, active, forceApply, fix)); break;
             }
+        if (finalActive is not null)
+        {
+            finalActive.Clear();
+            foreach (var (name, replacement) in active) finalActive[name] = replacement;
+        }
         return result;
     }
 
@@ -431,6 +460,7 @@ public static class ArrayLocalHoisting
         return expr switch
         {
             QText t => t with { Tree = RenameNode(t.Tree, map, on, fix) },
+            QMeasure m => m with { Target = RenameNode(m.Target, map, on, fix)! },
             QArrayLiteral l => l with { Elements = l.Elements.Select(e => RenameExpr(e, map, on, fix)).ToList() },
             _ => expr,
         };

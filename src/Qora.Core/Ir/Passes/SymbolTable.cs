@@ -5,7 +5,19 @@ using System.Text.RegularExpressions;
 namespace Qora.Ir.Passes;
 
 /// <summary>What a declared name IS.</summary>
-public enum SymbolKind { Parameter, Register, MeasureBit, Var, Const, LoopVar, Operation }
+public enum SymbolKind
+{
+    Namespace,
+    Parameter,
+    Register,
+    MeasureBit,
+    Var,
+    Const,
+    LoopVar,
+    Operation,
+    BuiltinGate,
+    BuiltinFunction,
+}
 
 /// <summary>One place a name is used (a gate operand, a measurement target, an angle argument, …).
 /// <see cref="Order"/> is a pre-order index over the operation's statements — monotonic in program order,
@@ -18,6 +30,17 @@ public sealed record UseSite(int Order, string Detail, int NodeId);
 /// checking (declaration), liveness (uses), constant folding (const value), effect analysis (kind/type).</summary>
 public sealed class Symbol
 {
+    /// <summary>Semantic identity inside one program-graph snapshot, distinct from a declaring QNode Id.</summary>
+    public SymbolId Id { get; } = SemanticIds.NextSymbol();
+
+    /// <summary>
+    /// The authoritative semantic owner. Child/member indexes are derived from this edge by
+    /// <see cref="ProgramSymbolGraph"/>.
+    /// </summary>
+    public SymbolId? OwnerSymbolId { get; }
+
+    public SymbolOrigin Origin { get; }
+
     /// <summary>The name AS WRITTEN IN SOURCE — the user's own spelling, frozen at validation and correct
     /// forever for diagnostics and symbol views. This is deliberately NOT the emitted name: after
     /// <see cref="NameMangler"/> runs, the QASM name of this declaration lives in
@@ -26,7 +49,7 @@ public sealed class Symbol
     /// a later tree — the emitter's model-less fallback — sees that tree's spellings as its "source".)</summary>
     public string SourceName { get; }
     public SymbolKind Kind { get; }
-    public QType? Type { get; }                 // Int / Float / Angle / Bit / Qubit (null if unknown)
+    public QType? Type { get; }                 // explicit or initializer-inferred Int / Float / Angle / Bit / Qubit
     public bool IsConst { get; }
     public string? ConstValue { get; }          // a const's initializer text (diagnostics); null for var/measure/register
     /// <summary>The const's value, FOLDED ONCE at its declaration — in the declaring scope, by the one
@@ -41,7 +64,9 @@ public sealed class Symbol
     /// never drift from the monomorphizer's own trigger.</summary>
     internal bool MonoSized { get; init; }
     public QSpan? DeclSpan { get; }
-    public int DeclNodeId { get; }              // stable Id of the declaring node (QParam / QUse / QDecl / QFor)
+    /// <summary>The declaring QNode Id, or null for merged/synthetic/built-in symbols.</summary>
+    public int? DeclarationNodeId { get; }
+
     public int? RegisterSize { get; }           // concrete qubit count: `use q = Qubit[N]` or a specialized Qubit[] param
     public bool IsArray { get; }                 // source T[] shape, independent of the element type
     public bool IsQubitArray { get; }            // convenience view for quantum passes
@@ -50,10 +75,13 @@ public sealed class Symbol
 
     public Symbol(string name, SymbolKind kind, QType? type = null, bool isConst = false, string? constValue = null,
         QSpan? declSpan = null, int? registerSize = null, bool isArray = false,
-        int? arrayLength = null, int declNodeId = 0)
+        int? arrayLength = null, int? declarationNodeId = null,
+        SymbolId? ownerSymbolId = null, SymbolOrigin origin = SymbolOrigin.Source)
     {
         SourceName = name;
         Kind = kind;
+        OwnerSymbolId = ownerSymbolId;
+        Origin = origin;
         Type = type;
         IsConst = isConst;
         ConstValue = constValue;
@@ -62,38 +90,92 @@ public sealed class Symbol
         IsArray = isArray || registerSize is not null;
         IsQubitArray = type == QType.Qubit && IsArray;
         ArrayLength = type == QType.Qubit ? null : arrayLength;
-        DeclNodeId = declNodeId;
+        DeclarationNodeId = declarationNodeId;
     }
 }
 
 /// <summary>
-/// A lexical scope IS a symbol table: a <c>name → Symbol</c> map plus a link to its enclosing scope. Each
-/// block (the operation body, each <c>for</c>/<c>while</c>/<c>repeat</c> body, each <c>if</c> branch) gets
-/// its own instance; child scopes link up to their parent. <see cref="Lookup"/> walks the parent chain
-/// (nearest-enclosing resolution); <see cref="LookupLocal"/> checks only this scope (same-scope duplicates).
+/// A lexical symbol table: a <c>name → SymbolId</c> map plus <see cref="ParentScopeId"/>. It contains only
+/// declarations inside one callable. Namespace and callable declarations live in
+/// <see cref="ProgramSymbolGraph"/>, so an operation's root lexical scope has no parent. Nested blocks
+/// link to their enclosing lexical scope by Id. <see cref="Lookup"/> follows those IDs for
+/// nearest-enclosing local lookup, while <see cref="LookupLocal"/> checks one exact block.
 /// </summary>
 public sealed class Scope
 {
-    private readonly Dictionary<string, Symbol> _symbols = new();   // PRIVATE: the only writer is TryAdd
-    public Scope? Parent { get; }
-    public List<Scope> Children { get; } = new();
+    private readonly Dictionary<string, SymbolId> _bindings = new();
+    private readonly ProgramSymbolGraph _programSymbols;
+    private readonly Dictionary<ScopeId, Scope> _scopes;
+    private readonly Dictionary<ScopeId, List<ScopeId>> _childrenByParent;
 
-    public Scope(Scope? parent = null) { Parent = parent; parent?.Children.Add(this); }
+    public ScopeId Id { get; } = SemanticIds.NextScope();
+    public ScopeId? ParentScopeId { get; }
+    public SymbolId EnclosingSymbolId { get; }
 
-    public Symbol? LookupLocal(string name) => _symbols.TryGetValue(name, out var s) ? s : null;
-    public Symbol? Lookup(string name) => LookupLocal(name) ?? Parent?.Lookup(name);
+    /// <summary>Direct lexical children, exposed by Id so no second object-reference tree is public.</summary>
+    public IReadOnlyList<ScopeId> ChildScopeIds =>
+        _childrenByParent.TryGetValue(Id, out var children)
+            ? children.ToArray()
+            : Array.Empty<ScopeId>();
+    /// <summary>Create the parentless lexical root for one callable body.</summary>
+    internal Scope(ProgramSymbolGraph programSymbols, SymbolId enclosingSymbolId)
+    {
+        _programSymbols = programSymbols;
+        EnclosingSymbolId = enclosingSymbolId;
+        _scopes = new Dictionary<ScopeId, Scope> { [Id] = this };
+        _childrenByParent = new Dictionary<ScopeId, List<ScopeId>>();
+    }
+
+    internal Scope(Scope parent)
+    {
+        ParentScopeId = parent.Id;
+        _programSymbols = parent._programSymbols;
+        EnclosingSymbolId = parent.EnclosingSymbolId;
+        _scopes = parent._scopes;
+        _childrenByParent = parent._childrenByParent;
+        _scopes.Add(Id, this);
+        if (!_childrenByParent.TryGetValue(parent.Id, out var children))
+            _childrenByParent[parent.Id] = children = new List<ScopeId>();
+        children.Add(Id);
+    }
+
+    public Symbol? LookupLocal(string name) =>
+        _bindings.TryGetValue(name, out var id) ? _programSymbols.FindSymbol(id) : null;
+    public Symbol? Lookup(string name) =>
+        LookupLocal(name) ?? (ParentScopeId is { } parentId ? _scopes[parentId].Lookup(name) : null);
+
+    internal Scope? ParentScope =>
+        ParentScopeId is { } parentId ? _scopes[parentId] : null;
+
+    internal IEnumerable<Scope> ChildScopes =>
+        ChildScopeIds.Select(childId => _scopes[childId]);
+
+    internal IEnumerable<Scope> ScopeTree()
+    {
+        yield return this;
+        foreach (var child in ChildScopes)
+            foreach (var descendant in child.ScopeTree())
+                yield return descendant;
+    }
 
     /// <summary>This scope's OWN symbols (not descendants') — read-only, for diagnostics/rendering.</summary>
-    public IEnumerable<Symbol> LocalSymbols => _symbols.Values;
+    public IEnumerable<Symbol> LocalSymbols =>
+        _bindings.Values.Select(id => _programSymbols.FindSymbol(id)!).Where(symbol => symbol is not null);
 
     /// <summary>This scope's symbols plus every descendant's — the flat set of all names declared at or below here.</summary>
-    public IEnumerable<Symbol> AllSymbols() => _symbols.Values.Concat(Children.SelectMany(c => c.AllSymbols()));
+    public IEnumerable<Symbol> AllSymbols() =>
+        LocalSymbols.Concat(ChildScopes.SelectMany(child => child.AllSymbols()));
 
     /// <summary>The ONE way to add a symbol — the backing dictionary is private, so no code path can bypass
     /// this. Returns false if a same-name symbol already exists in THIS scope; the caller turns that into
     /// QSEM015. Centralizing insertion here means every declaration (params, registers, measure bits, vars,
     /// consts, loop vars) is duplicate-checked by the same rule — no direct write can slip a collision past.</summary>
-    public bool TryAdd(Symbol sym) => _symbols.TryAdd(sym.SourceName, sym);
+    public bool TryAdd(Symbol symbol)
+    {
+        if (!_bindings.TryAdd(symbol.SourceName, symbol.Id)) return false;
+        _programSymbols.RegisterLexical(symbol);
+        return true;
+    }
 }
 
 /// <summary>
@@ -113,30 +195,113 @@ public sealed class Scope
 public static class SymbolTableBuilder
 {
 
-    /// <summary>Build the PROGRAM scope: the top-level symbol table whose entries are the operation symbols
-    /// (one per op, kind <see cref="SymbolKind.Operation"/>, keyed by the op's declaring node Id). They go
-    /// in through <see cref="Scope.TryAdd"/> — the SAME single insertion door every parameter, register and
-    /// variable uses — so an operation is a symbol exactly like any other name, just at the program layer.
-    /// A duplicate op name (already reported QSEM008/QSEM022) simply loses the TryAdd; that program does not
-    /// emit anyway. Each operation's <see cref="Build"/> scope is a CHILD of this one, making it the true
-    /// root of the whole symbol table: a name resolves up the chain to an operation, and Record rejects that
-    /// as a value (QSEM028) — an operation may only be called, never used in an expression.</summary>
-    public static Scope BuildProgramScope(QProgram program)
+    /// <summary>
+    /// Build the program declaration graph. A dotted namespace creates one namespace symbol per segment;
+    /// each segment owns the next through <see cref="Symbol.OwnerSymbolId"/>, and the final namespace owns
+    /// its callable symbols. Repeated namespace blocks reuse the same segment symbols. Built-in gates and
+    /// functions are synthetic members of <c>Qora.Intrinsic</c>. Lexical declarations are added later by
+    /// <see cref="Build"/> and never enter the graph's qualified-member index.
+    /// </summary>
+    public static ProgramSymbolGraph BuildProgramSymbols(QProgram program)
     {
-        var scope = new Scope();
+        var graph = new ProgramSymbolGraph();
+        var namespacePaths = program.Operations
+            .Select(operation => operation.Namespace)
+            .Where(path => path.Length > 0)
+            .ToHashSet(StringComparer.Ordinal);
+
+        if (program.Opens is not null)
+            foreach (var namespacePath in program.Opens.Keys)
+                if (namespacePath.Length > 0)
+                    namespacePaths.Add(namespacePath);
+
+        foreach (var namespacePath in namespacePaths
+                     .OrderBy(path => path.Count(character => character == '.'))
+                     .ThenBy(path => path, StringComparer.Ordinal))
+            graph.GetOrAddNamespace(namespacePath);
+
         foreach (var op in program.Operations)
-            scope.TryAdd(new Symbol(op.Name, SymbolKind.Operation, declSpan: op.Span, declNodeId: op.Id));
-        return scope;
+        {
+            var owner = op.Namespace.Length == 0
+                ? graph.RootSymbol
+                : graph.GetOrAddNamespace(op.Namespace);
+            graph.RegisterDeclaredMember(new Symbol(
+                LocalCallableName(op),
+                SymbolKind.Operation,
+                declSpan: op.Span,
+                declarationNodeId: op.Id,
+                ownerSymbolId: owner.Id));
+        }
+
+        var intrinsic = graph.GetOrAddNamespace(
+            QoraGates.IntrinsicNamespace,
+            SymbolOrigin.Builtin);
+        foreach (var name in QoraGates.Names.Keys)
+            graph.RegisterDeclaredMember(new Symbol(
+                name,
+                SymbolKind.BuiltinGate,
+                ownerSymbolId: intrinsic.Id,
+                origin: SymbolOrigin.Builtin));
+        foreach (var name in QoraGates.Functions.Keys)
+            graph.RegisterDeclaredMember(new Symbol(
+                name,
+                SymbolKind.BuiltinFunction,
+                ownerSymbolId: intrinsic.Id,
+                origin: SymbolOrigin.Builtin));
+
+        return graph;
     }
 
     public static Scope Build(QOperation op, List<QoraError> errors,
         Dictionary<IReadOnlyList<QStmt>, Scope>? scopeIndex = null,
-        Scope? programScope = null)
+        ProgramSymbolGraph? programSymbols = null,
+        IReadOnlyDictionary<int, QOperation>? opById = null,
+        Action<int, QoraError>? typeMismatchCandidate = null)
     {
         var opName = op.DisplayName ?? op.Name;
-        var root = new Scope(programScope);   // the op body's table is a CHILD of the program table, so a name resolves up to an operation (rejected as a value by Record). Null programScope (standalone Build) → parentless, unchanged.
+        programSymbols ??= BuildProgramSymbols(new QProgram(new[] { op }));
+        var callable = programSymbols.FindDeclaration(op.Id)
+            ?? throw new InvalidOperationException(
+                $"QINTERNAL: operation `{opName}` has no program symbol");
+        var root = new Scope(programSymbols, callable.Id);
         var order = 0;
         var reported026 = new HashSet<(int, int)>();   // QSEM026 spans already flagged — one per statement span (a `for`'s From/To share a span; a condition names a qubit twice), so the diagnostic isn't duplicated
+
+        bool ContainsFunctionCall(QExpr value) =>
+            QNodes.TreesOf(value).SelectMany(QNodes.CallsIn).Any(call =>
+                QoraGates.Functions.ContainsKey(call.Name)
+                || ExpressionTypes.TryGetFunction(call, programSymbols, opById, out _));
+
+        // QSEM037 belongs to the contracts introduced by functions: every return value, and a declared or
+        // assigned scalar that consumes a function result. Ordinary scalar declarations keep Qora's
+        // historical loose model. Shape is never loose: a whole T[] cannot silently become one T value.
+        void CheckAssignable(int statementId, QValueShape target, QExpr value, Scope valueScope, QSpan? span,
+            string targetDescription, bool isReturn = false)
+        {
+            if (ExpressionTypes.TypeOf(value, valueScope, programSymbols, opById) is not { } source)
+                return;   // an existing unknown/call/qubit diagnostic owns the malformed expression
+            if (source.Type == QType.Qubit)
+                return;   // QSEM026 already explains why a qubit is not a classical value
+            if (source is { Type: QType.Bit, IsArray: true } && !target.IsArray)
+                return;   // QSEM036 gives the precise AsInt guidance
+
+            var shapeMismatch = target.IsArray != source.IsArray;
+            var functionContract = isReturn || ContainsFunctionCall(value);
+            if ((!shapeMismatch && !functionContract) || ExpressionTypes.CanAssign(target, source, value))
+                return;
+
+            var reason = shapeMismatch
+                ? "a whole array and one scalar value cannot be assigned to each other"
+                : $"`{source}` cannot be implicitly converted to `{target}`";
+            var error = new QoraError(
+                $"in `{opName}`: {targetDescription} expects `{target}`, but the value is `{source}`; {reason}",
+                "QSEM037", span?.Start ?? -1, span?.End ?? -1);
+            // Validation supplies a candidate sink so a more fundamental call-signature error can own this
+            // statement. Standalone table builds have no later call-validation phase, so they receive the
+            // mismatch immediately as before.
+            if (typeMismatchCandidate is null) errors.Add(error);
+            else typeMismatchCandidate(statementId, error);
+        }
 
         // THE single insertion door. EVERY declared name — parameters, `use` registers, measure bits, vars,
         // consts, loop vars — is added through here, into the scope the caller chose (root for the hoisted
@@ -163,7 +328,8 @@ public static class SymbolTableBuilder
                 // monomorphization, like Qubit[]) — exposing it as ArrayLength gives the post-mono bounds
                 // proofs the same precision they have for sized registers; null pre-mono = P4 floors as ever.
                 arrayLength: p.Type != QType.Qubit ? p.RegisterSize : null,
-                declNodeId: p.Id)
+                declarationNodeId: p.Id,
+                ownerSymbolId: callable.Id)
             {
                 MonoSized = p.NeedsMonoSizing,   // the ONE answer, stamped for the deferral gates
             });
@@ -174,7 +340,8 @@ public static class SymbolTableBuilder
                 switch (s)
                 {
                     case QUse u: Declare(root, new Symbol(u.Name, SymbolKind.Register, QType.Qubit, declSpan: u.Span,
-                        registerSize: u.Size, isArray: true, declNodeId: u.Id)); break;
+                        registerSize: u.Size, isArray: true, declarationNodeId: u.Id,
+                        ownerSymbolId: callable.Id)); break;
                     case QIf i: SeedRegisters(i.Then); SeedRegisters(i.Else); break;
                     case QFor f: SeedRegisters(f.Body); break;
                     case QWhile w: SeedRegisters(w.Body); break;
@@ -203,9 +370,14 @@ public static class SymbolTableBuilder
             // exempt from resolution entirely and checked before lookup.
             if (IsReservedName(name)) return;
             var sym = scope.Lookup(name);
+            var callableValue = sym is null
+                ? programSymbols.LookupCallableOutward(
+                    callable.OwnerSymbolId ?? programSymbols.RootSymbol.Id,
+                    name)
+                : null;
             // An operation resolves up the scope chain but is NOT a value: it can only be called (the QGate
             // path records those uses), never referenced in an expression or used as an assignment target.
-            if (sym is { Kind: SymbolKind.Operation })
+            if (callableValue is { Kind: SymbolKind.Operation })
                 Add(errors, "QSEM028", $"in `{opName}`: `{name}` is an operation, not a value — it can only be called (`{name}(…)`)", span);
             else if (sym is not null) sym.Uses.Add(new UseSite(order, detail, currentStmtId));
             else
@@ -286,13 +458,18 @@ public static class SymbolTableBuilder
                     RecordExpr(scope, i.Index, detail, span, classicalOnly);
                     return;
                 case QCallNode c:
-                    // A call's name is a CALLABLE (a function, or the measurement M), resolved against the
-                    // function/gate table by validation — not a value identifier, so it is not recorded as a
-                    // use here. Its arguments are ordinary expressions, except that a whole register IS a
-                    // legal ARGUMENT: what an argument may be is decided by the callee's signature (QSEM006),
-                    // which is how `AsInt(f)` and a `bit[]` parameter are both reached. The allowance covers
-                    // the argument ITSELF only — `AsInt(f + 1)` still reports, because the register there sits
-                    // inside an arithmetic expression, not in the argument position.
+                    // A resolved user-function call is a use of its operation symbol, just like statement
+                    // call syntax. Prefer the stable declaration Id; the name path exists only for hand-built
+                    // IR. Built-ins have neither a program declaration nor an Id and are skipped.
+                    var callable = c.CalleeOpId is int expressionCalleeId
+                        ? programSymbols.FindDeclaration(expressionCalleeId)
+                        : programSymbols.LookupCallable(c.Name);
+                    if (callable is { Kind: SymbolKind.Operation })
+                        callable.Uses.Add(new UseSite(order, $"call @ {c.Name}", currentStmtId));
+
+                    // Arguments are ordinary expressions, except that a whole register IS a legal ARGUMENT:
+                    // the callee's signature decides what it may consume (QSEM006). The allowance covers the
+                    // argument itself only — `AsInt(f + 1)` still reports because that register is nested.
                     foreach (var a in c.Args) RecordExpr(scope, a, detail, span, classicalOnly, registerOk: true);
                     return;
             }
@@ -322,10 +499,13 @@ public static class SymbolTableBuilder
                 {
                     case QGate g:
                         // an operation CALL (not a built-in gate) records a use on the callee's operation
-                        // symbol — its "used-where", accumulated across every caller. The callee is looked up
-                        // in the PROGRAM scope by name (the same symbol-table lookup any name uses); a
-                        // built-in gate (H, X…) is not there → skipped. Functored calls (Adjoint Foo) name Foo.
-                        if (programScope?.LookupLocal(g.Name) is { Kind: SymbolKind.Operation } callee)
+                        // symbol — its "used-where", accumulated across every caller. Stable Id lookup works
+                        // across namespace qualification and later renames; canonical-name lookup remains the
+                        // hand-built-IR fallback. A built-in gate has neither and is skipped.
+                        var callee = g.CalleeOpId is int gateCalleeId
+                            ? programSymbols.FindDeclaration(gateCalleeId)
+                            : programSymbols.LookupCallable(g.Name);
+                        if (callee is { Kind: SymbolKind.Operation })
                             callee.Uses.Add(new UseSite(order, $"call @ {g.Name}", g.Id));
                         foreach (var a in g.Args)
                             switch (a)
@@ -359,15 +539,29 @@ public static class SymbolTableBuilder
                         // name of an ENCLOSING register / parameter / measure bit — those flatten to the same
                         // emitted scope and would collide. (Same-scope dups: Declare. Disjoint sibling blocks
                         // may reuse a name — they dedup into one emitted bit and never coexist.)
-                        if (scope.Parent?.Lookup(md.Name) is { Kind: SymbolKind.Register or SymbolKind.Parameter or SymbolKind.MeasureBit } encl)
+                        if (scope.ParentScope?.Lookup(md.Name) is { Kind: SymbolKind.Register or SymbolKind.Parameter or SymbolKind.MeasureBit } encl)
                             Add(errors, "QSEM015", $"in `{opName}`: measure bit `{md.Name}` reuses the name of an enclosing {KindLabel(encl.Kind)}; a measured result is emitted as one top-level `bit {md.Name};`, so its name must be unique across the operation's registers, parameters and measure bits — rename one", md.Span);
                         if (UsedBeforeShadow(scope, md.Name, scopeStart))
                             Add(errors, "QSEM025", $"in `{opName}`: `{md.Name}` is used earlier in this block but declared here, shadowing an outer `{md.Name}` — a name cannot be used before its declaration in its own scope; move this declaration above the first use or rename it", md.Span);
                         measureBits.Add((md.Name, md.Span));   // checked against the completed root scope after the walk (top-level collision)
-                        Declare(scope, new Symbol(md.Name, SymbolKind.MeasureBit, QType.Bit, isConst: md.IsConst, declSpan: md.Span, declNodeId: md.Id));
+                        Declare(scope, new Symbol(md.Name, SymbolKind.MeasureBit, QType.Bit, isConst: md.IsConst,
+                            declSpan: md.Span, declarationNodeId: md.Id, ownerSymbolId: callable.Id));
                         break;
                     case QDecl d:
                         RecordValue(scope, d.Value, $"init {d.Name}", d.Span, targetIsArray: d.IsArray);
+                        var inferred = ExpressionTypes.TypeOf(d.Value, scope, programSymbols, opById);
+                        // Aggregate initializers and array declarations already have the more precise QSEM029
+                        // owner. This shared check handles a bare array used as a scalar and every expression
+                        // that consumes a declared function result.
+                        if (!(d.Value is QArrayLiteral or QArrayNew) && !d.IsArray)
+                        {
+                            if (d.Type is { } declaredType)
+                                CheckAssignable(d.Id, new QValueShape(declaredType, IsArray: false), d.Value, scope,
+                                    d.Span, $"declaration `{d.Name}`");
+                            else if (inferred is { IsArray: true } inferredArray)
+                                CheckAssignable(d.Id, new QValueShape(inferredArray.Type, IsArray: false), d.Value,
+                                    scope, d.Span, $"declaration `{d.Name}`");
+                        }
                         // Point-of-declaration scoping: this name may not have been used earlier in its own
                         // block (that use would bind to the outer value, which this local shadows). The
                         // initializer's own use of the name (order == this statement) is exempt, so a const
@@ -377,9 +571,11 @@ public static class SymbolTableBuilder
                         // A const's initializer folds HERE — the owner's site, the owner's scope (earlier
                         // consts are already in scope, so chains like `const m: int = k + 1` settle too).
                         // From now on the value is DATA on the symbol; no consumer re-reads the text.
-                        Declare(scope, new Symbol(d.Name, d.IsConst ? SymbolKind.Const : SymbolKind.Var, d.Type,
+                        Declare(scope, new Symbol(d.Name, d.IsConst ? SymbolKind.Const : SymbolKind.Var,
+                            d.Type ?? inferred?.Type,
                             d.IsConst, d.IsConst && d.Value is QText qt ? QNodes.Render(qt.Tree) : null, d.Span,
-                            isArray: d.IsArray, arrayLength: ArrayLengthOf(d), declNodeId: d.Id)
+                            isArray: d.IsArray, arrayLength: ArrayLengthOf(d), declarationNodeId: d.Id,
+                            ownerSymbolId: callable.Id)
                         {
                             FoldedBound = d is { IsConst: true, IsArray: false, Value: QText ct }
                                 ? BoundFolder.Fold(ct.Tree, scope) : null,
@@ -396,19 +592,27 @@ public static class SymbolTableBuilder
                         RecordExpr(scope, a.Index, $"assign index {a.Name}[{QNodes.Render(a.Index)}]", a.Span, classicalOnly: true);
                         RecordValue(scope, a.Value, $"assign {a.Name}", a.Span,
                             targetIsArray: a.Index is null && scope.Lookup(a.Name) is { IsArray: true });
+                        if (scope.Lookup(a.Name) is { Type: { } assignedType } assigned
+                            && !(assigned.IsArray && a.Index is null))
+                            CheckAssignable(a.Id, new QValueShape(assignedType, IsArray: false), a.Value, scope,
+                                a.Span, $"assignment to `{a.Name}`");
                         break;
                     case QReturn ret:
                         // A `return` value is an ordinary value position. Without this case it was walked by
                         // nothing here, so QSEM025 (unknown name), QSEM026 (qubit as a value), QSEM028
                         // (operation as a value) and QSEM036 all silently skipped every returned expression.
                         RecordValue(scope, ret.Value, "return", ret.Span);
+                        if (op.IsFunction && op.ReturnType is { } returnType)
+                            CheckAssignable(ret.Id, new QValueShape(returnType, IsArray: false), ret.Value, scope,
+                                ret.Span, "function return", isReturn: true);
                         break;
                     case QFor f:
                         RecordExpr(scope, f.From, $"for bound {QNodes.Render(f.From)}", f.Span, classicalOnly: true);   // range bounds are classical (read in the ENCLOSING scope)…
                         RecordExpr(scope, f.To, $"for bound {QNodes.Render(f.To)}", f.Span, classicalOnly: true);
                         RecordExpr(scope, f.Step, $"for step {QNodes.Render(f.Step)}", f.Span, classicalOnly: true);
                         var loop = new Scope(scope);                                                        // …then the loop var gets its own scope
-                        Declare(loop, new Symbol(f.Var, SymbolKind.LoopVar, QType.Int, declSpan: f.Span, declNodeId: f.Id));
+                        Declare(loop, new Symbol(f.Var, SymbolKind.LoopVar, QType.Int, declSpan: f.Span,
+                            declarationNodeId: f.Id, ownerSymbolId: callable.Id));
                         Walk(f.Body, new Scope(loop));                                                      // body is a CHILD of the loop-var scope
                         break;
                     case QIf i:
@@ -486,6 +690,20 @@ public static class SymbolTableBuilder
         };
     }
 
+    /// <summary>
+    /// The name stored inside its declaring namespace scope. Before resolution this is already simple;
+    /// after resolution it is the FQN suffix. A later emitted/mangled tree does not carry the namespace
+    /// prefix anymore, so its current spelling remains the local symbol spelling for fallback builds.
+    /// </summary>
+    internal static string LocalCallableName(QOperation operation)
+    {
+        if (operation.Namespace.Length == 0) return operation.Name;
+        var prefix = operation.Namespace + ".";
+        return operation.Name.StartsWith(prefix, StringComparison.Ordinal)
+            ? operation.Name[prefix.Length..]
+            : operation.Name;
+    }
+
     private static void Add(List<QoraError> errors, string code, string message, QSpan? span) =>
         errors.Add(new QoraError(message, code, span?.Start ?? -1, span?.End ?? -1));
 
@@ -520,12 +738,20 @@ public static class SymbolTableBuilder
         if (program is null || program.Operations.Count == 0) return string.Empty;
         var sb = new StringBuilder();
         var sink = new List<QoraError>();                 // formatting must not surface errors
-        var programScope = model?.ProgramScope ?? BuildProgramScope(program);   // op symbols: from the model, or rebuilt
+        var programSymbols = model?.ProgramSymbols ?? BuildProgramSymbols(program);
+        ProgramSymbolGraph? fallbackSymbols = null;
+        var opById = new Dictionary<int, QOperation>();
+        foreach (var operation in program.Operations) opById.TryAdd(operation.Id, operation);
         foreach (var op in program.Operations)
         {
-            var kind = (programScope.LookupLocal(op.Name)?.Kind ?? SymbolKind.Operation).ToString().ToLowerInvariant();
+            var symbolsForOperation = programSymbols.FindDeclaration(op.Id) is not null
+                ? programSymbols
+                : fallbackSymbols ??= BuildProgramSymbols(program);
+            var kind = (symbolsForOperation.FindDeclaration(op.Id)?.Kind ?? SymbolKind.Operation)
+                .ToString().ToLowerInvariant();
             sb.AppendLine($"{op.DisplayName ?? op.Name}: {kind}");
-            var root = model?.FindRootScope(op.Id) ?? Build(op, sink);
+            var root = model?.FindRootScope(op.Id)
+                ?? Build(op, sink, programSymbols: symbolsForOperation, opById: opById);
             PrintScope(root, sb, 1);
         }
         return sb.ToString().TrimEnd();
@@ -544,6 +770,6 @@ public static class SymbolTableBuilder
                 : $"uses [{string.Join(", ", sym.Uses.Select(u => u.Order))}] last @ {sym.Uses[^1].Order}";
             sb.AppendLine($"{pad}{sym.SourceName}: {kind} {type}{val}  ({uses})");
         }
-        foreach (var child in scope.Children) PrintScope(child, sb, depth + 1);
+        foreach (var child in scope.ChildScopes) PrintScope(child, sb, depth + 1);
     }
 }

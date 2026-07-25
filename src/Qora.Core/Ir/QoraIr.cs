@@ -3,7 +3,7 @@ namespace Qora.Ir;
 /// <summary>The compiler's version, stamped into emitted QASM for provenance.</summary>
 public static class QoraVersion
 {
-    public const string Value = "0.27";
+    public const string Value = "0.28";
 }
 
 /// <summary>
@@ -244,7 +244,7 @@ public sealed record QDecl(bool IsConst, QType? Type, string Name, QExpr Value) 
 }
 
 /// <summary><c>name = e;</c>, or <c>name[index] = e;</c> when <see cref="Index"/> is present.
-/// The index is a grammar-atomic token — a <see cref="QNumLit"/> or <see cref="QNameRef"/>.</summary>
+/// The index is a complete expression tree, shared with indexed reads and qubit operands.</summary>
 public sealed record QAssign(string Name, QExpr Value) : QStmt
 {
     public QNode? Index { get; init; }
@@ -291,13 +291,12 @@ public abstract record QArg;
 /// <summary>
 /// A syntactically indexed argument <c>name[Index]</c>. It usually denotes a qubit; after arrays were
 /// added it may also denote a classical array element in a classical parameter slot. Validation resolves
-/// the base symbol before quantum analyses run. The index is grammar-atomic — a <see cref="QNumLit"/> or
-/// <see cref="QNameRef"/>, settled ONCE here so no consumer re-derives number-vs-name from a spelling.
+/// the base symbol before quantum analyses run. <see cref="Index"/> is the complete parsed expression
+/// (<c>i</c>, <c>idx()</c>, <c>i + 1</c>, and so on), so every consumer sees the same structured value.
 /// </summary>
 public sealed record QQubitArg(string Reg, QNode Index) : QArg
 {
-    /// <summary>Construction convenience (tests, hand-built IR): the token is atomized immediately —
-    /// nothing stores the string.</summary>
+    /// <summary>Construction convenience for tests and hand-built IR that use an atomic index.</summary>
     public QQubitArg(string reg, string index) : this(reg, ExprTree.Atom(index)) { }
 }
 
@@ -393,19 +392,25 @@ public sealed record QBinOp(string Op, QNode Left, QNode Right) : QNode;
 /// member is a diagnostic the reader raises (the grammar stays general for a precise error).</summary>
 public sealed record QMember(QNode Base, string Member) : QNode;
 
-/// <summary>An indexed access <c>Base[Index]</c>. The grammar restricts <c>Index</c> to a number or bare
-/// identifier today (so <c>a[k+1]</c> is a parse error), but the node admits any expression for when that
-/// restriction is lifted.</summary>
+/// <summary>An indexed access <c>Base[Index]</c>. <see cref="Index"/> is any value expression, parsed and
+/// lowered once as a structured tree.</summary>
 public sealed record QIndexNode(QNode Base, QNode Index) : QNode;
 
 /// <summary>A call <c>Name(Args…)</c> inside an expression. Two kinds share this node: the measurement
 /// <c>M(q[i])</c> (exactly one <see cref="QIndexNode"/> argument — lowered to <see cref="QMeasure"/> when it
 /// is a whole decl/assign RHS, otherwise carried here and either desugared out of a condition or rejected),
-/// and a <c>function</c> call <c>Foo(a, b)</c> (a legal value — the reader resolves it to a declared
-/// function and type-checks its arguments). A call to an <c>operation</c> or an unknown name left here is
-/// rejected (no OpenQASM expression form). <see cref="Args"/> is empty for a zero-argument call.</summary>
+/// and a <c>function</c> call <c>Foo(a, b)</c> / <c>Lib.Foo(a, b)</c> (a legal value — the resolver binds it
+/// to a declared function and the reader type-checks its arguments). A call to an <c>operation</c> or an
+/// unknown name left here is rejected (no OpenQASM expression form). <see cref="Args"/> is empty for a
+/// zero-argument call.</summary>
 public sealed record QCallNode(string Name, IReadOnlyList<QNode> Args) : QNode
 {
+    /// <summary>For a resolved user-function call, the stable node Id of the declaring
+    /// <see cref="QOperation"/>. Bound once by <see cref="Passes.Resolver"/> and re-pointed when a pass changes
+    /// the callee (for example, monomorphization selects a concrete array-width specialization). Null for a
+    /// built-in function or an unresolved/hand-built call.</summary>
+    public int? CalleeOpId { get; init; }
+
     /// <summary>Construction convenience for the single-argument measurement form <c>M(q[i])</c>.</summary>
     public QCallNode(string name, QNode? arg) : this(name, arg is null ? System.Array.Empty<QNode>() : new[] { arg }) { }
 }

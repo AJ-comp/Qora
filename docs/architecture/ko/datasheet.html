@@ -136,7 +136,7 @@
       <div><dt>방출 타깃</dt><dd>OpenQASM 3.0</dd></div>
       <div><dt>실행 검증 오라클</dt><dd>Amazon Braket LocalSimulator (전체 언어 실행)</dd></div>
       <div><dt>중심 자료구조</dt><dd>강타입 IR(<code>QProgram</code>) + 지속 <code>SemanticModel</code></dd></div>
-      <div><dt>문서 버전</dt><dd>Qora v0.21 기준</dd></div>
+      <div><dt>문서 버전</dt><dd>Qora v0.28 기준</dd></div>
     </dl>
   </section>
 
@@ -153,7 +153,7 @@
       <li><a href="#s2">패스 카탈로그</a></li>
       <li><a href="#s3">IR 노드 레퍼런스</a></li>
       <li><a href="#s4">SemanticModel — 지속 사이드테이블</a></li>
-      <li><a href="#s5">심벌테이블 & 이름의 두 도메인</a></li>
+      <li><a href="#s5">프로그램 심벌 그래프, 렉시컬 스코프 & 이름의 두 도메인</a></li>
       <li><a href="#s6">효과분석 & 큐빗이벤트 (rung ①)</a></li>
       <li><a href="#s7">자동 uncomputation 사다리</a></li>
       <li><a href="#s8">자동 uncomputation</a></li>
@@ -179,8 +179,8 @@
     <div class="stg"><div class="box"><b>QoraIR</b> <span class="d">— 강타입 노드 <code>QProgram</code> (안정 Id 발급)</span></div></div>
     <div class="arr">▼ ModuleLoader → MeasureConditionLowering → Resolver</div>
     <div class="stg"><div class="box"><b>해소된 IR</b> <span class="d">— import 병합, 측정-조건 desugar, 이름 FQN화</span></div></div>
-    <div class="arr">▼ 검증 → Monomorphizer → 재검증</div>
-    <div class="stg"><div class="box key"><b>검증된 · 특수화된 IR</b> <span class="d">— ★ 여기서 <strong>SemanticModel</strong> 1회 구축</span></div></div>
+    <div class="arr">▼ QoraValidator + QASM 범위 정책 → Monomorphizer → 재검증 + 정책</div>
+    <div class="stg"><div class="box key"><b>검증된 · 특수화된 IR</b> <span class="d">— ★ 마지막 검증의 <strong>SemanticModel</strong> 유지</span></div></div>
     <div class="arr">▼ EffectAnalysis (rung ①)</div>
     <div class="stg"><div class="box"><b>+ 큐빗이벤트 / 요약</b> <span class="d">— 모델에 적재 (IR 무변경)</span></div></div>
     <div class="arr">▼ ConjugationLowering → AdjointMaterializer → NameMangler → ReferentialCheck → OpenQasmLowering</div>
@@ -196,6 +196,17 @@
     <strong>마지막 검증 결과가 SemanticModel을 소유</strong>합니다.
   </div>
 
+  <div class="call">
+    <span class="h">미증명 인덱스의 사실과 QASM 정책</span>
+    <code>QoraValidator</code>는 범위를 증명하지 못한 접근을 오류로 확정하지 않고
+    <code>SemanticModel.UnprovenIndexes</code>에 기록합니다.<br>
+    이때 이미 범위를 벗어났거나 정수가 아닌 인덱스는 공통 오류 <code>QSEM016</code>이 됩니다.<br>
+    반면에 안전 여부가 끝내 정해지지 않은 접근은 <code>OpenQasmBoundsValidation</code>이
+    <code>QSEM030</code>으로 바꿉니다. OpenQASM에는 이 실패를 처리할 이식 가능한 실행 중단 경로가 없기 때문입니다.<br>
+    현재 기록은 진단 문맥을 보존하지만 표현식 위치의 안정 Id는 담지 않으므로, 앞으로 실행 중 검사 삽입을 지원하려면
+    별도의 위치 식별자와 동적 별칭 정책을 추가해야 합니다.
+  </div>
+
   <!-- ============ 2 ============ -->
   <h2 id="s2"><span class="n">2</span>패스 카탈로그</h2>
   <p>각 패스는 IR을 읽거나 IR→IR로 변환합니다.<br>
@@ -208,7 +219,8 @@
       <tr><td class="k">ModuleLoader</td><td>import 확장 — 여러 파일을 하나의 프로그램으로 병합.</td><td>QSEM020 · QSEM021은 폐기된 예약 코드</td></tr>
       <tr><td class="k"><a href="ir-pass-03-measure-condition-lowering.html">MeasureConditionLowering</a></td><td><code>if (M(q[i]) == v)</code>를 측정 문장과 그 결과를 읽는 비트 조건으로 분리.</td><td>해소·검증 前</td></tr>
       <tr><td class="k">Resolver</td><td>이름을 완전수식명(FQN)으로 해소 (네임스페이스/open).</td><td>QSEM018/019</td></tr>
-      <tr><td class="k">QoraValidator</td><td>의미 검증 1차 실행 — 수집형(조기중단 없음). 스코프 트리를 SemanticModel로 적재.</td><td>QSEM001–029</td></tr>
+      <tr><td class="k">QoraValidator</td><td>공유 의미 검증 — 수집형(조기중단 없음). 스코프 트리와 미증명 인덱스 사실을 SemanticModel에 적재.</td><td>확정 오류는 QSEM016, 미증명은 데이터</td></tr>
+      <tr><td class="k">OpenQasmBoundsValidation</td><td><code>UnprovenIndexes</code>를 OpenQASM의 최종 범위 정책에 따라 진단으로 변환.</td><td>QSEM030 · 각 검증 직후와 백엔드 입구</td></tr>
       <tr><td class="k">Monomorphizer</td><td>소스의 <code>Qubit[]</code> 파라미터를 호출부의 실제 크기로 특수화하고 <code>Count</code>를 정수로 치환. 복제 노드는 <code>ReId</code>로 새 Id.</td><td>모델 소유 검증 이후</td></tr>
       <tr><td class="k">EffectAnalysis</td><td><strong>rung ①</strong> — 리프 문장마다 큐빗이벤트(Read/Write/Measure) + op 요약. 순수 분석.</td><td>IR 무변경</td></tr>
       <tr><td class="k">ConjugationLowering</td><td><code>QConjugate</code>(within/apply)를 <code>W ++ A ++ inverse(W)</code>로 평탄화.</td><td>QSEM027 (역함수 없으면 거부)</td></tr>
@@ -280,9 +292,9 @@
   <div class="panel">
     <table class="spec">
       <tr><th>테이블</th><th>키 → 값</th><th>생산자</th></tr>
-      <tr><td class="k">_rootScopeByOp</td><td>op.Id → 루트 Scope (심벌테이블)</td><td>Validator</td></tr>
+      <tr><td class="k">_rootScopeByOp</td><td>op.Id → 부모가 없는 연산·함수 본문 루트 Scope</td><td>Validator</td></tr>
       <tr><td class="k">_symbolByDeclId</td><td>선언 노드 Id → Symbol</td><td>Validator</td></tr>
-      <tr><td class="k">_programScope</td><td>최상위 스코프 — op들이 심벌</td><td>Validator</td></tr>
+      <tr><td class="k">_programSymbols</td><td>ProgramSymbolGraph — 네임스페이스·호출 가능 선언 소유 관계</td><td>Validator</td></tr>
       <tr><td class="k">_derivedFrom</td><td>복사본 Id → 원본 Id (계보)</td><td>복제 패스 (ReId)</td></tr>
       <tr><td class="k">_qubitEventsByOp</td><td>op.Id → 큐빗이벤트 스트림 (시간·역할·플래그)</td><td>EffectAnalysis</td></tr>
       <tr><td class="k">_qubitGraphByOp</td><td>op.Id → 큐빗그래프 (값 버전 노드 + "만들어짐" 부모 엣지) — 이벤트와 같은 손·같은 순간에 기록, 상시 일치성 스윕이 어긋남을 QINTERNAL로 차단</td><td>EffectAnalysis</td></tr>
@@ -299,14 +311,54 @@
   </div>
 
   <!-- ============ 5 ============ -->
-  <h2 id="s5"><span class="n">5</span>심벌테이블 & 이름의 두 도메인</h2>
+  <h2 id="s5"><span class="n">5</span>프로그램 심벌 그래프, 렉시컬 스코프 & 이름의 두 도메인</h2>
   <p>
-    <strong>스코프 하나 = 심벌테이블 하나</strong>(<code>이름 → Symbol</code> 맵 + 부모 링크)이며, 이것들이 부모–자식으로 엮여
-    스코프 트리를 이룹니다.<br>
-    <strong>연산(op)도 심벌</strong>입니다.<br>
-    연산은 프로그램 최상위 스코프에 들어가며, 파라미터·레지스터·변수와 <strong>같은 단일 삽입 문</strong>(<code>Scope.TryAdd</code>)으로 등록됩니다.
+    프로그램 전체의 선언 소유 관계와 연산·함수 본문의 지역 이름은 <strong>서로 다른 구조</strong>에 저장됩니다.<br>
+    먼저 <code>ProgramSymbolGraph</code>는 모든 의미 심벌을 안정된 ID로 보관하며,
+    그중 전역 루트·네임스페이스·연산·함수·내장 호출 가능 선언(callable)을 수식 이름으로 조회할 수 있게 인덱싱합니다.<br>
+    이때 각 <code>Symbol.OwnerSymbolId</code>가 하나의 원본 소유 관계를 나타냅니다.<br>
+    반면에 <code>Scope</code>는 연산·함수 본문의 파라미터·레지스터·변수·상수·루프 변수를
+    <code>이름 → SymbolId</code> 지역 바인딩으로만 묶습니다.<br>
+    따라서 네임스페이스 소유 관계와 블록 지역 가시성이 하나의 부모 링크에 섞이지 않습니다.
   </p>
-  <p><code>SymbolKind</code> = Parameter · Register · MeasureBit · Var · Const · LoopVar · <strong>Operation</strong>.</p>
+
+  <div class="panel">
+    <table class="spec">
+      <tr><th>구조</th><th>담는 값</th><th>권위 있는 연결</th><th>주요 조회</th></tr>
+      <tr><td class="k">ProgramSymbolGraph</td><td>모든 Symbol ID; Namespace · Operation · BuiltinGate · BuiltinFunction은 수식 멤버로 인덱싱</td><td><code>Symbol.OwnerSymbolId</code></td><td>네임스페이스 경로, 호출 가능 선언, 완전수식명</td></tr>
+      <tr><td class="k">Scope</td><td>Parameter · Register · MeasureBit · Var · Const · LoopVar의 지역 바인딩</td><td><code>Scope.ParentScopeId</code></td><td>연산·함수 본문과 중첩 블록의 가장 가까운 지역 선언</td></tr>
+    </table>
+  </div>
+
+  <p>
+    예를 들어 <code>namespace A.B</code>는 점이 포함된 문자열 하나가 아니라
+    <code>global → A → B</code> 심벌 체인으로 등록됩니다.<br>
+    이때 <code>A</code>는 합성된 중간 심벌이어도 유효한 네임스페이스이므로 <code>open A;</code> 자체는 허용됩니다.<br>
+    다만 <code>open</code>은 지정한 네임스페이스가 직접 소유한 호출 가능 선언만 가져오므로,
+    <code>open A;</code>가 <code>A.B</code>의 멤버를 노출하지는 않습니다.<br>
+    <code>A.B</code> 안에서 네임스페이스를 붙이지 않은 호출(bare call)은 먼저 <code>A.B</code>,
+    다음으로 <code>A</code>, 마지막으로 전역 순서로 탐색합니다.<br>
+    반면에 <code>A.B.f()</code>처럼 수식된 호출은 언제나 전역 루트에서 시작하여 <code>A</code>, <code>B</code>, <code>f</code>를 순서대로 따라갑니다.
+  </p>
+
+  <p>
+    <code>open</code>은 소유 관계가 아니라 정확히 지정한 네임스페이스에 붙는 별도 후보 목록입니다.<br>
+    따라서 하위 네임스페이스를 재귀적으로 열지 않고, 대상 네임스페이스가 다시 연 이름도 재수출하지 않습니다.<br>
+    또한 네임스페이스와 호출 가능 선언은 역할이 다르므로 같은 소유자 아래에서 같은 이름으로 공존할 수 있습니다.<br>
+    중간 경로에서는 Namespace 역할을, 호출의 마지막 이름에서는 Operation 역할을 선택하므로
+    <code>A.B()</code>와 <code>A.B.f()</code>를 각각 다른 선언에 연결할 수 있습니다.
+  </p>
+
+  <p>
+    연산·함수 본문의 루트 <code>Scope</code>는 <code>ParentScopeId = null</code>이며,
+    네임스페이스나 전역 심벌을 부모 스코프로 사용하지 않습니다.<br>
+    중첩 블록만 <code>ParentScopeId</code>로 바깥 블록에 연결되고,
+    루트의 <code>EnclosingSymbolId</code>가 해당 연산·함수 심벌과 렉시컬 트리를 조인합니다.<br>
+    이 분리 덕분에 Resolver는 프로그램 선언 그래프만 따라 호출 대상을 결정하고,
+    Validator는 렉시컬 스코프만 따라 지역 값의 가시성과 중복 선언을 검사합니다.
+  </p>
+
+  <p><code>SymbolKind</code> = Namespace · Parameter · Register · MeasureBit · Var · Const · LoopVar · <strong>Operation</strong> · BuiltinGate · BuiltinFunction.</p>
 
   <div class="grid2">
     <div class="card">
@@ -326,7 +378,8 @@
     같은 선언에 대해 두 이름은 <strong>각자 한 곳</strong>에 저장되고 노드 Id로 조인됩니다.<br>
     그래서
     <code>var x = Foo</code>처럼 연산을 값으로 쓰면 정확히 <strong>QSEM028</strong>로 거부됩니다.<br>
-    연산이 스코프에 심벌로 있으므로 "Foo는 연산이라 값이 아니다"라고 정확히 진단할 수 있습니다.
+    연산 선언이 <code>ProgramSymbolGraph</code>의 심벌로 연결되어 있으므로
+    "Foo는 연산이라 값이 아니다"라고 정확히 진단할 수 있습니다.
   </p>
 
   <!-- ============ 6 ============ -->
@@ -500,7 +553,7 @@
   </div>
 
   <footer>
-    Qora 컴파일러 데이터시트 · v0.21 기준 · 개념 배경은 <a href="adjoint-pipeline.html">역합성 파이프라인</a>과
+    Qora 컴파일러 데이터시트 · v0.28 기준 · 개념 배경은 <a href="adjoint-pipeline.html">역합성 파이프라인</a>과
     <a href="hadamard.html">H 게이트 문서</a> 참조
   </footer>
 

@@ -63,7 +63,11 @@ public static class OpenQasmLowering
             QReturn r => r with { Value = LowerValue(r.Value, scope) },
             QIf i => i with { Cond = i.Cond with { Tree = Cast(i.Cond.Tree, scope) } },
             QWhile w => w with { Cond = w.Cond with { Tree = Cast(w.Cond.Tree, scope) } },
-            QRepeat r => r with { Until = r.Until with { Tree = Cast(r.Until.Tree, scope) } },
+            // `until` runs after the body and resolves in the body's scope, unlike a while-condition.
+            QRepeat r => r with
+            {
+                Until = r.Until with { Tree = Cast(r.Until.Tree, Child(r.Body, scope, scopeOf)) },
+            },
             QFor f => f with { From = Cast(f.From, scope)!, To = Cast(f.To, scope)!, Step = Cast(f.Step, scope) },
             QGate g => g with { Args = g.Args.Select(a => LowerArg(a, scope)).ToList() },
             _ => s,
@@ -94,8 +98,9 @@ public static class OpenQasmLowering
     private static QExpr LowerValue(QExpr value, Scope scope) => value switch
     {
         QText t => t with { Tree = Cast(t.Tree, scope) },
+        QMeasure m => m with { Target = Cast(m.Target, scope)! },
         QArrayLiteral l => l with { Elements = l.Elements.Select(e => LowerValue(e, scope)).ToList() },
-        _ => value,   // QMeasure (a target, not a computed value) and QArrayNew hold no castable expression
+        _ => value,   // QArrayNew holds no castable expression
     };
 
     private static QArg LowerArg(QArg arg, Scope scope) => arg switch

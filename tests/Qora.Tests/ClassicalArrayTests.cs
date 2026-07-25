@@ -1,3 +1,5 @@
+using Qora.Ir;
+
 namespace Qora.Tests;
 
 /// <summary>
@@ -505,6 +507,178 @@ public class ClassicalArrayTests
         Assert.True(r.Success, Explain(r));
         Assert.Contains("def Read__sz2(bit[2] values, qubit q)", r.Qasm);
         Assert.Contains("def Read__sz3(bit[3] values, qubit q)", r.Qasm);
+    }
+
+    /// <summary>Functions are called as <see cref="QCallNode"/> values inside expression trees rather than
+    /// as <see cref="QGate"/> statements. The monomorphizer must therefore find calls nested under both a
+    /// declaration initializer and another function call. Equal widths reuse one specialization, while a
+    /// distinct width creates a second one.</summary>
+    [Fact]
+    public void BitArrayFunctionCallsInNestedInitializersSpecializePerLengthAndReuse()
+    {
+        var r = Compiler.Compile("""
+            function CountBits(flags: bit[]): int { return AsInt(flags); }
+            function Increment(value: int): int { return value + 1; }
+            operation Main() {
+                use q = Qubit[1];
+                var first: bit[] = new bit[2];
+                var second: bit[] = new bit[3];
+                var sameWidth: bit[] = new bit[2];
+                var a: int = CountBits(first);
+                var b: int = CountBits(second);
+                var c: int = Increment(CountBits(sameWidth)) + CountBits(first);
+            }
+            """);
+
+        Assert.True(r.Success, Explain(r));
+        var specs = r.AnalyzedIr!.Operations.Where(o => o.DisplayName == "CountBits").ToList();
+        Assert.Equal(2, specs.Count);
+        Assert.Equal(new[] { 2, 3 },
+            specs.Select(o => o.Params.Single().RegisterSize!.Value).Order().ToArray());
+        Assert.All(specs, specialization =>
+        {
+            Assert.True(specialization.IsFunction);
+            Assert.Equal(QType.Int, specialization.ReturnType);
+        });
+        Assert.Equal(1, r.Qasm.Split("def CountBits__sz2(").Length - 1);
+        Assert.Equal(1, r.Qasm.Split("def CountBits__sz3(").Length - 1);
+        Assert.Contains("int a = CountBits__sz2(first);", r.Qasm);
+        Assert.Contains("int b = CountBits__sz3(second);", r.Qasm);
+        Assert.Contains("Increment(CountBits__sz2(sameWidth)) + CountBits__sz2(first)", r.Qasm);
+    }
+
+    [Fact]
+    public void BitArrayFunctionCallOnAnAssignmentRhsIsSpecialized()
+    {
+        var r = Compiler.Compile("""
+            function CountBits(flags: bit[]): int { return AsInt(flags); }
+            operation Main() {
+                use q = Qubit[1];
+                var flags: bit[] = new bit[2];
+                var count: int = 0;
+                count = CountBits(flags);
+            }
+            """);
+
+        Assert.True(r.Success, Explain(r));
+        Assert.Contains("def CountBits__sz2(bit[2] flags) -> int", r.Qasm);
+        Assert.Contains("count = CountBits__sz2(flags);", r.Qasm);
+    }
+
+    /// <summary>A function specialization can itself expose another expression-position call. Rewriting
+    /// continues through the specialized body, so the inner function receives the outer parameter's now
+    /// concrete width before the unsized originals are removed.</summary>
+    [Fact]
+    public void BitArrayFunctionCallInAReturnExpressionIsSpecializedTransitively()
+    {
+        var r = Compiler.Compile("""
+            function CountBits(flags: bit[]): int { return AsInt(flags); }
+            function ForwardCount(flags: bit[]): int { return CountBits(flags); }
+            operation Main() {
+                use q = Qubit[1];
+                var flags: bit[] = new bit[3];
+                var count: int = ForwardCount(flags);
+            }
+            """);
+
+        Assert.True(r.Success, Explain(r));
+        Assert.Contains("def ForwardCount__sz3(bit[3] flags) -> int", r.Qasm);
+        Assert.Contains("def CountBits__sz3(bit[3] flags) -> int", r.Qasm);
+        Assert.Contains("CountBits__sz3(flags)", r.Qasm);
+        Assert.Contains("int count = ForwardCount__sz3(flags);", r.Qasm);
+    }
+
+    [Fact]
+    public void BitArrayFunctionCallsInAConditionAndGateArgumentAreSpecialized()
+    {
+        var r = Compiler.Compile("""
+            function CountBits(flags: bit[]): int { return AsInt(flags); }
+            operation Main() {
+                use q = Qubit[1];
+                var flags: bit[] = new bit[2];
+                if (CountBits(flags) == 0) { Rx(CountBits(flags), q[0]); }
+            }
+            """);
+
+        Assert.True(r.Success, Explain(r));
+        Assert.Contains("if (CountBits__sz2(flags) == 0)", r.Qasm);
+        Assert.Contains("rx(CountBits__sz2(flags)) q[0];", r.Qasm);
+        Assert.Equal(1, r.Qasm.Split("def CountBits__sz2(").Length - 1);
+    }
+
+    [Fact]
+    public void RepeatUntilSpecializesWithABitArrayDeclaredInTheBodyScope()
+    {
+        var r = Compiler.Compile("""
+            function CountBits(flags: bit[]): int { return AsInt(flags); }
+            operation Main() {
+                use q = Qubit[1];
+                var flags: bit[] = new bit[3];
+                repeat {
+                    var flags: bit[] = new bit[2];
+                    flags[0] = 1;
+                } until (CountBits(flags) == 2);
+                var outerCount: int = CountBits(flags);
+            }
+            """);
+
+        Assert.True(r.Success, Explain(r));
+        Assert.Contains("def CountBits__sz2(bit[2] flags) -> int", r.Qasm);
+        Assert.Contains("def CountBits__sz3(bit[3] flags) -> int", r.Qasm);
+        Assert.Contains("bit[2] flags = \"00\";", r.Qasm);
+        Assert.Contains("bit[3] flags_ = \"000\";", r.Qasm);
+        Assert.Contains("CountBits__sz2(flags) == 2", r.Qasm);
+        Assert.DoesNotContain("CountBits__sz2(flags_)", r.Qasm);
+        Assert.Contains("int outerCount = CountBits__sz3(flags_);", r.Qasm);
+    }
+
+    [Fact]
+    public void RepeatUntilFunctionCallUsesTheBodyLocalAfterScalarShadowing()
+    {
+        var r = Compiler.Compile("""
+            function Echo(value: int): int { return value; }
+            operation Main() {
+                use q = Qubit[1];
+                var value: int = 0;
+                repeat {
+                    var value: int = 1;
+                } until (Echo(value) == 1);
+            }
+            """);
+
+        Assert.True(r.Success, Explain(r));
+        Assert.Contains("int value = 0;", r.Qasm);
+        Assert.Contains("int value_ = 1;", r.Qasm);
+        Assert.Contains("Echo(value_) == 1", r.Qasm);
+        Assert.DoesNotContain("Echo(value) == 1", r.Qasm);
+    }
+
+    [Fact]
+    public void HoistedArrayRenameDoesNotCaptureRepeatOrForScalarShadows()
+    {
+        var r = Compiler.Compile("""
+            function Echo(value: int): int { return value; }
+            operation Worker() {
+                var value: int[] = [7];
+                repeat {
+                    var value: int = 1;
+                } until (Echo(value) == 1);
+                for value in 0..0 {
+                    var seen: int = Echo(value);
+                }
+            }
+            operation Main() {
+                use q = Qubit[1];
+                Worker();
+            }
+            """);
+
+        Assert.True(r.Success, Explain(r));
+        Assert.Contains("int value_ = 1;", r.Qasm);
+        Assert.Contains("Echo(value_) == 1", r.Qasm);
+        Assert.Contains("for int value__ in", r.Qasm);
+        Assert.Contains("Echo(value__)", r.Qasm);
+        Assert.DoesNotContain("Echo(value) == 1", r.Qasm);
     }
 
     /// <summary>A bit[] parameter is READ-ONLY: its QASM form is a by-value register, so a write would

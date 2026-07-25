@@ -124,9 +124,9 @@ public static class QoraParser
         var tree = hasParse ? result.ToParseTree : null;
         var ast = hasParse ? result.AstRoot : null;
 
-        // Pipeline: AST → Lower → IR → validation pass → (only when clean) emit. Semantic errors gate
-        // emission: an invalid program reports every violation and produces no QASM, so the emitter only
-        // ever runs on validated IR.
+        // Pipeline: AST → Lower → IR → common validation + OpenQASM policy → (only when clean) emit.
+        // Errors gate emission: an invalid program reports every language and target-policy violation and
+        // produces no QASM, so the emitter only ever runs on an accepted IR.
         var ir = ast != null ? QoraLowering.Lower(ast) : null;
         // Import expansion first (the merged program is what everything downstream sees), then
         // resolution (names become fully-qualified). Each step's errors preempt the next: a partially
@@ -175,7 +175,7 @@ public static class QoraParser
                 }
                 else
                 {
-                    var baseErrors = QoraValidator.Validate(res, out var baseModel);
+                    var baseErrors = ValidateForOpenQasm(res, out var baseModel);
                     if (baseErrors.Count > 0)
                     {
                         semanticErrors = baseErrors;
@@ -196,7 +196,7 @@ public static class QoraParser
                         }
                         else
                         {
-                            semanticErrors = QoraValidator.Validate(monoProgram, out semantics);
+                            semanticErrors = ValidateForOpenQasm(monoProgram, out semantics);
                         }
                     }
                 }
@@ -253,6 +253,24 @@ public static class QoraParser
                 ? result.AllErrors.Select(ToQoraError).ToList()
                 : semanticErrors,
         };
+    }
+
+    /// <summary>
+    /// Run the shared validator, then let the selected OpenQASM target dispose of the bounds facts it
+    /// owns. Keeping these as two calls preserves the architectural boundary: direct validator consumers
+    /// see <see cref="SemanticModel.UnprovenIndexes"/> without QSEM030, while this QASM-producing facade
+    /// reports QSEM030 for source-distinct unresolved accesses. The target pass also runs when common errors
+    /// exist so the compiler's collect-all behavior does not depend on which rule happened to fail first.
+    /// </summary>
+    private static List<QoraError> ValidateForOpenQasm(QProgram program, out SemanticModel semantics)
+    {
+        var commonErrors = QoraValidator.Validate(program, out var model);
+        semantics = model
+            ?? throw new InvalidOperationException("QINTERNAL: validation of a non-null program produced no SemanticModel");
+        return commonErrors
+            .Concat(OpenQasmBoundsValidation.Run(semantics))
+            .Distinct()
+            .ToList();
     }
 
     /// <summary>

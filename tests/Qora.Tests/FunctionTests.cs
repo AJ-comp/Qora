@@ -41,6 +41,45 @@ public class FunctionTests
     }
 
     [Theory]
+    // These scalar conversions are intentional: the literal 1 is a valid bit value, while the built-in
+    // real constant pi is a valid angle value. Return checking must preserve both established cases.
+    [InlineData("function flag(): bit { return 1; }\noperation Main(){ use q=Qubit[1]; var result: bit = flag(); }")]
+    [InlineData("function phase(): angle { return pi; }\noperation Main(){ use q=Qubit[1]; var result: angle = phase(); }")]
+    public void AcceptsCompatibleFunctionReturnValues(string source) => Compiler.Accepts(source);
+
+    [Theory]
+    [InlineData("function bad(): int { var values: int[] = [1, 2]; return values; }\noperation Main(){ use q=Qubit[1]; }")]
+    [InlineData("function bad(): int { return 0.5; }\noperation Main(){ use q=Qubit[1]; }")]
+    [InlineData("function bad(): bit { return 2; }\noperation Main(){ use q=Qubit[1]; }")]
+    [InlineData("function bad(): angle { return 1; }\noperation Main(){ use q=Qubit[1]; }")]
+    [InlineData("function bad(x: int): int { if (x == 0) { return 1; } else { return 0.5; } }\noperation Main(){ use q=Qubit[1]; }")]
+    public void RejectsAnIncompatibleFunctionReturnValue(string source) =>
+        Compiler.Rejects(source, "QSEM037");
+
+    [Fact]
+    public void RejectsANestedFunctionCallWhoseReturnTypeDoesNotMatch() =>
+        Compiler.Rejects(
+            "function inner(): float { return 0.5; }\n" +
+            "function outer(): int { return inner(); }\n" +
+            "operation Main(){ use q=Qubit[1]; var result: int = outer(); }",
+            "QSEM037");
+
+    [Theory]
+    [InlineData("function half(): float { return 0.5; }\noperation Main(){ use q=Qubit[1]; var result: int = half(); }")]
+    [InlineData("function half(): float { return 0.5; }\noperation Main(){ use q=Qubit[1]; var result: int = 0; result = half(); }")]
+    public void RejectsAFloatFunctionResultStoredInAnInt(string source) =>
+        Compiler.Rejects(source, "QSEM037");
+
+    [Theory]
+    [InlineData("var result: int = values;")]
+    [InlineData("var result = values;")]
+    [InlineData("var result = values + 1;")]
+    public void RejectsAWholeArrayStoredInAScalar(string declaration) =>
+        Compiler.Rejects(
+            $"operation Main(){{ use q=Qubit[1]; var values: int[] = [1, 2]; {declaration} }}",
+            "QSEM037");
+
+    [Theory]
     // PURITY (QSEM033) — a function is classical: no gate, no measurement, no operation call:
     [InlineData("function f(): int { X(q); return 1; }\noperation Main(){ use q=Qubit[1]; }")]                                   // applies a gate
     [InlineData("function f(a: Qubit): int { H(a); return 1; }\noperation Main(){ use q=Qubit[1]; }")]                           // applies a gate (also QSEM034 on the param)
@@ -79,6 +118,20 @@ public class FunctionTests
     [InlineData("function f(a: int): int { return a; }\noperation Main(){ use q=Qubit[1]; var k: int = f(1, 2); }")]
     [InlineData("function f(a: int, b: int): int { return a; }\noperation Main(){ use q=Qubit[1]; var k: int = f(1); }")]
     public void RejectsWrongFunctionArgumentCount(string source) => Compiler.Rejects(source, "QSEM006");
+
+    [Theory]
+    [InlineData("function half(): float { return 0.5; }\noperation Main(){ use q=Qubit[1]; var result: int = half(1); }")]
+    [InlineData("function inner(x: int): float { return 0.5; }\nfunction outer(): int { return inner(); }\noperation Main(){ use q=Qubit[1]; }")]
+    public void InvalidFunctionCallOwnsTheDiagnosticBeforeItsResultType(string source) =>
+        Compiler.RejectsExactly(source, "QSEM006");
+
+    [Fact]
+    public void FunctionResultContractUsesTheInitializerPointOfDeclarationScope() =>
+        Compiler.RejectsExactly(
+            "function one(): int { return 1; }\n" +
+            "operation Main(){ use q=Qubit[1]; var x: float = 0.5; " +
+            "if (1 == 1) { var x: int = x + one(); } }",
+            "QSEM037");
 
     [Fact]
     public void OperationCannotDeclareAReturnType() =>

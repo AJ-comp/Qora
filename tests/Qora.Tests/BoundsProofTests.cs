@@ -599,7 +599,7 @@ public class BoundsProofTests
     {
         var r = Compiler.Compile("operation Main(){ use q=Qubit[2]; var x: bit = M(q[5]); H(q[0]); }");
         Assert.False(r.Success);
-        Assert.Single(r.Errors.Where(e => e.Code == "QSEM016"));
+        Assert.Single(r.Errors, e => e.Code == "QSEM016");
     }
 
     /// <summary>An unproven measure index records ONE UnprovenIndexes entry, not two.</summary>
@@ -626,13 +626,13 @@ public class BoundsProofTests
     {
         var r = Compiler.Compile("operation Main(){ use q=Qubit[3]; while (M(q[9]) == 1) { } }");
         Assert.False(r.Success);
-        Assert.Single(r.Errors.Where(e => e.Code == "QSEM016"));
+        Assert.Single(r.Errors, e => e.Code == "QSEM016");
     }
 
-    /// <summary>...and an UNPROVEN measured index in a while condition records ONE UnprovenIndexes entry, not
-    /// one per lowered copy.</summary>
+    /// <summary>For an UNPROVEN measured index, the model preserves both lowered access sites while the
+    /// OpenQASM policy still collapses their value-equal source diagnostics to one QSEM030.</summary>
     [Fact]
-    public void RecordsASingleUnprovenEntryForAMeasureInAWhileCondition()
+    public void RecordsBothUnprovenMeasureSitesButReportsOneDiagnostic()
     {
         var r = Compiler.Compile("""
             operation Foo(q: Qubit[]) {
@@ -643,7 +643,8 @@ public class BoundsProofTests
             operation Main() { use r = Qubit[3]; Foo(r); }
             """);
         Assert.False(r.Success);
-        Assert.Single(r.Semantics!.UnprovenIndexes);
+        Assert.Equal(2, r.Semantics!.UnprovenIndexes.Count);
+        Assert.Single(r.Errors, error => error.Code == "QSEM030");
     }
 
     // --- a `while` condition guard narrows the loop body (re-established each iteration), applied after the

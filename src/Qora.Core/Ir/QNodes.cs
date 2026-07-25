@@ -114,7 +114,7 @@ public static class QNodes
     // is semantics, not duplication, so those walks keep their explicit cases.
 
     /// <summary>Every expression tree a statement holds DIRECTLY — bounds, condition, values, argument
-    /// trees, index atoms. Nested statement BODIES are not entered (walk those yourself).</summary>
+    /// trees, and full index expressions. Nested statement BODIES are not entered (walk those yourself).</summary>
     public static IEnumerable<QNode> ExpressionSites(QStmt s)
     {
         switch (s)
@@ -156,7 +156,7 @@ public static class QNodes
     }
 
     /// <summary>Every expression tree inside a value (a decl initializer / assign RHS): the expression
-    /// itself, a measure target's index atom, or each element of an array literal — recursively, so no
+    /// itself, a measure target (including its full index expression), or each element of an array literal — recursively, so no
     /// checker can see the literal and miss what its elements hold.</summary>
     public static IEnumerable<QNode> TreesOf(QExpr value)
     {

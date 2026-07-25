@@ -214,17 +214,24 @@ internal static class ExprTree
         return new QNameRef(text);
     }
 
-    private static QNode IndexNode(AstNonTerminal idx)
+    /// <summary>Lower one type-neutral <c>name[expr]</c> access. Every statement context uses this helper,
+    /// so an indexed read, write, gate operand, and measurement target preserve the exact same index tree.</summary>
+    internal static QIndexNode IndexNode(AstNonTerminal idx)
     {
-        var baseName = idx.Items.Count > 0 ? idx.Items[0].ToString() ?? string.Empty : string.Empty;
-        var indexText = idx.Items.Count > 1 ? idx.Items[1].ToString() ?? string.Empty : string.Empty;
-        return new QIndexNode(new QNameRef(baseName), Atom(indexText));
+        var baseName = idx.Items.OfType<AstTerminal>().FirstOrDefault()?.ToString() ?? string.Empty;
+        var indexExpr = idx.Items.OfType<AstNonTerminal>().FirstOrDefault(n => n.Name == "Expr")
+            ?? throw QInternal("got an indexed access with no index expression");
+        var index = Expression(indexExpr)
+            ?? throw QInternal("got an empty index expression");
+        return new QIndexNode(new QNameRef(baseName), index);
     }
 
     private static QNode CallNode(AstNonTerminal call)
     {
-        var name = call.Items.OfType<AstTerminal>().FirstOrDefault()?.ToString() ?? string.Empty;
-        // Grammar: `Ident(expr, …)`. Each argument is an `Expr` nonterminal — parse each to a subtree.
+        // Grammar: `qname(expr, …)`. Its identifiers and meaningful dots are the Call node's direct
+        // terminals; arguments are Expr children. Joining those terminals keeps `Lib.Sub.Foo` intact.
+        var name = string.Concat(call.Items.OfType<AstTerminal>().Select(t => t.ToString() ?? string.Empty));
+        // Each argument is an `Expr` nonterminal — parse each to a subtree.
         // `M(q[0])`'s single argument is an `Expr` that is a lone index access, so it becomes one QIndexNode
         // (matching the measurement pattern the desugarer/validator expect: `Args: [QIndexNode …]`).
         var args = call.Items.OfType<AstNonTerminal>()
@@ -236,8 +243,8 @@ internal static class ExprTree
         return new QCallNode(name, args);
     }
 
-    /// <summary>A single index/atom token (the grammar limits an index to a number or bare identifier).
-    /// Also the tree form of a bare gate argument (a whole register, an angle name) at lowering.
+    /// <summary>The tree form of a bare gate argument (a whole register or an angle name).
+    /// This also supports the compatibility constructor of <see cref="QQubitArg"/>.
     /// A digit run too large for long stays a verbatim <see cref="QLit"/> (same rule as ParsePrimary) —
     /// it is a NUMBER a fortiori past any array length, never a name.</summary>
     internal static QNode Atom(string text) =>

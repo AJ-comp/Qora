@@ -6,7 +6,7 @@ using Janglim.FrontEnd.RegularGrammar;
 namespace Qora;
 
 /// <summary>
-/// Qora v0.26 — a Q#/C#-flavored quantum language on the Janglim engine.
+/// Qora v0.28 — a Q#/C#-flavored quantum language on the Janglim engine.
 ///
 ///   operation Bell(q: Qubit[]) {        // a subroutine, with trailing-type parameters (name: T)
 ///       H(q[0]);
@@ -20,7 +20,7 @@ namespace Qora;
 ///       if (r == 1) { Adjoint S(q[1]); } else { S(q[1]); }   // functor + if/else
 ///   }
 ///
-/// Calls and gate applications share one surface form (<c>Ident(args…)</c>); the emitter tells them
+/// Calls and gate applications share one surface form (<c>qualified.name(args…)</c>); the emitter tells them
 /// apart by name (a defined operation -> a call, otherwise a gate). The operation named <c>Main</c>
 /// is the entry (its body becomes the QASM top-level); every other operation becomes a <c>def</c>.
 ///
@@ -109,6 +109,20 @@ namespace Qora;
 /// <c>break</c>s out of it, with a done flag only for the statements AFTER the loop, which no <c>break</c>
 /// can reach). <c>QSEM035</c> keeps just the two real errors: a <c>return</c> in an
 /// <c>operation</c> (void), and a function with a path that produces no value.
+/// v0.28 checks function result contracts as <c>QSEM037</c>: every returned expression must be compatible
+/// with the declared return type, and an explicitly typed scalar cannot consume an incompatible function
+/// result or a whole array. An untyped declaration follows the same resolved function signature, so
+/// <c>var x = f()</c> carries <c>f</c>'s declared return type instead of defaulting to <c>int</c>.
+/// A function may take classical arrays. In particular, a <c>bit[]</c> parameter is specialized per concrete
+/// argument width, and every expression-position <see cref="Ir.QCallNode"/> is rewritten through the same
+/// monomorphization cache used by statement calls.
+/// Literals, names, operators, array elements, and calls all use that one expression-type reader, so an
+/// untyped declaration also preserves facts such as <c>true</c> being <c>bit</c> and an angle-valued name
+/// remaining <c>angle</c> through OpenQASM emission.
+/// An index is now the same complete expression tree used everywhere else: <c>xs[idx()]</c>,
+/// <c>q[i + 1]</c>, and nested indexed reads all parse. The shared semantic path requires one scalar
+/// <c>int</c>, validates calls inside the index, and records an unresolved in-bounds proof as model data.
+/// The OpenQASM policy pass — not the common bounds walk — turns that final fact into QSEM030.
 /// </summary>
 public class QoraGrammar : Grammar
 {
@@ -234,7 +248,6 @@ public class QoraGrammar : Grammar
     private NonTerminal memberAccess = new NonTerminal("memberAccess");
     private NonTerminal call = new NonTerminal("call");
     private NonTerminal indexAccess = new NonTerminal("indexAccess");
-    private NonTerminal index = new NonTerminal("index");
 
     // --- semantic tags ---
     public static MeaningUnit ProgramM { get; } = new MeaningUnit("Program");
@@ -371,15 +384,17 @@ public class QoraGrammar : Grammar
         // general lets it produce a precise diagnostic for `q.Length` instead of a low-level parse error.
         memberAccess.AddItem(Ident + Dot + Ident);
         // A call in expression position: the measurement `M(q[0])` (one indexed argument) OR a function call
-        // `Foo(a, b)` (classical value arguments). One production covers both — the lowering/validator tell
-        // them apart by name. `M(q[0])`'s argument is an `expr` that is a lone index access.
-        call.AddItem(Ident + LParen + RParen, CallM);                                       // Foo()
-        call.AddItem(Ident + LParen + expr + (Comma + expr).ZeroOrMore() + RParen, CallM);   // Foo(a, b) / M(q[0])
+        // `Foo(a, b)` / `Lib.Foo(a, b)` (classical value arguments). One production covers both — the
+        // lowering/validator tell them apart by name. The shared qname production preserves any namespace
+        // path, while `M(q[0])`'s argument is an `expr` that is a lone index access.
+        call.AddItem(qname + LParen + RParen, CallM);                                       // Foo() / Lib.Foo()
+        call.AddItem(qname + LParen + expr + (Comma + expr).ZeroOrMore() + RParen, CallM);   // Foo(a, b) / M(q[0])
 
-        // Type-neutral indexed access. Semantic validation later decides whether the base symbol is a
-        // qubit register or a classical array.
-        indexAccess.AddItem(Ident + LBracket + index + RBracket, IndexAccessM);
-        index.AddItem(Num | Ident);
+        // Type-neutral indexed access. Its index is the same full expression accepted elsewhere, so a
+        // call or arithmetic expression (`xs[idx()]`, `q[i + 1]`) reaches the common expression resolver
+        // and bounds analysis. Semantic validation later decides whether the base is a qubit register or
+        // a classical array, and whether the resulting integer is provably in range.
+        indexAccess.AddItem(Ident + LBracket + expr + RBracket, IndexAccessM);
 
         this.Optimization();
     }

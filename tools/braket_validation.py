@@ -198,6 +198,55 @@ operation Main() {
     f[2] = M(q[2]);
 }""", {"101"})   # f = "100" = g; 100 would mean the registers compared unequal
 
+load_and_run("B13 inferred function return types", """
+function phase(): angle { return pi; }
+function real(): float { return pi; }
+function flag(): bit { return 1; }
+function two(): int { return 2; }
+operation Main() {
+    use q = Qubit[4];
+    var a = phase();
+    var f = real();
+    var b = flag();
+    var n = two();
+    Rx(a, q[0]);
+    Rx(f, q[1]);
+    if (b == 1) { X(q[2]); }
+    if (n == 2) { X(q[3]); }
+    var m0: bit = M(q[0]);
+    var m1: bit = M(q[1]);
+    var m2: bit = M(q[2]);
+    var m3: bit = M(q[3]);
+}""", {"1111"})
+
+load_and_run("B14 bit[] function expression-call specialization", """
+function CountBits(flags: bit[]): int {
+    return AsInt(flags);
+}
+operation Main() {
+    use q = Qubit[1];
+    var flags: bit[] = new bit[2];
+    flags[0] = 1;
+    flags[1] = 0;
+    var n: int = CountBits(flags);
+    if (n == 2) { X(q[0]); }
+    var m: bit = M(q[0]);
+}""", {"1"})
+
+load_and_run("B15 namespace function resolution", """
+namespace L {
+    function two(): int { return 2; }
+    operation Mark(q: Qubit) {
+        if (two() == 2) { X(q); }
+    }
+}
+operation Main() {
+    use q = Qubit[1];
+    var n: int = L.two();
+    if (n == 2) { L.Mark(q[0]); }
+    var m: bit = M(q[0]);
+}""", {"1"})
+
 print()
 print(f"{PASS} passed, {FAIL} failed")
 
