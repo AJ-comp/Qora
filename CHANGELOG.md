@@ -11,6 +11,38 @@ emitted as **OpenQASM 3.0**.
 > **Note:** Qora was renamed from **Ket** on 2026-07-01 (a "Ket" extension already existed). Versions
 > 0.1–0.7 below were authored under the old name.
 
+## 0.29 — 2026-07-26
+
+### Changed
+- **Callable parameters are read-only by default, with explicit caller-visible `inout` for supported arrays
+  (breaking).**
+  Operations declare `inout values: int[]` and callers acknowledge the mutable borrow with
+  `Increment(inout values)`. The contract is initially limited to `int[]`, `float[]`, and `angle[]`;
+  functions, scalars, `bit[]`, and qubit parameters cannot opt in (QSEM038). Read-only arguments may
+  alias, while any overlap involving an `inout` slot is QSEM014, and a `const` array cannot be passed
+  to `inout` (QSEM024). OpenQASM emission now reflects the source contract with `readonly array[...]`
+  or `mutable array[...]`. Qubit operation parameters retain their existing implicit quantum-state
+  mutation semantics without `inout`.
+
+### Fixed
+- **Function and operation calls now enforce their scalar argument contracts.** Every user-call argument
+  is checked against its declared parameter type and shape through the same `ExpressionTypes.CanAssign`
+  rule used by returns and assignments. Statement and expression calls therefore agree, and invalid calls
+  such as passing `0.5` to `int` or `2` to `bit` report QSEM006 before emission.
+- **Array-bounds proofs now follow semantic identity, not source spelling.** `.Count` facts carry the
+  resolved array's stable `SymbolId`, so a shadowing array with the same name can neither borrow another
+  array's proof nor invalidate it.
+- **Direct `.Count`-relative indexes receive an exact affine bounds verdict.** The compiler classifies
+  `coefficient * Count + offset` over every legal array length: `xs[xs.Count-1]` is accepted,
+  `xs[xs.Count]` and every universally impossible form report QSEM016, and genuinely length-dependent
+  forms remain QSEM030 or defer until a size-specialized `Qubit[]` or `bit[]` has a concrete size. Symbolic
+  folding also preserves intermediate overflow state, so a later algebraic cancellation cannot turn an
+  overflowing expression into a false safety proof.
+- **Nested index diagnostics now preserve root causes without cascades or duplicates.** Indexed access
+  returns `Proven`, `Unproven`, or `Invalid`; an invalid child suppresses only the derivative outer QSEM030,
+  while independent call, base-shape, and index-type errors are still reported. Scalar indexed assignment
+  now has one common QSEM016 owner instead of emitting the same error twice.
+
 ## 0.28 — 2026-07-25
 
 ### Fixed

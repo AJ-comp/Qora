@@ -51,6 +51,11 @@ public sealed class Symbol
     public SymbolKind Kind { get; }
     public QType? Type { get; }                 // explicit or initializer-inferred Int / Float / Angle / Bit / Qubit
     public bool IsConst { get; }
+    /// <summary>
+    /// Access mode of a parameter symbol. Non-parameter symbols keep the default
+    /// <see cref="QParameterMode.In"/>; callers must not infer ownership from it for those kinds.
+    /// </summary>
+    public QParameterMode ParameterMode { get; }
     public string? ConstValue { get; }          // a const's initializer text (diagnostics); null for var/measure/register
     /// <summary>The const's value, FOLDED ONCE at its declaration — in the declaring scope, by the one
     /// shared calculator (<see cref="BoundFolder"/>) over the initializer tree — and read as plain data ever
@@ -76,7 +81,8 @@ public sealed class Symbol
     public Symbol(string name, SymbolKind kind, QType? type = null, bool isConst = false, string? constValue = null,
         QSpan? declSpan = null, int? registerSize = null, bool isArray = false,
         int? arrayLength = null, int? declarationNodeId = null,
-        SymbolId? ownerSymbolId = null, SymbolOrigin origin = SymbolOrigin.Source)
+        SymbolId? ownerSymbolId = null, SymbolOrigin origin = SymbolOrigin.Source,
+        QParameterMode parameterMode = QParameterMode.In)
     {
         SourceName = name;
         Kind = kind;
@@ -84,6 +90,7 @@ public sealed class Symbol
         Origin = origin;
         Type = type;
         IsConst = isConst;
+        ParameterMode = parameterMode;
         ConstValue = constValue;
         DeclSpan = declSpan;
         RegisterSize = registerSize;
@@ -143,6 +150,13 @@ public sealed class Scope
         _bindings.TryGetValue(name, out var id) ? _programSymbols.FindSymbol(id) : null;
     public Symbol? Lookup(string name) =>
         LookupLocal(name) ?? (ParentScopeId is { } parentId ? _scopes[parentId].Lookup(name) : null);
+
+    /// <summary>Resolve an already-bound identity in this scope tree's program-graph snapshot. Unlike
+    /// <see cref="Lookup"/>, this never changes meaning when a nested declaration shadows the source name.</summary>
+    internal Symbol GetSymbol(SymbolId id) =>
+        _programSymbols.FindSymbol(id)
+        ?? throw new InvalidOperationException(
+            $"QINTERNAL: semantic symbol {id} does not belong to this scope graph");
 
     internal Scope? ParentScope =>
         ParentScopeId is { } parentId ? _scopes[parentId] : null;
@@ -329,7 +343,8 @@ public static class SymbolTableBuilder
                 // proofs the same precision they have for sized registers; null pre-mono = P4 floors as ever.
                 arrayLength: p.Type != QType.Qubit ? p.RegisterSize : null,
                 declarationNodeId: p.Id,
-                ownerSymbolId: callable.Id)
+                ownerSymbolId: callable.Id,
+                parameterMode: p.Mode)
             {
                 MonoSized = p.NeedsMonoSizing,   // the ONE answer, stamped for the deferral gates
             });
@@ -764,11 +779,14 @@ public static class SymbolTableBuilder
         {
             var type = sym.Type is { } t ? t.ToString().ToLowerInvariant() : "?";
             var kind = sym.Kind.ToString().ToLowerInvariant();
+            var mode = sym is { Kind: SymbolKind.Parameter, ParameterMode: QParameterMode.InOut }
+                ? " inout"
+                : "";
             var val = sym.IsConst && sym.ConstValue is not null ? $" = {sym.ConstValue}" : "";
             var uses = sym.Uses.Count == 0
                 ? "no uses"
                 : $"uses [{string.Join(", ", sym.Uses.Select(u => u.Order))}] last @ {sym.Uses[^1].Order}";
-            sb.AppendLine($"{pad}{sym.SourceName}: {kind} {type}{val}  ({uses})");
+            sb.AppendLine($"{pad}{sym.SourceName}: {kind}{mode} {type}{val}  ({uses})");
         }
         foreach (var child in scope.ChildScopes) PrintScope(child, sb, depth + 1);
     }

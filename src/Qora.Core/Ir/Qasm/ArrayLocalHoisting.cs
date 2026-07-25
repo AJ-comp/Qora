@@ -203,7 +203,13 @@ public static class ArrayLocalHoisting
                 Params = appended.Count == 0
                     ? op.Params
                     : op.Params.Concat(appended.Select(key =>
-                        new QParam(paramName[(op.Name, key)], byOp[key.Op].First(h => h.DeclId == key.DeclId).ElemType, null) { IsArray = true })).ToList(),
+                        new QParam(paramName[(op.Name, key)], byOp[key.Op].First(h => h.DeclId == key.DeclId).ElemType, null)
+                        {
+                            IsArray = true,
+                            // Compiler-generated backing storage is explicitly threaded for writes. This
+                            // parameter does not exist in source, but its backend contract is still mutable.
+                            Mode = QParameterMode.InOut,
+                        })).ToList(),
                 Body = body,
             });
         }
@@ -329,7 +335,10 @@ public static class ArrayLocalHoisting
                 case QGate g when opNames.Contains(g.Name) && extras.TryGetValue(g.Name, out var calleeExtras) && calleeExtras.Count > 0:
                     var args = g.Args.Select(a => RenameArg(a, active, forceApply, fix)).ToList();
                     foreach (var key in calleeExtras)
-                        args.Add(new QTextArg(new QNameRef(ArgNameFor(key, op, isEntry, paramName, storageName))));
+                        args.Add(new QTextArg(new QNameRef(ArgNameFor(key, op, isEntry, paramName, storageName)))
+                        {
+                            Mode = QParameterMode.InOut,
+                        });
                     result.Add(g with { Args = args });
                     break;
 
@@ -448,7 +457,7 @@ public static class ArrayLocalHoisting
         if (fix.Idle(map, on)) return arg;
         return arg switch
         {
-            QQubitArg q => new QQubitArg(N(q.Reg, map), RenameNode(q.Index, map, on, fix)!),
+            QQubitArg q => new QQubitArg(N(q.Reg, map), RenameNode(q.Index, map, on, fix)!) { Mode = q.Mode },
             QTextArg t => t with { Tree = RenameNode(t.Tree, map, on, fix) },
             _ => arg,
         };

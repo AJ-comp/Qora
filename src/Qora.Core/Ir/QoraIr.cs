@@ -3,7 +3,7 @@ namespace Qora.Ir;
 /// <summary>The compiler's version, stamped into emitted QASM for provenance.</summary>
 public static class QoraVersion
 {
-    public const string Value = "0.28";
+    public const string Value = "0.29";
 }
 
 /// <summary>
@@ -128,6 +128,15 @@ public sealed record QOperation(string Name, IReadOnlyList<QParam> Params, IRead
 public enum QType { Qubit, Int, Bit, Float, Angle }
 
 /// <summary>
+/// The caller-visible CLASSICAL access contract of one callable parameter. <see cref="In"/> grants no
+/// caller-visible classical write permission; <see cref="InOut"/> is an exclusive mutable borrow whose
+/// writes are visible to the caller. This is deliberately NOT a <see cref="QType"/>:
+/// <c>inout xs: int[]</c> still has value type <c>int[]</c>, with a separate call-boundary permission.
+/// Qubit state changes through gates follow the language's quantum semantics and never use this mode.
+/// </summary>
+public enum QParameterMode { In, InOut }
+
+/// <summary>
 /// One parameter slot of a CALLABLE — a built-in gate or a user operation — reduced to exactly what a
 /// call-site kind check needs. <see cref="Type"/> <c>== Qubit</c> is a QUBIT slot (shaped by
 /// <see cref="RegisterSize"/> / <see cref="IsQubitArray"/> / <see cref="QubitBroadcast"/>); any other
@@ -143,6 +152,7 @@ public interface IParamSpec
     bool IsArray { get; }        // source shape: T[] rather than one scalar value
     bool IsQubitArray { get; }   // source shape: Qubit[] rather than one Qubit
     bool QubitBroadcast { get; } // qubit slot: accepts ANY qubit shape (built-in gates broadcast; ops are strict)
+    QParameterMode Mode { get; } // ordinary call mode, or an explicitly mutable classical inout borrow
 }
 
 /// <summary>
@@ -156,7 +166,7 @@ public interface ICallableSig
 {
     string CalleeName { get; }                 // name to show in diagnostics
     IReadOnlyList<IParamSpec> Params { get; }
-    bool IsBuiltin { get; }                     // gate vs user op — consulted ONLY for message phrasing, not the check
+    bool IsBuiltin { get; }                     // built-in gates keep gate-specific value rules; user callables use declared scalar types
 }
 
 /// <summary>A def parameter: one qubit, a qubit array, or a classical scalar/array value.
@@ -176,6 +186,12 @@ public sealed record QParam(string Name, QType Type, int? RegisterSize) : IParam
 
     /// <summary>Convenience view used by quantum passes; classical arrays keep this false.</summary>
     public bool IsQubitArray => Type == QType.Qubit && IsArray;
+
+    /// <summary>
+    /// Source-level classical access mode. Omitted syntax is <see cref="QParameterMode.In"/>; only
+    /// <c>inout name: T[]</c> sets <see cref="QParameterMode.InOut"/>. Qubit state semantics are separate.
+    /// </summary>
+    public QParameterMode Mode { get; init; }
 
     /// <summary>
     /// THE single definition of "monomorphization supplies this parameter's length": an unsized
@@ -286,7 +302,15 @@ public sealed record QConjugate(IReadOnlyList<QStmt> Within, IReadOnlyList<QStmt
 
 // ---- arguments ----
 
-public abstract record QArg;
+public abstract record QArg
+{
+    /// <summary>
+    /// The call-site permission marker. A source <c>inout values</c> argument carries
+    /// <see cref="QParameterMode.InOut"/>; an ordinary expression carries <see cref="QParameterMode.In"/>.
+    /// The validator requires an exact match with the callee parameter, and the QASM emitter erases it.
+    /// </summary>
+    public QParameterMode Mode { get; init; }
+}
 
 /// <summary>
 /// A syntactically indexed argument <c>name[Index]</c>. It usually denotes a qubit; after arrays were
@@ -458,6 +482,7 @@ public sealed record GateParam(string Name, QType Type, bool QubitBroadcast = fa
     public int? RegisterSize => null;
     public bool IsArray => false;
     public bool IsQubitArray => false;
+    public QParameterMode Mode => QParameterMode.In;
 }
 
 /// <summary>A built-in gate's signature (see <see cref="QoraGates.SigOf"/>).</summary>

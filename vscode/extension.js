@@ -47,6 +47,7 @@ const DOCS = {
   'new': '**new T[N]** — 고전 배열 만들기\n\n`var values: int[] = new int[3];`처럼 쓰면 0으로 초기화된 원소 N개를 만들어요.',
   'const': '**const** — 불변 변수\n\n`const n: int = 3;` / `const k = 5`. 한 번 정하면 못 바꿔요.',
   'var': '**var** — 가변 변수\n\n`var i = 0;` 후 `i = i + 1;`로 바꿀 수 있어요.',
+  'inout': '**inout** — 호출자가 가진 배열을 변경하는 매개변수\n\n연산 선언과 호출 양쪽에 표시해요: `operation Clear(inout values: int[])` / `Clear(inout values);`. 현재 `int[]`, `float[]`, `angle[]`에만 사용할 수 있어요.',
   'bit': '**bit** — 고전 비트 (0/1)\n\n측정 결과를 담아요. `var r: bit = M(q[0]);`',
   'int': '**int** — 정수\n\n`var i: int = 0;` / `const n: int = 3;`',
   'float': '**float** — 실수\n\n`var values: float[] = [0.25, 0.5];`처럼 스칼라나 배열 원소에 써요.',

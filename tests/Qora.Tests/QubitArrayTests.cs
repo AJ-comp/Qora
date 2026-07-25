@@ -92,14 +92,14 @@ public class QubitArrayTests
     public void SpecializationLeavesClassicalArrayCountForSizeofLowering()
     {
         var result = Compile("""
-            operation Mix(q: Qubit[], values: int[]) {
+            operation Mix(q: Qubit[], inout values: int[]) {
                 for i in 0..q.Count-1 { X(q[i]); }
                 for j in 0..values.Count-1 { values[j] = values[j] + 1; }
             }
             operation Main() {
                 use q = Qubit[2];
                 var values: int[] = [1, 2, 3];
-                Mix(q, values);
+                Mix(q, inout values);
             }
             """);
 

@@ -120,6 +120,35 @@ public class FunctionTests
     public void RejectsWrongFunctionArgumentCount(string source) => Compiler.Rejects(source, "QSEM006");
 
     [Theory]
+    [InlineData("function take(x: int): int { return x; }\noperation Main(){ var result: int = take(0.5); }")]
+    [InlineData("function take(x: bit): bit { return x; }\noperation Main(){ var result: bit = take(2); }")]
+    [InlineData("function giveFloat(): float { return 0.5; }\nfunction take(x: int): int { return x; }\noperation Main(){ var result: int = take(giveFloat()); }")]
+    [InlineData("function take(x: int): int { return x; }\noperation Main(){ var values: float[] = [0.5]; var result: int = take(values[0]); }")]
+    [InlineData("function take(x: int): int { return x; }\noperation Main(){ var values: int[] = [1]; var result: int = take(values + 1); }")]
+    public void RejectsAnIncompatibleScalarArgumentToAFunction(string source) =>
+        Compiler.RejectsExactly(source, "QSEM006");
+
+    [Fact]
+    public void WholeBitRegisterDiagnosticOwnsACompoundFunctionArgument() =>
+        Compiler.RejectsExactly(
+            "function take(x: int): int { return x; }\n" +
+            "operation Main(){ var flags: bit[] = new bit[2]; var result: int = take(flags + 1); }",
+            "QSEM036");
+
+    [Fact]
+    public void AcceptsCompatibleScalarArgumentsToAFunctionInBothCallForms() =>
+        Compiler.Accepts("""
+            function accept(i: int, f: float, a: angle, b0: bit, b1: bit): int {
+                return i;
+            }
+            operation Main() {
+                var flag: bit = 1;
+                var result: int = accept(flag, 2, 0.5, 0, 1);
+                accept(flag, 2, 0.5, 0, 1);
+            }
+            """);
+
+    [Theory]
     [InlineData("function half(): float { return 0.5; }\noperation Main(){ use q=Qubit[1]; var result: int = half(1); }")]
     [InlineData("function inner(x: int): float { return 0.5; }\nfunction outer(): int { return inner(); }\noperation Main(){ use q=Qubit[1]; }")]
     public void InvalidFunctionCallOwnsTheDiagnosticBeforeItsResultType(string source) =>
@@ -164,12 +193,15 @@ public class FunctionTests
         // a qubit in a classical slot has its own, more specific code — a qubit has no numeric value at all
         Compiler.Rejects("function twice(p: int): int { return p + p; }\noperation Main(){ use q=Qubit[2]; var n: int = twice(q[0]); }", "QSEM026");
 
-    [Fact]
-    public void AFunctionCallInAnExpressionGetsTheSameDiagnosticAsTheStatementForm()
+    [Theory]
+    [InlineData("var f: bit[] = new bit[2];", "f")]
+    [InlineData("", "0.5")]
+    [InlineData("var values: float[] = [0.5];", "values[0]")]
+    public void AFunctionCallInAnExpressionGetsTheSameDiagnosticAsTheStatementForm(string setup, string argument)
     {
-        const string prefix = "function twice(p: int): int { return p + p; }\noperation Main(){ use q=Qubit[1]; var f: bit[] = new bit[2]; ";
-        var asValue = Compiler.Compile(prefix + "var n: int = twice(f); }");
-        var asStatement = Compiler.Compile(prefix + "twice(f); }");
+        var prefix = $"function twice(p: int): int {{ return p + p; }}\noperation Main(){{ use q=Qubit[1]; {setup} ";
+        var asValue = Compiler.Compile(prefix + $"var n: int = twice({argument}); }}");
+        var asStatement = Compiler.Compile(prefix + $"twice({argument}); }}");
         Assert.False(asValue.Success);
         Assert.False(asStatement.Success);
         Assert.Equal(asStatement.Errors.Single(e => e.Code == "QSEM006").Message,

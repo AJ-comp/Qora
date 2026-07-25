@@ -101,14 +101,18 @@ public static class IrPrinter
         return sb.ToString().TrimEnd();
     }
 
-    private static string PrintParam(QParam p) => p.Type switch
+    private static string PrintParam(QParam p)
     {
-        QType.Qubit when p.RegisterSize is int n => $"Qubit[{n}] {p.Name}",
-        QType.Qubit when p.IsQubitArray => $"Qubit[] {p.Name}",
-        QType.Qubit => $"Qubit {p.Name}",
-        _ when p.IsArray => $"{p.Type.ToString().ToLowerInvariant()}[] {p.Name}",
-        _ => $"{p.Type} {p.Name}",
-    };
+        var value = p.Type switch
+        {
+            QType.Qubit when p.RegisterSize is int n => $"Qubit[{n}] {p.Name}",
+            QType.Qubit when p.IsQubitArray => $"Qubit[] {p.Name}",
+            QType.Qubit => $"Qubit {p.Name}",
+            _ when p.IsArray => $"{p.Type.ToString().ToLowerInvariant()}[] {p.Name}",
+            _ => $"{p.Type} {p.Name}",
+        };
+        return p.Mode == QParameterMode.InOut ? $"inout {value}" : value;
+    }
 
     private static void PrintBody(IReadOnlyList<QStmt> stmts, StringBuilder sb, string indent)
     {
@@ -167,12 +171,16 @@ public static class IrPrinter
         }
     }
 
-    private static string PrintArg(QArg arg) => arg switch
+    private static string PrintArg(QArg arg)
     {
-        QQubitArg q => $"{q.Reg}[{QNodes.Render(q.Index)}]",
-        QTextArg t => QNodes.Render(t.Tree),
-        _ => string.Empty,
-    };
+        var value = arg switch
+        {
+            QQubitArg q => $"{q.Reg}[{QNodes.Render(q.Index)}]",
+            QTextArg t => QNodes.Render(t.Tree),
+            _ => string.Empty,
+        };
+        return arg.Mode == QParameterMode.InOut ? $"inout {value}" : value;
+    }
 
     private static string PrintExpr(QExpr expr) => expr switch
     {

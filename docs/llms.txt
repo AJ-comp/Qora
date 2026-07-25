@@ -1,4 +1,4 @@
-# Qora v0.28 — complete language reference for AI assistants
+# Qora v0.29 — complete language reference for AI assistants
 
 Qora is a quantum programming language (Q#/C#-flavored syntax) that compiles to OpenQASM 3.
 File extension: `.qor`. This file is the full, authoritative surface spec: everything below is
@@ -80,10 +80,15 @@ operation Main()                // global namespace; the entry point; takes NO p
   To read a register as a number, write `AsInt(f)` — the one explicit unsigned reading, emitted as the
   width-qualified `uint[N](f)`. A SCALAR `bit` (one measurement result) is unaffected: it is a value, and
   `r == 1` emits as `r == true`.
-- Classical arrays are mutable when declared with `var`. Do not pass the same array to two array
-  parameters in one call, because array parameters are mutable and may not overlap. Whole-array
-  reassignment is not supported; update individual elements instead. A `const T[]` cannot be updated
-  directly or passed to a mutable `T[]` parameter.
+- Classical scalar and array parameters are READ-ONLY by default. An operation that intentionally changes
+  caller-owned storage must mark both sides of the borrow: declare `inout values: int[]` and call
+  `Increment(inout values)`. This first `inout` contract is limited to `int[]`, `float[]`, and `angle[]`
+  operation parameters. Scalars, `bit[]`, `Qubit`, `Qubit[]`, and every function parameter reject
+  `inout` with QSEM038. Qubit operation parameters keep their existing implicit quantum-state semantics.
+- Read-only array arguments may alias each other. Once any argument position is `inout`, however, the
+  same storage cannot also occupy another array position in that call (QSEM014). A `const T[]` cannot be
+  passed to `inout` (QSEM024), and a read-only parameter cannot be forwarded to `inout` (QSEM038).
+  Whole-array reassignment is not supported; an `inout` operation updates individual elements instead.
 - Every declaration begins with `var` (mutable) or `const` (immutable); the type is optional and trailing.
   `var x = expr;` / `var x: int = expr;` — mutable variable. `const x = expr;` / `const x: int = expr;` —
   IMMUTABLE binding (JS-const/Q#-let style): may hold any value including a measurement result
@@ -100,7 +105,8 @@ operation Main()                // global namespace; the entry point; takes NO p
 ## Functions (classical, value-returning)
 
 - `function Name(params): T { … return e; }` — a classical, pure subroutine (Q#'s `function`). Parameters
-  are classical scalars or arrays, while the return type `T` is a classical scalar
+  are read-only classical scalars or arrays and cannot be `inout`, while the return type `T` is a
+  classical scalar
   (`int`/`bit`/`float`/`angle`); neither may be a qubit. A `bit[]` parameter is specialized to the concrete
   argument width at every expression call site, so width-2 and width-3 calls receive separate generated
   definitions while repeated calls of the same width reuse one. The body is
@@ -189,7 +195,7 @@ QSEM007 unknown gate/operation name           QSEM008 duplicate global operation
 QSEM009 calling the entry operation           QSEM010 entry operation has parameters
 QSEM011 recursive operation calls             QSEM012 `use` outside `Main` top level
 QSEM013 name shadows a built-in where qualification cannot disambiguate
-QSEM014 same qubit (or overlapping register/element) twice in one gate; overlapping mutable arrays
+QSEM014 same qubit (or overlapping register/element) twice in one gate; array alias involving `inout`
 QSEM015 duplicate declared names in one operation
 QSEM016 non-integer or proven-out-of-range array/qubit index / indexing a scalar or single qubit
 QSEM017 measurement assigned to a non-bit     QSEM018 ambiguous unqualified name (candidates listed)
@@ -198,7 +204,7 @@ QSEM020 import file not found/unreadable/no file context
 QSEM021 retired/reserved; cyclic back-edges are skipped when loaded.Add returns false
 QSEM022 duplicate operation name within one namespace
 QSEM023 reserved; emitted-name collisions are auto-renamed by NameMangler with a `// Qora:` note
-QSEM024 mutation of a `const` value/array (including passing a const array to a mutable parameter)
+QSEM024 mutation of a `const` value/array (including passing a const array to `inout`)
 QSEM025 identifier not declared in scope here (unknown name, or classical used before declaration)
 QSEM026 qubit used as a classical value       QSEM027 non-invertible `within` body
 QSEM028 operation name used as a value
@@ -209,6 +215,7 @@ QSEM034 a qubit in a function signature (function parameters/return are classica
 QSEM035 `return` outside a function (an operation is void), or a function has a path that returns nothing
 QSEM036 a whole `bit[]` register used as a number, compared across widths, or ordered (use `AsInt(f)`)
 QSEM037 incompatible function return/result type, or a whole classical array used as one scalar
+QSEM038 invalid parameter access contract (`inout` shape/marker mismatch or read-only parameter mutation)
 
 ## CLI contract (for tooling/agents)
 
@@ -220,7 +227,7 @@ qora --json [file] [--stages] [--base-dir <dir>]
   `{"success":bool,"qasm":"...","errors":[{"message","code","start","end"}]}`
   `start`/`end` are half-open character offsets into the entry document (-1 = no location).
 - `--stages` adds `"ast"`, `"ir"`, `"irInverse"`, `"symbols"` (pipeline snapshots; original/FQN names, unmangled).
-- Emitted QASM starts with `// generated by Qora v0.28`.
+- Emitted QASM starts with `// generated by Qora v0.29`.
 
 ## Executing programs
 
@@ -243,14 +250,14 @@ operation Main() {
 }
 ```
 
-Classical array passed to a helper:
+Caller-owned classical array updated by a helper:
 ```qora
-operation Increment(values: int[]) {
+operation Increment(inout values: int[]) {
     for i in 0..values.Count-1 { values[i] = values[i] + 1; }
 }
 operation Main() {
     var values: int[] = [1, 2, 3];
-    Increment(values);
+    Increment(inout values);
 }
 ```
 
@@ -292,6 +299,9 @@ operation Main() {
 - `Rx(q[0], pi/2)` (QSEM006) — rotations take the ANGLE first.
 - `qubit` lowercase as a type — the keyword is `Qubit` (capital Q).
 - Type BEFORE the name (`int n`, `Qubit[] q`) — annotations are trailing: `n: int`, `q: Qubit[]`.
+- Writing an ordinary array parameter, omitting `inout` at either the declaration or call site, or adding
+  `inout` to a read-only slot (QSEM038) — mark both sides only for mutable `int[]`/`float[]`/`angle[]`
+  operation parameters.
 - `q: Qubit[2]` as a parameter — register parameters omit the length: `q: Qubit[]`; allocate the
   concrete size in `Main` with `use q = Qubit[2];`.
 - Calling `Main` (QSEM009), giving `Main` parameters (QSEM010), recursion (QSEM011).

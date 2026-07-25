@@ -20,6 +20,14 @@ public class ArgumentTests
     public void RejectsWrongArguments(string source) => Compiler.Rejects(source, "QSEM006");
 
     [Theory]
+    [InlineData("operation Take(x: int){}\noperation Main(){ Take(0.5); }")]
+    [InlineData("operation Take(x: bit){}\noperation Main(){ Take(2); }")]
+    [InlineData("operation Take(x: int){}\noperation Main(){ var values: float[] = [0.5]; Take(values[0]); }")]
+    [InlineData("operation Take(x: int){}\noperation Main(){ var values: int[] = [1]; Take(values + 1); }")]
+    public void RejectsIncompatibleScalarArgumentsToUserOperations(string source) =>
+        Compiler.RejectsExactly(source, "QSEM006");
+
+    [Theory]
     // Regression: indexing is valid only when the base symbol is an array. Indexing scalar int/bit values must
     // not masquerade as either a classical array element or a qubit reference in a call argument.
     [InlineData("operation Main(){ use q=Qubit[1]; var c: int=0; Rx(c[0], q[0]); }")]                 // gate angle slot, int
@@ -40,5 +48,21 @@ public class ArgumentTests
     [InlineData("operation Foo(a: Qubit){ H(a); }\noperation Main(){ use q=Qubit[2]; Foo(q[0]); }")]              // single qubit
     [InlineData("operation Rot(t: angle, a: Qubit){ Rx(t, a); }\noperation Main(){ use q=Qubit[1]; Rot(pi/2, q[0]); }")] // classical param
     [InlineData("operation Flip(q: Qubit[]){ for i in 0..q.Count-1 { X(q[i]); } }\noperation Main(){ use q=Qubit[3]; Flip(q); }")] // internally specialized
+    [InlineData("operation Main(){ use q=Qubit[1]; Rx(1, q[0]); }")] // built-in angle rules remain target-specific
     public void AcceptsWellFormedCalls(string source) => Compiler.Accepts(source);
+
+    [Fact]
+    public void AcceptsCompatibleScalarArgumentsToAUserOperation()
+    {
+        Compiler.Accepts("""
+            operation Accept(i: int, f: float, a: angle, b: bit) {}
+            operation TakeFloat(value: float) {}
+            operation Main() {
+                var flag: bit = 1;
+                var values: int[] = [2];
+                Accept(flag, 2, 0.5, 1);
+                TakeFloat(values[0]);
+            }
+            """);
+    }
 }

@@ -132,19 +132,20 @@ public static class QoraLowering
                      ?? arrayType?.Items.OfType<AstTerminal>().Select(t => t.ToString() ?? string.Empty)
                          .FirstOrDefault(t => TypeKeywords.Contains(t));
         var isArray = arrayType is not null;
+        var mode = terms.Contains("inout") ? QParameterMode.InOut : QParameterMode.In;
         // A source parameter contains one identifier besides its explicit type: the parameter name.
-        var idents = terms.Where(t => !TypeKeywords.Contains(t) && !IsNumber(t)).ToList();
+        var idents = terms.Where(t => t != "inout" && !TypeKeywords.Contains(t) && !IsNumber(t)).ToList();
         var name = idents.Count > 0 ? idents[^1] : string.Empty;
         var span = SpanOf(param.Items.OfType<AstTerminal>().FirstOrDefault(t => (t.ToString() ?? "") == name));
 
-        if (typeKw == "int") return new QParam(name, QType.Int, null) { IsArray = isArray, Span = span };
-        if (typeKw == "bit") return new QParam(name, QType.Bit, null) { IsArray = isArray, Span = span };
-        if (typeKw == "float") return new QParam(name, QType.Float, null) { IsArray = isArray, Span = span };
-        if (typeKw == "angle") return new QParam(name, QType.Angle, null) { IsArray = isArray, Span = span };
+        if (typeKw == "int") return new QParam(name, QType.Int, null) { IsArray = isArray, Mode = mode, Span = span };
+        if (typeKw == "bit") return new QParam(name, QType.Bit, null) { IsArray = isArray, Mode = mode, Span = span };
+        if (typeKw == "float") return new QParam(name, QType.Float, null) { IsArray = isArray, Mode = mode, Span = span };
+        if (typeKw == "angle") return new QParam(name, QType.Angle, null) { IsArray = isArray, Mode = mode, Span = span };
         if (typeKw == "Qubit" && isArray)
-            return new QParam(name, QType.Qubit, null) { IsArray = true, Span = span };                // Qubit[] qs
+            return new QParam(name, QType.Qubit, null) { IsArray = true, Mode = mode, Span = span };   // Qubit[] qs
         if (typeKw == "Qubit")
-            return new QParam(name, QType.Qubit, null) { IsArray = false, Span = span };               // Qubit q
+            return new QParam(name, QType.Qubit, null) { IsArray = false, Mode = mode, Span = span };  // Qubit q
 
         throw new InvalidOperationException("a parameter AST must contain an explicit type keyword");
     }
@@ -205,6 +206,17 @@ public static class QoraLowering
     {
         if (sym is AstNonTerminal nt)
         {
+            if (nt.Name == "InOutArg")
+            {
+                var value = nt.Items.OfType<AstNonTerminal>().FirstOrDefault(n => n.Name == "Expr")
+                    ?? throw new InvalidOperationException("an inout argument AST must contain one expression");
+                return LowerArg(value) switch
+                {
+                    QQubitArg q => q with { Mode = QParameterMode.InOut },
+                    QTextArg t => t with { Mode = QParameterMode.InOut },
+                    var other => other,
+                };
+            }
             if (nt.Name == "IndexAccess") return LowerIndexedArg(nt);
             if (nt.Name == "Expr")
             {

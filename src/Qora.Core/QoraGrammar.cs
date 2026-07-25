@@ -6,7 +6,7 @@ using Janglim.FrontEnd.RegularGrammar;
 namespace Qora;
 
 /// <summary>
-/// Qora v0.28 — a Q#/C#-flavored quantum language on the Janglim engine.
+/// Qora v0.29 — a Q#/C#-flavored quantum language on the Janglim engine.
 ///
 ///   operation Bell(q: Qubit[]) {        // a subroutine, with trailing-type parameters (name: T)
 ///       H(q[0]);
@@ -123,6 +123,14 @@ namespace Qora;
 /// <c>q[i + 1]</c>, and nested indexed reads all parse. The shared semantic path requires one scalar
 /// <c>int</c>, validates calls inside the index, and records an unresolved in-bounds proof as model data.
 /// The OpenQASM policy pass — not the common bounds walk — turns that final fact into QSEM030.
+/// v0.29 makes callable parameters read-only by default. Caller-visible mutation
+/// is explicit on both sides: an operation declares <c>inout values: int[]</c>, and its caller writes
+/// <c>Update(inout values)</c>. The mode is limited to general classical arrays and remains separate from
+/// the array's value type; functions, scalars, bit registers, and qubit parameters cannot opt in.
+/// User function and operation calls now validate scalar arguments against each declared parameter type.
+/// Array-bound facts follow stable symbol identity through shadowing, and direct affine <c>.Count</c>
+/// indexes receive an exact all-length verdict or defer to size specialization. Nested index validation
+/// preserves independent root errors while suppressing only derivative failed-proof diagnostics.
 /// </summary>
 public class QoraGrammar : Grammar
 {
@@ -137,6 +145,9 @@ public class QoraGrammar : Grammar
     public Terminal Var { get; } = new Terminal(TokenType.Keyword, "var", false);
     public Terminal Function { get; } = new Terminal(TokenType.Keyword, "function", false);
     public Terminal Return { get; } = new Terminal(TokenType.Keyword, "return", false);
+    // Parameter/call permission marker. Meaning=true keeps it in a Param AST so lowering can stamp the
+    // access mode; an inout call argument receives its own InOutArg meaning unit below.
+    public Terminal InOut { get; } = new Terminal(TokenType.Keyword, "inout", "inout", true, false);
     public Terminal If { get; } = new Terminal(TokenType.Keyword, "if", false);
     public Terminal For { get; } = new Terminal(TokenType.Keyword, "for", false);
     public Terminal In { get; } = new Terminal(TokenType.Keyword, "in", false);
@@ -263,6 +274,7 @@ public class QoraGrammar : Grammar
     public static MeaningUnit ArrayNewM { get; } = new MeaningUnit("ArrayNew");
     public static MeaningUnit UseM { get; } = new MeaningUnit("Use");
     public static MeaningUnit GateM { get; } = new MeaningUnit("Gate");
+    public static MeaningUnit InOutArgM { get; } = new MeaningUnit("InOutArg");
     public static MeaningUnit ConstDeclM { get; } = new MeaningUnit("ConstDecl");
     public static MeaningUnit VarDeclM { get; } = new MeaningUnit("VarDecl");
     public static MeaningUnit AssignM { get; } = new MeaningUnit("Assign");
@@ -312,6 +324,10 @@ public class QoraGrammar : Grammar
         param.AddItem(Ident + Colon + qubitArrayType, ParamM);   // q: Qubit[]
         param.AddItem(Ident + Colon + typeName, ParamM);         // n: int
         param.AddItem(Ident + Colon + arrayType, ParamM);        // a: int[]
+        param.AddItem(InOut + Ident + Colon + Qubit, ParamM);            // inout q: Qubit (semantic error)
+        param.AddItem(InOut + Ident + Colon + qubitArrayType, ParamM);   // inout q: Qubit[] (semantic error)
+        param.AddItem(InOut + Ident + Colon + typeName, ParamM);         // inout n: int (semantic error)
+        param.AddItem(InOut + Ident + Colon + arrayType, ParamM);        // inout a: int[]
 
         statement.AddItem(useStmt | gateStmt | constDecl | varDecl | assignStmt | ifStmt | forStmt | whileStmt | repeatStmt | returnStmt);
 
@@ -336,6 +352,7 @@ public class QoraGrammar : Grammar
         // Every argument is an expression. Lowering still preserves a lone indexed reference as a
         // structured argument, allowing validation to decide whether its base is a qubit or T[].
         arg.AddItem(expr);
+        arg.AddItem(InOut + expr, InOutArgM);
 
         // const x = expr;   /   const x: int = expr;   /   const a: int[] = […];   (immutable)
         constDecl.AddItem(Const + Ident + Assign + expr + Semicolon, ConstDeclM);                                    // const x = 5

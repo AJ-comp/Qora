@@ -118,22 +118,22 @@ public class ClassicalArrayTests
         RejectsCleanly("operation Main(){ var value: int = 1; for i in 0..value.Count-1 { value=i; } }");
 
     [Fact]
-    public void RejectsSameArrayPassedToTwoMutableParameters()
+    public void RejectsSameArrayPassedToReadonlyAndInOutParameters()
     {
         RejectsCleanly("""
-            operation Copy(left: int[], right: int[]) {
+            operation Copy(inout left: int[], right: int[]) {
                 left[0] = right[0];
             }
             operation Main() {
                 var values: int[] = [1, 2];
-                Copy(values, values);
+                Copy(inout values, values);
             }
             """);
     }
 
     [Theory]
     [InlineData("operation Main(){ const values: int[] = [1,2]; values[0]=3; }")]
-    [InlineData("operation Change(values: int[]){ values[0]=3; } operation Main(){ const values: int[] = [1,2]; Change(values); }")]
+    [InlineData("operation Change(inout values: int[]){ values[0]=3; } operation Main(){ const values: int[] = [1,2]; Change(inout values); }")]
     public void RejectsMutationOfConstArray(string source)
     {
         var result = Compiler.Compile(source);
@@ -207,12 +207,12 @@ public class ClassicalArrayTests
     public void EmitsMutableOneDimensionalArrayParameter()
     {
         var result = CompileSuccessfully("""
-            operation SetFirst(values: int[]) {
+            operation SetFirst(inout values: int[]) {
                 values[0] = 7;
             }
             operation Main() {
                 var values: int[] = [1, 2];
-                SetFirst(values);
+                SetFirst(inout values);
             }
             """);
 
@@ -223,14 +223,14 @@ public class ClassicalArrayTests
     public void EmitsCountAsSizeof()
     {
         var result = CompileSuccessfully("""
-            operation Visit(values: int[]) {
+            operation Visit(inout values: int[]) {
                 for i in 0..values.Count-1 {
                     values[i] = values[i] + 1;
                 }
             }
             operation Main() {
                 var values: int[] = [1, 2, 3];
-                Visit(values);
+                Visit(inout values);
             }
             """);
 
@@ -288,8 +288,8 @@ public class ClassicalArrayTests
     [Fact]
     public void RejectsLiteralOutOfBoundsThroughAnArrayParameter() =>
         Compiler.Rejects("""
-            operation Helper(x: int[]) { x[5] = 99; }
-            operation Main() { use q=Qubit[1]; var a: int[] = [1, 2, 3]; Helper(a); H(q[0]); }
+            operation Helper(inout x: int[]) { x[5] = 99; }
+            operation Main() { use q=Qubit[1]; var a: int[] = [1, 2, 3]; Helper(inout a); H(q[0]); }
             """, "QSEM016");
 
     /// <summary>The requirement folds through a CHAIN: Middle never indexes `y` itself, but it hands it to
@@ -297,17 +297,17 @@ public class ClassicalArrayTests
     [Fact]
     public void RejectsLiteralOutOfBoundsThroughAChainOfArrayParameters() =>
         Compiler.Rejects("""
-            operation Deep(x: int[]) { x[5] = 99; }
-            operation Middle(y: int[]) { Deep(y); }
-            operation Main() { use q=Qubit[1]; var a: int[] = [1, 2, 3]; Middle(a); H(q[0]); }
+            operation Deep(inout x: int[]) { x[5] = 99; }
+            operation Middle(inout y: int[]) { Deep(inout y); }
+            operation Main() { use q=Qubit[1]; var a: int[] = [1, 2, 3]; Middle(inout a); H(q[0]); }
             """, "QSEM016");
 
     /// <summary>NOT over-broad: an array long enough for the callee's literal index is fine.</summary>
     [Fact]
     public void AcceptsAnArrayLongEnoughForTheCalleeLiteralIndex() =>
         Compiler.Accepts("""
-            operation Helper(x: int[]) { x[5] = 99; }
-            operation Main() { use q=Qubit[1]; var a: int[] = new int[8]; Helper(a); H(q[0]); }
+            operation Helper(inout x: int[]) { x[5] = 99; }
+            operation Main() { use q=Qubit[1]; var a: int[] = new int[8]; Helper(inout a); H(q[0]); }
             """);
 
     /// <summary>A DYNAMIC index imposes no static floor — it stays a runtime concern, exactly as it does for a
@@ -315,8 +315,8 @@ public class ClassicalArrayTests
     [Fact]
     public void AcceptsDynamicIndexingOfAnArrayParameter() =>
         Compiler.Accepts("""
-            operation Helper(x: int[]) { for i in 0..x.Count-1 { x[i] = 1; } }
-            operation Main() { use q=Qubit[1]; var a: int[] = [1, 2, 3]; Helper(a); H(q[0]); }
+            operation Helper(inout x: int[]) { for i in 0..x.Count-1 { x[i] = 1; } }
+            operation Main() { use q=Qubit[1]; var a: int[] = [1, 2, 3]; Helper(inout a); H(q[0]); }
             """);
 
     // --- A WHOLE bit[] register is a CONTAINER OF BITS, not a number (QSEM036) ---

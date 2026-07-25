@@ -86,8 +86,8 @@ internal static class ExpressionTypes
     };
 
     /// <summary>
-    /// Assignment compatibility for a declared function contract. Qora historically keeps ordinary scalar
-    /// declarations loose, so this deliberately records only the established safe/contextual conversions:
+    /// Assignment compatibility for a declared callable/value contract. Qora historically keeps ordinary
+    /// scalar declarations loose, so this deliberately records only the established safe/contextual conversions:
     /// bit to int, int to float, a real expression to angle, and the literal 0 or 1 in a bit slot. Shape
     /// must always agree; a whole array is never one scalar value.
     /// </summary>

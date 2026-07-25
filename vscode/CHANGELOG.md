@@ -2,6 +2,17 @@
 
 All notable changes to the Qora Language extension.
 
+## 0.22.0
+
+- Bundles the **Qora v0.29** compiler. Callable parameters are read-only by default, while operations use
+  explicit `inout` at both the declaration and call site for caller-visible mutation of supported
+  classical arrays.
+- Highlights and hover-documents the new `inout` parameter marker. Operations use it on both the
+  declaration and call site when mutating caller-owned `int[]`, `float[]`, or `angle[]` storage.
+- Function and operation scalar arguments now follow their declared types, and array-index diagnostics
+  use symbol identity, exact `.Count`-relative proofs, specialization-aware deferral, and non-cascading
+  nested-error reporting.
+
 ## 0.21.0
 
 - Bundles the **Qora v0.28** compiler. Function results now follow one declared return-type path through

@@ -2,13 +2,17 @@ namespace Qora.Ir.Passes;
 
 /// <summary>What an integer expression folds to. <see cref="BoundNum"/>: every leaf resolved (integer
 /// literals, <c>const</c> names, <c>.Count</c> of a known-length array) — the value is definite.
-/// <see cref="BoundCount"/>: a linear form <c>Coeff·Array.Count + Offset</c> over exactly ONE array whose
+/// <see cref="ArrayLengthBound"/>: a linear form <c>Coeff·Array.Count + Offset</c> over exactly ONE array whose
 /// length is not yet known — still judgeable symbolically (e.g. <c>a.Count-1</c> is in range for ANY length
 /// of <c>a</c>). Anything else — a runtime variable, two unknown lengths, division by a symbol — does not
 /// settle, and <see cref="BoundFolder.Fold"/> returns null: no value, no proof.</summary>
 internal abstract record Bound;
 internal sealed record BoundNum(long Value) : Bound;
-internal sealed record BoundCount(string Array, long Coeff, long Offset) : Bound;
+internal sealed record ArrayLengthBound(
+    SymbolId ArraySymbolId,
+    long Coeff,
+    long Offset,
+    bool IsOverflowFree = true) : Bound;
 
 /// <summary>
 /// THE one calculator for compile-time integer expressions — <c>+ - * /</c>, integer literals, <c>const</c>
@@ -18,7 +22,7 @@ internal sealed record BoundCount(string Array, long Coeff, long Offset) : Bound
 /// folds loop bounds and index expressions. Reading one tree — never re-parsing text — means no two
 /// readings of one expression can disagree. The criterion is "does the computation settle?", never a
 /// syntactic pattern: <c>a.Count*2 - k - 3</c> folds to a number when <c>a</c>'s length and <c>k</c> are
-/// known, to a <see cref="BoundCount"/> when only the length is missing, and to null past that.
+/// known, to an <see cref="ArrayLengthBound"/> when only the length is missing, and to null past that.
 /// </summary>
 internal static class BoundFolder
 {
@@ -32,10 +36,10 @@ internal static class BoundFolder
         QMember { Base: QNameRef arr, Member: "Count" } =>
             scope.Lookup(arr.Name) is { IsArray: true } a
                 ? (a.Type == QType.Qubit ? a.RegisterSize : a.ArrayLength) is int len
-                    ? new BoundNum(len) : new BoundCount(arr.Name, 1, 0)
+                    ? new BoundNum(len) : new ArrayLengthBound(a.Id, 1, 0)
                 : null,
         // A const reads the value its DECLARATION already folded (owner's site) — no re-derivation, and it
-        // may be symbolic, so `const hi = q.Count; 0..hi` carries the same BoundCount the direct form does.
+        // may be symbolic, so `const hi = q.Count; 0..hi` carries the same ArrayLengthBound the direct form does.
         QNameRef r => scope.Lookup(r.Name) is { IsConst: true, FoldedBound: { } fb } ? fb : null,
         QUnary { Op: "-", Operand: { } op } => Apply(new BoundNum(0), "-", Fold(op, scope)),
         QBinOp b when b.Op is "+" or "-" or "*" or "/" => Apply(Fold(b.Left, scope), b.Op, Fold(b.Right, scope)),
@@ -58,14 +62,24 @@ internal static class BoundFolder
                     (BoundNum a, BoundNum b, "-") => new BoundNum(a.Value - b.Value),
                     (BoundNum a, BoundNum b, "*") => new BoundNum(a.Value * b.Value),
                     (BoundNum a, BoundNum { Value: not 0 } b, "/") => new BoundNum(a.Value / b.Value),
-                    (BoundCount c, BoundNum b, "+") => Norm(c.Array, c.Coeff, c.Offset + b.Value),
-                    (BoundNum a, BoundCount c, "+") => Norm(c.Array, c.Coeff, a.Value + c.Offset),
-                    (BoundCount c, BoundNum b, "-") => Norm(c.Array, c.Coeff, c.Offset - b.Value),
-                    (BoundNum a, BoundCount c, "-") => Norm(c.Array, -c.Coeff, a.Value - c.Offset),
-                    (BoundCount c, BoundNum b, "*") => Norm(c.Array, c.Coeff * b.Value, c.Offset * b.Value),
-                    (BoundNum a, BoundCount c, "*") => Norm(c.Array, a.Value * c.Coeff, a.Value * c.Offset),
-                    (BoundCount a, BoundCount b, "+") when a.Array == b.Array => Norm(a.Array, a.Coeff + b.Coeff, a.Offset + b.Offset),
-                    (BoundCount a, BoundCount b, "-") when a.Array == b.Array => Norm(a.Array, a.Coeff - b.Coeff, a.Offset - b.Offset),
+                    (ArrayLengthBound c, BoundNum b, "+") =>
+                        Norm(c.ArraySymbolId, c.Coeff, c.Offset + b.Value, c.IsOverflowFree),
+                    (BoundNum a, ArrayLengthBound c, "+") =>
+                        Norm(c.ArraySymbolId, c.Coeff, a.Value + c.Offset, c.IsOverflowFree),
+                    (ArrayLengthBound c, BoundNum b, "-") =>
+                        Norm(c.ArraySymbolId, c.Coeff, c.Offset - b.Value, c.IsOverflowFree),
+                    (BoundNum a, ArrayLengthBound c, "-") =>
+                        Norm(c.ArraySymbolId, -c.Coeff, a.Value - c.Offset, c.IsOverflowFree),
+                    (ArrayLengthBound c, BoundNum b, "*") =>
+                        Norm(c.ArraySymbolId, c.Coeff * b.Value, c.Offset * b.Value, c.IsOverflowFree),
+                    (BoundNum a, ArrayLengthBound c, "*") =>
+                        Norm(c.ArraySymbolId, a.Value * c.Coeff, a.Value * c.Offset, c.IsOverflowFree),
+                    (ArrayLengthBound a, ArrayLengthBound b, "+") when a.ArraySymbolId == b.ArraySymbolId =>
+                        Norm(a.ArraySymbolId, a.Coeff + b.Coeff, a.Offset + b.Offset,
+                            a.IsOverflowFree && b.IsOverflowFree),
+                    (ArrayLengthBound a, ArrayLengthBound b, "-") when a.ArraySymbolId == b.ArraySymbolId =>
+                        Norm(a.ArraySymbolId, a.Coeff - b.Coeff, a.Offset - b.Offset,
+                            a.IsOverflowFree && b.IsOverflowFree),
                     _ => null,   // Count·Count, mixed arrays, division by/of a symbol: does not settle
                 };
             }
@@ -75,8 +89,25 @@ internal static class BoundFolder
             return null;
         }
 
-        static Bound Norm(string array, long coeff, long offset) =>
-            coeff == 0 ? new BoundNum(offset) : new BoundCount(array, coeff, offset);
+        static Bound Norm(SymbolId arraySymbolId, long coeff, long offset, bool operandsOverflowFree)
+        {
+            // Algebraic cancellation must not erase an overflow that occurs earlier in source evaluation.
+            // Example: `Count + long.MaxValue - long.MaxValue - 1` looks like `Count-1` only AFTER the
+            // first addition has already overflowed for every positive Count. Track whether every
+            // intermediate is representable for the full legal length domain; once false it stays false.
+            var first = new System.Numerics.BigInteger(coeff) + offset;
+            var last = new System.Numerics.BigInteger(coeff) * int.MaxValue + offset;
+            var overflowFree = operandsOverflowFree
+                               && System.Numerics.BigInteger.Min(first, last) >= long.MinValue
+                               && System.Numerics.BigInteger.Max(first, last) <= long.MaxValue;
+
+            // A cancelled symbolic dependency may become a number only if its complete evaluation was
+            // overflow-free. Otherwise retain the originating SymbolId so monomorphization can substitute
+            // the real length and re-run the ordinary checked fold.
+            return coeff == 0 && overflowFree
+                ? new BoundNum(offset)
+                : new ArrayLengthBound(arraySymbolId, coeff, offset, overflowFree);
+        }
     }
 
     /// <summary>True when a folded bound is <c>k·p.Count + c</c> over a parameter whose length ONLY
@@ -87,5 +118,5 @@ internal static class BoundFolder
     /// Reading the folded bound instead of a text regex sees through a const: <c>const hi = q.Count</c>
     /// used as a bound defers exactly as the direct <c>q.Count</c> does.</summary>
     internal static bool DefersToUnsizedQubit(Bound? b, Scope scope) =>
-        b is BoundCount c && scope.Lookup(c.Array) is { MonoSized: true };
+        b is ArrayLengthBound c && scope.GetSymbol(c.ArraySymbolId).MonoSized;
 }

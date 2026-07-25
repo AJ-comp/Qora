@@ -254,24 +254,24 @@ public class BoundsProofTests
     [Fact]
     public void RejectsAConstLoopOverAParameterWhenTheArgumentIsTooShort() =>
         Compiler.Rejects("""
-            operation Helper(x: int[]) {
+            operation Helper(inout x: int[]) {
                 for i in 0..5 { x[i] = 1; }
             }
             operation Main() {
                 var a: int[] = [1, 2];
-                Helper(a);
+                Helper(inout a);
             }
             """, "QSEM016");
 
     [Fact]
     public void AcceptsAConstLoopOverAParameterWhenTheArgumentIsLongEnough() =>
         Compiler.Accepts("""
-            operation Helper(x: int[]) {
+            operation Helper(inout x: int[]) {
                 for i in 0..5 { x[i] = 1; }
             }
             operation Main() {
                 var a: int[] = [1, 2, 3, 4, 5, 6];
-                Helper(a);
+                Helper(inout a);
             }
             """);
 
@@ -339,12 +339,12 @@ public class BoundsProofTests
     [Fact]
     public void RejectsACountBoundedLoopOverAParameterReachingCountItself() =>
         Compiler.Rejects("""
-            operation Helper(a: int[]) {
+            operation Helper(inout a: int[]) {
                 for i in 0..a.Count { a[i] = 1; }
             }
             operation Main() {
                 var a: int[] = [1, 2, 3];
-                Helper(a);
+                Helper(inout a);
             }
             """, "QSEM016");
 
@@ -352,12 +352,12 @@ public class BoundsProofTests
     [Fact]
     public void AcceptsACountMinusTwoLoopOverAParameter() =>
         Compiler.Accepts("""
-            operation Helper(a: int[]) {
+            operation Helper(inout a: int[]) {
                 for i in 0..a.Count-2 { a[i] = 1; }
             }
             operation Main() {
                 var a: int[] = [1, 2, 3];
-                Helper(a);
+                Helper(inout a);
             }
             """);
 
@@ -478,13 +478,13 @@ public class BoundsProofTests
     public void KeepsASpecializedOpsContractReachableWhenThePostMonoValidationRejects()
     {
         var r = Compiler.Compile("""
-            operation Helper(q: Qubit[], x: int[]) {
+            operation Helper(q: Qubit[], inout x: int[]) {
                 for i in 0..q.Count*2-2 { x[i] = 1; }
             }
             operation Main() {
                 use r = Qubit[5];
                 var a: int[] = [1, 2];
-                Helper(r, a);
+                Helper(r, inout a);
             }
             """);
         Assert.False(r.Success);
@@ -1076,13 +1076,13 @@ public class BoundsProofTests
     [Fact]
     public void RejectsAConstIndexOnAParameterWhenTheArgumentIsTooShort() =>
         Compiler.Rejects("""
-            operation Helper(x: int[]) {
+            operation Helper(inout x: int[]) {
                 const k: int = 5;
                 x[k] = 1;
             }
             operation Main() {
                 var a: int[] = [1, 2];
-                Helper(a);
+                Helper(inout a);
             }
             """, "QSEM016");
 
@@ -1093,14 +1093,14 @@ public class BoundsProofTests
     [Fact]
     public void AcceptsAConstBoundOfAQubitCountWhenTheArgumentIsLongEnough() =>
         Compiler.Accepts("""
-            operation Helper(q: Qubit[], x: int[]) {
+            operation Helper(q: Qubit[], inout x: int[]) {
                 const hi: int = q.Count;
                 for i in 0..hi { x[i] = 1; }
             }
             operation Main() {
                 use r = Qubit[3];
                 var a: int[] = [1, 2, 3, 4, 5];
-                Helper(r, a);
+                Helper(r, inout a);
             }
             """);
 
@@ -1109,20 +1109,61 @@ public class BoundsProofTests
     [Fact]
     public void RejectsAConstBoundOfAQubitCountWhenTheArgumentIsTooShort() =>
         Compiler.Rejects("""
-            operation Helper(q: Qubit[], x: int[]) {
+            operation Helper(q: Qubit[], inout x: int[]) {
                 const hi: int = q.Count;
                 for i in 0..hi { x[i] = 1; }
             }
             operation Main() {
                 use r = Qubit[3];
                 var a: int[] = [1, 2];
-                Helper(r, a);
+                Helper(r, inout a);
             }
             """, "QSEM016");
 
     // --- facts are keyed by SYMBOL IDENTITY, resolved through the scope chain: a shadowing binder of any
     //     kind (declaration or for-header) is a different variable, so it neither inherits an outer
     //     variable's proof nor destroys it ---
+
+    /// <summary>An outer array's symbolic <c>.Count</c> belongs to that array's SymbolId. A shorter array
+    /// shadowing the same source name must not inherit the outer array's loop proof.</summary>
+    [Fact]
+    public void RejectsALoopBoundedByAnOuterArrayCountWhenAShadowingArrayIsIndexed() =>
+        Compiler.RejectsExactly("""
+            operation Visit(xs: int[]) {
+                for i in 0..xs.Count-1 {
+                    var xs: int[] = [0];
+                    xs[i] = 1;
+                }
+            }
+            operation Main() {
+                var values: int[] = [1, 2, 3];
+                Visit(values);
+            }
+            """, "QSEM030");
+
+    /// <summary>A const preserves the SymbolId of the array whose <c>.Count</c> it captured. Looking through
+    /// the const inside a nested scope must not rebind that proof to a same-named shadowing array.</summary>
+    [Fact]
+    public void RejectsAConstCountGuardFromProvingAShadowingArray() =>
+        Compiler.RejectsExactly("""
+            operation Visit(xs: int[], n: int) {
+                const hi: int = xs.Count;
+                if (true) {
+                    var xs: int[] = [0];
+                    if (0 <= n && n < hi) {
+                        xs[n] = 1;
+                    }
+                }
+            }
+            operation Main() {
+                use q = Qubit[1];
+                H(q[0]);
+                var measured: bit = M(q[0]);
+                var n: int = measured;
+                var values: int[] = [1, 2, 3];
+                Visit(values, n);
+            }
+            """, "QSEM030");
 
     /// <summary>A declaration shadowing the guarded name is a NEW variable — the outer guard proved someone
     /// else. Identity keying rejects this without any special-case invalidation.</summary>
@@ -1258,14 +1299,14 @@ public class BoundsProofTests
     public void AcceptsAGuardedClampOverAParameterAndRecordsNoFloor()
     {
         var r = Compiler.Compile("""
-            operation Helper(x: int[]) {
+            operation Helper(inout x: int[]) {
                 for i in 0..5 {
                     if (0 <= i && i < x.Count) { x[i] = 1; }
                 }
             }
             operation Main() {
                 var a: int[] = [1, 2];
-                Helper(a);
+                Helper(inout a);
             }
             """);
         Assert.True(r.Success);
@@ -1431,13 +1472,13 @@ public class BoundsProofTests
     [Fact]
     public void RejectsAPostMonoArithmeticBoundOverAClassicalParameter() =>
         Compiler.Rejects("""
-            operation Helper(q: Qubit[], x: int[]) {
+            operation Helper(q: Qubit[], inout x: int[]) {
                 for i in 0..q.Count*2-2 { x[i] = 1; }
             }
             operation Main() {
                 use r = Qubit[5];
                 var a: int[] = [1, 2];
-                Helper(r, a);
+                Helper(r, inout a);
             }
             """, "QSEM016");
 
@@ -1479,12 +1520,12 @@ public class BoundsProofTests
     [Fact]
     public void AcceptsAnEmptyConstantLoopOverAParameterRegardlessOfArgumentLength() =>
         Compiler.Accepts("""
-            operation Helper(x: int[]) {
+            operation Helper(inout x: int[]) {
                 for i in 5..2 { x[i] = 1; }
             }
             operation Main() {
                 var a: int[] = [1];
-                Helper(a);
+                Helper(inout a);
             }
             """);
 
@@ -1494,28 +1535,28 @@ public class BoundsProofTests
     [Fact]
     public void RejectsAShadowedInnerLoopWhoseBoundExceedsTheArgument() =>
         Compiler.Rejects("""
-            operation Helper(x: int[]) {
+            operation Helper(inout x: int[]) {
                 for i in 0..1 {
                     for i in 0..5 { x[i] = 1; }
                 }
             }
             operation Main() {
                 var a: int[] = [1, 2];
-                Helper(a);
+                Helper(inout a);
             }
             """, "QSEM016");
 
     [Fact]
     public void AcceptsAShadowedInnerLoopWhoseBoundFitsTheArgument() =>
         Compiler.Accepts("""
-            operation Helper(x: int[]) {
+            operation Helper(inout x: int[]) {
                 for i in 0..5 {
                     for i in 0..1 { x[i] = 1; }
                 }
             }
             operation Main() {
                 var a: int[] = [1, 2];
-                Helper(a);
+                Helper(inout a);
             }
             """);
 
@@ -1525,12 +1566,12 @@ public class BoundsProofTests
     public void RecordsTheArrayArgumentContractOnTheSemanticModel()
     {
         var r = Compiler.Compile("""
-            operation Helper(x: int[]) {
+            operation Helper(inout x: int[]) {
                 for i in 0..2+3 { x[i] = 1; }
             }
             operation Main() {
                 var a: int[] = [1, 2, 3, 4, 5, 6];
-                Helper(a);
+                Helper(inout a);
             }
             """);
         Assert.True(r.Success);
