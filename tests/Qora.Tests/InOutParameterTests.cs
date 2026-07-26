@@ -351,7 +351,8 @@ public class InOutParameterTests
             result.AnalyzedIr!.Operations,
             operation => operation.DisplayName == "Touch");
         Assert.Equal(2, specialization.Params[0].RegisterSize);
-        Assert.Equal(QParameterMode.InOut, specialization.Params[1].Mode);
+        Assert.Equal(QOwnershipMode.Borrowed, specialization.Params[1].Ownership);
+        Assert.Equal(QAccessMode.Mutable, specialization.Params[1].Access);
         Assert.Contains(
             "def Touch__sz2(qubit[2] qubits, mutable array[int, #dim = 1] values) {",
             result.Qasm);
@@ -380,7 +381,8 @@ public class InOutParameterTests
             result.AnalyzedIr!.Operations,
             operation => operation.DisplayName == "CountInto");
         Assert.Equal(3, specialization.Params[0].RegisterSize);
-        Assert.Equal(QParameterMode.InOut, specialization.Params[1].Mode);
+        Assert.Equal(QOwnershipMode.Borrowed, specialization.Params[1].Ownership);
+        Assert.Equal(QAccessMode.Mutable, specialization.Params[1].Access);
         Assert.Contains(
             "def CountInto__sz3(bit[3] flags, mutable array[int, #dim = 1] counts) {",
             result.Qasm);

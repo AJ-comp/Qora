@@ -17,7 +17,13 @@ namespace Qora.Ir.Passes;
 /// </summary>
 public static class Monomorphizer
 {
-    public static QProgram Run(QProgram program)
+    /// <param name="preserveKnownCountsForValidation">
+    /// Keep structurally visible <c>.Count</c> nodes while still stamping every concrete specialization.
+    /// The post-specialization validator uses this form so ownership analysis can see a binding read even
+    /// when its length is already known. Calling <see cref="Run(QProgram, bool)"/> again with the default
+    /// value performs the final literal substitution required by <c>bit[]</c> emission.
+    /// </param>
+    public static QProgram Run(QProgram program, bool preserveKnownCountsForValidation = false)
     {
         // The specialization trigger IS QParam.NeedsMonoSizing — the one definition every consumer of
         // "monomorphization supplies this length" shares (validator generic test, prover deferral gates).
@@ -88,8 +94,9 @@ public static class Monomorphizer
         QNode? RewriteNode(QNode? node, IReadOnlyDictionary<string, int> regs) => node switch
         {
             null => null,
-            QMember { Base: QNameRef r, Member: "Count" } when regs.TryGetValue(r.Name, out var size) =>
-                new QNumLit(size),
+            QMember { Base: QNameRef r, Member: "Count" } member
+                when regs.TryGetValue(r.Name, out var size) =>
+                preserveKnownCountsForValidation ? member : new QNumLit(size),
             QMember m => m with { Base = RewriteNode(m.Base, regs)! },
             QBinOp b => b with { Left = RewriteNode(b.Left, regs)!, Right = RewriteNode(b.Right, regs)! },
             QUnary u => u with { Operand = RewriteNode(u.Operand, regs)! },
@@ -312,7 +319,8 @@ public static class Monomorphizer
         if (HasGenericCall(result, genericById.Keys.ToHashSet(), genericByName.Keys.ToHashSet()))
             throw new InvalidOperationException(
                 "QINTERNAL: monomorphization removed a generic callable while a call still points to it");
-        if (result.Operations.SelectMany(o => o.Params).Any(IsUnsizedArray) || HasUnresolvedQubitCount(result))
+        if (result.Operations.SelectMany(o => o.Params).Any(IsUnsizedArray)
+            || !preserveKnownCountsForValidation && HasUnresolvedQubitCount(result))
             throw new InvalidOperationException(
                 "QINTERNAL: monomorphization left an unresolved Qubit[]/bit[] size or qubit-array `.Count` in the emitted program");
         return result;

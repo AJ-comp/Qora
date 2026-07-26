@@ -111,7 +111,7 @@ public static class IrPrinter
             _ when p.IsArray => $"{p.Type.ToString().ToLowerInvariant()}[] {p.Name}",
             _ => $"{p.Type} {p.Name}",
         };
-        return p.Mode == QParameterMode.InOut ? $"inout {value}" : value;
+        return ModePrefix(p.Ownership, p.Access) + value;
     }
 
     private static void PrintBody(IReadOnlyList<QStmt> stmts, StringBuilder sb, string indent)
@@ -179,8 +179,17 @@ public static class IrPrinter
             QTextArg t => QNodes.Render(t.Tree),
             _ => string.Empty,
         };
-        return arg.Mode == QParameterMode.InOut ? $"inout {value}" : value;
+        return ModePrefix(arg.Ownership, arg.Access) + value;
     }
+
+    private static string ModePrefix(QOwnershipMode ownership, QAccessMode access) =>
+        (ownership, access) switch
+        {
+            (QOwnershipMode.Borrowed, QAccessMode.Mutable) => "var ",
+            (QOwnershipMode.Moved, QAccessMode.ReadOnly) => "move ",
+            (QOwnershipMode.Moved, QAccessMode.Mutable) => "move var ",
+            _ => string.Empty,
+        };
 
     private static string PrintExpr(QExpr expr) => expr switch
     {

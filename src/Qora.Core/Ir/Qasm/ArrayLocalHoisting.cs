@@ -208,7 +208,8 @@ public static class ArrayLocalHoisting
                             IsArray = true,
                             // Compiler-generated backing storage is explicitly threaded for writes. This
                             // parameter does not exist in source, but its backend contract is still mutable.
-                            Mode = QParameterMode.InOut,
+                            Ownership = QOwnershipMode.Borrowed,
+                            Access = QAccessMode.Mutable,
                         })).ToList(),
                 Body = body,
             });
@@ -337,7 +338,8 @@ public static class ArrayLocalHoisting
                     foreach (var key in calleeExtras)
                         args.Add(new QTextArg(new QNameRef(ArgNameFor(key, op, isEntry, paramName, storageName)))
                         {
-                            Mode = QParameterMode.InOut,
+                            Ownership = QOwnershipMode.Borrowed,
+                            Access = QAccessMode.Mutable,
                         });
                     result.Add(g with { Args = args });
                     break;
@@ -457,7 +459,11 @@ public static class ArrayLocalHoisting
         if (fix.Idle(map, on)) return arg;
         return arg switch
         {
-            QQubitArg q => new QQubitArg(N(q.Reg, map), RenameNode(q.Index, map, on, fix)!) { Mode = q.Mode },
+            QQubitArg q => new QQubitArg(N(q.Reg, map), RenameNode(q.Index, map, on, fix)!)
+            {
+                Ownership = q.Ownership,
+                Access = q.Access,
+            },
             QTextArg t => t with { Tree = RenameNode(t.Tree, map, on, fix) },
             _ => arg,
         };

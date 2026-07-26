@@ -600,7 +600,7 @@ public static class QasmEmitter
         QType.Bit when p.IsArray => throw new InvalidOperationException(
             $"QINTERNAL: unspecialized bit[] parameter `{p.Name}` reached OpenQASM emission"),
         _ when p.Type != QType.Qubit && p.IsArray =>
-            $"{(p.Mode == QParameterMode.InOut ? "mutable" : "readonly")} array[{TypeName(p.Type)}, #dim = 1] {p.Name}",
+            $"{(p.Access == QAccessMode.Mutable ? "mutable" : "readonly")} array[{TypeName(p.Type)}, #dim = 1] {p.Name}",
         QType.Int => $"int {p.Name}",
         QType.Bit => $"bit {p.Name}",
         QType.Float => $"float {p.Name}",

@@ -35,8 +35,8 @@ namespace Qora.Ir.Passes;
 ///         ambiguous use is QSEM018, qualified by <c>MyLib.H(…)</c> / <c>Qora.Intrinsic.H(…)</c>.
 ///         Every other name is free — the <see cref="NameMangler"/> pass renames emitted identifiers
 ///         only when they collide with target-world names (stdgates, keywords) or another emitted name.</item>
-///   <item><b>QSEM014</b> — overlapping gate operands, or one classical array passed into multiple
-///         parameter slots when at least one slot is <c>inout</c>.</item>
+///   <item><b>QSEM014</b> — overlapping gate operands, or one storage binding passed into multiple
+///         parameter slots when at least one slot is mutable or moved.</item>
 ///   <item><b>QSEM015</b> — duplicate declared names within one scope: parameters and <c>use</c>
 ///         registers seed the top-level scope; measure bits, vars, consts and loop variables are
 ///         block-scoped. Every declaration flows through the symbol table's one insertion door, which
@@ -46,8 +46,8 @@ namespace Qora.Ir.Passes;
 ///   <item><b>QSEM017</b> — a measurement assigned to a non-<c>bit</c> declaration.</item>
 ///   <item><b>QSEM022</b> — the same operation name defined more than once WITHIN one namespace
 ///         (namespaced twin of QSEM008; the same simple name in two different namespaces is fine).</item>
-///   <item><b>QSEM024</b> — mutation of a <c>const</c> value: reassignment, indexed array update, or passing
-///         a const array to an <c>inout</c> parameter. The initializer may still be any valid value.</item>
+///   <item><b>QSEM024</b> — mutation of a <c>const</c> value: reassignment, indexed array update, or taking
+///         a mutable borrow with <c>var</c>. Moving a const binding is allowed because the old binding ends.</item>
 ///   <item><b>QSEM025</b> — a name referenced but not resolvable in scope at that point: an unknown
 ///         identifier, or a block-scoped name (measure bit, var, const, loop variable) used before its
 ///         declaration. Only <c>use</c> registers are HOISTED, so they alone may be referenced before their
@@ -91,9 +91,11 @@ namespace Qora.Ir.Passes;
 ///   <item><b>QSEM037</b> — a function return violates its declared scalar return type, a function result is
 ///         stored in an incompatible explicitly typed scalar, or a whole classical array is used where one
 ///         scalar value is required.</item>
-///   <item><b>QSEM038</b> — an invalid parameter access contract: unsupported <c>inout</c> declaration,
-///         declaration/call-site mode mismatch, write through an ordinary read-only parameter, or forwarding
-///         ordinary read-only access into an <c>inout</c> slot.</item>
+///   <item><b>QSEM038</b> — an invalid parameter contract: unsupported <c>var</c>/<c>move</c> declaration,
+///         declaration/call-site ownership or access mismatch, write through a read-only parameter, or
+///         forwarding a borrowed/read-only parameter into a stronger slot.</item>
+///   <item><b>QSEM039</b> — a binding is used after ownership was transferred with <c>move</c>, including
+///         after a branch on which it may have been moved or on a later loop iteration.</item>
 ///   <item><b>QSEM035</b> — a <c>return</c> in an <c>operation</c> (void), or a <c>function</c> with a path
 ///         that produces no value. Nothing is said about WHERE a return stands: it may sit anywhere a
 ///         statement may, and <see cref="ReturnFlattening"/> reshapes the function into the single-bottom-
@@ -141,6 +143,7 @@ public static class QoraValidator
         // floor check is DERIVED from both after the walk — same discipline as UnprovenIndexes.
         var needsByOp = new Dictionary<int, Dictionary<string, long>>();
         var calls = new List<ArrayCallFact>();
+        var ownershipWork = new List<OwnershipWork>();
 
         var inverter = new Inverter(program.Operations);
         var entry = program.Operations.FirstOrDefault(o => o.Name == "Main") ?? program.Operations[0];
@@ -248,18 +251,33 @@ public static class QoraValidator
                 Add(errors, "QSEM013", $"global operation `{simpleName}` shadows the built-in gate `{simpleName}` (the global namespace shares one scope with the built-ins, so it has no qualifier to disambiguate with); move it into a namespace or rename it", op.Span);
 
             // QSEM016 — an internally specialized Qubit[] parameter must have a positive concrete size.
-            // QSEM038 — `inout` is deliberately a narrow classical-array borrowing contract. Functions
-            // stay side-effect-free, qubits keep their existing gate-driven state semantics, bit[] stays a
-            // by-value read-only register, and scalar reassignment never needs caller-visible borrowing.
+            // QSEM038 — parameter contracts have two independent axes. Functions remain borrowed/read-only;
+            // mutable access is supported by reference-capable classical arrays; ownership transfer accepts
+            // whole arrays and whole qubit bindings. Classical scalars are Copy values and therefore never
+            // need `move`; qubit state changes keep their existing gate semantics, so `var` does not apply.
             foreach (var p in op.Params)
             {
                 if (p.Type == QType.Qubit && p.RegisterSize is int rs && rs < 1)
                     Add(errors, "QSEM016", $"in `{op.DisplayName ?? op.Name}`: parameter `{p.Name}` has an invalid register size; it must be a whole number from 1 to {int.MaxValue}", p.Span);
-                if (p.Mode != QParameterMode.InOut) continue;
+                if (p is { Ownership: QOwnershipMode.Borrowed, Access: QAccessMode.ReadOnly }) continue;
+
+                var contract = ContractSyntax(p.Ownership, p.Access);
                 if (op.IsFunction)
-                    Add(errors, "QSEM038", $"in function `{op.DisplayName ?? op.Name}`: parameter `{p.Name}` cannot be `inout`; functions are read-only and cannot change caller-owned storage", p.Span);
-                else if (!p.IsArray || p.Type is QType.Bit or QType.Qubit)
-                    Add(errors, "QSEM038", $"in `{op.DisplayName ?? op.Name}`: parameter `{p.Name}` cannot be `inout`; only `int[]`, `float[]`, and `angle[]` operation parameters support caller-visible mutation", p.Span);
+                {
+                    Add(errors, "QSEM038", $"in function `{op.DisplayName ?? op.Name}`: parameter `{p.Name}` cannot use `{contract}`; functions borrow every argument read-only and cannot mutate or consume caller-owned storage", p.Span);
+                    continue;
+                }
+
+                if (p.Access == QAccessMode.Mutable
+                    && (!p.IsArray || p.Type is not (QType.Int or QType.Float or QType.Angle)))
+                {
+                    Add(errors, "QSEM038", $"in `{op.DisplayName ?? op.Name}`: parameter `{p.Name}` cannot use `{contract}`; mutable parameter access is supported only for whole `int[]`, `float[]`, and `angle[]` operation parameters", p.Span);
+                    continue;
+                }
+
+                if (p.Ownership == QOwnershipMode.Moved
+                    && !p.IsArray && p.Type != QType.Qubit)
+                    Add(errors, "QSEM038", $"in `{op.DisplayName ?? op.Name}`: parameter `{p.Name}` cannot use `move`; `{TypeName(p.Type)}` is a Copy scalar, so passing it already copies the value without consuming the caller's binding", p.Span);
             }
 
             // The unified symbol table IS the scope model: a nested scope tree in which every name carries
@@ -270,8 +288,10 @@ public static class QoraValidator
             // to its scope so the walk below resolves every operand with correct nesting. Nothing re-derives it.
             var scopeOf = new Dictionary<IReadOnlyList<QStmt>, Scope>();
             var typeMismatchCandidates = new Dictionary<int, QoraError>();
+            var invalidOwnershipStatements = new HashSet<int>();
             var root = SymbolTableBuilder.Build(op, errors, scopeOf, programSymbols, opById,
-                (statementId, error) => typeMismatchCandidates.TryAdd(statementId, error));
+                (statementId, error) => typeMismatchCandidates.TryAdd(statementId, error),
+                (statementId, _) => invalidOwnershipStatements.Add(statementId));
             model.AddOperation(op, root);
 
             var opNeeds = new Dictionary<string, long>();
@@ -282,10 +302,19 @@ public static class QoraValidator
             // generic does not make the callee live).
             var willBeRechecked = !IsGenericOp(op) || reachedIds.Contains(op.Id) || reachedNames.Contains(op.Name);
             model.SetWillBeRechecked(op.Id, willBeRechecked);   // the verdict is model DATA, not a discarded local — see the model doc
+            var validMoves = new Dictionary<int, IReadOnlyList<Symbol>>();
             var ctx = new Ctx(op, entry.Name, ops, opByName, opById, programSymbols, inverter, errors, unproven,
                 deferred, opNeeds, new ArrayFloorSink(op.Id, calls), scopeOf, typeMismatchCandidates,
-                new Dictionary<QCallNode, bool>(ReferenceEqualityComparer.Instance), willBeRechecked);
+                new Dictionary<QCallNode, bool>(ReferenceEqualityComparer.Instance), validMoves,
+                invalidOwnershipStatements, willBeRechecked);
             Walk(op.Body, root, ctx, inControlFlow: false);
+            ownershipWork.Add(new OwnershipWork(
+                op,
+                root,
+                scopeOf,
+                validMoves,
+                invalidOwnershipStatements,
+                DeferUnknownControlFlow: IsGenericOp(op) && willBeRechecked));
             if (op.IsFunction) ValidateFunctionShape(op, ctx);
         }
 
@@ -310,11 +339,38 @@ public static class QoraValidator
                 }
             }
         }
+        var ownershipByOperation = ownershipWork.ToDictionary(work => work.Operation.Id);
         foreach (var c in calls)
             if (c.ArgLength is int have
                 && needsByOp.TryGetValue(c.CalleeOpId, out var calleeNeeds)
                 && calleeNeeds.TryGetValue(c.CalleeParam, out var need) && have < need)
+            {
                 Add(errors, "QSEM016", $"in `{c.CallerOpName}`: `{c.ArgName}` has {have} element(s), but `{c.CalleeName}` indexes `{c.CalleeParam}[{need - 1}]` — it needs at least {need}", c.Span);
+                if (c.CallStatementId is int statementId
+                    && ownershipByOperation.TryGetValue(c.CallerOpId, out var work))
+                    work.InvalidStatements.Add(statementId);
+            }
+
+        // A move takes effect only after every semantic layer has accepted its call. Some call failures,
+        // notably propagated minimum-array-length checks, are known only after the body walk; discard those
+        // late-invalidated facts before running the control-flow ownership analysis. A reachable unsized
+        // generic postpones only control flow whose reachability/repetition is not yet known:
+        // monomorphization will stamp its concrete register lengths and immediately re-run this validator,
+        // allowing a one-iteration loop to be distinguished from a repeated consume. Straight-line uses
+        // must still be checked now because specialization may replace `.Count` with a literal and erase the
+        // original symbol use.
+        foreach (var work in ownershipWork)
+        {
+            foreach (var statementId in work.InvalidStatements)
+                work.ValidMoves.Remove(statementId);
+            OwnershipValidation.Validate(
+                work.Operation,
+                work.Root,
+                work.ScopeOf,
+                work.ValidMoves,
+                errors,
+                work.DeferUnknownControlFlow);
+        }
 
         // The settled per-op requirement table is a validation FACT — each operation's array-argument
         // contract — recorded on the model for any later consumer (IDE signature help, docs, backends).
@@ -434,12 +490,22 @@ public static class QoraValidator
         IReadOnlyDictionary<IReadOnlyList<QStmt>, Scope> ScopeOf,
         Dictionary<int, QoraError> TypeMismatchCandidates,
         Dictionary<QCallNode, bool> CallValidity,
+        Dictionary<int, IReadOnlyList<Symbol>> ValidMoves,
+        HashSet<int> InvalidOwnershipStatements,
         // "Will this op's postponed judgements get their post-mono re-validation?" — a PREDICTION made
         // before monomorphization runs, from the same reachability the Monomorphizer acts on. False for
         // a generic op nothing calls: monomorphization will DROP it, so no re-check ever runs — every
         // "defer to mono" judgement must then fall back to its conservative pre-mono form instead of
         // silently skipping.
         bool WillBeRechecked);
+
+    private sealed record OwnershipWork(
+        QOperation Operation,
+        Scope Root,
+        IReadOnlyDictionary<IReadOnlyList<QStmt>, Scope> ScopeOf,
+        Dictionary<int, IReadOnlyList<Symbol>> ValidMoves,
+        HashSet<int> InvalidStatements,
+        bool DeferUnknownControlFlow);
 
     /// <summary>One call's classical-array argument, recorded as DATA during the walk (rung B'/P4).
     /// <see cref="ArgLength"/> is the argument's known length (a local/literal array) — a CHECK fact,
@@ -449,7 +515,8 @@ public static class QoraValidator
     /// outermost call where a concrete array actually enters.</summary>
     private sealed record ArrayCallFact(
         int CallerOpId, string CallerOpName, int CalleeOpId, string CalleeName,
-        string CalleeParam, string ArgName, int? ArgLength, string? CallerParam, QSpan? Span);
+        string CalleeParam, string ArgName, int? ArgLength, string? CallerParam,
+        int? CallStatementId, QSpan? Span);
 
     /// <summary>Where <see cref="CheckCall"/> deposits <see cref="ArrayCallFact"/>s: the calling op's Id plus
     /// the per-run shared list. Null when the callee is not a user operation (built-in gates take no
@@ -640,20 +707,25 @@ public static class QoraValidator
                     // a write inside the operation would silently never reach the caller.
                     if (target is { Kind: SymbolKind.Parameter, Type: QType.Bit, IsArray: true })
                         Add(ctx.Errors, "QSEM032", $"in `{opName}`: parameter `{a.Name}` is a `bit[]`, which is read-only inside an operation (OpenQASM passes bit registers by value, so the write would silently stay local); measure into a local bit[] instead, or pass `int[]` if the caller must see updates", a.Span);
-                    // QSEM038 — every ordinary parameter binding is read-only. A supported classical array
-                    // becomes writable only when its declaration explicitly says `inout`; the symbol carries
-                    // that access mode, so a shadowing local with the same source name is unaffected.
+                    // QSEM038 — every parameter binding is read-only unless its independent access axis is
+                    // `Mutable`. Ownership does not imply write permission: `move xs` consumes the caller's
+                    // binding but still presents a read-only binding inside the callee.
                     else if (target is
                              {
                                  Kind: SymbolKind.Parameter,
                                  Type: { } parameterType,
-                                 ParameterMode: not QParameterMode.InOut
+                                 ParameterAccess: not QAccessMode.Mutable
                              }
                              && parameterType != QType.Qubit)
+                    {
+                        var mutableContract = target.ParameterOwnership == QOwnershipMode.Moved
+                            ? "move var"
+                            : "var";
                         Add(ctx.Errors, "QSEM038", target.IsArray
-                            ? $"in `{opName}`: parameter `{a.Name}` is read-only; declare it as `inout {a.Name}: {TypeName(parameterType)}[]` and mark matching call arguments with `inout` if caller-visible array mutation is intended"
-                            : $"in `{opName}`: parameter `{a.Name}` is read-only and cannot be reassigned; copy it into a local `var` before changing the value",
+                                ? $"in `{opName}`: parameter `{a.Name}` is read-only; declare it as `{mutableContract} {a.Name}: {TypeName(parameterType)}[]` and mark matching call arguments with `{mutableContract}` if mutation is intended"
+                                : $"in `{opName}`: parameter `{a.Name}` is read-only and cannot be reassigned; copy it into a local `var` before changing the value",
                             a.Span);
+                    }
                     if (target is { IsArray: true } && a.Index is null)
                         Add(ctx.Errors, "QSEM029", $"in `{opName}`: whole-array assignment to `{a.Name}` is not supported; assign one element with `{a.Name}[i] = value`", a.Span);
                     if (a.Index is not null)
@@ -932,7 +1004,13 @@ public static class QoraValidator
     /// A resolved user function follows its program symbol's declaring operation Id, the same lookup
     /// <see cref="ExpressionTypes"/> uses for its return type.
     /// </summary>
-    private static bool CheckExprCalls(QNode? tree, Scope scope, Ctx ctx, string opName, QSpan? span)
+    private static bool CheckExprCalls(
+        QNode? tree,
+        Scope scope,
+        Ctx ctx,
+        string opName,
+        QSpan? span,
+        int? owningStatementId = null)
     {
         var allValid = true;
         foreach (var c in QNodes.CallsIn(tree))
@@ -957,7 +1035,8 @@ public static class QoraValidator
                 // the identical call written as a statement was rejected. Each argument is wrapped as the
                 // value-shaped QTextArg it is: an expression-position call has no qubit-operand form.
                 CheckCall(callee, c.Args.Select(a => (QArg)new QTextArg(a)).ToList(), "",
-                    scope, opName, ctx.Errors, span, ctx, ctx.Floors);
+                    scope, opName, ctx.Errors, span, ctx, ctx.Floors,
+                    statementId: owningStatementId);
             else if (QoraGates.MeasureLike.Contains(c.Name))
                 Add(ctx.Errors, "QSEM005", $"in `{opName}`: a measurement `M(q[i])` can only be a whole assignment (`var r: bit = M(q[i]);`), never part of a larger expression", span);
             else if ((c.CalleeOpId
@@ -1091,19 +1170,39 @@ public static class QoraValidator
     {
         var opName = ctx.Op.DisplayName ?? ctx.Op.Name;
         var errors = ctx.Errors;
+        // Capture before argument-expression and bounds checks. A move/floor fact belongs only to a call
+        // whose entire argument list is valid, not merely to one that added no further error in CheckCall.
+        var callErrorCountBeforeChecks = errors.Count;
 
         // A gate argument may contain a FUNCTION call (`Rx(angleOf(k), q[0])` — a classical value); a
         // measurement or operation call there has no OpenQASM form. CheckExprCalls sorts them out.
         foreach (var arg in g.Args)
             if (arg is QTextArg { Tree: { } argTree, HasCall: true })
-                CheckExprCalls(argTree, scope, ctx, opName, g.Span);
+                CheckExprCalls(argTree, scope, ctx, opName, g.Span, g.Id);
 
-        // QSEM016/030 — an index must be provably in bounds.
+        // A proven bad index is QSEM016 here; an otherwise valid but unproven index is only recorded for
+        // target policy (OpenQASM later turns that ledger entry into QSEM030). The latter does not invalidate
+        // the language-level call or cancel an ownership transfer: a checked-access backend may execute it.
         foreach (var arg in g.Args)
             if (arg is QQubitArg qa)
-                CheckIndexedAccess(qa.Reg, qa.Index, scope, opName, ctx, g.Span, bounds);
+                CheckIndexedAccess(
+                    qa.Reg,
+                    qa.Index,
+                    scope,
+                    opName,
+                    ctx,
+                    g.Span,
+                    bounds,
+                    owningStatementId: g.Id);
             else if (arg is QTextArg text)
-                CheckTextIndexes(text.Tree, scope, opName, ctx, g.Span, bounds);
+                CheckTextIndexes(
+                    text.Tree,
+                    scope,
+                    opName,
+                    ctx,
+                    g.Span,
+                    bounds,
+                    owningStatementId: g.Id);
 
         // QSEM014 — the same qubit twice in one gate. Whole registers count: `CNOT(q, q)` broadcasts to
         // duplicate operands, and `CNOT(q, q[0])` overlaps the register with its own element. Indexes are
@@ -1119,22 +1218,25 @@ public static class QoraValidator
             .Select(r => (r!.Value.Reg, r.Value.Index,
                 Domain: r.Value.Index is { } idx ? IndexDomain(idx, scope, bounds, ctx.WillBeRechecked) : null))
             .ToList();
-        if (GateNeverRuns(refs, scope, bounds)) return;   // gate inside a provably-empty loop — never emitted, no aliasing possible
-        for (var ai = 0; ai < refs.Count; ai++)
-            for (var bi = ai + 1; bi < refs.Count; bi++)
-            {
-                var (aReg, aIdx, aDom) = refs[ai];
-                var (bReg, bIdx, bDom) = refs[bi];
-                if (aReg != bReg) continue;
-                if (aIdx is null || bIdx is null)   // a whole register overlaps anything on it (or another whole)
-                    Add(errors, "QSEM014", aIdx is null && bIdx is null
-                        ? $"in `{opName}`: `{g.Name}` receives the qubit `{aReg}` more than once; gate operands must be distinct"
-                        : $"in `{opName}`: `{g.Name}` receives the register `{aReg}` and one of its own qubits; operands must not overlap", g.Span);
-                else if (aDom is { } da && bDom is { } db ? da.Lo <= db.Hi && db.Lo <= da.Hi : aIdx == bIdx)
-                    Add(errors, "QSEM014", $"in `{opName}`: `{g.Name}` receives the qubit `{Show(aReg, aIdx)}` more than once; gate operands must be distinct", g.Span);
-                else continue;
-                return;   // one aliasing pair is enough — one diagnostic per gate
-            }
+        // An empty loop makes runtime aliasing impossible, but it does not make malformed source valid:
+        // continue through callee, type, and ownership-contract checks below. Only the execution-dependent
+        // alias verdict is skipped.
+        if (!GateNeverRuns(refs, scope, bounds))
+            for (var ai = 0; ai < refs.Count; ai++)
+                for (var bi = ai + 1; bi < refs.Count; bi++)
+                {
+                    var (aReg, aIdx, aDom) = refs[ai];
+                    var (bReg, bIdx, bDom) = refs[bi];
+                    if (aReg != bReg) continue;
+                    if (aIdx is null || bIdx is null)   // a whole register overlaps anything on it (or another whole)
+                        Add(errors, "QSEM014", aIdx is null && bIdx is null
+                            ? $"in `{opName}`: `{g.Name}` receives the qubit `{aReg}` more than once; gate operands must be distinct"
+                            : $"in `{opName}`: `{g.Name}` receives the register `{aReg}` and one of its own qubits; operands must not overlap", g.Span);
+                    else if (aDom is { } da && bDom is { } db ? da.Lo <= db.Hi && db.Lo <= da.Hi : aIdx == bIdx)
+                        Add(errors, "QSEM014", $"in `{opName}`: `{g.Name}` receives the qubit `{Show(aReg, aIdx)}` more than once; gate operands must be distinct", g.Span);
+                    else continue;
+                    return;   // one aliasing pair is enough — one diagnostic per gate
+                }
 
         // QSEM009 — the entry op is emitted as the QASM top level, not as a def: nothing can call it.
         if (g.Name == ctx.EntryName)
@@ -1159,6 +1261,15 @@ public static class QoraValidator
                 return;
             }
 
+            // Ownership transfer has no inverse: reversing this call cannot restore the caller's consumed
+            // binding. The callee body may itself be unitary, but this particular invocation is directional.
+            if (g.Functors.FirstOrDefault() == "Adjoint"
+                && g.Args.Any(argument => argument.Ownership == QOwnershipMode.Moved))
+            {
+                Add(errors, "QSEM001", $"in `{opName}`: `Adjoint {g.Name}` cannot transfer ownership; an inverse call cannot restore a binding consumed by `move`", g.Span);
+                return;
+            }
+
             // QSEM001 — Adjoint on a user operation compiles to a synthesized inverse def, which must exist.
             if (g.Functors.FirstOrDefault() == "Adjoint" && !ctx.Inverter.TryInvertOperation(g.Name, out _, out var reason))
             {
@@ -1172,7 +1283,8 @@ public static class QoraValidator
             var callee = g.CalleeOpId is int cid && ctx.OpById.TryGetValue(cid, out var byId) ? byId
                        : ctx.OpByName.GetValueOrDefault(g.Name);
             if (callee is not null)
-                CheckCall(callee, g.Args, "", scope, opName, errors, g.Span, ctx, ctx.Floors);
+                CheckCall(callee, g.Args, "", scope, opName, errors, g.Span, ctx, ctx.Floors, g.Id,
+                    callErrorCountBeforeChecks);
             return;
         }
 
@@ -1197,7 +1309,8 @@ public static class QoraValidator
         var gateSig = QoraGates.SigOf(g.Name, g.Functors.Contains("Controlled") ? 1 : 0);
         if (gateSig is not null)
             CheckCall(gateSig, g.Args, g.Functors.Count > 0 ? string.Join(" ", g.Functors) + " " : "",
-                scope, opName, errors, g.Span, ctx);
+                scope, opName, errors, g.Span, ctx, statementId: g.Id,
+                initialErrorCount: callErrorCountBeforeChecks);
     }
 
     /// <summary>
@@ -1212,9 +1325,11 @@ public static class QoraValidator
     /// </summary>
     private static void CheckCall(ICallableSig sig, IReadOnlyList<QArg> args, string functorPrefix,
         Scope scope, string opName, List<QoraError> errors, QSpan? span,
-        Ctx ctx, ArrayFloorSink? floors = null)
+        Ctx ctx, ArrayFloorSink? floors = null, int? statementId = null, int? initialErrorCount = null)
     {
         var calleeName = sig.CalleeName;
+        var calleeContractValid = sig is not QOperation declared
+                                  || declared.Params.All(parameter => ParameterContractSupported(declared, parameter));
 
         void CheckScalarType(IParamSpec parameter, QText value)
         {
@@ -1246,38 +1361,75 @@ public static class QoraValidator
             return;
         }
 
-        // Only slots whose type, visible mode, and borrowing permission all succeed become alias
-        // candidates. A failed call therefore does not cascade into QSEM014 on a borrow that was never valid.
-        var validArrayAccesses = new List<(IParamSpec Parameter, Symbol Symbol)>();
+        var callErrorCount = initialErrorCount ?? errors.Count;
+        // Only slots whose type, visible contract, and source permission all succeed become storage
+        // candidates. A failed call therefore cannot cascade into QSEM014 or consume ownership.
+        var validStorageAccesses = new List<(IParamSpec Parameter, Symbol Symbol)>();
+        var movedCandidates = new List<Symbol>();
+        var pendingFloorFacts = new List<ArrayCallFact>();
+        void RecordStorageViews(IParamSpec parameter, QArg argument)
+        {
+            foreach (var symbol in ArgumentStorageSymbols(argument, scope))
+                validStorageAccesses.Add((parameter, symbol));
+        }
 
         for (var i = 0; i < sig.Params.Count; i++)
         {
             var p = sig.Params[i];
             var arg = args[i];
             var argSym = WholeArgumentSymbol(arg, scope);
-            var modeMatches = p.Mode == arg.Mode;
+            var contractMatches = p.Ownership == arg.Ownership && p.Access == arg.Access;
 
-            // An inout argument denotes one caller-owned binding, never a temporary, element, or computed
-            // expression. Diagnose that malformed borrow once, before comparing it with the formal mode.
-            if (arg.Mode == QParameterMode.InOut
+            // A non-default marker always denotes one WHOLE storage binding. `var` is the narrow
+            // reference-capable classical-array path; `move` additionally accepts whole qubit bindings and
+            // read-only bit arrays. Indexed elements and computed expressions never own their base storage.
+            if (arg.Ownership == QOwnershipMode.Moved
+                && argSym is not { IsArray: true } and not { Type: QType.Qubit })
+            {
+                Add(errors, "QSEM038", $"in `{opName}`: a `move` argument of `{calleeName}` must name a whole array or whole qubit binding, not a Copy scalar, indexed element, or computed expression", span);
+                continue;
+            }
+            if (arg.Access == QAccessMode.Mutable
                 && argSym is not
                    {
                        IsArray: true,
                        Type: QType.Int or QType.Float or QType.Angle
                    })
             {
-                Add(errors, "QSEM038", $"in `{opName}`: an `inout` argument of `{calleeName}` must name a whole `int[]`, `float[]`, or `angle[]` binding, not a scalar, bit/qubit value, indexed element, or computed expression", span);
+                Add(errors, "QSEM038", $"in `{opName}`: a `{ContractSyntax(arg.Ownership, arg.Access)}` argument of `{calleeName}` must name a whole `int[]`, `float[]`, or `angle[]` binding; mutable scalar, bit, and qubit parameters are not supported", span);
                 continue;
             }
 
             // The declaration and call site must visibly agree. This is checked for every callable,
-            // including built-ins: `inout` is a permission transfer, not decorative syntax that may be
-            // silently ignored. Expression-position function calls naturally carry ordinary `In` args.
-            if (!modeMatches)
-                Add(errors, "QSEM038", p.Mode == QParameterMode.InOut
-                    ? $"in `{opName}`: parameter `{p.Name}` of `{calleeName}` is `inout`; pass its argument as `inout name`"
-                    : $"in `{opName}`: parameter `{p.Name}` of `{calleeName}` is read-only; remove `inout` from this argument",
+            // including built-ins: ownership and write permission are contracts, not decorative syntax.
+            if (!contractMatches)
+                Add(errors, "QSEM038",
+                    $"in `{opName}`: parameter `{p.Name}` of `{calleeName}` requires `{ContractSyntax(p.Ownership, p.Access)}`, but the argument uses `{ContractSyntax(arg.Ownership, arg.Access)}`; make the declaration and call-site markers match",
                     span);
+
+            var permissionValid = contractMatches;
+            if (contractMatches
+                && p.Ownership == QOwnershipMode.Moved
+                && argSym is { Kind: SymbolKind.Parameter, ParameterOwnership: not QOwnershipMode.Moved })
+            {
+                Add(errors, "QSEM038", $"in `{opName}`: borrowed parameter `{argSym.SourceName}` cannot be forwarded with `move` to `{p.Name}` of `{calleeName}`; only an owned (`move`) parameter may transfer ownership onward", span);
+                permissionValid = false;
+            }
+            else if (contractMatches
+                     && p.Access == QAccessMode.Mutable
+                     && p.Ownership == QOwnershipMode.Borrowed
+                     && argSym?.IsConst == true)
+            {
+                Add(errors, "QSEM024", $"in `{opName}`: `{argSym.SourceName}` is const and cannot be passed as a mutable `var` borrow to `{p.Name}` of `{calleeName}`; moving the binding is a separate ownership operation", span);
+                permissionValid = false;
+            }
+            else if (contractMatches
+                     && p.Access == QAccessMode.Mutable
+                     && argSym is { Kind: SymbolKind.Parameter, ParameterAccess: not QAccessMode.Mutable })
+            {
+                Add(errors, "QSEM038", $"in `{opName}`: parameter `{argSym.SourceName}` is read-only and cannot be forwarded to mutable parameter `{p.Name}` of `{calleeName}`", span);
+                permissionValid = false;
+            }
 
             if (p.Type != QType.Qubit)
             {
@@ -1288,18 +1440,10 @@ public static class QoraValidator
                         Add(errors, "QSEM006", $"in `{opName}`: parameter `{p.Name}` of `{calleeName}` expects `{TypeName(p.Type)}[]`, but the argument is not a classical array", span);
                     else if (actualType != p.Type)
                         Add(errors, "QSEM006", $"in `{opName}`: parameter `{p.Name}` of `{calleeName}` expects `{TypeName(p.Type)}[]`, but `{argSym.SourceName}` is `{TypeName(actualType)}[]`", span);
-                    else if (!modeMatches)
+                    else if (!permissionValid)
                     {
                         // The QSEM038 above owns this slot. It cannot establish a valid floor or alias fact.
                     }
-                    // Permission checks apply after the visible declaration/call-site modes agree. This keeps
-                    // a missing marker a single QSEM038, while a correctly marked const borrow retains the
-                    // established, more specific QSEM024 ownership diagnostic.
-                    else if (p.Mode == QParameterMode.InOut && argSym.IsConst)
-                        Add(errors, "QSEM024", $"in `{opName}`: `{argSym.SourceName}` is a const array and cannot be passed to mutable parameter `{p.Name}` of `{calleeName}`", span);
-                    else if (p.Mode == QParameterMode.InOut
-                             && argSym is { Kind: SymbolKind.Parameter, ParameterMode: not QParameterMode.InOut })
-                        Add(errors, "QSEM038", $"in `{opName}`: parameter `{argSym.SourceName}` is read-only and cannot be forwarded to `inout` parameter `{p.Name}` of `{calleeName}`", span);
                     // Rung B'/P4 — record this array argument as DATA. A `T[]` parameter carries no length of
                     // its own (it arrives with the argument), so the callee's minimum-length requirement can
                     // only be checked at a call. The check itself happens AFTER the walk, against the
@@ -1307,11 +1451,12 @@ public static class QoraValidator
                     // handing our own parameter through is a PROPAGATION fact (the callee's need becomes ours).
                     else
                     {
-                        validArrayAccesses.Add((p, argSym));
+                        RecordStorageViews(p, arg);
+                        if (p.Ownership == QOwnershipMode.Moved) movedCandidates.Add(argSym);
                         if (floors is not null && sig is QOperation calleeOp)
-                            floors.Calls.Add(argSym.ArrayLength is int have
-                                ? new ArrayCallFact(floors.CallerOpId, opName, calleeOp.Id, calleeName, p.Name, argSym.SourceName, have, null, span)
-                                : new ArrayCallFact(floors.CallerOpId, opName, calleeOp.Id, calleeName, p.Name, argSym.SourceName, null, argSym.SourceName, span));
+                            pendingFloorFacts.Add(argSym.ArrayLength is int have
+                                ? new ArrayCallFact(floors.CallerOpId, opName, calleeOp.Id, calleeName, p.Name, argSym.SourceName, have, null, statementId, span)
+                                : new ArrayCallFact(floors.CallerOpId, opName, calleeOp.Id, calleeName, p.Name, argSym.SourceName, null, argSym.SourceName, statementId, span));
                     }
                     continue;
                 }
@@ -1325,14 +1470,18 @@ public static class QoraValidator
                 if (arg is QQubitArg indexed
                     && scope.Lookup(indexed.Reg) is { IsArray: true, Type: not QType.Qubit })
                 {
+                    var typeErrorCount = errors.Count;
                     CheckScalarType(
                         p,
                         new QText(new QIndexNode(new QNameRef(indexed.Reg), indexed.Index)));
+                    if (permissionValid && errors.Count == typeErrorCount)
+                        RecordStorageViews(p, arg);
                     continue;
                 }
                 // VALUE slot (rotation angle, or classical param): a qubit here is wrong. A classical array
                 // element was accepted above; a whole qubit or indexed qubit is QSEM006, while a qubit buried
                 // inside a classical expression such as `pi / q` is QSEM026.
+                var scalarTypeErrorCount = errors.Count;
                 if (IsQubitLike(arg, scope) || arg is QQubitArg)
                     Add(errors, "QSEM006", sig.IsBuiltin
                         ? $"in `{opName}`: the first argument of `{calleeName}` is the rotation angle, but a qubit was passed (write `{calleeName}(angle, qubit)`)"
@@ -1341,6 +1490,8 @@ public static class QoraValidator
                     Add(errors, "QSEM026", $"in `{opName}`: `{qn}` is a qubit, but `{QNodes.Render(vt.Tree)}` is used as a classical value ({(sig.IsBuiltin ? "the rotation angle" : $"the `{p.Name}` argument")} of `{calleeName}`) — a qubit has no numeric value", span);
                 else if (arg is QTextArg scalar)
                     CheckScalarType(p, new QText(scalar.Tree));
+                if (permissionValid && errors.Count == scalarTypeErrorCount)
+                    RecordStorageViews(p, arg);
             }
             else if (p.QubitBroadcast)
             {
@@ -1350,15 +1501,23 @@ public static class QoraValidator
             }
             else if (p.IsQubitArray)
             {
+                var typeErrorCount = errors.Count;
                 if (arg is QQubitArg qa)
                     Add(errors, "QSEM006", $"in `{opName}`: parameter `{p.Name}` of `{calleeName}` is a qubit array, but `{qa.Reg}[{QNodes.Render(qa.Index)}]` is a single qubit", span);
                 else if (arg is QTextArg tb && !IsQubitArray(argSym))
                     Add(errors, "QSEM006", $"in `{opName}`: parameter `{p.Name}` of `{calleeName}` is a qubit register, but `{QNodes.Render(tb.Tree)}` is not one", span);
                 else if (p.RegisterSize is int need && IsSizedRegister(argSym, out var have) && have != need)
                     Add(errors, "QSEM006", $"in `{opName}`: internal specialization `{calleeName}` expects {need} qubit(s) for `{p.Name}`, but the argument has {have}", span);
+                if (permissionValid && errors.Count == typeErrorCount)
+                {
+                    RecordStorageViews(p, arg);
+                    if (p.Ownership == QOwnershipMode.Moved && argSym is { Type: QType.Qubit })
+                        movedCandidates.Add(argSym);
+                }
             }
             else
             {
+                var typeErrorCount = errors.Count;
                 // single-qubit slot (user op)
                 if (arg is QQubitArg indexed && !IsQubit(scope.Lookup(indexed.Reg)))
                     Add(errors, "QSEM006", $"in `{opName}`: parameter `{p.Name}` of `{calleeName}` is a qubit, but `{indexed.Reg}[{QNodes.Render(indexed.Index)}]` is a classical array element", span);
@@ -1366,19 +1525,70 @@ public static class QoraValidator
                     Add(errors, "QSEM006", IsQubitArray(argSym)
                         ? $"in `{opName}`: parameter `{p.Name}` of `{calleeName}` is a single qubit, but `{QNodes.Render(ta.Tree)}` is a whole register (pass `{QNodes.Render(ta.Tree)}[i]`)"
                         : $"in `{opName}`: parameter `{p.Name}` of `{calleeName}` is a qubit, but `{QNodes.Render(ta.Tree)}` is not one", span);
+                if (permissionValid && errors.Count == typeErrorCount)
+                {
+                    RecordStorageViews(p, arg);
+                    if (p.Ownership == QOwnershipMode.Moved && argSym is { Type: QType.Qubit })
+                        movedCandidates.Add(argSym);
+                }
             }
         }
 
-        // Ordinary read-only slots may share storage. Once ANY slot in a same-storage group is `inout`,
-        // however, its exclusive mutable borrow cannot coexist with another mutable OR read-only view for
-        // the duration of the call. Group by resolved SymbolId, never source spelling: shadowed bindings with
-        // the same name are different storage, while every spelling of one binding has the same identity.
-        var overlappingArray = validArrayAccesses
+        // Alias checking is a property of an otherwise valid call. If another argument already failed,
+        // reporting an overlap among the remaining slots would be a consequence of a call that never
+        // existed semantically. Declaration errors recorded before this walk are included through the
+        // statement ledger, while late array-floor failures invalidate the committed facts afterwards.
+        var otherwiseValid = errors.Count == callErrorCount
+                             && calleeContractValid
+                             && (statementId is not int checkedStatement
+                                 || !ctx.InvalidOwnershipStatements.Contains(checkedStatement));
+        if (!otherwiseValid) return;
+
+        // Ordinary read-only borrows may share storage. A mutable borrow or ownership transfer is exclusive
+        // for the call. Group by resolved SymbolId, never spelling: shadowed names are different storage.
+        var overlappingStorage = validStorageAccesses
             .GroupBy(x => x.Symbol.Id)
             .FirstOrDefault(group => group.Count() > 1
-                                     && group.Any(x => x.Parameter.Mode == QParameterMode.InOut));
-        if (overlappingArray is not null)
-            Add(errors, "QSEM014", $"in `{opName}`: `{calleeName}` receives `{overlappingArray.First().Symbol.SourceName}` through multiple array parameters while at least one is `inout`; an `inout` array cannot overlap another read or write view in the same call", span);
+                                     && group.Any(x => x.Parameter.Access == QAccessMode.Mutable
+                                                       || x.Parameter.Ownership == QOwnershipMode.Moved));
+        if (overlappingStorage is not null)
+        {
+            Add(errors, "QSEM014", $"in `{opName}`: `{calleeName}` receives `{overlappingStorage.First().Symbol.SourceName}` through multiple parameters while at least one access is mutable or moved; exclusive access cannot overlap another view in the same call", span);
+            return;
+        }
+
+        // Ownership and propagated array requirements are committed atomically only after the full call,
+        // including exclusivity, is valid.
+        if (floors is not null && pendingFloorFacts.Count > 0)
+            floors.Calls.AddRange(pendingFloorFacts);
+        if (statementId is int id && movedCandidates.Count > 0)
+            ctx.ValidMoves[id] = movedCandidates
+                .GroupBy(symbol => symbol.Id)
+                .Select(group => group.First())
+                .ToList();
+    }
+
+    private static string ContractSyntax(QOwnershipMode ownership, QAccessMode access) =>
+        (ownership, access) switch
+        {
+            (QOwnershipMode.Borrowed, QAccessMode.Mutable) => "var name",
+            (QOwnershipMode.Moved, QAccessMode.ReadOnly) => "move name",
+            (QOwnershipMode.Moved, QAccessMode.Mutable) => "move var name",
+            _ => "plain name",
+        };
+
+    private static bool ParameterContractSupported(QOperation operation, QParam parameter)
+    {
+        if (parameter is { Ownership: QOwnershipMode.Borrowed, Access: QAccessMode.ReadOnly })
+            return true;
+        if (operation.IsFunction) return false;
+        if (parameter.Access == QAccessMode.Mutable
+            && (!parameter.IsArray
+                || parameter.Type is not (QType.Int or QType.Float or QType.Angle)))
+            return false;
+        return parameter.Ownership != QOwnershipMode.Moved
+               || parameter.IsArray
+               || parameter.Type == QType.Qubit;
     }
 
     // --- qubit-shape queries over the unified symbol table ---
@@ -1443,6 +1653,66 @@ public static class QoraValidator
 
     private static Symbol? WholeArgumentSymbol(QArg arg, Scope scope) =>
         arg is QTextArg text && BareName(text) is { } name ? scope.Lookup(name) : null;
+
+    /// <summary>
+    /// Every storage binding an argument observes, reduced to stable identity. This is broader than
+    /// <see cref="WholeArgumentSymbol"/>: <c>xs[i]</c>, <c>xs.Count</c>, and expressions containing either
+    /// still view <c>xs</c>. A same-call <c>move xs</c> or <c>var xs</c> must therefore conflict with those
+    /// views even though only the exclusive slot names the whole binding.
+    /// </summary>
+    private static IReadOnlyList<Symbol> ArgumentStorageSymbols(QArg arg, Scope scope)
+    {
+        var found = new Dictionary<SymbolId, Symbol>();
+
+        void AddName(string name)
+        {
+            if (scope.Lookup(name) is { } symbol
+                && (symbol.IsArray || symbol.Type == QType.Qubit))
+                found.TryAdd(symbol.Id, symbol);
+        }
+
+        void Walk(QNode? node)
+        {
+            switch (node)
+            {
+                case null or QNumLit or QLit:
+                    break;
+                case QNameRef name:
+                    AddName(name.Name);
+                    break;
+                case QUnary unary:
+                    Walk(unary.Operand);
+                    break;
+                case QBinOp binary:
+                    Walk(binary.Left);
+                    Walk(binary.Right);
+                    break;
+                case QMember member:
+                    Walk(member.Base);
+                    break;
+                case QIndexNode index:
+                    Walk(index.Base);
+                    Walk(index.Index);
+                    break;
+                case QCallNode call:
+                    foreach (var argument in call.Args) Walk(argument);
+                    break;
+            }
+        }
+
+        switch (arg)
+        {
+            case QQubitArg indexed:
+                AddName(indexed.Reg);
+                Walk(indexed.Index);
+                break;
+            case QTextArg text:
+                Walk(text.Tree);
+                break;
+        }
+
+        return found.Values.ToList();
+    }
 
     private static void CheckExprIndexes(
         QExpr expr,
@@ -1582,12 +1852,21 @@ public static class QoraValidator
         string opName,
         Ctx ctx,
         QSpan? span,
-        BoundsCtx bounds = default)
+        BoundsCtx bounds = default,
+        int? owningStatementId = null)
     {
         switch (tree)
         {
             case QIndexNode { Base: QNameRef b } acc:
-                var indexed = CheckIndexedAccess(b.Name, acc.Index, scope, opName, ctx, span, bounds);
+                var indexed = CheckIndexedAccess(
+                    b.Name,
+                    acc.Index,
+                    scope,
+                    opName,
+                    ctx,
+                    span,
+                    bounds,
+                    owningStatementId);
                 if (scope.Lookup(b.Name) is { Type: QType.Qubit })
                 {
                     Add(ctx.Errors, "QSEM026", $"in `{opName}`: `{b.Name}[{QNodes.Render(acc.Index)}]` is a qubit and cannot be used as a classical value", span);
@@ -1595,19 +1874,54 @@ public static class QoraValidator
                 }
                 return indexed;
             case QBinOp bin:
-                var left = CheckTextIndexes(bin.Left, scope, opName, ctx, span, bounds);
-                var right = CheckTextIndexes(bin.Right, scope, opName, ctx, span, bounds);
+                var left = CheckTextIndexes(
+                    bin.Left,
+                    scope,
+                    opName,
+                    ctx,
+                    span,
+                    bounds,
+                    owningStatementId);
+                var right = CheckTextIndexes(
+                    bin.Right,
+                    scope,
+                    opName,
+                    ctx,
+                    span,
+                    bounds,
+                    owningStatementId);
                 return MergeIndexResults(left, right);
             case QUnary u:
-                return CheckTextIndexes(u.Operand, scope, opName, ctx, span, bounds);
+                return CheckTextIndexes(
+                    u.Operand,
+                    scope,
+                    opName,
+                    ctx,
+                    span,
+                    bounds,
+                    owningStatementId);
             case QMember m:
-                return CheckTextIndexes(m.Base, scope, opName, ctx, span, bounds);
+                return CheckTextIndexes(
+                    m.Base,
+                    scope,
+                    opName,
+                    ctx,
+                    span,
+                    bounds,
+                    owningStatementId);
             case QCallNode c:
                 var calls = IndexCheckResult.Proven;
                 foreach (var callArg in c.Args)
                     calls = MergeIndexResults(
                         calls,
-                        CheckTextIndexes(callArg, scope, opName, ctx, span, bounds));
+                        CheckTextIndexes(
+                            callArg,
+                            scope,
+                            opName,
+                            ctx,
+                            span,
+                            bounds,
+                            owningStatementId));
                 return calls;
             default:
                 return IndexCheckResult.Proven;
@@ -1633,7 +1947,8 @@ public static class QoraValidator
         string opName,
         Ctx ctx,
         QSpan? span,
-        BoundsCtx bounds = default)
+        BoundsCtx bounds = default,
+        int? owningStatementId = null)
     {
         var errors = ctx.Errors;
         var unproven = ctx.Unproven;
@@ -1648,9 +1963,22 @@ public static class QoraValidator
         // the outer base's array shape, and the whole index's scalar-int type. A malformed child makes only
         // the OUTER bounds question meaningless; it must not hide a sibling call error or a scalar-base/type
         // error that remains true after the child is fixed.
-        var nestedResult = CheckTextIndexes(indexNode, scope, opName, ctx, span, bounds);
+        var nestedResult = CheckTextIndexes(
+            indexNode,
+            scope,
+            opName,
+            ctx,
+            span,
+            bounds,
+            owningStatementId);
         var callsValid = !QNodes.ContainsCall(indexNode)
-                         || CheckExprCalls(indexNode, scope, ctx, opName, span);
+                         || CheckExprCalls(
+                             indexNode,
+                             scope,
+                             ctx,
+                             opName,
+                             span,
+                             owningStatementId);
 
         var symbol = scope.Lookup(name);
         if (symbol is { IsArray: false })

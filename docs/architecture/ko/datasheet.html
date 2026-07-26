@@ -136,7 +136,7 @@
       <div><dt>방출 타깃</dt><dd>OpenQASM 3.0</dd></div>
       <div><dt>실행 검증 오라클</dt><dd>Amazon Braket LocalSimulator (전체 언어 실행)</dd></div>
       <div><dt>중심 자료구조</dt><dd>강타입 IR(<code>QProgram</code>) + 지속 <code>SemanticModel</code></dd></div>
-      <div><dt>문서 버전</dt><dd>Qora v0.29 기준</dd></div>
+      <div><dt>문서 버전</dt><dd>Qora v0.30 기준</dd></div>
     </dl>
   </section>
 
@@ -176,14 +176,16 @@
     <div class="arr">▼ Janglim 파싱</div>
     <div class="stg"><div class="box"><b>AST</b> <span class="d">— 엔진 문법 트리 (이후 읽기만)</span></div></div>
     <div class="arr">▼ QoraLowering</div>
-    <div class="stg"><div class="box"><b>QoraIR</b> <span class="d">— 강타입 노드 <code>QProgram</code> (안정 Id 발급)</span></div></div>
+    <div class="stg"><div class="box"><b>Qora HIR</b> <span class="d">— 소스 구조를 보존하는 강타입 <code>QProgram</code> (안정 Id 발급)</span></div></div>
     <div class="arr">▼ ModuleLoader → MeasureConditionLowering → Resolver</div>
-    <div class="stg"><div class="box"><b>해소된 IR</b> <span class="d">— import 병합, 측정-조건 desugar, 이름 FQN화</span></div></div>
+    <div class="stg"><div class="box"><b>해소된 HIR</b> <span class="d">— import 병합, 측정-조건 desugar, 이름 FQN화</span></div></div>
     <div class="arr">▼ QoraValidator + QASM 범위 정책 → Monomorphizer → 재검증 + 정책</div>
-    <div class="stg"><div class="box key"><b>검증된 · 특수화된 IR</b> <span class="d">— ★ 마지막 검증의 <strong>SemanticModel</strong> 유지</span></div></div>
+    <div class="stg"><div class="box key"><b>검증된 · 특수화된 HIR</b> <span class="d">— ★ 마지막 검증의 <strong>SemanticModel</strong> 유지</span></div></div>
     <div class="arr">▼ EffectAnalysis (rung ①)</div>
     <div class="stg"><div class="box"><b>+ 큐빗이벤트 / 요약</b> <span class="d">— 모델에 적재 (IR 무변경)</span></div></div>
-    <div class="arr">▼ ConjugationLowering → AdjointMaterializer → NameMangler → ReferentialCheck → OpenQasmLowering</div>
+    <div class="arr">▼ ConjugationLowering → QoraMirLowering → QoraMirVerifier → CFG·경로·저장소 provenance 분석 → MirEffectAnalysis</div>
+    <div class="stg"><div class="box key"><b>Qora MIR</b> <span class="d">— 기본 블록, SSA 값, 배열 상태·별칭 계약, 큐빗 리소스와 효과 witness</span></div></div>
+    <div class="arr">▼ 현재 전환 단계: 검증된 MIR은 분석용으로 보존하고, 기존 HIR을 AdjointMaterializer → NameMangler → ReferentialCheck → OpenQasmLowering으로 전달</div>
     <div class="stg"><div class="box"><b>방출용 IR</b> <span class="d">— within/apply 평탄화, 역연산 실체화, 이름 맹글링, Id 무결성</span></div></div>
     <div class="arr">▼ QasmEmitter</div>
     <div class="stg"><div class="box"><b>OpenQASM 3</b> <span class="d">— 순수 프린터 출력</span></div></div>
@@ -194,6 +196,18 @@
     모노모피제이션이 제네릭 레지스터 크기를 확정하므로, 크기 의존 검사(인덱스 범위·레지스터 크기 일치)는 크기가
     정해진 뒤에야 정확하게 실행될 수 있습니다. 그래서 검증은 <strong>기저 IR에서 1회, 특수화 후 1회</strong> 수행되며,
     <strong>마지막 검증 결과가 SemanticModel을 소유</strong>합니다.
+  </div>
+
+  <div class="call">
+    <span class="h">HIR과 MIR을 분리하는 이유</span>
+    HIR은 네임스페이스·선언·조건문·루프처럼 사용자가 작성한 구조를 보존하므로,
+    이름 해소와 언어 규칙 진단에 적합합니다.<br>
+    반면에 MIR은 모든 고전 값의 대입을 새 <code>MirValueId</code>로 만들고,
+    분기 합류점에는 블록 인수(Phi)를 둡니다.<br>
+    따라서 같은 변수에 새 값을 대입해도 이전 값의 Id가 바뀌지 않으며,
+    자동 cleanup은 소스 이름을 다시 찾지 않고 정방향 실행에서 사용한 정확한 값 버전을 참조할 수 있습니다.<br>
+    배열은 스칼라와 달리 저장소가 실제로 변경되므로, <code>MirMemoryStateAnalysis</code>가
+    SSA 지배 관계와 별개로 과거 배열 상태가 청소 지점까지 남아 있는지 계산합니다.
   </div>
 
   <div class="call">
@@ -209,13 +223,13 @@
 
   <!-- ============ 2 ============ -->
   <h2 id="s2"><span class="n">2</span>패스 카탈로그</h2>
-  <p>각 패스는 IR을 읽거나 IR→IR로 변환합니다.<br>
+  <p>앞단 패스는 소스 구조를 보존하는 HIR을 처리하고, <code>QoraMirLowering</code> 이후 분석은 SSA/CFG MIR을 사용합니다.<br>
     방출 단계에서는 <code>QasmEmitter</code>가 순수 프린터 역할만 맡습니다.</p>
 
   <div class="panel">
     <table class="spec">
       <tr><th>패스</th><th>역할</th><th>비고 / 진단</th></tr>
-      <tr><td class="k">QoraLowering</td><td>엔진 AST → Qora IR (1회). 문자열 태그 → 강타입 노드.</td><td>여기서 노드 안정 <code>Id</code> 발급</td></tr>
+      <tr><td class="k">QoraLowering</td><td>엔진 AST → Qora HIR (1회). 문자열 태그 → 강타입 노드.</td><td>여기서 노드 안정 <code>Id</code> 발급</td></tr>
       <tr><td class="k">ModuleLoader</td><td>import 확장 — 여러 파일을 하나의 프로그램으로 병합.</td><td>QSEM020 · QSEM021은 폐기된 예약 코드</td></tr>
       <tr><td class="k"><a href="ir-pass-03-measure-condition-lowering.html">MeasureConditionLowering</a></td><td><code>if (M(q[i]) == v)</code>를 측정 문장과 그 결과를 읽는 비트 조건으로 분리.</td><td>해소·검증 前</td></tr>
       <tr><td class="k">Resolver</td><td>이름을 완전수식명(FQN)으로 해소 (네임스페이스/open).</td><td>QSEM018/019</td></tr>
@@ -224,6 +238,16 @@
       <tr><td class="k">Monomorphizer</td><td>소스의 <code>Qubit[]</code> 파라미터를 호출부의 실제 크기로 특수화하고 <code>Count</code>를 정수로 치환. 복제 노드는 <code>ReId</code>로 새 Id.</td><td>모델 소유 검증 이후</td></tr>
       <tr><td class="k">EffectAnalysis</td><td><strong>rung ①</strong> — 리프 문장마다 큐빗이벤트(Read/Write/Measure) + op 요약. 순수 분석.</td><td>IR 무변경</td></tr>
       <tr><td class="k">ConjugationLowering</td><td><code>QConjugate</code>(within/apply)를 <code>W ++ A ++ inverse(W)</code>로 평탄화.</td><td>QSEM027 (역함수 없으면 거부)</td></tr>
+      <tr><td class="k">QoraMirLowering</td><td>검증된 HIR → 타입이 붙은 SSA/CFG MIR. 이름은 <code>SymbolId</code>로, 호출은 <code>MirCallableId</code>로 확정.</td><td>블록 인수가 Phi 역할</td></tr>
+      <tr><td class="k">QoraMirVerifier</td><td>MIR의 Id 유일성, 정의-사용, 지배 관계, 분기 인수, 호출·배열·큐빗 계약을 검사합니다. 또한 memory Phi로 들어오는 배열 버전이 해당 간선의 최신 상태인지 확인하고, 가변·이동 인수끼리 저장소가 겹치는 변형 MIR을 거부합니다.</td><td>위반은 QINTERNAL</td></tr>
+      <tr><td class="k">MirControlFlowAnalysis</td><td>기본 블록의 선행·후속 관계, 도달 가능성, dominator·post-dominator와 SSA 값 가용성을 계산.</td><td>프로그램 객체와 revision에 결속된 스냅샷</td></tr>
+      <tr><td class="k">MirPathConditionAnalysis</td><td>양자 명령이 실행되는 조건을 <code>Always</code>·<code>Never</code>·predicate·AND·OR 식으로 기록합니다. 각 predicate는 정확한 조건 <code>MirValueId</code>와 참·거짓 간선을 보존합니다.</td><td>루프 안 실행은 <code>LoopCarried</code>로 별도 표시</td></tr>
+      <tr><td class="k">MirStorageProvenanceAnalysis</td><td>배열 상태가 어느 저장소 후보에서 왔는지 store·mutable call·memory Phi를 따라 계산.</td><td>서로 다른 formal storage Id만으로 비별칭을 단정하지 않음</td></tr>
+      <tr><td class="k">MirStorageAliasAnalysis</td><td>지역 고유 저장소, 공유 읽기 전용 파라미터, 배타 파라미터의 계약을 합쳐 두 배열 상태의 별칭 가능성을 판정.</td><td>불완전 provenance는 보수적으로 별칭 가능</td></tr>
+      <tr><td class="k">MirMemoryStateAnalysis</td><td>store·가변 호출·소유권 이전이 과거 배열 상태를 죽였는지 CFG must-dataflow로 계산.</td><td>스칼라 SSA 가용성과 배열 내용 가용성을 분리</td></tr>
+      <tr><td class="k">MirScalarValueAvailabilityAnalysis</td><td>스칼라 값이 청소 지점을 지배하는지 확인하고, 그렇지 않으면 상수·순수 연산·순수 호출·유효한 배열 읽기에서 정확히 다시 만들 수 있는지 계산.</td><td>측정 결과와 사용할 수 없는 Phi는 재계산하지 않음</td></tr>
+      <tr><td class="k">MirWitnessAvailabilityAnalysis</td><td>양자 효과의 직접 인수·큐빗 인덱스·경로 조건·배열 상태를 제안된 청소 지점에서 함께 조회.</td><td>가역성·큐빗 청소 순서와 분리된 입력 가용성 판정</td></tr>
+      <tr><td class="k">MirEffectAnalysis</td><td>양자 명령이 사용한 정확한 스칼라 SSA 값, 배열 상태·저장소 후보, 실행 경로, 큐빗 위치와 효과를 revision별 스냅샷으로 생성.</td><td>효과 사실만 생성하며 cleanup 가능 여부는 판정하지 않음</td></tr>
       <tr><td class="k">AdjointMaterializer</td><td><code>Adjoint Foo</code>를 진짜 역연산 op <code>Foo__adj</code>로 실체화 + 호출부 재작성.</td><td>맹글 前</td></tr>
       <tr><td class="k">Inverter</td><td>순수 IR→IR 역전 커널 (함자 토글, for 역방향, if 역전, 전이 클로저).</td><td>위 두 패스의 부품</td></tr>
       <tr><td class="k">NameMangler</td><td>이름 → 충돌 없는 OpenQASM 식별자. 방출이름을 모델에 기록.</td><td>충돌은 에러가 아니며 자동으로 <code>_</code>를 붙임</td></tr>
@@ -263,24 +287,46 @@
       <tr><th>노드</th><th>의미</th><th>주요 필드</th></tr>
       <tr><td class="k">QProgram</td><td>프로그램 전체</td><td>Operations</td></tr>
       <tr><td class="k">QOperation</td><td>연산 정의 (Q#의 operation)</td><td>Name, Params, Body, Id</td></tr>
-      <tr><td class="k">QParam</td><td>스칼라 또는 배열 파라미터 슬롯</td><td>Name, Type, IsArray, Mode, RegisterSize, Id</td></tr>
+      <tr><td class="k">QParam</td><td>스칼라 또는 배열 파라미터 슬롯</td><td>Name, Type, IsArray, Ownership, Access, RegisterSize, Id</td></tr>
       <tr><td class="k">QUse</td><td>큐빗 레지스터 할당 <code>use q = Qubit[n]</code></td><td>Name, Size, Id</td></tr>
       <tr><td class="k">QGate</td><td>게이트 적용 또는 <strong>op 호출</strong> (같은 노드)</td><td>Functors, Name, Args, Id</td></tr>
       <tr><td class="k">QDecl / QAssign</td><td>고전 스칼라·배열 선언 / 전체 변수 또는 배열 원소 대입</td><td>Name, Type, IsArray / Index, Value, Id</td></tr>
       <tr><td class="k">QIf / QFor / QWhile / QRepeat</td><td>제어흐름 (컨테이너)</td><td>Cond/Var·From·To·Step, Body, Id</td></tr>
       <tr><td class="k">QConjugate</td><td>within/apply 켤레 — <strong>내부 IR 전용</strong> (표면 문법 없음)</td><td>Within, Apply, Id</td></tr>
-      <tr><td class="k">QArg</td><td>게이트·연산 호출 인자: <code>QQubitArg</code>(reg[idx]) / <code>QTextArg</code>(통짜·각도식)</td><td>Mode</td></tr>
+      <tr><td class="k">QArg</td><td>게이트·연산 호출 인자: <code>QQubitArg</code>(reg[idx]) / <code>QTextArg</code>(통짜·각도식)</td><td>Ownership, Access</td></tr>
       <tr><td class="k">QExpr / QCond</td><td>값 표현식 (<code>QText</code>·<code>QMeasure</code>·<code>QArrayLiteral</code>·<code>QArrayNew</code>) / 조건</td><td>HasCall 플래그 또는 배열 원소·타입·길이</td></tr>
     </table>
   </div>
 
   <div class="call">
-    <span class="h"><code>inout</code>은 타입이 아니라 접근 계약입니다</span>
-    일반 파라미터는 읽기 전용이며 <code>QParameterMode.In</code>으로 기록됩니다.<br>
-    반면에 연산이 호출자의 <code>int[]</code>·<code>float[]</code>·<code>angle[]</code> 원소를 변경하려면
-    선언의 <code>QParam.Mode</code>와 호출 인자의 <code>QArg.Mode</code>가 모두 <code>InOut</code>이어야 합니다.<br>
-    큐빗 상태는 게이트로 바뀌므로 이 고전 저장소 접근 모드를 사용하지 않습니다.<br>
-    따라서 <code>inout</code>은 <code>QType</code>에 섞이지 않으며, 타입 호환성과 읽기·쓰기 권한을 서로 다른 규칙으로 검증할 수 있습니다.
+    <span class="h">파라미터 계약은 소유권과 접근 권한의 두 축입니다</span>
+    <code>QParam</code>과 <code>QArg</code>는 소유권을 <code>QOwnershipMode</code>로,
+    접근 권한을 <code>QAccessMode</code>로 각각 기록합니다.<br>
+    따라서 타입 호환성, 소유권 이전, 읽기·쓰기 권한을 서로 독립된 규칙으로 검증할 수 있습니다.
+    <table class="spec">
+      <tr><th>표면 문법</th><th>Ownership</th><th>Access</th></tr>
+      <tr><td><code>x</code></td><td><code>Borrowed</code></td><td><code>ReadOnly</code></td></tr>
+      <tr><td><code>var x</code></td><td><code>Borrowed</code></td><td><code>Mutable</code></td></tr>
+      <tr><td><code>move x</code></td><td><code>Moved</code></td><td><code>ReadOnly</code></td></tr>
+      <tr><td><code>move var x</code></td><td><code>Moved</code></td><td><code>Mutable</code></td></tr>
+    </table>
+    다만 저장소 형태에 따라 허용되는 조합이 다릅니다.<br>
+    <code>var</code>와 <code>move var</code>는 현재 백엔드가 호출자에게 변경을 반영할 수 있는
+    <code>int[]</code>·<code>float[]</code>·<code>angle[]</code> 전체 바인딩에만 적용됩니다.<br>
+    반면에 읽기 전용 <code>move</code>는 모든 배열과 전체 <code>Qubit</code> 바인딩을 받을 수 있으며,
+    호출 뒤에는 호출자가 해당 배열이나 큐빗 바인딩을 다시 사용할 수 없습니다.<br>
+    고전 스칼라는 값을 복사하므로 <code>move</code>를 허용하지 않고, 모든 <code>function</code> 파라미터는
+    기본 계약인 <code>Borrowed + ReadOnly</code>만 허용합니다.<br>
+    선언과 호출 인자는 같은 계약을 표시해야 하며, 기존 <code>inout x</code>는
+    <code>var x</code>와 같은 가변 빌림으로 계속 허용되는 호환 별칭입니다.
+  </div>
+
+  <div class="call warn">
+    <span class="h"><code>var</code> 빌림과 <code>move var</code> 이전은 권한의 출처가 다릅니다</span>
+    <code>var</code>는 호출자의 저장소를 빌리므로 <code>const</code> 바인딩을 전달할 수 없습니다.<br>
+    반면에 <code>move var</code>는 바인딩 자체를 새 소유자에게 넘기므로 <code>const</code> 바인딩도 전달할 수 있습니다.<br>
+    다만 <code>move</code> 또는 <code>move var</code> 호출이 끝난 뒤 호출자가 같은 바인딩을 다시 읽거나 쓰거나 전달하면
+    이미 소유권이 없으므로 <code>QSEM039</code>입니다.
   </div>
 
   <div class="call warn">
@@ -452,6 +498,28 @@
     사다리는 아래→위로 의존하는 4단 구조이며, rung ①·②는 8장의 자료구조 위에서 <strong>조회</strong>로 끝납니다.
   </p>
 
+  <div class="call">
+    <span class="h">현재 구현 경계</span>
+    기존 HIR 분석은 앤실라 하나의 이벤트·사망점·안전성·역연산 목록을 계산할 수 있습니다.<br>
+    새 MIR 분석은 그 판단에 필요한 스칼라 값 버전, 분기 경로, 배열 저장소 별칭과
+    배열 내용 버전을 이름이 아닌 Id 기반 사실로 제공합니다.<br>
+    다만 여러 앤실라의 청소 순서를 한꺼번에 정하는 전역 스케줄러와
+    실제 MIR 주입기는 아직 연결되지 않았습니다.<br>
+    따라서 현재 컴파일러는 MIR 분석 결과를 보존하지만 자동 cleanup 코드를 방출하지 않습니다.
+  </div>
+
+  <div class="call warn">
+    <span class="h">배열 내용 버전과 소유권 capability는 같은 상태가 아닙니다</span>
+    배열 store와 가변 호출은 같은 저장소의 내용을 바꾸므로 <code>MirMemoryStateAnalysis</code>가
+    이전 배열 상태를 더 이상 현재 버전이 아니라고 판정합니다.<br>
+    반면에 <code>move</code>는 배열 내용을 쓴 것이 아니라 호출자가 가진 사용 권한을 넘긴 동작입니다.<br>
+    현재 소스 프로그램의 권한 이전은 HIR의 <code>OwnershipValidation</code>이 <code>QSEM039</code>로 검사합니다.<br>
+    MIR 단계에서 같은 검사를 정확히 반복하려면 반복문이 0회, 정확히 1회, 여러 번 실행될 수 있는지를 먼저 증명하고,
+    지역 allocation마다 새 capability가 생긴다는 사실까지 추적해야 합니다.<br>
+    따라서 MIR 검증기는 소유권 이전을 store처럼 취급하는 근사 검사를 사용하지 않습니다.<br>
+    이후 loop trip 분석과 선형 capability dataflow가 준비되면 별도 분석으로 연결합니다.
+  </div>
+
   <div class="ladder">
     <div class="rung done">
       <div class="rn">①</div>
@@ -476,10 +544,12 @@
     </div>
     <div class="rung">
       <div class="rn">④</div>
-      <div><span class="rt">자동 주입</span><span class="st next">다음</span>
-        <div class="rd">언어 규칙: <strong>측정하지 않은 use 레지스터는 스코프 끝에 |0⟩로 반납됩니다</strong> —
-        자동으로 치울 수 없으면 조용히 넘어가지 않고 <strong>컴파일 에러</strong>가 됩니다. 주입 지점은 사망점,
-        컨테이너 안에서 죽으면 최외곽 컨테이너 직후입니다. 역연산 커널은 이미 존재합니다 → <a href="adjoint-pipeline.html">역합성 파이프라인</a>.</div></div>
+      <div><span class="rt">전역 스케줄과 자동 주입</span><span class="st next">다음</span>
+        <div class="rd">모든 청소 후보의 의존 관계와 삽입 가능 구간을 함께 계산한 뒤,
+        파생된 앤실라부터 역순으로 배치합니다. 이때 MIR의 경로 조건과 정확한 스칼라 SSA 값,
+        현재까지 살아 있는 배열 상태를 다시 확인합니다. 공통 스케줄이 없으면 조용히 건너뛰지 않고
+        컴파일 오류를 만들며, 완성된 스케줄만 주입기가 새 MIR revision으로 변환합니다.
+        역연산 커널은 이미 존재합니다 → <a href="adjoint-pipeline.html">역합성 파이프라인</a>.</div></div>
     </div>
   </div>
 
@@ -531,18 +601,19 @@
       <tr><td class="k">QSEM008 · 022</td><td>중복 연산 정의 (전역 / 네임스페이스 내)</td></tr>
       <tr><td class="k">QSEM009–012</td><td>entry 호출·함자 / entry 파라미터 / 재귀 사이클 / 잘못된 <code>use</code>·고전 배열 선언 위치</td></tr>
       <tr><td class="k">QSEM013 · 015</td><td>내장 가림 예약 이름 / 같은 스코프 중복 선언 (단일 삽입 문)</td></tr>
-      <tr><td class="k">QSEM014</td><td>한 게이트의 중복 큐빗 피연산자 또는 <code>inout</code> 슬롯과 겹치는 배열 인자</td></tr>
+      <tr><td class="k">QSEM014</td><td>한 게이트의 중복 큐빗 피연산자 또는 가변 빌림·소유권 이전 슬롯과 겹치는 저장소 인자</td></tr>
       <tr><td class="k">QSEM016–017</td><td>잘못된 배열·큐빗 인덱스와 할당 크기 / 측정을 비-bit에 대입</td></tr>
       <tr><td class="k">QSEM018–020</td><td>모호한 참조 / 미지 네임스페이스 (Resolver) · import 파일 없음·읽기 실패·경로 문맥 없음 (ModuleLoader)</td></tr>
       <tr><td class="k">QSEM021</td><td>폐기된 예약 코드 — 순환 back-edge는 <code>loaded.Add(full) = false</code>일 때 오류 없이 생략</td></tr>
-      <tr><td class="k">QSEM024–026</td><td><code>const</code> 재대입·<code>inout</code> 전달 / 미해소·선언전 사용 / 큐빗을 고전값 자리에</td></tr>
+      <tr><td class="k">QSEM024–026</td><td><code>const</code> 재대입·<code>var</code> 가변 빌림(<code>move var</code> 제외) / 미해소·선언전 사용 / 큐빗을 고전값 자리에</td></tr>
       <tr><td class="k">QSEM027</td><td>역함수 없는 within 블록 (ConjugationLowering)</td></tr>
       <tr><td class="k">QSEM028</td><td>연산을 값으로 사용 (<code>var x = Foo</code>) — 연산은 호출만 가능</td></tr>
       <tr><td class="k">QSEM029</td><td>배열 형태·초기화·멤버 접근 또는 전체 배열 대입 오류</td></tr>
       <tr><td class="k">QSEM030–032</td><td>OpenQASM에서 범위를 증명하지 못한 인덱스 / 재귀 깊이 제한 초과 / 읽기 전용 <code>bit[]</code> 파라미터 쓰기</td></tr>
       <tr><td class="k">QSEM033–035</td><td>함수의 비순수 문장 / 함수 시그니처의 큐빗 / 잘못된 <code>return</code> 또는 반환 경로 누락</td></tr>
       <tr><td class="k">QSEM036–037</td><td>통짜 <code>bit[]</code>를 숫자로 사용 / 함수 반환값과 받는 자리의 타입·배열 형태 불일치</td></tr>
-      <tr><td class="k">QSEM038</td><td>지원하지 않는 <code>inout</code> 선언, 선언·호출 표식 불일치, 읽기 전용 파라미터 변경·전달</td></tr>
+      <tr><td class="k">QSEM038</td><td>지원하지 않는 소유권·접근 계약, 선언·호출 표식 불일치, 읽기 전용 파라미터 변경·전달</td></tr>
+      <tr><td class="k">QSEM039</td><td><code>move</code>로 소유권을 넘긴 뒤 호출자 바인딩을 다시 읽거나 쓰거나 전달</td></tr>
       <tr><td class="k">QINTERNAL</td><td>컴파일러 불변식 위반 — 조용히 틀리는 대신 크게 실패 (ReferentialCheck / 효과분석 자물쇠)</td></tr>
     </table>
   </div>
@@ -566,7 +637,7 @@
   </div>
 
   <footer>
-    Qora 컴파일러 데이터시트 · v0.29 기준 · 개념 배경은 <a href="adjoint-pipeline.html">역합성 파이프라인</a>과
+    Qora 컴파일러 데이터시트 · v0.30 기준 · 개념 배경은 <a href="adjoint-pipeline.html">역합성 파이프라인</a>과
     <a href="hadamard.html">H 게이트 문서</a> 참조
   </footer>
 

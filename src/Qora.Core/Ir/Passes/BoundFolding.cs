@@ -120,3 +120,69 @@ internal static class BoundFolder
     internal static bool DefersToUnsizedQubit(Bound? b, Scope scope) =>
         b is ArrayLengthBound c && scope.GetSymbol(c.ArraySymbolId).MonoSized;
 }
+
+/// <summary>
+/// The one compile-time boolean folder used by control-flow analyses. Like <see cref="BoundFolder"/>,
+/// it reads an expression tree and already-folded const data instead of reparsing source text. A null
+/// result means that the condition depends on runtime state and both control-flow paths remain possible.
+/// </summary>
+internal static class BooleanFolder
+{
+    internal static bool? Fold(QNode? node, Scope scope)
+    {
+        switch (node)
+        {
+            case QLit { Text: "true" }:
+                return true;
+            case QLit { Text: "false" }:
+                return false;
+            // Surface boolean literals currently lower through the identifier-shaped node used by the
+            // expression parser. They are reserved values, not lexical names.
+            case QNameRef { Name: "true" }:
+                return true;
+            case QNameRef { Name: "false" }:
+                return false;
+            case QNameRef name when scope.Lookup(name.Name) is
+                     { IsConst: true, FoldedBoolean: { } constValue }:
+                return constValue;
+            case QUnary { Op: "!", Operand: { } operand }:
+                return Fold(operand, scope) is { } operandValue ? !operandValue : null;
+            case QBinOp { Op: "&&" } and:
+            {
+                var left = Fold(and.Left, scope);
+                var right = Fold(and.Right, scope);
+                if (left == false || right == false) return false;
+                return left == true && right == true ? true : null;
+            }
+            case QBinOp { Op: "||" } or:
+            {
+                var left = Fold(or.Left, scope);
+                var right = Fold(or.Right, scope);
+                if (left == true || right == true) return true;
+                return left == false && right == false ? false : null;
+            }
+            case QBinOp comparison when comparison.Op is "==" or "!=" or "<" or "<=" or ">" or ">="
+                                              && BoundFolder.Fold(comparison.Left, scope) is BoundNum left
+                                              && BoundFolder.Fold(comparison.Right, scope) is BoundNum right:
+                return comparison.Op switch
+                {
+                    "==" => left.Value == right.Value,
+                    "!=" => left.Value != right.Value,
+                    "<" => left.Value < right.Value,
+                    "<=" => left.Value <= right.Value,
+                    ">" => left.Value > right.Value,
+                    ">=" => left.Value >= right.Value,
+                    _ => null,
+                };
+            case QBinOp comparison when comparison.Op is "==" or "!=":
+            {
+                var left = Fold(comparison.Left, scope);
+                var right = Fold(comparison.Right, scope);
+                if (left is null || right is null) return null;
+                return comparison.Op == "==" ? left == right : left != right;
+            }
+            default:
+                return null;
+        }
+    }
+}

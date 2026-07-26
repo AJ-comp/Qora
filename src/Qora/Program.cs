@@ -5,7 +5,7 @@ using Qora;
 // Two modes:
 //   qora --json [file]   parse [file] (or stdin when no path) and print ONE line of JSON — the machine
 //                       contract the VS Code extension consumes for squiggles + transpile.
-//                       `--stages` additionally includes the compilation stages (ast / ir / irInverse) —
+//                       `--stages` additionally includes the compilation stages (ast / hir / mir / inverse) —
 //                       kept out of the default reply because diagnostics run on every keystroke.
 //   qora                 parse a built-in sample and pretty-print the result (console demo).
 if (args.Contains("--json"))
@@ -57,6 +57,7 @@ if (args.Contains("--json"))
                 errors = r.Errors.Select(e => new { message = e.Message, code = e.Code, start = e.Start, end = e.End }),
                 ast = r.AstText,
                 ir = Qora.Ir.IrPrinter.Print(r.Ir),
+                mir = Qora.Ir.Mir.MirPrinter.Print(r.Mir),
                 irInverse = Qora.Ir.IrPrinter.PrintInverses(r.Ir),
                 symbols = Qora.Ir.Passes.SymbolTableBuilder.Format(r.Ir, r.Semantics),
                 uncompute = Qora.Ir.Passes.UncomputeReport.Format(r.AnalyzedIr, r.Semantics),

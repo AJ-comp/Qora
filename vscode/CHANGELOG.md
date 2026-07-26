@@ -2,6 +2,19 @@
 
 All notable changes to the Qora Language extension.
 
+## 0.23.0
+
+- Bundles the **Qora v0.30** compiler with four explicit operation-resource contracts:
+  read-only borrow (`values`), mutable borrow (`var values`), read-only ownership transfer
+  (`move values`), and mutable ownership transfer (`move var values`). Existing `inout` source remains
+  accepted as a compatibility alias for `var`.
+- Highlights and hover-documents `move`, the parameter meaning of `var`, and the legacy `inout` alias.
+  Diagnostics now cover contract mismatches, exclusive mutable/moved arguments, and every path-sensitive
+  use after ownership transfer (QSEM038/QSEM039).
+- Includes the new verified SSA/CFG MIR analysis foundation used to track exact value versions, Phi states,
+  short-circuit control flow, array storage and memory versions, path conditions, and quantum witnesses.
+  Automatic cleanup scheduling and injection are not enabled in this release.
+
 ## 0.22.0
 
 - Bundles the **Qora v0.29** compiler. Callable parameters are read-only by default, while operations use

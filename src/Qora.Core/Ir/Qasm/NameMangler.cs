@@ -218,7 +218,11 @@ public static class NameMangler
 
         private QArg MangleArg(QArg arg, Dictionary<string, string> map) => arg switch
         {
-            QQubitArg q => new QQubitArg(L(q.Reg, map), MangleTree(q.Index, map)!) { Mode = q.Mode },
+            QQubitArg q => new QQubitArg(L(q.Reg, map), MangleTree(q.Index, map)!)
+            {
+                Ownership = q.Ownership,
+                Access = q.Access,
+            },
             QTextArg t => t with { Tree = MangleTree(t.Tree, map) },
             _ => arg,
         };

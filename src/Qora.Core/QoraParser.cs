@@ -66,6 +66,19 @@ public sealed class QoraParseResult
     /// only in this tree — without it, a rejected specialization's recorded facts point into a program the
     /// consumer cannot see. Facts outlive the verdict, so the tree they describe must too.</summary>
     public Ir.QProgram? MonoIr { get; init; }
+    /// <summary>
+    /// The validated program lowered into Qora's typed SSA/CFG middle IR. The existing
+    /// <see cref="Ir"/> remains the source-shaped high-level IR; this graph is the analysis boundary for
+    /// value versions, array memory states, qubit resources, and future automatic uncomputation. Null when
+    /// the common front end or conjugation lowering rejected the program.
+    /// </summary>
+    public Ir.Mir.MirProgram? Mir { get; init; }
+    /// <summary>
+    /// MIR-native quantum effects for the exact <see cref="Mir"/> program instance and revision. It records
+    /// exact scalar SSA witnesses, array states/storage provenance, and qubit places, but does not yet
+    /// schedule or inject cleanup.
+    /// </summary>
+    public Ir.Mir.Analysis.MirEffectSnapshot? MirEffects { get; init; }
 }
 
 /// <summary>
@@ -188,7 +201,14 @@ public static class QoraParser
                         // can only run once sizes are known. No generics -> Run returns the same program and
                         // there is nothing new to check. Whichever Validate ran LAST owns the semantic model
                         // — its scope trees describe the program the rest of the pipeline actually consumes.
-                        monoProgram = Monomorphizer.Run(res);
+                        // Specialize widths first while preserving `.Count` as a real symbol read. Ownership
+                        // validation must see `move q; use q.Count` even though the final target form can
+                        // replace that Count with a literal. Once the concrete re-validation succeeds, run
+                        // the same pass again in its normal lowering mode to perform the literal substitution
+                        // required by bit-register emission.
+                        monoProgram = Monomorphizer.Run(
+                            res,
+                            preserveKnownCountsForValidation: true);
                         if (ReferenceEquals(monoProgram, res))
                         {
                             semanticErrors = baseErrors;
@@ -197,6 +217,8 @@ public static class QoraParser
                         else
                         {
                             semanticErrors = ValidateForOpenQasm(monoProgram, out semantics);
+                            if (semanticErrors.Count == 0)
+                                monoProgram = Monomorphizer.Run(monoProgram);
                         }
                     }
                 }
@@ -215,6 +237,8 @@ public static class QoraParser
         // The front's output contract: a validated, monomorphized, MATERIALIZED program.
         string qasm = string.Empty;
         Ir.QProgram? analyzedIr = null;   // the program effect analysis ran on (null when it never ran)
+        Ir.Mir.MirProgram? mir = null;
+        Ir.Mir.Analysis.MirEffectSnapshot? mirEffects = null;
         if (monoProgram != null && semanticErrors.Count == 0)
         {
             if (semantics is not null) { EffectAnalysis.Run(monoProgram, semantics); analyzedIr = monoProgram; }
@@ -226,6 +250,17 @@ public static class QoraParser
             }
             else
             {
+                // The source-shaped common IR is Qora HIR. Lower it to a separate typed SSA/CFG graph
+                // before backend-only adjoint materialization and QASM legalization. MIR is verified on
+                // every successful compilation; its first native effect layer remains shadow-mode data
+                // until cleanup scheduling and injection are complete.
+                if (semantics is not null)
+                {
+                    mir = Ir.Mir.QoraMirLowering.Lower(conjugated, semantics);
+                    Ir.Mir.QoraMirVerifier.VerifyOrThrow(mir);
+                    mirEffects = Ir.Mir.Analysis.MirEffectAnalysis.Analyze(mir);
+                }
+
                 var materialized = AdjointMaterializer.Run(conjugated, semantics);
 
                 // Hand the materialized program to the TARGET backend (see <see cref="Ir.QasmBackend"/>:
@@ -249,6 +284,8 @@ public static class QoraParser
             Semantics = semantics,
             AnalyzedIr = analyzedIr,
             MonoIr = monoProgram,
+            Mir = mir,
+            MirEffects = mirEffects,
             Errors = !result.Success
                 ? result.AllErrors.Select(ToQoraError).ToList()
                 : semanticErrors,

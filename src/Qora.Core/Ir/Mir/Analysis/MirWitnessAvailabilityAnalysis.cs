@@ -1,0 +1,221 @@
+using System.Collections.Frozen;
+
+namespace Qora.Ir.Mir.Analysis;
+
+public enum MirWitnessIssueKind
+{
+    ScalarValueUnavailable,
+    PathPredicateUnavailable,
+    ArrayStateUnavailable,
+}
+
+/// <summary>
+/// One unavailable replay input. Array issues retain the memory-state verdict so diagnostics can name
+/// the exact store, mutable call, or ownership transfer which destroyed the required contents.
+/// </summary>
+public sealed record MirWitnessIssue(
+    MirWitnessIssueKind Kind,
+    MirValueId Value,
+    MirMemoryStateAvailability? Memory = null);
+
+/// <summary>
+/// Availability of the exact classical inputs used by one forward quantum instruction at a proposed
+/// later point. This is deliberately not an overall cleanup-safety verdict: physical reversibility,
+/// qubit dependency ordering, and adjoint materialization remain separate analyses.
+/// </summary>
+public sealed record MirWitnessAvailability(
+    IReadOnlyList<MirWitnessIssue> Issues,
+    IReadOnlyList<MirScalarValueAvailability> Rematerializations,
+    bool RequiresIterationLocalPlacement,
+    bool RequiresBoundsRevalidation)
+{
+    private IReadOnlyList<MirWitnessIssue> _issues = MirCollections.Freeze(Issues);
+    private IReadOnlyList<MirScalarValueAvailability> _rematerializations =
+        MirCollections.Freeze(Rematerializations);
+
+    public IReadOnlyList<MirWitnessIssue> Issues
+    {
+        get => _issues;
+        init => _issues = MirCollections.Freeze(value);
+    }
+
+    public IReadOnlyList<MirScalarValueAvailability> Rematerializations
+    {
+        get => _rematerializations;
+        init => _rematerializations = MirCollections.Freeze(value);
+    }
+
+    public bool AllWitnessesAvailable => Issues.Count == 0;
+}
+
+/// <summary>
+/// Query object which joins quantum-effect facts with scalar SSA and destructive-memory availability.
+/// A source variable assignment never invalidates an older scalar <see cref="MirValueId"/>; an array
+/// mutation can invalidate an older state even when that state's SSA definition still dominates.
+/// </summary>
+public sealed class MirWitnessAvailabilitySnapshot
+{
+    private readonly MirProgram _sourceProgram;
+    private readonly MirCallable _callable;
+    private readonly MirEffectSnapshot _effects;
+    private readonly MirControlFlowSnapshot _cfg;
+    private readonly MirMemoryStateSnapshot _memory;
+    private readonly MirScalarValueAvailabilitySnapshot _scalars;
+    private readonly FrozenDictionary<MirEffectSite, MirQuantumInstructionEffect> _effectBySite;
+
+    internal MirWitnessAvailabilitySnapshot(
+        MirProgram sourceProgram,
+        MirCallable callable,
+        MirEffectSnapshot effects,
+        MirControlFlowSnapshot cfg,
+        MirMemoryStateSnapshot memory,
+        MirScalarValueAvailabilitySnapshot scalars)
+    {
+        _sourceProgram = sourceProgram;
+        _callable = callable;
+        _effects = effects;
+        _cfg = cfg;
+        _memory = memory;
+        _scalars = scalars;
+        ProgramRevision = sourceProgram.Revision;
+        Callable = callable.Id;
+        _effectBySite = effects.Effects
+            .Where(effect => effect.Site.Callable == callable.Id)
+            .ToFrozenDictionary(effect => effect.Site);
+    }
+
+    public int ProgramRevision { get; }
+    public MirCallableId Callable { get; }
+
+    public bool IsFor(
+        MirProgram program,
+        MirEffectSnapshot effects,
+        MirCallableId callable) =>
+        ReferenceEquals(_sourceProgram, program)
+        && ReferenceEquals(_effects, effects)
+        && ReferenceEquals(_callable, program.FindCallable(callable))
+        && ProgramRevision == program.Revision
+        && Callable == callable
+        && effects.IsFor(program);
+
+    public void EnsureFor(
+        MirProgram program,
+        MirEffectSnapshot effects,
+        MirCallableId callable)
+    {
+        if (!IsFor(program, effects, callable))
+            throw new InvalidOperationException(
+                $"MIR witness snapshot belongs to {Callable} in revision {ProgramRevision} " +
+                $"of a different program/effect snapshot; reanalyze {callable} in revision {program.Revision}");
+    }
+
+    public MirWitnessAvailability CheckBeforeInstruction(
+        MirEffectSite effect,
+        MirInstructionId target) =>
+        Check(effect, _cfg.PointBeforeInstruction(target));
+
+    public MirWitnessAvailability CheckAtTerminator(
+        MirEffectSite effect,
+        MirBlockId target) =>
+        Check(effect, _cfg.TerminatorPoint(target));
+
+    private MirWitnessAvailability Check(
+        MirEffectSite site,
+        MirProgramPoint point)
+    {
+        if (site.Callable != Callable
+            || !_effectBySite.TryGetValue(site, out var effect))
+            throw new ArgumentOutOfRangeException(
+                nameof(site),
+                site,
+                $"effect site {site} does not belong to callable {Callable}");
+
+        var issues = new List<MirWitnessIssue>();
+        var rematerializations = new List<MirScalarValueAvailability>();
+        foreach (var witness in effect.ClassicalWitnesses)
+        {
+            var availability = _scalars.Check(witness.Value, point);
+            if (!availability.CanSupplyValue)
+                issues.Add(new MirWitnessIssue(
+                    MirWitnessIssueKind.ScalarValueUnavailable,
+                    witness.Value));
+            else if (availability.Kind == MirScalarValueAvailabilityKind.Rematerializable)
+                rematerializations.Add(availability);
+        }
+
+        // PathCondition is a Boolean expression, not a flat conjunction. Availability needs every
+        // distinct SSA leaf which a later guard reconstruction may evaluate, while control-flow
+        // consumers must preserve the expression's All/Any shape.
+        foreach (var predicate in effect.PathCondition.Predicates
+                     .DistinctBy(predicate => predicate.Condition))
+        {
+            var availability = _scalars.Check(predicate.Condition, point);
+            if (!availability.CanSupplyValue)
+                issues.Add(new MirWitnessIssue(
+                    MirWitnessIssueKind.PathPredicateUnavailable,
+                    predicate.Condition));
+            else if (availability.Kind == MirScalarValueAvailabilityKind.Rematerializable)
+                rematerializations.Add(availability);
+        }
+
+        var requiresIterationLocalPlacement =
+            effect.ExecutionMultiplicity == MirExecutionMultiplicity.LoopCarried;
+        foreach (var array in effect.ArrayStates)
+        {
+            var availability = _memory.CheckAtLocation(
+                array.InputState,
+                point.Block,
+                point.InstructionIndex);
+            requiresIterationLocalPlacement |= availability.RequiresSameIteration;
+            if (!availability.IsAvailable)
+                issues.Add(new MirWitnessIssue(
+                    MirWitnessIssueKind.ArrayStateUnavailable,
+                    array.InputState,
+                    availability));
+        }
+
+        return new MirWitnessAvailability(
+            issues
+                .DistinctBy(issue => (issue.Kind, issue.Value))
+                .ToArray(),
+            rematerializations
+                .DistinctBy(availability => availability.Value)
+                .ToArray(),
+            requiresIterationLocalPlacement,
+            RequiresBoundsRevalidation: effect.Qubits.Any(
+                qubit => qubit.Place.Index is not null));
+    }
+}
+
+public static class MirWitnessAvailabilityAnalysis
+{
+    public static MirWitnessAvailabilitySnapshot Analyze(
+        MirProgram program,
+        MirEffectSnapshot effects,
+        MirCallableId callableId)
+    {
+        ArgumentNullException.ThrowIfNull(program);
+        ArgumentNullException.ThrowIfNull(effects);
+        QoraMirVerifier.VerifyOrThrow(program);
+        effects.EnsureFor(program);
+
+        var callable = program.FindCallable(callableId)
+            ?? throw new ArgumentOutOfRangeException(
+                nameof(callableId),
+                callableId,
+                $"callable {callableId} does not belong to the MIR program");
+        var cfg = MirControlFlowAnalysis.Analyze(program, callableId);
+        var memory = MirMemoryStateAnalysis.Analyze(program, callableId);
+        return new MirWitnessAvailabilitySnapshot(
+            program,
+            callable,
+            effects,
+            cfg,
+            memory,
+            new MirScalarValueAvailabilitySnapshot(
+                program,
+                callable,
+                cfg,
+                memory));
+    }
+}

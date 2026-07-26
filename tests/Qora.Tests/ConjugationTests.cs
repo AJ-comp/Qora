@@ -84,6 +84,51 @@ public class ConjugationTests
     }
 
     [Fact]
+    public void ApplyCannotMoveStorageNeededBySynthesizedInverseWithin()
+    {
+        var inspect = new QOperation(
+            "Inspect",
+            new[] { new QParam("values", QType.Int, null) { IsArray = true } },
+            Array.Empty<QStmt>());
+        var consume = new QOperation(
+            "Consume",
+            new[]
+            {
+                new QParam("values", QType.Int, null)
+                {
+                    IsArray = true,
+                    Ownership = QOwnershipMode.Moved,
+                },
+            },
+            Array.Empty<QStmt>());
+        var values = new QTextArg(new QNameRef("values"));
+        var movedValues = values with { Ownership = QOwnershipMode.Moved };
+        var main = new QOperation(
+            "Main",
+            Array.Empty<QParam>(),
+            new QStmt[]
+            {
+                new QDecl(
+                    false,
+                    QType.Int,
+                    "values",
+                    new QArrayLiteral(new QExpr[] { new QText(new QNumLit(1)) }))
+                {
+                    IsArray = true,
+                },
+                new QConjugate(
+                    Within: new QStmt[] { Gate("Inspect", values) },
+                    Apply: new QStmt[] { Gate("Consume", movedValues) }),
+            });
+
+        var errors = QoraValidator.Validate(
+            new QProgram(new[] { inspect, consume, main }),
+            out _);
+
+        Assert.Equal("QSEM039", Assert.Single(errors).Code);
+    }
+
+    [Fact]
     public void StrayConjugatePastFlattenIsQInternal()
     {
         // ReferentialCheck is the primary structural guard: a QConjugate reaching it (i.e. ConjugationLowering

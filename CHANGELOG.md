@@ -11,6 +11,50 @@ emitted as **OpenQASM 3.0**.
 > **Note:** Qora was renamed from **Ket** on 2026-07-01 (a "Ket" extension already existed). Versions
 > 0.1–0.7 below were authored under the old name.
 
+## 0.30 — 2026-07-26
+
+### Changed
+- **Operation resource parameters now express ownership and access as two independent axes.**
+  `values` is a read-only borrow, `var values` is a mutable borrow, `move values` transfers read-only
+  ownership, and `move var values` transfers ownership with mutable access. Declarations and call sites
+  must spell the same contract (QSEM038). Existing `inout values` source remains accepted as a compatibility
+  alias for `var values`, while compiler IR and new documentation use `var` as the canonical spelling.
+- **The supported contract follows the resource shape instead of one blanket reference rule.**
+  Mutable access (`var` or `move var`) is available to whole `int[]`, `float[]`, and `angle[]` storage;
+  read-only `move` also accepts whole `bit[]`, whole qubit registers, and whole single-qubit bindings.
+  Copy scalars reject `move`, and functions remain borrowed/read-only. A `const` array cannot be mutably
+  borrowed, but it may be transferred with `move var` because the old binding ends at that boundary.
+- **Ownership transfer is checked through complete control flow (QSEM039).** A binding cannot be read,
+  written, borrowed, moved again, used in a loop condition, or passed to a gate after a possible `move`.
+  The analysis distinguishes mutually exclusive branches, statically unreachable or zero-iteration paths,
+  one-iteration loops, repeated moves of outer bindings, and fresh loop-local resources. A call which
+  already has another semantic error does not commit its move and therefore does not create cascading
+  use-after-move errors.
+
+### Added
+- **Successful compilation now builds a separate, immutable SSA/CFG Qora MIR after the source-shaped HIR.**
+  Every classical assignment receives a stable `MirValueId`; block arguments represent Phi values; arrays
+  keep storage provenance and successive memory states; qubits keep resource identity; and calls reference
+  callable IDs rather than rediscovering names. MIR snapshots are tied to one program object and revision,
+  and the always-on verifier checks identities, dominance, edge contracts, call contracts, current memory
+  versions, and exclusive mutable/moved arguments.
+- **MIR analysis records the facts needed by future automatic uncomputation.** It includes dominators and
+  post-dominators, lazy `&&`/`||` control flow, exact `Always`/`Never`/AND/OR path conditions, array alias and
+  memory-state analysis, scalar rematerialization, and quantum effect/witness facts. The CLI `--stages`
+  response exposes this graph as `mir`. MIR is currently an analysis-only shadow pipeline: the existing HIR
+  still feeds OpenQASM emission, and global cleanup scheduling plus IR injection are intentionally not yet
+  enabled.
+
+### Fixed
+- **Moved arguments can no longer be treated as reversible calls.** Ownership transfer is directional and
+  cannot be restored by reversing statement order, so `Adjoint` rejects such a call and automatic cleanup
+  safety reports `NotInvertibleCall` even when the callee's gate body would otherwise be invertible.
+- **MIR cannot revive a stale array state at a Phi or hide overlapping mutable actuals.** Every reachable
+  memory-Phi edge must carry that path's current array state, and provenance-based call verification rejects
+  two actual arguments that may share storage when either slot is mutable or moved. Disjunctive control-flow
+  tails also retain their OR expression instead of collapsing to an empty condition that could be mistaken
+  for unconditional execution.
+
 ## 0.29 — 2026-07-26
 
 ### Changed

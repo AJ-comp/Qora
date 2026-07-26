@@ -62,9 +62,15 @@ public static class EffectAnalysis
             // authority on invertibility. We run it over the SAME (monomorphized) operations analysis saw, so the
             // names here are the mono names the mono call sites actually use.
             var inverter = new Inverter(_operations);
-            var nonInvertibleOps = _operations
+            var nonInvertibleOperations = _operations
                 .Where(op => !inverter.TryInvertOperation(op.Name, out _, out _))
-                .Select(op => op.Name).ToHashSet();
+                .ToList();
+            var nonInvertibleOpNames = nonInvertibleOperations
+                .Select(op => op.Name)
+                .ToHashSet();
+            var nonInvertibleOpIds = nonInvertibleOperations
+                .Select(op => op.Id)
+                .ToHashSet();
 
             // Record the CALL statements (by stable Id) that target such an op, so rung ③ blocks them without a
             // name lookup — StmtIds are shared with the pre-mono tree, mono names are not (a generic call's name is
@@ -73,7 +79,20 @@ public static class EffectAnalysis
             foreach (var op in _operations)
                 ContainerMap.Visit(op, (stmt, _) =>
                 {
-                    if (stmt is QGate g && nonInvertibleOps.Contains(g.Name)) nonInvertibleCallStmts.Add(g.Id);
+                    if (stmt is not QGate g) return;
+
+                    // Invertibility belongs to the call site as well as to the callee body. A moved
+                    // actual consumes ownership in the forward direction, and reversing nearby
+                    // statements cannot synthesize ownership restoration. Keep this classification in
+                    // lockstep with Inverter.InvertGate so a safe verdict can never produce a plan that
+                    // the inverter then refuses.
+                    var transfersOwnership = g.Args.Any(arg => arg.Ownership == QOwnershipMode.Moved);
+                    var targetsNonInvertibleOperation =
+                        g.CalleeOpId is int calleeId
+                            ? nonInvertibleOpIds.Contains(calleeId)
+                            : nonInvertibleOpNames.Contains(g.Name);
+                    if (transfersOwnership || targetsNonInvertibleOperation)
+                        nonInvertibleCallStmts.Add(g.Id);
                 });
             _model.RecordNonInvertibleCallStmts(nonInvertibleCallStmts);
         }

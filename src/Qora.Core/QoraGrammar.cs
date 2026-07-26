@@ -6,7 +6,7 @@ using Janglim.FrontEnd.RegularGrammar;
 namespace Qora;
 
 /// <summary>
-/// Qora v0.29 — a Q#/C#-flavored quantum language on the Janglim engine.
+/// Qora v0.30 — a Q#/C#-flavored quantum language on the Janglim engine.
 ///
 ///   operation Bell(q: Qubit[]) {        // a subroutine, with trailing-type parameters (name: T)
 ///       H(q[0]);
@@ -123,10 +123,11 @@ namespace Qora;
 /// <c>q[i + 1]</c>, and nested indexed reads all parse. The shared semantic path requires one scalar
 /// <c>int</c>, validates calls inside the index, and records an unresolved in-bounds proof as model data.
 /// The OpenQASM policy pass — not the common bounds walk — turns that final fact into QSEM030.
-/// v0.29 makes callable parameters read-only by default. Caller-visible mutation
-/// is explicit on both sides: an operation declares <c>inout values: int[]</c>, and its caller writes
-/// <c>Update(inout values)</c>. The mode is limited to general classical arrays and remains separate from
-/// the array's value type; functions, scalars, bit registers, and qubit parameters cannot opt in.
+/// Callable parameters are read-only borrows by default. An operation spells mutable borrowing as
+/// <c>var values: int[]</c> / <c>Update(var values)</c>, ownership transfer as <c>move values</c>, and both
+/// axes as <c>move var values</c>; legacy <c>inout</c> remains a compatibility alias for <c>var</c>.
+/// Mutable access is limited to reference-capable classical arrays, while read-only ownership transfer also
+/// accepts whole bit/qubit arrays and whole qubit bindings. Functions stay borrowed and read-only.
 /// User function and operation calls now validate scalar arguments against each declared parameter type.
 /// Array-bound facts follow stable symbol identity through shadowing, and direct affine <c>.Count</c>
 /// indexes receive an exact all-length verdict or defer to size specialization. Nested index validation
@@ -143,10 +144,11 @@ public class QoraGrammar : Grammar
     public Terminal New { get; } = new Terminal(TokenType.Keyword, "new", false);
     public Terminal Const { get; } = new Terminal(TokenType.Keyword, "const", false);
     public Terminal Var { get; } = new Terminal(TokenType.Keyword, "var", false);
+    public Terminal Move { get; } = new Terminal(TokenType.Keyword, "move", false);
     public Terminal Function { get; } = new Terminal(TokenType.Keyword, "function", false);
     public Terminal Return { get; } = new Terminal(TokenType.Keyword, "return", false);
-    // Parameter/call permission marker. Meaning=true keeps it in a Param AST so lowering can stamp the
-    // access mode; an inout call argument receives its own InOutArg meaning unit below.
+    // Legacy spelling retained as a parser-compatible alias for `var` mutable borrowing. Meaning=true
+    // lets lowering distinguish old source while the canonical IR printer emits only the new spelling.
     public Terminal InOut { get; } = new Terminal(TokenType.Keyword, "inout", "inout", true, false);
     public Terminal If { get; } = new Terminal(TokenType.Keyword, "if", false);
     public Terminal For { get; } = new Terminal(TokenType.Keyword, "for", false);
@@ -269,12 +271,18 @@ public class QoraGrammar : Grammar
     public static MeaningUnit FunctionM { get; } = new MeaningUnit("Function");
     public static MeaningUnit ReturnM { get; } = new MeaningUnit("Return");
     public static MeaningUnit ParamM { get; } = new MeaningUnit("Param");
+    public static MeaningUnit MutableParamM { get; } = new MeaningUnit("MutableParam");
+    public static MeaningUnit MovedParamM { get; } = new MeaningUnit("MovedParam");
+    public static MeaningUnit MovedMutableParamM { get; } = new MeaningUnit("MovedMutableParam");
     public static MeaningUnit ArrayTypeM { get; } = new MeaningUnit("ArrayType");
     public static MeaningUnit ArrayLiteralM { get; } = new MeaningUnit("ArrayLiteral");
     public static MeaningUnit ArrayNewM { get; } = new MeaningUnit("ArrayNew");
     public static MeaningUnit UseM { get; } = new MeaningUnit("Use");
     public static MeaningUnit GateM { get; } = new MeaningUnit("Gate");
     public static MeaningUnit InOutArgM { get; } = new MeaningUnit("InOutArg");
+    public static MeaningUnit MutableArgM { get; } = new MeaningUnit("MutableArg");
+    public static MeaningUnit MovedArgM { get; } = new MeaningUnit("MovedArg");
+    public static MeaningUnit MovedMutableArgM { get; } = new MeaningUnit("MovedMutableArg");
     public static MeaningUnit ConstDeclM { get; } = new MeaningUnit("ConstDecl");
     public static MeaningUnit VarDeclM { get; } = new MeaningUnit("VarDecl");
     public static MeaningUnit AssignM { get; } = new MeaningUnit("Assign");
@@ -328,6 +336,18 @@ public class QoraGrammar : Grammar
         param.AddItem(InOut + Ident + Colon + qubitArrayType, ParamM);   // inout q: Qubit[] (semantic error)
         param.AddItem(InOut + Ident + Colon + typeName, ParamM);         // inout n: int (semantic error)
         param.AddItem(InOut + Ident + Colon + arrayType, ParamM);        // inout a: int[]
+        param.AddItem(Var + Ident + Colon + Qubit, MutableParamM);            // var q: Qubit (semantic error)
+        param.AddItem(Var + Ident + Colon + qubitArrayType, MutableParamM);   // var q: Qubit[] (semantic error)
+        param.AddItem(Var + Ident + Colon + typeName, MutableParamM);         // var n: int (semantic error)
+        param.AddItem(Var + Ident + Colon + arrayType, MutableParamM);        // var a: int[]
+        param.AddItem(Move + Ident + Colon + Qubit, MovedParamM);             // move q: Qubit
+        param.AddItem(Move + Ident + Colon + qubitArrayType, MovedParamM);    // move q: Qubit[]
+        param.AddItem(Move + Ident + Colon + typeName, MovedParamM);          // move n: int (semantic error)
+        param.AddItem(Move + Ident + Colon + arrayType, MovedParamM);         // move a: T[]
+        param.AddItem(Move + Var + Ident + Colon + Qubit, MovedMutableParamM);          // move var q: Qubit (semantic error)
+        param.AddItem(Move + Var + Ident + Colon + qubitArrayType, MovedMutableParamM); // move var q: Qubit[] (semantic error)
+        param.AddItem(Move + Var + Ident + Colon + typeName, MovedMutableParamM);       // move var n: int (semantic error)
+        param.AddItem(Move + Var + Ident + Colon + arrayType, MovedMutableParamM);      // move var a: T[]
 
         statement.AddItem(useStmt | gateStmt | constDecl | varDecl | assignStmt | ifStmt | forStmt | whileStmt | repeatStmt | returnStmt);
 
@@ -353,6 +373,9 @@ public class QoraGrammar : Grammar
         // structured argument, allowing validation to decide whether its base is a qubit or T[].
         arg.AddItem(expr);
         arg.AddItem(InOut + expr, InOutArgM);
+        arg.AddItem(Var + expr, MutableArgM);
+        arg.AddItem(Move + expr, MovedArgM);
+        arg.AddItem(Move + Var + expr, MovedMutableArgM);
 
         // const x = expr;   /   const x: int = expr;   /   const a: int[] = […];   (immutable)
         constDecl.AddItem(Const + Ident + Assign + expr + Semicolon, ConstDeclM);                                    // const x = 5

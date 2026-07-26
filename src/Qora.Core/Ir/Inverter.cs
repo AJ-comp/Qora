@@ -146,6 +146,12 @@ public sealed class Inverter
 
     private (QStmt? Inverse, string Reason) InvertGate(QGate g)
     {
+        // Ownership transfer is directional. Reversing a body also reverses statement order, so a moved
+        // binding could be consumed before an earlier inverse statement tries to use it. Qora has no way
+        // to synthesize ownership restoration, therefore a call carrying `move` is not invertible.
+        if (g.Args.Any(arg => arg.Ownership == QOwnershipMode.Moved))
+            return (null, "it transfers ownership in a call, and reversing statement order could use the value after it was moved");
+
         // Resolve the callee by REFERENCE (CalleeOpId) when the call carries one; fall back to the name for
         // hand-built IR (test gates carry no CalleeOpId). isUserOp ⟺ the call resolves to a user operation;
         // the resolved op's own name then drives the memoized, single-tree op inversion below.

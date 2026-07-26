@@ -52,10 +52,11 @@ public sealed class Symbol
     public QType? Type { get; }                 // explicit or initializer-inferred Int / Float / Angle / Bit / Qubit
     public bool IsConst { get; }
     /// <summary>
-    /// Access mode of a parameter symbol. Non-parameter symbols keep the default
-    /// <see cref="QParameterMode.In"/>; callers must not infer ownership from it for those kinds.
+    /// Ownership/access contract of a parameter symbol. Non-parameter symbols keep the default
+    /// borrowed/read-only values; callers must not infer storage ownership from them for those kinds.
     /// </summary>
-    public QParameterMode ParameterMode { get; }
+    public QOwnershipMode ParameterOwnership { get; }
+    public QAccessMode ParameterAccess { get; }
     public string? ConstValue { get; }          // a const's initializer text (diagnostics); null for var/measure/register
     /// <summary>The const's value, FOLDED ONCE at its declaration — in the declaring scope, by the one
     /// shared calculator (<see cref="BoundFolder"/>) over the initializer tree — and read as plain data ever
@@ -63,6 +64,10 @@ public sealed class Symbol
     /// carries the count through), or null when it does not settle (or the symbol is not a const). A const
     /// can never be reassigned (QSEM024), so this value has no time axis: true wherever the symbol is visible.</summary>
     internal Bound? FoldedBound { get; init; }
+    /// <summary>The const's compile-time boolean value, folded once at its declaration. This is kept
+    /// separately from <see cref="FoldedBound"/> because a bit-valued comparison is not an integer bound,
+    /// while control-flow analysis still needs to know that an impossible branch cannot consume ownership.</summary>
+    internal bool? FoldedBoolean { get; init; }
     /// <summary>The <see cref="QParam.NeedsMonoSizing"/> answer, stamped ONCE at declaration — true only
     /// for a parameter whose length monomorphization will supply (unsized <c>Qubit[]</c> / <c>bit[]</c>).
     /// The bounds prover's deferral gates read this stamp instead of re-deriving the set, so they can
@@ -82,7 +87,8 @@ public sealed class Symbol
         QSpan? declSpan = null, int? registerSize = null, bool isArray = false,
         int? arrayLength = null, int? declarationNodeId = null,
         SymbolId? ownerSymbolId = null, SymbolOrigin origin = SymbolOrigin.Source,
-        QParameterMode parameterMode = QParameterMode.In)
+        QOwnershipMode parameterOwnership = QOwnershipMode.Borrowed,
+        QAccessMode parameterAccess = QAccessMode.ReadOnly)
     {
         SourceName = name;
         Kind = kind;
@@ -90,7 +96,8 @@ public sealed class Symbol
         Origin = origin;
         Type = type;
         IsConst = isConst;
-        ParameterMode = parameterMode;
+        ParameterOwnership = parameterOwnership;
+        ParameterAccess = parameterAccess;
         ConstValue = constValue;
         DeclSpan = declSpan;
         RegisterSize = registerSize;
@@ -270,7 +277,8 @@ public static class SymbolTableBuilder
         Dictionary<IReadOnlyList<QStmt>, Scope>? scopeIndex = null,
         ProgramSymbolGraph? programSymbols = null,
         IReadOnlyDictionary<int, QOperation>? opById = null,
-        Action<int, QoraError>? typeMismatchCandidate = null)
+        Action<int, QoraError>? typeMismatchCandidate = null,
+        Action<int, QoraError>? statementError = null)
     {
         var opName = op.DisplayName ?? op.Name;
         programSymbols ??= BuildProgramSymbols(new QProgram(new[] { op }));
@@ -344,7 +352,8 @@ public static class SymbolTableBuilder
                 arrayLength: p.Type != QType.Qubit ? p.RegisterSize : null,
                 declarationNodeId: p.Id,
                 ownerSymbolId: callable.Id,
-                parameterMode: p.Mode)
+                parameterOwnership: p.Ownership,
+                parameterAccess: p.Access)
             {
                 MonoSized = p.NeedsMonoSizing,   // the ONE answer, stamped for the deferral gates
             });
@@ -373,6 +382,12 @@ public static class SymbolTableBuilder
         var currentStmtId = 0;   // set by Walk to the statement being visited, so uses carry their node Id
         var measureBits = new List<(string Name, QSpan? Span)>();   // every measure bit, for the post-walk top-level collision check
         var reported036 = new HashSet<(int, int)>();   // QSEM036 spans already flagged — one diagnostic per statement span, like reported026
+        void AddStatementError(string code, string message, QSpan? span)
+        {
+            var error = new QoraError(message, code, span?.Start ?? -1, span?.End ?? -1);
+            errors.Add(error);
+            if (currentStmtId != 0) statementError?.Invoke(currentStmtId, error);
+        }
 
         // A WHOLE `bit[]` register, if that is what this node denotes. The discriminator is IsArray, NOT Type:
         // a scalar measure bit and a bit register are both QType.Bit, and the scalar one is untouched by the
@@ -393,10 +408,10 @@ public static class SymbolTableBuilder
             // An operation resolves up the scope chain but is NOT a value: it can only be called (the QGate
             // path records those uses), never referenced in an expression or used as an assignment target.
             if (callableValue is { Kind: SymbolKind.Operation })
-                Add(errors, "QSEM028", $"in `{opName}`: `{name}` is an operation, not a value — it can only be called (`{name}(…)`)", span);
+                AddStatementError("QSEM028", $"in `{opName}`: `{name}` is an operation, not a value — it can only be called (`{name}(…)`)", span);
             else if (sym is not null) sym.Uses.Add(new UseSite(order, detail, currentStmtId));
             else
-                Add(errors, "QSEM025", $"in `{opName}`: `{name}` is not declared in scope here — an unknown name, or a name used before its declaration", span);
+                AddStatementError("QSEM025", $"in `{opName}`: `{name}` is not declared in scope here — an unknown name, or a name used before its declaration", span);
         }
 
         // Resolve every identifier inside an EXPRESSION TREE — a condition, a range bound, a qubit index
@@ -421,7 +436,7 @@ public static class SymbolTableBuilder
                     // `if (q == q)` and a `for`'s `q..q` (From/To share the span) each report one diagnostic.
                     if (classicalOnly && scope.Lookup(r.Name) is { Type: QType.Qubit }
                         && reported026.Add((span?.Start ?? -1, span?.End ?? -1)))
-                        Add(errors, "QSEM026", $"in `{opName}`: `{r.Name}` is a qubit and cannot be used as a classical value here — a qubit has no numeric value to compare, index, or compute with", span);
+                        AddStatementError("QSEM026", $"in `{opName}`: `{r.Name}` is a qubit and cannot be used as a classical value here — a qubit has no numeric value to compare, index, or compute with", span);
                     // QSEM036 — a WHOLE bit register is a container of bits, not a number. It reached a
                     // position that reads a VALUE, and no position hands it a meaning: `registerOk` is set by
                     // the PARENT for the four places a whole register legitimately appears (index base,
@@ -430,15 +445,15 @@ public static class SymbolTableBuilder
                     // bits read 2 unsigned and −2 in two's complement — so the language refuses to choose.
                     if (!registerOk && WholeBitRegister(scope, r) is not null
                         && reported036.Add((span?.Start ?? -1, span?.End ?? -1)))
-                        Add(errors, "QSEM036", $"in `{opName}`: `{r.Name}` is a whole `bit[]` register, not a number — a bit pattern has no sign, so it has no numeric value on its own; write `{QoraGates.BitsAsInt}({r.Name})` to read it as an unsigned integer, or index a single bit (`{r.Name}[i]`)", span);
+                        AddStatementError("QSEM036", $"in `{opName}`: `{r.Name}` is a whole `bit[]` register, not a number — a bit pattern has no sign, so it has no numeric value on its own; write `{QoraGates.BitsAsInt}({r.Name})` to read it as an unsigned integer, or index a single bit (`{r.Name}[i]`)", span);
                     return;
                 case QMember { Base: QNameRef b } m:
                     Record(scope, b.Name, detail, span);
                     if (scope.Lookup(b.Name) is not { } owner) return; // Record already produced QSEM025
                     if (m.Member != "Count")
-                        Add(errors, "QSEM029", $"in `{opName}`: `{b.Name}.{m.Member}` is not a supported member; arrays expose `.Count`", span);
+                        AddStatementError("QSEM029", $"in `{opName}`: `{b.Name}.{m.Member}` is not a supported member; arrays expose `.Count`", span);
                     else if (!owner.IsArray)
-                        Add(errors, "QSEM029", $"in `{opName}`: `{b.Name}.Count` is invalid because `{b.Name}` is not an array", span);
+                        AddStatementError("QSEM029", $"in `{opName}`: `{b.Name}.Count` is invalid because `{b.Name}` is not an array", span);
                     return;
                 case QMember m:   // non-name base — grammar-unreachable; still resolve what is resolvable
                     RecordExpr(scope, m.Base, detail, span, classicalOnly);
@@ -459,7 +474,7 @@ public static class SymbolTableBuilder
                     {
                         if (lhs.ArrayLength is int ln && rhs.ArrayLength is int rn && ln != rn
                             && reported036.Add((span?.Start ?? -1, span?.End ?? -1)))
-                            Add(errors, "QSEM036", $"in `{opName}`: `{QNodes.Render(b2.Left)}` is `bit[{ln}]` and `{QNodes.Render(b2.Right)}` is `bit[{rn}]` — registers of different widths are never equal, whatever bits they hold; compare equal-width registers, or compare their values with `{QoraGates.BitsAsInt}(…)` on both sides", span);
+                            AddStatementError("QSEM036", $"in `{opName}`: `{QNodes.Render(b2.Left)}` is `bit[{ln}]` and `{QNodes.Render(b2.Right)}` is `bit[{rn}]` — registers of different widths are never equal, whatever bits they hold; compare equal-width registers, or compare their values with `{QoraGates.BitsAsInt}(…)` on both sides", span);
                         RecordExpr(scope, b2.Left, detail, span, classicalOnly, registerOk: true);
                         RecordExpr(scope, b2.Right, detail, span, classicalOnly, registerOk: true);
                         return;
@@ -498,9 +513,31 @@ public static class SymbolTableBuilder
         // to this later local, so the two passes would disagree (an out-of-bounds index folded to the wrong
         // value, or a duplicate qubit missed). Point-of-declaration scoping (which the emitted OpenQASM
         // follows) means a name may not be used before its declaration in its own scope: reject it here.
-        bool UsedBeforeShadow(Scope scope, string name, int scopeStart) =>
+        IReadOnlyList<UseSite> UsesBeforeShadow(Scope scope, string name, int scopeStart) =>
             scope.Lookup(name) is { Kind: not SymbolKind.Operation } outer
-            && outer.Uses.Any(u => u.Order > scopeStart && u.Order < order);
+                ? outer.Uses.Where(use => use.Order > scopeStart && use.Order < order).ToList()
+                : Array.Empty<UseSite>();
+
+        void ReportUsesBeforeShadow(Scope scope, string name, int scopeStart, QSpan? span)
+        {
+            var earlierUses = UsesBeforeShadow(scope, name, scopeStart);
+            if (earlierUses.Count == 0) return;
+
+            var error = new QoraError(
+                $"in `{opName}`: `{name}` is used earlier in this block but declared here, shadowing an outer `{name}` — a name cannot be used before its declaration in its own scope; move this declaration above the first use or rename it",
+                "QSEM025",
+                span?.Start ?? -1,
+                span?.End ?? -1);
+            errors.Add(error);
+
+            // The declaration-span diagnostic is caused by each earlier statement whose apparent outer
+            // lookup becomes illegal once this block declares a same-named local. Mark those statements as
+            // invalid too: after the scope is complete, call checking sees the inner symbol and must not
+            // commit an ownership move for a reference rejected by point-of-declaration scoping.
+            foreach (var use in earlierUses)
+                if (use.NodeId != 0)
+                    statementError?.Invoke(use.NodeId, error);
+        }
 
         void Walk(IReadOnlyList<QStmt> stmts, Scope scope)
         {
@@ -556,8 +593,7 @@ public static class SymbolTableBuilder
                         // may reuse a name — they dedup into one emitted bit and never coexist.)
                         if (scope.ParentScope?.Lookup(md.Name) is { Kind: SymbolKind.Register or SymbolKind.Parameter or SymbolKind.MeasureBit } encl)
                             Add(errors, "QSEM015", $"in `{opName}`: measure bit `{md.Name}` reuses the name of an enclosing {KindLabel(encl.Kind)}; a measured result is emitted as one top-level `bit {md.Name};`, so its name must be unique across the operation's registers, parameters and measure bits — rename one", md.Span);
-                        if (UsedBeforeShadow(scope, md.Name, scopeStart))
-                            Add(errors, "QSEM025", $"in `{opName}`: `{md.Name}` is used earlier in this block but declared here, shadowing an outer `{md.Name}` — a name cannot be used before its declaration in its own scope; move this declaration above the first use or rename it", md.Span);
+                        ReportUsesBeforeShadow(scope, md.Name, scopeStart, md.Span);
                         measureBits.Add((md.Name, md.Span));   // checked against the completed root scope after the walk (top-level collision)
                         Declare(scope, new Symbol(md.Name, SymbolKind.MeasureBit, QType.Bit, isConst: md.IsConst,
                             declSpan: md.Span, declarationNodeId: md.Id, ownerSymbolId: callable.Id));
@@ -581,8 +617,7 @@ public static class SymbolTableBuilder
                         // block (that use would bind to the outer value, which this local shadows). The
                         // initializer's own use of the name (order == this statement) is exempt, so a const
                         // chain reading the outer — `const n: int = n + 1` — is still fine.
-                        if (UsedBeforeShadow(scope, d.Name, scopeStart))
-                            Add(errors, "QSEM025", $"in `{opName}`: `{d.Name}` is used earlier in this block but declared here, shadowing an outer `{d.Name}` — a name cannot be used before its declaration in its own scope; move this declaration above the first use or rename it", d.Span);
+                        ReportUsesBeforeShadow(scope, d.Name, scopeStart, d.Span);
                         // A const's initializer folds HERE — the owner's site, the owner's scope (earlier
                         // consts are already in scope, so chains like `const m: int = k + 1` settle too).
                         // From now on the value is DATA on the symbol; no consumer re-reads the text.
@@ -594,6 +629,8 @@ public static class SymbolTableBuilder
                         {
                             FoldedBound = d is { IsConst: true, IsArray: false, Value: QText ct }
                                 ? BoundFolder.Fold(ct.Tree, scope) : null,
+                            FoldedBoolean = d is { IsConst: true, IsArray: false, Value: QText boolConst }
+                                ? BooleanFolder.Fold(boolConst.Tree, scope) : null,
                         });
                         break;
                     case QAssign { Value: QMeasure { Target: { } at } } ma:
@@ -779,8 +816,14 @@ public static class SymbolTableBuilder
         {
             var type = sym.Type is { } t ? t.ToString().ToLowerInvariant() : "?";
             var kind = sym.Kind.ToString().ToLowerInvariant();
-            var mode = sym is { Kind: SymbolKind.Parameter, ParameterMode: QParameterMode.InOut }
-                ? " inout"
+            var mode = sym.Kind == SymbolKind.Parameter
+                ? (sym.ParameterOwnership, sym.ParameterAccess) switch
+                {
+                    (QOwnershipMode.Borrowed, QAccessMode.Mutable) => " var",
+                    (QOwnershipMode.Moved, QAccessMode.ReadOnly) => " move",
+                    (QOwnershipMode.Moved, QAccessMode.Mutable) => " move var",
+                    _ => "",
+                }
                 : "";
             var val = sym.IsConst && sym.ConstValue is not null ? $" = {sym.ConstValue}" : "";
             var uses = sym.Uses.Count == 0

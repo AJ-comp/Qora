@@ -3,7 +3,7 @@ namespace Qora.Ir;
 /// <summary>The compiler's version, stamped into emitted QASM for provenance.</summary>
 public static class QoraVersion
 {
-    public const string Value = "0.29";
+    public const string Value = "0.30";
 }
 
 /// <summary>
@@ -33,9 +33,11 @@ public static class QNodeIds
 }
 
 /// <summary>
-/// Qora's own intermediate representation (IR): a strongly-typed, immutable tree that the compiler
-/// owns end-to-end, decoupled from the Janglim parse-AST. The pipeline is
-/// <c>source → Janglim AST → <see cref="QoraLowering"/> → QProgram → …passes… → <see cref="QasmEmitter"/> → OpenQASM</c>.
+/// Qora's high-level intermediate representation (HIR): a strongly-typed, immutable tree that preserves
+/// source declarations, lexical blocks, and structured expressions while remaining decoupled from the
+/// Janglim parse-AST. The common front end validates and specializes this tree, then
+/// <see cref="Mir.QoraMirLowering"/> turns it into ID-based SSA/CFG MIR for value/effect analysis.
+/// The OpenQASM backend still consumes the HIR during the staged MIR migration.
 /// (Not related to Microsoft's LLVM-based "QIR" standard — this is Qora's private, in-memory IR;
 /// the "Q" prefix on node types just namespaces them.)
 ///
@@ -128,13 +130,19 @@ public sealed record QOperation(string Name, IReadOnlyList<QParam> Params, IRead
 public enum QType { Qubit, Int, Bit, Float, Angle }
 
 /// <summary>
-/// The caller-visible CLASSICAL access contract of one callable parameter. <see cref="In"/> grants no
-/// caller-visible classical write permission; <see cref="InOut"/> is an exclusive mutable borrow whose
-/// writes are visible to the caller. This is deliberately NOT a <see cref="QType"/>:
-/// <c>inout xs: int[]</c> still has value type <c>int[]</c>, with a separate call-boundary permission.
-/// Qubit state changes through gates follow the language's quantum semantics and never use this mode.
+/// Whether a callable temporarily borrows a value or takes its ownership. The default is
+/// <see cref="Borrowed"/>; <see cref="Moved"/> invalidates the caller's binding after the call.
+/// This axis is deliberately independent from <see cref="QAccessMode"/>.
 /// </summary>
-public enum QParameterMode { In, InOut }
+public enum QOwnershipMode { Borrowed, Moved }
+
+/// <summary>
+/// Whether a callable parameter is read-only or may be changed. The default is
+/// <see cref="ReadOnly"/>; <see cref="Mutable"/> requires an exclusive access path. This axis is
+/// independent from <see cref="QOwnershipMode"/>, giving the four source contracts
+/// <c>x</c>, <c>var x</c>, <c>move x</c>, and <c>move var x</c>.
+/// </summary>
+public enum QAccessMode { ReadOnly, Mutable }
 
 /// <summary>
 /// One parameter slot of a CALLABLE — a built-in gate or a user operation — reduced to exactly what a
@@ -152,7 +160,8 @@ public interface IParamSpec
     bool IsArray { get; }        // source shape: T[] rather than one scalar value
     bool IsQubitArray { get; }   // source shape: Qubit[] rather than one Qubit
     bool QubitBroadcast { get; } // qubit slot: accepts ANY qubit shape (built-in gates broadcast; ops are strict)
-    QParameterMode Mode { get; } // ordinary call mode, or an explicitly mutable classical inout borrow
+    QOwnershipMode Ownership { get; }
+    QAccessMode Access { get; }
 }
 
 /// <summary>
@@ -188,10 +197,15 @@ public sealed record QParam(string Name, QType Type, int? RegisterSize) : IParam
     public bool IsQubitArray => Type == QType.Qubit && IsArray;
 
     /// <summary>
-    /// Source-level classical access mode. Omitted syntax is <see cref="QParameterMode.In"/>; only
-    /// <c>inout name: T[]</c> sets <see cref="QParameterMode.InOut"/>. Qubit state semantics are separate.
+    /// Source-level ownership contract. Omitted syntax borrows; <c>move name: T[]</c> transfers ownership.
     /// </summary>
-    public QParameterMode Mode { get; init; }
+    public QOwnershipMode Ownership { get; init; }
+
+    /// <summary>
+    /// Source-level access contract. Omitted syntax is read-only; <c>var name: T[]</c> grants mutation.
+    /// Qubit state changes through gates remain part of the language's separate quantum semantics.
+    /// </summary>
+    public QAccessMode Access { get; init; }
 
     /// <summary>
     /// THE single definition of "monomorphization supplies this parameter's length": an unsized
@@ -305,11 +319,15 @@ public sealed record QConjugate(IReadOnlyList<QStmt> Within, IReadOnlyList<QStmt
 public abstract record QArg
 {
     /// <summary>
-    /// The call-site permission marker. A source <c>inout values</c> argument carries
-    /// <see cref="QParameterMode.InOut"/>; an ordinary expression carries <see cref="QParameterMode.In"/>.
-    /// The validator requires an exact match with the callee parameter, and the QASM emitter erases it.
+    /// The call-site ownership marker. Omitted syntax borrows; <c>move values</c> transfers ownership.
     /// </summary>
-    public QParameterMode Mode { get; init; }
+    public QOwnershipMode Ownership { get; init; }
+
+    /// <summary>
+    /// The call-site access marker. Omitted syntax is read-only; <c>var values</c> grants mutation.
+    /// The validator requires both axes to match the callee parameter, and the QASM emitter erases them.
+    /// </summary>
+    public QAccessMode Access { get; init; }
 }
 
 /// <summary>
@@ -482,7 +500,8 @@ public sealed record GateParam(string Name, QType Type, bool QubitBroadcast = fa
     public int? RegisterSize => null;
     public bool IsArray => false;
     public bool IsQubitArray => false;
-    public QParameterMode Mode => QParameterMode.In;
+    public QOwnershipMode Ownership => QOwnershipMode.Borrowed;
+    public QAccessMode Access => QAccessMode.ReadOnly;
 }
 
 /// <summary>A built-in gate's signature (see <see cref="QoraGates.SigOf"/>).</summary>

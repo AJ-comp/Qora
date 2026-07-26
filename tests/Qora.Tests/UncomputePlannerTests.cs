@@ -161,6 +161,20 @@ public class UncomputePlannerTests
     //        by the call statement's StmtId (preserved across mono, unlike the name) blocks it on either tree. ---
 
     [Fact]
+    public void OwnershipTransferringCallIsBlockedEvenWhenCalleeBodyIsInvertible()
+    {
+        var (op, m, inv) = Compile(
+            "operation Flip(move p: Qubit[]){ X(p[0]); }\n" +
+            "operation Main(){ use a=Qubit[1]; Flip(move a); }");
+
+        Assert.False(m.IsSafelyUncomputable(op, Whole("a")));
+        Assert.Equal(
+            UncomputeBlocker.NotInvertibleCall,
+            m.UncomputeSafety(op, Whole("a")).Blocker);
+        Assert.Null(UncomputePlanner.Plan(m, inv, op, Whole("a")));
+    }
+
+    [Fact]
     public void GenericNonInvertibleCalleeIsBlockedOnThePreMonoTree()
     {
         var (op, m, inv) = Compile(

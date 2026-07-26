@@ -4,12 +4,12 @@ namespace Qora.Ir;
 
 /// <summary>
 /// The engine boundary: converts a Janglim parse-AST (<see cref="AstSymbol"/>, tagged by MeaningUnit
-/// name) into Qora's own <see cref="QProgram"/> IR, once. After this, nothing downstream touches Janglim
-/// types — passes and the emitter work purely on the IR.
+/// name) into Qora's source-shaped <see cref="QProgram"/> HIR, once. After this, nothing downstream
+/// touches Janglim types.
 ///
-/// Structure (statements, gates, control flow) becomes typed IR nodes; expressions and conditions are
-/// flattened to their rendered text here (Qora never restructures them), mirroring the old emitter's
-/// space-joined output exactly.
+/// Structure (statements, gates, control flow) becomes typed HIR nodes; expressions and conditions become
+/// one canonical <see cref="QNode"/> tree here. Validation and source diagnostics operate on this form,
+/// while <see cref="Mir.QoraMirLowering"/> later converts it to SSA values and basic blocks.
 /// </summary>
 public static class QoraLowering
 {
@@ -132,20 +132,25 @@ public static class QoraLowering
                      ?? arrayType?.Items.OfType<AstTerminal>().Select(t => t.ToString() ?? string.Empty)
                          .FirstOrDefault(t => TypeKeywords.Contains(t));
         var isArray = arrayType is not null;
-        var mode = terms.Contains("inout") ? QParameterMode.InOut : QParameterMode.In;
+        var ownership = param.Name is "MovedParam" or "MovedMutableParam"
+            ? QOwnershipMode.Moved
+            : QOwnershipMode.Borrowed;
+        var access = param.Name is "MutableParam" or "MovedMutableParam" || terms.Contains("inout")
+            ? QAccessMode.Mutable
+            : QAccessMode.ReadOnly;
         // A source parameter contains one identifier besides its explicit type: the parameter name.
         var idents = terms.Where(t => t != "inout" && !TypeKeywords.Contains(t) && !IsNumber(t)).ToList();
         var name = idents.Count > 0 ? idents[^1] : string.Empty;
         var span = SpanOf(param.Items.OfType<AstTerminal>().FirstOrDefault(t => (t.ToString() ?? "") == name));
 
-        if (typeKw == "int") return new QParam(name, QType.Int, null) { IsArray = isArray, Mode = mode, Span = span };
-        if (typeKw == "bit") return new QParam(name, QType.Bit, null) { IsArray = isArray, Mode = mode, Span = span };
-        if (typeKw == "float") return new QParam(name, QType.Float, null) { IsArray = isArray, Mode = mode, Span = span };
-        if (typeKw == "angle") return new QParam(name, QType.Angle, null) { IsArray = isArray, Mode = mode, Span = span };
+        if (typeKw == "int") return new QParam(name, QType.Int, null) { IsArray = isArray, Ownership = ownership, Access = access, Span = span };
+        if (typeKw == "bit") return new QParam(name, QType.Bit, null) { IsArray = isArray, Ownership = ownership, Access = access, Span = span };
+        if (typeKw == "float") return new QParam(name, QType.Float, null) { IsArray = isArray, Ownership = ownership, Access = access, Span = span };
+        if (typeKw == "angle") return new QParam(name, QType.Angle, null) { IsArray = isArray, Ownership = ownership, Access = access, Span = span };
         if (typeKw == "Qubit" && isArray)
-            return new QParam(name, QType.Qubit, null) { IsArray = true, Mode = mode, Span = span };   // Qubit[] qs
+            return new QParam(name, QType.Qubit, null) { IsArray = true, Ownership = ownership, Access = access, Span = span };   // Qubit[] qs
         if (typeKw == "Qubit")
-            return new QParam(name, QType.Qubit, null) { IsArray = false, Mode = mode, Span = span };  // Qubit q
+            return new QParam(name, QType.Qubit, null) { IsArray = false, Ownership = ownership, Access = access, Span = span };  // Qubit q
 
         throw new InvalidOperationException("a parameter AST must contain an explicit type keyword");
     }
@@ -206,14 +211,20 @@ public static class QoraLowering
     {
         if (sym is AstNonTerminal nt)
         {
-            if (nt.Name == "InOutArg")
+            if (nt.Name is "InOutArg" or "MutableArg" or "MovedArg" or "MovedMutableArg")
             {
                 var value = nt.Items.OfType<AstNonTerminal>().FirstOrDefault(n => n.Name == "Expr")
-                    ?? throw new InvalidOperationException("an inout argument AST must contain one expression");
+                    ?? throw new InvalidOperationException("a parameter-mode argument AST must contain one expression");
+                var ownership = nt.Name is "MovedArg" or "MovedMutableArg"
+                    ? QOwnershipMode.Moved
+                    : QOwnershipMode.Borrowed;
+                var access = nt.Name is "InOutArg" or "MutableArg" or "MovedMutableArg"
+                    ? QAccessMode.Mutable
+                    : QAccessMode.ReadOnly;
                 return LowerArg(value) switch
                 {
-                    QQubitArg q => q with { Mode = QParameterMode.InOut },
-                    QTextArg t => t with { Mode = QParameterMode.InOut },
+                    QQubitArg q => q with { Ownership = ownership, Access = access },
+                    QTextArg t => t with { Ownership = ownership, Access = access },
                     var other => other,
                 };
             }
@@ -367,11 +378,14 @@ public static class QoraLowering
     private static string OpName(AstNonTerminal op) =>
         op.Items.OfType<AstTerminal>().FirstOrDefault()?.ToString() ?? string.Empty;
 
+    private static bool IsParam(AstNonTerminal node) =>
+        node.Name is "Param" or "MutableParam" or "MovedParam" or "MovedMutableParam";
+
     private static IEnumerable<AstNonTerminal> Params(AstNonTerminal op) =>
-        op.Items.OfType<AstNonTerminal>().Where(n => n.Name == "Param");
+        op.Items.OfType<AstNonTerminal>().Where(IsParam);
 
     private static IEnumerable<AstNonTerminal> Body(AstNonTerminal op) =>
-        op.Items.OfType<AstNonTerminal>().Where(n => n.Name != "Param");
+        op.Items.OfType<AstNonTerminal>().Where(n => !IsParam(n));
 
     // Body statements are the block's nonterminal children, minus the "meta" nonterminals a statement
     // header carries as direct children: a "Condition" (if/while/repeat) and the two "Expr" for-bounds.
