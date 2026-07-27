@@ -56,7 +56,6 @@ if (args.Contains("--json"))
             new CompilationOptions(baseDir, sourcePath));
         var resolved = compilation.Hir.Resolved;
         var resolvedValidation = compilation.Hir.ResolvedValidation;
-        var effectAnalysis = compilation.Hir.EffectAnalysis;
         var mir = compilation.Mir;
         var openQasm = compilation.Targets.OpenQasm;
         if (args.Contains("--stages"))
@@ -85,9 +84,6 @@ if (args.Contains("--json"))
                 symbols = resolvedValidation is null
                     ? string.Empty
                     : CompilationReports.FormatSymbols(resolvedValidation),
-                uncompute = effectAnalysis is null
-                    ? string.Empty
-                    : CompilationReports.FormatUncompute(effectAnalysis),
                 mir = mir is null
                     ? string.Empty
                     : Qora.Ir.Mir.MirPrinter.Print(mir.Program),

@@ -6,7 +6,7 @@ using Janglim.FrontEnd.RegularGrammar;
 namespace Qora;
 
 /// <summary>
-/// Qora v0.31 — a Q#/C#-flavored quantum language on the Janglim engine.
+/// Qora v0.32 — a Q#/C#-flavored quantum language on the Janglim engine.
 ///
 ///   operation Bell(q: Qubit[]) {        // a subroutine, with trailing-type parameters (name: T)
 ///       H(q[0]);
@@ -17,20 +17,19 @@ namespace Qora;
 ///       use q = Qubit[2];
 ///       Bell(q);                        // call (whole register) — or Bell(q[0], q[1])
 ///       var r: bit = M(q[0]);
-///       if (r == 1) { Adjoint S(q[1]); } else { S(q[1]); }   // functor + if/else
+///       if (r == 1) { Z(q[1]); } else { S(q[1]); }           // if/else
 ///   }
 ///
 /// Calls and gate applications share one surface form (<c>qualified.name(args…)</c>); the emitter tells them
-/// apart by name (a defined operation -> a call, otherwise a gate). The operation named <c>Main</c>
+/// apart through the typed callable identity recorded by resolution; target emission never guesses by
+/// spelling. The operation named <c>Main</c>
 /// is the entry (its body becomes the QASM top-level); every other operation becomes a <c>def</c>.
 ///
-/// v0.8 added: single-gate functors <c>Adjoint G(...)</c> / <c>Controlled G(...)</c> (-> OpenQASM
-/// <c>inv @</c> / <c>ctrl @</c>), richer conditions (== != &lt; &lt;= &gt; &gt;= &amp;&amp; || !),
+/// v0.8 added: the single-gate modifier <c>Controlled G(...)</c> (-> OpenQASM <c>ctrl @</c>),
+/// richer conditions (== != &lt; &lt;= &gt; &gt;= &amp;&amp; || !),
 /// <c>if/else</c> (and <c>else if</c>), and first-class <c>Reset</c>.
 /// v0.9 added: <c>//</c> line comments (block <c>/* */</c> comments still pending engine support).
-/// v0.10 added: whole-operation <c>Adjoint</c> (synthesized inverse defs, via the typed IR pipeline in
-/// <c>Ir/</c> with semantic validation QSEM001-015), unary minus in expressions, and zero-argument
-/// functor calls.
+/// v0.10 added unary minus in expressions and zero-argument gate/operation calls.
 /// v0.11 added: hardened validation (argument kinds for built-ins, full user-op call signatures,
 /// index bounds QSEM016, measure-into-bit QSEM017; QSEM013 relaxed so def-locals may shadow stdgates
 /// names), the module-system grammar (<c>import</c> / <c>namespace</c> / <c>open</c>, parsed and gated
@@ -39,7 +38,7 @@ namespace Qora;
 /// v0.12 adds: the module system for real — namespaces/opens/qualified calls resolve
 /// (<c>Ir/Passes/Resolver.cs</c>, QSEM018/019/022), <c>import</c> loads files (<c>Ir/Passes/ModuleLoader.cs</c>,
 /// QSEM020, CLI <c>--base-dir</c>; repeated and cyclic paths are deduplicated), and emission name mangling was introduced
-/// (<c>Ir/Passes/NameMangler.cs</c>; current behavior is collision-only, see v0.14 below).
+/// (now owned by MIR-to-target lowering; current behavior is collision-only, see v0.14 below).
 /// Built-in gate names relaxed Q#-style: a NAMESPACED op may reuse one (ambiguous use ⇒ QSEM018,
 /// qualify via <c>L.Rx</c> / <c>Qora.Intrinsic.Rx</c>); measurement family + pi/tau/euler + global
 /// gate-named ops stay reserved (QSEM013).
@@ -52,10 +51,9 @@ namespace Qora;
 /// sized qubit-register parameters, specialized internally per call-site size by monomorphization
 /// (<c>Ir/Passes/Monomorphizer.cs</c>); name mangling that renames ONLY on a real collision — append
 /// <c>_</c>, auto-resolved, never an error, with a <c>// Qora:</c> note per rename (superseding v0.12's
-/// suffix-every-name scheme, so <c>q</c> stays <c>q</c> unless it clashes); whole-operation <c>Adjoint</c>
-/// materialized into a real inverse-def op BEFORE mangling (<c>Ir/Passes/AdjointMaterializer.cs</c>),
-/// leaving <c>QasmEmitter</c> a pure printer; and a post-mangle referential-integrity gate
-/// (<c>Ir/Passes/ReferentialCheck.cs</c>, QINTERNAL) that proves every emitted name resolves.
+/// suffix-every-name scheme, so <c>q</c> stays <c>q</c> unless it clashes); and a post-mangle
+/// referential-integrity gate
+/// (now part of the typed target verifier, QINTERNAL) that proves every emitted target ID resolves.
 /// v0.21 replaces sized source parameters with <c>Qubit[]</c> plus <c>.Count</c>, while retaining
 /// <c>use q = Qubit[N]</c> for allocation. It also adds one-dimensional <c>int[]</c>, <c>float[]</c>,
 /// <c>bit[]</c>, and <c>angle[]</c> values: explicit literals, zero-initialized <c>new T[N]</c>, indexed
@@ -68,14 +66,14 @@ namespace Qora;
 /// text. A name used before its own-scope declaration is <c>QSEM025</c> (point-of-declaration scoping).
 /// v0.23 lets array locals live anywhere a scalar does — helper operations, loops, branches. OpenQASM
 /// wants arrays at global scope and hides mutable globals from defs, so the backend's
-/// <c>Ir/Qasm/ArrayLocalHoisting.cs</c> threads a def-local classical array as a hidden
+/// MIR-to-OpenQASM lowering threads a def-local classical array as a hidden
 /// <c>mutable array[T, #dim = 1]</c> reference parameter backed by a global (the declaration site becomes
 /// per-entry element-wise re-initialization; a nested <c>bit[]</c> hoists to its scope top). <c>bit[]</c>
 /// parameters are length-specialized per call site like <c>Qubit[]</c> and emit as <c>bit[N]</c>; writing
 /// to a <c>bit[]</c> parameter is <c>QSEM032</c> (bit registers pass by value — a write would be
 /// silently invisible to the caller).
-/// v0.24 hardens the v0.23 hoisting: every minted name is a collision-proof <see cref="Ir.HoistName"/>
-/// placeholder the mangler prettifies, so no minted name can shadow a user variable, and a
+/// v0.24 hardens the v0.23 hoisting: every minted name is a collision-proof internal placeholder
+/// that target name allocation prettifies, so no minted name can shadow a user variable, and a
 /// measurement-in-condition temp can no longer mask a user's undeclared <c>__mN</c> (its <c>QSEM025</c>).
 /// v0.25 moves every type annotation to TRAILING position (<c>name: T</c>): a parameter is <c>q: Qubit[]</c>,
 /// a declaration is <c>var x: int = 5</c> / <c>const a: int[] = […]</c> (the type stays optional — <c>var x = 5</c>
@@ -103,11 +101,9 @@ namespace Qora;
 /// with <c>bool</c>, so it IS a value.
 /// v0.27 also lets <c>return</c> stand ANYWHERE a statement may — an early return, one inside <c>if</c>/
 /// <c>else</c>, one inside a <c>for</c>/<c>while</c>. The execution target cannot leave a <c>def</c> from a
-/// nested block, but that is the target's shape, not the language's: <c>Ir/Qasm/ReturnFlattening.cs</c>
-/// rewrites each function into one bottom return (a return becomes an assignment to a result variable, and
-/// the code it would have skipped moves into the <c>else</c> that did not return; a return inside a LOOP
-/// <c>break</c>s out of it, with a done flag only for the statements AFTER the loop, which no <c>break</c>
-/// can reach). <c>QSEM035</c> keeps just the two real errors: a <c>return</c> in an
+/// nested block, but that is the target's shape, not the language's. MIR control-flow lowering preserves
+/// every return path and target lowering emits the equivalent structured result flow.
+/// <c>QSEM035</c> keeps just the two real errors: a <c>return</c> in an
 /// <c>operation</c> (void), and a function with a path that produces no value.
 /// v0.28 checks function result contracts as <c>QSEM037</c>: every returned expression must be compatible
 /// with the declared return type, and an explicitly typed scalar cannot consume an incompatible function
@@ -157,8 +153,8 @@ public class QoraGrammar : Grammar
     // else stays in the AST (meaning=true) so the emitter can split the then-branch from the else-branch.
     public Terminal Else { get; } = new Terminal(TokenType.Keyword, "else", "else", true, false);
 
-    // functors: meaning=true so the gate name that follows can be distinguished from the prefix.
-    public Terminal Adjoint { get; } = new Terminal(TokenType.Keyword, "Adjoint", "Adjoint", true, false);
+    // The Controlled modifier stays in the AST so the gate name that follows can be distinguished from it.
+    // Inversion has no source keyword. A later MIR-only pass may attach an internal inverse request.
     public Terminal Controlled { get; } = new Terminal(TokenType.Keyword, "Controlled", "Controlled", true, false);
 
     // --- type keywords (meaning=TRUE so they stay in the AST; bWordPattern=false for keyword priority) ---
@@ -349,16 +345,14 @@ public class QoraGrammar : Grammar
         // use q = Qubit[2];
         useStmt.AddItem(Use + Ident + Assign + Qubit + LBracket + Num + RBracket + Semicolon, UseM);
 
-        // gate / rotation / operation call — all share one form Ident(args…); the emitter tells them
-        // apart by name. H(q[0]); CNOT(q[0],q[1]); Rx(pi/2, q[0]); Bell(q); Reset(q[0]);
-        // A functor prefix (Adjoint / Controlled) applies to a single built-in gate:
-        //   Adjoint S(q)      -> inv @ s q;
+        // Gate, rotation, and operation calls share one syntax. Resolution and signature validation bind
+        // each call before MIR lowering: H(q[0]); CNOT(q[0],q[1]); Rx(pi/2, q[0]); Bell(q); Reset(q[0]);
+        // The Controlled modifier applies to a single built-in gate:
         //   Controlled X(c,t) -> ctrl @ x c, t;
+        // Inverse applications are compiler-generated IR and deliberately have no source production.
         // call/gate names may be namespace-qualified (MyLib.Bell) — qname = Ident (Dot Ident)*
         gateStmt.AddItem(qname + LParen + RParen + Semicolon, GateM);
         gateStmt.AddItem(qname + LParen + arg + (Comma + arg).ZeroOrMore() + RParen + Semicolon, GateM);
-        gateStmt.AddItem(Adjoint + qname + LParen + RParen + Semicolon, GateM);
-        gateStmt.AddItem(Adjoint + qname + LParen + arg + (Comma + arg).ZeroOrMore() + RParen + Semicolon, GateM);
         gateStmt.AddItem(Controlled + qname + LParen + RParen + Semicolon, GateM);
         gateStmt.AddItem(Controlled + qname + LParen + arg + (Comma + arg).ZeroOrMore() + RParen + Semicolon, GateM);
         // Every argument is an expression. Lowering still preserves a lone indexed reference as a

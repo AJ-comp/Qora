@@ -17,8 +17,6 @@ public enum HirStage
     MeasurementLowered,
     Resolved,
     Specialized,
-    ConjugationLowered,
-    AdjointMaterialized,
 }
 
 /// <summary>The kind of stable-ID-bearing node stored in a HIR snapshot.</summary>
@@ -79,10 +77,6 @@ public sealed class HirStructuralIndex
                         break;
                     case QRepeat loop:
                         AddStatements(operationId, loop.Body);
-                        break;
-                    case QConjugate conjugation:
-                        AddStatements(operationId, conjugation.Within);
-                        AddStatements(operationId, conjugation.Apply);
                         break;
                 }
             }
@@ -183,10 +177,6 @@ public sealed class HirSourceMap
                         break;
                     case QRepeat loop:
                         AddStatements(loop.Body);
-                        break;
-                    case QConjugate conjugation:
-                        AddStatements(conjugation.Within);
-                        AddStatements(conjugation.Apply);
                         break;
                 }
             }
@@ -429,8 +419,6 @@ public sealed class HirCompilation
         HirStage.MeasurementLowered,
         HirStage.Resolved,
         HirStage.Specialized,
-        HirStage.ConjugationLowered,
-        HirStage.AdjointMaterialized,
     };
 
     private readonly IReadOnlyList<HirSnapshot> _snapshots;
@@ -591,8 +579,6 @@ public sealed class HirCompilation
     public HirSnapshot? MeasurementLowered => Find(HirStage.MeasurementLowered);
     public HirSnapshot? Resolved => Find(HirStage.Resolved);
     public HirSnapshot? Specialized => Find(HirStage.Specialized);
-    public HirSnapshot? ConjugationLowered => Find(HirStage.ConjugationLowered);
-    public HirSnapshot? AdjointMaterialized => Find(HirStage.AdjointMaterialized);
 
     public HirSemanticArtifact? ResolvedValidation =>
         Resolved is { } snapshot

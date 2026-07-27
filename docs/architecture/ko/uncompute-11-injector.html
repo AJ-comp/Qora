@@ -127,12 +127,17 @@
     <a class="doc-link" href="datasheet.html#s8">코스 목차</a>
     <a class="doc-link" href="uncompute-12-loops.html">12. 루프와 호출 — 왜 판정이 달라지는가 →</a>
   </nav>
+  <div class="call">
+    <span class="h">구현 상태</span>
+    이 장은 앞으로 연결할 automatic-uncomputation scheduler와 injector의 설계 계약을 설명해요.<br>
+    현재 compiler에는 SSA/CFG MIR 분석 기반과 <code>MirAdjointMaterializer</code>가 있지만, 여러 ancilla의 전역 cleanup 순서를 계산하고 inverse request를 자동 주입하는 scheduler는 아직 활성화되지 않았어요.<br>
+    따라서 아래의 주입 결과는 현재 Qora가 자동으로 방출하는 소스가 아니라, 구현할 MIR 변환의 기대 결과예요.
+  </div>
   <p>
     <a href="uncompute-02-ladder.html">2장</a>의 판별 사다리를 통과해 청소 후보가 된 앤실라가
-    되돌림 안전 판정(rung ③)까지 통과해 safe가 되면, 이제 컴파일러(rung ④)가 그 앤실라를 |0⟩로
-    되돌리는 정리 코드를 실제로 만들어 넣습니다.<br>
-    이 단계는 회로를 새로 설계하지 않습니다.<br>
-    앞에 이미 적힌 문장들을 재료로 삼는 기계적인 붙여넣기이며, 절차 전체가 다음 한 문장으로 요약됩니다.
+    되돌림 안전 판정(rung ③)까지 통과해 safe가 되면, 완성될 compiler(rung ④)는 그 앤실라를 |0⟩로
+    되돌리는 정리 코드를 MIR에 만들어 넣게 될 거예요.<br>
+    이 단계는 회로를 새로 설계하는 것이 아니라 앞에 이미 적힌 문장들을 재료로 삼으며, 목표 절차는 다음 한 문장으로 요약할 수 있어요.
   </p>
   <div class="rule">앤실라를 편집한 <strong>문장들의 목록</strong>을 가져와, 각 문장의 <strong>역</strong>을, <strong>역순</strong>으로, <strong>사망점에</strong> 붙여넣습니다.</div>
   <p>
@@ -214,7 +219,7 @@
     다만 앤실라 자동 청소의 목록에서 이 항목이 직접 나올 일은 없습니다.<br>
     앤실라에 대한 Y 쓰기는 되돌림 안전 판정(rung ③)이 NonQfreeWrite로 차단하기 때문입니다.<br>
     이 항목이 실제로 일하는 곳은 카탈로그의 마지막 항목인 호출의 역입니다.<br>
-    <code>Adjoint</code> 호출이 연산 본문을 뒤집다가 본문 속 Y 게이트를 만나면, 이 항목에 따라 Y†를 내놓습니다.
+    컴파일러 내부의 역연산 생성기가 연산 본문을 뒤집다가 본문 속 Y 게이트를 만나면, 이 항목에 따라 Y†를 내놓습니다.
   </p>
 
   <h3>예제 — 3중 컨트롤을 앤실라로 조립하고 자동 청소</h3>
@@ -253,7 +258,7 @@ CCX(t, c, d);    <span class="cm">// ② action:   d ^= t AND c   ← t의 마�
     규칙(<a href="uncompute-01-ancilla.html">1장</a>)을 이행하기 위해 컴파일러가 넣는 코드입니다.
   </p>
 
-  <h3>예제 — 편집이 두 번이면 역순이 보입니다: 호출은 Adjoint 호출로</h3>
+  <h3>예제 — 편집이 두 번이면 역순이 보입니다: 호출에는 내부 역연산 표식이 붙습니다</h3>
   <p>
     앞의 예제는 목록에 항목이 하나라서 역순이 드러나지 않았습니다.<br>
     이번에는 앤실라 <code>t</code>를 게이트로 한
@@ -270,18 +275,22 @@ operation Main(){
     X(t[0]);                 <span class="cm">// ① t 편집: t = 1</span>
     Mix(q[0], t[0]);         <span class="cm">// ② t 편집(호출): t = q[0]이 됨</span>
     CNOT(t[0], q[1]);        <span class="cm">// ③ action: q[1] ^= t  ← t의 마지막 사용 = 사망점</span>
-    <span class="add">Adjoint Mix(q[0], t[0]);</span> <span class="cm">// 주입 1: ②의 역 — 호출은 Adjoint 호출로</span>
-    <span class="add">X(t[0]);</span>                 <span class="cm">// 주입 2: ①의 역 — t가 |0⟩로 복귀</span>
     var m0: bit = M(q[0]);
     var m1: bit = M(q[1]);
     <span class="cm">// 항상 m0 == m1 (00 또는 11, 각각 50%)</span>
 }</code></pre>
   <p>
+    위 코드는 사용자 소스이며 <code>Adjoint</code> 문법을 포함하지 않습니다.<br>
+    scheduler가 나중에 ③ 직후의 정확한 MIR instruction 위치를 선택하면, 컴파일러 내부 MIR에는 다음 요청과 역방향 게이트가 추가됩니다.
+  </p>
+<pre><code><span class="add">MirQuantumApply(Target=Mix, Functors=[MirFunctor.Adjoint], Operands=[q[0], t[0]])</span>
+<span class="add">MirQuantumApply(Target=X, Functors=[], Operands=[t[0]])</span></code></pre>
+  <p>
     <code>t</code>를 편집한 문장의 목록은 [①, ②] 두 개입니다.<br>
     역순이므로 ②의 역이 먼저, ①의 역이 나중에
     붙습니다.<br>
-    ②는 호출이므로 카탈로그에 따라 <code>Adjoint Mix</code>가 되는데, 이것은 <code>Mix</code>가 한 일을
-    정확히 되돌리는 연산입니다.<br>
+    ②는 호출이므로 내부 MIR에서 <code>MirFunctor.Adjoint</code> 요청이 붙은 <code>MirQuantumApply</code>가 되는데, 이것은 <code>Mix</code>가 한 일을 정확히 되돌리라는 컴파일러 전용 요청입니다.<br>
+    그다음 <code>MirAdjointMaterializer</code>가 역방향 callable을 합성하고 이 요청을 typed callable target으로 바꿉니다.<br>
     안을 들여다보면 본문에도 같은 규칙이 적용되어 있습니다.<br>
     <code>CNOT(s, d)</code>가 먼저, <code>X(d)</code>가 나중, 즉 <code>Mix</code> 본문 각 문장의 역을 역순으로
     실행하는 것입니다.<br>
@@ -317,7 +326,7 @@ operation Main(){
       <tr><td><code>CNOT(c[0], t[0])</code></td><td><code>CNOT(c[0], t[0])</code></td><td>같은 XOR을 한 번 더 (자기 역)</td><td>CNOT 단계표</td></tr>
       <tr><td><code>CCX(a, b, t)</code></td><td><code>CCX(a, b, t)</code></td><td>자기 역</td><td>첫째 예제</td></tr>
       <tr><td><code>Y(t[0])</code></td><td><code>Y†(t[0])</code></td><td>위상까지 함께 되돌리는 수반(adjoint) 게이트</td><td>Y 단계표</td></tr>
-      <tr><td><code>Foo(...)</code> 호출</td><td><code>Adjoint Foo(...)</code> 호출</td><td>Foo 본문 전체의 역 (본문에 같은 규칙을 재귀 적용)</td><td>둘째 예제 (<code>Mix</code>)</td></tr>
+      <tr><td><code>Foo(...)</code> 호출</td><td>내부 MIR의 <code>MirQuantumApply(Target=Foo, Functors=[MirFunctor.Adjoint], ...)</code></td><td><code>MirAdjointMaterializer</code>가 합성하는 Foo 본문 전체의 역</td><td>둘째 예제 (<code>Mix</code>)</td></tr>
     </table>
   </div>
 

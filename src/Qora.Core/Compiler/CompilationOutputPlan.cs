@@ -10,7 +10,8 @@ public enum HirCompilationGoal
 
 /// <summary>
 /// The exact set of downstream artifacts requested for one Compilation revision.
-/// HIR is always built as far as diagnostics permit, while MIR and target artifacts are opt-in outputs.
+/// HIR is always built as far as diagnostics permit. MIR is an explicit output or an owned prerequisite
+/// of any requested target; a backend never lowers from HIR through a private side branch.
 /// </summary>
 public sealed class CompilationOutputPlan
 {
@@ -62,6 +63,7 @@ public sealed class CompilationOutputPlan
             Array.Empty<TargetBackend>());
 
     public bool ProduceMir { get; }
+    public bool RequiresMir => ProduceMir || _targets.Count > 0;
     public HirCompilationGoal HirGoal { get; }
 
     /// <summary>

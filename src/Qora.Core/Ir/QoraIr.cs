@@ -3,7 +3,7 @@ namespace Qora.Ir;
 /// <summary>The compiler's version, stamped into emitted QASM for provenance.</summary>
 public static class QoraVersion
 {
-    public const string Value = "0.31";
+    public const string Value = "0.32";
 }
 
 /// <summary>
@@ -18,7 +18,7 @@ public static class QoraVersion
 /// integer is never a cross-snapshot identity. The counter is global and monotonic across compilations — only uniqueness WITHIN one program
 /// matters, and a process-wide counter avoids threading an allocator through all of lowering.
 /// A pass that COPIES a subtree into a second tree position must re-mint Ids via <see cref="ReId"/>;
-/// <see cref="Passes.ReferentialCheck"/> fails loudly on any duplicate that slips through.
+/// exact HIR/MIR snapshot verifiers fail loudly on any duplicate that slips through.
 /// </summary>
 internal static class QNodeIds
 {
@@ -31,7 +31,7 @@ internal static class QNodeIds
 /// source declarations, lexical blocks, and structured expressions while remaining decoupled from the
 /// Janglim parse-AST. The common front end validates and specializes this tree, then
 /// <see cref="Mir.QoraMirLowering"/> turns it into ID-based SSA/CFG MIR for value/effect analysis.
-/// The OpenQASM backend still consumes the HIR during the staged MIR migration.
+/// Target backends consume only the resulting immutable MIR snapshot.
 /// (Not related to Microsoft's LLVM-based "QIR" standard — this is Qora's private, in-memory IR;
 /// the "Q" prefix on node types just namespaces them.)
 ///
@@ -82,6 +82,15 @@ public sealed record QProgram(
         get => _opens;
         init => _opens = HirCollections.FreezeNested(value);
     }
+
+    /// <summary>
+    /// The callable whose body becomes the executable program. Functions only produce values for callers,
+    /// so a function named <c>Main</c> is never an entry point. A global <c>operation Main</c> wins;
+    /// otherwise declaration order chooses the first operation.
+    /// </summary>
+    public QOperation? EntryOperation =>
+        Operations.FirstOrDefault(operation => !operation.IsFunction && operation.Name == "Main")
+        ?? Operations.FirstOrDefault(operation => !operation.IsFunction);
 
     /// <summary>Stable node identity (see <see cref="QNodeIds"/>): fresh at <c>new</c>, inherited by <c>with</c>.</summary>
     public int Id { get; init; } = QNodeIds.Next();
@@ -279,21 +288,31 @@ public abstract record QStmt
 public sealed record QUse(string Name, int Size) : QStmt;
 
 /// <summary>
-/// A gate application, functor-modified gate, or user-operation call — all share this one shape, exactly
-/// as the surface grammar does. <see cref="Functors"/> holds the prefix modifiers outermost-first
-/// (e.g. <c>["Controlled"]</c> for <c>Controlled X</c>); it is 0-or-1 long today but a list so inverses
-/// can stack (<c>inv @ ctrl @ …</c>). The emitter tells a gate from a call by whether <see cref="Name"/>
-/// is a defined operation.
+/// A modifier written in Qora source and preserved in source-shaped HIR. Inverse application is a
+/// MIR-only compiler operation and deliberately has no HIR value.
 /// </summary>
-public sealed record QGate(IReadOnlyList<string> Functors, string Name, IReadOnlyList<QArg> Args) : QStmt
+public enum QGateModifier
 {
-    private IReadOnlyList<string> _functors = HirCollections.Freeze(Functors);
+    Controlled,
+}
+
+/// <summary>
+/// A gate application or user-operation call. <see cref="Modifiers"/> contains only modifiers that were
+/// present in source. The typed collection prevents MIR-only transformation state from leaking back into
+/// source-shaped HIR.
+/// </summary>
+public sealed record QGate(
+    IReadOnlyList<QGateModifier> Modifiers,
+    string Name,
+    IReadOnlyList<QArg> Args) : QStmt
+{
+    private IReadOnlyList<QGateModifier> _modifiers = HirCollections.Freeze(Modifiers);
     private IReadOnlyList<QArg> _args = HirCollections.Freeze(Args);
 
-    public IReadOnlyList<string> Functors
+    public IReadOnlyList<QGateModifier> Modifiers
     {
-        get => _functors;
-        init => _functors = HirCollections.Freeze(value);
+        get => _modifiers;
+        init => _modifiers = HirCollections.Freeze(value);
     }
 
     public IReadOnlyList<QArg> Args
@@ -307,10 +326,7 @@ public sealed record QGate(IReadOnlyList<string> Functors, string Name, IReadOnl
     /// aims it at the size specialization). Null for a built-in gate (X, CNOT, …), which resolves to no
     /// operation, so <c>CalleeOpId is int</c> ⟺ "this gate is a user-op call". Consumers that need the callee
     /// FOLLOW this reference instead of re-matching <see cref="Name"/>, which is domain-dependent (a generic
-    /// call is <c>Loop</c> pre-mono, <c>Loop__sz2</c> post-mono, a third form post-mangle). Cleared to null by
-    /// <see cref="Passes.AdjointMaterializer"/> when it rewrites <c>Adjoint Foo</c> to a <c>Foo__adj</c> call:
-    /// the synthesized inverse's Id is not yet minted at that point, and no post-adjoint consumer needs the
-    /// reference (analysis runs earlier), so null (= "unbound, resolve by name") is honest, never a stale Id.</summary>
+    /// call is <c>Loop</c> pre-mono, <c>Loop__sz2</c> post-mono, a third form post-mangle).</summary>
     public int? CalleeOpId { get; init; }
 }
 
@@ -351,21 +367,11 @@ public sealed record QIf(QCond Cond, IReadOnlyList<QStmt> Then, IReadOnlyList<QS
 public sealed record QReturn(QExpr Value) : QStmt;
 
 /// <summary>
-/// <c>break;</c> — leave the innermost enclosing loop. NOT a Qora statement: there is no source syntax for
-/// it, and no front-end pass ever sees one. It is minted only by <see cref="Passes.ReturnFlattening"/>, the
-/// first step of the OpenQASM backend, to stop a loop whose body has already produced the function's result.
-/// Deliberately kept out of the language: every statement kind is one more shape each pass must handle, and
-/// this one needs to travel through five backend passes only, none of which read or rename anything in it.
-/// </summary>
-public sealed record QBreak : QStmt;
-
-/// <summary>
 /// <c>for Var in From..To { Body }</c>. Bounds are expression TREES (<c>0</c>, <c>values.Count - 1</c>),
 /// parsed once at lowering; the bounds prover folds them and every consumer renders its own spelling.
-/// <see cref="Step"/> has no surface syntax: the surface form always steps by +1 (null); the inversion
-/// pass sets <c>-1</c> to run a loop backwards, which emits OpenQASM's <c>[From:Step:To]</c> range.
+/// Source-shaped HIR always advances by one. Transformed traversal order belongs to MIR.
 /// </summary>
-public sealed record QFor(string Var, QNode From, QNode To, IReadOnlyList<QStmt> Body, QNode? Step = null) : QStmt
+public sealed record QFor(string Var, QNode From, QNode To, IReadOnlyList<QStmt> Body) : QStmt
 {
     private IReadOnlyList<QStmt> _body = HirCollections.Freeze(Body);
 
@@ -395,29 +401,6 @@ public sealed record QRepeat(IReadOnlyList<QStmt> Body, QCond Until) : QStmt
     {
         get => _body;
         init => _body = HirCollections.Freeze(value);
-    }
-}
-
-/// <summary>
-/// Synthetic node — no surface syntax produces it. A later uncompute pass injects it to mean
-/// "run <see cref="Within"/>, then <see cref="Apply"/>, then the inverse of <see cref="Within"/>".
-/// Present now so the IR is ready for that pass; nothing emits it yet.
-/// </summary>
-public sealed record QConjugate(IReadOnlyList<QStmt> Within, IReadOnlyList<QStmt> Apply) : QStmt
-{
-    private IReadOnlyList<QStmt> _within = HirCollections.Freeze(Within);
-    private IReadOnlyList<QStmt> _apply = HirCollections.Freeze(Apply);
-
-    public IReadOnlyList<QStmt> Within
-    {
-        get => _within;
-        init => _within = HirCollections.Freeze(value);
-    }
-
-    public IReadOnlyList<QStmt> Apply
-    {
-        get => _apply;
-        init => _apply = HirCollections.Freeze(value);
     }
 }
 
@@ -581,34 +564,34 @@ public sealed record QCallNode(string Name, IReadOnlyList<QNode> Args) : QNode
     public QCallNode(string name, QNode? arg) : this(name, arg is null ? System.Array.Empty<QNode>() : new[] { arg }) { }
 }
 
-// ---- the built-in gate table (single source of truth for emitter + validator + inverter) ----
+// ---- the built-in gate table (single source of truth for semantic analysis and lowering) ----
 
 /// <summary>Everything the pipeline needs to know about one built-in gate.</summary>
 /// <param name="QasmName">The OpenQASM gate (or statement) this lowers to.</param>
 /// <param name="Arity">Expected argument count, angle included; <c>Controlled</c> adds one on top.</param>
 /// <param name="AngleFirst">Parametrized rotation form: <c>Rx(θ, q)</c> → <c>rx(θ) q;</c>.</param>
-/// <param name="Unitary">False for reset-like operations — they cannot take functors or be inverted.</param>
+/// <param name="Unitary">False for reset-like operations — they cannot take modifiers or be reversed.</param>
 /// <param name="Controls">How many LEADING qubit slots are controls: they steer the gate but their own
 /// computational-basis value never changes (effect analysis marks them touched, not modified).</param>
 /// <param name="Diagonal">Diagonal in the computational basis: targets keep their 0/1 value, only the
 /// phase may change. CAUTION for later passes: phase kickback (e.g. CZ) still entangles — diagonal-only
 /// contact does NOT make a qubit safely discardable.</param>
-/// <param name="NonQfree">This write is NOT safely uncomputable by whole-statement adjoint injection when its
+/// <param name="NonQfree">This write is NOT safely uncomputable by a whole-statement cleanup reversal when its
 /// target is entangled — rung ③ rejects any ancilla that carries one. TWO gate families set it, for two
 /// distinct reasons, both established by state-vector verification (adversarial round 5):
 /// <list type="bullet">
 /// <item>SUPERPOSITION — <c>H</c>, <c>Rx</c>/<c>Ry</c> at a general angle turn a basis state into a genuine
-/// superposition; the ancilla then carries a fresh quantum degree of freedom the injected adjoint cannot fold
+/// superposition; the ancilla then carries a fresh quantum degree of freedom cleanup cannot fold
 /// back once a surviving qubit has recorded it.</item>
 /// <item>PHASE PERMUTATION — <c>Y</c>, <c>CY</c> permute the basis while attaching a basis-VALUE-dependent
-/// phase (Y: <c>+i</c> on 0→1, <c>−i</c> on 1→0). On a definite basis value that phase is global and the
-/// adjoint undoes it — but when the target is ENTANGLED the phase differs per survivor branch, becoming a
-/// RELATIVE phase the documented "replace q with |0⟩" keeps and the injected adjoint strips, flipping a
+/// phase (Y: <c>+i</c> on 0→1, <c>−i</c> on 1→0). On a definite basis value that phase is global and cleanup
+/// reverses it, but when the target is ENTANGLED the phase differs per survivor branch, becoming a RELATIVE
+/// phase the documented "replace q with |0⟩" keeps and cleanup strips, flipping a
 /// downstream measurement (repro: <c>H(b);CNOT(b,a);Y(a);H(b);M(b)</c>). Matches Silq's exclusion of Y from
 /// qfree; an earlier "broader than Silq — Y is safe" claim was a verified bug.</item>
 /// </list>
 /// A phase-free basis PERMUTATION — X, CNOT, CCX, SWAP — does NOT set this: its target stays a definite basis
-/// value the adjoint cleanly undoes. Diagonal/phase gates (Z, S, T, CZ, Rz) never write a value (their targets
+/// value cleanup can reverse. Diagonal/phase gates (Z, S, T, CZ, Rz) never write a value (their targets
 /// are Reads), so this flag is irrelevant to them and they stay uncompute-safe. Default false; a NEW gate
 /// added without a deliberate value is caught by a table-invariant test, so the false default can never
 /// silently green-light an un-classified non-qfree gate. (A future taint-refinement could re-admit Y/CY on
@@ -644,8 +627,8 @@ public sealed record GateSig(string CalleeName, IReadOnlyList<IParamSpec> Params
 
 /// <summary>
 /// Qora's built-in gate registry. THE single source of truth: to add a built-in, add ONE entry here —
-/// the emitter's name mapping, the validator's arity/unitarity checks, the inverter's irreversibility
-/// rejection, and the reserved-name set all derive from this table automatically.
+/// target name mapping, HIR/MIR arity and unitarity checks, MIR inversion safety, and the reserved-name
+/// set all derive from this table automatically.
 /// </summary>
 /// <summary>
 /// One built-in FUNCTION. <see cref="TakesBitRegister"/> marks a callable whose single argument is a WHOLE

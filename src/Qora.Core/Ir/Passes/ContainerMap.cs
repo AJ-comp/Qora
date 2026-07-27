@@ -1,9 +1,8 @@
 namespace Qora.Ir.Passes;
 
 /// <summary>
-/// The statement → enclosing-container map (the "메모장" of the uncompute design discussions): for every
-/// statement in one operation, WHICH container statements (<c>if</c> / <c>for</c> / <c>while</c> /
-/// <c>repeat</c> / <c>within-apply</c>) enclose it, outermost first. The qubit-event stream is a flat
+/// The statement → enclosing-container map: for every statement in one operation, WHICH container statements
+/// (<c>if</c> / <c>for</c> / <c>while</c> / <c>repeat</c>) enclose it, outermost first. The qubit-event stream is a flat
 /// timeline (containers emit no events, and time order says nothing about nesting), so structure questions —
 /// "is this ancilla's compute inside an if, and which one?" — are answered HERE, from the IR tree, which is
 /// the one place nesting is a fact. DERIVED, nothing stored: built by ONE recursive walk of the body (the
@@ -26,9 +25,8 @@ internal static class ContainerMap
     /// <summary>The ONE recursive walk of an operation body: invoke <paramref name="visit"/> exactly once per
     /// statement (containers included, at any depth) with its enclosing container chain, outermost first. The
     /// chain handed in is the live stack — snapshot it (<c>.ToArray()</c>) if you need to keep it past the
-    /// call. Both the container map above and <see cref="StmtMap"/> are derived from this single walk, so a new
-    /// container statement type is taught to the walk in ONE place and both maps learn it at once (the
-    /// exhaustiveness guard in ContainerMapTests fails until a new body-bearing type is added here).</summary>
+    /// call. A new container statement type must be taught to this walk; the exhaustiveness guard in
+    /// ContainerMapTests fails until a new body-bearing type is added here.</summary>
     public static void Visit(QOperation op, Action<QStmt, IReadOnlyList<QStmt>> visit)
         => Walk(op.Body, new List<QStmt>(), visit);
 
@@ -58,12 +56,6 @@ internal static class ContainerMap
                 case QRepeat r:
                     stack.Add(r);
                     Walk(r.Body, stack, visit);
-                    stack.RemoveAt(stack.Count - 1);
-                    break;
-                case QConjugate c:
-                    stack.Add(c);
-                    Walk(c.Within, stack, visit);
-                    Walk(c.Apply, stack, visit);
                     stack.RemoveAt(stack.Count - 1);
                     break;
             }

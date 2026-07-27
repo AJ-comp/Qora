@@ -274,6 +274,7 @@ public sealed class QoraMirTests
         var sameRevisionCopy = new MirProgram(
             program.SnapshotId,
             program.Origins,
+            program.EntryPoint,
             program.Callables.ToArray());
         Assert.False(effects.IsFor(sameRevisionCopy));
         Assert.Throws<InvalidOperationException>(() => effects.EnsureFor(sameRevisionCopy));
@@ -327,6 +328,7 @@ public sealed class QoraMirTests
         var malformed = new MirProgram(
             program.SnapshotId,
             program.Origins,
+            program.EntryPoint,
             new[] { malformedCallable });
 
         var errors = QoraMirVerifier.Verify(malformed);
@@ -334,6 +336,178 @@ public sealed class QoraMirTests
         var exception = Assert.Throws<InvalidOperationException>(
             () => QoraMirVerifier.VerifyOrThrow(malformed));
         Assert.Contains("MIR014", exception.Message);
+    }
+
+    [Fact]
+    public void VerifierRejectsAMissingProgramEntryCallable()
+    {
+        var (program, _) = CompileMir("operation Main() {}");
+        var malformed = new MirProgram(
+            program.SnapshotId,
+            program.Origins,
+            new MirCallableId(int.MaxValue),
+            program.Callables);
+
+        var error = Assert.Single(
+            QoraMirVerifier.Verify(malformed),
+            candidate => candidate.Code == "MIR009");
+        Assert.Contains(new MirCallableId(int.MaxValue).ToString(), error.Message);
+    }
+
+    [Fact]
+    public void VerifierRejectsAFunctionAsTheProgramEntryCallable()
+    {
+        var (program, _) = CompileMir("""
+            function Value(): int {
+                return 1;
+            }
+
+            operation Main() {}
+            """);
+        var function = Assert.Single(
+            program.Callables,
+            callable => callable.Name == "Value");
+        var malformed = new MirProgram(
+            program.SnapshotId,
+            program.Origins,
+            function.Id,
+            program.Callables);
+
+        Assert.Contains(
+            QoraMirVerifier.Verify(malformed),
+            candidate => candidate.Code == "MIR036");
+    }
+
+    [Fact]
+    public void VerifierRejectsAParameterizedOperationAsTheProgramEntryCallable()
+    {
+        var (program, _) = CompileMir("""
+            operation Worker(value: int) {}
+
+            operation Main() {}
+            """);
+        var worker = Assert.Single(
+            program.Callables,
+            callable => callable.Name == "Worker");
+        var malformed = new MirProgram(
+            program.SnapshotId,
+            program.Origins,
+            worker.Id,
+            program.Callables);
+
+        Assert.Contains(
+            QoraMirVerifier.Verify(malformed),
+            candidate => candidate.Code == "MIR037");
+    }
+
+    [Fact]
+    public void VerifierRejectsAnyFunctorOnANonUnitaryBuiltin()
+    {
+        var (program, _) = CompileMir(
+            """
+            operation Main() {
+                use q = Qubit[1];
+                Reset(q[0]);
+            }
+            """);
+        var callable = Assert.Single(program.Callables);
+        var block = Assert.Single(callable.Blocks);
+        var reset = Assert.Single(
+            block.Instructions.OfType<MirQuantumApply>());
+        var malformedReset = reset with
+        {
+            Functors = new[] { MirFunctor.Adjoint },
+        };
+        var malformedBlock = block with
+        {
+            Instructions = block.Instructions
+                .Select(instruction =>
+                    instruction.Id == reset.Id
+                        ? malformedReset
+                        : instruction)
+                .ToArray(),
+        };
+        var malformedCallable = callable with
+        {
+            Blocks = new[] { malformedBlock },
+        };
+        var malformed = new MirProgram(
+            program.SnapshotId,
+            program.Origins,
+            program.EntryPoint,
+            new[] { malformedCallable });
+
+        var error = Assert.Single(
+            QoraMirVerifier.Verify(malformed),
+            candidate => candidate.Code == "MIR139");
+        Assert.Contains(
+            "non-unitary",
+            error.Message,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void VerifierRejectsUnknownAndNonCanonicalFunctorLists()
+    {
+        var (program, _) = CompileMir(
+            """
+            operation Main() {
+                use q = Qubit[1];
+                X(q[0]);
+            }
+            """);
+        var callable = Assert.Single(program.Callables);
+        var block = Assert.Single(callable.Blocks);
+        var apply = Assert.Single(
+            block.Instructions.OfType<MirQuantumApply>());
+
+        MirProgram WithFunctors(params MirFunctor[] functors)
+        {
+            var rewrittenApply = apply with { Functors = functors };
+            var rewrittenBlock = block with
+            {
+                Instructions = block.Instructions
+                    .Select(instruction =>
+                        instruction.Id == apply.Id
+                            ? rewrittenApply
+                            : instruction)
+                    .ToArray(),
+            };
+            return new MirProgram(
+                program.SnapshotId,
+                program.Origins,
+                program.EntryPoint,
+                new[]
+                {
+                    callable with
+                    {
+                        Blocks = new[] { rewrittenBlock },
+                    },
+                });
+        }
+
+        Assert.Contains(
+            QoraMirVerifier.Verify(
+                WithFunctors((MirFunctor)int.MaxValue)),
+            error => error.Code == "MIR140");
+        Assert.Contains(
+            QoraMirVerifier.Verify(
+                WithFunctors(
+                    MirFunctor.Adjoint,
+                    MirFunctor.Adjoint)),
+            error => error.Code == "MIR141");
+        Assert.Contains(
+            QoraMirVerifier.Verify(
+                WithFunctors(
+                    MirFunctor.Controlled,
+                    MirFunctor.Controlled)),
+            error => error.Code == "MIR141");
+        Assert.Contains(
+            QoraMirVerifier.Verify(
+                WithFunctors(
+                    MirFunctor.Controlled,
+                    MirFunctor.Adjoint)),
+            error => error.Code == "MIR141");
     }
 
     private static (MirProgram Program, MirEffectSnapshot Effects) CompileMir(string source)

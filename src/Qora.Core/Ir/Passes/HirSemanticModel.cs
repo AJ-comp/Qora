@@ -34,21 +34,21 @@ public enum QubitEventKind { Read, Write, Measure }
 /// interacted AT that statement — entanglement edges are read off by grouping on it. Only leaf statements
 /// (gates, measurements, <c>use</c>) emit events; containers hold none of their own — their children carry
 /// the precise per-gate detail.
-/// <para><see cref="Irreversible"/> marks a touch the inverse CANNOT undo — a <c>reset</c> (a non-unitary
-/// gate) or a call whose body transitively measures/resets — since such a touch cannot be recovered by
-/// replaying U†. It is the one bit NOT derivable from <see cref="Kind"/> alone: a reset lands as a
+/// <para><see cref="Irreversible"/> marks a touch that a future MIR cleanup transformation CANNOT undo — a
+/// <c>reset</c> (a non-unitary gate) or a call whose body transitively measures/resets. It is the one bit NOT
+/// derivable from <see cref="Kind"/> alone: a reset lands as a
 /// <see cref="QubitEventKind.Write"/> indistinguishable from a unitary write, so its irreversibility must be
 /// recorded here. A measurement stays the separate <see cref="QubitEventKind.Measure"/> and does NOT set this
 /// flag; rung ③ qfree treats a qubit as un-uncomputable when any of its events is a Measure OR sets Irreversible.</para>
-/// <para><see cref="NonQfree"/> marks a <see cref="QubitEventKind.Write"/> that cannot be cleanly undone by
-/// whole-statement adjoint injection when its target is entangled — for one of TWO reasons: the gate created a
+/// <para><see cref="NonQfree"/> marks a <see cref="QubitEventKind.Write"/> that cannot be cleanly reversed as
+/// a whole statement when its target is entangled — for one of TWO reasons: the gate created a
 /// genuine SUPERPOSITION (<c>H</c>, <c>Rx</c>, <c>Ry</c>), or it is a PHASE PERMUTATION carrying a
-/// basis-value-dependent phase (<c>Y</c>, <c>CY</c>) whose relative phase across survivor branches the
-/// injected adjoint would strip (or a call that transitively does either). This is the SECOND thing not
+/// basis-value-dependent phase (<c>Y</c>, <c>CY</c>) whose relative phase across survivor branches a cleanup
+/// reversal would strip (or a call that transitively does either). This is the SECOND thing not
 /// derivable from <see cref="Kind"/> alone — a non-qfree write and a phase-free classical permutation (X, CNOT,
 /// SWAP) are both just a Write — and it is the decisive uncompute clause: an ancilla with any such write cannot
-/// be auto-uncomputed (whereas a phase-free permutation is a reversible function of live sources the adjoint
-/// undoes). Always false on Read/Measure events and on a <c>use</c> register's |0…0⟩ birth.</para>
+/// be auto-uncomputed (whereas a phase-free permutation is a reversible function of live sources). Always
+/// false on Read/Measure events and on a <c>use</c> register's |0…0⟩ birth.</para>
 /// <para><see cref="NodeId"/> is the second KEY the event carries (the first is <see cref="StmtId"/> into the
 /// IR): it points into the operation's <see cref="QubitGraph"/> — for a Write/Measure, the value-version NODE
 /// this event created (1:1); for a Read, the version that was read (the source's then-current node). Time and
@@ -186,22 +186,14 @@ public sealed class QubitGraph
 /// <see cref="NotACleanupCandidate"/> (not an ancilla at all — a caller-owned parameter or an unknown name) and
 /// <see cref="Measured"/> (an ancilla promoted to OUTPUT — its value was delivered, and a collapse has no
 /// unitary inverse either; the culprit is the measuring event). The rest are one value per safety clause:
-/// <see cref="Irreversible"/> breaks clause 1 (reversible history), <see cref="NonQfreeWrite"/> breaks clause 2 (qfree compute),
-/// <see cref="NotInvertibleCall"/> breaks the invertibility clause (the write is a call to a user operation whose
-/// body the <see cref="Inverter"/> cannot statement-adjoint — a <c>while</c>/<c>repeat</c> of unknown count,
-/// classical mutation, or a local <c>use</c>, transitively; the value is reversible in principle but no
-/// straight-line cleanup can be synthesized, so it is conservatively unsafe — the culprit is the call event),
-/// <see cref="ContainedWrite"/> breaks clause 3 (unconditional compute: a write sitting inside a container —
-/// an <c>if</c> runs it conditionally, a loop runs it repeatedly, and a within/apply conjugation already
-/// replays its own W† (another adjoint would RE-compute the restored value) — so replaying a straight-line
-/// adjoint at the death point would not mirror what actually executed; the if case is lifted later by
-/// conditional-inverse support, which additionally needs classical condition-bit flow — NOT in the event
-/// stream, known gap #11),
+/// <see cref="Irreversible"/> breaks clause 1 (reversible history), <see cref="NonQfreeWrite"/> breaks clause 2
+/// (qfree compute), and <see cref="ContainedWrite"/> breaks clause 3 (unconditional compute: a write sitting
+/// inside a branch or loop cannot be treated as an unconditional straight-line event),
 /// <see cref="CoWrittenPartner"/> and <see cref="SourceDied"/> break clause 4 (well-sourced compute: a
 /// statement that writes q must READ its other qubits, and those sources must stay unchanged until q dies).
 /// <see cref="NotAnalyzed"/> means the operation has no recorded event stream (effect analysis never ran on
 /// it — a semantic-error abort, or a synthesized op) — reported instead of a vacuous "safe".</summary>
-public enum UncomputeBlocker { None, NotACleanupCandidate, Measured, Irreversible, NonQfreeWrite, NotInvertibleCall, ContainedWrite, CoWrittenPartner, SourceDied, NotAnalyzed }
+public enum UncomputeBlocker { None, NotACleanupCandidate, Measured, Irreversible, NonQfreeWrite, ContainedWrite, CoWrittenPartner, SourceDied, NotAnalyzed }
 
 /// <summary>The rung-③ safety verdict for one qubit. <see cref="Blocker"/> names the failed clause
 /// (<see cref="UncomputeBlocker.None"/> = safe to auto-uncompute); <see cref="Culprit"/> is the offending
@@ -218,12 +210,28 @@ public sealed record UncomputeVerdict(UncomputeBlocker Blocker, QubitEvent? Culp
 /// <summary>An indexed access whose in-bounds proof FAILED (rung B′): the bound never settles to a value at
 /// compile time, so the access is neither proven safe nor proven wrong. Recorded by <see cref="QoraValidator"/>
 /// as DATA, not as a diagnostic — the verdict is target-independent, only its disposition differs per backend.
-/// The OpenQASM backend derives QSEM030 because an unproven access cannot ship. This record intentionally
-/// carries diagnostic context, not stable expression-site identity; a future runtime-check lowering must
-/// extend the model with such identity (and dynamic-alias policy) before using failed proofs as a rewrite
-/// work list. <see cref="LoopBound"/> is the undetermined loop upper bound when <see cref="Index"/> is a
+/// The OpenQASM backend derives QSEM030 because an unproven access cannot ship. <see cref="UnprovenIndex.Site"/>
+/// is the exact semantic identity that HIR-to-MIR lowering translates into an instruction reference;
+/// diagnostic strings are never used as rewrite keys. <see cref="UnprovenIndex.LoopBound"/> is the
+/// undetermined loop upper bound when <see cref="UnprovenIndex.Index"/> is a
 /// <c>for</c> variable, and null for any other runtime index expression.</summary>
-public sealed record UnprovenIndex(string Op, string Array, string Index, string? LoopBound, SourceSpan? Span);
+/// <summary>
+/// Dense identity of one indexed-access site inside an exact HIR semantic artifact. Source-shaped HIR
+/// does not put identity on every expression node, so validation assigns this revision-bound semantic
+/// identity and privately maps it to the exact immutable HIR object.
+/// </summary>
+public readonly record struct HirIndexAccessId(int Value)
+{
+    public override string ToString() => $"index{Value}";
+}
+
+public sealed record UnprovenIndex(
+    HirIndexAccessId Site,
+    string Op,
+    string Array,
+    string Index,
+    string? LoopBound,
+    SourceSpan? Span);
 
 /// <summary>One outstanding "re-check after monomorphization" PROMISE (the deferral ledger): a size-dependent
 /// judgement the validator postponed because <see cref="Array"/> is a parameter whose length only
@@ -260,6 +268,8 @@ public sealed class HirSemanticModel
     private sealed class ValidationFacts
     {
         internal readonly List<UnprovenIndex> UnprovenIndexes = new();
+        internal readonly Dictionary<int, Dictionary<object, HirIndexAccessId>>
+            UnprovenIndexSitesByStatement = new();
         internal readonly List<DeferredSizeCheck> DeferredSizeChecks = new();
         internal readonly Dictionary<int, bool> WillBeRecheckedByOp = new();
         internal readonly Dictionary<int, IReadOnlyDictionary<string, long>>
@@ -273,11 +283,9 @@ public sealed class HirSemanticModel
     private readonly Dictionary<int, IReadOnlyList<QubitEvent>> _qubitEventsByOp = new(); // QOperation.Id → program-ordered qubit-event stream
     private readonly Dictionary<int, QubitGraph> _qubitGraphByOp = new();   // QOperation.Id → value-genealogy DAG
     private readonly Dictionary<int, OpEffectSummary> _effectSummaryByOpId = new(); // QOperation.Id → summary
-    private readonly HashSet<int> _nonInvertibleCallStmts = new();      // StmtIds of CALL statements whose callee the Inverter cannot invert
     private readonly ValidationFacts _validation;
     private readonly HirSnapshot? _sourceSnapshot;
     private readonly HirSemanticPhase _artifactPhase;
-    private bool _nonInvertibleCallSweepCompleted;
     private bool _effectAnalysisCompleted;
     private bool _effectsSealed;
 
@@ -375,8 +383,6 @@ public sealed class HirSemanticModel
         if (_qubitEventsByOp.Count != 0
             || _qubitGraphByOp.Count != 0
             || _effectSummaryByOpId.Count != 0
-            || _nonInvertibleCallStmts.Count != 0
-            || _nonInvertibleCallSweepCompleted
             || _effectAnalysisCompleted)
             throw new InvalidOperationException(
                 "QINTERNAL: only a validation-only HIR semantic model can be forked for effect analysis");
@@ -406,8 +412,7 @@ public sealed class HirSemanticModel
                 "QINTERNAL: a validation artifact requires a completed HIR scope graph");
         if (_qubitEventsByOp.Count != 0
             || _qubitGraphByOp.Count != 0
-            || _effectSummaryByOpId.Count != 0
-            || _nonInvertibleCallStmts.Count != 0)
+            || _effectSummaryByOpId.Count != 0)
         {
             throw new InvalidOperationException(
                 "QINTERNAL: a validation artifact cannot contain effect-analysis facts");
@@ -445,22 +450,6 @@ public sealed class HirSemanticModel
                 "QINTERNAL: effect analysis did not publish one coherent summary, event stream, "
                 + "and qubit graph for every source operation");
         }
-        if (!_nonInvertibleCallSweepCompleted)
-        {
-            throw new InvalidOperationException(
-                "QINTERNAL: effect analysis did not complete its non-invertible-call sweep");
-        }
-        foreach (var statementId in _nonInvertibleCallStmts)
-        {
-            if (!_sourceSnapshot.Structure.Contains(statementId)
-                || _sourceSnapshot.Structure.RequireKind(statementId) != HirNodeKind.Statement)
-            {
-                throw new InvalidOperationException(
-                    $"QINTERNAL: effect analysis recorded non-invertible call statement "
-                    + $"{statementId} outside its exact source snapshot");
-            }
-        }
-
         _effectAnalysisCompleted = true;
         _effectsSealed = true;
     }
@@ -554,33 +543,57 @@ public sealed class HirSemanticModel
                 $"QINTERNAL: op {opId} already has a qubit graph — re-analysis would silently replace add-only facts");
     }
 
-    /// <summary>Record the CALL statements (by stable node <see cref="QStmt.Id"/>) whose callee the
-    /// <see cref="Inverter"/> cannot invert — recorded by <see cref="EffectAnalysis"/> alongside the event stream
-    /// (co-populated, same pass, so rung ③ never sees events without this companion fact). Keyed by StmtId, NOT by
-    /// operation NAME: monomorphization rewrites a generic call's name (<c>Loop</c> → <c>Loop__sz2</c>) while
-    /// PRESERVING the node Id, so a name test would miss the block whenever rung ③ is handed the pre-mono tree.
-    /// StmtIds are shared across the pre-mono and analyzed trees, so <see cref="UncomputeSafety"/> answers
-    /// correctly whichever it is given. Rung ③ reads this to refuse certifying an ancilla whose write is a call it
-    /// cannot actually uncompute — keeping the safety verdict and the Inverter (the single authority) in agreement.</summary>
-    internal void RecordNonInvertibleCallStmts(IEnumerable<int> stmtIds)
-    {
-        RequireEffectsOpen();
-        ArgumentNullException.ThrowIfNull(stmtIds);
-        if (_nonInvertibleCallSweepCompleted)
-            throw new InvalidOperationException(
-                "QINTERNAL: the non-invertible-call sweep was already recorded");
-        foreach (var id in stmtIds)
-            _nonInvertibleCallStmts.Add(id);
-        _nonInvertibleCallSweepCompleted = true;
-    }
-
     /// <summary>Record one unproven indexed access (rung B′) — produced by <see cref="QoraValidator"/> during
     /// the bounds-proof walk, add-only like every other fact. The backend decides the disposition; the
     /// OpenQASM path derives source-distinct QSEM030 diagnostics from this list.</summary>
-    internal void AddUnprovenIndex(UnprovenIndex access)
+    internal void AddUnprovenIndex(
+        UnprovenIndex access,
+        int owningStatementId,
+        object exactSite)
     {
+        ArgumentNullException.ThrowIfNull(access);
+        ArgumentNullException.ThrowIfNull(exactSite);
         RequireValidationOpen();
+        if (access.Site != new HirIndexAccessId(_validation.UnprovenIndexes.Count))
+        {
+            throw new ArgumentException(
+                $"unproven index {access.Site} is not the next dense semantic site identity",
+                nameof(access));
+        }
+        if (!_validation.UnprovenIndexSitesByStatement.TryGetValue(
+                owningStatementId,
+                out var sites))
+        {
+            sites = new Dictionary<object, HirIndexAccessId>(
+                ReferenceEqualityComparer.Instance);
+            _validation.UnprovenIndexSitesByStatement.Add(
+                owningStatementId,
+                sites);
+        }
+        if (!sites.TryAdd(exactSite, access.Site))
+        {
+            throw new InvalidOperationException(
+                "QINTERNAL: one exact HIR indexed-access object was recorded more than once");
+        }
         _validation.UnprovenIndexes.Add(access);
+    }
+
+    /// <summary>
+    /// Resolve one exact immutable HIR indexed-access object to its failed bounds-proof identity. This
+    /// reference lookup is stage-local: validation and HIR-to-MIR lowering consume the same immutable HIR
+    /// snapshot and the same semantic artifact, so object identity never crosses a revision boundary.
+    /// </summary>
+    internal HirIndexAccessId? UnprovenIndexSite(
+        int owningStatementId,
+        object exactSite)
+    {
+        ArgumentNullException.ThrowIfNull(exactSite);
+        return _validation.UnprovenIndexSitesByStatement.TryGetValue(
+                   owningStatementId,
+                   out var sites)
+               && sites.TryGetValue(exactSite, out var site)
+            ? site
+            : null;
     }
 
     /// <summary>Record an operation's array-argument CONTRACT (rung B′/P4): the minimum length each of its
@@ -604,8 +617,8 @@ public sealed class HirSemanticModel
 
     /// <summary>Every indexed access this validation could not prove in bounds, in walk order — empty when
     /// the whole program is proven. Non-empty NEVER coexists with a successful OpenQASM compile because its
-    /// target-policy pass derives QSEM030. Entries currently provide diagnostic context only, not the stable
-    /// site identity a future checked-access lowering would require.</summary>
+    /// target-policy pass derives QSEM030. Each entry's semantic site identity is translated to an exact
+    /// MIR instruction reference during lowering.</summary>
     public IReadOnlyList<UnprovenIndex> UnprovenIndexes =>
         HirCollections.Freeze(_validation.UnprovenIndexes);
 
@@ -650,9 +663,9 @@ public sealed class HirSemanticModel
                 $"QINTERNAL: op {opId} already has a WillBeRechecked verdict — re-recording would silently replace an add-only fact");
     }
 
-    /// <summary>The operation's value-genealogy graph (see <see cref="QubitNode"/>), or null when the op was
-    /// never analyzed — same key discipline as <see cref="QubitEvents"/> (no derivation walk: a synthesized
-    /// inverse's genealogy is not its source's).</summary>
+    /// <summary>The operation's value-genealogy graph (see <see cref="QubitNode"/>), or null when this exact
+    /// operation was never analyzed. Facts are keyed by operation identity and never borrowed through a
+    /// derivation chain.</summary>
     public QubitGraph? Graph(int opId) => _qubitGraphByOp.TryGetValue(opId, out var g) ? g : null;
     internal void AddOpEffects(int opId, OpEffectSummary s)
     {
@@ -685,16 +698,15 @@ public sealed class HirSemanticModel
         _validation.ScopeGraph?.Scopes ?? EmptyScopes;
 
     /// <summary>This operation's qubit-event stream (leaf reads/writes/measures in program order), or an
-    /// empty list if the model never analyzed this op. Keyed by <c>op.Id</c> directly — events are emitted
-    /// pre-copy, and deliberately NOT resolved through the derivation chain: a synthesized inverse
-    /// (<c>Foo__adj</c>) replays its source's gates in reverse, so the source's stream (its Orders, its
-    /// windows) would be a LIE for it. Use <see cref="WasEffectAnalyzed"/> to tell "analyzed, zero events"
-    /// from "never analyzed".</summary>
+    /// empty list if the model never analyzed this exact op. Keyed by <c>op.Id</c> directly and deliberately
+    /// NOT resolved through a derivation chain: a structurally derived operation requires its own event
+    /// analysis. Use <see cref="WasEffectAnalyzed"/> to tell "analyzed, zero events" from "never analyzed".
+    /// </summary>
     public IReadOnlyList<QubitEvent> QubitEvents(int opId) =>
         _qubitEventsByOp.TryGetValue(opId, out var e) ? e : System.Array.Empty<QubitEvent>();
 
     /// <summary>Did <see cref="EffectAnalysis"/> actually run on this op Id? False for an op the analysis
-    /// never saw — a semantic-error abort, a synthesized inverse, a still-generic def. The safety queries
+    /// never saw — for example, a semantic-error abort or a still-generic definition. The safety queries
     /// refuse to answer "safe" from an absent stream (that would be vacuous truth, not analysis).</summary>
     public bool WasEffectAnalyzed(int opId) => _qubitEventsByOp.ContainsKey(opId);
 
@@ -763,8 +775,8 @@ public sealed class HirSemanticModel
     }
 
     /// <summary>Rung ③ — the full safety verdict for auto-uncomputing qubit <paramref name="q"/> in operation
-    /// <paramref name="opId"/>. SAFE means: injecting the adjoint of the statements that wrote q (whole
-    /// statements, reverse order, the <c>use</c> birth never replayed) at q's death point yields, in every
+    /// <paramref name="opId"/>. SAFE means: a future MIR cleanup that reverses the statements that wrote q
+    /// (whole statements, reverse order, the <c>use</c> birth never replayed) at q's death point yields, in every
     /// measurement branch, exactly the no-injection state with q coherently replaced by |0⟩ (up to a
     /// branch-global phase). That is the declared return semantics — a program whose LATER interference
     /// depended on q's leftover entanglement behaves differently BY DESIGN (removing that dependence is what
@@ -780,46 +792,46 @@ public sealed class HirSemanticModel
     /// non-ancilla) before any clause runs — never re-judged inside the scan. The clauses themselves:
     /// <list type="number">
     /// <item>REVERSIBLE — no event of q carries <c>Irreversible</c> (a reset, or a call that resets/measures,
-    /// destroys the value the adjoint would replay).</item>
+    /// destroys the value the cleanup would need).</item>
     /// <item>QFREE COMPUTE — no <see cref="QubitEventKind.Write"/> of q carries <c>NonQfree</c>: neither an
-    /// H/Rx/Ry write (which injects a fresh superposition the adjoint cannot fold back once a surviving qubit
+    /// H/Rx/Ry write (which injects a fresh superposition cleanup cannot fold back once a surviving qubit
     /// has recorded it) NOR a Y/CY phase-permutation write (whose basis-value-dependent phase becomes a
-    /// survivor-relative phase under entanglement that the injected adjoint would strip — state-vector
+    /// survivor-relative phase under entanglement that cleanup would strip — state-vector
     /// verified, round 5; matches Silq's qfree excluding Y).</item>
     /// <item>UNCONDITIONAL COMPUTE — no <see cref="QubitEventKind.Write"/> of q sits inside a CONTAINER
-    /// (<c>if</c> / <c>for</c> / <c>while</c> / <c>repeat</c> / conjugation). The event stream is a flat
+    /// (<c>if</c> / <c>for</c> / <c>while</c> / <c>repeat</c>). The event stream is a flat
     /// timeline that walks each container body once, so a contained write runs conditionally (an <c>if</c>)
-    /// or repeatedly (a loop) at runtime — a straight-line adjoint replayed at the death point would not
+    /// or repeatedly (a loop) at runtime — a straight-line cleanup sequence at the death point would not
     /// mirror what actually executed. Structure is not in the events; it is read from the IR via
     /// <see cref="ContainerMap"/> — which is why this query takes the OPERATION, not just its Id. (Reads
-    /// inside containers are harmless: the adjoint replays the write chain only.) Lifted later by
-    /// conditional-inverse support — which additionally requires proving the CONDITION BIT unchanged between
-    /// the compute and the injected inverse; classical-bit flow is NOT in the event stream (known gap #11 of
+    /// inside containers are harmless: cleanup reverses the write chain only.) Lifted later by conditional
+    /// cleanup support, which additionally requires proving the CONDITION BIT unchanged between the compute
+    /// and cleanup; classical-bit flow is NOT in the event stream (known gap #11 of
     /// the requirements table).</item>
     /// <item>WELL-SOURCED COMPUTE — a statement that writes q must only READ its other qubits (a co-WRITTEN
-    /// partner — a SWAP operand, a call modifying two params — blocks outright: the injected adjoint would
+    /// partner — a SWAP operand, a call modifying two params — blocks outright: cleanup would
     /// rewrite that partner at q's death, and no window scan can see the partner's uses AFTER q dies).
     /// Additionally, a Write of q WIDER than q — a whole-register broadcast or a blanket projected call under
     /// an ELEMENT query — writes sibling elements inside ONE event and blocks as
-    /// <see cref="UncomputeBlocker.CoWrittenPartner"/> too: the statement-level adjoint cannot be sliced to
+    /// <see cref="UncomputeBlocker.CoWrittenPartner"/> too: whole-statement cleanup cannot be sliced to
     /// q. The register's <c>use</c> birth is exempt (the only parentless write node — enforced QINTERNAL-loud
-    /// at construction), sound because the injected adjoint never replays an allocation. Every parent EDGE of
+    /// at construction), sound because cleanup never replays an allocation. Every parent EDGE of
     /// q's write (the graph's recorded sources) must then not be value-changed (Written/Measured) between
-    /// that write and q's death, so q stays a function of still-present, unchanged sources the adjoint can
-    /// invert against. Only edges FULLY COVERED by q (same register, and q is the whole register or names the
+    /// that write and q's death, so q stays a function of still-present, unchanged sources cleanup can use.
+    /// Only edges FULLY COVERED by q (same register, and q is the whole register or names the
     /// same element) are exempt as q's own chain — a same-register BLANKET source under an element query
     /// covers sibling elements too, so it is a real source and its liveness is scanned (adversarially
     /// confirmed).</item>
     /// </list>
     /// The verdict names the failed clause and carries the offending event, whose <see cref="QubitEvent.StmtId"/>
-    /// lets a consumer point at the exact statement (the <c>--stages</c> uncompute view now, rung ④'s
-    /// diagnostics later). An op with no recorded stream answers <see cref="UncomputeBlocker.NotAnalyzed"/> —
+    /// lets a future MIR planner point at the exact statement in diagnostics. An op with no recorded stream
+    /// answers <see cref="UncomputeBlocker.NotAnalyzed"/> —
     /// never a vacuous "safe". Conservative (may reject a safe case, never admits an unsafe one). The
     /// source-liveness clause is sound under the dependency-respecting (LIFO) uncompute-injection order rung ④
     /// must use, injecting at the death point — or, when the death sits inside a container, immediately AFTER
     /// the outermost enclosing container (the window extension above makes the verdict honest for that
     /// placement). Matches Silq's <c>qfree</c> on the deciding case: a basis permutation carrying a
-    /// basis-value-dependent phase (Y, CY) is REJECTED — under entanglement the injected adjoint strips a
+    /// basis-value-dependent phase (Y, CY) is REJECTED — under entanglement cleanup would strip a
     /// survivor-relative phase the documented result keeps (state-vector verified, round 5; an earlier
     /// "broader than Silq — Y allowed" claim was a confirmed bug). Diagonal phase gates (Z/S/T/CZ) stay safe:
     /// they never write a value (all-Read), so they are not qfree writes at all.</summary>
@@ -833,7 +845,7 @@ public sealed class HirSemanticModel
         // rung 1's ruling (IsCleanupCandidate — measurement means the value was DELIVERED, an output), so
         // it is delegated there, never re-judged as a scan clause here: one concept, one home. It is
         // delivered as a VERDICT rather than a silent precondition, so a direct caller can never receive
-        // "safe" for a measured ancilla (whose collapse also has no unitary inverse) or a caller-owned input.
+        // "safe" for a measured ancilla (whose collapse also has no unitary cleanup) or a caller-owned input.
         if (!IsCleanupCandidate(op.Id, q))
         {
             if (!IsAncilla(op.Id, q)) return new(UncomputeBlocker.NotACleanupCandidate, null);
@@ -862,8 +874,6 @@ public sealed class HirSemanticModel
             if (e.Irreversible) return new(UncomputeBlocker.Irreversible, e);                          // (a) lossy touch
             if (e.Kind == QubitEventKind.Write && e.NonQfree)
                 return new(UncomputeBlocker.NonQfreeWrite, e);                                    // (b) superposition (H/Rx/Ry) or phase-permutation (Y/CY)
-            if (e.Kind == QubitEventKind.Write && _nonInvertibleCallStmts.Contains(e.StmtId))
-                return new(UncomputeBlocker.NotInvertibleCall, e);                                // (b″) write is a call the Inverter cannot invert (while/repeat/mutation/use in the callee) — keyed by StmtId, tree-independent
             if (e.Kind == QubitEventKind.Write && chain.Count > 0)
                 return new(UncomputeBlocker.ContainedWrite, e);                                        // (b′) contained write
             if (death is null || e.Order > death.Order) death = e;
@@ -888,19 +898,19 @@ public sealed class HirSemanticModel
         // recorded PARENT EDGES (written down by the analyzer at the moment it knew them — never re-derived
         // from the flat timeline, which is where three adversarially-confirmed holes lived).
         //   · CO-WRITTEN partner (a Write/Measure sibling at the same statement not fully covered by q —
-        //     a SWAP-style value move / a call modifying both): block outright — the injected adjoint rewrites
+        //     a SWAP-style value move / a call modifying both): block outright — cleanup rewrites
         //     that partner at q's death, and its later uses can sit AFTER q's death where no window reaches.
         //   · each parent edge not fully covered by q is a SOURCE: it must still be the CURRENT version of its
         //     access ref (Edge.Via keeps a blanketed read's conservative breadth) through (write.Order,
-        //     windowEnd], or q is no longer a function of it and the adjoint inverts against the wrong value.
-        //     Edges fully covered by q are q's own chain, which the adjoint itself replays.
+        //     windowEnd], or q is no longer a function of it and cleanup reverses against the wrong value.
+        //     Edges fully covered by q are q's own chain, which cleanup itself reverses.
         var graph = Graph(op.Id)!;   // guaranteed by the WasEffectAnalyzed guard above
         foreach (var write in events)
         {
             if (write.Kind != QubitEventKind.Write || !write.Qubit.Overlaps(q)) continue;
 
             // A write of q WIDER than q (a blanket write under an element query — a broadcast, an opaque
-            // call) writes SIBLING ELEMENTS inside this one event: the statement-level adjoint cannot be
+            // call) writes SIBLING ELEMENTS inside this one event: whole-statement cleanup cannot be
             // sliced down to q, so replaying it would rewrite the other elements too (adversarially
             // verified: it deterministically flips a measured sibling). Blocked as a co-written partner —
             // of q's own register-mates. The `use` birth is exempt: it is the only write whose node has NO

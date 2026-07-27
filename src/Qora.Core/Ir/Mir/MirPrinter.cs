@@ -31,7 +31,8 @@ public static class MirPrinter
 
         public string Print()
         {
-            _text.AppendLine($"mir snapshot {_program.SnapshotId}");
+            _text.AppendLine(
+                $"mir snapshot {_program.SnapshotId} entry @{_program.EntryPoint}");
             foreach (var callable in _program.Callables.OrderBy(callable => callable.Id.Value))
             {
                 _text.AppendLine();

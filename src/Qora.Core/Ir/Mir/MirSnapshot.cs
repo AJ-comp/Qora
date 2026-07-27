@@ -43,6 +43,18 @@ public enum MirLoweringProfile
 }
 
 /// <summary>
+/// The pass milestone owned by one immutable MIR snapshot. HIR lowering creates the root snapshot;
+/// any MIR transformation that changes the program allocates a greater revision and points back to its
+/// exact parent.
+/// </summary>
+public enum MirStage
+{
+    Lowered,
+    InverseRequestsInjected,
+    AdjointsMaterialized,
+}
+
+/// <summary>
 /// The exact location of an instruction within its callable and block.
 /// </summary>
 public readonly record struct MirInstructionLocation(
@@ -208,7 +220,10 @@ public sealed class MirSnapshot
         MirSnapshotId id,
         MirLoweringProfile profile,
         MirProgram program,
-        MirCrossStageLinks links)
+        MirCrossStageLinks links,
+        MirStage stage = MirStage.Lowered,
+        MirSnapshot? parent = null,
+        MirSafetyFacts? safety = null)
     {
         ArgumentNullException.ThrowIfNull(program);
         ArgumentNullException.ThrowIfNull(links);
@@ -224,6 +239,8 @@ public sealed class MirSnapshot
                 nameof(program));
         if (!Enum.IsDefined(profile))
             throw new ArgumentOutOfRangeException(nameof(profile), profile, "unknown MIR lowering profile");
+        if (!Enum.IsDefined(stage))
+            throw new ArgumentOutOfRangeException(nameof(stage), stage, "unknown MIR stage");
         if (links.MirSnapshot != id)
             throw new ArgumentException(
                 "the cross-stage links do not belong to this MIR snapshot",
@@ -232,24 +249,131 @@ public sealed class MirSnapshot
             throw new ArgumentException(
                 "the MIR program and its cross-stage links must share one origin table",
                 nameof(links));
+        safety ??= MirSafetyFacts.Empty(id);
+        if (safety.SnapshotId != id)
+            throw new ArgumentException(
+                "MIR safety facts belong to a different snapshot",
+                nameof(safety));
+        if (parent is null)
+        {
+            if (stage != MirStage.Lowered)
+                throw new ArgumentException(
+                    "a non-lowered MIR snapshot requires an exact parent snapshot",
+                    nameof(parent));
+        }
+        else
+        {
+            if (stage == MirStage.Lowered)
+                throw new ArgumentException(
+                    "a transformed MIR snapshot cannot declare the lowering stage",
+                    nameof(stage));
+            if (parent.Id.CompilationId != id.CompilationId
+                || parent.Id.CompilationRevision != id.CompilationRevision
+                || parent.Id.Revision == int.MaxValue
+                || id.Revision != parent.Id.Revision + 1)
+            {
+                throw new ArgumentException(
+                    "a MIR transformation must be the immediate next revision of its exact parent",
+                    nameof(parent));
+            }
+            if (parent.Profile != profile)
+                throw new ArgumentException(
+                    "a MIR transformation cannot change its lowering profile",
+                    nameof(profile));
+            if (!IsDirectStageSuccessor(parent.Stage, stage))
+            {
+                throw new ArgumentException(
+                    $"MIR stage {stage} cannot directly follow {parent.Stage}; "
+                    + "inverse requests must be injected before their adjoints are materialized",
+                    nameof(stage));
+            }
+            if (!ReferenceEquals(
+                    parent.Links.LoweredFromSnapshot,
+                    links.LoweredFromSnapshot)
+                || !ReferenceEquals(
+                    parent.Links.SymbolsFromArtifact,
+                    links.SymbolsFromArtifact))
+                throw new ArgumentException(
+                    "a MIR transformation must retain its parent's exact HIR and semantic authorities",
+                    nameof(links));
+        }
 
         QoraMirVerifier.VerifyOrThrow(program);
 
         Id = id;
         Profile = profile;
+        Stage = stage;
+        Parent = parent;
         Program = program;
+        Safety = safety;
         Links = links;
         Structure = new MirStructuralIndex(id, program);
+        foreach (var obligation in safety.UnprovenBounds)
+            VerifyBoundsSite(
+                obligation.Site,
+                Structure.RequireInstruction(
+                    obligation.Site.Instruction));
         links.VerifyAgainst(Structure);
         Analyses = new MirAnalysisStore(this);
     }
 
+    private static void VerifyBoundsSite(
+        MirIndexedAccessRef site,
+        MirInstruction instruction)
+    {
+        var matches = (site.Kind, instruction) switch
+        {
+            (MirIndexedAccessKind.ArrayLoad, MirArrayLoad) =>
+                site.Ordinal == 0,
+            (MirIndexedAccessKind.ArrayStore, MirArrayStore) =>
+                site.Ordinal == 0,
+            (MirIndexedAccessKind.Measurement, MirMeasure
+            {
+                Place.Index: not null,
+            }) =>
+                site.Ordinal == 0,
+            (MirIndexedAccessKind.QubitOperand, MirQuantumApply apply)
+                when site.Ordinal < apply.Operands.Count =>
+                apply.Operands[site.Ordinal] is MirQubitCallOperand
+                {
+                    Place.Index: not null,
+                },
+            _ => false,
+        };
+        if (!matches)
+        {
+            throw new ArgumentException(
+                $"MIR bounds obligation site {site} does not identify an indexed access");
+        }
+    }
+
+    private static bool IsDirectStageSuccessor(
+        MirStage parent,
+        MirStage child) =>
+        (parent, child) switch
+        {
+            (MirStage.Lowered, MirStage.InverseRequestsInjected) => true,
+            (MirStage.InverseRequestsInjected, MirStage.AdjointsMaterialized) => true,
+            _ => false,
+        };
+
     public MirSnapshotId Id { get; }
     public HirSnapshotId LoweredFrom => Links.LoweredFrom;
     public MirLoweringProfile Profile { get; }
+    public MirStage Stage { get; }
+    public MirSnapshot? Parent { get; }
     public MirProgram Program { get; }
+    public MirSafetyFacts Safety { get; }
     public MirOriginTable Origins => Program.Origins;
     public MirCrossStageLinks Links { get; }
     public MirStructuralIndex Structure { get; }
     public MirAnalysisStore Analyses { get; }
+
+    public bool DescendsFrom(MirSnapshotId ancestor)
+    {
+        for (MirSnapshot? current = this; current is not null; current = current.Parent)
+            if (current.Id == ancestor)
+                return true;
+        return false;
+    }
 }

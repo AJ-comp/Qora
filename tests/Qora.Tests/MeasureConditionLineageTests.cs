@@ -11,7 +11,7 @@ public class MeasureConditionLineageTests
     {
         var parent = Program(
             new QGate(
-                Array.Empty<string>(),
+                Array.Empty<QGateModifier>(),
                 "X",
                 new QArg[] { new QQubitArg("q", "0") }));
         var operation = parent.Operations.Single();
@@ -87,7 +87,7 @@ public class MeasureConditionLineageTests
             new QStmt[]
             {
                 new QGate(
-                    Array.Empty<string>(),
+                    Array.Empty<QGateModifier>(),
                     "X",
                     new QArg[] { new QQubitArg("q", "0") }),
             },
@@ -115,7 +115,7 @@ public class MeasureConditionLineageTests
             new QStmt[]
             {
                 new QGate(
-                    Array.Empty<string>(),
+                    Array.Empty<QGateModifier>(),
                     "X",
                     new QArg[] { new QQubitArg("q", "0") }),
             });
@@ -145,7 +145,7 @@ public class MeasureConditionLineageTests
             new QStmt[]
             {
                 new QGate(
-                    Array.Empty<string>(),
+                    Array.Empty<QGateModifier>(),
                     "X",
                     new QArg[] { new QQubitArg("q", "0") }),
             },

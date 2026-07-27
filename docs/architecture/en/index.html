@@ -139,7 +139,7 @@
 <header class="hero">
   <div class="tag">Qora · Core Design Document</div>
   <h1>Qora Compilation Pipeline Design</h1>
-  <p>The reference path from source text to AST, Qora IR, validation passes, and OpenQASM emission</p>
+  <p>The reference path from source text through source-shaped HIR, SSA/CFG MIR, a typed target, and OpenQASM emission</p>
 </header>
 
 <div class="wrap">
@@ -149,23 +149,22 @@
     middle end that Qora owns entirely</strong>. Compilation is a straight line of small, single-purpose
     passes: each takes the program in one form, does exactly one job, and hands the next pass a slightly
     more finished program — until the last pass prints OpenQASM 3. This document walks that line end to end,
-    one stage at a time, using <strong>real compiler output</strong> for every AST, IR, and QASM listing below.
+    one stage at a time, combining compiler output with compact explanatory MIR sketches.
   </p>
 
   <div class="flowline">
     Source
     <span class="st">─Parse─▶</span> AST
-    <span class="st">─Lower─▶</span> Qora IR
+    <span class="st">─Lower─▶</span> HIR
     <span class="st">─Expand─▶</span> merged
     <span class="st">─Desugar measure─▶</span>
     <span class="st">─Resolve─▶</span> callee FQNs
     <span class="st">─Validate + Symbols─▶</span> (STOP on error)
     <span class="st">─Monomorphize─▶</span> specialized
-    <span class="st">─Flatten within/apply─▶</span>
-    <span class="st">─Materialize Adjoint─▶</span> + inverse ops
-    <span class="st">─Mangle─▶</span> collision-free
-    <span class="st">─Check─▶</span>
-    <span class="st">─Target-lower─▶</span>
+    <span class="st">─Lower MIR─▶</span> SSA/CFG MIR
+    <span class="st">─Analyze─▶</span>
+    <span class="st">─Materialize MIR-only inverses─▶</span>
+    <span class="st">─Target-lower─▶</span> typed OpenQASM model
     <span class="st">─Emit─▶</span> OpenQASM 3
   </div>
 
@@ -178,7 +177,7 @@
       </div>
       <div>
         <dt>Scope</dt>
-        <dd>The full route from source text to AST, Qora IR, validated IR, and OpenQASM.</dd>
+        <dd>The full route from source text to AST, validated HIR, SSA/CFG MIR, a typed target model, and OpenQASM.</dd>
       </div>
       <div>
         <dt>Audience</dt>
@@ -192,7 +191,6 @@
   </section>
 
   <nav class="doc-links" aria-label="Related compiler documents">
-    <a class="doc-link" href="adjoint-pipeline.html">Adjoint synthesis behavior</a>
     <a class="doc-link" href="hadamard.html">Understanding the H gate with arrows</a>
   </nav>
 
@@ -202,13 +200,13 @@
       <li><a href="#s0">The example — one file that touches every pass</a></li>
       <li><a href="#s1">Two worlds — where the engine stops and Qora begins</a></li>
       <li><a href="#s2">Parse — source to AST (the engine's job)</a></li>
-      <li><a href="#s3">Lower — AST to Qora IR (crossing the boundary)</a></li>
+      <li><a href="#s3">Lower — AST to source-shaped HIR (crossing the boundary)</a></li>
       <li><a href="#s4">Expand &amp; Resolve — imports and callee FQNs</a></li>
       <li><a href="#s5">Validate — the semantic gate</a></li>
       <li><a href="#s6">Monomorphize — specializing qubit-array calls</a></li>
-      <li><a href="#s7">Materialize Adjoint — inverses become real ops</a></li>
-      <li><a href="#s8">Mangle &amp; Check — collision-free names, then verified</a></li>
-      <li><a href="#s9">Emit — the dumb printer to OpenQASM 3</a></li>
+      <li><a href="#s7">Lower — source-shaped HIR to SSA/CFG MIR</a></li>
+      <li><a href="#s8">Analyze MIR and materialize internal inverses</a></li>
+      <li><a href="#s9">Target-lower and emit OpenQASM 3</a></li>
       <li><a href="#s10">The whole pipeline at a glance</a></li>
     </ol>
   </div>
@@ -216,8 +214,8 @@
   <h2 id="s0"><span class="n">0</span>The example — one file that touches every pass</h2>
 
   <p>
-    To see every stage do real work, we use one small program that packs in a <strong>namespace</strong>,
-    a <strong>qubit-array parameter</strong> (<code>Qubit[]</code>), a call, and an <strong>Adjoint</strong>:
+    To see the source-facing stages do real work, we use one small program that packs in a
+    <strong>namespace</strong>, a <strong>qubit-array parameter</strong> (<code>Qubit[]</code>), and a call:
   </p>
 
 <pre><code>namespace Prep {
@@ -229,15 +227,13 @@
 operation Main() {
     use reg = Qubit[3];
     Prep.Fanout(reg);                    <span class="cm">// call across a namespace</span>
-    <span class="hl">Adjoint Prep.Fanout(reg);</span>            <span class="cm">// undo it — the compiler synthesizes the inverse</span>
     var r: bit = M(reg[0]);
 }</code></pre>
 
   <p>
-    Watch three names travel through the passes: <code>Fanout</code> gains a namespace
-    (<code>Prep.Fanout</code>), gains a concrete size (<code>Prep.Fanout__sz3</code>), gains an inverse twin
-    (<code>Prep.Fanout__sz3__adj</code>), and finally flattens for OpenQASM (<code>Prep_Fanout__sz3</code>).
-    Each of those changes is one pass, below.
+    Watch the name travel through the passes: <code>Fanout</code> gains a namespace
+    (<code>Prep.Fanout</code>), gains a concrete size (<code>Prep.Fanout__sz3</code>), and finally flattens
+    for OpenQASM (<code>Prep_Fanout__sz3</code>). Each change belongs to one pass below.
   </p>
 
   <h2 id="s1"><span class="n">1</span>Two worlds — where the engine stops and Qora begins</h2>
@@ -252,7 +248,7 @@ operation Main() {
 
   <div class="rule">
     Source&nbsp;→&nbsp;AST&nbsp;&nbsp;<span style="color:var(--muted)">│ engine (Janglim)</span><br>
-    <span style="color:var(--muted)">Qora │</span>&nbsp;&nbsp;IR&nbsp;→&nbsp;⋯&nbsp;→&nbsp;OpenQASM
+    <span style="color:var(--muted)">Qora │</span>&nbsp;&nbsp;HIR&nbsp;→&nbsp;SSA/CFG MIR&nbsp;→&nbsp;typed target&nbsp;→&nbsp;OpenQASM
   </div>
 
   <div class="call why">
@@ -269,9 +265,9 @@ operation Main() {
 
   <p>
     The engine builds a lexer and an LALR parser from Qora's grammar, then turns the source into a
-    <strong>parse tree</strong>. At this stage there is <strong>no meaning</strong> — <code>Adjoint</code> is
-    just a token sitting next to a call, <code>Prep.Fanout</code> is three tokens (<code>Prep</code>,
-    <code>.</code>, <code>Fanout</code>), and a call and a gate look identical. The real tree for our example:
+    <strong>parse tree</strong>. At this stage there is <strong>no meaning</strong> —
+    <code>Prep.Fanout</code> is three tokens (<code>Prep</code>, <code>.</code>, <code>Fanout</code>), and a
+    call and a gate look identical. The real tree for our example:
   </p>
 
 <pre><code>Nonterminal : Program
@@ -298,12 +294,6 @@ operation Main() {
       Terminal : .
       Terminal : Fanout
       Nonterminal : Expr ( reg )
-    Nonterminal : Gate
-      <span class="hl">Terminal : Adjoint</span>              <span class="cm">← the functor is just a leading token</span>
-      Terminal : Prep
-      Terminal : .
-      Terminal : Fanout
-      Nonterminal : Expr ( reg )
     Nonterminal : VarDecl
       Terminal : bit
       Terminal : r
@@ -311,20 +301,20 @@ operation Main() {
 
   <div class="call">
     <span class="h">This tree is read once, then never touched again</span>
-    Every later stage works on the IR, not this tree. Nothing named <code>Prep.Fanout__sz3</code> or
-    <code>__adj</code> exists yet — those are all born downstream.
+    Every later stage works on the IR, not this tree. Nothing named <code>Prep.Fanout__sz3</code> exists
+    yet — it is born downstream.
   </div>
 
-  <h2 id="s3"><span class="n">3</span>Lower — AST to Qora IR (crossing the boundary)</h2>
+  <h2 id="s3"><span class="n">3</span>Lower — AST to source-shaped HIR (crossing the boundary)</h2>
 
-  <p class="stagehead">in: engine AST &nbsp;·&nbsp; out: <code>QProgram</code> (Qora IR) &nbsp;·&nbsp; pass: <code>QoraLowering</code></p>
+  <p class="stagehead">in: engine AST &nbsp;·&nbsp; out: <code>QProgram</code> (source-shaped HIR) &nbsp;·&nbsp; pass: <code>QoraLowering</code></p>
 
   <p>
     Lowering walks the engine's tree <strong>once</strong> and rebuilds it as Qora's own IR — a hierarchy of
     strongly-typed records (<code>QOperation</code>, <code>QGate</code>, <code>QFor</code>, <code>QIf</code>,
-    <code>QDecl</code>, <code>QUse</code>, <code>QMeasure</code>, …). Two changes matter most: string tokens
-    become <strong>typed nodes</strong>, and functors become <strong>data on the node</strong>
-    (<code>functors=[Adjoint]</code>). The IR of our example:
+    <code>QDecl</code>, <code>QUse</code>, <code>QMeasure</code>, …). String tokens become
+    <strong>typed nodes</strong>, while any source modifier that the grammar supports becomes structured
+    data on its node. The IR of our example:
   </p>
 
 <pre><code>QOperation Prep.Fanout(Qubit q)
@@ -334,15 +324,13 @@ operation Main() {
 QOperation Main()
   QUse(name=reg, size=3)
   QGate(functors=[],        name=Prep.Fanout, args=[reg])
-  QGate(functors=[<span class="hl">Adjoint</span>], name=Prep.Fanout, args=[reg])
   QDecl(const=False, type=Bit, name=r, value=QMeasure(reg[0]))</code></pre>
 
   <div class="call why">
-    <span class="h">Why turn the functor into data?</span>
-    Because "is this call inverted?" is now a <em>value</em> (<code>functors=[Adjoint]</code>) rather than
-    a token to re-parse, a later pass can build an inverse just by flipping that value — no string surgery.
-    This is the same reason the whole middle end is IR-based: passes read and write structured nodes, so each
-    one stays short and hard to get wrong.
+    <span class="h">Why rebuild the tree as typed data?</span>
+    Later passes can inspect call targets, arguments, and modifiers without re-parsing strings. This is the
+    reason the whole middle end is IR-based: passes read and write structured nodes, so each one stays short
+    and hard to get wrong.
   </div>
 
   <h2 id="s4"><span class="n">4</span>Expand &amp; Resolve — imports and callee FQNs</h2>
@@ -381,7 +369,7 @@ qubit[2] q;
     <strong>Resolve</strong> then turns operation definitions and operation call targets into
     <strong>fully-qualified names (FQNs)</strong>. Inside <code>namespace Prep</code>, the operation
     <code>Fanout</code> becomes <code>Prep.Fanout</code>, and the call site <code>Prep.Fanout(reg)</code>
-    is checked to point at it. This is why the IR listing above already reads <code>Prep.Fanout</code>,
+    is checked to point at it. This is why the HIR listing above already reads <code>Prep.Fanout</code>,
     not <code>Fanout</code>. This pass does not resolve every identifier in the program. Variables, loop
     variables, qubit indices, and names inside conditions are checked by the symbol table during validation.
     If a call target were ambiguous (visible from two <code>open</code>ed namespaces) it would be
@@ -405,7 +393,6 @@ qubit[2] q;
   <div class="panel">
     <table class="amp">
       <tr><th>Code</th><th>Rejects</th></tr>
-      <tr><td><code>QSEM001</code></td><td><code>Adjoint Foo</code> where <code>Foo</code> has no inverse (measurement, reset, a <code>while</code> loop, …) — reason chained from the inverter</td></tr>
       <tr><td><code>QSEM002</code></td><td><code>Controlled Foo</code> on a user op (OpenQASM has no <code>ctrl @</code> for a def)</td></tr>
       <tr><td><code>QSEM006</code></td><td>a call whose arguments do not match the signature — count, kind (qubit vs angle), or register size</td></tr>
       <tr><td><code>QSEM007</code></td><td>an unknown gate or operation name (with a "did you mean …?" hint)</td></tr>
@@ -418,19 +405,19 @@ qubit[2] q;
   <div class="call why">
     <span class="h">Why validate before the transforming passes?</span>
     Because it lets every later pass assume the program is already sound. The monomorphizer never meets a
-    name that failed scope resolution; the adjoint materializer never meets a non-invertible <code>Adjoint</code> (QSEM001 already
-    rejected it); the emitter never meets a bad call. Each transforming pass gets to be simple because the
-    gate stands in front of them all.
+    name that failed scope resolution, and the emitter never meets a bad call. Each transforming pass gets
+    to be simple because the gate stands in front of them all.
   </div>
 
   <h2 id="s6"><span class="n">6</span>Monomorphize — specializing qubit-array calls</h2>
 
-  <p class="stagehead">in: validated IR &nbsp;·&nbsp; out: IR with concrete-size ops &nbsp;·&nbsp; pass: <code>Monomorphizer</code></p>
+  <p class="stagehead">in: validated HIR &nbsp;·&nbsp; out: HIR with concrete-size ops &nbsp;·&nbsp; pass: <code>Monomorphizer</code></p>
 
   <p>
     The surface type <code>Fanout(q: Qubit[])</code> deliberately omits the array length. At each call site,
     the monomorphizer reads the actual register size, <strong>stamps out a concrete internal copy</strong>,
-    replaces <code>q.Count</code> with that size, and rewrites the call to point at the copy. Our call passes
+    gives its parameter that known width, and rewrites the call to point at the copy. Common HIR preserves
+    <code>q.Count</code>; the target later lowers it from the known width. Our call passes
     <code>reg</code> (3 qubits), so:
   </p>
 
@@ -441,161 +428,84 @@ qubit[2] q;
 
   <p>
     Because sizes are now concrete, the program is <strong>validated a second time</strong>: checks that only
-    make sense once <code>q.Count</code> is a number — index bounds, register-size matches — finally have something
+    need a known register width — index bounds and register-size matches — finally have something
     to run against. After this pass, no generic operations remain.
   </p>
 
-  <h2 id="s7"><span class="n">7</span>Materialize Adjoint — inverses become real ops</h2>
+  <h2 id="s7"><span class="n">7</span>Lower — source-shaped HIR to SSA/CFG MIR</h2>
 
-  <p class="stagehead">in: specialized IR &nbsp;·&nbsp; out: IR with synthesized inverse ops &nbsp;·&nbsp; pass: <code>AdjointMaterializer</code></p>
-
-  <h3>Run just before it — flatten <code>within/apply</code> (<code>ConjugationLowering</code>)</h3>
+  <p class="stagehead">in: accepted specialized HIR + semantic facts &nbsp;·&nbsp; out: <code>MirSnapshot</code> &nbsp;·&nbsp; pass: <code>QoraMirLowering</code></p>
 
   <p>
-    Qora's IR has one synthetic node with no surface syntax: <code>QConjugate</code>, the <em>within/apply</em>
-    (conjugation) form meaning "run <em>within</em>, then <em>apply</em>, then the inverse of <em>within</em>" —
-    the compute · use · uncompute sandwich. Only <em>within</em> is reversed, so its effect (a temporary
-    ancilla setup) is undone while <em>apply</em>'s effect survives. <code>ConjugationLowering</code> flattens
-    the node into ordinary gates, reusing the same inversion kernel to synthesize the trailing inverse:
+    HIR still resembles the program the user wrote, which makes name resolution, type checking, and
+    diagnostics straightforward. After those responsibilities are complete, <code>QoraMirLowering</code>
+    creates the compiler's execution-oriented form: classical values become SSA versions and branches
+    and loops become an explicit control-flow graph.
   </p>
 
-<pre><code>QConjugate(within=[X(a[0])], apply=[CNOT(a[0], d[0])])
-                       <span class="cm">↓ ConjugationLowering  ( within ++ apply ++ inverse-of-within )</span>
-x a[0];                <span class="cm">← within (compute)</span>
-cx a[0], d[0];         <span class="cm">← apply   (use)</span>
-<span class="add">inv @ x a[0];</span>          <span class="cm">← synthesized inverse of within (uncompute)</span>
-</code></pre>
+<pre><code>var x: int = 1;
+x = x + 1;
+
+<span class="cm">↓ QoraMirLowering</span>
+
+v0 = constant 1
+v1 = add v0, 1
+return</code></pre>
 
   <p>
-    Ordering is the reason it runs <em>here</em>, right before the materializer: if the synthesized inverse
-    calls a user operation (<code>Adjoint Foo</code>), that must still become a real <code>Foo__adj</code> op —
-    which only happens because the materializer runs <em>after</em> this pass. Today nothing produces a
-    <code>QConjugate</code> from source, so for an ordinary program this pass is a no-op; it is the emit path
-    the upcoming <strong>automatic uncomputation</strong> will feed (see the closing note).
+    The result is one immutable, revision-qualified <code>MirSnapshot</code>. Its origin table and typed
+    cross-stage links connect every MIR callable, value, storage object, and qubit resource to its HIR
+    source or explicitly classify it as a compiler temporary. A backend therefore never has to guess
+    which source declaration a MIR identity came from.
+  </p>
+
+  <h2 id="s8"><span class="n">8</span>Analyze MIR and materialize internal inverses</h2>
+
+  <p class="stagehead">passes: revision-bound MIR analyses → <code>MirAdjointMaterializer</code></p>
+
+  <p>
+    Control-flow, effect, alias, memory-state, path-condition, and control-region analyses all consume
+    the exact MIR revision they describe. Their results are not copied into HIR and cannot be reused
+    against a changed graph.
   </p>
 
   <p>
-    Our <code>Main</code> contains <code>Adjoint Prep.Fanout(reg)</code>. This pass turns that whole-operation
-    adjoint into an <strong>ordinary operation</strong>. Using the inversion kernel (<code>Inverter</code>),
-    it computes the inverse body — <strong>reverse the statements, dagger each gate</strong> — adds it to the
-    program as a real op named <code>Prep.Fanout__sz3__adj</code>, and rewrites the call to a plain
-    <code>Prep.Fanout__sz3__adj(reg)</code>. The inverse of a fan-out of H gates is the reversed loop with each
-    <code>H</code> daggered:
+    Inverse requests also belong exclusively to MIR. A compiler-internal scheduler may mark one exact
+    <code>MirQuantumApply</code> with <code>MirFunctor.Adjoint</code>. The
+    <code>MirAdjointMaterializer</code> then synthesizes the required inverse MIR callable, rewrites the
+    request to a typed callable target, and publishes a new snapshot with an exact parent and rebased
+    origins. Qora source and HIR contain no <code>Adjoint</code>, inverse marker, or conjugation node.
   </p>
 
-  <div class="rule">(U₁ · U₂ · ⋯ · Uₙ)† &nbsp;=&nbsp; Uₙ† · ⋯ · U₂† · U₁†</div>
-
-  <p>
-    The demand is <strong>transitive</strong>: if an inverse body calls <code>Adjoint Bar</code>, then
-    <code>Bar</code>'s inverse is materialized too, and so on until the set closes. Adjoint on a <em>built-in</em>
-    gate (<code>Adjoint H</code>) is left alone — that becomes <code>inv @ h</code> at emit time; only user
-    operations are materialized here.
-  </p>
+<pre><code>MirQuantumApply(Target = Prepare, Functors = [MirFunctor.Adjoint])
+                         <span class="cm">↓ MirAdjointMaterializer</span>
+MirCallable __qora_inverse_...(reversed unitary body)
+MirQuantumApply(Target = __qora_inverse_..., Functors = [])</code></pre>
 
   <div class="call why">
-    <span class="h">Why materialize before naming (and not at emit time)?</span>
-    A synthesized inverse def is a <strong>name</strong> the final QASM must keep clear of every other global
-    name (a user register also called <code>Prep.Fanout__sz3__adj</code>, say). By creating it here — as a
-    real op, before the name mangler runs — the inverse flows through the <em>same</em> collision resolution as
-    every other operation, so no generated name is ever born after naming. It is the same trick the
-    monomorphizer uses: <strong>materialize generated ops before mangling</strong>, and the emitter never has
-    to invent a name.
+    <span class="h">Why is this boundary in MIR?</span>
+    Automatic uncomputation needs SSA versions, CFG paths, storage states, and exact instruction
+    identities. Keeping requests and synthesized callables in MIR lets the scheduler and materializer
+    share that evidence without adding compiler-only syntax to HIR or creating a second target path.
   </div>
 
-  <h2 id="s8"><span class="n">8</span>Mangle &amp; Check — collision-free names, then verified</h2>
+  <h2 id="s9"><span class="n">9</span>Target-lower and emit OpenQASM 3</h2>
 
-  <p class="stagehead">passes: <code>NameMangler</code> → <code>ReferentialCheck</code></p>
-
-  <p>
-    <strong>Mangle</strong> maps every Qora name to a valid, collision-free OpenQASM identifier. Two things
-    happen: a namespaced name <strong>flattens its dots</strong> (<code>Prep.Fanout__sz3</code> →
-    <code>Prep_Fanout__sz3</code>), and any name that would collide — with an OpenQASM keyword, a stdgates gate
-    name, or another emitted name — gets <code>_</code> appended until it is unique. A collision is therefore
-    <strong>never a compile error</strong>: it is resolved automatically, and a <code>// Qora:</code> note is
-    written into the QASM header so the reader knows a name was adjusted.
-  </p>
-
-  <div class="call">
-    <span class="h">Names live in scopes that mirror OpenQASM</span>
-    Operation names and the entry op's top-level declarations share one global scope (just like stdgates);
-    each def gets its own local scope for its parameters and variables. That is why a variable named
-    <code>s</code> (which clashes with the <code>s</code> gate) is emitted as <code>s_</code>, while the same
-    name is free to reappear inside a different def.
-  </div>
+  <p class="stagehead">in: materialized MIR &nbsp;·&nbsp; target: <code>MirOpenQasmTargetProgram</code> &nbsp;·&nbsp; passes: <code>MirOpenQasmLowering</code> → <code>MirQasmEmitter</code></p>
 
   <p>
-    <strong>Check</strong> (the referential-integrity gate) is a safety net that runs right after mangling: it
-    verifies that <strong>every identifier the program uses resolves</strong> to something declared — a
-    parameter, register, variable, operation, or built-in. A dangling reference here would mean a pass renamed
-    a declaration but not one of its uses — a <em>compiler</em> bug — so it is reported loudly as
-    <code>QINTERNAL</code> rather than emitted as silently-broken QASM. On a correct compiler it never fires;
-    it exists to make that whole class of bug impossible to ship.
-  </p>
-
-  <h2 id="s9"><span class="n">9</span>Emit — the dumb printer to OpenQASM 3</h2>
-
-  <p class="stagehead">in: mangled IR &nbsp;·&nbsp; out: OpenQASM 3 text &nbsp;·&nbsp; pass: <code>OpenQasmLowering</code> → <code>QasmEmitter</code></p>
-
-  <h3>Run just before it — target-lower for OpenQASM (<code>OpenQasmLowering</code>)</h3>
-
-  <p>
-    One last IR→IR step runs before the printer — <strong>OpenQasmLowering</strong>, the OpenQASM-specific
-    target lowering. Qora's <code>const</code> is an immutable <em>binding</em> that may hold any value
-    (Q#-<code>let</code> style), but OpenQASM's <code>const</code> demands a compile-time-constant initializer.
-    So a runtime-bound <code>const c = n;</code> is demoted to a plain <code>int c = n;</code> for emission —
-    still never reassigned, so nothing about its immutability is lost:
-  </p>
-
-<pre><code>int n = 2;
-<span class="hl">const c = n;</span>          <span class="cm">← Qora const: an immutable binding, any value</span>
-                   <span class="cm">↓ OpenQasmLowering</span>
-int n = 2;
-<span class="add">int c = n;</span>            <span class="cm">← plain int (OpenQASM const must be compile-time)</span>
-</code></pre>
-
-  <p>
-    This is the <strong>first per-target lowering pass</strong> — where IR that is correct for Qora is adjusted
-    to a specific backend's rules. A future QIR target would add its own lowering here without touching any pass
-    above it.
+    The OpenQASM backend consumes the exact materialized MIR snapshot. It recovers structured
+    <code>if</code>, <code>while</code>, and loop exits from the CFG, converts SSA values and phi edges into
+    typed target declarations and assignments, and assigns collision-free OpenQASM names. The resulting
+    <code>MirOpenQasmTargetProgram</code> owns target types, callables, declarations, statements, and their
+    target-local identities; it does not carry HIR as a second source of truth.
   </p>
 
   <p>
-    The last pass is deliberately the <strong>least clever</strong>: it invents no names and inverts nothing —
-    every transformation already happened upstream. It just prints each operation as a <code>def</code> and the
-    entry op as the top-level body. Its only real chore is <strong>ordering</strong>: OpenQASM has no forward
-    declarations, so defs are emitted in call-dependency (topological) order — which is why
-    <code>Prep_Fanout__sz3__adj</code> appears before nothing that it needs, and every def is declared before
-    it is used. The complete output for our example:
+    <code>MirQasmEmitter</code> then serializes that target model. It does not resolve source names, inspect
+    semantic facts, synthesize inverses, or reconstruct control flow. A future backend can consume the same
+    canonical MIR through its own typed lowering without forking the HIR pipeline.
   </p>
-
-<pre><code>// generated by Qora v0.18
-OPENQASM 3;
-include "stdgates.inc";
-
-def <span class="hl">Prep_Fanout__sz3</span>(qubit[3] q) {      <span class="cm">← namespaced + specialized + flattened</span>
-  for int i in [0:3 - 1] {
-    h q[i];
-  }
-}
-
-<span class="add">def Prep_Fanout__sz3__adj(qubit[3] q) {</span>  <span class="cm">← synthesized inverse (not in the source)</span>
-<span class="add">  for int i in [3 - 1:-1:0] {</span>            <span class="cm">← reversed loop</span>
-<span class="add">    inv @ h q[i];</span>                         <span class="cm">← daggered gate</span>
-<span class="add">  }</span>
-<span class="add">}</span>
-
-qubit[3] reg;
-bit r;
-Prep_Fanout__sz3(reg);
-<span class="hl">Prep_Fanout__sz3__adj(reg);</span>              <span class="cm">← Adjoint Prep.Fanout(reg) became this call</span>
-r = measure reg[0];</code></pre>
-
-  <div class="call why">
-    <span class="h">Why keep the emitter this dumb?</span>
-    Because a printer that only prints is easy to trust. When inversion, specialization, and naming all live in
-    their own passes, the final text-producing step has no decisions left to make — so the OpenQASM it writes
-    is simply the IR it was handed, character for character.
-  </div>
 
   <h2 id="s10"><span class="n">10</span>The whole pipeline at a glance</h2>
 
@@ -603,18 +513,17 @@ r = measure reg[0];</code></pre>
     <table class="amp">
       <tr><th>Stage</th><th>Pass</th><th>Turns … into …</th></tr>
       <tr><td>Parse</td><td><em>Janglim engine</em></td><td>source text → syntax tree (no meaning yet)</td></tr>
-      <tr><td>Lower</td><td><code>QoraLowering</code></td><td>engine tree → Qora IR (typed nodes; functors as data)</td></tr>
+      <tr><td>Lower HIR</td><td><code>QoraLowering</code></td><td>engine tree → source-shaped typed HIR</td></tr>
       <tr><td>Expand</td><td><code>ModuleLoader</code></td><td>imports → one merged program</td></tr>
       <tr><td>Desugar measure</td><td><code>MeasureConditionLowering</code></td><td>a measurement inside a condition → a hoisted <code>bit</code>, assigned then tested</td></tr>
       <tr><td>Resolve</td><td><code>Resolver</code></td><td>operation call targets → fully-qualified names</td></tr>
       <tr><td>Validate</td><td><code>QoraValidator</code> + <code>SymbolTableBuilder</code></td><td>IR → symbol tables + every semantic error (a hard gate on emission)</td></tr>
       <tr><td>Monomorphize</td><td><code>Monomorphizer</code></td><td><code>Qubit[]</code> calls → call-size-specific internal copies, then re-validate if changed</td></tr>
-      <tr><td>Flatten conjugation</td><td><code>ConjugationLowering</code></td><td><code>within/apply</code> (<code>QConjugate</code>) → <code>compute; apply;</code> + synthesized inverse of <code>within</code></td></tr>
-      <tr><td>Materialize</td><td><code>AdjointMaterializer</code></td><td><code>Adjoint Foo</code> → a real <code>Foo__adj</code> op + a plain call</td></tr>
-      <tr><td>Mangle</td><td><code>NameMangler</code></td><td>Qora names → collision-free OpenQASM identifiers</td></tr>
-      <tr><td>Check</td><td><code>ReferentialCheck</code></td><td>verifies every used name resolves (else <code>QINTERNAL</code>)</td></tr>
-      <tr><td>Target-lower</td><td><code>OpenQasmLowering</code></td><td>OpenQASM-specific adjustments (e.g. a runtime <code>const</code> → a plain <code>int</code>/<code>float</code>)</td></tr>
-      <tr><td>Emit</td><td><code>QasmEmitter</code></td><td>final IR → OpenQASM 3 text (a pure printer)</td></tr>
+      <tr><td>Lower MIR</td><td><code>QoraMirLowering</code></td><td>accepted HIR + semantic facts → typed SSA/CFG <code>MirSnapshot</code></td></tr>
+      <tr><td>Analyze MIR</td><td><code>MirAnalysisStore</code></td><td>exact MIR revision → control-flow, effects, alias, memory, and path facts</td></tr>
+      <tr><td>Materialize</td><td><code>MirAdjointMaterializer</code></td><td>MIR-only inverse requests → synthesized inverse MIR callables</td></tr>
+      <tr><td>Target-lower</td><td><code>MirOpenQasmLowering</code></td><td>materialized MIR → typed <code>MirOpenQasmTargetProgram</code></td></tr>
+      <tr><td>Emit</td><td><code>MirQasmEmitter</code></td><td>typed target model → OpenQASM 3 text</td></tr>
     </table>
   </div>
 
@@ -628,25 +537,24 @@ r = measure reg[0];</code></pre>
   <div class="call why">
     <span class="h">Where this is heading — automatic uncomputation</span>
     Silq-style automatic uncomputation — <strong>finding where a temporary qubit is no longer needed and
-    injecting its inverse automatically</strong> — is what these passes are built toward. The first piece is
-    already in place: <code>ConjugationLowering</code> flattens a <code>within/apply</code> node into
-    compute · apply · uncompute and emits it, so the whole downstream path (inverse synthesis →
-    <code>__adj</code> closure → mangling → QASM) is proven end to end. What remains is the analysis that
-    <em>produces</em> that node on its own — liveness (when a temporary dies) plus effect analysis (whether it
-    can be safely reversed) — after which a small injector emits the <code>QConjugate</code> at each death point.
+    injecting its inverse automatically</strong> — now has the correct stage boundary. The scheduler will
+    consume revision-bound SSA/CFG facts, find a global cleanup order, and inject exact MIR instruction
+    requests. <code>MirAdjointMaterializer</code> and the typed target path already consume that representation.
+    Conditions, loops, aliases, classical-witness stability, and conflicts between several ancillas still need
+    explicit proofs before the scheduler can enable those cases.
   </div>
 
   <hr>
 
   <p style="color:var(--muted); font-size:.92rem;">
-    Every AST, IR, and OpenQASM listing in this document was produced by compiling the example above with the
-    real Qora compiler (<code>qora --json --stages</code>).<br>
+    Source, AST, HIR, and OpenQASM listings come from the Qora compiler
+    (<code>qora --json --stages</code>); compact MIR listings are explanatory sketches using the real MIR types.<br>
     Source, in pipeline order: <code>QoraGrammar.cs</code> (grammar) ·
     <code>Ir/QoraLowering.cs</code> (AST→IR) ·
     <code>Ir/Passes/ModuleLoader.cs</code> · <code>MeasureConditionLowering.cs</code> · <code>Resolver.cs</code> · <code>SymbolTable.cs</code> · <code>QoraValidator.cs</code> ·
-    <code>Monomorphizer.cs</code> · <code>ConjugationLowering.cs</code> · <code>AdjointMaterializer.cs</code> · <code>NameMangler.cs</code> ·
-    <code>ReferentialCheck.cs</code> · <code>Ir/Inverter.cs</code> (inversion kernel) ·
-    <code>OpenQasmLowering.cs</code> · <code>Ir/QasmEmitter.cs</code> (IR→OpenQASM).
+    <code>Monomorphizer.cs</code> · <code>Ir/Mir/QoraMirLowering.cs</code> ·
+    <code>Ir/Mir/MirAdjointMaterializer.cs</code> · <code>Ir/Qasm/MirOpenQasmLowering.cs</code> ·
+    <code>Ir/Qasm/MirQasmEmitter.cs</code> (typed target model→OpenQASM).
   </p>
 
 </div>

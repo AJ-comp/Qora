@@ -90,8 +90,6 @@ public enum HirScopeSiteRole
     WhileBody,
     RepeatBody,
     RepeatCondition,
-    ConjugateWithin,
-    ConjugateApply,
 }
 
 /// <summary>A stable HIR node-and-role key for the scope introduced at that source site.</summary>

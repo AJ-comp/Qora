@@ -616,37 +616,33 @@
               <div class="diagram-scroll" tabindex="0" aria-label="QOperation Body에서 각 제어문의 하위 본문으로 재귀 방문하는 트리">
                 <svg viewBox="0 0 1000 420" role="img" aria-labelledby="mc-recursive-title mc-recursive-desc" focusable="false">
                   <title id="mc-recursive-title">MeasureConditionLowering의 재귀 방문 범위</title>
-                  <desc id="mc-recursive-desc">QOperation Body를 루트로 하여 QIf Then Else, QWhile Body, QRepeat Body, QFor Body, QConjugate Within Apply를 같은 색의 하위 카드로 연결한다.</desc>
+                  <desc id="mc-recursive-desc">QOperation Body를 루트로 하여 QIf Then Else, QWhile Body, QRepeat Body, QFor Body를 같은 색의 하위 카드로 연결한다.</desc>
                   <rect x="372" y="28" width="256" height="66" rx="11" fill="#263141" stroke="#334155"/>
                   <rect x="398" y="43" width="104" height="28" rx="14" fill="none" stroke="#bfdbfe"/>
                   <text class="svg-code" x="450" y="62" text-anchor="middle" fill="#dbeafe" font-size="12" font-weight="850">QOperation</text>
                   <text class="svg-code" x="516" y="62" fill="#f8fafc" font-size="13.5" font-weight="850">Body</text>
-                  <path d="M500 94 V130 M100 130 H900 M100 130 V162 M300 130 V162 M500 130 V162 M700 130 V162 M900 130 V162" fill="none" stroke="#5688b8" stroke-width="2.2"/>
+                  <path d="M500 94 V130 M125 130 H875 M125 130 V162 M375 130 V162 M625 130 V162 M875 130 V162" fill="none" stroke="#5688b8" stroke-width="2.2"/>
 
                   <g class="svg-code" font-size="13">
-                    <rect x="28" y="162" width="144" height="66" rx="9" fill="#eaf2fb" stroke="#6a9ac8"/>
-                    <text x="100" y="190" text-anchor="middle" fill="#174f88" font-weight="850">QIf</text>
-                    <text x="100" y="214" text-anchor="middle" fill="#475569">Then · Else</text>
+                    <rect x="53" y="162" width="144" height="66" rx="9" fill="#eaf2fb" stroke="#6a9ac8"/>
+                    <text x="125" y="190" text-anchor="middle" fill="#174f88" font-weight="850">QIf</text>
+                    <text x="125" y="214" text-anchor="middle" fill="#475569">Then · Else</text>
 
-                    <rect x="228" y="162" width="144" height="66" rx="9" fill="#eaf2fb" stroke="#6a9ac8"/>
-                    <text x="300" y="190" text-anchor="middle" fill="#174f88" font-weight="850">QWhile</text>
-                    <text x="300" y="214" text-anchor="middle" fill="#475569">Body</text>
+                    <rect x="303" y="162" width="144" height="66" rx="9" fill="#eaf2fb" stroke="#6a9ac8"/>
+                    <text x="375" y="190" text-anchor="middle" fill="#174f88" font-weight="850">QWhile</text>
+                    <text x="375" y="214" text-anchor="middle" fill="#475569">Body</text>
 
-                    <rect x="428" y="162" width="144" height="66" rx="9" fill="#eaf2fb" stroke="#6a9ac8"/>
-                    <text x="500" y="190" text-anchor="middle" fill="#174f88" font-weight="850">QRepeat</text>
-                    <text x="500" y="214" text-anchor="middle" fill="#475569">Body</text>
+                    <rect x="553" y="162" width="144" height="66" rx="9" fill="#eaf2fb" stroke="#6a9ac8"/>
+                    <text x="625" y="190" text-anchor="middle" fill="#174f88" font-weight="850">QRepeat</text>
+                    <text x="625" y="214" text-anchor="middle" fill="#475569">Body</text>
 
-                    <rect x="628" y="162" width="144" height="66" rx="9" fill="#eaf2fb" stroke="#6a9ac8"/>
-                    <text x="700" y="190" text-anchor="middle" fill="#174f88" font-weight="850">QFor</text>
-                    <text x="700" y="214" text-anchor="middle" fill="#475569">Body</text>
-
-                    <rect x="828" y="162" width="144" height="66" rx="9" fill="#eaf2fb" stroke="#6a9ac8"/>
-                    <text x="900" y="190" text-anchor="middle" fill="#174f88" font-weight="850">QConjugate</text>
-                    <text x="900" y="214" text-anchor="middle" fill="#475569">Within · Apply</text>
+                    <rect x="803" y="162" width="144" height="66" rx="9" fill="#eaf2fb" stroke="#6a9ac8"/>
+                    <text x="875" y="190" text-anchor="middle" fill="#174f88" font-weight="850">QFor</text>
+                    <text x="875" y="214" text-anchor="middle" fill="#475569">Body</text>
                   </g>
 
-                  <path d="M100 228 V274 M300 228 V274 M500 228 V274 M700 228 V274 M900 228 V274" fill="none" stroke="#5688b8" stroke-width="2" stroke-dasharray="6 5"/>
-                  <rect x="92" y="270" width="816" height="82" rx="10" fill="#f5f9fd" stroke="#8db8e0"/>
+                  <path d="M125 228 V274 M375 228 V274 M625 228 V274 M875 228 V274" fill="none" stroke="#5688b8" stroke-width="2" stroke-dasharray="6 5"/>
+                  <rect x="117" y="270" width="766" height="82" rx="10" fill="#f5f9fd" stroke="#8db8e0"/>
                   <text class="svg-ui" x="500" y="300" text-anchor="middle" fill="#174f88" font-size="14" font-weight="850">하위 본문에서 다시 QIf · QWhile · QRepeat 조건을 확인</text>
                   <text class="svg-code" x="500" y="330" text-anchor="middle" fill="#475569" font-size="12.5">조건의 M(register[index])만 QMeasure와 임시 비트로 분리</text>
                   <rect x="308" y="370" width="384" height="30" rx="15" fill="#fff7e8" stroke="#d9a23d"/>
@@ -749,8 +745,8 @@
             </div>
 
             <p>
-              이후 <code>QasmEmitter</code>는 이 <code>QDecl</code>을 OpenQASM의 비트 선언과 측정 대입으로 출력합니다.<br>
-              비트 선언을 연산 위쪽으로 올리거나 조건의 <code>1</code>을 <code>true</code>로 출력하는 작업은 방출 단계의 책임이며, <code>MeasureConditionLowering</code>의 IR 출력에는 포함되지 않습니다.
+              이후 HIR은 SSA/CFG MIR로 내려가고, <code>MirOpenQasmLowering</code>이 이 선언과 측정을 타입 있는 target statement로 바꿉니다.<br>
+              <code>MirQasmEmitter</code>는 완성된 target model을 직렬화할 뿐이며, 비트 선언의 배치와 조건 표현 변환은 <code>MeasureConditionLowering</code>의 HIR 출력에 포함되지 않습니다.
             </p>
           </div>
         </section>

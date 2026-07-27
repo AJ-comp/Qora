@@ -69,6 +69,7 @@ public sealed class MirProgram
     internal MirProgram(
         MirSnapshotId snapshotId,
         MirOriginTable origins,
+        MirCallableId entryPoint,
         IEnumerable<MirCallable> callables)
     {
         ArgumentNullException.ThrowIfNull(origins);
@@ -81,10 +82,12 @@ public sealed class MirProgram
         SnapshotId = snapshotId;
         Origins = origins;
         Callables = MirCollections.Freeze(callables);
+        EntryPoint = entryPoint;
     }
 
     public MirSnapshotId SnapshotId { get; }
     public MirOriginTable Origins { get; }
+    public MirCallableId EntryPoint { get; }
     public IReadOnlyList<MirCallable> Callables { get; }
 
     internal int Revision => SnapshotId.Revision;

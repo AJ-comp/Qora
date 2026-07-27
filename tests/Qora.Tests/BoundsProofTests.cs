@@ -379,13 +379,13 @@ public class BoundsProofTests
     [Fact]
     public void RejectsACrossArrayLoopOverTwoParameters() =>
         Compiler.Rejects("""
-            operation Helper(x: int[], y: int[]) {
+            operation Helper(var x: int[], y: int[]) {
                 for i in 0..y.Count-1 { x[i] = 1; }
             }
             operation Main() {
                 var a: int[] = [1, 2, 3];
                 var b: int[] = [1, 2, 3];
-                Helper(a, b);
+                Helper(var a, b);
             }
             """, "QSEM030");
 

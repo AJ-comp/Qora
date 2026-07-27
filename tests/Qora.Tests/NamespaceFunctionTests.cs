@@ -65,8 +65,20 @@ public class NamespaceFunctionTests
 
         Assert.Equal("L.two", call.Name);
         Assert.Equal(function.Id, call.CalleeOpId);
-        Assert.Contains("def L_two() -> int {", result.Targets.OpenQasm!.Text);
-        Assert.Contains("int n = L_two();", result.Targets.OpenQasm!.Text);
+        var target = result.Targets.OpenQasm!.Program;
+        var targetCall = Assert.Single(
+            target.Expressions()
+                .OfType<MirQasmFunctionCallExpression>(),
+            expression =>
+                expression.Target is MirQasmUserFunctionTarget);
+        var targetFunction = target.Resolve(
+            Assert.IsType<MirQasmUserFunctionTarget>(targetCall.Target));
+
+        Assert.Contains("L_two", targetFunction.EmittedName);
+        Assert.Equal(
+            MirQasmScalarKind.Int,
+            Assert.IsType<MirQasmScalarType>(
+                targetFunction.ReturnType).Kind);
     }
 
     [Fact]
@@ -224,12 +236,30 @@ public class NamespaceFunctionTests
             operation Main() { var n: int = wrapper(); }
             """);
 
-        var callee = result.Targets.OpenQasm!.Text.IndexOf("def L_two()", StringComparison.Ordinal);
-        var caller = result.Targets.OpenQasm!.Text.IndexOf("def wrapper()", StringComparison.Ordinal);
+        var target = result.Targets.OpenQasm!.Program;
+        var definitions = MirQasmEmitter
+            .OrderDefinitions(target.Definitions)
+            .ToArray();
+        var caller = Assert.Single(
+            definitions,
+            definition =>
+            MirQasmTestModel
+                .Statements(definition.Body)
+                .SelectMany(MirQasmTestModel.Expressions)
+                .OfType<MirQasmFunctionCallExpression>()
+                .Any(
+                    expression =>
+                        expression.Target is MirQasmUserFunctionTarget));
+        var call = Assert.Single(
+            MirQasmTestModel
+                .Statements(caller.Body)
+                .SelectMany(MirQasmTestModel.Expressions)
+                .OfType<MirQasmFunctionCallExpression>());
+        var callee = target.Resolve(
+            Assert.IsType<MirQasmUserFunctionTarget>(call.Target));
 
-        Assert.True(callee >= 0, result.Targets.OpenQasm!.Text);
-        Assert.True(caller >= 0, result.Targets.OpenQasm!.Text);
-        Assert.True(callee < caller, result.Targets.OpenQasm!.Text);
-        Assert.Contains("= L_two();", result.Targets.OpenQasm!.Text);
+        Assert.True(
+            Array.IndexOf(definitions, callee)
+            < Array.IndexOf(definitions, caller));
     }
 }

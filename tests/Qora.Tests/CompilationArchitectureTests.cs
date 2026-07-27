@@ -41,6 +41,47 @@ public sealed class CompilationArchitectureTests
     }
 
     [Fact]
+    public void AFunctionNamedMainCanNeverReplaceTheOperationEntryPoint()
+    {
+        var compilation = QoraCompiler.Compile(
+            """
+            function Main(): int {
+                return 1;
+            }
+
+            operation Foo() {
+            }
+            """);
+
+        Assert.True(compilation.Succeeded);
+        var mir = Assert.IsType<MirSnapshot>(compilation.Mir);
+        var entry = Assert.Single(
+            mir.Program.Callables,
+            callable => callable.Id == mir.Program.EntryPoint);
+        Assert.Equal(MirCallableKind.Operation, entry.Kind);
+        Assert.Equal("Foo", entry.Name);
+    }
+
+    [Fact]
+    public void FunctionsWithoutAnyOperationAreAUserDiagnosticNotAnInternalMirFailure()
+    {
+        var compilation = QoraCompiler.Compile(
+            """
+            function Main(): int {
+                return 1;
+            }
+            """);
+
+        Assert.False(compilation.Succeeded);
+        var error = Assert.Single(compilation.Diagnostics);
+        Assert.Equal(CompilationStage.HirValidation, error.Stage);
+        Assert.Equal("QSEM040", error.Error.Code);
+        Assert.DoesNotContain(compilation.Diagnostics, diagnostic => diagnostic.Error.Code == "QORA0000");
+        Assert.Null(compilation.Mir);
+        Assert.Empty(compilation.Targets.Artifacts);
+    }
+
+    [Fact]
     public void HirGenerationsAreChronologicalAndAnalysisDoesNotMutateValidationFacts()
     {
         var compilation = QoraCompiler.Compile(
@@ -75,11 +116,14 @@ public sealed class CompilationArchitectureTests
         Assert.Throws<InvalidOperationException>(
             () => validated.Model.AddUnprovenIndex(
                 new UnprovenIndex(
+                    new HirIndexAccessId(0),
                     main.Name,
                     "xs",
                     "i",
                     LoopBound: null,
-                    Span: null)));
+                    Span: null),
+                main.Id,
+                new object()));
         Assert.Throws<InvalidOperationException>(
             () => EffectAnalysis.Run(analyzed.Program, analyzed.Model));
     }
@@ -228,7 +272,7 @@ public sealed class CompilationArchitectureTests
             new QStmt[]
             {
                 new QGate(
-                    Array.Empty<string>(),
+                    Array.Empty<QGateModifier>(),
                     "X",
                     Array.Empty<QArg>())
                 {
@@ -296,129 +340,19 @@ public sealed class CompilationArchitectureTests
     }
 
     [Fact]
-    public void MirAndTargetDeclareTheirExactHirSources()
+    public void MirAndTargetDeclareTheirExactSources()
     {
         var compilation = QoraCompiler.Compile(
             "operation Main() { use q = Qubit[1]; H(q[0]); }");
         Assert.True(compilation.Succeeded);
 
-        var conjugated = compilation.Hir.Require(HirStage.ConjugationLowered);
-        var materialized = compilation.Hir.Require(HirStage.AdjointMaterialized);
         var analyzed = Assert.IsType<HirSemanticArtifact>(compilation.Hir.EffectAnalysis);
-        Assert.Equal(conjugated.Id, compilation.Mir!.LoweredFrom);
-        Assert.Equal(materialized.Id, compilation.Targets.OpenQasm!.Source);
-        Assert.Equal(analyzed.Id, compilation.Mir.Links.SymbolsFrom);
-        Assert.Equal(analyzed.Id, compilation.Targets.OpenQasm.SemanticBasis);
-        Assert.Same(compilation.Mir.Links, compilation.Links.Mir);
-    }
-
-    [Fact]
-    public void CopiedHirNodesResolveThroughCompilationLineage()
-    {
-        var compilation = QoraCompiler.Compile(
-            """
-            operation Flip(q: Qubit) {
-                X(q);
-            }
-
-            operation Main() {
-                use q = Qubit[1];
-                Adjoint Flip(q[0]);
-            }
-            """);
-        Assert.True(compilation.Succeeded);
-
-        var analyzed = Assert.IsType<HirSemanticArtifact>(compilation.Hir.EffectAnalysis);
-        var materialized = compilation.Hir.Require(HirStage.AdjointMaterialized);
-        var original = analyzed.Program.Operations.Single(operation => operation.Name == "Flip");
-        var inverse = materialized.Program.Operations.Single(
-            operation => operation.Name.StartsWith("Flip__adj", StringComparison.Ordinal));
-        var materializedMain = materialized.Program.Operations.Single(operation => operation.Name == "Main");
-        var inverseCall = materializedMain.Body.OfType<QGate>().Single();
-        Assert.Equal(inverse.Id, inverseCall.CalleeOpId);
-        Assert.Equal(inverse.Name, inverseCall.Name);
-        Assert.NotEqual(original.Body.Single().Id, inverse.Body.Single().Id);
-        Assert.Equal(
-            original.Body.Single().Id,
-            compilation.Links.Hir.ResolveNodeId(
-                materialized.Id,
-                analyzed.SourceId,
-                inverse.Body.Single().Id));
-    }
-
-    [Fact]
-    public void NestedPassLocalCopiesNormalizeToNodesThatExistInTheParentSnapshot()
-    {
-        static QGate Gate(string name) =>
-            new(Array.Empty<string>(), name, new QArg[] { new QQubitArg("q", "0") });
-
-        var original = new QProgram(
-            new[]
-            {
-                new QOperation(
-                    "Main",
-                    Array.Empty<QParam>(),
-                    new QStmt[]
-                    {
-                        new QUse("q", 1),
-                        new QConjugate(
-                            Within: new QStmt[]
-                            {
-                                new QConjugate(
-                                    Within: new QStmt[] { Gate("X") },
-                                    Apply: new QStmt[] { Gate("H") }),
-                            },
-                            Apply: new QStmt[] { Gate("Z") }),
-                    }),
-            });
-        var lowered = ConjugationLowering.Run(original);
-        Assert.Empty(lowered.Errors);
-
-        var compilationId = CompilationId.New();
-        var builder = new HirPipelineBuilder(
-            compilationId,
-            new CompilationRevision(0));
-        var parent = builder.Advance(HirStage.Lowered, original);
-        var target = builder.Advance(
-            HirStage.ConjugationLowered,
-            lowered.Program,
-            lowered.Derivations);
-        var lineage = builder.Build().Lineage;
-
-        static IEnumerable<QStmt> Descendants(IReadOnlyList<QStmt> statements)
-        {
-            foreach (var statement in statements)
-            {
-                yield return statement;
-                var nested = statement switch
-                {
-                    QIf branch => branch.Then.Concat(branch.Else),
-                    QFor loop => loop.Body,
-                    QWhile loop => loop.Body,
-                    QRepeat loop => loop.Body,
-                    QConjugate conjugation => conjugation.Within.Concat(conjugation.Apply),
-                    _ => Array.Empty<QStmt>(),
-                };
-                foreach (var child in Descendants(nested.ToArray()))
-                    yield return child;
-            }
-        }
-
-        var copied = target.Program.Operations
-            .SelectMany(operation => Descendants(operation.Body))
-            .Where(statement => !parent.Structure.Contains(statement.Id))
-            .ToArray();
-        Assert.NotEmpty(copied);
-        Assert.All(
-            copied,
-            statement =>
-            {
-                var sourceId = lineage.ResolveNodeId(
-                    target.Id,
-                    parent.Id,
-                    statement.Id);
-                Assert.True(parent.Structure.Contains(sourceId));
-            });
+        var mir = Assert.IsType<MirSnapshot>(compilation.Mir);
+        var target = Assert.IsType<OpenQasmArtifact>(compilation.Targets.OpenQasm);
+        Assert.Equal(analyzed.SourceId, mir.LoweredFrom);
+        Assert.Equal(mir.Id, target.Source);
+        Assert.Equal(analyzed.Id, mir.Links.SymbolsFrom);
+        Assert.Same(mir.Links, compilation.Links.Mir);
     }
 
     [Fact]
@@ -512,27 +446,31 @@ public sealed class CompilationArchitectureTests
             () => new TargetArtifactSet(
                 new ITargetArtifact[]
                 {
-                    new StubTargetArtifact((TargetBackend)int.MaxValue),
+                    new StubTargetArtifact(
+                        (TargetBackend)int.MaxValue,
+                        openQasm.Source),
                 }));
         Assert.Throws<ArgumentException>(
             () => new TargetArtifactSet(
                 new ITargetArtifact[]
                 {
-                    new StubTargetArtifact(TargetBackend.OpenQasm),
+                    new StubTargetArtifact(
+                        TargetBackend.OpenQasm,
+                        openQasm.Source),
                 }));
         Assert.Throws<ArgumentOutOfRangeException>(
             () => targets.Find((TargetBackend)int.MaxValue));
     }
 
     [Fact]
-    public void TargetDiagnosticsCanNameExactHirOrMirInputsWithoutForcingOneBackendShape()
+    public void TargetDiagnosticsRequireTheExactCanonicalMirInput()
     {
         var source = QoraCompiler.Compile(
             "operation Main() { use q = Qubit[1]; X(q[0]); }");
         Assert.True(source.Succeeded);
         var mir = Assert.IsType<MirSnapshot>(source.Mir);
 
-        Compilation WithTargetDiagnostic(TargetDiagnosticInput input) =>
+        Compilation WithTargetDiagnostic(MirSnapshotId input) =>
             new(
                 source.Id,
                 source.Revision,
@@ -554,12 +492,7 @@ public sealed class CompilationArchitectureTests
                             input)),
                 });
 
-        var fromHir = WithTargetDiagnostic(
-            new TargetDiagnosticInput.Hir(
-                source.Hir.AdjointMaterialized!.Id));
-        var fromMir = WithTargetDiagnostic(
-            new TargetDiagnosticInput.Mir(mir.Id));
-        Assert.False(fromHir.Succeeded);
+        var fromMir = WithTargetDiagnostic(mir.Id);
         Assert.False(fromMir.Succeeded);
 
         var staleMir = new MirSnapshotId(
@@ -567,10 +500,10 @@ public sealed class CompilationArchitectureTests
             source.Revision,
             mir.Id.Revision + 1);
         Assert.Throws<ArgumentException>(
-            () => WithTargetDiagnostic(
-                new TargetDiagnosticInput.Mir(staleMir)));
+            () => WithTargetDiagnostic(staleMir));
     }
 
     private sealed record StubTargetArtifact(
-        TargetBackend Backend) : ITargetArtifact;
+        TargetBackend Backend,
+        MirSnapshotId Source) : ITargetArtifact;
 }

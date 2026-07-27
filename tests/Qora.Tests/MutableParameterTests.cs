@@ -21,13 +21,20 @@ public class MutableParameterTests
                 var values: int[] = [1, 2];
                 Compare(values, values);
             }
-            """);
+        """);
 
         Assert.True(result.Succeeded, string.Join(" | ", result.Diagnostics.Select(diagnostic => diagnostic.Error).ToList().Select(e => $"{e.Code}: {e.Message}")));
-        Assert.Contains(
-            "def Compare(readonly array[int, #dim = 1] left, readonly array[int, #dim = 1] right) {",
-            result.Targets.OpenQasm!.Text);
-        Assert.Contains("Compare(values, values);", result.Targets.OpenQasm!.Text);
+        var target = result.Targets.OpenQasm!.Program;
+        var compare = RequireOperation(
+            target,
+            parameterCount: 2,
+            parameter =>
+                parameter.Type is MirQasmArrayType
+                && parameter.Access == MirQasmParameterAccess.ReadOnly);
+        var call = RequireEntryOperationCall(target, compare.Id);
+
+        Assert.Equal(2, call.Operands.Length);
+        Assert.Equal(call.Operands[0], call.Operands[1]);
     }
 
     [Fact]
@@ -55,12 +62,18 @@ public class MutableParameterTests
                 var values: int[] = [1, 2];
                 Clear(var values);
             }
-            """);
+        """);
 
         Assert.True(result.Succeeded, string.Join(" | ", result.Diagnostics.Select(diagnostic => diagnostic.Error).ToList().Select(e => $"{e.Code}: {e.Message}")));
-        Assert.Contains("def Clear(mutable array[int, #dim = 1] values) {", result.Targets.OpenQasm!.Text);
-        Assert.Contains("Clear(values);", result.Targets.OpenQasm!.Text);
-        Assert.DoesNotContain("var values", result.Targets.OpenQasm!.Text);
+        var target = result.Targets.OpenQasm!.Program;
+        var clear = RequireOperation(
+            target,
+            parameterCount: 1,
+            parameter =>
+                parameter.Type is MirQasmArrayType
+                && parameter.Access == MirQasmParameterAccess.Mutable);
+
+        RequireEntryOperationCall(target, clear.Id);
     }
 
     [Fact]
@@ -76,13 +89,30 @@ public class MutableParameterTests
                 var destination: float[] = [0.0];
                 CopyFirst(source, var destination);
             }
-            """);
+        """);
 
         Assert.True(result.Succeeded, string.Join(" | ", result.Diagnostics.Select(diagnostic => diagnostic.Error).ToList().Select(e => $"{e.Code}: {e.Message}")));
-        Assert.Contains(
-            "def CopyFirst(readonly array[float, #dim = 1] source, mutable array[float, #dim = 1] destination) {",
-            result.Targets.OpenQasm!.Text);
-        Assert.Contains("CopyFirst(source, destination);", result.Targets.OpenQasm!.Text);
+        var target = result.Targets.OpenQasm!.Program;
+        var copy = Assert.Single(
+            target.Definitions.Where(
+                definition =>
+                    definition.Kind == MirQasmCallableKind.Operation
+                    && definition.Parameters.Length == 2));
+
+        Assert.Equal(
+            MirQasmParameterAccess.ReadOnly,
+            copy.Parameters[0].Access);
+        Assert.Equal(
+            MirQasmParameterAccess.Mutable,
+            copy.Parameters[1].Access);
+        Assert.All(
+            copy.Parameters,
+            parameter =>
+                Assert.Equal(
+                    MirQasmScalarKind.Float,
+                    Assert.IsType<MirQasmArrayType>(parameter.Type)
+                        .ElementType.Kind));
+        RequireEntryOperationCall(target, copy.Id);
     }
 
     [Fact]
@@ -99,11 +129,19 @@ public class MutableParameterTests
                 var values: int[] = [1];
                 Buffers.Clear(var values);
             }
-            """);
+        """);
 
         Assert.True(result.Succeeded, string.Join(" | ", result.Diagnostics.Select(diagnostic => diagnostic.Error).ToList().Select(e => $"{e.Code}: {e.Message}")));
-        Assert.Contains("def Buffers_Clear(mutable array[int, #dim = 1] values) {", result.Targets.OpenQasm!.Text);
-        Assert.Contains("Buffers_Clear(values);", result.Targets.OpenQasm!.Text);
+        var target = result.Targets.OpenQasm!.Program;
+        var clear = RequireOperation(
+            target,
+            parameterCount: 1,
+            parameter =>
+                parameter.Type is MirQasmArrayType
+                && parameter.Access == MirQasmParameterAccess.Mutable);
+
+        Assert.Contains("Buffers_Clear", clear.EmittedName);
+        RequireEntryOperationCall(target, clear.Id);
     }
 
     [Fact]
@@ -121,7 +159,17 @@ public class MutableParameterTests
             """);
 
         Assert.True(result.Succeeded, string.Join(" | ", result.Diagnostics.Select(diagnostic => diagnostic.Error).ToList().Select(e => $"{e.Code}: {e.Message}")));
-        Assert.Contains("def First(readonly array[int, #dim = 1] values) -> int {", result.Targets.OpenQasm!.Text);
+        var function = Assert.Single(
+            result.Targets.OpenQasm!.Program.Definitions.Where(
+                definition =>
+                    definition.Kind == MirQasmCallableKind.Function));
+        var parameter = Assert.Single(function.Parameters);
+
+        Assert.IsType<MirQasmArrayType>(parameter.Type);
+        Assert.Equal(MirQasmParameterAccess.ReadOnly, parameter.Access);
+        Assert.Equal(
+            MirQasmScalarKind.Int,
+            Assert.IsType<MirQasmScalarType>(function.ReturnType).Kind);
     }
 
     [Theory]
@@ -353,10 +401,22 @@ public class MutableParameterTests
         Assert.Equal(2, specialization.Params[0].RegisterSize);
         Assert.Equal(QOwnershipMode.Borrowed, specialization.Params[1].Ownership);
         Assert.Equal(QAccessMode.Mutable, specialization.Params[1].Access);
-        Assert.Contains(
-            "def Touch__sz2(qubit[2] qubits, mutable array[int, #dim = 1] values) {",
-            result.Targets.OpenQasm!.Text);
-        Assert.Contains("Touch__sz2(qubits, values);", result.Targets.OpenQasm!.Text);
+        var target = result.Targets.OpenQasm!.Program;
+        var touch = Assert.Single(
+            target.Definitions.Where(
+                definition =>
+                    definition.Kind == MirQasmCallableKind.Operation
+                    && definition.Parameters.Length == 2
+                    && definition.Parameters[0].Type
+                        is MirQasmQubitType { Count: 2 }
+                    && definition.Parameters[1]
+                        is
+                        {
+                            Type: MirQasmArrayType,
+                            Access: MirQasmParameterAccess.Mutable,
+                        }));
+
+        RequireEntryOperationCall(target, touch.Id);
     }
 
     [Fact]
@@ -383,10 +443,22 @@ public class MutableParameterTests
         Assert.Equal(3, specialization.Params[0].RegisterSize);
         Assert.Equal(QOwnershipMode.Borrowed, specialization.Params[1].Ownership);
         Assert.Equal(QAccessMode.Mutable, specialization.Params[1].Access);
-        Assert.Contains(
-            "def CountInto__sz3(bit[3] flags, mutable array[int, #dim = 1] counts) {",
-            result.Targets.OpenQasm!.Text);
-        Assert.Contains("CountInto__sz3(flags, counts);", result.Targets.OpenQasm!.Text);
+        var target = result.Targets.OpenQasm!.Program;
+        var countInto = Assert.Single(
+            target.Definitions.Where(
+                definition =>
+                    definition.Kind == MirQasmCallableKind.Operation
+                    && definition.Parameters.Length == 2
+                    && definition.Parameters[0].Type
+                        is MirQasmBitType { Width: 3 }
+                    && definition.Parameters[1]
+                        is
+                        {
+                            Type: MirQasmArrayType,
+                            Access: MirQasmParameterAccess.Mutable,
+                        }));
+
+        RequireEntryOperationCall(target, countInto.Id);
     }
 
     [Fact]
@@ -406,13 +478,29 @@ public class MutableParameterTests
                 A.B(var values);
                 A_B();
             }
-            """);
+        """);
 
         Assert.True(result.Succeeded, string.Join(" | ", result.Diagnostics.Select(diagnostic => diagnostic.Error).ToList().Select(e => $"{e.Code}: {e.Message}")));
-        Assert.Contains("def A_B() {", result.Targets.OpenQasm!.Text);
-        Assert.Contains("def A_B_(mutable array[int, #dim = 1] values) {", result.Targets.OpenQasm!.Text);
-        Assert.Contains("A_B_(values);", result.Targets.OpenQasm!.Text);
-        Assert.Contains("A_B();", result.Targets.OpenQasm!.Text);
+        var target = result.Targets.OpenQasm!.Program;
+        var definitions = target.Definitions
+            .Where(
+                definition =>
+                    definition.Kind == MirQasmCallableKind.Operation)
+            .ToArray();
+        var noArguments = Assert.Single(
+            definitions,
+            definition => definition.Parameters.Length == 0);
+        var mutable = RequireOperation(
+            target,
+            parameterCount: 1,
+            parameter =>
+                parameter.Type is MirQasmArrayType
+                && parameter.Access == MirQasmParameterAccess.Mutable);
+
+        Assert.NotEqual(noArguments.Id, mutable.Id);
+        Assert.NotEqual(noArguments.EmittedName, mutable.EmittedName);
+        RequireEntryOperationCall(target, noArguments.Id);
+        RequireEntryOperationCall(target, mutable.Id);
     }
 
     [Fact]
@@ -428,13 +516,28 @@ public class MutableParameterTests
             operation Main() {
                 var result: int = LocalValue();
             }
-            """);
+        """);
 
         Assert.True(result.Succeeded, string.Join(" | ", result.Diagnostics.Select(diagnostic => diagnostic.Error).ToList().Select(e => $"{e.Code}: {e.Message}")));
+        var target = result.Targets.OpenQasm!.Program;
+        var localValue = Assert.Single(
+            target.Definitions.Where(
+                definition =>
+                    definition.Kind == MirQasmCallableKind.Function));
+        var hidden = Assert.Single(localValue.Parameters);
+
+        Assert.IsType<MirQasmArrayType>(hidden.Type);
+        Assert.Equal(MirQasmParameterAccess.Mutable, hidden.Access);
+        Assert.Equal(
+            MirQasmScalarKind.Int,
+            Assert.IsType<MirQasmScalarType>(localValue.ReturnType).Kind);
         Assert.Contains(
-            "def LocalValue(mutable array[int, #dim = 1] values) -> int {",
-            result.Targets.OpenQasm!.Text);
-        Assert.Contains("int result = LocalValue(LocalValue_values);", result.Targets.OpenQasm!.Text);
+            target.Expressions()
+                .OfType<MirQasmFunctionCallExpression>(),
+            expression =>
+                expression.Target
+                    is MirQasmUserFunctionTarget user
+                && user.Callable == localValue.Id);
     }
 
     [Theory]
@@ -497,14 +600,76 @@ public class MutableParameterTests
                 var values: int[] = [4, 5];
                 var answer: int = IncrementFirst(values) + First(values);
             }
-            """);
+        """);
 
         Assert.True(result.Succeeded, string.Join(" | ", result.Diagnostics.Select(diagnostic => diagnostic.Error).ToList().Select(e => $"{e.Code}: {e.Message}")));
-        Assert.Contains("def First(readonly array[int, #dim = 1] values) -> int {", result.Targets.OpenQasm!.Text);
+        var target = result.Targets.OpenQasm!.Program;
+        var functions = target.Definitions
+            .Where(
+                definition =>
+                    definition.Kind == MirQasmCallableKind.Function)
+            .ToArray();
+        Assert.Equal(2, functions.Length);
+        Assert.All(
+            functions,
+            function =>
+            {
+                var parameter = Assert.Single(function.Parameters);
+                Assert.IsType<MirQasmArrayType>(parameter.Type);
+                Assert.Equal(
+                    MirQasmParameterAccess.ReadOnly,
+                    parameter.Access);
+                Assert.Equal(
+                    MirQasmScalarKind.Int,
+                    Assert.IsType<MirQasmScalarType>(
+                        function.ReturnType).Kind);
+            });
+
+        var wrapper = Assert.Single(
+            functions,
+            function =>
+                MirQasmTestModel
+                    .Statements(function.Body)
+                    .SelectMany(MirQasmTestModel.Expressions)
+                    .OfType<MirQasmFunctionCallExpression>()
+                    .Any());
+        var innerCall = Assert.Single(
+            MirQasmTestModel
+                .Statements(wrapper.Body)
+                .SelectMany(MirQasmTestModel.Expressions)
+                .OfType<MirQasmFunctionCallExpression>());
+        var inner = target.Resolve(
+            Assert.IsType<MirQasmUserFunctionTarget>(
+                innerCall.Target));
+
+        Assert.NotEqual(wrapper.Id, inner.Id);
         Assert.Contains(
-            "def IncrementFirst(readonly array[int, #dim = 1] values) -> int {",
-            result.Targets.OpenQasm!.Text);
-        Assert.Contains("First(values) + 1", result.Targets.OpenQasm!.Text);
-        Assert.Contains("IncrementFirst(values) + First(values)", result.Targets.OpenQasm!.Text);
+            target.Expressions()
+                .OfType<MirQasmFunctionCallExpression>(),
+            call =>
+                call.Target is MirQasmUserFunctionTarget user
+                && user.Callable == wrapper.Id);
     }
+
+    private static MirQasmCallableDefinition RequireOperation(
+        MirOpenQasmTargetProgram program,
+        int parameterCount,
+        Func<MirQasmParameter, bool> parameterPredicate) =>
+        Assert.Single(
+            program.Definitions.Where(
+                definition =>
+                    definition.Kind == MirQasmCallableKind.Operation
+                    && definition.Parameters.Length == parameterCount
+                    && definition.Parameters.All(parameterPredicate)));
+
+    private static MirQasmQuantumApplyStatement RequireEntryOperationCall(
+        MirOpenQasmTargetProgram program,
+        MirQasmCallableId callable) =>
+        Assert.Single(
+            MirQasmTestModel
+                .Statements(program.EntryPoint.Body)
+                .OfType<MirQasmQuantumApplyStatement>(),
+            apply =>
+                apply.Target is MirQasmUserQuantumTarget target
+                && target.Callable == callable);
 }

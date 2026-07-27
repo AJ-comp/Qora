@@ -5,243 +5,360 @@ using Qora.Ir.Passes;
 namespace Qora.Tests;
 
 /// <summary>
-/// An untyped <c>var</c>/<c>const</c> takes the type of its initializer in the semantic model. Literals,
-/// names, operators, array elements and function calls all go through the same expression-type reader; the
-/// emitter consumes the declaration symbol rather than guessing again. (Finding G: <c>var x = r</c> with a
-/// bit <c>r</c> once emitted a mis-typed <c>int x = r;</c> and compared it as an int (<c>== 1</c>) instead of
-/// a bit (<c>== true</c>).)
+/// Untyped declarations take the initializer's semantic type. Assertions use HIR symbols, MIR-owned
+/// target types, and target callable IDs rather than assuming that SSA temporaries preserve source names.
 /// </summary>
 public class TypeInferenceTests
 {
     [Fact]
-    public void UntypedVarFromBitIsEmittedAsBit()
+    public void UntypedVarFromBitRemainsBitThroughTheTarget()
     {
-        // `var res = mb` where mb is a bit must emit `bit res = mb;` — not `int res = mb;` — and the condition
-        // that reads it must compare as a bit (`res == true`), matching an explicitly-typed `bit res`.
-        var r = Compiler.Compile("operation Main(){ use q=Qubit[1]; var mb: bit = M(q[0]); var res = mb; if(res==1){ X(q[0]); } }");
-        Assert.True(
-            r.Succeeded,
-            string.Join(
-                " | ",
-                r.Diagnostics.Select(diagnostic =>
-                    $"{diagnostic.Error.Code}: {diagnostic.Error.Message}")));
-        var qasm = Assert.IsType<OpenQasmArtifact>(r.Targets.OpenQasm).Text;
-        Assert.Contains("bit res = mb;", qasm);
-        Assert.DoesNotContain("int res", qasm);
-        Assert.Contains("res == true", qasm);
+        var compilation = AssertVariableType(
+            "operation Main(){ use q=Qubit[1]; var mb: bit = M(q[0]); var res = mb; if(res==1){ X(q[0]); } }",
+            "res",
+            QType.Bit);
+
+        Assert.Contains(
+            TargetValueTypes(compilation),
+            type => type is MirQasmBitType { Width: 1 });
     }
 
     [Fact]
-    public void UntypedVarFromIntIsEmittedAsInt() =>
-        Compiler.Emits("operation Main(){ use q=Qubit[1]; var cnt: int = 5; var got = cnt; Rx(got, q[0]); }", "int got = cnt;");
+    public void UntypedVarFromIntRemainsIntThroughTheTarget()
+    {
+        var compilation = AssertVariableType(
+            "operation Main(){ use q=Qubit[1]; var cnt: int = 5; var got = cnt; Rx(got, q[0]); }",
+            "got",
+            QType.Int);
+
+        AssertTargetScalar(compilation, MirQasmScalarKind.Int);
+    }
 
     [Fact]
-    public void UntypedVarFromRealIsEmittedAsFloat() =>
-        // floatness propagates from a built-in constant
-        Compiler.Emits("operation Main(){ use q=Qubit[1]; var ang = pi/2; Rx(ang, q[0]); }", "float ang = pi / 2;");
+    public void UntypedVarFromRealRemainsFloatThroughTheTarget()
+    {
+        var compilation = AssertVariableType(
+            "operation Main(){ use q=Qubit[1]; var ang = pi/2; Rx(ang, q[0]); }",
+            "ang",
+            QType.Float);
+
+        AssertTargetScalar(compilation, MirQasmScalarKind.Float);
+    }
 
     [Fact]
-    public void FloatPropagatesThroughAnotherUntypedVar() =>
-        // `var a = pi; var b = a / 2;` — b is a float too (the map records a as float)
-        Compiler.Emits("operation Main(){ use q=Qubit[1]; var a = pi; var b = a / 2; Rx(b, q[0]); }", "float b = a / 2;");
+    public void FloatPropagatesThroughAnotherUntypedVar()
+    {
+        var compilation = AssertVariableType(
+            "operation Main(){ use q=Qubit[1]; var a = pi; var b = a / 2; Rx(b, q[0]); }",
+            "b",
+            QType.Float);
+
+        AssertTargetScalar(compilation, MirQasmScalarKind.Float);
+    }
 
     [Fact]
-    public void UntypedVarPreservesTheAngleTypeOfAReferencedVariable() =>
-        Compiler.Emits(
+    public void UntypedVarPreservesTheAngleTypeOfAReferencedVariable()
+    {
+        var compilation = AssertVariableType(
             "operation Main(){ use q=Qubit[1]; var sourceValue: angle = pi; var copy = sourceValue; Rx(copy, q[0]); }",
-            "angle copy = sourceValue;");
+            "copy",
+            QType.Angle);
+
+        AssertTargetScalar(compilation, MirQasmScalarKind.Angle);
+    }
 
     [Fact]
-    public void UntypedBooleanLiteralIsEmittedAsBit() =>
-        Compiler.Emits(
+    public void UntypedBooleanLiteralIsBit()
+    {
+        var compilation = AssertVariableType(
             "operation Main(){ use q=Qubit[1]; var truth = true; if (truth) { X(q[0]); } }",
-            "bit truth = true;");
+            "truth",
+            QType.Bit);
+
+        Assert.Contains(
+            TargetValueTypes(compilation),
+            type => type is MirQasmBitType { Width: 1 });
+    }
 
     [Theory]
-    [InlineData("function giveInt(): int { return 2; }\noperation Main(){ use q=Qubit[1]; var result = giveInt(); }", "int result = giveInt();")]
-    [InlineData("function giveFloat(): float { return 0.5; }\noperation Main(){ use q=Qubit[1]; var result = giveFloat(); }", "float result = giveFloat();")]
-    [InlineData("function giveAngle(): angle { return pi; }\noperation Main(){ use q=Qubit[1]; var result = giveAngle(); }", "angle result = giveAngle();")]
-    [InlineData("function giveBit(): bit { return 1; }\noperation Main(){ use q=Qubit[1]; var result = giveBit(); }", "bit result = giveBit();")]
-    public void UntypedVarTakesAFunctionReturnType(string source, string qasm) =>
-        Compiler.Emits(source, qasm);
-
-    [Fact]
-    public void InferredBitFunctionResultKeepsBitConditionRendering()
+    [InlineData(
+        "function giveInt(): int { return 2; }\noperation Main(){ var result = giveInt(); }",
+        QType.Int,
+        MirQasmScalarKind.Int)]
+    [InlineData(
+        "function giveFloat(): float { return 0.5; }\noperation Main(){ var result = giveFloat(); }",
+        QType.Float,
+        MirQasmScalarKind.Float)]
+    [InlineData(
+        "function giveAngle(): angle { return pi; }\noperation Main(){ var result = giveAngle(); }",
+        QType.Angle,
+        MirQasmScalarKind.Angle)]
+    public void UntypedVarTakesAFunctionReturnType(
+        string source,
+        QType expectedSourceType,
+        MirQasmScalarKind expectedTargetType)
     {
-        const string source =
-            "function flag(): bit { return 1; }\n" +
-            "operation Main(){ use q=Qubit[1]; var result = flag(); if (result == 1) { X(q[0]); } }";
-        Compiler.Emits(source, "bit result = flag();");
-        Compiler.Emits(source, "result == true");
+        var compilation = AssertVariableType(
+            source,
+            "result",
+            expectedSourceType);
+        var artifact = Assert.IsType<OpenQasmArtifact>(
+            compilation.Targets.OpenQasm);
+        var call = Assert.Single(
+            artifact.Program.Expressions()
+                .OfType<MirQasmFunctionCallExpression>(),
+            expression =>
+                expression.Target is MirQasmUserFunctionTarget);
+        var target = artifact.Program.Resolve(
+            Assert.IsType<MirQasmUserFunctionTarget>(call.Target));
+
+        Assert.Equal(
+            expectedTargetType,
+            Assert.IsType<MirQasmScalarType>(target.ReturnType).Kind);
     }
 
     [Fact]
-    public void FloatFunctionResultPropagatesThroughAnArithmeticExpression() =>
-        Compiler.Emits(
+    public void UntypedVarTakesABitFunctionReturnType()
+    {
+        var compilation = AssertVariableType(
+            "function giveBit(): bit { return 1; }\noperation Main(){ var result = giveBit(); }",
+            "result",
+            QType.Bit);
+        var artifact = Assert.IsType<OpenQasmArtifact>(
+            compilation.Targets.OpenQasm);
+        var function = Assert.Single(
+            artifact.Program.Definitions.Where(
+                definition =>
+                    definition.Kind == MirQasmCallableKind.Function));
+
+        Assert.IsType<MirQasmBitType>(function.ReturnType);
+    }
+
+    [Fact]
+    public void FloatFunctionResultPropagatesThroughArithmetic()
+    {
+        var compilation = AssertVariableType(
             "function half(): float { return 0.5; }\n" +
             "operation Main(){ use q=Qubit[1]; var result = half() + 1; Rx(result, q[0]); }",
-            "float result = half() + 1;");
+            "result",
+            QType.Float);
+
+        AssertTargetScalar(compilation, MirQasmScalarKind.Float);
+    }
 
     [Fact]
-    public void BuiltinFunctionReturnTypeIsInferredFromTheSameRegistry() =>
-        Compiler.Emits(
-            "operation Main(){ use q=Qubit[1]; var bits: bit[] = new bit[2]; var result = AsInt(bits); }",
-            "int result = uint[2](bits);");
+    public void BuiltinFunctionReturnTypeUsesTheRegistryAndTargetCastWidth()
+    {
+        var compilation = AssertVariableType(
+            "operation Main(){ var bits: bit[] = new bit[2]; var result = AsInt(bits); }",
+            "result",
+            QType.Int);
+        var artifact = Assert.IsType<OpenQasmArtifact>(
+            compilation.Targets.OpenQasm);
+
+        Assert.Contains(
+            artifact.Program.Expressions().OfType<MirQasmUnsignedCastExpression>(),
+            cast => cast.Width == 2);
+        AssertTargetScalar(compilation, MirQasmScalarKind.Int);
+    }
 
     [Fact]
-    public void InferredTypeSurvivesTheSyntheticReturnDeclaration() =>
-        Compiler.Emits(
+    public void InferredTypeSurvivesNestedFunctionLowering()
+    {
+        var compilation = AssertVariableType(
             "function half(): float { return 0.5; }\n" +
             "function wrapper(): float { var result = half(); return result; }\n" +
-            "operation Main(){ use q=Qubit[1]; var answer: float = wrapper(); }",
-            "float result = half();");
+            "operation Main(){ var answer: float = wrapper(); }",
+            "result",
+            QType.Float);
+        var artifact = Assert.IsType<OpenQasmArtifact>(
+            compilation.Targets.OpenQasm);
+        var functions = artifact.Program.Definitions
+            .Where(definition => definition.Kind == MirQasmCallableKind.Function)
+            .ToArray();
+
+        Assert.Equal(2, functions.Length);
+        Assert.All(
+            functions,
+            function =>
+                Assert.Equal(
+                    MirQasmScalarKind.Float,
+                    Assert.IsType<MirQasmScalarType>(function.ReturnType).Kind));
+    }
 
     [Fact]
-    public void InferredTypeSurvivesHiddenArrayStorageAddedByTheBackend() =>
-        Compiler.Emits(
+    public void InferredTypeSurvivesSyntheticArrayStorage()
+    {
+        var compilation = AssertVariableType(
             "function half(): float { var values: int[] = [1, 2]; return 0.5; }\n" +
-            "operation Main(){ use q=Qubit[1]; var result = half(); }",
-            "float result = half(half_values);");
+            "operation Main(){ var result = half(); }",
+            "result",
+            QType.Float);
+        var artifact = Assert.IsType<OpenQasmArtifact>(
+            compilation.Targets.OpenQasm);
+        var function = Assert.Single(
+            artifact.Program.Definitions.Where(
+                definition =>
+                    definition.Kind == MirQasmCallableKind.Function));
+
+        Assert.Equal(
+            MirQasmScalarKind.Float,
+            Assert.IsType<MirQasmScalarType>(function.ReturnType).Kind);
+        Assert.Contains(
+            function.Parameters,
+            parameter =>
+                parameter.Type is MirQasmArrayType
+                && parameter.Access == MirQasmParameterAccess.Mutable);
+    }
 
     [Fact]
     public void CallableLookupIsNotHiddenByALocalValueWithTheSameName()
     {
-        var r = Compiler.Compile(
+        var compilation = Compiler.Compile(
             "function value(): float { return 0.5; }\n" +
-            "operation Main(){ use q=Qubit[1]; var value: int = 1; var result = value(); }");
-        Assert.True(
-            r.Succeeded,
-            string.Join(
-                " | ",
-                r.Diagnostics.Select(diagnostic =>
-                    $"{diagnostic.Error.Code}: {diagnostic.Error.Message}")));
+            "operation Main(){ var value: int = 1; var result = value(); }");
+        AssertSucceeded(compilation);
 
-        var analyzed = Assert.IsType<HirSemanticArtifact>(r.Hir.EffectAnalysis);
-        var semantics = analyzed.Model;
+        var analyzed = Assert.IsType<HirSemanticArtifact>(
+            compilation.Hir.EffectAnalysis);
         var result = analyzed.Program.Operations
-            .SelectMany(op => op.Body)
+            .SelectMany(operation => operation.Body)
             .OfType<QDecl>()
-            .Single(d => d.Name == "result");
-        Assert.Equal(QType.Float, semantics.FindSymbol(result.Id)!.Type);
-
-        var graph = Assert.IsType<HirScopeGraph>(semantics.ScopeGraph);
+            .Single(declaration => declaration.Name == "result");
+        var graph = Assert.IsType<HirScopeGraph>(analyzed.Model.ScopeGraph);
         var main = analyzed.Program.Operations.Single(
             operation => operation.Name == "Main");
-        var mainScope = Assert.IsType<Scope>(graph.FindCallableScope(main.Id));
-        var localValue = Assert.IsType<Symbol>(mainScope.Lookup("value"));
-        var callable = Assert.IsType<Symbol>(graph.LookupCallable("value"));
+        var mainScope = Assert.IsType<Scope>(
+            graph.FindCallableScope(main.Id));
+        var localValue = Assert.IsType<Symbol>(
+            mainScope.Lookup("value"));
+        var callable = Assert.IsType<Symbol>(
+            graph.LookupCallable("value"));
 
+        Assert.Equal(QType.Float, analyzed.Model.FindSymbol(result.Id)!.Type);
         Assert.Equal(SymbolKind.Var, localValue.Kind);
         Assert.Equal(SymbolKind.Operation, callable.Kind);
         Assert.NotEqual(localValue.Id, callable.Id);
     }
 
     [Fact]
-    public void TargetTypeEnvironmentCarriesValidatedFunctionReturnType()
+    public void TargetFunctionDefinitionCarriesValidatedReturnType()
     {
         var compilation = QoraCompiler.Compile(
             "function half(): float { return 0.5; }\n" +
-            "operation Main(){ use q=Qubit[1]; var result = half(); }");
-        Assert.True(
-            compilation.Succeeded,
-            string.Join(
-                " | ",
-                compilation.Diagnostics.Select(diagnostic =>
-                    $"{diagnostic.Error.Code}: {diagnostic.Error.Message}")));
-
-        var analyzed = Assert.IsType<HirSemanticArtifact>(compilation.Hir.EffectAnalysis);
-        var declaration = analyzed.Program.Operations
-            .SelectMany(operation => operation.Body)
-            .OfType<QDecl>()
-            .Single(item => item.Name == "result");
+            "operation Main(){ var result = half(); }");
+        AssertSucceeded(compilation);
         var artifact = Assert.IsType<OpenQasmArtifact>(
             compilation.Targets.OpenQasm);
-        var targetType = artifact.Program.Types.GetType(declaration.Id);
+        var function = Assert.Single(
+            artifact.Program.Definitions.Where(
+                definition =>
+                    definition.Kind == MirQasmCallableKind.Function));
 
-        Assert.Equal(QType.Float, targetType.ElementType);
-        Assert.False(targetType.IsArray);
-        Assert.Contains("float result = half();", artifact.Text);
-    }
-
-    [Fact]
-    public void TargetArtifactRejectsAnIdlessNamespaceFunctionCall()
-    {
-        var compilation = QoraCompiler.Compile("""
-            namespace L {
-                function half(): float { return 0.5; }
-            }
-            operation Main() { var result = L.half(); }
-            """);
-        Assert.True(
-            compilation.Succeeded,
-            string.Join(
-                " | ",
-                compilation.Diagnostics.Select(diagnostic =>
-                    $"{diagnostic.Error.Code}: {diagnostic.Error.Message}")));
-
-        var artifact = Assert.IsType<OpenQasmArtifact>(
-            compilation.Targets.OpenQasm);
-        var target = artifact.Program;
-        var main = target.Program.Operations.Single(
-            operation => operation.Name == "Main");
-        var declaration = main.Body.OfType<QDecl>().Single();
-        var text = Assert.IsType<QText>(declaration.Value);
-        var call = Assert.IsType<QCallNode>(text.Tree);
-        var idlessDeclaration = declaration with
-        {
-            Value = text with { Tree = call with { CalleeOpId = null } },
-        };
-        var idlessMain = main with
-        {
-            Body = main.Body
-                .Select(statement => statement.Id == declaration.Id
-                    ? (QStmt)idlessDeclaration
-                    : statement)
-                .ToList(),
-        };
-        var idlessProgram = target.Program with
-        {
-            Operations = target.Program.Operations
-                .Select(operation => operation.Id == main.Id ? idlessMain : operation)
-                .ToList(),
-        };
-        var error = Assert.Throws<ArgumentException>(
-            () => new OpenQasmTargetProgram(
-                idlessProgram,
-                target.Symbols,
-                target.Types,
-                target.Facts,
-                target.Notes));
-        Assert.Contains("has no user-callable identity", error.Message);
+        Assert.Equal(
+            MirQasmScalarKind.Float,
+            Assert.IsType<MirQasmScalarType>(function.ReturnType).Kind);
     }
 
     [Fact]
     public void InferredFunctionReturnTypeIsRecordedOnTheDeclarationSymbol()
     {
-        var r = Compiler.Compile(
+        var compilation = QoraCompiler.Compile(
             "function half(): float { return 0.5; }\n" +
-            "operation Main(){ use q=Qubit[1]; var result = half(); }");
-        Assert.True(
-            r.Succeeded,
-            string.Join(
-                " | ",
-                r.Diagnostics.Select(diagnostic =>
-                    $"{diagnostic.Error.Code}: {diagnostic.Error.Message}")));
+            "operation Main(){ var result = half(); }");
+        AssertSucceeded(compilation);
 
-        var analyzed = Assert.IsType<HirSemanticArtifact>(r.Hir.EffectAnalysis);
-        var semantics = analyzed.Model;
-        var decl = analyzed.Program.Operations
-            .SelectMany(op => op.Body)
+        var analyzed = Assert.IsType<HirSemanticArtifact>(
+            compilation.Hir.EffectAnalysis);
+        var declaration = analyzed.Program.Operations
+            .SelectMany(operation => operation.Body)
             .OfType<QDecl>()
-            .Single(d => d.Name == "result");
-        var symbol = semantics.FindSymbol(decl.Id);
+            .Single(item => item.Name == "result");
+        var symbol = analyzed.Model.FindSymbol(declaration.Id);
+        var function = analyzed.Program.Operations.Single(
+            operation => operation.Name == "half");
+        var graph = Assert.IsType<HirScopeGraph>(analyzed.Model.ScopeGraph);
+        var callable = graph.LookupCallable("half");
+
         Assert.NotNull(symbol);
         Assert.Equal(QType.Float, symbol!.Type);
-
-        var function = analyzed.Program.Operations.Single(op => op.Name == "half");
-        var graph = Assert.IsType<HirScopeGraph>(semantics.ScopeGraph);
-        var callable = graph.LookupCallable("half");
         Assert.Equal(function.Id, callable!.DeclarationNodeId);
-        Assert.Null(callable.Type);   // return type stays on QOperation; it is not copied into the symbol
+        Assert.Null(callable.Type);
     }
+
+    private static Compilation AssertVariableType(
+        string source,
+        string variable,
+        QType expected)
+    {
+        var compilation = Compiler.Compile(source);
+        AssertSucceeded(compilation);
+        var analyzed = Assert.IsType<HirSemanticArtifact>(
+            compilation.Hir.EffectAnalysis);
+        var declaration = analyzed.Program.Operations
+            .SelectMany(operation => DescendantStatements(operation.Body))
+            .OfType<QDecl>()
+            .Single(item => item.Name == variable);
+
+        Assert.Equal(expected, analyzed.Model.FindSymbol(declaration.Id)!.Type);
+        Assert.NotNull(compilation.Mir);
+        Assert.NotNull(compilation.Targets.OpenQasm);
+        return compilation;
+    }
+
+    private static IEnumerable<QStmt> DescendantStatements(
+        IEnumerable<QStmt> statements)
+    {
+        foreach (var statement in statements)
+        {
+            yield return statement;
+            switch (statement)
+            {
+                case QIf branch:
+                    foreach (var nested in DescendantStatements(branch.Then))
+                        yield return nested;
+                    foreach (var nested in DescendantStatements(branch.Else))
+                        yield return nested;
+                    break;
+                case QFor loop:
+                    foreach (var nested in DescendantStatements(loop.Body))
+                        yield return nested;
+                    break;
+                case QWhile loop:
+                    foreach (var nested in DescendantStatements(loop.Body))
+                        yield return nested;
+                    break;
+                case QRepeat loop:
+                    foreach (var nested in DescendantStatements(loop.Body))
+                        yield return nested;
+                    break;
+            }
+        }
+    }
+
+    private static IEnumerable<MirQasmType> TargetValueTypes(
+        Compilation compilation) =>
+        Assert.IsType<OpenQasmArtifact>(compilation.Targets.OpenQasm)
+            .Program
+            .Statements()
+            .OfType<MirQasmValueDeclarationStatement>()
+            .Select(declaration => declaration.Type);
+
+    private static void AssertTargetScalar(
+        Compilation compilation,
+        MirQasmScalarKind expected) =>
+        Assert.Contains(
+            TargetValueTypes(compilation),
+            type =>
+                type is MirQasmScalarType scalar
+                && scalar.Kind == expected);
+
+    private static void AssertSucceeded(Compilation compilation) =>
+        Assert.True(
+            compilation.Succeeded,
+            string.Join(
+                " | ",
+                compilation.Diagnostics.Select(
+                    diagnostic =>
+                        $"{diagnostic.Error.Code}: {diagnostic.Error.Message}")));
 }

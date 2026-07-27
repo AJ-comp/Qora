@@ -13,9 +13,8 @@ work · **hard** = needs a self-contained compiler pass · **not-expressible** =
 
 ## ✅ Done — v0.8
 
-- **Single-gate functors** — `Adjoint G(...)` → `inv @ g`, `Controlled G(...)` → `ctrl @ g`.
-  Teaches the two defining facts of gates: every unitary is invertible (dagger) and any gate can take a
-  control. (clean)
+- **Controlled gates** — `Controlled G(...)` → `ctrl @ g`.
+  Inverse applications are compiler-generated MIR only and have no source or HIR spelling. (clean)
 - **Richer conditions** — `== != < <= > >= && || !` in `if` / `while` / `repeat` (flat; OpenQASM
   re-parses precedence). Enables real measurement-feedback and counters. (clean)
 - **`if` / `else` / `else if`** — both-way branching on a measured bit. (clean)
@@ -72,7 +71,7 @@ declared at `Main` top level and lowers to OpenQASM general arrays. (clean)
 - **`bool` classical type** — `float` and `angle` have shipped, while a Boolean type distinct from the
   measurement-oriented `bit` remains. It maps directly to OpenQASM 3 `bool`. (clean)
 - **`within { } apply { }` conjugation (auto-uncompute)** ⚛️ — run U, then V, then automatically
-  `Adjoint U` — the U·V·U† scratch/ancilla pattern; one of the most important quantum lessons. OpenQASM
+  run U† — the U·V·U† scratch/ancilla pattern; one of the most important quantum lessons. OpenQASM
   has no conjugation construct, so Qora must synthesize `inv(U)` itself — feasible only once the
   single-gate `inv @` path exists (it now does) and only for fully-unitary `within` blocks. (workable)
 - **Local / loop-scoped `use` (qubit allocation lowering)** ⚛️ — allow `use` inside subroutines and
@@ -96,11 +95,10 @@ declared at `Main` top level and lowers to OpenQASM general arrays. (clean)
 
 ## ⚪ LOW — later (limited near-term value / target limits)
 
-- **Whole-operation Auto-`Adjoint` / Auto-`Controlled`** ⚛️ — auto-generate the inverse / controlled
-  version of a *user operation* (Q#'s `adjoint auto` / `controlled auto`). The showcase Q# feature, but
-  OpenQASM's `inv @` / `ctrl @` invert only a *single gate*, not a `def` — so it needs a self-contained
-  compiler pass (reversibility check, reversed emission, per-gate inversion, synthesized `gate`).
-  Expensive; do it only after the single-gate functors prove the modifier path. (hard)
+- **Automatic controlled-operation generation** ⚛️ — generate a controlled version of a user operation.
+  OpenQASM's `ctrl @` applies only to a single gate, not a `def`, so this needs a self-contained compiler
+  pass. Whole-operation inverse generation is not a user feature; it belongs exclusively to the internal
+  automatic-uncomputation pipeline described below. (hard)
 - **`Result` type (`Zero`/`One`)** ⚛️ — a measurement-outcome type distinct from classical `bit`. Clarifies
   the quantum/classical boundary conceptually, but OpenQASM has no Result type (measurement yields `bit`,
   which Qora already uses correctly) — it would erase to `bit`, a Qora-only abstraction. (not-expressible)
@@ -111,19 +109,16 @@ declared at `Main` top level and lowers to OpenQASM general arrays. (clean)
 
 ## Auto-uncompute — rung ④ injector prerequisites (2026-07-12 deep-dive on blanket+all-scratch)
 
-- **#17 — wiring the injector to the EXISTING adjoint materialization.** A safe verdict on a register
-  written by a CALL (e.g. `Bcast(a)`) promises injection of `Adjoint Bcast(a)`. The materialization
-  machinery for that ALREADY SHIPS: `AdjointMaterializer` + `Inverter` (v0.14/v0.16) turn an explicit
-  `Adjoint Foo(...)` call into a real `Foo__adj` operation — body reversed, statements inverted, loop
-  ranges reversed — verified end-to-end by the existing functor/conjugation tests. What rung ④ must ADD
-  is the wiring, not an inverter: emit the implicit `Adjoint <stmt>` calls at injection points (death
-  point / after outermost container, LIFO) and ensure the materializer runs over compiler-generated
-  adjoint references the same way it does over user-written ones. The verdict's clauses already fence
-  the preconditions (no measurement — transitive flags; static loop bounds — language rule; bit
-  conditions imply measurement ⇒ excluded), so everything verdict-SAFE is materializable. Note: Qora
-  already performs Classiq-style COMPOUND INVERSION implicitly at call boundaries (a callee's internal
-  loops are mirrored by inverting the whole call, which is why callee-internal containers correctly do
-  NOT trigger ContainedWrite — only caller-side containers around the write do).
+- **#17 — wiring the injector to MIR-only inverse materialization.** A safe verdict on a register
+  written by a call such as `Bcast(a)` promises an internal inverse request for that exact MIR
+  instruction. `MirAdjointMaterializer` already owns this boundary: `InjectRequests` marks an exact
+  `MirInstructionRef` by attaching `MirFunctor.Adjoint` to its `MirQuantumApply`, and `Run` synthesizes
+  the required inverse MIR callable before rewriting the request to a typed call. Qora source and HIR
+  contain no inverse marker or HIR-side inversion machinery. Rung ④ must therefore compute a global LIFO cleanup
+  schedule, inject requests into a new MIR revision, and pass that exact snapshot to the materializer.
+  The current materializer deliberately accepts only the straight-line unitary subset; branch CFGs,
+  measurement, mutation, local allocation, recursion, and unstable witnesses must remain explicit
+  blockers until their inverse semantics are implemented.
 
 ## Auto-uncompute — registered data gaps (from the requirements cross-check, 2026-07-11)
 
@@ -133,10 +128,11 @@ The rung-③ analysis (events + qubit graph + ContainerMap) answers the injector
   (`if (r==1) { inverse }`) requires proving the condition bit unchanged between the compute and the
   injected inverse; classical bits are not in the event stream (only `Symbol.Uses`, thin). Fill when
   building the if-tools.
-- **#14 — post-injection re-analysis.** Snapshot- and phase-qualified storage now exists through
-  `HirSemanticArtifactId(HirSnapshotId, HirSemanticPhase)`. Rung ④ must publish the injected tree as a
-  new HIR snapshot, record its lineage, and wire validation/effect analysis to produce new artifacts
-  over that exact snapshot instead of reusing the pre-injection facts.
+- **#14 — post-injection re-analysis.** The cleanup scheduler consumes analyses bound to one exact
+  `MirSnapshotId`. Rung ④ must publish the injected program as a new
+  `MirStage.InverseRequestsInjected` snapshot, record its exact parent and rebased origins, and recompute
+  every invalidated MIR analysis rather than reusing facts from the pre-injection revision. Successful
+  materialization then publishes the next `MirStage.AdjointsMaterialized` snapshot.
 - **#16 — ancilla-identification conditions coupled to FUTURE features** (2026-07-11 literature
   cross-check: Silq PLDI'20, Q#, Unqomp PLDI'21/Reqomp, Twist POPL'22, Quipper, Bennett'73, Gidney'18 —
   20/20 key claims source-verified). `IsCleanupCandidate`'s two conditions (`IsAncilla` use-birth + never
@@ -191,11 +187,11 @@ The rung-③ analysis (events + qubit graph + ContainerMap) answers the injector
 - **#19 — bind calls to their callee by node reference, not by name — ✅ SHIPPED (2026-07-14, working tree).**
   Statement calls (`QGate`) and expression calls (`QCallNode`) carry `int? CalleeOpId`. Resolver binds a
   user call to its callee's stable node Id once, and monomorphization re-points the reference to the selected
-  specialization. `AdjointMaterializer` first synthesizes and re-Ids the inverse operation, then rewrites
-  `Adjoint Foo` to the inverse name **and** its minted `CalleeOpId`; built-ins remain null. Validation,
-  effect analysis, MIR lowering, target referential checks, name mangling, and emission follow the typed
-  reference and fail loudly on a missing or dangling Id. `IrPrinter` may display the readable call name,
-  but that spelling is no longer semantic identity.
+  specialization. HIR→MIR lowering replaces that HIR reference with `MirUserCallableTarget(MirCallableId)`.
+  `MirAdjointMaterializer` synthesizes a fresh MIR callable ID and rewrites the internal request to that
+  typed target; built-ins remain `MirBuiltinGateTarget`. Validation, effect analysis, MIR lowering, target
+  lowering, and emission fail loudly on missing or dangling IDs. Printers may display readable names, but
+  those spellings are never semantic identity.
 - **#20 — immutable compilation snapshots and explicit stage ownership — ✅ SHIPPED
   (2026-07-27); incremental invalidation remains future work.** `QoraParser.Parse` is syntax-only and
   `QoraCompiler.Compile` returns one immutable `Compilation` whose authoritative top-level owners are
@@ -223,12 +219,11 @@ The rung-③ analysis (events + qubit graph + ContainerMap) answers the injector
   CFG are reused within that snapshot. MIR callables and entities use exact HIR/semantic references.
   Every HIR symbol has one `MirSymbolLoweringDisposition`, while every MIR value/storage/qubit has one
   `MirEntityOriginKind`, so non-lowering and compiler temporaries are explicit rather than missing.
-  Target results live in the backend-keyed `TargetArtifactSet.Artifacts` map. `QasmBackend` consumes an
-  exact `HirSemanticContext` and produces `OpenQasmTargetProgram`; `OpenQasmArtifact.Text` is derived
-  from that model. The current artifact records both its exact HIR source and semantic basis instead of
-  pretending to be MIR-backed, while the common `ITargetArtifact` contract does not force HIR
-  provenance on future backends. Target diagnostics likewise carry a backend plus a typed HIR-or-MIR
-  input union. The CLI renders `--stages` from this completed aggregate without rerunning passes.
+  Target results live in the backend-keyed `TargetArtifactSet.Artifacts` map. `QasmBackend` consumes the
+  exact materialized `MirSnapshot` and produces `MirOpenQasmTargetProgram`; `OpenQasmArtifact.Text` is
+  derived from that model. The artifact records the exact MIR source it consumed, and the backend never
+  reaches back into HIR. Target diagnostics likewise carry the backend plus a typed MIR input identity.
+  The CLI renders `--stages` from this completed aggregate without rerunning passes.
   This revision-bound model is the required foundation for IDE queries and future incremental
   compilation, but document dependency invalidation, snapshot reuse, and separate compilation are
   **not implemented yet** and must not be described as unnecessary.
@@ -238,9 +233,9 @@ The rung-③ analysis (events + qubit graph + ContainerMap) answers the injector
 Updated 2026-07-27. The module system, typed functions and returns, expression calls, float/angle
 types, effect analysis, ownership contracts, MIR, and immutable compilation snapshots have landed.
 The main dependent track is now **automatic uncomputation**: the injector must consume the existing
-effect/liveness facts, insert identity-bound adjoint calls, preserve the scope-exit |0⟩ guarantee, and
-publish a new HIR snapshot with the correct typed lineage classification rather than mutate an earlier
-snapshot. Local allocation lowering
+effect/liveness facts, insert identity-bound internal inverse requests, preserve the scope-exit |0⟩ guarantee, and
+publish a new MIR snapshot with the correct parent, origins, and invalidated analyses rather than mutate an
+earlier snapshot. Local allocation lowering
 depends on that guarantee. Incremental invalidation and IDE query indexes should extend the existing
 document identities, typed cross-stage links, and source maps; they must not introduce a second mutable
 ledger of semantic facts. `bool`, automatic controlled-operation generation, and the target-erased

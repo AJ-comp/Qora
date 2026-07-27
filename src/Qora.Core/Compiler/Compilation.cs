@@ -73,7 +73,7 @@ public sealed class Compilation
         }
 
         var outputPlan = Options.OutputPlan;
-        if (mir is not null && !outputPlan.ProduceMir)
+        if (mir is not null && !outputPlan.RequiresMir)
         {
             throw new ArgumentException(
                 "Compilation carries an unsolicited MIR snapshot.",
@@ -90,6 +90,17 @@ public sealed class Compilation
             }
         }
 
+        foreach (var artifact in targets.Artifacts.Values)
+        {
+            if (mir is null || artifact.Source != mir.Id)
+            {
+                throw new ArgumentException(
+                    $"{artifact.Backend} source {artifact.Source} is not this Compilation's canonical "
+                    + "MIR snapshot.",
+                    nameof(targets));
+            }
+        }
+
         if (_diagnostics.Count > 0 && targets.Artifacts.Count > 0)
         {
             throw new ArgumentException(
@@ -101,10 +112,10 @@ public sealed class Compilation
         {
             VerifySuccessfulHirGoal(hir, outputPlan);
 
-            if (outputPlan.ProduceMir != (mir is not null))
+            if (outputPlan.RequiresMir != (mir is not null))
             {
                 throw new ArgumentException(
-                    outputPlan.ProduceMir
+                    outputPlan.RequiresMir
                         ? "A successful Compilation is missing its requested MIR snapshot."
                         : "A successful Compilation carries an unsolicited MIR snapshot.",
                     nameof(mir));
@@ -218,33 +229,12 @@ public sealed class Compilation
 
         if (targets.OpenQasm is { } openQasm)
         {
-            if (!ReferenceEquals(
-                    hir.Find(openQasm.Source),
-                    openQasm.SourceSnapshot))
-                throw new ArgumentException(
-                    $"OpenQASM source {openQasm.Source} is detached from this HIR history.",
-                    nameof(targets));
-            var targetSemanticBasis = hir.FindSemantics(
-                openQasm.SemanticBasis.Source,
-                openQasm.SemanticBasis.Phase);
-            if (!ReferenceEquals(
-                    targetSemanticBasis,
-                    openQasm.SemanticArtifact))
-                throw new ArgumentException(
-                    $"OpenQASM semantic basis {openQasm.SemanticBasis} is detached from this HIR history.",
-                    nameof(targets));
-            VerifyCanonicalEffectBasis(
-                hir,
-                targetSemanticBasis,
-                "OpenQASM",
-                nameof(targets));
-            if (!links.Hir.IsAncestor(
-                    openQasm.Source,
-                    targetSemanticBasis.SourceId))
+            if (mir is null
+                || !ReferenceEquals(mir, openQasm.SourceSnapshot)
+                || openQasm.Source != mir.Id)
             {
                 throw new ArgumentException(
-                    $"OpenQASM semantic basis {targetSemanticBasis.SourceId} is not an ancestor of " +
-                    $"its structural source {openQasm.Source}.",
+                    $"OpenQASM source {openQasm.Source} is not this Compilation's exact MIR snapshot.",
                     nameof(targets));
             }
         }
@@ -336,34 +326,14 @@ public sealed class Compilation
                             $"Diagnostic was produced by unsolicited target backend {source.Backend}.",
                             nameof(diagnostics));
                     }
-                    if (source.Input is null)
-                        throw new ArgumentException(
-                            "A target diagnostic requires an exact HIR or MIR input.",
-                            nameof(diagnostics));
-                    switch (source.Input)
+                    if (mir is null || source.Input != mir.Id)
                     {
-                        case TargetDiagnosticInput.Hir input:
-                            if (hir.Find(input.Snapshot) is null)
-                                throw new ArgumentException(
-                                    $"Diagnostic target HIR input {input.Snapshot} is not owned by " +
-                                    "this Compilation.",
-                                    nameof(diagnostics));
-                            break;
-                        case TargetDiagnosticInput.Mir input:
-                            if (mir is null || input.Snapshot != mir.Id)
-                                throw new ArgumentException(
-                                    $"Diagnostic target MIR input {input.Snapshot} is not owned by " +
-                                    "this Compilation.",
-                                    nameof(diagnostics));
-                            if (input.Location is { } targetLocation)
-                                _ = mir.Origins.Require(targetLocation);
-                            break;
-                        default:
-                            throw new ArgumentException(
-                                $"Unknown target diagnostic input type " +
-                                $"{source.Input.GetType().Name}.",
-                                nameof(diagnostics));
+                        throw new ArgumentException(
+                            $"Diagnostic target MIR input {source.Input} is not owned by this Compilation.",
+                            nameof(diagnostics));
                     }
+                    if (source.Location is { } targetLocation)
+                        _ = mir.Origins.Require(targetLocation);
                     break;
 
                 default:
@@ -452,17 +422,6 @@ public sealed class Compilation
                     throw new ArgumentException(
                         "A successful Compilation requires effect analysis derived from its exact "
                         + "accepted specialized-HIR validation artifact.",
-                        nameof(hir));
-                }
-                _ = hir.ConjugationLowered
-                    ?? throw new ArgumentException(
-                        "A successful Compilation is missing canonical conjugation-lowered HIR.",
-                        nameof(hir));
-                if (outputPlan.Requests(TargetBackend.OpenQasm)
-                    && hir.AdjointMaterialized is null)
-                {
-                    throw new ArgumentException(
-                        "A successful OpenQASM Compilation is missing adjoint-materialized HIR.",
                         nameof(hir));
                 }
                 break;

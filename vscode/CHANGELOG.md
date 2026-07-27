@@ -2,6 +2,17 @@
 
 All notable changes to the Qora Language extension.
 
+## 0.25.0
+
+- Bundles the **Qora v0.32** compiler and its canonical HIR → SSA/CFG MIR → typed OpenQASM target pipeline.
+  Compiler-generated inversion now exists only inside MIR, while the source language and HIR expose no
+  adjoint syntax.
+- The compilation-stage view now follows the real pipeline: AST, resolved HIR, HIR symbols, SSA/CFG MIR,
+  MIR effects, and OpenQASM. The obsolete HIR automatic-cleanup panel has been removed.
+- Includes exact per-access array-safety tracking, correct early-return lowering for `repeat` loops,
+  reliable operation entry-point selection when functions are also present, and version provenance in
+  emitted OpenQASM.
+
 ## 0.24.0
 
 - Bundles the **Qora v0.31** compiler and its immutable, revision-bound compilation pipeline.
@@ -122,7 +133,7 @@ All notable changes to the Qora Language extension.
 ## 0.14.0
 
 - Bundles the **Qora v0.20** compiler — rung ④ of the automatic-uncomputation ladder begins with the
-  cleanup **plan builder** (a safe ancilla's reverse-order adjoint cleanup, computed but not yet injected);
+  cleanup **plan builder** (a safe ancilla's reverse-order inverse cleanup, computed but not yet injected);
   rung ③ now blocks an ancilla whose write is a call it cannot invert (a `while`/`repeat`, classical
   mutation, or local `use` in the callee), with the reason shown in the `--stages` uncompute view; and
   calls are bound to their callee by stable node reference (`CalleeOpId`) rather than by name.
@@ -154,7 +165,7 @@ All notable changes to the Qora Language extension.
     (a final control *Read* counts) is the death point the injection rung will hang an uncompute off.
   - **Defensive fail-loud locks**: spots that used to silently under-approximate — an unknown callee,
     a mismatched argument/parameter count, an indexed effect collapsed onto a single-qubit binding, a
-    non-`Adjoint` functor on a user-op call — now throw an internal error, since each is already
+    unsupported functor other than the compiler's internal inverse marker on a user-op call — now throw an internal error, since each is already
     guaranteed impossible on clean IR by an earlier validation pass (QSEM002 / 006 / 007 / 016).
   - Compiler test suite grew to 168 cases.
 
@@ -206,8 +217,7 @@ All notable changes to the Qora Language extension.
 
 - Bundles the **Qora v0.14** compiler: `float` / `angle` classical types, parameterized register sizes
   `Qubit[n]` (monomorphized to a concrete copy per call site), name collisions that auto-resolve (with a
-  `// Qora:` note) instead of erroring, and whole-operation `Adjoint` compiled by a dedicated
-  inverse-synthesis pass.
+  `// Qora:` note) instead of erroring, and a dedicated compiler-internal inverse-synthesis pass.
 - **Import-path editing**: typing `import "…"` now completes sibling `.qor` files and folders (like
   JS/TS import-path completion), `"` auto-closes, and an `import` snippet inserts the quoted-path form.
   `import` / `namespace` / `open` keywords and string literals are now syntax-highlighted.
@@ -300,23 +310,20 @@ All notable changes to the Qora Language extension.
 ## 0.5.0
 
 - **"Qora: Show Compilation Stages" command** — opens a side panel showing how the current file moves
-  through the compiler: AST → QoraIR → (synthesized inverse IR, when `Adjoint` is used) → OpenQASM 3.
+  through the compiler: AST → QoraIR → compiler-generated inverse IR → OpenQASM 3.
   The panel refreshes on save; the heavy payload is fetched only when you ask (keystroke diagnostics
   stay on the lean `--json` contract).
 - Bundles the compiler with the new **semantic-validation pass**: invalid programs now fail with
   QSEM001–QSEM015 errors (shown as squiggles) instead of silently emitting broken OpenQASM —
-  non-invertible `Adjoint`, calls in expressions, wrong argument counts/shapes, reserved names,
+  calls in expressions, wrong argument counts/shapes, reserved names,
   recursion, `use` misplacement, and more.
-- **Whole-operation `Adjoint`** — `Adjoint Foo(q)` on a user operation now compiles to a synthesized
-  inverse subroutine (`Foo__adj`), covering gates, `for` (reversed), `if`, classical declarations, and
-  nested calls transitively.
-- Grammar: zero-argument functor calls (`Adjoint Nop();`) and unary minus (`Rx(-pi/2, q[0]);`).
+- Grammar: zero-argument gate/operation calls and unary minus (`Rx(-pi/2, q[0]);`).
 
 ## 0.4.0
 
 - Bundles the **Qora v0.9** parser (Janglim `0.2.0-preview.3`), so live errors and transpile now
   understand the newer language features:
-  - single-gate functors (`Adjoint G(...)` / `Controlled G(...)`), richer conditions
+  - controlled gates (`Controlled G(...)`), richer conditions
     (`!= < <= > >= && || !`), `if` / `else` / `else if`, and first-class `Reset` / `ResetAll`;
   - **`//` line comments** — recognized and dropped before parsing, while a lone `/` still lexes as
     division. (Block `/* */` comments are still pending engine support.)

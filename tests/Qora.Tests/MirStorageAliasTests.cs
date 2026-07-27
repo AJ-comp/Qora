@@ -134,6 +134,7 @@ public sealed class MirStorageAliasTests
         var malformedProgram = new MirProgram(
             program.SnapshotId,
             program.Origins,
+            program.EntryPoint,
             program.Callables
                 .Select(callable => callable.Id == inspect.Id ? malformedCallable : callable)
                 .ToArray());
@@ -180,6 +181,7 @@ public sealed class MirStorageAliasTests
         var malformedProgram = new MirProgram(
             program.SnapshotId,
             program.Origins,
+            program.EntryPoint,
             program.Callables
                 .Select(callable => callable.Id == main.Id
                     ? malformedMain

@@ -101,17 +101,7 @@ operation Main() {
     var r1: bit = M(q[1]);
 }""", {"111", "11"}, subset=True)  # key = r,r1 registers; both 1 whatever grouping
 
-load_and_run("F6 single-gate functors identity (H S S† H = I) -> 0", """
-operation Main() {
-    use q = Qubit[1];
-    H(q[0]);
-    S(q[0]);
-    Adjoint S(q[0]);
-    H(q[0]);
-    var r: bit = M(q[0]);
-}""", {"0"})
-
-load_and_run("F6b Controlled X -> 11", """
+load_and_run("F6 Controlled X -> 11", """
 operation Main() {
     use q = Qubit[2];
     X(q[0]);
@@ -153,21 +143,7 @@ operation Main() {
     var r1: bit = M(q[1]);
 }""", {"00", "11"})
 
-load_and_run("D2 whole-op Adjoint identity (Prep; Adjoint Prep -> 00)", """
-operation Prep(q: Qubit[]) {
-    H(q[0]);
-    T(q[1]);
-    CNOT(q[0], q[1]);
-}
-operation Main() {
-    use q = Qubit[2];
-    Prep(q);
-    Adjoint Prep(q);
-    var r0: bit = M(q[0]);
-    var r1: bit = M(q[1]);
-}""", {"00"})
-
-load_and_run("D3 namespaced call (def MyLib__Bell_)", """
+load_and_run("D2 namespaced call (def MyLib__Bell_)", """
 namespace MyLib {
     operation Bell(q: Qubit[]) {
         H(q[0]);
@@ -180,32 +156,6 @@ operation Main() {
     var r0: bit = M(q[0]);
     var r1: bit = M(q[1]);
 }""", {"00", "11"})
-
-load_and_run("D4 adjoint-pipeline doc example (defs + ___adj + reversed for)", """
-operation Inner(q: Qubit[]) {
-    H(q[0]);
-    T(q[1]);
-}
-operation Outer(q: Qubit[], b: bit) {
-    var k: int = 2;
-    Inner(q);
-    Rx(pi/k, q[0]);
-    for i in 0..q.Count - 1 {
-        X(q[i]);
-    }
-    if (b == 1) {
-        Z(q[0]);
-        Adjoint S(q[0]);
-    }
-}
-operation Main() {
-    use q = Qubit[2];
-    var r: bit = M(q[0]);
-    Outer(q, r);
-    Adjoint Outer(q, r);
-    var r0: bit = M(q[0]);
-    var r1: bit = M(q[1]);
-}""", None)  # load-only: contents statistical; identity check is D2's job
 
 print()
 print(f"{PASS} passed, {FAIL} failed")

@@ -13,13 +13,6 @@ public sealed class CompilationReportsTests
 
         var validation = Assert.IsType<HirSemanticArtifact>(
             compilation.Hir.SpecializedValidation);
-        var effects = Assert.IsType<HirSemanticArtifact>(
-            compilation.Hir.EffectAnalysis);
-
         Assert.Contains("Main: operation", CompilationReports.FormatSymbols(validation));
-        Assert.Contains("q: register", CompilationReports.FormatSymbols(effects));
-        Assert.Contains("cleanup candidate", CompilationReports.FormatUncompute(effects));
-        Assert.Throws<ArgumentException>(
-            () => CompilationReports.FormatUncompute(validation));
     }
 }

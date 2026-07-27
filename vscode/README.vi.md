@@ -19,7 +19,7 @@ chuột, **báo lỗi thời gian thực** và một lệnh **chuyển đổi**.
 - **Ví dụ dùng ngay** — chạy **`Qora: Mở ví dụ`** để mở `demo.qor`, hoặc **`Qora: Tạo ví dụ Bell mới`** để bắt đầu từ một mạch Bell nhỏ
 - **Chạy chương trình** — **`Qora: Chạy chương trình`** (hoặc CodeLens ▶ phía trên `Main`) thực thi tệp trên trình mô phỏng lượng tử thực (Amazon Braket cục bộ) và hiển thị biểu đồ kết quả đo. Lần chạy đầu tiên sẽ tự động thiết lập trình mô phỏng (tải một lần ~200 MB vào bộ nhớ riêng của tiện ích — bạn không cần cài gì cả).
 - **Chuyển đổi sang OpenQASM** — chạy **`Qora: Transpile to OpenQASM`** từ Command Palette; kết quả mở ở cửa sổ bên cạnh
-- **Hiển thị các giai đoạn biên dịch** — chạy **`Qora: Hiển thị các giai đoạn biên dịch`** để xem pipeline: AST → QoraIR → IR nghịch đảo (khi dùng `Adjoint`) → OpenQASM; tự cập nhật khi lưu
+- **Hiển thị các giai đoạn biên dịch** — chạy **`Qora: Hiển thị các giai đoạn biên dịch`** để theo dõi AST, HIR giữ cấu trúc nguồn, MIR SSA/CFG cùng kết quả phân tích, đích OpenQASM có kiểu và OpenQASM cuối cùng; tự cập nhật khi lưu
 - **Đoạn mã mẫu (snippets)** — `operation`, `main`, `use`, `measure`, `for`, `if`, `bell`
 - **Khớp / tự đóng dấu ngoặc**
 

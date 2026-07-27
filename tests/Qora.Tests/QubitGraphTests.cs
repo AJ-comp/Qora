@@ -83,33 +83,7 @@ public class QubitGraphTests
         Assert.Contains(g.Node(write.NodeId).Parents, p => p.NodeId == seedId.Value);   // seeded own-previous
     }
 
-    // --- 3. a conjugation's W† replay makes FRESH nodes with freshly-resolved parents — never stale copies ---
-
-    [Fact]
-    public void ConjugateReplayMakesFreshNodesChainedToTheForwardOnes()
-    {
-        static QGate G(string n, params QArg[] a) => new(new List<string>(), n, a.ToList());
-        var w = G("X", new QQubitArg("a", "0"));
-        var op = new QOperation("Main", new List<QParam>(), new List<QStmt>
-        {
-            new QUse("a", 1), new QUse("d", 1),
-            new QConjugate(
-                Within: new List<QStmt> { w },
-                Apply: new List<QStmt> { G("CNOT", new QQubitArg("a", "0"), new QQubitArg("d", "0")) }),
-        });
-        var m = new HirSemanticModel();
-        EffectAnalysis.Run(new QProgram(new List<QOperation> { op }), m);
-        var g = m.Graph(op.Id)!;
-        var events = m.QubitEvents(op.Id);
-
-        var xWrites = events.Where(e => e.StmtId == w.Id && e.Kind == QubitEventKind.Write)
-            .OrderBy(e => e.Order).ToList();
-        Assert.Equal(2, xWrites.Count);                                    // forward + replayed W†
-        Assert.NotEqual(xWrites[0].NodeId, xWrites[1].NodeId);             // fresh node, not a stale copy
-        Assert.Contains(g.Node(xWrites[1].NodeId).Parents, p => p.NodeId == xWrites[0].NodeId);   // chained
-    }
-
-    // --- 4a. same-Order double writes of ONE register (SWAP, a two-param-writing call) followed by a
+    // --- 3a. same-Order double writes of ONE register (SWAP, a two-param-writing call) followed by a
     //         blanket ref: construction and sweep must agree on the tie (adversarially found: the sweep's
     //         Order-keyed tie-break crashed these VALID programs with QINTERNAL) ---
 
@@ -128,7 +102,7 @@ public class QubitGraphTests
         Assert.True(r3.Succeeded);
     }
 
-    // --- 4b. register declarations are HOISTED (like the emitter's declaration hoisting): a gate may
+    // --- 3b. register declarations are HOISTED (like the emitter's declaration hoisting): a gate may
     //         textually precede its register's `use` and still write onto the hoisted birth ---
 
     [Fact]

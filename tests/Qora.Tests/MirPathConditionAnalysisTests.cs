@@ -179,7 +179,9 @@ public sealed class MirPathConditionAnalysisTests
     public void OrTailMergeKeepsItsDisjunctiveCondition()
     {
         var program = OrTailMergeMir();
-        var callable = Assert.Single(program.Callables);
+        var callable = Assert.Single(
+            program.Callables,
+            candidate => candidate.Name == "TailMerge");
         var site = ApplySite(callable);
         var cfg = MirControlFlowAnalysis.Analyze(program, callable.Id);
         var paths = MirPathConditionAnalysis.Analyze(program, callable.Id);
@@ -231,8 +233,11 @@ public sealed class MirPathConditionAnalysisTests
             Array.Empty<MirMutableArrayResult>(),
             Array.Empty<MirFunctor>(),
             source);
+        var entryPointId = new MirCallableId(1);
+        var entryPointBlock = new MirBlockId(0);
 
         return context.Program(
+            entryPointId,
             new[]
             {
                 new MirCallable(
@@ -324,6 +329,26 @@ public sealed class MirPathConditionAnalysisTests
                             AllocationInstruction: null,
                             source),
                     },
+                    source),
+                new MirCallable(
+                    entryPointId,
+                    Name: "Main",
+                    MirCallableKind.Operation,
+                    ReturnType: null,
+                    Parameters: Array.Empty<MirParameter>(),
+                    EntryBlock: entryPointBlock,
+                    Blocks: new[]
+                    {
+                        new MirBlock(
+                            entryPointBlock,
+                            Array.Empty<MirBlockArgument>(),
+                            Array.Empty<MirInstruction>(),
+                            new MirReturn(Value: null, source),
+                            source),
+                    },
+                    Values: Array.Empty<MirValue>(),
+                    Storages: Array.Empty<MirArrayStorage>(),
+                    Qubits: Array.Empty<MirQubitResource>(),
                     source),
             });
     }

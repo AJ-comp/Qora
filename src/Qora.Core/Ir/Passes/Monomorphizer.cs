@@ -77,7 +77,6 @@ internal static class Monomorphizer
                         case QFor f: CollectUses(f.Body); break;
                         case QWhile w: CollectUses(w.Body); break;
                         case QRepeat r: CollectUses(r.Body); break;
-                        case QConjugate c: CollectUses(c.Within); CollectUses(c.Apply); break;
                     }
             }
             CollectUses(op.Body);
@@ -197,7 +196,6 @@ internal static class Monomorphizer
                     {
                         From = RewriteNode(f.From, regs)!,   // bounds evaluate in the ENCLOSING block
                         To = RewriteNode(f.To, regs)!,
-                        Step = RewriteNode(f.Step, regs),
                         Body = Rewrite(f.Body, Shadow(regs, f.Var)),   // the loop variable shadows in the body
                     },
                     QWhile w => w with
@@ -206,11 +204,6 @@ internal static class Monomorphizer
                         Body = Rewrite(w.Body, regs),
                     },
                     QRepeat r => RewriteRepeat(r, regs),
-                    QConjugate c => c with
-                    {
-                        Within = Rewrite(c.Within, regs),
-                        Apply = Rewrite(c.Apply, regs),
-                    },
                     _ => stmt,
                 };
 
@@ -347,8 +340,6 @@ internal static class Monomorphizer
                 QFor loop => HasGenericCall(loop.Body, genericIds),
                 QWhile loop => HasGenericCall(loop.Body, genericIds),
                 QRepeat loop => HasGenericCall(loop.Body, genericIds),
-                QConjugate conjugate => HasGenericCall(conjugate.Within, genericIds)
-                                        || HasGenericCall(conjugate.Apply, genericIds),
                 _ => false,
             };
             if (nested) return true;

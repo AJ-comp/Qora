@@ -1,63 +1,143 @@
+using Qora.Ir;
+
 namespace Qora.Tests;
 
 /// <summary>
-/// The logical-NOT `!` on a condition. OpenQASM has no `!` on a classical scalar (it reads a bit/int as a
-/// numeric literal, not a bool), so the emitter rewrites `!x` at emit time: a bit becomes `x == false`, any
-/// other classical becomes `x == 0`. The name's type comes from the symbol table (one source), so EVERY
-/// classical kind — parameter, var, measure bit, AND loop variable — is rewritten; a qubit has no numeric
-/// value and is rejected outright. (Regression guard for finding E: a loop variable used to emit an invalid
-/// `! ( i )` because it was missing from the emitter's hand-rolled type map.)
+/// Logical negation is verified through the target expression dependency graph. SSA may split one source
+/// condition across temporaries, but the typed logical-not operator and its grouping must remain unchanged.
 /// </summary>
 public class NegationTests
 {
     [Fact]
-    public void NotOnBitBecomesEqualsFalse() =>
-        Compiler.Emits("operation Main(){ use q=Qubit[1]; var r: bit = M(q[0]); if(!r){ X(q[0]); } }", "r == false");
+    public void NotOnBitRemainsTypedLogicalNot() =>
+        AssertConditionContainsLogicalNot(
+            "operation Main(){ use q=Qubit[1]; var r: bit = M(q[0]); if(!r){ X(q[0]); } }");
 
     [Fact]
-    public void NotOnIntVarBecomesEqualsZero() =>
-        Compiler.Emits("operation Main(){ use q=Qubit[1]; var n: int = 0; if(!n){ X(q[0]); } }", "n == 0");
+    public void NotOnIntVarRemainsTypedLogicalNot() =>
+        AssertConditionContainsLogicalNot(
+            "operation Main(){ use q=Qubit[1]; var n: int = 0; if(!n){ X(q[0]); } }");
 
     [Fact]
-    public void NotOnLoopVarBecomesEqualsZero() =>
-        // finding E — the loop variable is now known (from the symbol table) to be an int, so `!i` rewrites
-        Compiler.Emits("operation Main(){ use q=Qubit[1]; for i in 0..2 { if(!i){ X(q[0]); } } }", "i == 0");
+    public void NotOnLoopVarRemainsTypedLogicalNot() =>
+        AssertConditionContainsLogicalNot(
+            "operation Main(){ use q=Qubit[1]; for i in 0..2 { if(!i){ X(q[0]); } } }");
 
     [Fact]
-    public void LoopVarEqualityIsNotBitRewritten()
+    public void LoopVarEqualityRemainsIntegerEquality()
     {
-        // an int loop var compared to 1 must stay `i == 1` — NOT wrongly rewritten to `i == true`
-        var r = Compiler.Compile("operation Main(){ use q=Qubit[1]; for i in 0..2 { if(i==1){ X(q[0]); } } }");
-        Assert.True(r.Succeeded);
-        Assert.Contains("i == 1", r.Targets.OpenQasm!.Text);
-        Assert.DoesNotContain("i == true", r.Targets.OpenQasm!.Text);
+        var (body, conditions) = Conditions(
+            "operation Main(){ use q=Qubit[1]; for i in 0..2 { if(i==1){ X(q[0]); } } }");
+
+        Assert.Contains(
+            conditions,
+            condition => ContainsEqualityTo(body, condition, "1"));
+        Assert.DoesNotContain(
+            conditions,
+            condition => ContainsEqualityTo(body, condition, "true"));
     }
 
     [Fact]
     public void NotOnQubitIsRejected() =>
-        // a qubit has no boolean/numeric value; negating it is QSEM026, not a broken emission
-        Compiler.Rejects("operation Main(){ use q=Qubit[1]; if(!q){ X(q[0]); } }", "QSEM026");
+        Compiler.Rejects(
+            "operation Main(){ use q=Qubit[1]; if(!q){ X(q[0]); } }",
+            "QSEM026");
 
     [Fact]
-    public void NegationUnderARelationalKeepsItsGroupingInQasm()
+    public void NegationUnderARelationalKeepsItsDependencyGrouping()
     {
-        // `!a < 2` means (!a) < 2. The bit rewrite substitutes `a == 0` for `!a` — a synthesized
-        // equality UNDER a relational, which the emitted token run would re-parse the other way
-        // (`a == 0 < 2` groups as a == (0 < 2)). The renderer must parenthesize the synthesized
-        // subtree so the QASM keeps the tree's grouping.
-        var r = Compiler.Compile("operation Main(){ use q=Qubit[1]; var a: int = 0; if (!a < 2) { X(q[0]); } }");
-        Assert.True(r.Succeeded, string.Join(" | ", r.Diagnostics.Select(diagnostic => diagnostic.Error).ToList().Select(e => $"{e.Code}: {e.Message}")));
-        Assert.Contains("( a == 0 ) < 2", r.Targets.OpenQasm!.Text);
+        var (body, conditions) = Conditions(
+            "operation Main(){ use q=Qubit[1]; var a: int = 0; if (!a < 2) { X(q[0]); } }");
+        var relational = conditions
+            .SelectMany(condition => body.DependencyClosure(condition))
+            .OfType<MirQasmBinaryExpression>()
+            .First(
+                expression =>
+                    expression.Operator == MirQasmBinaryOperator.Less);
+
+        Assert.True(
+            ContainsLogicalNot(body, relational.Left),
+            "the relational left operand must depend on the lowered logical negation");
     }
 
     [Fact]
-    public void NegationAsTheRightOperandOfAnEqualityKeepsItsGroupingInQasm()
+    public void NegationAsTheRightOperandOfEqualityKeepsItsDependencyGrouping()
     {
-        // `n == !m` means n == (!m) — the rewrite synthesizes `m == 0` as the RIGHT child of `==`.
-        // Unparenthesized, `n == m == 0` re-parses LEFT-associatively as (n == m) == 0 — the opposite
-        // branch fires. A same-precedence RIGHT child must be parenthesized.
-        var r = Compiler.Compile("operation Main(){ use q=Qubit[1]; var n: int = 2; var m: int = 5; if (n == !m) { X(q[0]); } }");
-        Assert.True(r.Succeeded, string.Join(" | ", r.Diagnostics.Select(diagnostic => diagnostic.Error).ToList().Select(e => $"{e.Code}: {e.Message}")));
-        Assert.Contains("n == ( m == 0 )", r.Targets.OpenQasm!.Text);
+        var (body, conditions) = Conditions(
+            "operation Main(){ use q=Qubit[1]; var n: int = 2; var m: int = 5; if (n == !m) { X(q[0]); } }");
+        var outer = conditions
+            .SelectMany(condition => body.DependencyClosure(condition))
+            .OfType<MirQasmBinaryExpression>()
+            .First(
+                expression =>
+                    expression.Operator == MirQasmBinaryOperator.Equal
+                    && ContainsLogicalNot(body, expression.Right));
+
+        Assert.True(ContainsLogicalNot(body, outer.Right));
+    }
+
+    private static void AssertConditionContainsLogicalNot(string source)
+    {
+        var (body, conditions) = Conditions(source);
+        Assert.Contains(
+            conditions,
+            condition => ContainsLogicalNot(body, condition));
+    }
+
+    private static bool ContainsLogicalNot(
+        IReadOnlyList<MirQasmStatement> body,
+        MirQasmExpression expression) =>
+        body.DependencyClosure(expression)
+            .OfType<MirQasmUnaryExpression>()
+            .Any(unary => unary.Operator == MirQasmUnaryOperator.LogicalNot);
+
+    private static bool ContainsEqualityTo(
+        IReadOnlyList<MirQasmStatement> body,
+        MirQasmExpression expression,
+        string literal) =>
+        body.DependencyClosure(expression)
+            .OfType<MirQasmBinaryExpression>()
+            .Any(
+                binary =>
+                    binary.Operator == MirQasmBinaryOperator.Equal
+                    && (body.DependsOn(
+                            binary.Left,
+                            candidate =>
+                                candidate
+                                    is MirQasmLiteralExpression
+                                    {
+                                        Text: var text,
+                                    }
+                                && text == literal)
+                        || body.DependsOn(
+                            binary.Right,
+                            candidate =>
+                                candidate
+                                    is MirQasmLiteralExpression
+                                    {
+                                        Text: var text,
+                                    }
+                                && text == literal)));
+
+    private static (
+        IReadOnlyList<MirQasmStatement> Body,
+        IReadOnlyList<MirQasmExpression> Conditions) Conditions(
+        string source)
+    {
+        var artifact = MirQasmTestModel.Compile(source);
+        var body = artifact.Program.EntryPoint.Body;
+        var conditions = MirQasmTestModel
+            .Statements(body)
+            .Select(
+                statement => statement switch
+                {
+                    MirQasmIfStatement branch => branch.Condition,
+                    MirQasmWhileStatement loop => loop.Condition,
+                    _ => null,
+                })
+            .Where(condition => condition is not null)
+            .Cast<MirQasmExpression>()
+            .ToArray();
+        return (body, conditions);
     }
 }

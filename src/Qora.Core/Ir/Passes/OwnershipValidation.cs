@@ -102,35 +102,10 @@ internal static class OwnershipValidation
                         break;
                     }
 
-                    case QConjugate conjugate:
-                    {
-                        var within = AnalyzeBlock(conjugate.Within, state, inLoop);
-                        var apply = within.Next is null
-                            ? new Flow(null, Array.Empty<HashSet<SymbolId>>())
-                            : AnalyzeBlock(conjugate.Apply, within.Next, inLoop);
-                        // Lowering executes Within, Apply, then inverse(Within). An invertible Within cannot
-                        // itself transfer ownership, so replaying its source statements is sufficient for
-                        // the ownership dimension: it checks the same storage reads against moves made by
-                        // Apply. This catches a value consumed in Apply and then needed by the synthesized
-                        // cleanup, even though that cleanup does not have source statement IDs yet.
-                        var cleanup = apply.Next is null
-                            ? new Flow(null, Array.Empty<HashSet<SymbolId>>())
-                            : AnalyzeBlock(conjugate.Within, apply.Next, inLoop);
-                        state = cleanup.Next;
-                        breaks.AddRange(within.Breaks.Select(Copy));
-                        breaks.AddRange(apply.Breaks.Select(Copy));
-                        breaks.AddRange(cleanup.Breaks.Select(Copy));
-                        break;
-                    }
-
                     case QReturn:
                         state = null;
                         break;
 
-                    case QBreak when inLoop:
-                        breaks.Add(Copy(state));
-                        state = null;
-                        break;
                 }
             }
 
@@ -244,7 +219,7 @@ internal static class OwnershipValidation
             HashSet<SymbolId>? after;
             if (conditionAfterBody)
             {
-                // repeat executes at least once; only a completed first iteration or a break can exit.
+                // repeat executes at least once; a completed iteration is its only source-level exit.
                 after = JoinMany(normalExitPossible && firstNext is not null
                     ? exits.Prepend(firstNext)
                     : exits);
@@ -253,7 +228,7 @@ internal static class OwnershipValidation
             {
                 // Only an unknown/empty for or a non-true while may execute zero times. A statically
                 // non-empty for must enter its body, so an incoming path cannot bypass a non-returning
-                // first iteration. A statically-true while exits only via break.
+                // first iteration. A statically-true while has no source-level exit.
                 IEnumerable<HashSet<SymbolId>> paths = normalExitPossible && mayExecuteZero
                     ? exits.Prepend(Copy(incoming))
                     : exits;
@@ -270,16 +245,7 @@ internal static class OwnershipValidation
             if (BoundFolder.Fold(loop.From, scope) is not BoundNum from
                 || BoundFolder.Fold(loop.To, scope) is not BoundNum to)
                 return null;
-            var step = loop.Step is null
-                ? 1
-                : BoundFolder.Fold(loop.Step, scope) is BoundNum explicitStep ? explicitStep.Value : 0;
-            if (step == 0) return null;
-            if (step > 0)
-            {
-                if (from.Value > to.Value) return 0;
-                return from.Value == to.Value ? 1 : 2;
-            }
-            if (from.Value < to.Value) return 0;
+            if (from.Value > to.Value) return 0;
             return from.Value == to.Value ? 1 : 2;
         }
 

@@ -833,10 +833,9 @@ function stagesHtml(fileName, result) {
     ${stageColumn('1. AST (파서 출력)', result.ast)}
     ${stageColumn('2. Resolved HIR', result.ir)}
     ${stageColumn('3. HIR 심벌 테이블', result.symbols)}
-    ${stageColumn('4. HIR 자동 청소 분석', result.uncompute)}
-    ${stageColumn('5. SSA/CFG MIR', result.mir)}
-    ${stageColumn('6. MIR 효과 분석', result.mirEffects)}
-    ${stageColumn('7. OpenQASM 3', result.qasm)}
+    ${stageColumn('4. SSA/CFG MIR', result.mir)}
+    ${stageColumn('5. MIR 효과 분석', result.mirEffects)}
+    ${stageColumn('6. OpenQASM 3', result.qasm)}
   </main>
 </body></html>`;
 }

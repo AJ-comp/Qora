@@ -335,18 +335,6 @@ public class OwnershipParameterTests
     }
 
     [Fact]
-    public void AdjointCallCannotTransferOwnership()
-    {
-        Compiler.RejectsExactly("""
-            operation Consume(move values: int[]) {}
-            operation Main() {
-                var values: int[] = [1];
-                Adjoint Consume(move values);
-            }
-            """, "QSEM001");
-    }
-
-    [Fact]
     public void InvalidMoveCallDoesNotPoisonTheBindingForLaterStatements()
     {
         // The call contract is invalid because a borrowed formal cannot receive a moved actual.  In
@@ -559,12 +547,16 @@ public class OwnershipParameterTests
 
         var target = Assert.IsType<OpenQasmArtifact>(result.Targets.OpenQasm);
         var targetObserve = Assert.Single(
-            target.Program.Program.Operations,
-            operation => operation.DisplayName == "Observe");
-        var targetDeclaration =
-            Assert.IsType<QDecl>(Assert.Single(targetObserve.Body));
-        var targetValue = Assert.IsType<QText>(targetDeclaration.Value);
-        Assert.Equal(2, Assert.IsType<QNumLit>(targetValue.Tree).Value);
+            target.Program.Definitions,
+            operation =>
+                operation.EmittedName.StartsWith(
+                    "Observe",
+                    StringComparison.Ordinal));
+        Assert.Contains(
+            MirQasmTestModel.Statements(targetObserve.Body)
+                .OfType<MirQasmAssignmentStatement>(),
+            assignment =>
+                assignment.Value is MirQasmLiteralExpression { Text: "2" });
     }
 
     [Fact]

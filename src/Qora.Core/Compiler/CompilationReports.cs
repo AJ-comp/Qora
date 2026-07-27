@@ -15,22 +15,4 @@ public static class CompilationReports
         ArgumentNullException.ThrowIfNull(artifact);
         return SymbolTableBuilder.Format(artifact.Program, artifact.Model);
     }
-
-    /// <summary>
-    /// Render automatic-uncomputation verdicts from an effect-analysis artifact.
-    /// A validation-only artifact has no quantum effect history and is rejected instead of producing an
-    /// apparently valid empty report.
-    /// </summary>
-    public static string FormatUncompute(HirSemanticArtifact artifact)
-    {
-        ArgumentNullException.ThrowIfNull(artifact);
-        if (artifact.Phase != HirSemanticPhase.EffectAnalysis)
-        {
-            throw new ArgumentException(
-                "An uncompute report requires an effect-analysis HIR artifact.",
-                nameof(artifact));
-        }
-
-        return UncomputeReport.Format(artifact.Program, artifact.Model);
-    }
 }

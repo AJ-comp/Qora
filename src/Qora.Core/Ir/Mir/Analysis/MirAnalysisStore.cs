@@ -12,6 +12,8 @@ public sealed class MirAnalysisStore
     private readonly MirSnapshot _snapshot;
     private readonly ConcurrentDictionary<MirCallableId, Lazy<MirControlFlowSnapshot>> _controlFlow =
         new();
+    private readonly ConcurrentDictionary<MirCallableId, Lazy<MirControlRegionSnapshot>> _controlRegions =
+        new();
     private readonly ConcurrentDictionary<MirCallableId, Lazy<MirStorageProvenanceSnapshot>>
         _storageProvenance = new();
     private readonly ConcurrentDictionary<MirCallableId, Lazy<MirMemoryStateSnapshot>> _memoryState =
@@ -55,6 +57,23 @@ public sealed class MirAnalysisStore
             callable,
             _ => NewLazy(
                 () => MirStorageProvenanceAnalysis.AnalyzeUnchecked(Program, source))).Value;
+    }
+
+    /// <summary>
+    /// Natural-loop and structured-region facts derived from the canonical CFG for this exact snapshot.
+    /// The result never stores a second executable tree; target lowerings remain consumers of MIR blocks.
+    /// </summary>
+    public MirControlRegionSnapshot ControlRegions(MirCallableRef reference)
+    {
+        var source = RequireCallable(reference);
+        var callable = reference.Callable;
+        return _controlRegions.GetOrAdd(
+            callable,
+            _ => NewLazy(
+                () => MirControlRegionAnalysis.AnalyzeVerified(
+                    Program,
+                    source,
+                    ControlFlow(reference)))).Value;
     }
 
     public MirMemoryStateSnapshot MemoryState(MirCallableRef reference)

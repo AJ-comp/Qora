@@ -34,8 +34,8 @@ public class GeneralIndexExpressionSemanticTests
             targetDiagnostic.Origin);
         Assert.Equal(TargetBackend.OpenQasm, targetOrigin.Backend);
         Assert.Equal(
-            compiled.Hir.AdjointMaterialized!.Id,
-            Assert.IsType<TargetDiagnosticInput.Hir>(targetOrigin.Input).Snapshot);
+            compiled.Mir!.Id,
+            targetOrigin.Input);
         Assert.DoesNotContain(compiled.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(), error => error.Code is "CE0001" or "QSEM005" or "QSEM007");
 
         Assert.DoesNotContain(
@@ -47,7 +47,7 @@ public class GeneralIndexExpressionSemanticTests
         var fact = Assert.Single(commonModel.UnprovenIndexes);
         Assert.Equal(("Main", "xs", "idx()"), (fact.Op, fact.Array, fact.Index));
 
-        var targetError = Assert.Single(OpenQasmBoundsValidation.Run(commonModel));
+        var targetError = targetDiagnostic.Error;
         Assert.Equal("QSEM030", targetError.Code);
         Assert.Contains("var i: int = idx();", targetError.Message);
         Assert.True(fact.Span.HasValue);
@@ -162,7 +162,7 @@ public class GeneralIndexExpressionSemanticTests
     }
 
     [Fact]
-    public void CollectsCommonAndOpenQasmBoundsErrorsTogether()
+    public void InvalidHirStopsBeforeAnyTargetPolicyRuns()
     {
         var compiled = Compiler.Compile("""
             operation Main(n: int) {
@@ -172,7 +172,13 @@ public class GeneralIndexExpressionSemanticTests
             """);
 
         Assert.Contains(compiled.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(), error => error.Code == "QSEM010");
-        Assert.Contains(compiled.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(), error => error.Code == "QSEM030");
+        Assert.DoesNotContain(
+            compiled.Diagnostics,
+            diagnostic => diagnostic.Stage == CompilationStage.OpenQasm);
+        Assert.DoesNotContain(
+            compiled.Diagnostics.Select(diagnostic => diagnostic.Error),
+            error => error.Code == "QSEM030");
+        Assert.Null(compiled.Mir);
     }
 
     [Fact]
@@ -229,21 +235,10 @@ public class GeneralIndexExpressionSemanticTests
     }
 
     [Fact]
-    public void QasmBackendRequiresAnExplicitSemanticContext()
+    public void QasmBackendRequiresAnExactMirSnapshot()
     {
         Assert.Throws<ArgumentNullException>(() =>
-            QasmBackend.Run(
-                semantics: null!,
-                Array.Empty<string>()));
+            QasmBackend.Run(null!));
     }
 
-    [Fact]
-    public void ConvertsASpanlessFactToASpanlessQasmDiagnostic()
-    {
-        var model = new HirSemanticModel();
-        model.AddUnprovenIndex(new UnprovenIndex("Imported", "xs", "idx()", null, null));
-
-        var error = Assert.Single(OpenQasmBoundsValidation.Run(model));
-        Assert.Equal((-1, -1), (error.Start, error.End));
-    }
 }

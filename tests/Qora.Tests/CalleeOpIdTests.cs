@@ -42,18 +42,7 @@ public class CalleeOpIdTests
         Assert.Null(x.CalleeOpId);
     }
 
-    // --- 3. Adjoint Foo is still bound to Foo — the reference survives the functor ---
-    [Fact]
-    public void AdjointCallBindsToTheForwardOp()
-    {
-        var r = Parse("operation Foo(p: Qubit){ X(p); }\noperation Main(){ use a=Qubit[1]; Adjoint Foo(a[0]); }");
-        var foo = r.Hir.Resolved!.Program!.Operations.Single(o => o.Name == "Foo");
-        var call = SoleUserCall(r.Hir.Resolved!.Program!);
-        Assert.Equal("Adjoint", call.Functors.Single());
-        Assert.Equal(foo.Id, call.CalleeOpId);
-    }
-
-    // --- 4. THE point: a generic call is bound to the generic pre-mono, then RE-POINTED to the size
+    // --- 3. THE point: a generic call is bound to the generic pre-mono, then RE-POINTED to the size
     //        specialization in the analyzed (mono) tree — the exact domain shift the reference survives ---
     [Fact]
     public void GenericCallRepointsFromGenericToSpecialization()

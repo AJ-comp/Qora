@@ -10,8 +10,6 @@ namespace Qora.Ir.Passes;
 ///
 /// Rules (codes are stable identifiers for editor tooling):
 /// <list type="bullet">
-///   <item><b>QSEM001</b> — <c>Adjoint Foo</c> where <c>Foo</c> has no inverse (reason chain from
-///         <see cref="Inverter"/>).</item>
 ///   <item><b>QSEM002</b> — <c>Controlled Foo</c> on a user operation (no <c>ctrl @</c> on defs).</item>
 ///   <item><b>QSEM003</b> — a functor on <c>Reset</c>/<c>ResetAll</c> (reset is a statement, not a gate).</item>
 ///   <item><b>QSEM004</b> — a bare measurement statement (only assignment forms exist).</item>
@@ -35,7 +33,7 @@ namespace Qora.Ir.Passes;
 ///         built-ins), or declaring the reserved <c>Qora.Intrinsic</c> namespace (raised by the
 ///         <see cref="Resolver"/>). Inside a namespace, gate names ARE allowed (Q#-style) — an
 ///         ambiguous use is QSEM018, qualified by <c>MyLib.H(…)</c> / <c>Qora.Intrinsic.H(…)</c>.
-///         Every other name is free — the <see cref="NameMangler"/> pass renames emitted identifiers
+///         Every other name is free — MIR-to-target name allocation renames emitted identifiers
 ///         only when they collide with target-world names (stdgates, keywords) or another emitted name.</item>
 ///   <item><b>QSEM014</b> — overlapping gate operands, or one storage binding passed into multiple
 ///         parameter slots when at least one slot is mutable or moved.</item>
@@ -63,7 +61,7 @@ namespace Qora.Ir.Passes;
 ///         no numeric value, so any of these would emit invalid QASM. (A whole qubit passed straight into a
 ///         value slot, e.g. <c>Rx(q, …)</c>, is the argument-KIND error QSEM006.)</item>
 ///   <item><b>QSEM023</b> — reserved. Emitted-name collisions are no longer rejected here; the
-///         <see cref="NameMangler"/> pass auto-renames colliding emitted identifiers and records a
+///         the MIR-to-target name allocator auto-renames colliding emitted identifiers and records a
 ///         <c>// Qora:</c> note.</item>
 ///   <item><b>QSEM028</b> — an operation name used as a VALUE (<c>var x = Foo</c>, or an op name in any
 ///         expression / argument / index slot). An operation can only be CALLED (<c>Foo(…)</c>); it has no
@@ -72,8 +70,10 @@ namespace Qora.Ir.Passes;
 ///   <item><b>QSEM029</b> — an invalid array shape, initializer, whole-array assignment, or member access.</item>
 ///   <item><b>QSEM030</b> is deliberately NOT emitted here. A failed in-bounds proof is recorded as
 ///         <see cref="UnprovenIndex"/> data; the OpenQASM backend turns final unresolved facts into QSEM030.
-///         A runtime-capable backend still needs stable site identity and a lowering policy before it can
-///         handle this category differently. An index proven OUT of range remains QSEM016 here.</item>
+///         HIR-to-MIR lowering translates each fact's semantic site identity into a typed indexed-access
+///         reference. A runtime-capable backend still needs a checked-access lowering and failure policy
+///         before it can handle this category differently. An index proven OUT of range remains QSEM016
+///         here.</item>
 ///   <item><b>QSEM031</b> — an expression or nested-block structure deeper than the compiler's recursion
 ///         limit (only ever machine-generated). Rejected up front so pathological depth is a clean
 ///         diagnostic, not an uncatchable stack overflow.</item>
@@ -83,10 +83,8 @@ namespace Qora.Ir.Passes;
 ///         asymmetry between <c>bit[]</c> and the other <c>T[]</c> parameters stays unobservable.</item>
 ///   <item><b>QSEM035</b> — a <c>return</c> in an <c>operation</c> (void), or a <c>function</c> with a path
 ///         that produces no value. Nothing is said about WHERE a return stands: it may sit anywhere a
-///         statement may, and <see cref="ReturnFlattening"/> reshapes the function into the single-bottom-
-///         return form the execution target needs. The coverage predicate is literally the pass's own
-///         (<c>ReturnFlattening.AlwaysReturns</c>), so what validation accepts is exactly what it can
-///         reshape — the two can never drift apart.</item>
+///         statement may. HIR validates that every path returns; MIR control-flow lowering preserves those
+///         paths and target lowering emits the corresponding structured return behavior.</item>
 ///   <item><b>QSEM036</b> — a WHOLE <c>bit[]</c> register read as a NUMBER (assigned to an <c>int</c>, used
 ///         in arithmetic, used as a bare truth condition, compared against a number), or compared to a
 ///         register of a different width, or ordered (<c>&lt;</c>/<c>&gt;</c>) against another register. A bit
@@ -104,8 +102,8 @@ namespace Qora.Ir.Passes;
 ///         forwarding a borrowed/read-only parameter into a stronger slot.</item>
 ///   <item><b>QSEM039</b> — a binding is used after ownership was transferred with <c>move</c>, including
 ///         after a branch on which it may have been moved or on a later loop iteration.</item>
-///   <item><b>QSEM040</b> — the source set contains no operation or function, so no HIR program can be
-///         published or compiled.</item>
+///   <item><b>QSEM040</b> — the source set contains no runnable operation. Functions cannot own the
+///         program entry point.</item>
 /// </list>
 /// Earlier pipeline steps own the remaining codes, and each step's errors preempt this validator:
 /// QSEM020 (import file not found/unreadable) comes from the compiler's source graph loader;
@@ -154,7 +152,7 @@ internal static class QoraValidator
     {
         model = null;
         var errors = new List<QoraError>();
-        var unproven = new List<UnprovenIndex>();   // rung B′ data: accesses whose bounds proof never settled
+        var unproven = new List<UnprovenIndexWork>();   // rung B′ data: accesses whose bounds proof never settled
         var deferred = new List<DeferredSizeCheck>();   // rung B′ data: verdicts postponed to the post-mono re-check
         if (program is null) return errors;
 
@@ -188,8 +186,13 @@ internal static class QoraValidator
         var calls = new List<ArrayCallFact>();
         var ownershipWork = new List<OwnershipWork>();
 
-        var inverter = new Inverter(program.Operations);
-        var entry = program.Operations.FirstOrDefault(o => o.Name == "Main") ?? program.Operations[0];
+        var entry = program.EntryOperation;
+        if (entry is null)
+            Add(
+                errors,
+                "QSEM040",
+                "the program contains functions but no operation; a function cannot be the program entry point",
+                program.Operations[0].Span);
 
         // QSEM008 / QSEM022 — duplicate definitions (everything downstream keys ops by name). Names are
         // FQNs after resolution, so the check is naturally per-namespace: the same simple name in two
@@ -203,7 +206,7 @@ internal static class QoraValidator
                 dup.Skip(1).First().Span ?? dup.First().Span);   // point at the SECOND definition
 
         // QSEM010 — the entry op has no caller, so parameters can never be supplied.
-        if (entry.Params.Count > 0)
+        if (entry is { Params.Count: > 0 })
             Add(errors, "QSEM010", $"the entry operation `{entry.Name}` cannot take parameters; allocate qubits with `use` inside it instead",
                 entry.Params[0].Span ?? entry.Span);
 
@@ -218,7 +221,7 @@ internal static class QoraValidator
         }
 
         // Name collisions in the emitted QASM (op vs op, or a declaration vs a def name) are NOT rejected:
-        // NameMangler auto-resolves them by appending `_` and records a `// Qora:` note in the output, so
+        // MIR-to-target name allocation auto-resolves them by appending `_`, so
         // any validated program emits. (Same-source-name duplicates are still QSEM008/015/022 above.)
 
         // The unified HIR scope graph creates program, namespace, and callable scopes before any body so
@@ -255,7 +258,6 @@ internal static class QoraValidator
                     case QFor f: CollectCallTargets(f.Body, ids); break;
                     case QWhile w: CollectCallTargets(w.Body, ids); break;
                     case QRepeat r: CollectCallTargets(r.Body, ids); break;
-                    case QConjugate c: CollectCallTargets(c.Within, ids); CollectCallTargets(c.Apply, ids); break;
                 }
             }
         }
@@ -340,7 +342,7 @@ internal static class QoraValidator
             var willBeRechecked = !IsGenericOp(op) || reachedIds.Contains(op.Id);
             model.SetWillBeRechecked(op.Id, willBeRechecked);   // the verdict is model DATA, not a discarded local — see the model doc
             var validMoves = new Dictionary<int, IReadOnlyList<Symbol>>();
-            var ctx = new Ctx(op, entry.Id, entry.Name, ops, opById, scopeGraph, inverter, errors, unproven,
+            var ctx = new Ctx(op, entry?.Id, entry?.Name, ops, opById, scopeGraph, errors, unproven,
                 deferred, opNeeds, new ArrayFloorSink(op.Id, calls), typeMismatchCandidates,
                 new Dictionary<QCallNode, bool>(ReferenceEqualityComparer.Instance), validMoves,
                 invalidOwnershipStatements, willBeRechecked);
@@ -416,15 +418,18 @@ internal static class QoraValidator
 
         // Rung B′ fact publication. The walk above RECORDS unproven accesses as target-independent data;
         // it does not turn them into diagnostics. OpenQASM rejects the final list because it has no runtime
-        // failure channel. A future checked-access backend must additionally define stable site identity,
-        // runtime failure, and dynamic-alias policies.
+        // failure channel. HIR-to-MIR lowering translates every semantic site into a typed instruction,
+        // access-kind, and operand-ordinal reference. A future checked-access backend must still define
+        // runtime failure and dynamic-alias policies.
         // Preserve every visited access site in walk order. A lowering may produce two value-equal entries
         // from one source span (for example the pre-loop and back-edge copies of a measured while condition);
         // collapsing them here would discard backend work. OpenQASM de-duplicates only the user-facing
-        // diagnostics it derives. Stable expression-site identity remains a prerequisite for a future
-        // runtime-check rewriting backend.
+        // diagnostics it derives.
         foreach (var u in unproven)
-            model.AddUnprovenIndex(u);
+            model.AddUnprovenIndex(
+                u.Fact,
+                u.OwningStatementId,
+                u.ExactSite);
 
         // The deferral ledger — recorded during the walk, model DATA afterwards. No diagnostic is derived
         // here: a deferral is a promise, not a failure. On today's pipeline the post-monomorphization
@@ -476,7 +481,6 @@ internal static class QoraValidator
                         case QFor f: stack.Push((f.Body, depth + 1)); break;
                         case QWhile w: stack.Push((w.Body, depth + 1)); break;
                         case QRepeat r: stack.Push((r.Body, depth + 1)); break;
-                        case QConjugate c: stack.Push((c.Within, depth + 1)); stack.Push((c.Apply, depth + 1)); break;
                     }
                 }
             }
@@ -516,10 +520,10 @@ internal static class QoraValidator
     /// supplies declaration lookup and stable node-and-role scope lookup for branch and loop recursion.
     /// </summary>
     private sealed record Ctx(
-        QOperation Op, int EntryOpId, string EntryName, HashSet<string> OpNames,
-        Dictionary<int, QOperation> OpById, HirScopeGraph ScopeGraph, Inverter Inverter,
+        QOperation Op, int? EntryOpId, string? EntryName, HashSet<string> OpNames,
+        Dictionary<int, QOperation> OpById, HirScopeGraph ScopeGraph,
         List<QoraError> Errors,
-        List<UnprovenIndex> Unproven,
+        List<UnprovenIndexWork> Unproven,
         List<DeferredSizeCheck> Deferred,
         Dictionary<string, long> ParamNeeds,
         ArrayFloorSink Floors,
@@ -541,6 +545,16 @@ internal static class QoraValidator
         Dictionary<int, IReadOnlyList<Symbol>> ValidMoves,
         HashSet<int> InvalidStatements,
         bool DeferUnknownControlFlow);
+
+    /// <summary>
+    /// Validation-local bridge between a typed semantic access identity and the exact immutable HIR object
+    /// which owns it. Publication moves the object-keyed relation into the snapshot-bound semantic model;
+    /// MIR lowering then consumes it once and emits an exact instruction reference.
+    /// </summary>
+    private sealed record UnprovenIndexWork(
+        UnprovenIndex Fact,
+        int OwningStatementId,
+        object ExactSite);
 
     /// <summary>One call's classical-array argument, recorded as DATA during the walk (rung B'/P4).
     /// <see cref="ArgLength"/> is the argument's known length (a local/literal array) — a CHECK fact,
@@ -677,7 +691,7 @@ internal static class QoraValidator
                 case QUse u:
                     if (u.Size < 1)   // 0, or -1 from a size that overflowed a 32-bit int (`Qubit[99999999999]`)
                         Add(ctx.Errors, "QSEM016", $"in `{opName}`: `use {u.Name} = Qubit[…];` has an invalid register size; it must be a whole number from 1 to {int.MaxValue}", u.Span);
-                    if (ctx.Op.Id != ctx.EntryOpId)
+                    if (ctx.EntryOpId is int entryOperationId && ctx.Op.Id != entryOperationId)
                         Add(ctx.Errors, "QSEM012", $"in `{opName}`: `use {u.Name} = Qubit[{u.Size}];` is not supported inside an operation; allocate in `{ctx.EntryName}` and pass the qubits as a parameter", u.Span);
                     else if (inControlFlow)
                         Add(ctx.Errors, "QSEM012", $"in `{opName}`: `use {u.Name} = ...` inside a loop or branch is not supported; allocate once at the top level", u.Span);
@@ -688,7 +702,7 @@ internal static class QoraValidator
                     if (d.IsArray)
                     {
                         // Array placement is a TARGET limitation, not a language rule: OpenQASM wants
-                        // arrays at global scope, so the QASM backend's ArrayLocalHoisting pass threads a
+                        // arrays at global scope, so MIR-to-OpenQASM lowering threads a
                         // def-local array as a hidden reference parameter (and hoists a nested one to its
                         // scope top). The language itself allows `T[]` locals anywhere a scalar goes —
                         // the QSEM012 arm that once rejected them here was that target rule leaking out.
@@ -723,7 +737,14 @@ internal static class QoraValidator
                     // CheckExprIndexes bounds-checks every index in the value, INCLUDING a measurement target
                     // (direct or nested in an array literal) — the single measure-index check, so no dedicated
                     // CheckQubitIndex is repeated here (that duplicated the diagnostic).
-                    CheckExprIndexes(d.Value, scope, opName, ctx, d.Span, flow);
+                    CheckExprIndexes(
+                        d.Value,
+                        d.Id,
+                        scope,
+                        opName,
+                        ctx,
+                        d.Span,
+                        flow);
                     // QSEM017 — a measurement result is a `bit`, so measuring into a non-bit target is a type
                     // error, whether the measurement is the whole value (`var x: int = M(q)`) or an element of an
                     // array literal (`var a: int[] = [M(q)]`, which would otherwise emit `measure` inside a `{…}`
@@ -766,7 +787,16 @@ internal static class QoraValidator
                     if (target is { IsArray: true } && a.Index is null)
                         Add(ctx.Errors, "QSEM029", $"in `{opName}`: whole-array assignment to `{a.Name}` is not supported; assign one element with `{a.Name}[i] = value`", a.Span);
                     if (a.Index is not null)
-                        CheckIndexedAccess(a.Name, a.Index, scope, opName, ctx, a.Span, flow);
+                        CheckIndexedAccess(
+                            a.Name,
+                            a.Index,
+                            a,
+                            scope,
+                            opName,
+                            ctx,
+                            a.Span,
+                            flow,
+                            a.Id);
                     // QSEM024 — `const` is an IMMUTABLE BINDING (JS/Q#-let style): it may hold any value,
                     // including a measurement result, but can never be assigned again. The symbol table
                     // resolves `a.Name` to its nearest binding, so a local `var` shadowing an outer `const`
@@ -792,13 +822,27 @@ internal static class QoraValidator
                     }
                     // CheckExprIndexes bounds-checks the measure target too (via its QMeasure case) — the
                     // single measure-index check, so no dedicated CheckQubitIndex is repeated (it duplicated).
-                    CheckExprIndexes(a.Value, scope, opName, ctx, a.Span, flow);
+                    CheckExprIndexes(
+                        a.Value,
+                        a.Id,
+                        scope,
+                        opName,
+                        ctx,
+                        a.Span,
+                        flow);
                     CommitTypeMismatch(a.Id, assignmentCallsAreValid, ctx);
                     break;
 
                 case QIf i:
                     CheckCondition(i.Cond, scope, ctx, opName, i.Span);
-                    CheckTextIndexes(i.Cond.Tree, scope, opName, ctx, i.Span, flow);
+                    CheckTextIndexes(
+                        i.Cond.Tree,
+                        scope,
+                        opName,
+                        ctx,
+                        i.Span,
+                        flow,
+                        i.Id);
                     // P5 — the then-branch runs only when the guard held, so a guarded index is proven there.
                     // The guard's names resolve HERE, at the if's own scope: the facts are about these
                     // variables, and a shadowing binder inside gets a different Symbol — no leak either way.
@@ -815,9 +859,22 @@ internal static class QoraValidator
                     // the bound into a variable first and use that.
                     if (QNodes.ContainsCall(f.From) || QNodes.ContainsCall(f.To))
                         Add(ctx.Errors, "QSEM005", $"in `{opName}`: a `for` bound cannot contain a call or measurement; compute it into a variable first and use a numeric or variable bound", f.Span);
-                    CheckTextIndexes(f.From, scope, opName, ctx, f.Span, flow);
-                    CheckTextIndexes(f.To, scope, opName, ctx, f.Span, flow);
-                    // Step has no surface syntax (synthesized "-1" by the inverter, post-validation) and carries no index.
+                    CheckTextIndexes(
+                        f.From,
+                        scope,
+                        opName,
+                        ctx,
+                        f.Span,
+                        flow,
+                        f.Id);
+                    CheckTextIndexes(
+                        f.To,
+                        scope,
+                        opName,
+                        ctx,
+                        f.Span,
+                        flow,
+                        f.Id);
                     // P2/P3 — the loop variable ranges over From..To inside the body. The bounds are FOLDED
                     // HERE, in the header's scope — the scope the emitted QASM evaluates them in — so a
                     // shadowing `const` inside the body cannot resolve a bound name to a different value than
@@ -854,7 +911,14 @@ internal static class QoraValidator
                     var whileBody = At(w, HirScopeSiteRole.WhileBody);
                     var whileWiped = WithoutBodyAssigned(flow, w.Body, whileBody, ctx.ScopeGraph);
                     // The condition's own indexes are checked under those wiped facts (not its own guard).
-                    CheckTextIndexes(w.Cond.Tree, scope, opName, ctx, w.Span, whileWiped);
+                    CheckTextIndexes(
+                        w.Cond.Tree,
+                        scope,
+                        opName,
+                        ctx,
+                        w.Span,
+                        whileWiped,
+                        w.Id);
                     // A `while` condition holds at the TOP of every iteration and is RE-checked each time, so
                     // its guard narrows the body exactly as an `if` narrows its then-branch — applied AFTER the
                     // back-edge wipe (the condition re-establishes it every iteration, so a reassignment does
@@ -875,11 +939,14 @@ internal static class QoraValidator
                     // did). Checking it against the enclosing scope made a legal body-local argument look like
                     // an undeclared one.
                     CheckCondition(r.Until, repeatBody, ctx, opName, r.Span);
-                    CheckTextIndexes(r.Until.Tree, repeatBody, opName, ctx, r.Span, repeatFlow);
-                    break;
-                case QConjugate c:
-                    Walk(c.Within, At(c, HirScopeSiteRole.ConjugateWithin), ctx, inControlFlow, flow);
-                    Walk(c.Apply, At(c, HirScopeSiteRole.ConjugateApply), ctx, inControlFlow, flow);
+                    CheckTextIndexes(
+                        r.Until.Tree,
+                        repeatBody,
+                        opName,
+                        ctx,
+                        r.Span,
+                        repeatFlow,
+                        r.Id);
                     break;
                 case QReturn ret:
                     var returnCallsAreValid = true;
@@ -891,7 +958,14 @@ internal static class QoraValidator
                     // ValidateFunctionShape too — this covers a return nested in a returned sub-expression.)
                     if (ret.Value is QText { Tree: { } retTree })
                         returnCallsAreValid = CheckExprCalls(retTree, scope, ctx, opName, ret.Span);
-                    CheckExprIndexes(ret.Value, scope, opName, ctx, ret.Span, flow);
+                    CheckExprIndexes(
+                        ret.Value,
+                        ret.Id,
+                        scope,
+                        opName,
+                        ctx,
+                        ret.Span,
+                        flow);
                     CommitTypeMismatch(ret.Id, returnCallsAreValid, ctx);
                     break;
             }
@@ -956,10 +1030,6 @@ internal static class QoraValidator
                     break;
                 case QRepeat r:
                     foreach (var b in r.Body) Collect(b, At(r, HirScopeSiteRole.RepeatBody));
-                    break;
-                case QConjugate c:
-                    foreach (var b in c.Within) Collect(b, At(c, HirScopeSiteRole.ConjugateWithin));
-                    foreach (var b in c.Apply) Collect(b, At(c, HirScopeSiteRole.ConjugateApply));
                     break;
             }
         }
@@ -1179,7 +1249,7 @@ internal static class QoraValidator
                 case QUse u:
                     Add(ctx.Errors, "QSEM033", $"in function `{name}`: `use {u.Name} = ...` is not allowed; a function is classical and cannot allocate qubits", u.Span ?? fn.Span);
                     break;
-                case QGate g when g.Functors.Count == 0
+                case QGate g when g.Modifiers.Count == 0
                                       && g.CalleeOpId is int operationId
                                       && ctx.OpById.TryGetValue(operationId, out var callee)
                                       && callee.IsFunction:
@@ -1209,11 +1279,8 @@ internal static class QoraValidator
     /// matter what runs it. A block always returns iff SOME statement in it is a <c>return</c>, or an
     /// <c>if</c>/<c>else</c> whose branches both always return. A loop never counts — it may run zero times.
     ///
-    /// This is deliberately the SAME predicate <see cref="ReturnFlattening"/> uses to decide where a skipped
-    /// tail belongs, so a function the validator accepts is exactly one the pass can reshape — but the rule
-    /// lives HERE, in the language layer, because it is the language's. The QASM pass reads it; if that pass
-    /// is ever removed (a target that runs a <c>return</c> from a nested block needs no reshaping), this check
-    /// stays exactly as is.
+    /// This predicate belongs to the language layer. MIR lowering consumes the accepted control flow, and
+    /// each target decides how to serialize the already-valid return paths without changing this rule.
     /// </summary>
     internal static bool AlwaysReturns(IReadOnlyList<QStmt> body) =>
         body.Any(s => s switch
@@ -1274,6 +1341,7 @@ internal static class QoraValidator
                 CheckIndexedAccess(
                     qa.Reg,
                     qa.Index,
+                    qa,
                     scope,
                     opName,
                     ctx,
@@ -1325,7 +1393,7 @@ internal static class QoraValidator
                 }
 
         // QSEM009 — the entry op is emitted as the QASM top level, not as a def: nothing can call it.
-        if (userCallee?.Id == ctx.EntryOpId)
+        if (ctx.EntryOpId is int entryOperationId && userCallee?.Id == entryOperationId)
         {
             Add(errors, "QSEM009", $"in `{opName}`: the entry operation `{ctx.EntryName}` cannot be called (its body is the program's top level, not a def)", g.Span);
             return;
@@ -1341,31 +1409,14 @@ internal static class QoraValidator
         if (userCallee is not null)
         {
             // QSEM002 — OpenQASM gate modifiers apply to gates only, never to def subroutine calls.
-            if (g.Functors.Contains("Controlled"))
+            if (g.Modifiers.Contains(QGateModifier.Controlled))
             {
                 Add(errors, "QSEM002", $"in `{opName}`: `Controlled {g.Name}` is not supported: OpenQASM cannot apply ctrl @ to a def", g.Span);
                 return;
             }
 
-            // Ownership transfer has no inverse: reversing this call cannot restore the caller's consumed
-            // binding. The callee body may itself be unitary, but this particular invocation is directional.
-            if (g.Functors.FirstOrDefault() == "Adjoint"
-                && g.Args.Any(argument => argument.Ownership == QOwnershipMode.Moved))
-            {
-                Add(errors, "QSEM001", $"in `{opName}`: `Adjoint {g.Name}` cannot transfer ownership; an inverse call cannot restore a binding consumed by `move`", g.Span);
-                return;
-            }
-
-            // QSEM001 — Adjoint on a user operation compiles to a synthesized inverse def, which must exist.
-            if (g.Functors.FirstOrDefault() == "Adjoint"
-                && !ctx.Inverter.TryInvertOperation(userCallee.Id, out _, out var reason))
-            {
-                Add(errors, "QSEM001", $"in `{opName}`: `Adjoint {g.Name}` cannot be compiled: {reason}", g.Span);
-                return;
-            }
-
-            // QSEM006 — a def call must match the def's signature (an Adjoint call shares it). The callee
-            // declaration is the identity bound by Resolver; its spelling is diagnostic data only.
+            // QSEM006 — the callee declaration is the identity bound by Resolver; its spelling is
+            // diagnostic data only.
             CheckCall(userCallee, g.Args, "", scope, opName, errors, g.Span, ctx, ctx.Floors, g.Id,
                 callErrorCountBeforeChecks);
             return;
@@ -1380,18 +1431,20 @@ internal static class QoraValidator
         }
 
         // QSEM003 — reset is a statement, not a gate: no inv @ / ctrl @ on it.
-        if (QoraGates.NonUnitary.Contains(g.Name) && g.Functors.Count > 0)
+        if (QoraGates.NonUnitary.Contains(g.Name) && g.Modifiers.Count > 0)
         {
-            Add(errors, "QSEM003", $"in `{opName}`: `{string.Join(" ", g.Functors)} {g.Name}` is not supported: reset is not a gate and takes no modifiers", g.Span);
+            Add(errors, "QSEM003", $"in `{opName}`: `{string.Join(" ", g.Modifiers)} {g.Name}` is not supported: reset is not a gate and takes no modifiers", g.Span);
             return;
         }
 
         // QSEM006 — a built-in gate is an ICallableSig too: QoraGates.SigOf derives its slots from GateInfo
         // (a rotation exposes a leading angle value slot; every qubit slot broadcasts), and a Controlled
         // functor adds one leading qubit slot. So the SAME CheckCall validates count + per-slot kind.
-        var gateSig = QoraGates.SigOf(g.Name, g.Functors.Contains("Controlled") ? 1 : 0);
+        var gateSig = QoraGates.SigOf(
+            g.Name,
+            g.Modifiers.Contains(QGateModifier.Controlled) ? 1 : 0);
         if (gateSig is not null)
-            CheckCall(gateSig, g.Args, g.Functors.Count > 0 ? string.Join(" ", g.Functors) + " " : "",
+            CheckCall(gateSig, g.Args, g.Modifiers.Count > 0 ? string.Join(" ", g.Modifiers) + " " : "",
                 scope, opName, errors, g.Span, ctx, statementId: g.Id,
                 initialErrorCount: callErrorCountBeforeChecks);
     }
@@ -1799,6 +1852,7 @@ internal static class QoraValidator
 
     private static void CheckExprIndexes(
         QExpr expr,
+        int owningStatementId,
         Scope scope,
         string opName,
         Ctx ctx,
@@ -1808,11 +1862,25 @@ internal static class QoraValidator
         switch (expr)
         {
             case QText text:
-                CheckTextIndexes(text.Tree, scope, opName, ctx, span, bounds);
+                CheckTextIndexes(
+                    text.Tree,
+                    scope,
+                    opName,
+                    ctx,
+                    span,
+                    bounds,
+                    owningStatementId);
                 break;
             case QArrayLiteral literal:
                 foreach (var element in literal.Elements)
-                    CheckExprIndexes(element, scope, opName, ctx, span, bounds);
+                    CheckExprIndexes(
+                        element,
+                        owningStatementId,
+                        scope,
+                        opName,
+                        ctx,
+                        span,
+                        bounds);
                 break;
             // A measurement's target index must be bounds-checked here too — a measurement NESTED in an
             // array-literal initializer (`var r: bit[] = [M(q[3])]`) reaches this recursion, whereas the QDecl
@@ -1821,11 +1889,13 @@ internal static class QoraValidator
             case QMeasure m when QNodes.IndexOf(m.Target) is { } measuredIndex:
                 CheckQubitIndex(
                     new QQubitArg(QNodes.RegOf(m.Target), measuredIndex),
+                    m.Target,
                     scope,
                     opName,
                     ctx,
                     span,
-                    bounds);
+                    bounds,
+                    owningStatementId);
                 break;
             // A WHOLE-reference measurement (`M(a)`) is legal for exactly one shape: a SINGLE qubit. A whole
             // REGISTER would collapse many qubits into one bit, and a classical is not measurable at all —
@@ -1944,6 +2014,7 @@ internal static class QoraValidator
                 var indexed = CheckIndexedAccess(
                     b.Name,
                     acc.Index,
+                    acc,
                     scope,
                     opName,
                     ctx,
@@ -2026,6 +2097,7 @@ internal static class QoraValidator
     private static IndexCheckResult CheckIndexedAccess(
         string name,
         QNode indexNode,
+        object exactSite,
         Scope scope,
         string opName,
         Ctx ctx,
@@ -2294,28 +2366,52 @@ internal static class QoraValidator
 
         // No proof exists. Recorded as DATA, not as a diagnostic — the failed proof is target-independent;
         // the OpenQASM policy pass later derives QSEM030 from <see cref="HirSemanticModel.UnprovenIndexes"/>.
-        // A future runtime-capable backend will need both a checked-access lowering and stable site identity
-        // before it can consume this category as a rewrite work list.
+        // A future runtime-capable backend will consume the typed site identity after it defines checked
+        // access lowering and runtime-failure semantics.
         // Blame the bound that actually failed to settle: when From never folded, naming To would accuse
         // the wrong bound (and the fix hint would send the user to the wrong place).
-        unproven.Add(new UnprovenIndex(opName, name, index,
-            !inLoop ? null : fact.FromB is null ? from : to, span));
+        var site = new HirIndexAccessId(unproven.Count);
+        var statementId = owningStatementId
+            ?? throw new InvalidOperationException(
+                "QINTERNAL: an unproven indexed access has no owning HIR statement");
+        unproven.Add(
+            new UnprovenIndexWork(
+                new UnprovenIndex(
+                    site,
+                    opName,
+                    name,
+                    index,
+                    !inLoop ? null : fact.FromB is null ? from : to,
+                    span),
+                statementId,
+                exactSite));
         return Result(IndexCheckResult.Unproven);
     }
 
     /// <summary>Validate and bounds-check the full index expression of one measurement target.</summary>
     private static void CheckQubitIndex(
         QQubitArg q,
+        object exactSite,
         Scope scope,
         string opName,
         Ctx ctx,
         SourceSpan? span,
-        BoundsCtx bounds = default)
+        BoundsCtx bounds = default,
+        int? owningStatementId = null)
     {
         if (scope.Lookup(q.Reg) is not { } resolved)
             return; // the symbol-table walk already owns the unknown-name diagnostic
 
-        CheckIndexedAccess(q.Reg, q.Index, scope, opName, ctx, span, bounds);
+        CheckIndexedAccess(
+            q.Reg,
+            q.Index,
+            exactSite,
+            scope,
+            opName,
+            ctx,
+            span,
+            bounds,
+            owningStatementId);
         if (resolved.Type != QType.Qubit)
             Add(ctx.Errors, "QSEM006", $"in `{opName}`: measurement target `{q.Reg}[{QNodes.Render(q.Index)}]` is not a qubit", span);
     }
@@ -2457,10 +2553,6 @@ internal static class QoraValidator
                     break;
                 case QRepeat r:
                     CollectOpRefs(r.Body, opById, into);
-                    break;
-                case QConjugate c:
-                    CollectOpRefs(c.Within, opById, into);
-                    CollectOpRefs(c.Apply, opById, into);
                     break;
             }
         }

@@ -45,11 +45,13 @@ internal sealed class MirTestContext
     }
 
     public MirProgram Program(
+        MirCallableId entryPoint,
         IEnumerable<MirCallable> callables,
         params (int OperationId, int NodeId)[] hirOrigins) =>
         new(
             SnapshotId,
             Origins(hirOrigins),
+            entryPoint,
             callables);
 
     public MirCallableRef Callable(MirCallableId callable) =>

@@ -1,3 +1,5 @@
+using Qora.Ir;
+
 namespace Qora.Tests;
 
 /// <summary>
@@ -23,20 +25,32 @@ public class MeasureConditionTests
     [Fact]
     public void IfDesugarsToBitThenTest()
     {
-        // the measurement becomes a hoisted bit assigned before the branch; the branch tests that bit
-        Compiler.Emits("operation Main(){ use q=Qubit[2]; if(M(q[0])==1){ X(q[1]); } }", "= measure q[0];");
-        Compiler.Emits("operation Main(){ use q=Qubit[2]; if(M(q[0])==1){ X(q[1]); } }", "if (");
+        var artifact = MirQasmTestModel.Compile(
+            "operation Main(){ use q=Qubit[2]; if(M(q[0])==1){ X(q[1]); } }");
+        var statements = MirQasmTestModel
+            .Statements(artifact.Program.EntryPoint.Body)
+            .ToArray();
+
+        Assert.Single(
+            statements.OfType<MirQasmMeasurementAssignmentStatement>());
+        Assert.Single(statements.OfType<MirQasmIfStatement>());
     }
 
     [Fact]
     public void WhileReMeasuresAtEndOfBody()
     {
-        // the condition is re-evaluated each iteration, so the qubit is re-measured at the end of the body
-        var r = Compiler.Compile("operation Main(){ use q=Qubit[1]; while(M(q[0])==1){ X(q[0]); } }");
-        Assert.True(r.Succeeded);
-        // two `measure q[0]` occurrences: once before the loop, once at the end of the body
-        var count = r.Targets.OpenQasm!.Text.Split("measure q[0];").Length - 1;
-        Assert.True(count == 2, $"expected 2 measurements (before loop + per iteration), got {count}:\n{r.Targets.OpenQasm!.Text}");
+        var artifact = MirQasmTestModel.Compile(
+            "operation Main(){ use q=Qubit[1]; while(M(q[0])==1){ X(q[0]); } }");
+        var statements = MirQasmTestModel
+            .Statements(artifact.Program.EntryPoint.Body)
+            .ToArray();
+
+        Assert.Equal(
+            2,
+            statements
+                .OfType<MirQasmMeasurementAssignmentStatement>()
+                .Count());
+        Assert.Single(statements.OfType<MirQasmWhileStatement>());
     }
 
     [Fact]
@@ -50,14 +64,36 @@ public class MeasureConditionTests
     [Fact]
     public void SyntheticTempStaysDistinctFromUserNames()
     {
-        // The synthetic temp is a HoistName placeholder (base `__m0`); the mangler keeps the user's own
-        // `__m0`/`__m1` and splits the temp to a distinct spelling — no name-scanning, no collision.
-        var r = Compiler.Compile("operation Main(){ use q=Qubit[1]; var __m0=1; var __m1=2; if(M(q[0])==1){ X(q[0]); } }");
-        Assert.True(r.Succeeded, string.Join(" | ", r.Diagnostics.Select(diagnostic => diagnostic.Error).ToList().Select(e => $"{e.Code}: {e.Message}")));
-        Assert.Contains("int __m0 = 1;", r.Targets.OpenQasm!.Text);        // the user's names are preserved
-        Assert.Contains("int __m1 = 2;", r.Targets.OpenQasm!.Text);
-        Assert.Contains("__m0_ = measure q[0];", r.Targets.OpenQasm!.Text); // the temp is a distinct spelling
-        Assert.DoesNotContain("#hoist", r.Targets.OpenQasm!.Text);          // the placeholder never leaks into the final QASM
+        var artifact = MirQasmTestModel.Compile(
+            "operation Main(){ use q=Qubit[1]; var __m0=1; var __m1=2; if(M(q[0])==1){ X(q[0]); } }");
+        var declarations = MirQasmTestModel
+            .Statements(artifact.Program.EntryPoint.Body)
+            .Select(
+                statement => statement switch
+                {
+                    MirQasmValueDeclarationStatement value =>
+                        (value.Declaration, value.EmittedName),
+                    MirQasmQubitDeclarationStatement qubit =>
+                        (qubit.Declaration, qubit.EmittedName),
+                    _ => ((MirQasmDeclarationId, string)?)null,
+                })
+            .Where(item => item.HasValue)
+            .Select(item => item!.Value)
+            .ToArray();
+
+        Assert.Equal(
+            declarations.Length,
+            declarations.Select(item => item.Item1).Distinct().Count());
+        Assert.Equal(
+            declarations.Length,
+            declarations.Select(item => item.Item2).Distinct().Count());
+        Assert.DoesNotContain(
+            declarations,
+            item => item.Item2.Contains('#'));
+        Assert.Single(
+            MirQasmTestModel
+                .Statements(artifact.Program.EntryPoint.Body)
+                .OfType<MirQasmMeasurementAssignmentStatement>());
     }
 
     /// <summary>The masking hole (Codex R-report): a synthetic temp named exactly `__m0` used to become a

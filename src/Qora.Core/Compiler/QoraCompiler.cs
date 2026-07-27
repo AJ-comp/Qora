@@ -126,32 +126,6 @@ public static class QoraCompiler
                     new DiagnosticOrigin.Hir(snapshot.Id))));
         }
 
-        void AddTargetDiagnostics(
-            IEnumerable<QoraError> errors,
-            HirSnapshot source)
-        {
-            diagnostics.AddRange(
-                errors.Select(error => new CompilationDiagnostic(
-                    CompilationStage.OpenQasm,
-                    error,
-                    new DiagnosticOrigin.Target(
-                        TargetBackend.OpenQasm,
-                        new TargetDiagnosticInput.Hir(source.Id)))));
-        }
-
-        void AddRejectedTargetPolicy(
-            HirSemanticArtifact validation)
-        {
-            ArgumentNullException.ThrowIfNull(validation);
-            if (!options.OutputPlan.Requests(TargetBackend.OpenQasm))
-            {
-                return;
-            }
-            AddTargetDiagnostics(
-                QasmBackend.ValidatePolicy(validation.Model),
-                validation.Source);
-        }
-
         void AddValidationDiagnostics(HirSemanticArtifact validation)
         {
             ArgumentNullException.ThrowIfNull(validation);
@@ -260,7 +234,6 @@ public static class QoraCompiler
         if (!resolvedValidation.IsAccepted)
         {
             AddValidationDiagnostics(resolvedValidation);
-            AddRejectedTargetPolicy(resolvedValidation);
             return Finish();
         }
 
@@ -284,70 +257,70 @@ public static class QoraCompiler
             if (!specializedValidation.IsAccepted)
             {
                 AddValidationDiagnostics(specializedValidation);
-                AddRejectedTargetPolicy(specializedValidation);
                 return Finish();
             }
         }
 
         var analyzed = hirBuilder.AnalyzeEffects(specializedValidation);
 
-        var conjugation = ConjugationLowering.Run(specialized.Program);
-        if (conjugation.Errors.Count > 0)
-        {
-            AddHirDiagnostics(
-                CompilationStage.HirAnalysis,
-                conjugation.Errors,
-                specialized);
-            return Finish();
-        }
-
-        var conjugated = hirBuilder.Advance(
-            HirStage.ConjugationLowered,
-            conjugation.Program,
-            derivations: conjugation.Derivations);
-
-        if (options.OutputPlan.ProduceMir)
+        if (options.OutputPlan.RequiresMir)
         {
             var loweringHir = hirBuilder.Build();
             var semanticContext = new HirSemanticContext(
                 loweringHir,
-                conjugated,
+                specialized,
                 analyzed);
             var mirLowering = QoraMirLowering.Lower(
                 semanticContext,
                 revision: 0);
             mir = mirLowering.CreateSnapshot();
+
+            // MIR analyses run on the canonical lowered graph before any internal inverse request can
+            // be injected. The future cleanup scheduler will consume these revision-bound facts, mark
+            // exact MIR call sites, and then hand the resulting snapshot to the materializer below.
             _ = mir.Analyses.Effects;
+            var materialization = MirAdjointMaterializer.Run(mir);
+            if (!materialization.Succeeded)
+            {
+                foreach (var error in materialization.Errors)
+                {
+                    var span = mir.Origins.ResolveHir(error.Origin).Span;
+                    diagnostics.Add(
+                        new CompilationDiagnostic(
+                            CompilationStage.MirLowering,
+                            new QoraError(error.Message, error.Code, span),
+                            new DiagnosticOrigin.Mir(mir.Id, error.Origin)));
+                }
+                return Finish();
+            }
+            mir = materialization.Snapshot;
         }
 
         if (!options.OutputPlan.Requests(TargetBackend.OpenQasm))
             return Finish();
 
-        var materialization = AdjointMaterializer.Run(conjugated.Program);
-        var materialized = hirBuilder.Advance(
-            HirStage.AdjointMaterialized,
-            materialization.Program,
-            derivations: materialization.Derivations);
-        var targetHir = hirBuilder.Build();
-        var targetSemanticContext = new HirSemanticContext(
-            targetHir,
-            materialized,
-            analyzed);
-
-        // The current OpenQASM target still consumes structured HIR. The artifact records that exact
-        // revision instead of pretending emission already starts from MIR.
-        var backend = QasmBackend.Run(
-            targetSemanticContext,
-            materialization.Notes);
-        if (backend.Errors.Count > 0)
+        var targetMir = mir
+            ?? throw new InvalidOperationException(
+                "QINTERNAL: a requested target has no canonical MIR input");
+        var backend = QasmBackend.Run(targetMir);
+        if (backend.Diagnostics.Count > 0)
         {
-            AddTargetDiagnostics(
-                backend.Errors,
-                materialized);
+            foreach (var diagnostic in backend.Diagnostics)
+            {
+                diagnostics.Add(
+                    new CompilationDiagnostic(
+                        CompilationStage.OpenQasm,
+                        diagnostic.Error,
+                        new DiagnosticOrigin.Target(
+                            TargetBackend.OpenQasm,
+                            targetMir.Id,
+                            diagnostic.Location)));
+            }
             return Finish();
         }
 
-        targetArtifacts.Add(new OpenQasmArtifact(backend));
+        targetArtifacts.Add(
+            new OpenQasmArtifact(backend));
         return Finish();
     }
 }

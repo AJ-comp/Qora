@@ -355,6 +355,7 @@ public sealed class MirMemoryStateAnalysisTests
         return new MirProgram(
             program.SnapshotId,
             program.Origins,
+            program.EntryPoint,
             program.Callables
                 .Select(candidate => candidate.Id == callable.Id
                     ? rewrittenCallable

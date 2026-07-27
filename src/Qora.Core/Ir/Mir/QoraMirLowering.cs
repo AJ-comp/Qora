@@ -38,32 +38,49 @@ internal static class QoraMirLowering
             .Select((operation, index) => (SourceId: operation.Id, MirId: new MirCallableId(index)))
             .ToDictionary(item => item.SourceId, item => item.MirId);
         var operationsById = hir.Operations.ToDictionary(operation => operation.Id);
+        var boundsSites =
+            new Dictionary<HirIndexAccessId, MirIndexedAccessRef>();
         var callables = hir.Operations
             .Select(operation => new CallableLowerer(
                 operation,
                 callableIds[operation.Id],
+                snapshotId,
                 semantics,
                 callableIds,
                 operationsById,
                 origins,
-                links).Lower())
+                links,
+                boundsSites).Lower())
             .ToList();
 
         var originTable = origins.Build();
+        var entryOperation = hir.EntryOperation
+            ?? throw new InvalidOperationException(
+                "validated HIR must contain an operation before MIR lowering");
         return new MirLoweringResult(
-            new MirProgram(snapshotId, originTable, callables),
-            links.Build(originTable));
+            new MirProgram(
+                snapshotId,
+                originTable,
+                callableIds[entryOperation.Id],
+                callables),
+            links.Build(originTable),
+            MirSafetyFacts.FromHir(
+                snapshotId,
+                semantics.SourceModel,
+                boundsSites));
     }
 
     private sealed class CallableLowerer
     {
         private readonly QOperation _operation;
         private readonly MirCallableId _callableId;
+        private readonly MirSnapshotId _snapshotId;
         private readonly IHirSemanticContext _semantics;
         private readonly IReadOnlyDictionary<int, MirCallableId> _callableIds;
         private readonly IReadOnlyDictionary<int, QOperation> _operationsById;
         private readonly MirOriginTableBuilder _origins;
         private readonly MirCrossStageLinksBuilder _links;
+        private readonly Dictionary<HirIndexAccessId, MirIndexedAccessRef> _boundsSites;
 
         private readonly List<BlockBuilder> _blocks = new();
         private readonly List<MirValue> _values = new();
@@ -76,6 +93,7 @@ internal static class QoraMirLowering
         private int _nextInstruction;
         private int _nextStorage;
         private int _nextQubit;
+        private int? _currentHirStatementId;
         private BlockBuilder? _current;
         private FlowState _state = new();
         private readonly MirOriginRef _operationOrigin;
@@ -83,19 +101,23 @@ internal static class QoraMirLowering
         public CallableLowerer(
             QOperation operation,
             MirCallableId callableId,
+            MirSnapshotId snapshotId,
             IHirSemanticContext semantics,
             IReadOnlyDictionary<int, MirCallableId> callableIds,
             IReadOnlyDictionary<int, QOperation> operationsById,
             MirOriginTableBuilder origins,
-            MirCrossStageLinksBuilder links)
+            MirCrossStageLinksBuilder links,
+            Dictionary<HirIndexAccessId, MirIndexedAccessRef> boundsSites)
         {
             _operation = operation;
             _callableId = callableId;
+            _snapshotId = snapshotId;
             _semantics = semantics;
             _callableIds = callableIds;
             _operationsById = operationsById;
             _origins = origins;
             _links = links;
+            _boundsSites = boundsSites;
             _operationOrigin = _origins.Hir(
                 operation.Id,
                 operation.Id);
@@ -290,63 +312,60 @@ internal static class QoraMirLowering
                     foreach (var nested in loop.Body)
                         MarkUnreachableDeclarations(nested);
                     break;
-                case QConjugate conjugate:
-                    foreach (var nested in conjugate.Within)
-                        MarkUnreachableDeclarations(nested);
-                    foreach (var nested in conjugate.Apply)
-                        MarkUnreachableDeclarations(nested);
-                    break;
             }
         }
 
         private void LowerStatement(QStmt statement)
         {
-            switch (statement)
+            var previousOwner = _currentHirStatementId;
+            _currentHirStatementId = statement.Id;
+            try
             {
-                case QUse:
-                    // Local qubit resources are allocated once in the callable entry block.
-                    return;
+                switch (statement)
+                {
+                    case QUse:
+                        // Local qubit resources are allocated once in the callable entry block.
+                        return;
 
-                case QDecl declaration:
-                    LowerDeclaration(declaration);
-                    return;
+                    case QDecl declaration:
+                        LowerDeclaration(declaration);
+                        return;
 
-                case QAssign assignment:
-                    LowerAssignment(assignment);
-                    return;
+                    case QAssign assignment:
+                        LowerAssignment(assignment);
+                        return;
 
-                case QGate gate:
-                    LowerStatementCall(gate);
-                    return;
+                    case QGate gate:
+                        LowerStatementCall(gate);
+                        return;
 
-                case QIf conditional:
-                    LowerIf(conditional);
-                    return;
+                    case QIf conditional:
+                        LowerIf(conditional);
+                        return;
 
-                case QFor loop:
-                    LowerFor(loop);
-                    return;
+                    case QFor loop:
+                        LowerFor(loop);
+                        return;
 
-                case QWhile loop:
-                    LowerWhile(loop);
-                    return;
+                    case QWhile loop:
+                        LowerWhile(loop);
+                        return;
 
-                case QRepeat loop:
-                    LowerRepeat(loop);
-                    return;
+                    case QRepeat loop:
+                        LowerRepeat(loop);
+                        return;
 
-                case QReturn returned:
-                    LowerReturn(returned);
-                    return;
+                    case QReturn returned:
+                        LowerReturn(returned);
+                        return;
 
-                case QConjugate:
-                    throw Internal("a QConjugate reached MIR lowering; run ConjugationLowering first");
-
-                case QBreak:
-                    throw Internal("a backend-only QBreak reached common MIR lowering");
-
-                default:
-                    throw Internal($"unsupported HIR statement {statement.GetType().Name}");
+                    default:
+                        throw Internal($"unsupported HIR statement {statement.GetType().Name}");
+                }
+            }
+            finally
+            {
+                _currentHirStatementId = previousOwner;
             }
         }
 
@@ -452,6 +471,10 @@ internal static class QoraMirLowering
             var instructionId = NextInstruction();
             var result = AddInstructionResult(instructionId, arrayType, symbolId, source);
             Emit(new MirArrayStore(instructionId, result, array, index, storedValue, source));
+            RegisterBoundsSite(
+                assignment,
+                instructionId,
+                MirIndexedAccessKind.ArrayStore);
             _state.Values[symbolId] = result;
         }
 
@@ -477,7 +500,7 @@ internal static class QoraMirLowering
 
             var signature = QoraGates.SigOf(
                 gate.Name,
-                gate.Functors.Count(functor => functor == "Controlled"))
+                gate.Modifiers.Count(modifier => modifier == QGateModifier.Controlled))
                 ?? throw Internal($"validated built-in gate `{gate.Name}` has no signature");
             var operands = new List<MirCallOperand>(gate.Args.Count);
             for (var index = 0; index < gate.Args.Count; index++)
@@ -504,13 +527,18 @@ internal static class QoraMirLowering
                 }
             }
 
+            var instructionId = NextInstruction();
             Emit(new MirQuantumApply(
-                NextInstruction(),
+                instructionId,
                 new MirBuiltinGateTarget(gate.Name),
                 operands,
                 Array.Empty<MirMutableArrayResult>(),
-                LowerFunctors(gate.Functors),
+                LowerModifiers(gate.Modifiers),
                 source));
+            RegisterQubitArgumentBoundsSites(
+                gate.Args,
+                signature.Params,
+                instructionId);
         }
 
         private void LowerOperationCall(QGate gate, QOperation callee, MirOriginRef source)
@@ -564,8 +592,12 @@ internal static class QoraMirLowering
                 new MirUserCallableTarget(_callableIds[callee.Id]),
                 operands,
                 mutableResults,
-                LowerFunctors(gate.Functors),
+                LowerModifiers(gate.Modifiers),
                 source));
+            RegisterQubitArgumentBoundsSites(
+                gate.Args,
+                callee.Params,
+                instructionId);
             foreach (var (symbol, result) in mutableBindings)
                 _state.Values[symbol] = result;
         }
@@ -697,11 +729,8 @@ internal static class QoraMirLowering
             var source = SourceOf(loop);
             var from = EnsureType(LowerNode(loop.From, source), MirType.Scalar(QType.Int), source);
             var to = EnsureType(LowerNode(loop.To, source), MirType.Scalar(QType.Int), source);
-            var step = EnsureType(
-                LowerNode(loop.Step ?? new QNumLit(1), source),
-                MirType.Scalar(QType.Int),
-                source);
-            var descending = loop.Step is QNumLit { Value: < 0 };
+            var step = EmitConstant(QType.Int, "1", source);
+            const bool descending = false;
             var before = _state.Clone();
             var preheader = RequireCurrent();
             var header = NewBlock(source);
@@ -912,6 +941,10 @@ internal static class QoraMirLowering
                 null,
                 source);
             Emit(new MirMeasure(instructionId, result, place, source));
+            RegisterBoundsSite(
+                measurement.Target,
+                instructionId,
+                MirIndexedAccessKind.Measurement);
             return result;
         }
 
@@ -1059,6 +1092,10 @@ internal static class QoraMirLowering
                         null,
                         source);
                     Emit(new MirArrayLoad(instructionId, result, array, offset, source));
+                    RegisterBoundsSite(
+                        index,
+                        instructionId,
+                        MirIndexedAccessKind.ArrayLoad);
                     return result;
                 }
 
@@ -1324,6 +1361,61 @@ internal static class QoraMirLowering
 
         private MirType TypeOf(MirValueId value) => _values[_valueIndexes[value]].Type;
 
+        private void RegisterQubitArgumentBoundsSites(
+            IReadOnlyList<QArg> arguments,
+            IReadOnlyList<IParamSpec> parameters,
+            MirInstructionId instruction)
+        {
+            for (var index = 0; index < arguments.Count; index++)
+            {
+                if (parameters[index].Type != QType.Qubit)
+                    continue;
+                var exactSite = arguments[index] switch
+                {
+                    QQubitArg indexed => (object)indexed,
+                    QTextArg { Tree: QIndexNode indexed } => indexed,
+                    _ => null,
+                };
+                if (exactSite is not null)
+                    RegisterBoundsSite(
+                        exactSite,
+                        instruction,
+                        MirIndexedAccessKind.QubitOperand,
+                        index);
+            }
+        }
+
+        private void RegisterBoundsSite(
+            object exactHirSite,
+            MirInstructionId instruction,
+            MirIndexedAccessKind kind,
+            int ordinal = 0)
+        {
+            var owner = _currentHirStatementId
+                ?? throw Internal(
+                    "indexed-access lowering has no owning HIR statement");
+            if (_semantics.SourceModel.UnprovenIndexSite(
+                    owner,
+                    exactHirSite)
+                is not { } semanticSite)
+            {
+                return;
+            }
+
+            var loweredSite = new MirIndexedAccessRef(
+                new MirInstructionRef(
+                    _snapshotId,
+                    _callableId,
+                    instruction),
+                kind,
+                ordinal);
+            if (!_boundsSites.TryAdd(semanticSite, loweredSite))
+            {
+                throw Internal(
+                    $"unproven bounds site {semanticSite} lowered more than once");
+            }
+        }
+
         private void Emit(MirInstruction instruction) =>
             RequireCurrent().Instructions.Add(instruction);
 
@@ -1375,13 +1467,13 @@ internal static class QoraMirLowering
             _ => throw new InvalidOperationException("QINTERNAL: a validated call argument has no expression"),
         };
 
-        private static IReadOnlyList<MirFunctor> LowerFunctors(IReadOnlyList<string> functors) =>
-            functors.Select(functor => functor switch
+        private static IReadOnlyList<MirFunctor> LowerModifiers(
+            IReadOnlyList<QGateModifier> modifiers) =>
+            modifiers.Select(modifier => modifier switch
             {
-                "Adjoint" => MirFunctor.Adjoint,
-                "Controlled" => MirFunctor.Controlled,
+                QGateModifier.Controlled => MirFunctor.Controlled,
                 _ => throw new InvalidOperationException(
-                    $"QINTERNAL: unsupported functor `{functor}` reached MIR lowering"),
+                    $"QINTERNAL: unsupported HIR gate modifier `{modifier}` reached MIR lowering"),
             }).ToList();
 
         private static MirBinaryOperator BinaryOperator(string op) => op switch

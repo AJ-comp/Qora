@@ -3,16 +3,8 @@ using System.Text;
 namespace Qora.Ir;
 
 /// <summary>
-/// Renders Qora IR as a readable tree — the "what did the compiler actually build" view. Used by the
-/// CLI's <c>--stages</c> mode (and any tooling that wants to show the pipeline: the VS Code stages
-/// panel, docs). The format matches the compiler walkthrough in <c>docs/adjoint-pipeline.html</c>:
-/// <code>
-/// QOperation Outer(Qubit[2] q, Bit b)
-///   QDecl(const=False, type=Int, name=k, value=2)
-///   QGate(functors=[Adjoint], name=S, args=[q[0]])
-///   QFor(i in 1..0, step=-1)
-///     ...
-/// </code>
+/// Renders source-shaped Qora HIR as a readable tree. Used by the CLI's <c>--stages</c> mode and tooling
+/// that wants to inspect the front-end result without exposing MIR-only transformation state.
 /// </summary>
 public static class IrPrinter
 {
@@ -54,7 +46,7 @@ public static class IrPrinter
                     sb.AppendLine($"{indent}QUse(name={u.Name}, size={u.Size})");
                     break;
                 case QGate g:
-                    sb.AppendLine($"{indent}QGate(functors=[{string.Join(",", g.Functors)}], name={g.Name}, args=[{string.Join(", ", g.Args.Select(PrintArg))}])");
+                    sb.AppendLine($"{indent}QGate(modifiers=[{string.Join(",", g.Modifiers)}], name={g.Name}, args=[{string.Join(", ", g.Args.Select(PrintArg))}])");
                     break;
                 case QDecl d:
                     sb.AppendLine($"{indent}QDecl(const={d.IsConst}, type={d.Type?.ToString() ?? "?"}{(d.IsArray ? "[]" : "")}, name={d.Name}, value={PrintExpr(d.Value)})");
@@ -64,9 +56,6 @@ public static class IrPrinter
                     break;
                 case QReturn r:
                     sb.AppendLine($"{indent}QReturn({PrintExpr(r.Value)})");
-                    break;
-                case QBreak:
-                    sb.AppendLine($"{indent}QBreak");
                     break;
                 case QIf i:
                     sb.AppendLine($"{indent}QIf(cond=\"{QNodes.Render(i.Cond.Tree)}\")");
@@ -79,7 +68,7 @@ public static class IrPrinter
                     }
                     break;
                 case QFor f:
-                    sb.AppendLine($"{indent}QFor({f.Var} in {QNodes.Render(f.From)}..{QNodes.Render(f.To)}{(f.Step is null ? string.Empty : $", step={QNodes.Render(f.Step)}")})");
+                    sb.AppendLine($"{indent}QFor({f.Var} in {QNodes.Render(f.From)}..{QNodes.Render(f.To)})");
                     PrintBody(f.Body, sb, indent + "  ");
                     break;
                 case QWhile w:
@@ -89,13 +78,6 @@ public static class IrPrinter
                 case QRepeat r:
                     sb.AppendLine($"{indent}QRepeat(until=\"{QNodes.Render(r.Until.Tree)}\")");
                     PrintBody(r.Body, sb, indent + "  ");
-                    break;
-                case QConjugate c:
-                    sb.AppendLine($"{indent}QConjugate");
-                    sb.AppendLine($"{indent}  within:");
-                    PrintBody(c.Within, sb, indent + "    ");
-                    sb.AppendLine($"{indent}  apply:");
-                    PrintBody(c.Apply, sb, indent + "    ");
                     break;
             }
         }

@@ -65,7 +65,7 @@ public sealed class CompilationOutputPlanTests
                 outputPlan: CompilationOutputPlan.HirOnly));
         Assert.True(hirOnly.Succeeded);
         Assert.NotNull(hirOnly.Hir.EffectAnalysis);
-        Assert.NotNull(hirOnly.Hir.ConjugationLowered);
+        Assert.NotNull(hirOnly.Hir.Specialized);
         Assert.Null(hirOnly.Mir);
         Assert.Empty(hirOnly.Targets.Artifacts);
 
@@ -78,7 +78,6 @@ public sealed class CompilationOutputPlanTests
         Assert.True(mirOnly.Succeeded);
         Assert.NotNull(mirOnly.Mir);
         Assert.Empty(mirOnly.Targets.Artifacts);
-        Assert.Null(mirOnly.Hir.AdjointMaterialized);
 
         var openQasmOnly = QoraCompiler.Compile(
             source,
@@ -87,9 +86,8 @@ public sealed class CompilationOutputPlanTests
                     produceMir: false,
                     new[] { TargetBackend.OpenQasm })));
         Assert.True(openQasmOnly.Succeeded);
-        Assert.Null(openQasmOnly.Mir);
+        Assert.NotNull(openQasmOnly.Mir);
         Assert.NotNull(openQasmOnly.Targets.OpenQasm);
-        Assert.NotNull(openQasmOnly.Hir.AdjointMaterialized);
     }
 
     [Fact]

@@ -93,10 +93,27 @@ internal static class QoraMirVerifier
                     Add("MIR004", $"callable identity {callable.Id} is declared more than once", callable);
             }
 
+            VerifyEntryPoint();
+
             foreach (var callable in _callables.Values.OrderBy(callable => callable.Id.Value))
                 VerifyCallable(callable);
 
             return _errors;
+        }
+
+        private void VerifyEntryPoint()
+        {
+            if (!_callables.TryGetValue(_program.EntryPoint, out var entryPoint))
+            {
+                Add("MIR009", $"program entry callable {_program.EntryPoint} does not exist");
+                return;
+            }
+
+            if (entryPoint.Kind != MirCallableKind.Operation)
+                Add("MIR036", "program entry callable must be an operation", entryPoint);
+
+            if (entryPoint.Parameters.Count != 0)
+                Add("MIR037", "program entry callable must not declare parameters", entryPoint);
         }
 
         private void VerifyCallable(MirCallable callable)
@@ -1082,6 +1099,30 @@ internal static class QoraMirVerifier
                             callable, block, allocation);
                     break;
                 case MirQuantumApply apply:
+                    for (var index = 0; index < apply.Functors.Count; index++)
+                    {
+                        if (!Enum.IsDefined(apply.Functors[index]))
+                            Add(
+                                "MIR140",
+                                $"quantum apply carries unknown functor value {(int)apply.Functors[index]}",
+                                callable,
+                                block,
+                                apply);
+                    }
+                    var adjointCount = apply.Functors.Count(
+                        functor => functor == MirFunctor.Adjoint);
+                    if (apply.Functors.Distinct().Count()
+                            != apply.Functors.Count
+                        || adjointCount == 1
+                        && apply.Functors[0] != MirFunctor.Adjoint)
+                    {
+                        Add(
+                            "MIR141",
+                            "quantum functors are not canonical; each functor may appear once and Adjoint must precede Controlled",
+                            callable,
+                            block,
+                            apply);
+                    }
                     VerifyCall(callable, block, apply, apply.Target, apply.Operands, values, qubits,
                         expectFunction: false);
                     VerifyMutableResults(callable, block, apply, values);
@@ -1153,6 +1194,22 @@ internal static class QoraMirVerifier
 
                 case MirBuiltinGateTarget builtin when !expectFunction:
                 {
+                    if (instruction is MirQuantumApply
+                        {
+                            Functors.Count: > 0
+                        } modified
+                        && QoraGates.Gates.TryGetValue(
+                            builtin.Name,
+                            out var gate)
+                        && !gate.Unitary)
+                    {
+                        Add(
+                            "MIR139",
+                            $"non-unitary built-in gate `{builtin.Name}` cannot carry MIR functors",
+                            caller,
+                            block,
+                            modified);
+                    }
                     var extraControls = instruction is MirQuantumApply apply
                         ? apply.Functors.Count(functor => functor == MirFunctor.Controlled)
                         : 0;

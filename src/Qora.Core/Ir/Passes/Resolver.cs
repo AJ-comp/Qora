@@ -141,7 +141,6 @@ internal static class Resolver
             {
                 From = ResolveNode(loop.From, loop.Span)!,
                 To = ResolveNode(loop.To, loop.Span)!,
-                Step = ResolveNode(loop.Step, loop.Span),
                 Body = ResolveBody(loop.Body),
             },
             QWhile loop => loop with
@@ -153,11 +152,6 @@ internal static class Resolver
             {
                 Body = ResolveBody(loop.Body),
                 Until = ResolveCondition(loop.Until, loop.Span),
-            },
-            QConjugate conjugate => conjugate with
-            {
-                Within = ResolveBody(conjugate.Within),
-                Apply = ResolveBody(conjugate.Apply),
             },
             _ => statement,
         };

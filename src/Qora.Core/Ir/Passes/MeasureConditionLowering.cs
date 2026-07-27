@@ -32,10 +32,10 @@ namespace Qora.Ir.Passes;
 /// extracted; any OTHER call left in a condition keeps <see cref="QCond.HasCall"/> set and is still rejected
 /// by QSEM005.
 ///
-/// Temp names are minted as <see cref="HoistName"/> PLACEHOLDERS carrying the base <c>__mN</c>. A user can
+/// Temp names are minted as <see cref="HirGeneratedName"/> bindings carrying the base <c>__mN</c>. A user can
 /// never write a placeholder (its <c>#</c> is not a legal identifier character), so a synthetic temp can
-/// never share a spelling with a user name — the <see cref="NameMangler"/> prettifies each placeholder back
-/// to <c>__mN</c> (or <c>__mN_</c> only if the user genuinely declared that name too). This closes a masking
+/// never share a spelling with a user name. Target lowering recovers the display base and assigns its own
+/// collision-free identifier. This closes a masking
 /// hole: a temp literally named <c>__m0</c> used to become a real declaration BEFORE validation, so a user's
 /// undeclared <c>__m0 = …</c> silently bound to it and its <c>QSEM025</c> was lost; now the user's <c>__m0</c>
 /// stays undeclared and is reported. Uniqueness is the placeholder's uid, so no name-scanning is needed.
@@ -60,7 +60,7 @@ internal static class MeasureConditionLowering
         var ops = program.Operations.Select(op =>
         {
             var n = 0;   // per-op base counter, so the mangler emits __m0, __m1, … within each scope
-            string Fresh() => HoistName.Make($"__m{n++}", uid++);
+            string Fresh() => HirGeneratedName.Create($"__m{n++}", uid++);
             return op with { Body = Lower(op.Body, Fresh, Record) };
         }).ToList();
         return new Result(
@@ -123,13 +123,6 @@ internal static class MeasureConditionLowering
                 }
                 case QFor f:
                     result.Add(f with { Body = Lower(f.Body, fresh, record) });
-                    break;
-                case QConjugate c:
-                    result.Add(c with
-                    {
-                        Within = Lower(c.Within, fresh, record),
-                        Apply = Lower(c.Apply, fresh, record),
-                    });
                     break;
                 default:
                     result.Add(s);

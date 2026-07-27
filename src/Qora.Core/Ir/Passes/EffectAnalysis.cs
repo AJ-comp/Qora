@@ -54,41 +54,6 @@ internal static class EffectAnalysis
         public void RunAll()
         {
             foreach (var op in _operations) Summarize(op.Id);
-
-            // Which user operations cannot be statement-adjoint-inverted (a while/repeat of unknown count, classical
-            // mutation, a local `use`, or measure/reset in the body — transitively). The Inverter is the SINGLE
-            // authority on invertibility. We run it over the SAME (monomorphized) operations analysis saw, so the
-            // names here are the mono names the mono call sites actually use.
-            var inverter = new Inverter(_operations);
-            var nonInvertibleOperations = _operations
-                .Where(op => !inverter.TryInvertOperation(op.Id, out _, out _))
-                .ToList();
-            var nonInvertibleOpIds = nonInvertibleOperations
-                .Select(op => op.Id)
-                .ToHashSet();
-
-            // Record the CALL statements (by stable Id) that target such an op, so rung ③ blocks them without a
-            // name lookup — StmtIds are shared with the pre-mono tree, mono names are not (a generic call's name is
-            // rewritten while its Id is preserved). One walk of every statement at every depth.
-            var nonInvertibleCallStmts = new HashSet<int>();
-            foreach (var op in _operations)
-                ContainerMap.Visit(op, (stmt, _) =>
-                {
-                    if (stmt is not QGate g) return;
-
-                    // Invertibility belongs to the call site as well as to the callee body. A moved
-                    // actual consumes ownership in the forward direction, and reversing nearby
-                    // statements cannot synthesize ownership restoration. Keep this classification in
-                    // lockstep with Inverter.InvertGate so a safe verdict can never produce a plan that
-                    // the inverter then refuses.
-                    var transfersOwnership = g.Args.Any(arg => arg.Ownership == QOwnershipMode.Moved);
-                    var targetsNonInvertibleOperation =
-                        g.CalleeOpId is int calleeId
-                        && nonInvertibleOpIds.Contains(calleeId);
-                    if (transfersOwnership || targetsNonInvertibleOperation)
-                        nonInvertibleCallStmts.Add(g.Id);
-                });
-            _model.RecordNonInvertibleCallStmts(nonInvertibleCallStmts);
         }
 
         private OpEffectSummary Summarize(int operationId)
@@ -223,22 +188,6 @@ internal static class EffectAnalysis
                     (touched, modified, nonQfreeWrites, measured, irreversible) = AnalyzeBlock(r.Body, log);
                     break;
 
-                case QConjugate c:
-                    // the flattened form is Within; Apply; inv(Within) — mirror the synthesized replay in the
-                    // event stream (same statements, reversed statement order, fresh Orders), so liveness death
-                    // points and clause-(c) windows see the W† the emitted program will actually run.
-                    var mark = log.Events.Count;
-                    var (wt, wm, ws, wme, wi) = AnalyzeBlock(c.Within, log);
-                    var withinCount = log.Events.Count - mark;
-                    var (at, am, ap, ame, ai) = AnalyzeBlock(c.Apply, log);
-                    log.ReplayReversed(mark, withinCount);
-                    touched.UnionWith(wt); touched.UnionWith(at);
-                    modified.UnionWith(wm); modified.UnionWith(am);
-                    nonQfreeWrites.UnionWith(ws); nonQfreeWrites.UnionWith(ap);
-                    measured.UnionWith(wme); measured.UnionWith(ame);
-                    irreversible = wi || ai;
-                    break;
-
                 // purely classical QDecl/QAssign: no qubit contact. The measurement-bit → later-if
                 // dataflow edge is already recorded by Symbol.Uses — not duplicated here.
                 default:
@@ -252,10 +201,10 @@ internal static class EffectAnalysis
         private (HashSet<QubitRef> Touched, HashSet<QubitRef> Modified, HashSet<QubitRef> NonQfreeWrites, HashSet<QubitRef> Measured, bool Irreversible)
             AnalyzeGate(QGate g)
         {
-            // user-operation call (Adjoint Foo projects identically — U† touches the same qubits;
-            // Controlled on a user op is impossible here, QSEM002 rejected it). A call is bound to its callee by
-            // REFERENCE (CalleeOpId, set at name resolution): `CalleeOpId is int` ⟺ user-op call, and we follow
-            // the reference — never re-matching the name, which shifts across mono/mangle domains.
+            // Controlled on a user op is impossible here because QSEM002 rejected it. A call is bound to its
+            // callee by REFERENCE (CalleeOpId, set at name resolution):
+            // `CalleeOpId is int` means user-op call, and we follow the reference rather than re-matching a
+            // name that shifts across mono/mangle domains.
             if (g.CalleeOpId is int calleeId)
             {
                 // The reference must resolve within THIS analyzed program; a dangling Id is an internal
@@ -263,19 +212,12 @@ internal static class EffectAnalysis
                 if (!_opById.TryGetValue(calleeId, out var callee))
                     throw new System.InvalidOperationException(
                         $"effect analysis: call `{g.Name}` binds CalleeOpId {calleeId}, but no such operation exists — a stale/dangling callee reference");
-                // INVARIANT: the only functor that reaches a user-op call is Adjoint — Controlled on a user
-                // op is rejected by QSEM002. Adjoint preserves both arg count and qubit support, so the
-                // positional projection below is exact. A Controlled here would prepend a control arg,
-                // misaligning params↔args and dropping the shifted target (a silent wrong-mapping +
-                // under-approximation). If that invariant ever regressed, fail loud rather than mis-analyze.
-                if (g.Functors.Any(f => f != "Adjoint"))
+                // A source modifier on a user call would change its positional signature. Validation rejects
+                // that form, so seeing it here is an internal pipeline inconsistency.
+                if (g.Modifiers.Count > 0)
                     throw new System.InvalidOperationException(
-                        $"effect analysis: user-op call `{g.Name}` carries a non-Adjoint functor [{string.Join(", ", g.Functors)}]; QSEM002 should have rejected it before analysis");
+                        $"effect analysis: user-op call `{g.Name}` carries unsupported source modifiers [{string.Join(", ", g.Modifiers)}]; QSEM002 should have rejected it before analysis");
                 var summary = Summarize(callee.Id);
-                // Adjoint is superposition-agnostic: U† writes exactly what U writes, so the callee's
-                // superposition-write set projects identically to its touched/modified sets. A param the
-                // callee measures projects as measured here too — the caller-side event must be a Measure,
-                // so a register measured through a helper is recognized as an output.
                 return (Project(summary.ParamTouched, callee, g.Args),
                         Project(summary.ParamModified, callee, g.Args),
                         Project(summary.ParamModifiedNonQfree, callee, g.Args),
@@ -310,7 +252,8 @@ internal static class EffectAnalysis
             // leading slots are controls (gate's own + one per Controlled functor): steering only,
             // their basis value is preserved. Diagonal gates preserve every target's basis value too
             // (phase kickback is the gate table's Diagonal flag's problem, not Modified's).
-            var controls = info.Controls + g.Functors.Count(f => f == "Controlled");
+            var controls = info.Controls
+                + g.Modifiers.Count(modifier => modifier == QGateModifier.Controlled);
             for (var i = 0; i < qubitArgs.Count; i++)
             {
                 var r = RefOf(qubitArgs[i]);
@@ -424,8 +367,8 @@ internal static class EffectAnalysis
             /// (value-changing) qubit is <see cref="QubitEventKind.Write"/>, anything else touched is
             /// <see cref="QubitEventKind.Read"/> (a control or diagonal-gate target). <paramref name="irreversible"/>
             /// is the statement's irreversibility (a reset, or a call that transitively measures/resets); it
-            /// stamps NON-measured WRITES only — replaying a write needs the statement's adjoint, which an
-            /// irreversible statement does not have, while a read through such a statement is harmless and a
+            /// stamps NON-measured WRITES only — reversing a write during future MIR cleanup requires a
+            /// reversible statement, while a read through an irreversible statement is harmless and a
             /// measured qubit carries its irreversibility in its Kind. <paramref name="nonQfreeWrites"/> stamp
             /// <c>NonQfree</c> on the matching Writes. Graph nodes/edges for the statement are
             /// created in the same call (see <see cref="Stamp"/>).</summary>
@@ -443,22 +386,6 @@ internal static class EffectAnalysis
                     refs.Add((r, kind, irreversible && isModified && !isMeasured, nonQfreeWrites.Contains(r)));
                 }
                 Stamp(stmtId, refs, birth);
-            }
-
-            /// <summary>Mirror a slice of already-recorded events as the synthesized REPLAY of its inverse —
-            /// used by <see cref="QConjugate"/>, whose flattened form runs <c>inv(Within)</c> after
-            /// <c>Apply</c>. The slice's statements are re-recorded in REVERSE statement order (kinds/flags
-            /// preserved — an inverse touches the same qubits the same way) under fresh Orders AND fresh graph
-            /// nodes with freshly-resolved parents (the replay reads/writes the CURRENT versions at replay
-            /// time, not stale copies). StmtIds are preserved: a culprit still points at the source
-            /// <c>within</c> statement.</summary>
-            public void ReplayReversed(int start, int count)
-            {
-                if (count <= 0) return;
-                var slice = Events.GetRange(start, count);
-                foreach (var group in slice.GroupBy(e => e.Order).OrderByDescending(g => g.Key))
-                    Stamp(group.First().StmtId,
-                        group.Select(e => (e.Qubit, e.Kind, e.Irreversible, e.NonQfree)).ToList());
             }
 
             /// <summary>The core recorder: one statement's refs → graph nodes + linked events, all resolved
@@ -524,7 +451,7 @@ internal static class EffectAnalysis
             }
         }
 
-        /// <summary>PIPELINE INVARIANT (a <see cref="ReferentialCheck"/>-style safety net): the event stream
+        /// <summary>PIPELINE INVARIANT (an independent verifier safety net): the event stream
         /// and the qubit graph are written by the same hand, but a bug in that hand must fail LOUD at compile
         /// time — silent divergence between the two must never reach a consumer. Re-derives everything the
         /// graph claims with its OWN independent state (shares the spec, not the construction's code paths):

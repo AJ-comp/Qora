@@ -38,6 +38,28 @@ public enum MirEntityOriginKind
     CompilerTemporary,
 }
 
+/// <summary>
+/// The authoritative origin of one MIR callable. Source callables retain their exact HIR declaration
+/// and symbol, while callables synthesized by a MIR pass point to the MIR callable from which they were
+/// derived. A synthesized callable is deliberately not inserted into the HIR symbol maps.
+/// </summary>
+public abstract record MirCallableProvenance;
+
+public sealed record MirLoweredCallableProvenance(
+    HirNodeRef Operation,
+    HirSymbolRef Symbol)
+    : MirCallableProvenance;
+
+public enum MirCallableSynthesisKind
+{
+    Inverse,
+}
+
+public sealed record MirSynthesizedCallableProvenance(
+    MirCallableRef DerivedFrom,
+    MirCallableSynthesisKind Kind)
+    : MirCallableProvenance;
+
 /// <summary>The exact HIR operation/node pair reached by resolving one MIR origin.</summary>
 public readonly record struct MirResolvedHirOrigin(
     HirNodeRef Operation,
@@ -65,6 +87,7 @@ public sealed class MirCrossStageLinks
         IReadOnlyDictionary<HirSymbolRef, IReadOnlyList<MirQubitResourceRef>> qubitsBySymbol,
         IReadOnlyDictionary<MirQubitResourceRef, IReadOnlyList<HirSymbolRef>> symbolsByQubit,
         IReadOnlyDictionary<HirSymbolRef, MirSymbolLoweringDisposition> symbolDispositions,
+        IReadOnlyDictionary<MirCallableRef, MirCallableProvenance> callableProvenance,
         IReadOnlyDictionary<MirValueRef, MirEntityOriginKind> valueOrigins,
         IReadOnlyDictionary<MirStorageRef, MirEntityOriginKind> storageOrigins,
         IReadOnlyDictionary<MirQubitResourceRef, MirEntityOriginKind> qubitOrigins)
@@ -101,6 +124,7 @@ public sealed class MirCrossStageLinks
         QubitsBySymbol = FreezeNested(qubitsBySymbol);
         SymbolsByQubit = FreezeNested(symbolsByQubit);
         SymbolDispositions = Freeze(symbolDispositions);
+        CallableProvenance = Freeze(callableProvenance);
         ValueOrigins = Freeze(valueOrigins);
         StorageOrigins = Freeze(storageOrigins);
         QubitOrigins = Freeze(qubitOrigins);
@@ -129,6 +153,7 @@ public sealed class MirCrossStageLinks
     public IReadOnlyDictionary<HirSymbolRef, IReadOnlyList<MirQubitResourceRef>> QubitsBySymbol { get; }
     public IReadOnlyDictionary<MirQubitResourceRef, IReadOnlyList<HirSymbolRef>> SymbolsByQubit { get; }
     public IReadOnlyDictionary<HirSymbolRef, MirSymbolLoweringDisposition> SymbolDispositions { get; }
+    public IReadOnlyDictionary<MirCallableRef, MirCallableProvenance> CallableProvenance { get; }
     public IReadOnlyDictionary<MirValueRef, MirEntityOriginKind> ValueOrigins { get; }
     public IReadOnlyDictionary<MirStorageRef, MirEntityOriginKind> StorageOrigins { get; }
     public IReadOnlyDictionary<MirQubitResourceRef, MirEntityOriginKind> QubitOrigins { get; }
@@ -167,6 +192,148 @@ public sealed class MirCrossStageLinks
             ?? Array.Empty<HirSymbolRef>();
     }
 
+    /// <summary>
+    /// Rebinds an additive MIR transformation to a fresh snapshot identity. Existing source links keep
+    /// their local entity IDs, while entities introduced by the pass are explicitly classified as
+    /// compiler temporaries. Synthesized callables receive MIR-to-MIR provenance rather than pretending
+    /// to be additional lowerings of one HIR declaration.
+    /// </summary>
+    internal MirCrossStageLinks CloneForAdditiveTransformation(
+        MirProgram transformedProgram,
+        MirOriginTable transformedOrigins,
+        IReadOnlyDictionary<
+            MirCallableId,
+            (MirCallableId DerivedFrom, MirCallableSynthesisKind Kind)> synthesizedCallables)
+    {
+        ArgumentNullException.ThrowIfNull(transformedProgram);
+        ArgumentNullException.ThrowIfNull(transformedOrigins);
+        ArgumentNullException.ThrowIfNull(synthesizedCallables);
+        var targetSnapshot = transformedProgram.SnapshotId;
+        if (targetSnapshot != transformedOrigins.SnapshotId)
+            throw new ArgumentException(
+                "the transformed MIR program and origin table belong to different snapshots",
+                nameof(transformedOrigins));
+        if (targetSnapshot.CompilationId != MirSnapshot.CompilationId
+            || targetSnapshot.CompilationRevision != MirSnapshot.CompilationRevision)
+        {
+            throw new ArgumentException(
+                "an additive MIR transformation cannot cross compilation snapshots",
+                nameof(transformedProgram));
+        }
+        if (MirSnapshot.Revision == int.MaxValue
+            || targetSnapshot.Revision != MirSnapshot.Revision + 1)
+        {
+            throw new ArgumentException(
+                "an additive MIR transformation must target the immediate next snapshot revision",
+                nameof(transformedProgram));
+        }
+
+        MirCallableRef Callable(MirCallableRef reference) =>
+            new(targetSnapshot, reference.Callable);
+        MirValueRef Value(MirValueRef reference) =>
+            new(targetSnapshot, reference.Callable, reference.Value);
+        MirStorageRef Storage(MirStorageRef reference) =>
+            new(targetSnapshot, reference.Callable, reference.Storage);
+        MirQubitResourceRef Qubit(MirQubitResourceRef reference) =>
+            new(targetSnapshot, reference.Callable, reference.Resource);
+
+        var callablesByOperation = CallablesByHirOperation.ToDictionary(
+            pair => pair.Key,
+            pair => Callable(pair.Value));
+        var callablesBySymbol = CallablesBySymbol.ToDictionary(
+            pair => pair.Key,
+            pair => (IReadOnlyList<MirCallableRef>)pair.Value.Select(Callable).ToArray());
+        var valuesBySymbol = ValuesBySymbol.ToDictionary(
+            pair => pair.Key,
+            pair => (IReadOnlyList<MirValueRef>)pair.Value.Select(Value).ToArray());
+        var symbolsByValue = SymbolsByValue.ToDictionary(
+            pair => Value(pair.Key),
+            pair => pair.Value);
+        var storagesBySymbol = StoragesBySymbol.ToDictionary(
+            pair => pair.Key,
+            pair => (IReadOnlyList<MirStorageRef>)pair.Value.Select(Storage).ToArray());
+        var symbolsByStorage = SymbolsByStorage.ToDictionary(
+            pair => Storage(pair.Key),
+            pair => pair.Value);
+        var qubitsBySymbol = QubitsBySymbol.ToDictionary(
+            pair => pair.Key,
+            pair => (IReadOnlyList<MirQubitResourceRef>)pair.Value.Select(Qubit).ToArray());
+        var symbolsByQubit = SymbolsByQubit.ToDictionary(
+            pair => Qubit(pair.Key),
+            pair => pair.Value);
+
+        var callableProvenance = CallableProvenance.ToDictionary(
+            pair => Callable(pair.Key),
+            pair => (MirCallableProvenance)(pair.Value switch
+            {
+                MirLoweredCallableProvenance lowered => lowered,
+                MirSynthesizedCallableProvenance synthesized =>
+                    new MirSynthesizedCallableProvenance(
+                        Callable(synthesized.DerivedFrom),
+                        synthesized.Kind),
+                _ => throw new InvalidOperationException(
+                    $"unknown MIR callable provenance {pair.Value.GetType().Name}"),
+            }));
+        foreach (var (callable, synthesis) in synthesizedCallables)
+        {
+            var reference = new MirCallableRef(targetSnapshot, callable);
+            if (!callableProvenance.TryAdd(
+                    reference,
+                    new MirSynthesizedCallableProvenance(
+                        new MirCallableRef(targetSnapshot, synthesis.DerivedFrom),
+                        synthesis.Kind)))
+            {
+                throw new ArgumentException(
+                    $"MIR transformation registered callable {callable} more than once",
+                    nameof(synthesizedCallables));
+            }
+        }
+
+        var valueOrigins = ValueOrigins.ToDictionary(
+            pair => Value(pair.Key),
+            pair => pair.Value);
+        var storageOrigins = StorageOrigins.ToDictionary(
+            pair => Storage(pair.Key),
+            pair => pair.Value);
+        var qubitOrigins = QubitOrigins.ToDictionary(
+            pair => Qubit(pair.Key),
+            pair => pair.Value);
+        foreach (var callable in transformedProgram.Callables)
+        {
+            foreach (var value in callable.Values)
+                valueOrigins.TryAdd(
+                    new MirValueRef(targetSnapshot, callable.Id, value.Id),
+                    MirEntityOriginKind.CompilerTemporary);
+            foreach (var storage in callable.Storages)
+                storageOrigins.TryAdd(
+                    new MirStorageRef(targetSnapshot, callable.Id, storage.Id),
+                    MirEntityOriginKind.CompilerTemporary);
+            foreach (var qubit in callable.Qubits)
+                qubitOrigins.TryAdd(
+                    new MirQubitResourceRef(targetSnapshot, callable.Id, qubit.Id),
+                    MirEntityOriginKind.CompilerTemporary);
+        }
+
+        return new MirCrossStageLinks(
+            targetSnapshot,
+            LoweredFromSnapshot,
+            SymbolsFromArtifact,
+            transformedOrigins,
+            callablesByOperation,
+            callablesBySymbol,
+            valuesBySymbol,
+            symbolsByValue,
+            storagesBySymbol,
+            symbolsByStorage,
+            qubitsBySymbol,
+            symbolsByQubit,
+            SymbolDispositions,
+            callableProvenance,
+            valueOrigins,
+            storageOrigins,
+            qubitOrigins);
+    }
+
     private void ValidateMirEndpoints()
     {
         foreach (var reference in CallablesByHirOperation.Values)
@@ -189,6 +356,29 @@ public sealed class MirCrossStageLinks
                 Require(reference.Snapshot, nameof(QubitsBySymbol));
         foreach (var reference in SymbolsByQubit.Keys)
             Require(reference.Snapshot, nameof(SymbolsByQubit));
+        foreach (var (reference, provenance) in CallableProvenance)
+        {
+            Require(reference.Snapshot, nameof(CallableProvenance));
+            switch (provenance)
+            {
+                case MirLoweredCallableProvenance lowered:
+                    Require(lowered.Operation.Snapshot, nameof(CallableProvenance));
+                    Require(lowered.Symbol, nameof(CallableProvenance));
+                    break;
+                case MirSynthesizedCallableProvenance synthesized:
+                    Require(synthesized.DerivedFrom.Snapshot, nameof(CallableProvenance));
+                    if (!Enum.IsDefined(synthesized.Kind))
+                        throw new ArgumentException(
+                            $"MIR callable {reference} has unknown synthesis kind {synthesized.Kind}.",
+                            nameof(CallableProvenance));
+                    break;
+                default:
+                    throw new ArgumentException(
+                        $"MIR callable {reference} has unknown provenance type "
+                        + $"{provenance?.GetType().Name ?? "<null>"}.",
+                        nameof(CallableProvenance));
+            }
+        }
         foreach (var reference in ValueOrigins.Keys)
             Require(reference.Snapshot, nameof(ValueOrigins));
         foreach (var reference in StorageOrigins.Keys)
@@ -271,6 +461,12 @@ public sealed class MirCrossStageLinks
         foreach (var references in CallablesBySymbol.Values)
             foreach (var reference in references)
                 structure.RequireCallable(reference);
+        foreach (var (reference, provenance) in CallableProvenance)
+        {
+            structure.RequireCallable(reference);
+            if (provenance is MirSynthesizedCallableProvenance synthesized)
+                structure.RequireCallable(synthesized.DerivedFrom);
+        }
         foreach (var references in ValuesBySymbol.Values)
             foreach (var reference in references)
                 structure.RequireValue(reference);
@@ -293,13 +489,46 @@ public sealed class MirCrossStageLinks
         foreach (var reference in QubitOrigins.Keys)
             structure.RequireQubit(reference);
 
-        var mappedCallables = CallablesByHirOperation.Values.ToHashSet();
         var structuralCallables = structure.Callables.ToHashSet();
-        if (CallablesByHirOperation.Count != structuralCallables.Count
-            || !mappedCallables.SetEquals(structuralCallables))
+        if (!CallableProvenance.Keys.ToHashSet().SetEquals(structuralCallables))
             throw new ArgumentException(
-                "HIR operation links must cover every MIR callable exactly once.",
+                "MIR callable provenance must cover every MIR callable exactly once.",
                 nameof(structure));
+
+        foreach (var reference in structuralCallables)
+        {
+            var visited = new HashSet<MirCallableRef>();
+            var current = reference;
+            while (CallableProvenance[current]
+                is MirSynthesizedCallableProvenance synthesized)
+            {
+                if (!visited.Add(current))
+                {
+                    throw new ArgumentException(
+                        $"MIR callable provenance contains a synthesis cycle at {current}.",
+                        nameof(structure));
+                }
+                current = synthesized.DerivedFrom;
+            }
+        }
+
+        var loweredCallables = CallableProvenance
+            .Where(pair => pair.Value is MirLoweredCallableProvenance)
+            .ToDictionary(pair => pair.Key, pair => (MirLoweredCallableProvenance)pair.Value);
+        if (loweredCallables.Count != CallablesByHirOperation.Count)
+            throw new ArgumentException(
+                "Every HIR operation link must have exactly one lowered-callable provenance entry.",
+                nameof(structure));
+        foreach (var (operation, callable) in CallablesByHirOperation)
+        {
+            if (!loweredCallables.TryGetValue(callable, out var provenance)
+                || provenance.Operation != operation)
+            {
+                throw new ArgumentException(
+                    $"HIR operation link {operation} -> {callable} disagrees with callable provenance.",
+                    nameof(structure));
+            }
+        }
 
         VerifyEntityCoverage(
             structure.Values,
@@ -376,6 +605,18 @@ public sealed class MirCrossStageLinks
                 throw new ArgumentException(
                     $"HIR operation {operation} and symbol {symbolRef} disagree about MIR callable " +
                     $"{callable}.",
+                    nameof(hir));
+            }
+            if (!CallableProvenance.TryGetValue(
+                    callable,
+                    out var provenance)
+                || provenance is not MirLoweredCallableProvenance lowered
+                || lowered.Operation != operation
+                || lowered.Symbol != symbolRef)
+            {
+                throw new ArgumentException(
+                    $"MIR callable {callable} does not preserve the exact HIR operation/symbol "
+                    + "provenance resolved from its lowering source.",
                     nameof(hir));
             }
         }
@@ -623,6 +864,7 @@ internal sealed class MirCrossStageLinksBuilder
     private readonly BiMultiMap<HirSymbolRef, MirStorageRef> _storages = new();
     private readonly BiMultiMap<HirSymbolRef, MirQubitResourceRef> _qubits = new();
     private readonly Dictionary<HirSymbolRef, MirSymbolLoweringDisposition> _dispositions = new();
+    private readonly Dictionary<MirCallableRef, MirCallableProvenance> _callableProvenance = new();
     private readonly Dictionary<MirValueRef, MirEntityOriginKind> _valueOrigins = new();
     private readonly Dictionary<MirStorageRef, MirEntityOriginKind> _storageOrigins = new();
     private readonly Dictionary<MirQubitResourceRef, MirEntityOriginKind> _qubitOrigins = new();
@@ -670,6 +912,13 @@ internal sealed class MirCrossStageLinksBuilder
         if (!_callablesByHirOperation.TryAdd(operation, reference))
             throw new InvalidOperationException(
                 $"HIR operation {operation} was lowered more than once");
+        if (!_callableProvenance.TryAdd(
+                reference,
+                new MirLoweredCallableProvenance(operation, Symbol(symbol))))
+        {
+            throw new InvalidOperationException(
+                $"MIR callable {reference} was registered more than once");
+        }
         RecordDisposition(symbol, MirSymbolLoweringDisposition.Callable);
         _callables.Add(Symbol(symbol), reference);
     }
@@ -752,6 +1001,7 @@ internal sealed class MirCrossStageLinksBuilder
             _qubits.Forward(),
             _qubits.Reverse(),
             _dispositions,
+            _callableProvenance,
             _valueOrigins,
             _storageOrigins,
             _qubitOrigins);
@@ -840,7 +1090,8 @@ internal sealed class MirCrossStageLinksBuilder
 /// <summary>The complete, exact result of one HIR-to-MIR lowering.</summary>
 internal sealed record MirLoweringResult(
     MirProgram Program,
-    MirCrossStageLinks Links)
+    MirCrossStageLinks Links,
+    MirSafetyFacts Safety)
 {
     public MirSnapshot CreateSnapshot(
         MirLoweringProfile profile = MirLoweringProfile.CanonicalV1) =>
@@ -848,5 +1099,6 @@ internal sealed record MirLoweringResult(
             Links.MirSnapshot,
             profile,
             Program,
-            Links);
+            Links,
+            safety: Safety);
 }

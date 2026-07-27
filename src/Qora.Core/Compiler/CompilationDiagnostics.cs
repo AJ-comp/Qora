@@ -35,24 +35,8 @@ public abstract record DiagnosticOrigin
 
     public sealed record Target(
         TargetBackend Backend,
-        TargetDiagnosticInput Input) : DiagnosticOrigin;
-}
-
-/// <summary>
-/// The exact compiler-stage input on which a target diagnostic was derived. This is a union rather than
-/// a mandatory HIR reference because each backend is free to consume HIR or MIR.
-/// </summary>
-public abstract record TargetDiagnosticInput
-{
-    private TargetDiagnosticInput()
-    {
-    }
-
-    public sealed record Hir(HirSnapshotId Snapshot) : TargetDiagnosticInput;
-
-    public sealed record Mir(
-        MirSnapshotId Snapshot,
-        MirOriginRef? Location = null) : TargetDiagnosticInput;
+        MirSnapshotId Input,
+        MirOriginRef? Location = null) : DiagnosticOrigin;
 }
 
 public enum TargetBackend

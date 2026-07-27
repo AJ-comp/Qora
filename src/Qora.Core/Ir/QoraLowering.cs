@@ -15,7 +15,6 @@ namespace Qora.Ir;
 internal static class QoraLowering
 {
     private static readonly HashSet<string> TypeKeywords = new() { "Qubit", "int", "bit", "float", "angle" };
-    private static readonly HashSet<string> FunctorNames = new() { "Adjoint", "Controlled" };
 
     public static QProgram? Lower(
         AstSymbol? ast,
@@ -196,7 +195,7 @@ internal static class QoraLowering
             BodyStmts(node).Select(statement => LowerSpanned(statement, source)).ToList(),
             LowerCondition(CondOf(node))),
         "Return" => new QReturn(LowerExpr(ExprOf(node))),
-        _ => new QGate(new List<string>(), node.Name, new List<QArg>()), // defensive: unknown node -> inert
+        _ => new QGate(Array.Empty<QGateModifier>(), node.Name, Array.Empty<QArg>()), // defensive: unknown node -> inert
     };
 
     /// <summary>Parse a register size (a grammar-guaranteed number). Returns <c>-1</c> when the value does
@@ -217,9 +216,13 @@ internal static class QoraLowering
         var items = node.Items;
         var head = items.Count > 0 ? items[0].ToString() ?? string.Empty : string.Empty;
 
-        var functors = new List<string>();
+        var modifiers = new List<QGateModifier>();
         var start = 0;
-        if (FunctorNames.Contains(head)) { functors.Add(head); start = 1; }
+        if (head == "Controlled")
+        {
+            modifiers.Add(QGateModifier.Controlled);
+            start = 1;
+        }
 
         // the callee may be namespace-qualified: consume Ident (Dot Ident)* into one dotted name.
         var name = items.Count > start ? items[start].ToString() ?? string.Empty : string.Empty;
@@ -233,7 +236,7 @@ internal static class QoraLowering
         }
 
         var args = items.Skip(idx).Select(LowerArg).ToList();
-        return new QGate(functors, name, args);
+        return new QGate(modifiers, name, args);
     }
 
     private static QArg LowerArg(AstSymbol sym)

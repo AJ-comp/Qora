@@ -1,34 +1,28 @@
-using Qora.Ir.Passes;
+using Qora.Ir.Mir;
 
 namespace Qora.Ir;
 
 /// <summary>
-/// OpenQASM's disposition for the target-independent failed bounds proofs recorded in
-/// <see cref="HirSemanticModel.UnprovenIndexes"/>. OpenQASM 3 has no portable runtime trap/abort path for an
-/// indexed access, so an access the common validator could neither prove safe nor prove wrong cannot be
-/// emitted. A future runtime-capable backend can use the category when it also supplies stable access-site
-/// identity, checked-access lowering, and any required dynamic-alias policy; this diagnostic fact alone is
-/// not yet a rewrite work list.
+/// OpenQASM's disposition for unresolved bounds-proof obligations owned by MIR. OpenQASM 3 has no
+/// portable runtime trap for an invalid indexed access, so this backend rejects obligations which a
+/// runtime-capable backend could instead lower to checked accesses.
 /// </summary>
 internal static class OpenQasmBoundsValidation
 {
-    /// <summary>Turn final unresolved bounds facts into source-distinct QSEM030 diagnostics.</summary>
-    public static IReadOnlyList<QoraError> Run(HirSemanticModel semantics)
+    public static IReadOnlyList<QoraError> Run(MirSnapshot source)
     {
-        if (semantics.UnprovenIndexes.Count == 0)
-            return Array.Empty<QoraError>();
-
-        return semantics.UnprovenIndexes
+        ArgumentNullException.ThrowIfNull(source);
+        return source.Safety.UnprovenBounds
             .Select(ToDiagnostic)
             .Distinct()
-            .ToList();
+            .ToArray();
     }
 
-    private static QoraError ToDiagnostic(UnprovenIndex unresolved)
+    private static QoraError ToDiagnostic(MirBoundsObligation unresolved)
     {
         var message = unresolved.LoopBound is { } bound
-            ? $"in `{unresolved.Op}`: `{unresolved.Array}[{unresolved.Index}]` — the loop bound `{bound}` cannot be determined at compile time, so the index cannot be proven in bounds. Guard the access — `if (0 <= {unresolved.Index} && {unresolved.Index} < {unresolved.Array}.Count) {{ … }}` — or bound the loop by `{unresolved.Array}.Count-1` or a constant"
-            : $"in `{unresolved.Op}`: `{unresolved.Array}[{unresolved.Index}]` uses a runtime index that cannot be proven in bounds at compile time. Evaluate it once — `var i: int = {unresolved.Index};` — then guard the access with `if (0 <= i && i < {unresolved.Array}.Count) {{ {unresolved.Array}[i] … }}`";
+            ? $"in `{unresolved.Operation}`: `{unresolved.Aggregate}[{unresolved.Index}]` — the loop bound `{bound}` cannot be determined at compile time, so the index cannot be proven in bounds. Guard the access — `if (0 <= {unresolved.Index} && {unresolved.Index} < {unresolved.Aggregate}.Count) {{ … }}` — or bound the loop by `{unresolved.Aggregate}.Count-1` or a constant"
+            : $"in `{unresolved.Operation}`: `{unresolved.Aggregate}[{unresolved.Index}]` uses a runtime index that cannot be proven in bounds at compile time. Evaluate it once — `var i: int = {unresolved.Index};` — then guard the access with `if (0 <= i && i < {unresolved.Aggregate}.Count) {{ {unresolved.Aggregate}[i] … }}`";
 
         return new QoraError(
             message,

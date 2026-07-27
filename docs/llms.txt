@@ -1,4 +1,4 @@
-# Qora v0.31 — complete language reference for AI assistants
+# Qora v0.32 — complete language reference for AI assistants
 
 Qora is a quantum programming language (Q#/C#-flavored syntax) that compiles to OpenQASM 3.
 File extension: `.qor`. This file is the full, authoritative surface spec: everything below is
@@ -47,9 +47,9 @@ VS Code extension: `qora-lang.qora-language` (bundles the compiler; errors as yo
   outcome; they are not a second validation truth. Effect analysis accepts only the exact accepted
   validation artifact for the same snapshot and records it as `ValidationBasis`. Analysis does not create another
   structural HIR stage. Query the effect artifact as `Compilation.Hir.EffectAnalysis`. The canonical
-  milestone order is `Lowered -> ImportsExpanded -> MeasurementLowered -> Resolved -> Specialized ->
-  ConjugationLowered -> AdjointMaterialized`; a no-op pass may alias its predecessor but may not move
-  a later milestone backwards.
+  milestone order is `Lowered -> ImportsExpanded -> MeasurementLowered -> Resolved -> Specialized`;
+  a no-op pass may alias its predecessor but may not move a later milestone backwards. HIR has no
+  conjugation or adjoint stage.
   `HirCompilation` also owns the exact `HirLineage` over those same snapshot objects. Identity-preserving
   `NodeDerivation`, provenance-only `NodeSynthesis`, and source `HirNodeIntroduction` are distinct typed
   classifications. Every node newly appearing after the first snapshot must have exactly one of them.
@@ -57,15 +57,16 @@ VS Code extension: `qora-lang.qora-language` (bundles the compiler; errors as yo
   `Compilation.Mir` is a separate typed SSA/CFG snapshot with revision-bound analyses and explicit
   HIR-to-MIR links. Its cross-stage map gives every HIR semantic symbol one
   `MirSymbolLoweringDisposition` and every MIR value/storage/qubit one `MirEntityOriginKind`, so
-  unlowered symbols and compiler temporaries are explicit rather than missing links.
+  unlowered symbols and compiler temporaries are explicit rather than missing links. MIR stages are
+  `Lowered -> InverseRequestsInjected -> AdjointsMaterialized`; each transformed snapshot records its
+  exact parent and rebases its origin table.
 - `Compilation.Targets.Artifacts` is the authoritative backend-keyed target map;
   `Compilation.Targets.OpenQasm` is the current typed convenience view. The OpenQASM artifact records
-  the exact materialized HIR source and semantic basis it consumed; the current backend is HIR-backed,
-  not MIR-backed. The shared target interface does not force HIR provenance on future backends, and
-  target diagnostics carry the backend plus an exact HIR-or-MIR input identity. A failed compilation
+  the exact materialized `MirSnapshot` it consumed. The backend never reaches back into HIR or its
+  semantic model, and target diagnostics carry the backend plus an exact MIR input identity. A failed compilation
   retains every artifact already published before the failure, while later artifacts and successful
-  target output are absent. `QasmBackend` accepts only an exact `HirSemanticContext`, produces an
-  `OpenQasmTargetProgram`, and `OpenQasmArtifact.Text` is then derived from that target model by the
+  target output are absent. `QasmBackend` accepts only an exact `MirSnapshot`, produces a
+  `MirOpenQasmTargetProgram`, and `OpenQasmArtifact.Text` is then derived from that target model by the
   pure emitter; emitted text is not an independent authoritative input.
 - In the emitted QASM, user-defined names pass through unchanged when they are already safe.
   Namespaces flatten dots with `_` (`MyLib.Bell` -> `MyLib_Bell`), and `_` is appended only when
@@ -228,11 +229,11 @@ operation Main()                // global namespace; the entry point; takes NO p
 
 ## Functors
 
-- `Adjoint G(args);` — inverse. On a built-in gate -> `inv @`. On a USER operation the compiler
-  SYNTHESIZES the inverse def transitively (gates reversed and inverted, for-loops run backwards,
-  if-bodies inverted, nested calls handled). Fails (QSEM001) if the target measures or resets.
 - `Controlled G(ctrl, ...args);` — adds a control qubit (FIRST argument). Built-in gates only,
   never on user operations (QSEM002).
+- There is no source-level inverse/Adjoint functor, and HIR has no inverse marker or conjugation node.
+  An internal MIR scheduler may attach `MirFunctor.Adjoint` only to an exact `MirQuantumApply`;
+  `MirAdjointMaterializer` consumes that MIR-only request.
 
 ## Name resolution (C#/Q# rules)
 
@@ -257,7 +258,7 @@ For an unqualified call inside namespace `A.B`, in order:
 
 ## Error codes (collect-all within each reached stage; located errors carry a source span)
 
-QSEM001 Adjoint target not invertible (measures/resets, reason chained through calls)
+QSEM001 compiler-generated inverse target not invertible (internal defensive diagnostic)
 QSEM002 Controlled on a user operation        QSEM003 functor on Reset/ResetAll
 QSEM004 bare measurement statement            QSEM005 void/measurement call used in an unsupported value position
 QSEM006 wrong argument count/kind/type for a call
@@ -273,10 +274,10 @@ QSEM019 unknown namespace/member in qualified name or `open`
 QSEM020 import file not found/unreadable/no file context
 QSEM021 retired/reserved; cyclic back-edges reuse the canonical `SourceDocumentRef` and are visited once
 QSEM022 duplicate callable name within one namespace
-QSEM023 reserved; emitted-name collisions are auto-renamed by NameMangler with a `// Qora:` note
+QSEM023 reserved; emitted-name collisions are auto-renamed by `MirOpenQasmLowering`
 QSEM024 mutation of a `const` value/array, including a `var` mutable borrow (not `move var`)
 QSEM025 identifier not declared in scope here (unknown name, or classical used before declaration)
-QSEM026 qubit used as a classical value       QSEM027 non-invertible `within` body
+QSEM026 qubit used as a classical value       QSEM027 retired (source/HIR conjugation was removed)
 QSEM028 operation name used as a value
 QSEM029 invalid array shape, initializer, member, or whole-array assignment
 QSEM030 OpenQASM target cannot emit an index whose in-bounds proof remains unresolved
@@ -289,7 +290,7 @@ QSEM036 a whole `bit[]` register used as a number, compared across widths, or or
 QSEM037 incompatible function return/result type, or a whole classical array used as one scalar
 QSEM038 invalid ownership/access contract (unsupported shape, marker mismatch, or read-only mutation)
 QSEM039 use of a caller binding after its ownership was transferred with `move`
-QSEM040 the program contains no operation or function
+QSEM040 the program contains no callable at all, or contains functions but no runnable operation
 
 ## CLI contract (for tooling/agents)
 
@@ -307,7 +308,7 @@ qora --json [file] [--stages] [--base-dir <dir>] [--source-path <path>]
   original/FQN source names unmangled. These views are read from the same completed immutable
   `Compilation`; the CLI does not rerun compiler passes to reconstruct them. A stage not reached
   because of an earlier error is returned as an empty string.
-- Emitted QASM starts with `// generated by Qora v0.31`.
+- Emitted QASM starts with `// generated by Qora v0.32`.
 
 ## Executing programs
 
@@ -338,20 +339,6 @@ operation Increment(var values: int[]) {
 operation Main() {
     var values: int[] = [1, 2, 3];
     Increment(var values);
-}
-```
-
-Inverse synthesis (the flagship):
-```qora
-operation Prep(q: Qubit[]) {
-    H(q[0]);
-    T(q[1]);
-    for i in 0..q.Count-1 { X(q[i]); }
-}
-operation Main() {
-    use q = Qubit[2];
-    Prep(q);
-    Adjoint Prep(q);      // compiler synthesizes Prep's inverse def
 }
 ```
 

@@ -32,9 +32,30 @@ public class QubitArrayTests
 
         var specs = result.Hir.EffectAnalysis!.Program!.Operations.Where(o => o.DisplayName == "Visit").ToList();
         Assert.Equal(new[] { 2, 3 }, specs.Select(o => o.Params.Single().RegisterSize!.Value).Order().ToArray());
-        Assert.DoesNotContain(".Count", result.Targets.OpenQasm!.Text);
-        Assert.Contains("def Visit__sz2(qubit[2] qubits)", result.Targets.OpenQasm!.Text);
-        Assert.Contains("def Visit__sz3(qubit[3] qubits)", result.Targets.OpenQasm!.Text);
+
+        var targetSpecializations = result.Targets.OpenQasm!.Program.Definitions
+            .Where(
+                definition =>
+                    definition.Kind == MirQasmCallableKind.Operation
+                    && definition.Parameters.Length == 1
+                    && definition.Parameters[0].Type is MirQasmQubitType
+                    {
+                        IsRegister: true,
+                    })
+            .ToArray();
+        Assert.Equal(
+            new[] { 2, 3 },
+            targetSpecializations
+                .Select(
+                    definition =>
+                        ((MirQasmQubitType)definition.Parameters[0].Type).Count)
+                .Order()
+                .ToArray());
+        Assert.DoesNotContain(
+            targetSpecializations.SelectMany(
+                definition =>
+                    definition.Body.SelectMany(MirQasmTestModel.Expressions)),
+            expression => expression is MirQasmSizeOfExpression);
     }
 
     [Fact]
@@ -84,8 +105,25 @@ public class QubitArrayTests
     {
         var result = Compile("operation Main(){ use work=Qubit[3]; for i in 0..work.Count-1 { X(work[i]); } }");
 
-        Assert.Contains("for int i in [0:3 - 1]", result.Targets.OpenQasm!.Text);
-        Assert.DoesNotContain(".Count", result.Targets.OpenQasm!.Text);
+        var entry = result.Targets.OpenQasm!.Program.EntryPoint.Body;
+        var statements = MirQasmTestModel.Statements(entry).ToArray();
+        Assert.Contains(
+            statements.OfType<MirQasmQubitDeclarationStatement>(),
+            declaration =>
+                declaration.Type is
+                {
+                    Count: 3,
+                    IsRegister: true,
+                });
+        var loop = Assert.Single(statements.OfType<MirQasmWhileStatement>());
+        var dependencies = LoopDependencies(entry, loop).ToArray();
+        Assert.Contains(
+            dependencies,
+            expression =>
+                expression is MirQasmLiteralExpression { Text: "3" });
+        Assert.DoesNotContain(
+            dependencies,
+            expression => expression is MirQasmSizeOfExpression);
     }
 
     [Fact]
@@ -103,8 +141,47 @@ public class QubitArrayTests
             }
             """);
 
-        Assert.Contains("for int i in [0:2 - 1]", result.Targets.OpenQasm!.Text);
-        Assert.Contains("for int j in [0:sizeof(values) - 1]", result.Targets.OpenQasm!.Text);
+        var target = result.Targets.OpenQasm!.Program;
+        var mix = Assert.Single(
+            target.Definitions.Where(
+                definition =>
+                    definition.Parameters.Any(
+                        parameter =>
+                            parameter.Type is MirQasmQubitType
+                            {
+                                Count: 2,
+                                IsRegister: true,
+                            })
+                    && definition.Parameters.Any(
+                        parameter =>
+                            parameter.Type is MirQasmArrayType
+                            {
+                                ElementType.Kind: MirQasmScalarKind.Int,
+                            })));
+        var array = Assert.Single(
+            mix.Parameters.Where(
+                parameter => parameter.Type is MirQasmArrayType));
+        Assert.Equal(MirQasmParameterAccess.Mutable, array.Access);
+        var loops = MirQasmTestModel.Statements(mix.Body)
+            .OfType<MirQasmWhileStatement>()
+            .ToArray();
+        Assert.Equal(2, loops.Length);
+        Assert.Contains(
+            loops,
+            loop =>
+                LoopDependencies(mix.Body, loop).Any(
+                    expression =>
+                        expression is MirQasmLiteralExpression { Text: "2" }));
+        Assert.Contains(
+            loops,
+            loop =>
+                LoopDependencies(mix.Body, loop).Any(
+                    expression =>
+                        expression is MirQasmSizeOfExpression
+                        {
+                            Operand: MirQasmParameterReferenceExpression reference,
+                        }
+                        && reference.Parameter == array.Id));
     }
 
     [Fact]
@@ -123,5 +200,18 @@ public class QubitArrayTests
                 result.Diagnostics.Select(diagnostic =>
                     $"{diagnostic.Error.Code}: {diagnostic.Error.Message}")));
         return result;
+    }
+
+    private static IEnumerable<MirQasmExpression> LoopDependencies(
+        IEnumerable<MirQasmStatement> ownerBody,
+        MirQasmWhileStatement loop)
+    {
+        foreach (var expression in MirQasmTestModel.Expressions(loop.Condition))
+            foreach (var dependency in ownerBody.DependencyClosure(expression))
+                yield return dependency;
+        foreach (var statement in MirQasmTestModel.Statements(loop.Body))
+            foreach (var expression in MirQasmTestModel.Expressions(statement))
+                foreach (var dependency in ownerBody.DependencyClosure(expression))
+                    yield return dependency;
     }
 }

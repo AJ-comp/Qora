@@ -58,7 +58,11 @@ public sealed class MirImmutabilityTests
         };
 
         var callables = new List<MirCallable> { clonedCallable };
-        var program = new MirProgram(compiled.SnapshotId, compiled.Origins, callables);
+        var program = new MirProgram(
+            compiled.SnapshotId,
+            compiled.Origins,
+            compiled.EntryPoint,
+            callables);
         QoraMirVerifier.VerifyOrThrow(program);
         var effects = MirEffectAnalysis.Analyze(program);
         var cfg = MirControlFlowAnalysis.Analyze(program, clonedCallable.Id);

@@ -80,21 +80,7 @@ operation Main() {
     var r1: bit = M(q[1]);
 }""", {"11"})
 
-load_and_run("B4 전연산 Adjoint 항등성 (합성 ___adj def)", """
-operation Prep(q: Qubit[]) {
-    H(q[0]);
-    T(q[1]);
-    CNOT(q[0], q[1]);
-}
-operation Main() {
-    use q = Qubit[2];
-    Prep(q);
-    Adjoint Prep(q);
-    var r0: bit = M(q[0]);
-    var r1: bit = M(q[1]);
-}""", {"00"})
-
-load_and_run("B5 네임스페이스 맹글명 def", """
+load_and_run("B4 네임스페이스 맹글명 def", """
 namespace MyLib {
     operation Bell(q: Qubit[]) {
         H(q[0]);

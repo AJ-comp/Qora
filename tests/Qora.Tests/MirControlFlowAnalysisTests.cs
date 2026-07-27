@@ -85,7 +85,10 @@ public sealed class MirControlFlowAnalysisTests
             Storages: Array.Empty<MirArrayStorage>(),
             Qubits: Array.Empty<MirQubitResource>(),
             source);
-        var program = context.Program(new[] { callable });
+        var entryPoint = EmptyEntry(C(1), source);
+        var program = context.Program(
+            entryPoint.Id,
+            new[] { callable, entryPoint });
         var cfg = MirControlFlowAnalysis.Analyze(program, callable.Id);
 
         Assert.False(cfg.IsReachable(B(1)));
@@ -133,7 +136,7 @@ public sealed class MirControlFlowAnalysisTests
             Storages: Array.Empty<MirArrayStorage>(),
             Qubits: Array.Empty<MirQubitResource>(),
             source);
-        var program = context.Program(new[] { callable });
+        var program = context.Program(callable.Id, new[] { callable });
         var cfg = MirControlFlowAnalysis.Analyze(program, callable.Id);
 
         Assert.Equal(new[] { BR(program, 1), BR(program, 3) }, cfg.ExitBlocks);
@@ -182,7 +185,7 @@ public sealed class MirControlFlowAnalysisTests
             Storages: Array.Empty<MirArrayStorage>(),
             Qubits: Array.Empty<MirQubitResource>(),
             source);
-        var program = context.Program(new[] { callable });
+        var program = context.Program(callable.Id, new[] { callable });
         var cfg = MirControlFlowAnalysis.Analyze(program, callable.Id);
 
         Assert.True(cfg.Dominates(B(1), B(2)));
@@ -206,6 +209,7 @@ public sealed class MirControlFlowAnalysisTests
         var copy = new MirProgram(
             program.SnapshotId,
             program.Origins,
+            program.EntryPoint,
             program.Callables.ToArray());
         Assert.False(first.IsFor(copy, callable.Id));
         Assert.Throws<InvalidOperationException>(() => first.EnsureFor(copy, callable.Id));
@@ -283,7 +287,32 @@ public sealed class MirControlFlowAnalysisTests
             Storages: Array.Empty<MirArrayStorage>(),
             Qubits: Array.Empty<MirQubitResource>(),
             source);
-        return context.Program(new[] { callable });
+        return context.Program(callable.Id, new[] { callable });
+    }
+
+    private static MirCallable EmptyEntry(MirCallableId id, MirOriginRef source)
+    {
+        var entryBlock = B(0);
+        return new MirCallable(
+            id,
+            "Main",
+            MirCallableKind.Operation,
+            ReturnType: null,
+            Parameters: Array.Empty<MirParameter>(),
+            EntryBlock: entryBlock,
+            Blocks: new[]
+            {
+                new MirBlock(
+                    entryBlock,
+                    Array.Empty<MirBlockArgument>(),
+                    Array.Empty<MirInstruction>(),
+                    new MirReturn(null, source),
+                    source),
+            },
+            Values: Array.Empty<MirValue>(),
+            Storages: Array.Empty<MirArrayStorage>(),
+            Qubits: Array.Empty<MirQubitResource>(),
+            source);
     }
 
     private static MirBlockRef BR(MirProgram program, int value) =>

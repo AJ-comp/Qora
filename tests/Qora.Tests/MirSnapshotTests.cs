@@ -102,15 +102,13 @@ public sealed class MirSnapshotTests
             20,
             hir.Semantics.Model.FindSymbol(20)!.Id,
             new MirCallableId(1));
-        linkBuilder.LinkCallable(
-            30,
-            hir.Semantics.Model.FindSymbol(30)!.Id,
-            new MirCallableId(1));
+        var error = Assert.Throws<InvalidOperationException>(
+            () => linkBuilder.LinkCallable(
+                30,
+                hir.Semantics.Model.FindSymbol(30)!.Id,
+                new MirCallableId(1)));
 
-        var error = Assert.Throws<ArgumentException>(
-            () => linkBuilder.Build(program.Origins));
-
-        Assert.Contains("exactly one HIR operation", error.Message);
+        Assert.Contains("registered more than once", error.Message);
     }
 
     [Fact]
@@ -149,6 +147,7 @@ public sealed class MirSnapshotTests
             links.QubitsBySymbol,
             links.SymbolsByQubit,
             links.SymbolDispositions,
+            links.CallableProvenance,
             links.ValueOrigins,
             links.StorageOrigins,
             links.QubitOrigins);
@@ -204,6 +203,7 @@ public sealed class MirSnapshotTests
             links.QubitsBySymbol,
             links.SymbolsByQubit,
             links.SymbolDispositions,
+            links.CallableProvenance,
             links.ValueOrigins,
             links.StorageOrigins,
             links.QubitOrigins);
@@ -534,6 +534,7 @@ public sealed class MirSnapshotTests
             ? MirTestContext.For(id)
             : MirTestContext.Create();
         return context.Program(
+            new MirCallableId(0),
             new[]
             {
                 Callable(new MirCallableId(0), context.Origin(0), "First", "10"),

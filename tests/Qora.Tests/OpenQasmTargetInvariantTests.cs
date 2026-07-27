@@ -1,12 +1,13 @@
+using Qora.Compiler;
 using Qora.Ir;
-using Qora.Ir.Passes;
+using Qora.Ir.Mir;
 
 namespace Qora.Tests;
 
 public sealed class OpenQasmTargetInvariantTests
 {
     [Fact]
-    public void BackendConsumesOnlyOneExactHirSemanticContext()
+    public void BackendConsumesOneExactMirSnapshot()
     {
         var run = Assert.Single(
             typeof(QasmBackend)
@@ -17,21 +18,26 @@ public sealed class OpenQasmTargetInvariantTests
             method => method.Name == nameof(QasmBackend.Run));
         var parameters = run.GetParameters();
 
-        Assert.Equal(typeof(HirSemanticContext), parameters[0].ParameterType);
+        Assert.Single(parameters);
+        Assert.Equal(typeof(MirSnapshot), parameters[0].ParameterType);
         Assert.DoesNotContain(
             parameters,
             parameter => parameter.ParameterType == typeof(QProgram));
     }
 
     [Fact]
-    public void ArtifactTextIsDerivedFromItsAuthoritativeTargetProgram()
+    public void ArtifactOwnsTheExactMirSnapshotAndDerivesTextFromItsTargetProgram()
     {
         var compilation = QoraCompiler.Compile("operation Main() { }");
         Assert.True(compilation.Succeeded);
+        var source = Assert.IsType<MirSnapshot>(compilation.Mir);
         var artifact = Assert.IsType<OpenQasmArtifact>(
             compilation.Targets.OpenQasm);
 
-        Assert.Equal(QasmEmitter.Emit(artifact.Program), artifact.Text);
+        Assert.Same(source, artifact.SourceSnapshot);
+        Assert.Equal(source.Id, artifact.Source);
+        Assert.Equal(MirQasmEmitter.Emit(artifact.Program), artifact.Text);
+
         var constructor = Assert.Single(
             typeof(OpenQasmArtifact).GetConstructors(
                 System.Reflection.BindingFlags.Instance
@@ -42,163 +48,147 @@ public sealed class OpenQasmTargetInvariantTests
     }
 
     [Fact]
-    public void BackendResultCannotBeForgedOutsideItsOwningBackend()
+    public void TargetProgramDoesNotCarryASecondHirOrMirSourceOfTruth()
     {
-        var factories = typeof(QasmBackend.Result)
-            .GetMethods(
-                System.Reflection.BindingFlags.Static
+        var sourceTypes = typeof(MirOpenQasmTargetProgram)
+            .GetProperties(
+                System.Reflection.BindingFlags.Instance
+                | System.Reflection.BindingFlags.Public
                 | System.Reflection.BindingFlags.NonPublic)
-            .Where(method => method.ReturnType == typeof(QasmBackend.Result))
+            .Select(property => property.PropertyType)
+            .Concat(
+                typeof(MirOpenQasmTargetProgram)
+                    .GetFields(
+                        System.Reflection.BindingFlags.Instance
+                        | System.Reflection.BindingFlags.Public
+                        | System.Reflection.BindingFlags.NonPublic)
+                    .Select(field => field.FieldType))
             .ToArray();
 
-        Assert.NotEmpty(factories);
-        Assert.All(factories, factory => Assert.True(factory.IsPrivate));
+        Assert.DoesNotContain(typeof(QProgram), sourceTypes);
+        Assert.DoesNotContain(typeof(MirProgram), sourceTypes);
+        Assert.DoesNotContain(typeof(MirSnapshot), sourceTypes);
     }
 
     [Fact]
-    public void TargetRejectsUserCallsWithoutExactDeclarationIds()
+    public void TargetRejectsAUserCallToAnUndefinedTargetCallableId()
     {
-        var worker = new QOperation(
-            "Worker",
-            Array.Empty<QParam>(),
-            Array.Empty<QStmt>());
-        var unboundCall = new QGate(
-            Array.Empty<string>(),
-            worker.Name,
-            Array.Empty<QArg>());
-        var main = new QOperation(
+        var dangling = new MirQasmQuantumApplyStatement(
+            new MirQasmStatementId(0),
+            new MirQasmUserQuantumTarget(new MirQasmCallableId(7)),
+            Array.Empty<MirQasmExpression>(),
+            Array.Empty<MirQasmExpression>());
+        var entry = new MirQasmEntryPoint(
+            new MirQasmCallableId(0),
             "Main",
-            Array.Empty<QParam>(),
-            new QStmt[] { unboundCall });
+            new[] { dangling });
 
         var error = Assert.Throws<ArgumentException>(
-            () => OpenQasmTargetProgram.CreateExplicitForTesting(
-                new QProgram(new[] { worker, main })));
-        Assert.Contains("has no CalleeOpId", error.Message);
+            () => new MirOpenQasmTargetProgram(
+                entry,
+                Array.Empty<MirQasmCallableDefinition>()));
+
+        Assert.Contains(new MirQasmCallableId(7).ToString(), error.Message);
     }
 
     [Fact]
-    public void TargetRejectsCallNamesThatDisagreeWithTheirDeclarationIds()
+    public void TargetRejectsDuplicateCallableIdsAcrossEntryAndDefinitions()
     {
-        var worker = new QOperation(
-            "Worker",
-            Array.Empty<QParam>(),
-            Array.Empty<QStmt>());
-        var mismatchedCall = new QGate(
-            Array.Empty<string>(),
-            "Other",
-            Array.Empty<QArg>())
-        {
-            CalleeOpId = worker.Id,
-        };
-        var main = new QOperation(
+        var id = new MirQasmCallableId(0);
+        var entry = new MirQasmEntryPoint(
+            id,
             "Main",
-            Array.Empty<QParam>(),
-            new QStmt[] { mismatchedCall });
+            Array.Empty<MirQasmStatement>());
+        var definition = new MirQasmCallableDefinition(
+            id,
+            "Worker",
+            MirQasmCallableKind.Operation,
+            Array.Empty<MirQasmParameter>(),
+            returnType: null,
+            Array.Empty<MirQasmStatement>());
 
         var error = Assert.Throws<ArgumentException>(
-            () => OpenQasmTargetProgram.CreateExplicitForTesting(
-                new QProgram(new[] { worker, main })));
-        Assert.Contains("disagrees with CalleeOpId", error.Message);
+            () => new MirOpenQasmTargetProgram(entry, new[] { definition }));
+
+        Assert.Contains("occurs more than once", error.Message);
     }
 
     [Fact]
-    public void TargetRejectsMissingAndExtraSymbolEntries()
+    public void TargetRejectsAUserOperationCallWithTheWrongArity()
     {
-        var (program, operation, declaration) = ProgramWithDeclaration();
-        var types = OpenQasmTypeEnvironment.BuildExplicitForTesting(program);
-
-        var missing = new OpenQasmSymbolMap(
-            new[]
-            {
-                KeyValuePair.Create(operation.Id, operation.Name),
-            });
-        Assert.Throws<InvalidOperationException>(
-            () => Create(program, missing, types));
-
-        var extra = new OpenQasmSymbolMap(
-            new[]
-            {
-                KeyValuePair.Create(operation.Id, operation.Name),
-                KeyValuePair.Create(declaration.Id, declaration.Name),
-                KeyValuePair.Create(QNodeIds.Next(), "ghost"),
-            });
-        var error = Assert.Throws<InvalidOperationException>(
-            () => Create(program, extra, types));
-        Assert.Contains("absent from the final target tree", error.Message);
-    }
-
-    [Fact]
-    public void TargetRejectsMissingAndExtraClassicalTypeEntries()
-    {
-        var (program, operation, declaration) = ProgramWithDeclaration();
-        var symbols = new OpenQasmSymbolMap(
-            new[]
-            {
-                KeyValuePair.Create(operation.Id, operation.Name),
-                KeyValuePair.Create(declaration.Id, declaration.Name),
-            });
-
-        var noDeclaration = program with
-        {
-            Operations = new[]
-            {
-                operation with { Body = Array.Empty<QStmt>() },
-            },
-        };
-        var missing = OpenQasmTypeEnvironment.BuildExplicitForTesting(noDeclaration);
-        Assert.Throws<InvalidOperationException>(
-            () => Create(program, symbols, missing));
-
-        var ghost = new QDecl(
-            false,
-            QType.Int,
-            "ghost",
-            new QText(new QNumLit(0)));
-        var withExtra = program with
-        {
-            Operations = new[]
-            {
-                operation with
-                {
-                    Body = new QStmt[] { declaration, ghost },
-                },
-            },
-        };
-        var extra = OpenQasmTypeEnvironment.BuildExplicitForTesting(withExtra);
-        var error = Assert.Throws<InvalidOperationException>(
-            () => Create(program, symbols, extra));
-        Assert.Contains("absent from the final target tree", error.Message);
-    }
-
-    private static (
-        QProgram Program,
-        QOperation Operation,
-        QDecl Declaration) ProgramWithDeclaration()
-    {
-        var declaration = new QDecl(
-            false,
-            QType.Int,
-            "value",
-            new QText(new QNumLit(1)));
-        var operation = new QOperation(
+        var workerId = new MirQasmCallableId(1);
+        var call = new MirQasmQuantumApplyStatement(
+            new MirQasmStatementId(0),
+            new MirQasmUserQuantumTarget(workerId),
+            Array.Empty<MirQasmExpression>(),
+            Array.Empty<MirQasmExpression>());
+        var entry = new MirQasmEntryPoint(
+            new MirQasmCallableId(0),
             "Main",
-            Array.Empty<QParam>(),
-            new QStmt[] { declaration });
-        return (
-            new QProgram(new[] { operation }),
-            operation,
-            declaration);
+            new[] { call });
+        var worker = new MirQasmCallableDefinition(
+            workerId,
+            "Worker",
+            MirQasmCallableKind.Operation,
+            new[]
+            {
+                new MirQasmParameter(
+                    new MirQasmParameterId(0),
+                    "value",
+                    new MirQasmScalarType(MirQasmScalarKind.Int)),
+            },
+            returnType: null,
+            Array.Empty<MirQasmStatement>());
+
+        var error = Assert.Throws<ArgumentException>(
+            () => new MirOpenQasmTargetProgram(entry, new[] { worker }));
+
+        Assert.Contains("0 operand(s), expected 1", error.Message);
     }
 
-    private static OpenQasmTargetProgram Create(
-        QProgram program,
-        OpenQasmSymbolMap symbols,
-        OpenQasmTypeEnvironment types) =>
-        new(
-            program,
-            symbols,
-            types,
-            OpenQasmTargetFacts.Empty,
-            Array.Empty<string>());
+    [Fact]
+    public void TargetRejectsAUserFunctionCallWithTheWrongArity()
+    {
+        var functionId = new MirQasmCallableId(1);
+        var intType = new MirQasmScalarType(MirQasmScalarKind.Int);
+        var call = new MirQasmFunctionCallExpression(
+            new MirQasmUserFunctionTarget(functionId),
+            Array.Empty<MirQasmExpression>());
+        var entry = new MirQasmEntryPoint(
+            new MirQasmCallableId(0),
+            "Main",
+            new[]
+            {
+                new MirQasmValueDeclarationStatement(
+                    new MirQasmStatementId(0),
+                    new MirQasmDeclarationId(0),
+                    "result",
+                    intType,
+                    call),
+            });
+        var function = new MirQasmCallableDefinition(
+            functionId,
+            "Identity",
+            MirQasmCallableKind.Function,
+            new[]
+            {
+                new MirQasmParameter(
+                    new MirQasmParameterId(0),
+                    "value",
+                    intType),
+            },
+            intType,
+            new[]
+            {
+                new MirQasmReturnStatement(
+                    new MirQasmStatementId(1),
+                    new MirQasmParameterReferenceExpression(
+                        new MirQasmParameterId(0))),
+            });
+
+        var error = Assert.Throws<ArgumentException>(
+            () => new MirOpenQasmTargetProgram(entry, new[] { function }));
+
+        Assert.Contains("0 argument(s), expected 1", error.Message);
+    }
 }

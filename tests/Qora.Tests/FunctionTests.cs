@@ -1,3 +1,5 @@
+using Qora.Ir;
+
 namespace Qora.Tests;
 
 /// <summary>
@@ -25,19 +27,53 @@ public class FunctionTests
     public void AcceptsFunctionUses(string source) => Compiler.Accepts(source);
 
     [Fact]
-    public void EmitsDefWithReturnTypeAndReturn()
+    public void FunctionTargetCarriesReturnTypeAndTypedCallIdentity()
     {
-        Compiler.Emits("function two(): int { return 2; }\noperation Main(){ use q=Qubit[1]; var k: int = two(); }", "def two() -> int {");
-        Compiler.Emits("function two(): int { return 2; }\noperation Main(){ use q=Qubit[1]; var k: int = two(); }", "int k = two();");
-        // A return produces its value into the result variable; the def takes its ONE return at the end.
-        Compiler.Emits("function two(): int { return 2; }\noperation Main(){ use q=Qubit[1]; var k: int = two(); }", "ret = 2;");
-        Compiler.Emits("function two(): int { return 2; }\noperation Main(){ use q=Qubit[1]; var k: int = two(); }", "return ret;");
+        var program = CompileTarget(
+            "function two(): int { return 2; }\n" +
+            "operation Main(){ use q=Qubit[1]; var k: int = two(); }");
+        var function = RequireOnlyFunction(program);
+        var returnType = Assert.IsType<MirQasmScalarType>(function.ReturnType);
+        var returned = Assert.IsType<MirQasmReturnStatement>(function.Body[^1]);
+        var returnPlace = Assert.IsType<MirQasmDeclarationReferenceExpression>(
+            returned.Value);
+        var call = Assert.Single(
+            program.Expressions().OfType<MirQasmFunctionCallExpression>());
+        var target = Assert.IsType<MirQasmUserFunctionTarget>(call.Target);
+
+        Assert.Equal(MirQasmCallableKind.Function, function.Kind);
+        Assert.Equal(MirQasmScalarKind.Int, returnType.Kind);
+        Assert.Equal(function.Id, target.Callable);
+        Assert.Contains(
+            MirQasmTestModel.Statements(function.Body)
+                .OfType<MirQasmAssignmentStatement>(),
+            assignment =>
+                assignment.Target
+                    is MirQasmDeclarationReferenceExpression reference
+                && reference.Declaration == returnPlace.Declaration);
     }
 
     [Fact]
-    public void EmitsClassicalParametersAndBitReturn()
+    public void FunctionTargetCarriesClassicalParameterAndReturnTypes()
     {
-        Compiler.Emits("function pick(a: int, b: float): float { return a + b; }\noperation Main(){ use q=Qubit[1]; Rx(pick(1, 0.5), q[0]); }", "def pick(int a, float b) -> float {");
+        var program = CompileTarget(
+            "function pick(a: int, b: float): float { return a + b; }\n" +
+            "operation Main(){ use q=Qubit[1]; Rx(pick(1, 0.5), q[0]); }");
+        var function = RequireOnlyFunction(program);
+        var parameterTypes = function.Parameters
+            .Select(parameter => Assert.IsType<MirQasmScalarType>(parameter.Type).Kind)
+            .ToArray();
+
+        Assert.Equal(MirQasmCallableKind.Function, function.Kind);
+        Assert.Equal(
+            MirQasmScalarKind.Float,
+            Assert.IsType<MirQasmScalarType>(function.ReturnType).Kind);
+        Assert.Equal(
+            new[] { MirQasmScalarKind.Int, MirQasmScalarKind.Float },
+            parameterTypes);
+        Assert.All(
+            function.Parameters,
+            parameter => Assert.Equal(MirQasmParameterAccess.Value, parameter.Access));
     }
 
     [Theory]
@@ -214,9 +250,29 @@ public class FunctionTests
         // An array local becomes a hidden reference PARAMETER (OpenQASM: arrays enter a def only by
         // reference). Every call site must supply it — including the expression-position one, which is the
         // only way a function is ever called. Missing it emitted a def/call arity mismatch under success:true.
-        var r = Compiler.Compile("function f(): int { var xs: int[] = [4, 5, 6]; return xs.Count; }\noperation Main(){ use q=Qubit[1]; var n: int = f(); if (n == 3) { X(q[0]); } }");
-        Assert.True(r.Succeeded, string.Join("; ", r.Diagnostics.Select(diagnostic => diagnostic.Error).ToList().Select(e => e.Code + " " + e.Message)));
-        Assert.Contains("int n = f(f_xs);", r.Targets.OpenQasm!.Text);
+        var program = CompileTarget(
+            "function f(): int { var xs: int[] = [4, 5, 6]; return xs.Count; }\n" +
+            "operation Main(){ use q=Qubit[1]; var n: int = f(); " +
+            "if (n == 3) { X(q[0]); } }");
+        var function = RequireOnlyFunction(program);
+        var hidden = Assert.Single(function.Parameters);
+        var hiddenType = Assert.IsType<MirQasmArrayType>(hidden.Type);
+        var call = Assert.Single(
+            program.EntryPoint.Body
+                .SelectMany(MirQasmTestModel.Expressions)
+                .OfType<MirQasmFunctionCallExpression>());
+        var target = Assert.IsType<MirQasmUserFunctionTarget>(call.Target);
+        var hiddenArgument = Assert.IsType<MirQasmDeclarationReferenceExpression>(
+            Assert.Single(call.Arguments));
+        var backing = Assert.Single(
+            MirQasmTestModel.Statements(program.EntryPoint.Body)
+                .OfType<MirQasmArrayDeclarationStatement>(),
+            declaration => declaration.Declaration == hiddenArgument.Declaration);
+
+        Assert.Equal(function.Id, target.Callable);
+        Assert.Equal(MirQasmParameterAccess.Mutable, hidden.Access);
+        Assert.Equal(3, hiddenType.Length);
+        Assert.Equal(3, backing.Type.Length);
     }
 
     [Fact]
@@ -225,7 +281,7 @@ public class FunctionTests
         // The hoisting pass renames array references when a nested declaration shadows an outer one. It never
         // rewrote a `return` VALUE, so the returned reference kept a name a shadowing declaration had taken
         // over — the function returned a DIFFERENT array's contents, with no diagnostic anywhere.
-        var r = Compiler.Compile("""
+        var program = CompileTarget("""
             function f(): int {
                 var b: bit[] = new bit[3];
                 b[0] = 1;
@@ -234,9 +290,33 @@ public class FunctionTests
             }
             operation Main() { use q = Qubit[1]; var n: int = f(); if (n == 4) { X(q[0]); } }
             """);
-        Assert.True(r.Succeeded, string.Join("; ", r.Diagnostics.Select(diagnostic => diagnostic.Error).ToList().Select(e => e.Code + " " + e.Message)));
-        Assert.Contains("ret = uint[3](b_);", r.Targets.OpenQasm!.Text);   // the OUTER bit[3], which the returned expression names
-        Assert.DoesNotContain("uint[2](", r.Targets.OpenQasm!.Text);       // never the inner bit[2] that shadowed it
+        var function = RequireOnlyFunction(program);
+        var returned = Assert.IsType<MirQasmReturnStatement>(function.Body[^1]);
+        var bitDeclarations = MirQasmTestModel.Statements(function.Body)
+            .OfType<MirQasmValueDeclarationStatement>()
+            .Where(
+                declaration =>
+                    declaration.Type is MirQasmBitType { IsRegister: true })
+            .ToArray();
+
+        Assert.Contains(
+            bitDeclarations,
+            declaration =>
+                declaration.Type is MirQasmBitType { Width: 3 });
+        Assert.Contains(
+            bitDeclarations,
+            declaration =>
+                declaration.Type is MirQasmBitType { Width: 2 });
+        Assert.True(
+            function.Body.DependsOn(
+                Assert.IsAssignableFrom<MirQasmExpression>(returned.Value),
+                expression =>
+                    expression is MirQasmUnsignedCastExpression { Width: 3 }));
+        Assert.False(
+            function.Body.DependsOn(
+                Assert.IsAssignableFrom<MirQasmExpression>(returned.Value),
+                expression =>
+                    expression is MirQasmUnsignedCastExpression { Width: 2 }));
     }
 
     // --- `return` may stand anywhere; the target's one-return-at-the-end shape is produced by a pass ---
@@ -264,11 +344,17 @@ public class FunctionTests
     [InlineData("function deep(x: int): int { if (x == 0) { return 1; } else { if (x == 1) { return 2; } } return 3; }", "deep")]
     public void EveryEmittedDefTakesExactlyOneReturnAtItsEnd(string fn, string name)
     {
-        var r = Compiler.Compile($"{fn}\noperation Main(){{ use q=Qubit[1]; var k: int = {name}(1); }}");
-        Assert.True(r.Succeeded, string.Join("; ", r.Diagnostics.Select(diagnostic => diagnostic.Error).ToList().Select(e => e.Code + " " + e.Message)));
-        var def = r.Targets.OpenQasm!.Text.Split($"def {name}(")[1].Split("\n}")[0];
-        Assert.Equal(1, def.Split("return ").Length - 1);            // exactly one return…
-        Assert.EndsWith("return ret;", def.TrimEnd());               // …and it is the def's last statement
+        var program = CompileTarget(
+            $"{fn}\noperation Main(){{ use q=Qubit[1]; var k: int = {name}(1); }}");
+        var function = RequireOnlyFunction(program);
+        var returns = MirQasmTestModel.Statements(function.Body)
+            .OfType<MirQasmReturnStatement>()
+            .ToArray();
+
+        Assert.Equal(MirQasmCallableKind.Function, function.Kind);
+        Assert.Single(returns);
+        Assert.Same(function.Body[^1], returns[0]);
+        Assert.NotNull(returns[0].Value);
     }
 
     [Fact]
@@ -276,10 +362,23 @@ public class FunctionTests
     {
         // The path that did NOT return is exactly the one that should still run the rest, so the structure
         // already carries the answer — no "have we returned?" flag is minted for straight-line code.
-        var r = Compiler.Compile("function sign(x: int): int { if (x == 0) { return 7; } return 4; }\noperation Main(){ use q=Qubit[1]; var k: int = sign(0); }");
-        Assert.True(r.Succeeded, string.Join("; ", r.Diagnostics.Select(diagnostic => diagnostic.Error).ToList().Select(e => e.Code + " " + e.Message)));
-        Assert.Contains("else {", r.Targets.OpenQasm!.Text);
-        Assert.DoesNotContain("done", r.Targets.OpenQasm!.Text);
+        var program = CompileTarget(
+            "function sign(x: int): int { if (x == 0) { return 7; } return 4; }\n" +
+            "operation Main(){ use q=Qubit[1]; var k: int = sign(0); }");
+        var function = RequireOnlyFunction(program);
+        var branch = Assert.Single(function.Body.OfType<MirQasmIfStatement>());
+
+        Assert.NotEmpty(branch.Then);
+        Assert.NotEmpty(branch.Else);
+        Assert.Empty(
+            MirQasmTestModel.Statements(function.Body)
+                .OfType<MirQasmWhileStatement>());
+        Assert.Empty(
+            MirQasmTestModel.Statements(function.Body)
+                .OfType<MirQasmBreakStatement>());
+        Assert.Single(
+            MirQasmTestModel.Statements(function.Body)
+                .OfType<MirQasmReturnStatement>());
     }
 
     [Fact]
@@ -287,11 +386,27 @@ public class FunctionTests
     {
         // A loop's tail cannot be re-nested into a branch, so this one shape needs the flag: later iterations
         // stop doing work, and the statements after the loop only run if no return happened.
-        var r = Compiler.Compile("function find(n: int): int { for i in 0..4 { if (i == n) { return i; } } return 9; }\noperation Main(){ use q=Qubit[1]; var k: int = find(2); }");
-        Assert.True(r.Succeeded, string.Join("; ", r.Diagnostics.Select(diagnostic => diagnostic.Error).ToList().Select(e => e.Code + " " + e.Message)));
-        Assert.Contains("break;", r.Targets.OpenQasm!.Text);            // leaving the loop is what makes the FIRST return win
-        Assert.Contains("if (done == 0)", r.Targets.OpenQasm!.Text);    // …and the flag is what skips the statements after it
-        Assert.DoesNotContain("if (done == 0) {\n      if (", r.Targets.OpenQasm!.Text);   // the body itself is not wrapped
+        var program = CompileTarget(
+            "function find(n: int): int { for i in 0..4 { " +
+            "if (i == n) { return i; } } return 9; }\n" +
+            "operation Main(){ use q=Qubit[1]; var k: int = find(2); }");
+        var function = RequireOnlyFunction(program);
+        var loop = Assert.Single(
+            MirQasmTestModel.Statements(function.Body)
+                .OfType<MirQasmWhileStatement>());
+        var propagationGuard = RequireReturnPropagationGuard(
+            function.Body,
+            loop);
+        var returnFlag = ReturnFlag(propagationGuard);
+
+        Assert.Contains(
+            MirQasmTestModel.Statements(loop.Body),
+            statement => statement is MirQasmBreakStatement);
+        Assert.True(
+            propagationGuard.Then.IsEmpty || propagationGuard.Else.IsEmpty);
+        Assert.DoesNotContain(
+            loop.Body.OfType<MirQasmIfStatement>(),
+            branch => IsReturnFlagCondition(branch.Condition, returnFlag));
     }
 
     [Fact]
@@ -300,7 +415,7 @@ public class FunctionTests
         // The loop sits INSIDE an `if`, so it is not a direct element of the function body — yet a value it
         // produces must still stop the statements after the `if` from overwriting it. The guard follows any
         // statement that can return THROUGH a loop, not only a loop that is itself the next statement.
-        var r = Compiler.Compile("""
+        var program = CompileTarget("""
             function f(n: int): int {
                 var acc: int = 0;
                 if (n > 0) { for i in 0..3 { if (i == n) { return i + 100; } } }
@@ -309,16 +424,35 @@ public class FunctionTests
             }
             operation Main() { use q = Qubit[1]; var k: int = f(2); }
             """);
-        Assert.True(r.Succeeded, string.Join("; ", r.Diagnostics.Select(diagnostic => diagnostic.Error).ToList().Select(e => e.Code + " " + e.Message)));
-        var def = r.Targets.OpenQasm!.Text.Split("def f(")[1].Split("\n}")[0];
-        Assert.Contains("if (done == 0)", def);   // acc = acc + 5 / return acc are guarded, not unconditional
+        var function = RequireOnlyFunction(program);
+        var loop = Assert.Single(
+            MirQasmTestModel.Statements(function.Body)
+                .OfType<MirQasmWhileStatement>());
+        var returnFlag = FindReturnFlag(function.Body, loop);
+        var guards = MirQasmTestModel.Statements(function.Body)
+            .OfType<MirQasmIfStatement>()
+            .Where(branch => IsReturnFlagCondition(branch.Condition, returnFlag))
+            .ToArray();
+
+        Assert.NotEmpty(guards);
+        Assert.Contains(
+            guards,
+            guard =>
+                MirQasmTestModel.Statements(guard.Then)
+                    .Concat(MirQasmTestModel.Statements(guard.Else))
+                    .OfType<MirQasmAssignmentStatement>()
+                    .Any(
+                        assignment =>
+                            assignment.Target
+                                is MirQasmDeclarationReferenceExpression target
+                            && target.Declaration != returnFlag));
     }
 
     [Fact]
     public void AReturnInsideNestedLoopsLeavesEveryLevel()
     {
         // `break` leaves only the INNERMOST loop, so each enclosing one is left as well once the result exists.
-        var r = Compiler.Compile("""
+        var program = CompileTarget("""
             function grid(n: int): int {
                 for i in 0..2 {
                     for j in 0..2 { if (i + j == n) { return i * 10 + j; } }
@@ -327,9 +461,47 @@ public class FunctionTests
             }
             operation Main() { use q = Qubit[1]; var k: int = grid(1); }
             """);
-        Assert.True(r.Succeeded, string.Join("; ", r.Diagnostics.Select(diagnostic => diagnostic.Error).ToList().Select(e => e.Code + " " + e.Message)));
-        Assert.Contains("if (done == 1) {", r.Targets.OpenQasm!.Text);                     // the outer loop is left too
-        Assert.Equal(2, r.Targets.OpenQasm!.Text.Split("break;").Length - 1);              // one break per loop level
+        var function = RequireOnlyFunction(program);
+        var outer = Assert.Single(function.Body.OfType<MirQasmWhileStatement>());
+        var inner = Assert.Single(
+            MirQasmTestModel.Statements(outer.Body)
+                .OfType<MirQasmWhileStatement>());
+        var returnFlag = FindReturnFlag(function.Body, inner);
+        var outerBreakGuard = Assert.Single(
+            MirQasmTestModel.Statements(outer.Body)
+                .OfType<MirQasmIfStatement>(),
+            branch =>
+                IsReturnFlagCondition(branch.Condition, returnFlag)
+                && MirQasmTestModel.Statements(branch.Then)
+                    .Concat(MirQasmTestModel.Statements(branch.Else))
+                    .Any(statement => statement is MirQasmBreakStatement));
+        var innerReturnBranch = Assert.Single(
+            MirQasmTestModel.Statements(inner.Body)
+                .OfType<MirQasmIfStatement>(),
+            branch =>
+                branch.Then
+                    .Concat(branch.Else)
+                    .OfType<MirQasmAssignmentStatement>()
+                    .Any(
+                        assignment =>
+                            assignment.Target
+                                is MirQasmDeclarationReferenceExpression target
+                            && target.Declaration == returnFlag
+                            && assignment.Value
+                                is MirQasmLiteralExpression { Text: "1" })
+                && branch.Then
+                    .Concat(branch.Else)
+                    .Any(statement => statement is MirQasmBreakStatement));
+        var innerReturnBreak = Assert.Single(
+            MirQasmTestModel.Statements(innerReturnBranch.Then)
+                .Concat(MirQasmTestModel.Statements(innerReturnBranch.Else))
+                .OfType<MirQasmBreakStatement>());
+        var outerPropagationBreak = Assert.Single(
+            MirQasmTestModel.Statements(outerBreakGuard.Then)
+                .Concat(MirQasmTestModel.Statements(outerBreakGuard.Else))
+                .OfType<MirQasmBreakStatement>());
+
+        Assert.NotEqual(innerReturnBreak.Id, outerPropagationBreak.Id);
     }
 
     [Theory]
@@ -346,4 +518,100 @@ public class FunctionTests
         // the `--stages` IR view dropped every `return`, rendering function bodies as incomplete
         Assert.Contains("QReturn", Qora.Ir.IrPrinter.Print(
             Compiler.Compile("function two(): int { return 2; }\noperation Main(){ use q=Qubit[1]; var k: int = two(); }").Hir.Resolved!.Program));
+
+    private static MirOpenQasmTargetProgram CompileTarget(string source) =>
+        MirQasmTestModel.Compile(source).Program;
+
+    private static MirQasmCallableDefinition RequireOnlyFunction(
+        MirOpenQasmTargetProgram program) =>
+        Assert.Single(
+            program.Definitions,
+            definition => definition.Kind == MirQasmCallableKind.Function);
+
+    private static MirQasmIfStatement RequireReturnPropagationGuard(
+        IReadOnlyList<MirQasmStatement> body,
+        MirQasmWhileStatement loop)
+    {
+        var returnFlag = FindReturnFlag(body, loop);
+        return Assert.Single(
+            MirQasmTestModel.Statements(body)
+                .OfType<MirQasmIfStatement>(),
+            branch =>
+                IsReturnFlagCondition(branch.Condition, returnFlag)
+                && (branch.Then.IsEmpty || branch.Else.IsEmpty));
+    }
+
+    private static MirQasmDeclarationId ReturnFlag(
+        MirQasmIfStatement propagationGuard)
+    {
+        var condition = Assert.IsType<MirQasmBinaryExpression>(
+            propagationGuard.Condition);
+        return condition.Left switch
+        {
+            MirQasmDeclarationReferenceExpression reference =>
+                reference.Declaration,
+            _ => Assert.IsType<MirQasmDeclarationReferenceExpression>(
+                    condition.Right)
+                .Declaration,
+        };
+    }
+
+    private static MirQasmDeclarationId FindReturnFlag(
+        IReadOnlyList<MirQasmStatement> body,
+        MirQasmWhileStatement loop)
+    {
+        var initializedToZero = MirQasmTestModel.Statements(body)
+            .OfType<MirQasmValueDeclarationStatement>()
+            .Where(
+                declaration =>
+                    declaration.Type
+                        is MirQasmScalarType { Kind: MirQasmScalarKind.Int }
+                    && declaration.Initializer
+                        is MirQasmLiteralExpression { Text: "0" })
+            .Select(declaration => declaration.Declaration)
+            .ToHashSet();
+        var setToOneInLoop = MirQasmTestModel.Statements(loop.Body)
+            .OfType<MirQasmAssignmentStatement>()
+            .Where(
+                assignment =>
+                    assignment.Target
+                        is MirQasmDeclarationReferenceExpression
+                    && assignment.Value
+                        is MirQasmLiteralExpression { Text: "1" })
+            .Select(
+                assignment =>
+                    ((MirQasmDeclarationReferenceExpression)assignment.Target)
+                    .Declaration)
+            .Where(initializedToZero.Contains)
+            .Distinct()
+            .ToArray();
+
+        return Assert.Single(setToOneInLoop);
+    }
+
+    private static bool IsReturnFlagCondition(
+        MirQasmExpression condition,
+        MirQasmDeclarationId returnFlag)
+    {
+        if (condition
+            is not MirQasmBinaryExpression
+            {
+                Operator: MirQasmBinaryOperator.Equal
+            } equality)
+        {
+            return false;
+        }
+
+        return IsFlag(equality.Left, equality.Right)
+               || IsFlag(equality.Right, equality.Left);
+
+        bool IsFlag(
+            MirQasmExpression flag,
+            MirQasmExpression expected) =>
+            flag
+                is MirQasmDeclarationReferenceExpression reference
+                && reference.Declaration == returnFlag
+                && expected
+                    is MirQasmLiteralExpression { Text: "1" };
+    }
 }

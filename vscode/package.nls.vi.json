@@ -2,7 +2,7 @@
   "displayName": "Ngôn ngữ Qora",
   "description": "Tô sáng cú pháp, chú thích khi di chuột, đoạn mã mẫu, báo lỗi thời gian thực và chuyển đổi OpenQASM cho ngôn ngữ lượng tử đồ chơi Qora.",
   "command.transpile.title": "Qora: Chuyển đổi sang OpenQASM",
-  "command.showStages.title": "Qora: Hiển thị các giai đoạn biên dịch (AST / IR / OpenQASM)",
+  "command.showStages.title": "Qora: Hiển thị các giai đoạn biên dịch (AST / HIR / MIR / OpenQASM)",
   "command.openExample.title": "Qora: Mở ví dụ",
   "command.newBellExample.title": "Qora: Tạo ví dụ Bell mới",
   "command.openWalkthrough.title": "Qora: Mở hướng dẫn bắt đầu",
@@ -13,6 +13,6 @@
   "walkthrough.step.transpile.title": "Chuyển đổi sang OpenQASM",
   "walkthrough.step.transpile.description": "Khi đang mở tệp Qora, gửi tệp qua parser đi kèm và mở OpenQASM được tạo ở bên cạnh mã nguồn.\n[Chuyển đổi tệp hiện tại](command:qora.transpile)",
   "walkthrough.step.stages.title": "Xem pipeline biên dịch",
-  "walkthrough.step.stages.description": "Theo dõi cùng một nguồn đi qua AST, QoraIR, IR đảo ngược và OpenQASM để luồng ngôn ngữ dễ hiểu hơn.\n[Hiển thị các giai đoạn](command:qora.showStages)",
+  "walkthrough.step.stages.description": "Theo dõi cùng một nguồn đi qua AST, HIR giữ cấu trúc nguồn, MIR SSA/CFG cùng kết quả phân tích, đích OpenQASM có kiểu và OpenQASM cuối cùng.\n[Hiển thị các giai đoạn](command:qora.showStages)",
   "command.run.title": "Qora: Chạy chương trình"
 }

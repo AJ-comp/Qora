@@ -26,9 +26,9 @@ public sealed class HirImmutabilityTests
         };
         var program = new QProgram(operations, imports, opens);
 
-        var functors = new List<string> { "Adjoint" };
+        var modifiers = new List<QGateModifier> { QGateModifier.Controlled };
         var arguments = new List<QArg> { argument };
-        var gate = new QGate(functors, "F", arguments);
+        var gate = new QGate(modifiers, "F", arguments);
         var thenBody = new List<QStmt> { statement };
         var elseBody = new List<QStmt> { statement };
         var conditional = new QIf(new QCond(new QNumLit(1)), thenBody, elseBody);
@@ -38,9 +38,6 @@ public sealed class HirImmutabilityTests
         var whileLoop = new QWhile(new QCond(new QNumLit(1)), whileBody);
         var repeatBody = new List<QStmt> { statement };
         var repeat = new QRepeat(repeatBody, new QCond(new QNumLit(1)));
-        var within = new List<QStmt> { statement };
-        var apply = new List<QStmt> { statement };
-        var conjugate = new QConjugate(within, apply);
         var elements = new List<QExpr> { expression };
         var literal = new QArrayLiteral(elements);
         var callArguments = new List<QNode> { new QNumLit(1) };
@@ -54,15 +51,13 @@ public sealed class HirImmutabilityTests
         imports.Clear();
         openDirectives.Clear();
         opens.Clear();
-        functors.Clear();
+        modifiers.Clear();
         arguments.Clear();
         thenBody.Clear();
         elseBody.Clear();
         forBody.Clear();
         whileBody.Clear();
         repeatBody.Clear();
-        within.Clear();
-        apply.Clear();
         elements.Clear();
         callArguments.Clear();
         slots.Clear();
@@ -73,15 +68,13 @@ public sealed class HirImmutabilityTests
         Assert.Single(program.Imports!);
         Assert.Single(program.Opens!);
         Assert.Single(program.Opens!["App"]);
-        Assert.Single(gate.Functors);
+        Assert.Single(gate.Modifiers);
         Assert.Single(gate.Args);
         Assert.Single(conditional.Then);
         Assert.Single(conditional.Else);
         Assert.Single(loop.Body);
         Assert.Single(whileLoop.Body);
         Assert.Single(repeat.Body);
-        Assert.Single(conjugate.Within);
-        Assert.Single(conjugate.Apply);
         Assert.Single(literal.Elements);
         Assert.Single(call.Args);
         Assert.Single(signature.Params);
@@ -95,7 +88,7 @@ public sealed class HirImmutabilityTests
         var argument = new QTextArg(new QNumLit(1));
         var operation = new QOperation("F", Array.Empty<QParam>(), Array.Empty<QStmt>());
         var program = new QProgram(Array.Empty<QOperation>());
-        var gate = new QGate(Array.Empty<string>(), "F", Array.Empty<QArg>());
+        var gate = new QGate(Array.Empty<QGateModifier>(), "F", Array.Empty<QArg>());
         var conditional = new QIf(
             new QCond(new QNumLit(1)),
             Array.Empty<QStmt>(),
@@ -107,7 +100,6 @@ public sealed class HirImmutabilityTests
             Array.Empty<QStmt>());
         var whileLoop = new QWhile(new QCond(new QNumLit(1)), Array.Empty<QStmt>());
         var repeat = new QRepeat(Array.Empty<QStmt>(), new QCond(new QNumLit(1)));
-        var conjugate = new QConjugate(Array.Empty<QStmt>(), Array.Empty<QStmt>());
         var literal = new QArrayLiteral(Array.Empty<QExpr>());
         var call = new QCallNode("F", Array.Empty<QNode>());
         var signature = new GateSig("F", Array.Empty<IParamSpec>());
@@ -121,15 +113,13 @@ public sealed class HirImmutabilityTests
         {
             ["App"] = openDirectives,
         };
-        var functors = new List<string> { "Adjoint" };
+        var modifiers = new List<QGateModifier> { QGateModifier.Controlled };
         var arguments = new List<QArg> { argument };
         var thenBody = new List<QStmt> { statement };
         var elseBody = new List<QStmt> { statement };
         var forBody = new List<QStmt> { statement };
         var whileBody = new List<QStmt> { statement };
         var repeatBody = new List<QStmt> { statement };
-        var within = new List<QStmt> { statement };
-        var apply = new List<QStmt> { statement };
         var elements = new List<QExpr> { new QText(new QNumLit(1)) };
         var callArguments = new List<QNode> { new QNumLit(1) };
         var slots = new List<IParamSpec> { parameter };
@@ -141,12 +131,11 @@ public sealed class HirImmutabilityTests
             Imports = imports,
             Opens = opens,
         };
-        var rewrittenGate = gate with { Functors = functors, Args = arguments };
+        var rewrittenGate = gate with { Modifiers = modifiers, Args = arguments };
         var rewrittenConditional = conditional with { Then = thenBody, Else = elseBody };
         var rewrittenLoop = loop with { Body = forBody };
         var rewrittenWhile = whileLoop with { Body = whileBody };
         var rewrittenRepeat = repeat with { Body = repeatBody };
-        var rewrittenConjugate = conjugate with { Within = within, Apply = apply };
         var rewrittenLiteral = literal with { Elements = elements };
         var rewrittenCall = call with { Args = callArguments };
         var rewrittenSignature = signature with { Params = slots };
@@ -157,15 +146,13 @@ public sealed class HirImmutabilityTests
         imports.Clear();
         openDirectives.Clear();
         opens.Clear();
-        functors.Clear();
+        modifiers.Clear();
         arguments.Clear();
         thenBody.Clear();
         elseBody.Clear();
         forBody.Clear();
         whileBody.Clear();
         repeatBody.Clear();
-        within.Clear();
-        apply.Clear();
         elements.Clear();
         callArguments.Clear();
         slots.Clear();
@@ -175,15 +162,13 @@ public sealed class HirImmutabilityTests
         Assert.Single(rewrittenProgram.Operations);
         Assert.Single(rewrittenProgram.Imports!);
         Assert.Single(rewrittenProgram.Opens!["App"]);
-        Assert.Single(rewrittenGate.Functors);
+        Assert.Single(rewrittenGate.Modifiers);
         Assert.Single(rewrittenGate.Args);
         Assert.Single(rewrittenConditional.Then);
         Assert.Single(rewrittenConditional.Else);
         Assert.Single(rewrittenLoop.Body);
         Assert.Single(rewrittenWhile.Body);
         Assert.Single(rewrittenRepeat.Body);
-        Assert.Single(rewrittenConjugate.Within);
-        Assert.Single(rewrittenConjugate.Apply);
         Assert.Single(rewrittenLiteral.Elements);
         Assert.Single(rewrittenCall.Args);
         Assert.Single(rewrittenSignature.Params);
@@ -331,7 +316,16 @@ public sealed class HirImmutabilityTests
         var validation = new HirSemanticModel();
         var required = new Dictionary<string, long> { ["xs"] = 2 };
         validation.SetRequiredArgLengths(7, required);
-        validation.AddUnprovenIndex(new UnprovenIndex("F", "xs", "i", null, null));
+        validation.AddUnprovenIndex(
+            new UnprovenIndex(
+                new HirIndexAccessId(0),
+                "F",
+                "xs",
+                "i",
+                null,
+                null),
+            owningStatementId: 1,
+            new object());
         validation.AddDeferredSizeCheck(new DeferredSizeCheck("F", "xs", "xs[i]", "size", null));
         required["xs"] = 99;
         required["ys"] = 1;
@@ -343,7 +337,13 @@ public sealed class HirImmutabilityTests
         AssertDictionaryCannotRemove(needs, "xs");
         AssertCannotAdd(
             validation.UnprovenIndexes,
-            new UnprovenIndex("Injected", "ys", "0", null, null));
+            new UnprovenIndex(
+                new HirIndexAccessId(1),
+                "Injected",
+                "ys",
+                "0",
+                null,
+                null));
         AssertCannotAdd(
             validation.DeferredSizeChecks,
             new DeferredSizeCheck("Injected", "ys", "ys[0]", "mutation", null));

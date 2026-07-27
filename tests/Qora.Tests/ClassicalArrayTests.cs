@@ -62,7 +62,29 @@ public class ClassicalArrayTests
     {
         var result = CompileSuccessfully("operation Take(value: int){} operation Main(){ var values: int[] = [1,2]; Take(values[0]); }");
 
-        Assert.Contains("Take(values[0]);", result.Targets.OpenQasm!.Text);
+        var program = result.Targets.OpenQasm!.Program;
+        var call = Assert.Single(
+            TargetStatements(program.EntryPoint.Body)
+                .OfType<MirQasmQuantumApplyStatement>(),
+            apply => apply.Target is MirQasmUserQuantumTarget);
+        var target = Assert.IsType<MirQasmUserQuantumTarget>(call.Target);
+        var callee = Resolve(program, target.Callable);
+        Assert.Equal(MirQasmCallableKind.Operation, callee.Kind);
+        Assert.IsType<MirQasmScalarType>(
+            Assert.Single(callee.Parameters).Type);
+        var operand = Assert.Single(call.Operands);
+        var argument = Assert.Single(
+            program.EntryPoint.Body.DependencyClosure(operand)
+                .OfType<MirQasmIndexExpression>());
+        var array = Assert.IsType<MirQasmArrayType>(
+            TargetPlaceType(program.EntryPoint.Body, argument.Base));
+        Assert.Equal(MirQasmScalarKind.Int, array.ElementType.Kind);
+        Assert.Equal(2, array.Length);
+        Assert.Equal(
+            "0",
+            Assert.Single(
+                program.EntryPoint.Body.DependencyClosure(argument.Index)
+                    .OfType<MirQasmLiteralExpression>()).Text);
     }
 
     [Fact]
@@ -80,7 +102,7 @@ public class ClassicalArrayTests
 
     /// <summary>Array locals go wherever a scalar goes — a helper op, a branch, a loop. The old QSEM012
     /// arm rejecting these was OpenQASM's placement rule leaking into the language; the QASM backend's
-    /// ArrayLocalHoisting pass now absorbs it (hidden-parameter threading / scope-top hoisting), so the
+    /// MIR-to-OpenQASM lowering now absorbs it (hidden-parameter threading / scope-top hoisting), so the
     /// language accepts all three shapes it once rejected.</summary>
     [Theory]
     [InlineData("operation Work(){ var values: int[] = [1,2]; } operation Main(){ Work(); }")]
@@ -144,15 +166,31 @@ public class ClassicalArrayTests
 
     /// <summary>Every element type EXCEPT bit takes the general array form. See <see cref="EmitsBitArrayAsNativeBitRegister"/>.</summary>
     [Theory]
-    [InlineData("int", "1, 2", "1, 2")]
-    [InlineData("float", "1.0, 2.5", "1.0, 2.5")]
-    [InlineData("angle", "0.0, pi/2", "0.0, pi / 2")]
+    [InlineData("int", "1, 2", MirQasmScalarKind.Int)]
+    [InlineData("float", "1.0, 2.5", MirQasmScalarKind.Float)]
+    [InlineData("angle", "0.0, pi/2", MirQasmScalarKind.Angle)]
     public void EmitsGeneralOpenQasmArrayAndBraceLiteral(
-        string type, string sourceElements, string qasmElements)
+        string type,
+        string sourceElements,
+        MirQasmScalarKind targetKind)
     {
         var result = CompileSuccessfully($"operation Main(){{ var values: {type}[] = [{sourceElements}]; }}");
 
-        Assert.Contains($"array[{type}, 2] values = {{{qasmElements}}};", result.Targets.OpenQasm!.Text);
+        var declaration = Assert.Single(
+            TargetStatements(result.Targets.OpenQasm!.Program.EntryPoint.Body)
+                .OfType<MirQasmArrayDeclarationStatement>());
+        Assert.Equal(targetKind, declaration.Type.ElementType.Kind);
+        Assert.Equal(2, declaration.Type.Length);
+        Assert.Equal(2, declaration.Elements.Length);
+        if (targetKind == MirQasmScalarKind.Angle)
+        {
+            Assert.Equal(
+                "0.0",
+                Assert.IsType<MirQasmLiteralExpression>(
+                    declaration.Elements[0]).Text);
+            Assert.IsType<MirQasmLiteralExpression>(
+                declaration.Elements[1]);
+        }
     }
 
     /// <summary>
@@ -165,10 +203,33 @@ public class ClassicalArrayTests
     {
         var result = CompileSuccessfully("operation Main(){ var flags: bit[] = [0,1]; }");
 
-        Assert.Contains("bit[2] flags;", result.Targets.OpenQasm!.Text);
-        Assert.Contains("flags[0] = 0;", result.Targets.OpenQasm!.Text);
-        Assert.Contains("flags[1] = 1;", result.Targets.OpenQasm!.Text);
-        Assert.DoesNotContain("array[bit", result.Targets.OpenQasm!.Text);
+        var body = result.Targets.OpenQasm!.Program.EntryPoint.Body;
+        var statements = TargetStatements(body);
+        var declaration = Assert.Single(
+            statements.OfType<MirQasmValueDeclarationStatement>(),
+            value => value.Type is MirQasmBitType { Width: 2 });
+        var bit = Assert.IsType<MirQasmBitType>(declaration.Type);
+        Assert.True(bit.IsRegister);
+        Assert.DoesNotContain(
+            statements.OfType<MirQasmArrayDeclarationStatement>(),
+            array => array.Type.ElementType.Kind == MirQasmScalarKind.Int);
+        var writes = statements
+            .OfType<MirQasmAssignmentStatement>()
+            .Where(
+                assignment =>
+                    assignment.Target is MirQasmIndexExpression
+                    {
+                        Base: MirQasmDeclarationReferenceExpression reference,
+                    }
+                    && reference.Declaration == declaration.Declaration)
+            .ToArray();
+        Assert.Equal(2, writes.Length);
+        Assert.Contains(
+            writes,
+            write => IsLiteralIndexWrite(body, write, "0", "0"));
+        Assert.Contains(
+            writes,
+            write => IsLiteralIndexWrite(body, write, "1", "1"));
     }
 
     /// <summary>
@@ -180,8 +241,29 @@ public class ClassicalArrayTests
     {
         var result = CompileSuccessfully("operation Main(){ var flags: bit[] = new bit[3]; }");
 
-        Assert.Contains("bit[3] flags = \"000\";", result.Targets.OpenQasm!.Text);
-        Assert.DoesNotContain("array[bit", result.Targets.OpenQasm!.Text);
+        var statements = TargetStatements(
+            result.Targets.OpenQasm!.Program.EntryPoint.Body);
+        var declaration = Assert.Single(
+            statements.OfType<MirQasmValueDeclarationStatement>(),
+            value => value.Type is MirQasmBitType { Width: 3 });
+        Assert.IsType<MirQasmBitType>(declaration.Type);
+        Assert.True(
+            declaration.Initializer is MirQasmLiteralExpression
+            {
+                Text: "\"000\"",
+            }
+            || statements
+                .OfType<MirQasmAssignmentStatement>()
+                .Count(
+                    assignment =>
+                        assignment.Target is MirQasmIndexExpression
+                        {
+                            Base: MirQasmDeclarationReferenceExpression reference,
+                        }
+                        && reference.Declaration == declaration.Declaration
+                        && assignment.Value is MirQasmLiteralExpression { Text: "0" })
+                == 3);
+        Assert.Empty(statements.OfType<MirQasmArrayDeclarationStatement>());
     }
 
     /// <summary><c>sizeof</c> is not defined on a bit register, so a bit array's Count must fold to a literal.
@@ -199,8 +281,17 @@ public class ClassicalArrayTests
             }
             """);
 
-        Assert.Contains("[0:2 - 1]", result.Targets.OpenQasm!.Text);
-        Assert.DoesNotContain("sizeof(flags)", result.Targets.OpenQasm!.Text);
+        var body = result.Targets.OpenQasm!.Program.EntryPoint.Body;
+        var loop = Assert.Single(
+            TargetStatements(body).OfType<MirQasmWhileStatement>());
+        var dependencies = TargetLoopDependencies(body, loop).ToArray();
+        Assert.Contains(
+            dependencies,
+            expression =>
+                expression is MirQasmLiteralExpression { Text: "2" });
+        Assert.DoesNotContain(
+            dependencies,
+            expression => expression is MirQasmSizeOfExpression);
     }
 
     [Fact]
@@ -216,7 +307,17 @@ public class ClassicalArrayTests
             }
             """);
 
-        Assert.Contains("mutable array[int, #dim = 1] values", result.Targets.OpenQasm!.Text);
+        var parameter = Assert.Single(
+            result.Targets.OpenQasm!.Program.Definitions
+                .SelectMany(definition => definition.Parameters),
+            candidate =>
+                candidate.Access == MirQasmParameterAccess.Mutable
+                && candidate.Type is MirQasmArrayType
+                {
+                    ElementType.Kind: MirQasmScalarKind.Int,
+                    Length: null,
+                });
+        Assert.IsType<MirQasmArrayType>(parameter.Type);
     }
 
     [Fact]
@@ -234,8 +335,30 @@ public class ClassicalArrayTests
             }
             """);
 
-        Assert.Contains("sizeof(values)", result.Targets.OpenQasm!.Text);
-        Assert.DoesNotContain(".Count", result.Targets.OpenQasm!.Text);
+        var definition = Assert.Single(
+            result.Targets.OpenQasm!.Program.Definitions.Where(
+                candidate =>
+                    candidate.Parameters.Any(
+                        parameter =>
+                            parameter.Access == MirQasmParameterAccess.Mutable
+                            && parameter.Type is MirQasmArrayType
+                            {
+                                ElementType.Kind: MirQasmScalarKind.Int,
+                            })));
+        var array = Assert.Single(
+            definition.Parameters.Where(
+                parameter => parameter.Type is MirQasmArrayType));
+        var loop = Assert.Single(
+            TargetStatements(definition.Body)
+                .OfType<MirQasmWhileStatement>());
+        Assert.Contains(
+            TargetLoopDependencies(definition.Body, loop),
+            expression =>
+                    expression is MirQasmSizeOfExpression
+                    {
+                        Operand: MirQasmParameterReferenceExpression reference,
+                    }
+                    && reference.Parameter == array.Id);
     }
 
     [Fact]
@@ -243,7 +366,17 @@ public class ClassicalArrayTests
     {
         var result = CompileSuccessfully("operation Main(){ var values: int[] = new int[3]; }");
 
-        Assert.Contains("array[int, 3] values = {0, 0, 0};", result.Targets.OpenQasm!.Text);
+        var array = Assert.Single(
+            TargetStatements(result.Targets.OpenQasm!.Program.EntryPoint.Body)
+                .OfType<MirQasmArrayDeclarationStatement>());
+        Assert.Equal(MirQasmScalarKind.Int, array.Type.ElementType.Kind);
+        Assert.Equal(3, array.Type.Length);
+        Assert.All(
+            array.Elements,
+            element =>
+                Assert.Equal(
+                    "0",
+                    Assert.IsType<MirQasmLiteralExpression>(element).Text));
     }
 
     [Fact]
@@ -251,25 +384,108 @@ public class ClassicalArrayTests
     {
         var result = CompileSuccessfully("operation Main(){ var values: int[] = [1,2]; var saved: int = values[1]; values[0]=saved; }");
 
-        Assert.Contains("int saved = values[1];", result.Targets.OpenQasm!.Text);
-        Assert.Contains("values[0] = saved;", result.Targets.OpenQasm!.Text);
+        var body = result.Targets.OpenQasm!.Program.EntryPoint.Body;
+        var statements = TargetStatements(body);
+        var array = Assert.Single(
+            statements.OfType<MirQasmArrayDeclarationStatement>());
+        var read = Assert.Single(
+            statements.OfType<MirQasmAssignmentStatement>(),
+            assignment =>
+                assignment.Value is MirQasmIndexExpression
+                {
+                    Base: MirQasmDeclarationReferenceExpression reference,
+                } index
+                && reference.Declaration == array.Declaration
+                && body.DependsOn(
+                    index.Index,
+                    dependency =>
+                        dependency is MirQasmLiteralExpression { Text: "1" }));
+        var saved = Assert.IsType<MirQasmDeclarationReferenceExpression>(
+            read.Target);
+        Assert.IsType<MirQasmScalarType>(
+            TargetPlaceType(body, saved));
+        Assert.Contains(
+            statements.OfType<MirQasmAssignmentStatement>(),
+            assignment =>
+                assignment.Target is MirQasmIndexExpression
+                {
+                    Base: MirQasmDeclarationReferenceExpression reference,
+                } index
+                && reference.Declaration == array.Declaration
+                && body.DependsOn(
+                    index.Index,
+                    expression =>
+                        expression is MirQasmLiteralExpression { Text: "0" })
+                && body.DependsOn(
+                    assignment.Value,
+                    expression =>
+                        expression is MirQasmDeclarationReferenceExpression value
+                        && value.Declaration == saved.Declaration));
     }
 
     [Fact]
-    public void EmitsBitArrayElementConditionsAsBooleanComparisons()
+    public void EmitsBitArrayElementConditionsAsIntegerComparisons()
     {
         var result = CompileSuccessfully("operation Main(){ var flags: bit[] = [0,1]; if(flags[1]==1){ flags[0]=1; } }");
 
-        Assert.Contains("if (flags[1] == true)", result.Targets.OpenQasm!.Text);
+        var body = result.Targets.OpenQasm!.Program.EntryPoint.Body;
+        var branch = Assert.Single(
+            TargetStatements(body).OfType<MirQasmIfStatement>());
+        var equality = Assert.Single(
+            body.DependencyClosure(branch.Condition)
+                .OfType<MirQasmBinaryExpression>(),
+            expression =>
+                expression.Operator == MirQasmBinaryOperator.Equal);
+        var sides = new[] { equality.Left, equality.Right };
+        Assert.All(
+            sides,
+            side =>
+                Assert.Equal(
+                    MirQasmScalarKind.Int,
+                    Assert.IsType<MirQasmScalarType>(
+                        TargetPlaceType(body, side)).Kind));
+        Assert.Contains(
+            sides,
+            side =>
+                body.DependencyClosure(side)
+                    .OfType<MirQasmIndexExpression>()
+                    .Any(
+                        index =>
+                            body.DependsOn(
+                                index.Index,
+                                expression =>
+                                    expression is MirQasmLiteralExpression
+                                    {
+                                        Text: "1",
+                                    })));
+        Assert.Contains(
+            sides,
+            side =>
+                body.DependsOn(
+                    side,
+                    expression =>
+                        expression is MirQasmLiteralExpression { Text: "1" }));
+        Assert.Contains(
+            sides,
+            side =>
+                body.DependsOn(
+                    side,
+                    expression =>
+                        expression is MirQasmFunctionCallExpression
+                        {
+                            Target: MirQasmBuiltinFunctionTarget
+                            {
+                                EmittedName: "int",
+                            },
+                        }));
     }
 
     private static Compilation CompileSuccessfully(string source)
     {
         var result = Compiler.Compile(source);
         Assert.True(result.Succeeded, Explain(result));
-        Assert.False(
-            string.IsNullOrWhiteSpace(result.Targets.OpenQasm?.Text),
-            "a successful array program must emit OpenQASM");
+        Assert.NotNull(result.Targets.OpenQasm);
+        Assert.NotNull(result.Targets.OpenQasm!.Program);
         return result;
     }
 
@@ -278,7 +494,7 @@ public class ClassicalArrayTests
         var result = Compiler.Compile(source);
         Assert.False(
             result.Succeeded,
-            $"expected the array program to be rejected, but it compiled:\n{source}\n{result.Targets.OpenQasm?.Text}");
+            $"expected the array program to be rejected, but it compiled:\n{source}");
         Assert.NotEmpty(result.Diagnostics.Select(diagnostic => diagnostic.Error).ToList());
         Assert.DoesNotContain(result.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(), e => e.Code is "QORA0000" or "QINTERNAL");
     }
@@ -358,9 +574,16 @@ public class ClassicalArrayTests
     {
         var r = Compiler.Compile("operation Main(){ use q=Qubit[1]; var f: bit[] = new bit[2]; if (AsInt(f) == 1) { X(q[0]); } }");
         Assert.True(r.Succeeded, Explain(r));
-        Assert.Contains("if (uint[2](f) == 1)", r.Targets.OpenQasm!.Text);
-        Assert.DoesNotContain("(int[2](f)", r.Targets.OpenQasm!.Text);   // never the SIGNED cast (`uint[2](f)` contains `int[2](f)`)
-        Assert.DoesNotContain("uint(f)", r.Targets.OpenQasm!.Text);      // never width-less: the spec requires n == m
+        var body = r.Targets.OpenQasm!.Program.EntryPoint.Body;
+        var cast = Assert.Single(
+            TargetStatements(body)
+                .SelectMany(MirQasmTestModel.Expressions)
+                .OfType<MirQasmUnsignedCastExpression>());
+        Assert.Equal(2, cast.Width);
+        var source = Assert.IsType<MirQasmBitType>(
+            TargetPlaceType(body, cast.Operand));
+        Assert.Equal(2, source.Width);
+        Assert.True(source.IsRegister);
     }
 
     /// <summary>The width follows the REGISTER, not a single op-wide guess — two same-named registers in
@@ -376,8 +599,20 @@ public class ClassicalArrayTests
             }
             """);
         Assert.True(r.Succeeded, Explain(r));
-        Assert.Contains("uint[2](", r.Targets.OpenQasm!.Text);
-        Assert.Contains("uint[5](", r.Targets.OpenQasm!.Text);
+        var body = r.Targets.OpenQasm!.Program.EntryPoint.Body;
+        var casts = TargetStatements(body)
+            .SelectMany(MirQasmTestModel.Expressions)
+            .OfType<MirQasmUnsignedCastExpression>()
+            .ToArray();
+        Assert.Equal(new[] { 2, 5 }, casts.Select(cast => cast.Width).Order());
+        Assert.All(
+            casts,
+            cast =>
+            {
+                var source = Assert.IsType<MirQasmBitType>(
+                    TargetPlaceType(body, cast.Operand));
+                Assert.Equal(cast.Width, source.Width);
+            });
     }
 
     /// <summary>Register-to-register comparison needs no numeric reading — it matches bit patterns — so it
@@ -387,8 +622,42 @@ public class ClassicalArrayTests
     {
         var r = Compiler.Compile("operation Main(){ use q=Qubit[1]; var f: bit[] = new bit[2]; var g: bit[] = new bit[2]; if (f == g) { X(q[0]); } }");
         Assert.True(r.Succeeded, Explain(r));
-        Assert.Contains("if (f == g)", r.Targets.OpenQasm!.Text);
-        Assert.DoesNotContain("uint", r.Targets.OpenQasm!.Text);
+        var body = r.Targets.OpenQasm!.Program.EntryPoint.Body;
+        var branch = Assert.Single(
+            TargetStatements(body).OfType<MirQasmIfStatement>());
+        MirQasmBinaryExpression? registerEquality = null;
+        Assert.True(
+            body.DependsOn(
+                branch.Condition,
+                expression =>
+                {
+                    if (expression is not MirQasmBinaryExpression
+                        {
+                            Operator: MirQasmBinaryOperator.Equal,
+                        } equality)
+                    {
+                        return false;
+                    }
+                    if (equality.Left is not MirQasmDeclarationReferenceExpression
+                        || equality.Right is not MirQasmDeclarationReferenceExpression)
+                    {
+                        return false;
+                    }
+                    registerEquality = equality;
+                    return true;
+                }));
+        Assert.NotNull(registerEquality);
+        var left = Assert.IsType<MirQasmBitType>(
+            TargetPlaceType(body, registerEquality!.Left));
+        var right = Assert.IsType<MirQasmBitType>(
+            TargetPlaceType(body, registerEquality.Right));
+        Assert.Equal(2, left.Width);
+        Assert.Equal(2, right.Width);
+        Assert.False(
+            SameTargetPlace(registerEquality.Left, registerEquality.Right));
+        Assert.DoesNotContain(
+            TargetStatements(body).SelectMany(MirQasmTestModel.Expressions),
+            expression => expression is MirQasmUnsignedCastExpression);
     }
 
     /// <summary>Different widths are never equal in OpenQASM whatever bits they hold — `bit[2] "10"` and
@@ -441,7 +710,13 @@ public class ClassicalArrayTests
     {
         var r = Compiler.Compile("operation Main(){ use q=Qubit[1]; repeat { var f: bit[] = new bit[2]; f[0] = M(q[0]); } until (AsInt(f) == 1); }");
         Assert.True(r.Succeeded, Explain(r));
-        Assert.Contains("uint[2](f) == 1", r.Targets.OpenQasm!.Text);
+        var body = r.Targets.OpenQasm!.Program.EntryPoint.Body;
+        var loop = Assert.Single(
+            TargetStatements(body).OfType<MirQasmWhileStatement>());
+        Assert.Contains(
+            TargetLoopDependencies(body, loop),
+            expression =>
+                expression is MirQasmUnsignedCastExpression { Width: 2 });
     }
 
     /// <summary>A whole register passed as an ARGUMENT is judged by the callee's signature, not by the rule —
@@ -470,8 +745,27 @@ public class ClassicalArrayTests
             }
             """);
         Assert.True(r.Succeeded, Explain(r));
-        Assert.Contains("def Read__sz2(bit[2] values, qubit q)", r.Targets.OpenQasm!.Text);
-        Assert.DoesNotContain("array[bit", r.Targets.OpenQasm!.Text);   // the invalid base type never appears
+        var definition = Assert.Single(
+            r.Targets.OpenQasm!.Program.Definitions.Where(
+                candidate =>
+                    candidate.Parameters.Any(
+                        parameter =>
+                            parameter.Type is MirQasmBitType
+                            {
+                                Width: 2,
+                                IsRegister: true,
+                            })));
+        Assert.Contains(
+            definition.Parameters,
+            parameter =>
+                parameter.Type is MirQasmQubitType
+                {
+                    Count: 1,
+                    IsRegister: false,
+                });
+        Assert.DoesNotContain(
+            definition.Parameters,
+            parameter => parameter.Type is MirQasmArrayType);
     }
 
     [Fact]
@@ -489,8 +783,29 @@ public class ClassicalArrayTests
             }
             """);
         Assert.True(r.Succeeded, Explain(r));
-        Assert.Contains("[0:3 - 1]", r.Targets.OpenQasm!.Text);
-        Assert.DoesNotContain("sizeof", r.Targets.OpenQasm!.Text);
+        var definition = Assert.Single(
+            r.Targets.OpenQasm!.Program.Definitions.Where(
+                candidate =>
+                    candidate.Parameters.Any(
+                        parameter =>
+                            parameter.Type is MirQasmBitType
+                            {
+                                Width: 3,
+                                IsRegister: true,
+                            })));
+        var loop = Assert.Single(
+            TargetStatements(definition.Body)
+                .OfType<MirQasmWhileStatement>());
+        var dependencies = TargetLoopDependencies(
+            definition.Body,
+            loop).ToArray();
+        Assert.Contains(
+            dependencies,
+            expression =>
+                expression is MirQasmLiteralExpression { Text: "3" });
+        Assert.DoesNotContain(
+            dependencies,
+            expression => expression is MirQasmSizeOfExpression);
     }
 
     [Fact]
@@ -509,8 +824,15 @@ public class ClassicalArrayTests
             }
             """);
         Assert.True(r.Succeeded, Explain(r));
-        Assert.Contains("def Read__sz2(bit[2] values, qubit q)", r.Targets.OpenQasm!.Text);
-        Assert.Contains("def Read__sz3(bit[3] values, qubit q)", r.Targets.OpenQasm!.Text);
+        var widths = r.Targets.OpenQasm!.Program.Definitions
+            .SelectMany(definition => definition.Parameters)
+            .Select(parameter => parameter.Type)
+            .OfType<MirQasmBitType>()
+            .Where(bit => bit.IsRegister)
+            .Select(bit => bit.Width)
+            .Order()
+            .ToArray();
+        Assert.Equal(new[] { 2, 3 }, widths);
     }
 
     /// <summary>Functions are called as <see cref="QCallNode"/> values inside expression trees rather than
@@ -544,11 +866,78 @@ public class ClassicalArrayTests
             Assert.True(specialization.IsFunction);
             Assert.Equal(QType.Int, specialization.ReturnType);
         });
-        Assert.Equal(1, r.Targets.OpenQasm!.Text.Split("def CountBits__sz2(").Length - 1);
-        Assert.Equal(1, r.Targets.OpenQasm!.Text.Split("def CountBits__sz3(").Length - 1);
-        Assert.Contains("int a = CountBits__sz2(first);", r.Targets.OpenQasm!.Text);
-        Assert.Contains("int b = CountBits__sz3(second);", r.Targets.OpenQasm!.Text);
-        Assert.Contains("Increment(CountBits__sz2(sameWidth)) + CountBits__sz2(first)", r.Targets.OpenQasm!.Text);
+        var program = r.Targets.OpenQasm!.Program;
+        var countDefinitions = program.Definitions
+            .Where(
+                definition =>
+                    definition.Kind == MirQasmCallableKind.Function
+                    && definition.ReturnType is MirQasmScalarType
+                    {
+                        Kind: MirQasmScalarKind.Int,
+                    }
+                    && definition.Parameters.Length == 1
+                    && definition.Parameters[0].Type is MirQasmBitType
+                    {
+                        IsRegister: true,
+                    })
+            .ToDictionary(
+                definition => definition.Id,
+                definition =>
+                    ((MirQasmBitType)definition.Parameters[0].Type).Width);
+        Assert.Equal(new[] { 2, 3 }, countDefinitions.Values.Order());
+        var increment = Assert.Single(
+            program.Definitions.Where(
+                definition =>
+                    definition.Kind == MirQasmCallableKind.Function
+                    && definition.Parameters.Length == 1
+                    && definition.Parameters[0].Type is MirQasmScalarType
+                    {
+                        Kind: MirQasmScalarKind.Int,
+                    }));
+        var entry = program.EntryPoint.Body;
+        var calls = TargetStatements(entry)
+            .SelectMany(MirQasmTestModel.Expressions)
+            .OfType<MirQasmFunctionCallExpression>()
+            .Where(
+                call =>
+                    call.Target is MirQasmUserFunctionTarget target
+                    && countDefinitions.ContainsKey(target.Callable))
+            .ToArray();
+        Assert.Equal(
+            new[] { 2, 2, 2, 3 },
+            calls.Select(
+                    call =>
+                        countDefinitions[
+                            ((MirQasmUserFunctionTarget)call.Target).Callable])
+                .Order());
+        Assert.All(
+            calls,
+            call =>
+            {
+                var width = countDefinitions[
+                    ((MirQasmUserFunctionTarget)call.Target).Callable];
+                var argument = Assert.Single(call.Arguments);
+                var bits = Assert.IsType<MirQasmBitType>(
+                    TargetPlaceType(entry, argument));
+                Assert.Equal(width, bits.Width);
+            });
+        var incrementCall = Assert.Single(
+            TargetStatements(entry)
+                .SelectMany(MirQasmTestModel.Expressions)
+                .OfType<MirQasmFunctionCallExpression>(),
+            call =>
+                call.Target is MirQasmUserFunctionTarget target
+                && target.Callable == increment.Id);
+        Assert.True(
+            entry.DependsOn(
+                Assert.Single(incrementCall.Arguments),
+                expression =>
+                    expression is MirQasmFunctionCallExpression
+                    {
+                        Target: MirQasmUserFunctionTarget target,
+                    }
+                    && countDefinitions.TryGetValue(target.Callable, out var width)
+                    && width == 2));
     }
 
     [Fact]
@@ -565,8 +954,37 @@ public class ClassicalArrayTests
             """);
 
         Assert.True(r.Succeeded, Explain(r));
-        Assert.Contains("def CountBits__sz2(bit[2] flags) -> int", r.Targets.OpenQasm!.Text);
-        Assert.Contains("count = CountBits__sz2(flags);", r.Targets.OpenQasm!.Text);
+        var program = r.Targets.OpenQasm!.Program;
+        var count = Assert.Single(
+            program.Definitions.Where(
+                definition =>
+                    definition.Kind == MirQasmCallableKind.Function
+                    && definition.Parameters.SingleOrDefault()?.Type is
+                    MirQasmBitType
+                    {
+                        Width: 2,
+                        IsRegister: true,
+                    }));
+        var body = program.EntryPoint.Body;
+        var call = Assert.Single(
+            TargetStatements(body)
+                .SelectMany(MirQasmTestModel.Expressions)
+                .OfType<MirQasmFunctionCallExpression>(),
+            expression =>
+                expression.Target is MirQasmUserFunctionTarget target
+                && target.Callable == count.Id);
+        var argument = Assert.Single(call.Arguments);
+        Assert.Equal(
+            2,
+            Assert.IsType<MirQasmBitType>(
+                TargetPlaceType(body, argument)).Width);
+        Assert.Contains(
+            TargetStatements(body).OfType<MirQasmAssignmentStatement>(),
+            assignment =>
+                body.DependsOn(
+                    assignment.Value,
+                    expression => ReferenceEquals(expression, call)
+                        || expression == call));
     }
 
     /// <summary>A function specialization can itself expose another expression-position call. Rewriting
@@ -586,10 +1004,53 @@ public class ClassicalArrayTests
             """);
 
         Assert.True(r.Succeeded, Explain(r));
-        Assert.Contains("def ForwardCount__sz3(bit[3] flags) -> int", r.Targets.OpenQasm!.Text);
-        Assert.Contains("def CountBits__sz3(bit[3] flags) -> int", r.Targets.OpenQasm!.Text);
-        Assert.Contains("CountBits__sz3(flags)", r.Targets.OpenQasm!.Text);
-        Assert.Contains("int count = ForwardCount__sz3(flags);", r.Targets.OpenQasm!.Text);
+        var program = r.Targets.OpenQasm!.Program;
+        var functions = program.Definitions
+            .Where(
+                definition =>
+                    definition.Kind == MirQasmCallableKind.Function
+                    && definition.Parameters.SingleOrDefault()?.Type is
+                    MirQasmBitType
+                    {
+                        Width: 3,
+                        IsRegister: true,
+                    })
+            .ToArray();
+        Assert.Equal(2, functions.Length);
+        var forwarding = Assert.Single(
+            functions,
+            definition =>
+                TargetStatements(definition.Body)
+                    .SelectMany(MirQasmTestModel.Expressions)
+                    .OfType<MirQasmFunctionCallExpression>()
+                    .Any(
+                        call =>
+                            call.Target is MirQasmUserFunctionTarget target
+                            && functions.Any(
+                                candidate =>
+                                    candidate.Id == target.Callable)));
+        var innerCall = Assert.Single(
+            TargetStatements(forwarding.Body)
+                .SelectMany(MirQasmTestModel.Expressions)
+                .OfType<MirQasmFunctionCallExpression>(),
+            call => call.Target is MirQasmUserFunctionTarget);
+        var inner = Resolve(
+            program,
+            ((MirQasmUserFunctionTarget)innerCall.Target).Callable);
+        Assert.Contains(inner, functions);
+        var entryCall = Assert.Single(
+            TargetStatements(program.EntryPoint.Body)
+                .SelectMany(MirQasmTestModel.Expressions)
+                .OfType<MirQasmFunctionCallExpression>(),
+            call =>
+                call.Target is MirQasmUserFunctionTarget target
+                && target.Callable == forwarding.Id);
+        Assert.Equal(
+            3,
+            Assert.IsType<MirQasmBitType>(
+                TargetPlaceType(
+                    program.EntryPoint.Body,
+                    Assert.Single(entryCall.Arguments))).Width);
     }
 
     [Fact]
@@ -605,9 +1066,44 @@ public class ClassicalArrayTests
             """);
 
         Assert.True(r.Succeeded, Explain(r));
-        Assert.Contains("if (CountBits__sz2(flags) == 0)", r.Targets.OpenQasm!.Text);
-        Assert.Contains("rx(CountBits__sz2(flags)) q[0];", r.Targets.OpenQasm!.Text);
-        Assert.Equal(1, r.Targets.OpenQasm!.Text.Split("def CountBits__sz2(").Length - 1);
+        var program = r.Targets.OpenQasm!.Program;
+        var count = Assert.Single(
+            program.Definitions.Where(
+                definition =>
+                    definition.Kind == MirQasmCallableKind.Function
+                    && definition.Parameters.SingleOrDefault()?.Type is
+                    MirQasmBitType
+                    {
+                        Width: 2,
+                        IsRegister: true,
+                    }));
+        var body = program.EntryPoint.Body;
+        var branch = Assert.Single(
+            TargetStatements(body).OfType<MirQasmIfStatement>());
+        Assert.True(
+            body.DependsOn(
+                branch.Condition,
+                expression =>
+                    expression is MirQasmFunctionCallExpression
+                    {
+                        Target: MirQasmUserFunctionTarget target,
+                    }
+                    && target.Callable == count.Id));
+        var rotation = Assert.Single(
+            TargetStatements(branch.Then)
+                .OfType<MirQasmQuantumApplyStatement>(),
+            apply =>
+                apply.Target is MirQasmBuiltinGateTarget
+                && apply.GateParameters.Length == 1);
+        Assert.True(
+            body.DependsOn(
+                Assert.Single(rotation.GateParameters),
+                expression =>
+                    expression is MirQasmFunctionCallExpression
+                    {
+                        Target: MirQasmUserFunctionTarget target,
+                    }
+                    && target.Callable == count.Id));
     }
 
     [Fact]
@@ -627,13 +1123,53 @@ public class ClassicalArrayTests
             """);
 
         Assert.True(r.Succeeded, Explain(r));
-        Assert.Contains("def CountBits__sz2(bit[2] flags) -> int", r.Targets.OpenQasm!.Text);
-        Assert.Contains("def CountBits__sz3(bit[3] flags) -> int", r.Targets.OpenQasm!.Text);
-        Assert.Contains("bit[2] flags = \"00\";", r.Targets.OpenQasm!.Text);
-        Assert.Contains("bit[3] flags_ = \"000\";", r.Targets.OpenQasm!.Text);
-        Assert.Contains("CountBits__sz2(flags) == 2", r.Targets.OpenQasm!.Text);
-        Assert.DoesNotContain("CountBits__sz2(flags_)", r.Targets.OpenQasm!.Text);
-        Assert.Contains("int outerCount = CountBits__sz3(flags_);", r.Targets.OpenQasm!.Text);
+        var program = r.Targets.OpenQasm!.Program;
+        var countByWidth = program.Definitions
+            .Where(
+                definition =>
+                    definition.Kind == MirQasmCallableKind.Function
+                    && definition.Parameters.SingleOrDefault()?.Type is
+                    MirQasmBitType { IsRegister: true })
+            .ToDictionary(
+                definition =>
+                    ((MirQasmBitType)definition.Parameters[0].Type).Width);
+        Assert.Equal(new[] { 2, 3 }, countByWidth.Keys.Order());
+        var body = program.EntryPoint.Body;
+        Assert.Equal(
+            new[] { 2, 3 },
+            TargetStatements(body)
+                .OfType<MirQasmValueDeclarationStatement>()
+                .Select(declaration => declaration.Type)
+                .OfType<MirQasmBitType>()
+                .Where(bit => bit.IsRegister)
+                .Select(bit => bit.Width)
+                .Order());
+        var loop = Assert.Single(
+            TargetStatements(body).OfType<MirQasmWhileStatement>());
+        var loopDependencies = TargetLoopDependencies(body, loop).ToArray();
+        Assert.Contains(
+            loopDependencies,
+            expression =>
+                    expression is MirQasmFunctionCallExpression
+                    {
+                        Target: MirQasmUserFunctionTarget target,
+                    }
+                    && target.Callable == countByWidth[2].Id);
+        Assert.DoesNotContain(
+            loopDependencies,
+            expression =>
+                    expression is MirQasmFunctionCallExpression
+                    {
+                        Target: MirQasmUserFunctionTarget target,
+                    }
+                    && target.Callable == countByWidth[3].Id);
+        Assert.Contains(
+            TargetStatements(body)
+                .SelectMany(MirQasmTestModel.Expressions)
+                .OfType<MirQasmFunctionCallExpression>(),
+            call =>
+                call.Target is MirQasmUserFunctionTarget target
+                && target.Callable == countByWidth[3].Id);
     }
 
     [Fact]
@@ -651,10 +1187,35 @@ public class ClassicalArrayTests
             """);
 
         Assert.True(r.Succeeded, Explain(r));
-        Assert.Contains("int value = 0;", r.Targets.OpenQasm!.Text);
-        Assert.Contains("int value_ = 1;", r.Targets.OpenQasm!.Text);
-        Assert.Contains("Echo(value_) == 1", r.Targets.OpenQasm!.Text);
-        Assert.DoesNotContain("Echo(value) == 1", r.Targets.OpenQasm!.Text);
+        var program = r.Targets.OpenQasm!.Program;
+        var echo = Assert.Single(
+            program.Definitions.Where(
+                definition =>
+                    definition.Kind == MirQasmCallableKind.Function
+                    && definition.Parameters.SingleOrDefault()?.Type is
+                    MirQasmScalarType { Kind: MirQasmScalarKind.Int }));
+        var body = program.EntryPoint.Body;
+        var loop = Assert.Single(
+            TargetStatements(body).OfType<MirQasmWhileStatement>());
+        var conditionCall = Assert.Single(
+            TargetLoopDependencies(body, loop)
+                .OfType<MirQasmFunctionCallExpression>()
+                .Where(
+                    call =>
+                        call.Target is MirQasmUserFunctionTarget target
+                        && target.Callable == echo.Id)
+                .Distinct());
+        var argument = Assert.Single(conditionCall.Arguments);
+        Assert.True(
+            body.DependsOn(
+                argument,
+                expression =>
+                    expression is MirQasmLiteralExpression { Text: "1" }));
+        Assert.False(
+            body.DependsOn(
+                argument,
+                expression =>
+                    expression is MirQasmLiteralExpression { Text: "0" }));
     }
 
     [Fact]
@@ -678,11 +1239,44 @@ public class ClassicalArrayTests
             """);
 
         Assert.True(r.Succeeded, Explain(r));
-        Assert.Contains("int value_ = 1;", r.Targets.OpenQasm!.Text);
-        Assert.Contains("Echo(value_) == 1", r.Targets.OpenQasm!.Text);
-        Assert.Contains("for int value__ in", r.Targets.OpenQasm!.Text);
-        Assert.Contains("Echo(value__)", r.Targets.OpenQasm!.Text);
-        Assert.DoesNotContain("Echo(value) == 1", r.Targets.OpenQasm!.Text);
+        var program = r.Targets.OpenQasm!.Program;
+        var echo = Assert.Single(
+            program.Definitions.Where(
+                definition =>
+                    definition.Kind == MirQasmCallableKind.Function
+                    && definition.Parameters.SingleOrDefault()?.Type is
+                    MirQasmScalarType { Kind: MirQasmScalarKind.Int }));
+        var worker = Assert.Single(
+            program.Definitions.Where(
+                definition =>
+                    definition.Parameters.Any(
+                        parameter =>
+                            parameter.Access == MirQasmParameterAccess.Mutable
+                            && parameter.Type is MirQasmArrayType)));
+        var echoCalls = TargetStatements(worker.Body)
+            .SelectMany(MirQasmTestModel.Expressions)
+            .OfType<MirQasmFunctionCallExpression>()
+            .Where(
+                call =>
+                    call.Target is MirQasmUserFunctionTarget target
+                    && target.Callable == echo.Id)
+            .ToArray();
+        Assert.Equal(2, echoCalls.Length);
+        var arguments = echoCalls
+            .Select(call => Assert.Single(call.Arguments))
+            .ToArray();
+        Assert.All(
+            arguments,
+            argument =>
+                Assert.IsType<MirQasmDeclarationReferenceExpression>(argument));
+        Assert.False(SameTargetPlace(arguments[0], arguments[1]));
+        Assert.Contains(
+            arguments,
+            argument =>
+                worker.Body.DependsOn(
+                    argument,
+                    expression =>
+                        expression is MirQasmLiteralExpression { Text: "1" }));
     }
 
     /// <summary>A bit[] parameter is READ-ONLY: its QASM form is a by-value register, so a write would
@@ -754,7 +1348,7 @@ public class ClassicalArrayTests
         Assert.True(r.Succeeded, Explain(r));
     }
 
-    // --- ArrayLocalHoisting: a classical-array LOCAL in a def-emitted op is inexpressible in OpenQASM
+    // --- MIR target array legalization: a classical-array LOCAL in a def-emitted op is inexpressible in OpenQASM
     //     (arrays are global-or-parameter only, and defs cannot see mutable globals — scope.rst), so the
     //     QASM backend threads it as a hidden array-reference parameter backed by a global, with the
     //     declaration site becoming element-wise re-initialization (fresh value on every entry). ---
@@ -773,15 +1367,59 @@ public class ClassicalArrayTests
             }
             """);
 
-        Assert.Contains("array[int, 3] SetTable_tbl = {0, 0, 0};", result.Targets.OpenQasm!.Text);   // global backing, default-init
-        Assert.Contains("mutable array[int, #dim = 1] tbl", result.Targets.OpenQasm!.Text);          // hidden parameter on the def
-        Assert.Contains("tbl[0] = 1;", result.Targets.OpenQasm!.Text);                               // declaration site = re-init
-        Assert.Contains("tbl[2] = 3;", result.Targets.OpenQasm!.Text);
-        Assert.Contains("SetTable(q[0], SetTable_tbl);", result.Targets.OpenQasm!.Text);             // caller supplies the backing
-        Assert.DoesNotContain("array[int, 3] tbl", result.Targets.OpenQasm!.Text);                   // no array DECLARATION inside the def
-        // the backing declaration precedes the call that hands it over
-        Assert.True(result.Targets.OpenQasm!.Text.IndexOf("array[int, 3] SetTable_tbl")
-                    < result.Targets.OpenQasm!.Text.IndexOf("SetTable(q[0], SetTable_tbl);"));
+        var program = result.Targets.OpenQasm!.Program;
+        var entry = program.EntryPoint.Body;
+        var backing = Assert.Single(
+            entry.OfType<MirQasmArrayDeclarationStatement>());
+        Assert.Equal(MirQasmScalarKind.Int, backing.Type.ElementType.Kind);
+        Assert.Equal(3, backing.Type.Length);
+        Assert.All(
+            backing.Elements,
+            element =>
+                Assert.Equal(
+                    "0",
+                    Assert.IsType<MirQasmLiteralExpression>(element).Text));
+        var call = Assert.Single(
+            entry.OfType<MirQasmQuantumApplyStatement>(),
+            apply => apply.Target is MirQasmUserQuantumTarget);
+        var callee = Resolve(
+            program,
+            ((MirQasmUserQuantumTarget)call.Target).Callable);
+        var hidden = Assert.Single(
+            callee.Parameters,
+            parameter =>
+                parameter.Access == MirQasmParameterAccess.Mutable
+                && parameter.Type is MirQasmArrayType
+                {
+                    ElementType.Kind: MirQasmScalarKind.Int,
+                });
+        Assert.Contains(
+            call.Operands,
+            operand =>
+                operand is MirQasmDeclarationReferenceExpression reference
+                && reference.Declaration == backing.Declaration);
+        Assert.Empty(
+            TargetStatements(callee.Body)
+                .OfType<MirQasmArrayDeclarationStatement>());
+        var writes = TargetStatements(callee.Body)
+            .OfType<MirQasmAssignmentStatement>()
+            .Where(
+                assignment =>
+                    assignment.Target is MirQasmIndexExpression
+                    {
+                        Base: MirQasmParameterReferenceExpression reference,
+                    }
+                    && reference.Parameter == hidden.Id)
+            .ToArray();
+        Assert.Contains(
+            writes,
+            write => IsLiteralIndexWrite(callee.Body, write, "0", "1"));
+        Assert.Contains(
+            writes,
+            write => IsLiteralIndexWrite(callee.Body, write, "2", "3"));
+        Assert.True(
+            entry.IndexOf(backing) < entry.IndexOf(call),
+            "the entry-owned backing declaration must precede the typed call that borrows it");
     }
 
     [Fact]
@@ -801,9 +1439,47 @@ public class ClassicalArrayTests
             }
             """);
 
-        Assert.Contains("array[int, 2] Inner_t = {0, 0};", result.Targets.OpenQasm!.Text);   // one backing global
-        Assert.Contains("Inner(q, Inner_t);", result.Targets.OpenQasm!.Text);                // Outer hands its pass-through on
-        Assert.Contains("Outer(q[0], Inner_t);", result.Targets.OpenQasm!.Text);             // Main names the global directly
+        var program = result.Targets.OpenQasm!.Program;
+        var entry = program.EntryPoint.Body;
+        var backing = Assert.Single(
+            entry.OfType<MirQasmArrayDeclarationStatement>());
+        Assert.Equal(2, backing.Type.Length);
+        var outerCall = Assert.Single(
+            entry.OfType<MirQasmQuantumApplyStatement>(),
+            apply => apply.Target is MirQasmUserQuantumTarget);
+        Assert.Contains(
+            outerCall.Operands,
+            operand =>
+                operand is MirQasmDeclarationReferenceExpression reference
+                && reference.Declaration == backing.Declaration);
+        var outer = Resolve(
+            program,
+            ((MirQasmUserQuantumTarget)outerCall.Target).Callable);
+        var passThrough = Assert.Single(
+            outer.Parameters,
+            parameter =>
+                parameter.Access == MirQasmParameterAccess.Mutable
+                && parameter.Type is MirQasmArrayType);
+        var innerCall = Assert.Single(
+            TargetStatements(outer.Body)
+                .OfType<MirQasmQuantumApplyStatement>(),
+            apply => apply.Target is MirQasmUserQuantumTarget);
+        Assert.Contains(
+            innerCall.Operands,
+            operand =>
+                operand is MirQasmParameterReferenceExpression reference
+                && reference.Parameter == passThrough.Id);
+        var inner = Resolve(
+            program,
+            ((MirQasmUserQuantumTarget)innerCall.Target).Callable);
+        Assert.Contains(
+            inner.Parameters,
+            parameter =>
+                parameter.Access == MirQasmParameterAccess.Mutable
+                && parameter.Type is MirQasmArrayType
+                {
+                    ElementType.Kind: MirQasmScalarKind.Int,
+                });
     }
 
     [Fact]
@@ -821,10 +1497,29 @@ public class ClassicalArrayTests
             }
             """);
 
-        Assert.Contains("array[int, 2] a = {0, 0};", result.Targets.OpenQasm!.Text);   // declaration at global top…
-        Assert.Contains("a[0] = 7;", result.Targets.OpenQasm!.Text);                   // …site keeps element-wise re-init
-        Assert.Contains("a[1] = 8;", result.Targets.OpenQasm!.Text);
-        Assert.True(result.Targets.OpenQasm!.Text.IndexOf("array[int, 2] a") < result.Targets.OpenQasm!.Text.IndexOf("if ("));
+        var body = result.Targets.OpenQasm!.Program.EntryPoint.Body;
+        var backing = Assert.Single(
+            body.OfType<MirQasmArrayDeclarationStatement>());
+        Assert.Equal(2, backing.Type.Length);
+        var branch = Assert.Single(
+            body.OfType<MirQasmIfStatement>());
+        var writes = TargetStatements(branch.Then)
+            .OfType<MirQasmAssignmentStatement>()
+            .Where(
+                assignment =>
+                    assignment.Target is MirQasmIndexExpression
+                    {
+                        Base: MirQasmDeclarationReferenceExpression reference,
+                    }
+                    && reference.Declaration == backing.Declaration)
+            .ToArray();
+        Assert.Contains(
+            writes,
+            write => IsLiteralIndexWrite(body, write, "0", "7"));
+        Assert.Contains(
+            writes,
+            write => IsLiteralIndexWrite(body, write, "1", "8"));
+        Assert.True(body.IndexOf(backing) < body.IndexOf(branch));
     }
 
     /// <summary>bit[] locals are sized REGISTERS in OpenQASM — legal inside a def, not "arrays" — so the
@@ -844,9 +1539,36 @@ public class ClassicalArrayTests
             }
             """);
 
-        Assert.Contains("bit[2] f = \"00\";", result.Targets.OpenQasm!.Text);   // register declaration stays in the def
-        Assert.Contains("Flag(q[0]);", result.Targets.OpenQasm!.Text);          // no hidden parameter added
-        Assert.DoesNotContain("Flag_f", result.Targets.OpenQasm!.Text);         // no backing global minted
+        var program = result.Targets.OpenQasm!.Program;
+        var call = Assert.Single(
+            program.EntryPoint.Body.OfType<MirQasmQuantumApplyStatement>(),
+            apply => apply.Target is MirQasmUserQuantumTarget);
+        var definition = Resolve(
+            program,
+            ((MirQasmUserQuantumTarget)call.Target).Callable);
+        var bits = Assert.Single(
+            definition.Body.OfType<MirQasmValueDeclarationStatement>(),
+            declaration =>
+                declaration.Type is MirQasmBitType
+                {
+                    Width: 2,
+                    IsRegister: true,
+                });
+        Assert.DoesNotContain(
+            definition.Parameters,
+            parameter => parameter.Type is MirQasmArrayType);
+        Assert.Empty(
+            program.EntryPoint.Body.OfType<MirQasmArrayDeclarationStatement>());
+        Assert.Contains(
+            TargetStatements(definition.Body)
+                .OfType<MirQasmAssignmentStatement>(),
+            write =>
+                write.Target is MirQasmIndexExpression
+                {
+                    Base: MirQasmDeclarationReferenceExpression reference,
+                }
+                && reference.Declaration == bits.Declaration
+                && IsLiteralIndexWrite(definition.Body, write, "0", "1"));
     }
 
     /// <summary>A bit[] NESTED in a control-flow block hoists only to the top of its own op (importers
@@ -871,16 +1593,43 @@ public class ClassicalArrayTests
             }
             """);
 
-        Assert.Contains("bit[2] f = \"00\";", result.Targets.OpenQasm!.Text);          // storage at the def's top
-        Assert.Contains("f[0] = 0;", result.Targets.OpenQasm!.Text);                   // site re-initializes per entry
-        Assert.Contains("Tally(q[0], n);", result.Targets.OpenQasm!.Text);             // signature unchanged — no threading
-        Assert.DoesNotContain("Tally_f", result.Targets.OpenQasm!.Text);
-        Assert.True(result.Targets.OpenQasm!.Text.IndexOf("bit[2] f") < result.Targets.OpenQasm!.Text.IndexOf("if ("));
+        var program = result.Targets.OpenQasm!.Program;
+        var call = Assert.Single(
+            program.EntryPoint.Body.OfType<MirQasmQuantumApplyStatement>(),
+            apply => apply.Target is MirQasmUserQuantumTarget);
+        var definition = Resolve(
+            program,
+            ((MirQasmUserQuantumTarget)call.Target).Callable);
+        Assert.Equal(2, definition.Parameters.Length);
+        Assert.DoesNotContain(
+            definition.Parameters,
+            parameter => parameter.Type is MirQasmArrayType);
+        var bits = Assert.Single(
+            definition.Body.OfType<MirQasmValueDeclarationStatement>(),
+            declaration =>
+                declaration.Type is MirQasmBitType
+                {
+                    Width: 2,
+                    IsRegister: true,
+                });
+        var branch = Assert.Single(
+            definition.Body.OfType<MirQasmIfStatement>());
+        Assert.True(definition.Body.IndexOf(bits) < definition.Body.IndexOf(branch));
+        Assert.Contains(
+            TargetStatements(branch.Then)
+                .OfType<MirQasmAssignmentStatement>(),
+            write =>
+                write.Target is MirQasmIndexExpression
+                {
+                    Base: MirQasmDeclarationReferenceExpression reference,
+                }
+                && reference.Declaration == bits.Declaration
+                && IsLiteralIndexWrite(definition.Body, write, "0", "0"));
     }
 
-    // --- ArrayLocalHoisting name-uniqueness (R13/R14): the pass mints every global / parameter / storage
+    // --- MIR target name uniqueness (R13/R14): lowering mints every global / parameter / storage
     //     as a UNIQUE placeholder (#hoist#base#uid), so two distinct entities can never share a spelling
-    //     and a placeholder can never equal a user name — without enumerating the scope. NameMangler then
+    //     and a placeholder can never equal a user name — without enumerating the scope. Target lowering then
     //     turns each placeholder into a pretty, collision-free name (distinct placeholders never trigger
     //     its same-name MERGE; its per-key freshening splits a shared base into `x`/`x_`). These pin the
     //     collision vectors that once emitted invalid QASM with success=true; semantics are Braket-verified
@@ -900,10 +1649,40 @@ public class ClassicalArrayTests
             operation Main() { use q = Qubit[2]; A(q[0]); A_b(q[1]); }
             """);
 
-        Assert.Contains("array[int, 2] A_b_c = {0, 0};", result.Targets.OpenQasm!.Text);   // A's b_c
-        Assert.Contains("array[int, 1] A_b_c_ = {0};", result.Targets.OpenQasm!.Text);     // A_b's c — split apart
-        Assert.Contains("A(q[0], A_b_c);", result.Targets.OpenQasm!.Text);
-        Assert.Contains("A_b(q[1], A_b_c_);", result.Targets.OpenQasm!.Text);
+        var program = result.Targets.OpenQasm!.Program;
+        var arrays = program.EntryPoint.Body
+            .OfType<MirQasmArrayDeclarationStatement>()
+            .OrderBy(array => array.Type.Length)
+            .ToArray();
+        Assert.Equal(new int?[] { 1, 2 }, arrays.Select(array => array.Type.Length));
+        Assert.NotEqual(arrays[0].Declaration, arrays[1].Declaration);
+        var calls = program.EntryPoint.Body
+            .OfType<MirQasmQuantumApplyStatement>()
+            .Where(apply => apply.Target is MirQasmUserQuantumTarget)
+            .ToArray();
+        Assert.Equal(2, calls.Length);
+        var suppliedArrays = calls
+            .SelectMany(call => call.Operands)
+            .OfType<MirQasmDeclarationReferenceExpression>()
+            .Where(
+                reference =>
+                    arrays.Any(array => array.Declaration == reference.Declaration))
+            .Select(reference => reference.Declaration)
+            .ToHashSet();
+        Assert.Equal(
+            arrays.Select(array => array.Declaration).ToHashSet(),
+            suppliedArrays);
+        Assert.All(
+            calls,
+            call =>
+                Assert.Contains(
+                    Resolve(
+                            program,
+                            ((MirQasmUserQuantumTarget)call.Target).Callable)
+                        .Parameters,
+                    parameter =>
+                        parameter.Access == MirQasmParameterAccess.Mutable
+                        && parameter.Type is MirQasmArrayType));
     }
 
     /// <summary>Vector 1 — a minted backing global and a user top-level variable of the same spelling get
@@ -916,10 +1695,31 @@ public class ClassicalArrayTests
             operation Main() { use q = Qubit[1]; var Foo_bar: int = 5; Foo(q[0]); if (Foo_bar == 5) { X(q[0]); } }
             """);
 
-        Assert.Contains("array[int, 1] Foo_bar = {0};", result.Targets.OpenQasm!.Text);   // the backing global
-        Assert.Contains("int Foo_bar_ = 5;", result.Targets.OpenQasm!.Text);             // the user scalar, split apart
-        Assert.Contains("Foo(q[0], Foo_bar);", result.Targets.OpenQasm!.Text);           // the call supplies the backing global
-        Assert.Contains("Foo_bar_ == 5", result.Targets.OpenQasm!.Text);                 // the user scalar's own use follows its rename
+        var program = result.Targets.OpenQasm!.Program;
+        var body = program.EntryPoint.Body;
+        var backing = Assert.Single(
+            body.OfType<MirQasmArrayDeclarationStatement>());
+        Assert.Equal(1, backing.Type.Length);
+        var call = Assert.Single(
+            body.OfType<MirQasmQuantumApplyStatement>(),
+            apply => apply.Target is MirQasmUserQuantumTarget);
+        Assert.Contains(
+            call.Operands,
+            operand =>
+                operand is MirQasmDeclarationReferenceExpression reference
+                && reference.Declaration == backing.Declaration);
+        var branch = Assert.Single(body.OfType<MirQasmIfStatement>());
+        Assert.True(
+            body.DependsOn(
+                branch.Condition,
+                expression =>
+                    expression is MirQasmLiteralExpression { Text: "5" }));
+        Assert.False(
+            body.DependsOn(
+                branch.Condition,
+                expression =>
+                    expression is MirQasmDeclarationReferenceExpression reference
+                    && reference.Declaration == backing.Declaration));
     }
 
     /// <summary>Vector 3 — a pass-through parameter (named after the global it forwards) must be freshened
@@ -933,10 +1733,54 @@ public class ClassicalArrayTests
             operation Main() { use q = Qubit[1]; Mid(q[0]); }
             """);
 
-        // Mid owns array `D_g` (its own param) AND forwards D's global `D_g` — the two params must differ.
-        Assert.Contains("def Mid(qubit q, mutable array[int, #dim = 1] D_g, mutable array[int, #dim = 1] D_g_) {", result.Targets.OpenQasm!.Text);
-        Assert.Contains("D(q, D_g_);", result.Targets.OpenQasm!.Text);              // D receives the forwarded (freshened) slot
-        Assert.Contains("Mid(q[0], Mid_D_g, D_g);", result.Targets.OpenQasm!.Text); // Main supplies Mid's own + D's backing
+        var program = result.Targets.OpenQasm!.Program;
+        var entryCall = Assert.Single(
+            program.EntryPoint.Body.OfType<MirQasmQuantumApplyStatement>(),
+            apply => apply.Target is MirQasmUserQuantumTarget);
+        var mid = Resolve(
+            program,
+            ((MirQasmUserQuantumTarget)entryCall.Target).Callable);
+        var arrays = mid.Parameters
+            .Where(
+                parameter =>
+                    parameter.Access == MirQasmParameterAccess.Mutable
+                    && parameter.Type is MirQasmArrayType)
+            .ToArray();
+        Assert.Equal(2, arrays.Length);
+        Assert.NotEqual(arrays[0].Id, arrays[1].Id);
+        var entryArrays = entryCall.Operands
+            .OfType<MirQasmDeclarationReferenceExpression>()
+            .Where(
+                reference =>
+                    TargetDeclaration(
+                        program.EntryPoint.Body,
+                        reference.Declaration) is MirQasmArrayDeclarationStatement)
+            .Select(reference => reference.Declaration)
+            .ToArray();
+        Assert.Equal(2, entryArrays.Distinct().Count());
+        var forwardedCall = Assert.Single(
+            TargetStatements(mid.Body)
+                .OfType<MirQasmQuantumApplyStatement>(),
+            apply => apply.Target is MirQasmUserQuantumTarget);
+        var forwarded = Assert.Single(
+            forwardedCall.Operands
+                .OfType<MirQasmParameterReferenceExpression>(),
+            reference =>
+                arrays.Any(array => array.Id == reference.Parameter));
+        Assert.Contains(arrays, array => array.Id == forwarded.Parameter);
+        Assert.Contains(
+            arrays,
+            array =>
+                array.Id != forwarded.Parameter
+                && TargetStatements(mid.Body)
+                    .OfType<MirQasmAssignmentStatement>()
+                    .Any(
+                        assignment =>
+                            assignment.Target is MirQasmIndexExpression
+                            {
+                                Base: MirQasmParameterReferenceExpression reference,
+                            }
+                            && reference.Parameter == array.Id));
     }
 
     /// <summary>Vector 4 — an array local that shadows a same-named parameter gets a freshened parameter,
@@ -955,14 +1799,62 @@ public class ClassicalArrayTests
             operation Main() { use q = Qubit[1]; Helper(q, 0); }
             """);
 
-        Assert.Contains("if (a == 0)", result.Targets.OpenQasm!.Text);        // the PARAMETER comparison — untouched
-        Assert.Contains("a_[0] = 1;", result.Targets.OpenQasm!.Text);         // the ARRAY — freshened and rewritten
-        Assert.Contains("if (a_[0] == 1)", result.Targets.OpenQasm!.Text);
-        Assert.DoesNotContain("if (a_ == 0)", result.Targets.OpenQasm!.Text); // the rename must NOT leak to the param comparison
+        var program = result.Targets.OpenQasm!.Program;
+        var call = Assert.Single(
+            program.EntryPoint.Body.OfType<MirQasmQuantumApplyStatement>(),
+            apply => apply.Target is MirQasmUserQuantumTarget);
+        var helper = Resolve(
+            program,
+            ((MirQasmUserQuantumTarget)call.Target).Callable);
+        var scalar = Assert.Single(
+            helper.Parameters,
+            parameter =>
+                parameter.Type is MirQasmScalarType
+                {
+                    Kind: MirQasmScalarKind.Int,
+                });
+        var array = Assert.Single(
+            helper.Parameters,
+            parameter =>
+                parameter.Access == MirQasmParameterAccess.Mutable
+                && parameter.Type is MirQasmArrayType);
+        var branches = TargetStatements(helper.Body)
+            .OfType<MirQasmIfStatement>()
+            .ToArray();
+        Assert.Contains(
+            branches,
+            branch =>
+                helper.Body.DependsOn(
+                    branch.Condition,
+                    expression =>
+                        expression is MirQasmParameterReferenceExpression reference
+                        && reference.Parameter == scalar.Id));
+        Assert.Contains(
+            branches,
+            branch =>
+                helper.Body.DependsOn(
+                    branch.Condition,
+                    expression =>
+                        expression is MirQasmIndexExpression
+                        {
+                            Base: MirQasmParameterReferenceExpression reference,
+                        }
+                        && reference.Parameter == array.Id));
+        Assert.DoesNotContain(
+            branches,
+            branch =>
+                helper.Body.DependsOn(
+                    branch.Condition,
+                    expression =>
+                        expression is MirQasmIndexExpression
+                        {
+                            Base: MirQasmParameterReferenceExpression reference,
+                        }
+                        && reference.Parameter == scalar.Id));
     }
 
-    // --- ArrayLocalHoisting seed completeness (R14): the Namer that mints unique names must be seeded
-    //     with EVERY inhabitant of the emission scope — the full set NameMangler collects — not just op
+    // --- MIR target name-allocation completeness (R14): the allocator must account for
+    //     with EVERY inhabitant of the emission scope — the full target binding set — not just op
     //     names and parameters. A body-declared local (loop variable, scalar, measure bit) or a NESTED
     //     entry declaration is in that scope too; omitting it let a minted name collide with it and the
     //     mangler then merged the two. These pin the collisions against body-declared names. ---
@@ -982,10 +1874,42 @@ public class ClassicalArrayTests
             operation Main() { use q = Qubit[1]; Helper(q[0]); }
             """);
 
-        Assert.Contains("mutable array[int, #dim = 1] g_)", result.Targets.OpenQasm!.Text);   // the array parameter
-        Assert.Contains("for int g__ in", result.Targets.OpenQasm!.Text);                     // the loop variable, split apart
-        Assert.Contains("g_[0] == 1", result.Targets.OpenQasm!.Text);                         // the array reference points at the parameter
-        Assert.Contains("Helper(q[0], Helper_g);", result.Targets.OpenQasm!.Text);            // the backing global is distinct too
+        var program = result.Targets.OpenQasm!.Program;
+        var entryCall = Assert.Single(
+            program.EntryPoint.Body.OfType<MirQasmQuantumApplyStatement>(),
+            apply => apply.Target is MirQasmUserQuantumTarget);
+        var helper = Resolve(
+            program,
+            ((MirQasmUserQuantumTarget)entryCall.Target).Callable);
+        var array = Assert.Single(
+            helper.Parameters,
+            parameter =>
+                parameter.Access == MirQasmParameterAccess.Mutable
+                && parameter.Type is MirQasmArrayType);
+        var backing = Assert.Single(
+            entryCall.Operands.OfType<MirQasmDeclarationReferenceExpression>(),
+            reference =>
+                TargetDeclaration(
+                    program.EntryPoint.Body,
+                    reference.Declaration) is MirQasmArrayDeclarationStatement);
+        Assert.NotNull(TargetDeclaration(
+            program.EntryPoint.Body,
+            backing.Declaration));
+        var loop = Assert.Single(
+            TargetStatements(helper.Body)
+                .OfType<MirQasmWhileStatement>());
+        Assert.Contains(
+            TargetLoopDependencies(helper.Body, loop),
+            expression =>
+                expression is MirQasmIndexExpression
+                {
+                    Base: MirQasmParameterReferenceExpression reference,
+                }
+                && reference.Parameter == array.Id);
+        Assert.Contains(
+            TargetLoopDependencies(helper.Body, loop),
+            expression =>
+                expression is MirQasmDeclarationReferenceExpression);
     }
 
     /// <summary>A minted backing global and a user variable declared inside a NESTED block of the entry op
@@ -1004,10 +1928,37 @@ public class ClassicalArrayTests
             }
             """);
 
-        Assert.Contains("array[int, 3] SetTable_tbl = {0, 0, 0};", result.Targets.OpenQasm!.Text);   // the backing global
-        Assert.Contains("int SetTable_tbl_ = 1;", result.Targets.OpenQasm!.Text);                    // the nested user scalar, split apart
-        Assert.Contains("if (SetTable_tbl_ == 1)", result.Targets.OpenQasm!.Text);                   // its own use follows the rename
-        Assert.Contains("SetTable(q[0], SetTable_tbl);", result.Targets.OpenQasm!.Text);
+        var program = result.Targets.OpenQasm!.Program;
+        var body = program.EntryPoint.Body;
+        var backing = Assert.Single(
+            body.OfType<MirQasmArrayDeclarationStatement>());
+        Assert.Equal(3, backing.Type.Length);
+        var call = Assert.Single(
+            body.OfType<MirQasmQuantumApplyStatement>(),
+            apply => apply.Target is MirQasmUserQuantumTarget);
+        Assert.Contains(
+            call.Operands,
+            operand =>
+                operand is MirQasmDeclarationReferenceExpression reference
+                && reference.Declaration == backing.Declaration);
+        var branches = TargetStatements(body)
+            .OfType<MirQasmIfStatement>()
+            .ToArray();
+        Assert.Contains(
+            branches,
+            branch =>
+                body.DependsOn(
+                    branch.Condition,
+                    expression =>
+                        expression is MirQasmLiteralExpression { Text: "1" }));
+        Assert.DoesNotContain(
+            branches,
+            branch =>
+                body.DependsOn(
+                    branch.Condition,
+                    expression =>
+                        expression is MirQasmDeclarationReferenceExpression reference
+                        && reference.Declaration == backing.Declaration));
     }
 
     /// <summary>A pass-through parameter and a caller body-local of the same spelling get DISTINCT names
@@ -1021,11 +1972,138 @@ public class ClassicalArrayTests
             operation Main() { use q = Qubit[1]; Outer(q[0]); }
             """);
 
-        Assert.Contains("mutable array[int, #dim = 1] Inner_t)", result.Targets.OpenQasm!.Text);   // Outer's pass-through parameter
-        Assert.Contains("int Inner_t_ = 0;", result.Targets.OpenQasm!.Text);                       // Outer's own scalar, split apart
-        Assert.Contains("Inner(q, Inner_t);", result.Targets.OpenQasm!.Text);                      // the pass-through is forwarded
-        Assert.Contains("Inner_t_ == 0", result.Targets.OpenQasm!.Text);                           // the scalar's use follows its rename
+        var program = result.Targets.OpenQasm!.Program;
+        var entryCall = Assert.Single(
+            program.EntryPoint.Body.OfType<MirQasmQuantumApplyStatement>(),
+            apply => apply.Target is MirQasmUserQuantumTarget);
+        var outer = Resolve(
+            program,
+            ((MirQasmUserQuantumTarget)entryCall.Target).Callable);
+        var passThrough = Assert.Single(
+            outer.Parameters,
+            parameter =>
+                parameter.Access == MirQasmParameterAccess.Mutable
+                && parameter.Type is MirQasmArrayType);
+        var innerCall = Assert.Single(
+            TargetStatements(outer.Body)
+                .OfType<MirQasmQuantumApplyStatement>(),
+            apply => apply.Target is MirQasmUserQuantumTarget);
+        Assert.Contains(
+            innerCall.Operands,
+            operand =>
+                operand is MirQasmParameterReferenceExpression reference
+                && reference.Parameter == passThrough.Id);
+        var branch = Assert.Single(
+            TargetStatements(outer.Body).OfType<MirQasmIfStatement>());
+        Assert.True(
+            outer.Body.DependsOn(
+                branch.Condition,
+                expression =>
+                    expression is MirQasmLiteralExpression { Text: "0" }));
+        Assert.False(
+            outer.Body.DependsOn(
+                branch.Condition,
+                expression =>
+                    expression is MirQasmParameterReferenceExpression reference
+                    && reference.Parameter == passThrough.Id));
     }
+
+    private static IReadOnlyList<MirQasmStatement> TargetStatements(
+        IEnumerable<MirQasmStatement> body) =>
+        MirQasmTestModel.Statements(body).ToArray();
+
+    private static bool IsLiteralIndexWrite(
+        IEnumerable<MirQasmStatement> ownerBody,
+        MirQasmAssignmentStatement assignment,
+        string index,
+        string value) =>
+        assignment.Target is MirQasmIndexExpression
+        {
+            Index: var targetIndex,
+        }
+        && ownerBody.DependsOn(
+            targetIndex,
+            expression =>
+                expression is MirQasmLiteralExpression { Text: var actualIndex }
+                && actualIndex == index)
+        && ownerBody.DependsOn(
+            assignment.Value,
+            expression =>
+                expression is MirQasmLiteralExpression { Text: var actualValue }
+                && actualValue == value);
+
+    private static IEnumerable<MirQasmExpression> TargetLoopDependencies(
+        IEnumerable<MirQasmStatement> ownerBody,
+        MirQasmWhileStatement loop)
+    {
+        foreach (var expression in MirQasmTestModel.Expressions(loop.Condition))
+            foreach (var dependency in ownerBody.DependencyClosure(expression))
+                yield return dependency;
+        foreach (var statement in TargetStatements(loop.Body))
+            foreach (var expression in MirQasmTestModel.Expressions(statement))
+                foreach (var dependency in ownerBody.DependencyClosure(expression))
+                    yield return dependency;
+    }
+
+    private static MirQasmStatement TargetDeclaration(
+        IEnumerable<MirQasmStatement> ownerBody,
+        MirQasmDeclarationId id) =>
+        Assert.Single(
+            TargetStatements(ownerBody),
+            statement => statement switch
+                {
+                    MirQasmValueDeclarationStatement declaration =>
+                        declaration.Declaration == id,
+                    MirQasmArrayDeclarationStatement declaration =>
+                        declaration.Declaration == id,
+                    MirQasmQubitDeclarationStatement declaration =>
+                        declaration.Declaration == id,
+                    _ => false,
+                });
+
+    private static MirQasmType TargetPlaceType(
+        IEnumerable<MirQasmStatement> ownerBody,
+        MirQasmExpression expression) =>
+        expression switch
+        {
+            MirQasmDeclarationReferenceExpression reference =>
+                TargetDeclaration(ownerBody, reference.Declaration) switch
+                {
+                    MirQasmValueDeclarationStatement value => value.Type,
+                    MirQasmArrayDeclarationStatement array => array.Type,
+                    MirQasmQubitDeclarationStatement qubit => qubit.Type,
+                    _ => throw new InvalidOperationException(),
+                },
+            MirQasmIndexExpression index =>
+                TargetPlaceType(ownerBody, index.Base) switch
+                {
+                    MirQasmArrayType array => array.ElementType,
+                    MirQasmBitType => new MirQasmBitType(),
+                    MirQasmQubitType => new MirQasmQubitType(),
+                    var type => throw new Xunit.Sdk.XunitException(
+                        $"cannot index target type {type.GetType().Name}"),
+                },
+            _ => throw new Xunit.Sdk.XunitException(
+                $"expected a declaration-backed target place, got {expression.GetType().Name}"),
+        };
+
+    private static bool SameTargetPlace(
+        MirQasmExpression left,
+        MirQasmExpression right) =>
+        (left, right) switch
+        {
+            (MirQasmDeclarationReferenceExpression a, MirQasmDeclarationReferenceExpression b) =>
+                a.Declaration == b.Declaration,
+            (MirQasmParameterReferenceExpression a, MirQasmParameterReferenceExpression b) =>
+                a.Parameter == b.Parameter,
+            _ => false,
+        };
+
+    private static MirQasmCallableDefinition Resolve(
+        MirOpenQasmTargetProgram program,
+        MirQasmCallableId id) =>
+        Assert.Single(
+            program.Definitions.Where(definition => definition.Id == id));
 
     private static string Explain(Compilation result) =>
         string.Join(

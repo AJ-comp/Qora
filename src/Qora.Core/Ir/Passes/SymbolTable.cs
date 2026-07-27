@@ -327,7 +327,6 @@ internal static class SymbolTableBuilder
                     case QFor f: SeedRegisters(f.Body); break;
                     case QWhile w: SeedRegisters(w.Body); break;
                     case QRepeat r: SeedRegisters(r.Body); break;
-                    case QConjugate c: SeedRegisters(c.Within); SeedRegisters(c.Apply); break;
                 }
         }
         SeedRegisters(op.Body);
@@ -620,7 +619,6 @@ internal static class SymbolTableBuilder
                     case QFor f:
                         RecordExpr(scope, f.From, $"for bound {QNodes.Render(f.From)}", f.Span, classicalOnly: true);   // range bounds are classical (read in the ENCLOSING scope)…
                         RecordExpr(scope, f.To, $"for bound {QNodes.Render(f.To)}", f.Span, classicalOnly: true);
-                        RecordExpr(scope, f.Step, $"for step {QNodes.Render(f.Step)}", f.Span, classicalOnly: true);
                         var loop = scopeGraph.CreateScope(
                             HirScopeKind.Loop,
                             scope.Id,
@@ -674,18 +672,6 @@ internal static class SymbolTableBuilder
                         currentStmtId = r.Id;   // the nested Walk moved it; the until belongs to the repeat itself
                         RecordExpr(repeatBody, r.Until.Tree, $"until ({QNodes.Render(r.Until.Tree)})", r.Span, classicalOnly: true);  // until runs AFTER the body, so it sees body-local names
                         break;
-                    case QConjugate c:
-                        var withinScope = scopeGraph.CreateScope(
-                            HirScopeKind.Block,
-                            scope.Id,
-                            site: new HirScopeSite(c.Id, HirScopeSiteRole.ConjugateWithin));
-                        var applyScope = scopeGraph.CreateScope(
-                            HirScopeKind.Block,
-                            scope.Id,
-                            site: new HirScopeSite(c.Id, HirScopeSiteRole.ConjugateApply));
-                        Walk(c.Within, withinScope);
-                        Walk(c.Apply, applyScope);
-                        break;
                 }
             }
         }
@@ -694,7 +680,7 @@ internal static class SymbolTableBuilder
 
         // QSEM015 — a measure bit HOISTS to a flat top-level `bit r;` at emission, so it shares the emitted
         // top-level namespace with root-scope classicals (const/var/array), which also emit there. A same
-        // name in both is a duplicate top-level declaration OpenQASM 3 rejects — and NameMangler, keying by
+        // name in both is a duplicate top-level declaration OpenQASM 3 rejects — and target name allocation, keying by
         // source name, would emit both under one name rather than renaming. Checked HERE, against the
         // COMPLETED root scope, so it fires regardless of whether the classical is declared before or after
         // the measure bit's block. (Enclosing register/parameter/measure-bit collisions are caught inline

@@ -118,11 +118,11 @@ lookup follows ordinary containment scopes while validation and emission still a
 
 ## Lowering to OpenQASM (no module system there)
 
-Namespaces flatten by name mangling at emit:
+Namespaces flatten while MIR is lowered into the typed OpenQASM target model:
 
 - `MyLib.Bell` → `def MyLib_Bell(...)`, resolved call sites emit the mangled name.
-- If the flattened name collides with a keyword, stdgates gate, or another emitted name, `NameMangler`
-  appends `_` until the emitted identifier is unique and records a `// Qora:` note.
+- If the flattened name collides with a keyword, stdgates gate, or another emitted name,
+  `MirOpenQasmLowering` appends `_` until the target identifier is unique.
 - Global-namespace ops keep their plain names unless a real emitted-name collision forces a rename.
 
 ## Pipeline changes
@@ -153,8 +153,8 @@ QoraCompiler.Compile
        │   └─ typed Source / HIR / MIR / Target(backend, HIR-or-MIR input) origin
        └─ Targets.Artifacts[TargetBackend]
            └─ OpenQasmArtifact
-               ├─ exact materialized HIR source + semantic basis
-               ├─ OpenQasmTargetProgram
+               ├─ exact materialized MirSnapshot
+               ├─ MirOpenQasmTargetProgram
                └─ OpenQASM 3 text derived from that target model
 ```
 
@@ -184,7 +184,7 @@ QoraCompiler.Compile
   manufacture another structural HIR stage; callers query `Compilation.Hir.EffectAnalysis` for the
   exact semantic artifact.
   Milestones follow the canonical order `Lowered -> ImportsExpanded -> MeasurementLowered -> Resolved
-  -> Specialized -> ConjugationLowered -> AdjointMaterialized`.
+  -> Specialized`. Adjoint and conjugation are absent from Qora source and HIR.
 - HIR lineage is owned by `HirCompilation`; `Compilation.Links.Hir` is the same instance, not another
   ledger. `NodeDerivation` means same semantic identity, `NodeSynthesis` records only provenance for a
   new entity, and `HirNodeIntroduction` records a source node entering through import expansion.
@@ -220,19 +220,14 @@ QoraCompiler.Compile
 - An exact HIR `HirSemanticModel` retains this one `ScopeGraph`; it does not mirror separate program-symbol and lexical
   scope tables. Declaration, callable-root, namespace-path, and source-site queries delegate to indexes
   owned by the graph.
-- `NameMangler` returns an immutable `OpenQasmSymbolMap`; it does not write an emitted name into
-  `HirSemanticModel`. `OpenQasmTargetProgram` owns that map together with the target type environment.
+- `MirOpenQasmLowering` assigns emitted names and builds an immutable
+  `MirOpenQasmTargetProgram`; it never writes a target spelling into `HirSemanticModel` or MIR.
   `TargetArtifactSet.Artifacts` is the authoritative backend-keyed map, while the current convenience
-  view is `Targets.OpenQasm`. The shared `ITargetArtifact` contract requires only the backend key; it
-  does not impose HIR provenance on future MIR-backed targets. `OpenQasmArtifact.Source` identifies
-  the exact materialized HIR snapshot consumed by this backend and `SemanticBasis` identifies its
-  exact effect-analysis artifact. OpenQASM's `AsInt` rewrite also becomes an explicit
-  `OpenQasmUnsignedCastNode`, never a synthetic `QCallNode` name that could leak into callable lookup
-  or mangling. `QasmBackend` consumes only an exact `HirSemanticContext`, and
-  `OpenQasmArtifact.Text` is emitted from the resulting `OpenQasmTargetProgram` rather than supplied as
-  a second authority. Target diagnostics independently record
-  `TargetDiagnosticInput.Hir` or `TargetDiagnosticInput.Mir`, so diagnostic provenance follows the
-  backend's real input domain.
+  view is `Targets.OpenQasm`. `OpenQasmArtifact.Source` identifies the exact materialized
+  `MirSnapshot` consumed by this backend. `QasmBackend` accepts only that exact MIR snapshot, and
+  `OpenQasmArtifact.Text` is emitted from the typed target program rather than supplied as a second
+  authority. Target diagnostics record `TargetDiagnosticInput.Mir`, so provenance follows the
+  backend's real input domain without reaching back into HIR.
 - MIR links are exact-reference maps. Every HIR semantic symbol has one
   `MirSymbolLoweringDisposition`, including explicit namespace, builtin, and unreachable non-lowering
   reasons. Every MIR value, storage, and qubit has one `MirEntityOriginKind`, distinguishing a
@@ -247,7 +242,7 @@ New semantic codes:
 | QSEM020 | import file not found / unreadable |
 | QSEM021 | retired/reserved; cyclic back-edges are skipped and do not emit a diagnostic |
 | QSEM022 | duplicate operation name within one namespace (QSEM008 becomes per-namespace) |
-| QSEM023 | reserved; emitted-name collisions are auto-renamed by `NameMangler` and surfaced as `// Qora:` notes |
+| QSEM023 | reserved; emitted-name collisions are auto-renamed by `MirOpenQasmLowering` |
 | QSEM025 | identifier not declared in scope here: an unknown name, or a classical name used before declaration |
 
 ## Tooling contract changes
@@ -269,7 +264,7 @@ New semantic codes:
    QSEM019 (unknown namespace/member — including `open` of a nonexistent namespace), QSEM022 (duplicate
    within one namespace; global duplicates stay QSEM008). In the current pipeline, document lowering and
    module merge precede measurement lowering and resolution; resolver errors still preempt validation,
-   specialization, analysis, MIR, and target work. `NameMangler` later encodes FQN dots as `_` (`MyLib.Bell` →
+   specialization, analysis, MIR, and target work. `MirOpenQasmLowering` later encodes FQN dots as `_` (`MyLib.Bell` →
    `MyLib_Bell`) and appends more `_` only on real emitted-name collisions; stages
    (`ast`/`ir`/`symbols`/`uncompute`/`mir`/`mirEffects`) show source/FQN identities, while only the
    OpenQASM target artifact contains mangled names.
@@ -286,10 +281,10 @@ New semantic codes:
    QSEM020. `ModuleLoader.Expand(LoadedSourceGraph)` then performs a pure graph merge: entry operations
    remain first, imported subtrees follow deterministic depth-first post-order, namespaces merge across
    files, and opens union per namespace.
-4. **Mangled emission + docs + adversarial review** — DONE. README×3 and the adjoint-pipeline doc×3
+4. **Mangled emission + docs + adversarial review** — DONE. README×3
    now show real mangled output plus a namespaces/import tour section. The adversarial review found and
    fixed three real bugs: (1) dot flattening could collide (`A.F` vs `A_F`), now auto-renamed by
-   `NameMangler` with a note; (2) an entry-op local named like an operation could collide with a top-level
+   target lowering; (2) an entry-op local named like an operation could collide with a top-level
    def, now auto-renamed by the same emitted-scope machinery; (3) `open` of a declared-but-empty namespace
    was a false QSEM019. `BuildHirScopeGraph` registers empty namespace scopes and every intermediate
    segment of a dotted namespace, not just namespaces that directly contain callables.

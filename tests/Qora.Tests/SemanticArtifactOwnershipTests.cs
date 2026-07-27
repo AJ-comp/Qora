@@ -77,7 +77,7 @@ public sealed class SemanticArtifactOwnershipTests
         Assert.True(compilation.Succeeded);
 
         var current = Assert.IsType<HirSnapshot>(
-            compilation.Hir.ConjugationLowered);
+            compilation.Hir.Specialized);
         var validation = Assert.IsType<HirSemanticArtifact>(
             compilation.Hir.SpecializedValidation);
 
@@ -224,7 +224,6 @@ public sealed class SemanticArtifactOwnershipTests
         builder.Alias(HirStage.Resolved, snapshot);
         var rejected = builder.ValidateSnapshot(snapshot);
         builder.Alias(HirStage.Specialized, snapshot);
-        builder.Alias(HirStage.ConjugationLowered, snapshot);
         var hir = builder.Build();
 
         Assert.False(rejected.IsAccepted);
@@ -267,7 +266,6 @@ public sealed class SemanticArtifactOwnershipTests
         builder.Alias(HirStage.Resolved, snapshot);
         _ = builder.ValidateSnapshot(snapshot);
         builder.Alias(HirStage.Specialized, snapshot);
-        builder.Alias(HirStage.ConjugationLowered, snapshot);
         var hir = builder.Build();
 
         var error = Assert.Throws<ArgumentException>(

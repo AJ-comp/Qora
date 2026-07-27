@@ -5,10 +5,13 @@
 AST
     |
     v
-QoraIR
+source-shaped HIR
     |
     v
-inverse IR
+SSA/CFG MIR + analyses
+    |
+    v
+typed OpenQASM target
     |
     v
 OpenQASM 3

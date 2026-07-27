@@ -139,7 +139,7 @@
 <header class="hero">
   <div class="tag">Qora · コア設計文書</div>
   <h1>Qora コンパイルパイプライン設計</h1>
-  <p>ソースが AST、Qora IR、検証パス、OpenQASM 出力まで進む基準フロー</p>
+  <p>ソースが source-shaped HIR、SSA/CFG MIR、typed target、OpenQASM 出力まで進む基準フロー</p>
 </header>
 
 <div class="wrap">
@@ -149,23 +149,22 @@
     マルチパスのミドルエンド</strong>から成ります。コンパイルは、小さく単一目的なパスの一直線です。各パスは
     プログラムをある形で受け取り、ちょうど 1 つの仕事だけをこなし、少しだけ仕上がったプログラムを次のパスへ渡します
     — 最後のパスが OpenQASM 3 を出力するまで。本ドキュメントはその一直線を最初から最後まで 1 ステージずつ辿り、
-    以下のすべての AST・IR・QASM のリスティングに<strong>実際のコンパイラ出力</strong>を用います。
+    コンパイラ出力と説明用の短い MIR sketch を組み合わせます。
   </p>
 
   <div class="flowline">
     ソース
     <span class="st">─Parse─▶</span> AST
-    <span class="st">─Lower─▶</span> Qora IR
+    <span class="st">─Lower─▶</span> HIR
     <span class="st">─Expand─▶</span> 統合
     <span class="st">─Desugar measure─▶</span>
     <span class="st">─Resolve─▶</span> 呼び出し先 FQN
     <span class="st">─Validate + Symbols─▶</span> (エラーで STOP)
     <span class="st">─Monomorphize─▶</span> 特殊化
-    <span class="st">─Flatten within/apply─▶</span>
-    <span class="st">─Materialize Adjoint─▶</span> + 逆演算 op
-    <span class="st">─Mangle─▶</span> 衝突しない名前
-    <span class="st">─Check─▶</span>
-    <span class="st">─Target-lower─▶</span>
+    <span class="st">─Lower MIR─▶</span> SSA/CFG MIR
+    <span class="st">─Analyze─▶</span>
+    <span class="st">─MIR-only 逆演算を実体化─▶</span>
+    <span class="st">─Target-lower─▶</span> typed OpenQASM model
     <span class="st">─Emit─▶</span> OpenQASM 3
   </div>
 
@@ -178,7 +177,7 @@
       </div>
       <div>
         <dt>範囲</dt>
-        <dd>ソーステキストが AST、Qora IR、検証済み IR、OpenQASM へ変わる経路全体を扱います。</dd>
+        <dd>ソーステキストが AST、検証済み HIR、SSA/CFG MIR、typed target model、OpenQASM へ変わる経路全体を扱います。</dd>
       </div>
       <div>
         <dt>対象読者</dt>
@@ -192,7 +191,6 @@
   </section>
 
   <nav class="doc-links" aria-label="関連するコンパイラ文書">
-    <a class="doc-link" href="adjoint-pipeline.html">Adjoint 逆合成の動作</a>
     <a class="doc-link" href="hadamard.html">H ゲートを矢印で理解する</a>
   </nav>
 
@@ -202,13 +200,13 @@
       <li><a href="#s0">例 — すべてのパスに触れる 1 ファイル</a></li>
       <li><a href="#s1">2 つの世界 — エンジンが止まり Qora が始まる場所</a></li>
       <li><a href="#s2">Parse — ソースから AST へ（エンジンの仕事）</a></li>
-      <li><a href="#s3">Lower — AST から Qora IR へ（境界を越える）</a></li>
+      <li><a href="#s3">Lower — AST からソース形 HIR へ（境界を越える）</a></li>
       <li><a href="#s4">Expand &amp; Resolve — インポートと呼び出し先 FQN</a></li>
       <li><a href="#s5">Validate — 意味のゲート</a></li>
       <li><a href="#s6">Monomorphize — 量子ビット配列呼び出しの特殊化</a></li>
-      <li><a href="#s7">Materialize Adjoint — 逆演算を本物の op に</a></li>
-      <li><a href="#s8">Mangle &amp; Check — 衝突しない名前、そして検証</a></li>
-      <li><a href="#s9">Emit — OpenQASM 3 へ出す単純なプリンタ</a></li>
+      <li><a href="#s7">Lower — ソース形 HIR から SSA/CFG MIR へ</a></li>
+      <li><a href="#s8">MIR 解析と内部逆演算の実体化</a></li>
+      <li><a href="#s9">OpenQASM target lowering と出力</a></li>
       <li><a href="#s10">パイプライン全体を一望する</a></li>
     </ol>
   </div>
@@ -216,8 +214,8 @@
   <h2 id="s0"><span class="n">0</span>例 — すべてのパスに触れる 1 ファイル</h2>
 
   <p>
-    すべてのステージが実際に働く様子を見るため、<strong>名前空間</strong>と<strong>量子ビット配列パラメータ</strong>
-    （<code>Qubit[]</code>）、呼び出し、そして <strong>Adjoint</strong> を 1 つのプログラムに詰め込みます:
+    ソース向けの各ステージが実際に働く様子を見るため、<strong>名前空間</strong>と
+    <strong>量子ビット配列パラメータ</strong>（<code>Qubit[]</code>）、呼び出しを 1 つのプログラムに詰め込みます:
   </p>
 
 <pre><code>namespace Prep {
@@ -229,15 +227,13 @@
 operation Main() {
     use reg = Qubit[3];
     Prep.Fanout(reg);                    <span class="cm">// 名前空間をまたぐ呼び出し</span>
-    <span class="hl">Adjoint Prep.Fanout(reg);</span>            <span class="cm">// 元に戻す — コンパイラが逆演算を合成</span>
     var r: bit = M(reg[0]);
 }</code></pre>
 
   <p>
-    3 つの名前がパスを通り抜けて変わっていく様子を追ってください。<code>Fanout</code> は名前空間を得
-    （<code>Prep.Fanout</code>）、具体的なサイズを得（<code>Prep.Fanout__sz3</code>）、逆演算の双子を得
-    （<code>Prep.Fanout__sz3__adj</code>）、最後に OpenQASM 用に平坦化されます（<code>Prep_Fanout__sz3</code>）。
-    これらの変化のそれぞれが、下記の 1 パスずつです。
+    名前がパスを通り抜けて変わっていく様子を追ってください。<code>Fanout</code> は名前空間を得
+    （<code>Prep.Fanout</code>）、具体的なサイズを得た後（<code>Prep.Fanout__sz3</code>）、最後に
+    OpenQASM 用に平坦化されます（<code>Prep_Fanout__sz3</code>）。各変化を下記の 1 パスずつが担当します。
   </p>
 
   <h2 id="s1"><span class="n">1</span>2 つの世界 — エンジンが止まり Qora が始まる場所</h2>
@@ -251,7 +247,7 @@ operation Main() {
 
   <div class="rule">
     ソース&nbsp;→&nbsp;AST&nbsp;&nbsp;<span style="color:var(--muted)">│ エンジン (Janglim)</span><br>
-    <span style="color:var(--muted)">Qora │</span>&nbsp;&nbsp;IR&nbsp;→&nbsp;⋯&nbsp;→&nbsp;OpenQASM
+    <span style="color:var(--muted)">Qora │</span>&nbsp;&nbsp;HIR&nbsp;→&nbsp;SSA/CFG MIR&nbsp;→&nbsp;typed target&nbsp;→&nbsp;OpenQASM
   </div>
 
   <div class="call why">
@@ -268,9 +264,9 @@ operation Main() {
 
   <p>
     エンジンは Qora の文法からレクサと LALR パーサを作り、ソースを<strong>パース木</strong>に変えます。この段階
-    には<strong>意味がありません</strong> — <code>Adjoint</code> は呼び出しの隣にあるトークンにすぎず、
-    <code>Prep.Fanout</code> は 3 つのトークン（<code>Prep</code>、<code>.</code>、<code>Fanout</code>）であり、
-    呼び出しとゲートは同じ見た目です。例の実際の木:
+    には<strong>意味がありません</strong> — <code>Prep.Fanout</code> は 3 つのトークン
+    （<code>Prep</code>、<code>.</code>、<code>Fanout</code>）であり、呼び出しとゲートは同じ見た目です。
+    例の実際の木:
   </p>
 
 <pre><code>Nonterminal : Program
@@ -297,12 +293,6 @@ operation Main() {
       Terminal : .
       Terminal : Fanout
       Nonterminal : Expr ( reg )
-    Nonterminal : Gate
-      <span class="hl">Terminal : Adjoint</span>              <span class="cm">← ファンクタは先頭のトークンにすぎない</span>
-      Terminal : Prep
-      Terminal : .
-      Terminal : Fanout
-      Nonterminal : Expr ( reg )
     Nonterminal : VarDecl
       Terminal : bit
       Terminal : r
@@ -310,20 +300,20 @@ operation Main() {
 
   <div class="call">
     <span class="h">この木は一度読まれた後、二度と触れられません</span>
-    以降のすべてのステージはこの木ではなく IR 上で作動します。<code>Prep.Fanout__sz3</code> や <code>__adj</code>
-    のような名前はまだ存在しません — すべてこの下流で生まれます。
+    以降のすべてのステージはこの木ではなく IR 上で作動します。<code>Prep.Fanout__sz3</code>
+    のような名前はまだ存在しません — この下流で生まれます。
   </div>
 
-  <h2 id="s3"><span class="n">3</span>Lower — AST から Qora IR へ（境界を越える）</h2>
+  <h2 id="s3"><span class="n">3</span>Lower — AST からソース形 HIR へ（境界を越える）</h2>
 
-  <p class="stagehead">in: エンジン AST &nbsp;·&nbsp; out: <code>QProgram</code> (Qora IR) &nbsp;·&nbsp; パス: <code>QoraLowering</code></p>
+  <p class="stagehead">in: エンジン AST &nbsp;·&nbsp; out: <code>QProgram</code> (source-shaped HIR) &nbsp;·&nbsp; パス: <code>QoraLowering</code></p>
 
   <p>
     ローワリングはエンジンの木を<strong>一度</strong>走査し、Qora 自身の IR として組み直します — 強く型付けされた
     レコードの階層です（<code>QOperation</code>、<code>QGate</code>、<code>QFor</code>、<code>QIf</code>、
-    <code>QDecl</code>、<code>QUse</code>、<code>QMeasure</code> …）。最も重要な変化は 2 つ: 文字列トークンが
-    <strong>型のあるノード</strong>になり、ファンクタが<strong>ノード上のデータ</strong>になります
-    （<code>functors=[Adjoint]</code>）。例の IR:
+    <code>QDecl</code>、<code>QUse</code>、<code>QMeasure</code> …）。文字列トークンは
+    <strong>型のあるノード</strong>になり、文法が支援するソース修飾子は構造化されたデータになります。
+    例の IR:
   </p>
 
 <pre><code>QOperation Prep.Fanout(Qubit q)
@@ -333,14 +323,13 @@ operation Main() {
 QOperation Main()
   QUse(name=reg, size=3)
   QGate(functors=[],        name=Prep.Fanout, args=[reg])
-  QGate(functors=[<span class="hl">Adjoint</span>], name=Prep.Fanout, args=[reg])
   QDecl(const=False, type=Bit, name=r, value=QMeasure(reg[0]))</code></pre>
 
   <div class="call why">
-    <span class="h">なぜファンクタをデータに変えるのか?</span>
-    「この呼び出しは逆演算か?」が、いまや再パースすべきトークンではなく<em>値</em>（<code>functors=[Adjoint]</code>）
-    なので、後続のパスはその値を反転するだけで逆演算を作れます — 文字列の手術は不要です。ミドルエンド全体が IR
-    ベースであるのも同じ理由です: パスが構造化されたノードを読み書きするので、各パスは短く保たれ、間違えにくいのです。
+    <span class="h">なぜ木を型のあるデータとして組み直すのか?</span>
+    後続のパスが文字列を再解析せずに、呼び出し先・引数・修飾子を検査できるからです。
+    ミドルエンド全体が IR ベースであるのも同じ理由です。パスが構造化されたノードを読み書きするので、
+    各パスは短く保たれ、間違えにくくなります。
   </div>
 
   <h2 id="s4"><span class="n">4</span>Expand &amp; Resolve — インポートと呼び出し先 FQN</h2>
@@ -403,7 +392,6 @@ qubit[2] q;
   <div class="panel">
     <table class="amp">
       <tr><th>コード</th><th>拒否するもの</th></tr>
-      <tr><td><code>QSEM001</code></td><td>逆演算を持たない <code>Foo</code> への <code>Adjoint Foo</code>（測定・リセット・<code>while</code> ループなど） — 理由はインバータから連鎖</td></tr>
       <tr><td><code>QSEM002</code></td><td>ユーザ op への <code>Controlled Foo</code>（OpenQASM に def 用の <code>ctrl @</code> はない）</td></tr>
       <tr><td><code>QSEM006</code></td><td>シグネチャに合わない引数の呼び出し — 個数、種類（量子ビット vs 角度）、またはレジスタサイズ</td></tr>
       <tr><td><code>QSEM007</code></td><td>未知のゲート/演算名（「もしかして …?」ヒント付き）</td></tr>
@@ -415,19 +403,20 @@ qubit[2] q;
 
   <div class="call why">
     <span class="h">なぜ変換パスより先に検証するのか?</span>
-    以降のすべてのパスが、プログラムはすでに健全だと仮定できるようになるからです。単相化器はスコープで解決できない名前に決して
-    出会わず、adjoint 実体化器は逆演算不可能な <code>Adjoint</code> に決して出会わず（QSEM001 がすでに拒否済み）、
-    エミッタは不正な呼び出しに決して出会いません。ゲートが全員の前に立っているからこそ、各変換パスは単純でいられます。
+    以降のすべてのパスが、プログラムはすでに健全だと仮定できるようになるからです。
+    単相化器はスコープで解決できない名前に出会わず、エミッタは不正な呼び出しに出会いません。
+    ゲートが全員の前に立っているからこそ、各変換パスは単純でいられます。
   </div>
 
   <h2 id="s6"><span class="n">6</span>Monomorphize — 量子ビット配列呼び出しの特殊化</h2>
 
-  <p class="stagehead">in: 検証済み IR &nbsp;·&nbsp; out: 具体サイズの op を持つ IR &nbsp;·&nbsp; パス: <code>Monomorphizer</code></p>
+  <p class="stagehead">in: 検証済み HIR &nbsp;·&nbsp; out: 具体サイズの op を持つ HIR &nbsp;·&nbsp; パス: <code>Monomorphizer</code></p>
 
   <p>
     表面型 <code>Fanout(Qubit[] q)</code> には配列長を書きません。単相化器（monomorphizer）は呼び出しごとに
-    実際のレジスタサイズを読み取り、<strong>具体的な内部コピーを打ち出し</strong>、そのコピーの <code>q.Count</code>
-    を実際のサイズに置き換えてから、呼び出し先を書き換えます。例の呼び出しは <code>reg</code>（量子ビット 3 個）を渡すので:
+    実際のレジスタサイズを読み取り、<strong>具体的な内部コピーを打ち出し</strong>、パラメータへ既知の幅を
+    与えてから呼び出し先を書き換えます。共通 HIR は <code>q.Count</code> を保ち、target が後で既知の幅から
+    lowering します。例の呼び出しは <code>reg</code>（量子ビット 3 個）を渡すので:
   </p>
 
   <div class="rule">
@@ -436,158 +425,82 @@ qubit[2] q;
   </div>
 
   <p>
-    サイズが具体的になったので、プログラムは<strong>二度目の検証</strong>を受けます: <code>q.Count</code> が数になって
-    初めて意味を持つ検査 — インデックス範囲、レジスタサイズの一致 — が、ようやく照合する対象を得ます。このパスの
-    後には、ジェネリックな演算は残りません。
+    幅が具体的になったので、プログラムは<strong>二度目の検証</strong>を受けます。インデックス範囲と
+    レジスタサイズの一致が照合する値を得て、このパスの後にはジェネリックな演算が残りません。
   </p>
 
-  <h2 id="s7"><span class="n">7</span>Materialize Adjoint — 逆演算を本物の op に</h2>
+  <h2 id="s7"><span class="n">7</span>Lower — ソース形 HIR から SSA/CFG MIR へ</h2>
 
-  <p class="stagehead">in: 特殊化された IR &nbsp;·&nbsp; out: 合成された逆演算 op を持つ IR &nbsp;·&nbsp; パス: <code>AdjointMaterializer</code></p>
-
-  <h3>直前に走る — <code>within/apply</code> を平坦化（<code>ConjugationLowering</code>）</h3>
+  <p class="stagehead">in: 検証済み specialized HIR + 意味情報 &nbsp;·&nbsp; out: <code>MirSnapshot</code> &nbsp;·&nbsp; パス: <code>QoraMirLowering</code></p>
 
   <p>
-    Qora の IR には、表層構文を持たない合成ノードが 1 つあります: <code>QConjugate</code> — <em>within/apply</em>
-    （共役; conjugation）形式で、「<em>within</em> を実行し、次に <em>apply</em>、最後に <em>within</em> の逆演算を
-    実行する」ことを意味します — compute · use · uncompute のサンドイッチです。反転されるのは <em>within</em> だけ
-    なので、その効果（一時的な補助ビット（アンシラ）の準備）は取り消され、一方で <em>apply</em> の効果は残ります。
-    <code>ConjugationLowering</code> はそのノードを普通のゲートへ平坦化し、末尾の逆演算を合成するために同じ反転
-    カーネルを再利用します:
+    HIR はユーザーが書いたプログラムの形を保つため、名前解決、型検査、診断に適しています。
+    それらの責務が終わると、<code>QoraMirLowering</code> が古典値を SSA version に分け、
+    分岐と反復を明示的な制御フローグラフに変換します。
   </p>
 
-<pre><code>QConjugate(within=[X(a[0])], apply=[CNOT(a[0], d[0])])
-                       <span class="cm">↓ ConjugationLowering  ( within ++ apply ++ inverse-of-within )</span>
-x a[0];                <span class="cm">← within (compute)</span>
-cx a[0], d[0];         <span class="cm">← apply   (use)</span>
-<span class="add">inv @ x a[0];</span>          <span class="cm">← 合成された within の逆演算 (uncompute)</span>
-</code></pre>
+<pre><code>var x: int = 1;
+x = x + 1;
+
+<span class="cm">↓ QoraMirLowering</span>
+
+v0 = constant 1
+v1 = add v0, 1
+return</code></pre>
 
   <p>
-    このパスが<em>ここ</em>、実体化器の直前で走る理由は順序です: 合成された逆演算がユーザ演算
-    （<code>Adjoint Foo</code>）を呼ぶ場合、それはやはり本物の <code>Foo__adj</code> op にならなければならず —
-    それは実体化器がこのパスの<em>後</em>に走るからこそ起こります。今日、ソースから <code>QConjugate</code> を
-    生み出すものは何もないので、普通のプログラムではこのパスは何もしません（no-op）; これは、来たる
-    <strong>自動アンコンピュテーション</strong>が供給する出力経路です（末尾のノートを参照）。
+    結果は revision identity を持つ不変の <code>MirSnapshot</code> です。
+    origin table と typed cross-stage link が MIR callable、値、storage、量子ビット資源を HIR の
+    元要素へ結びつけるか、compiler temporary として明示します。
+  </p>
+
+  <h2 id="s8"><span class="n">8</span>MIR 解析と内部逆演算の実体化</h2>
+
+  <p class="stagehead">パス: revision-bound MIR analyses → <code>MirAdjointMaterializer</code></p>
+
+  <p>
+    制御フロー、effect、alias、memory state、path condition、control region の各解析は、
+    自分が説明する正確な MIR revision だけを消費します。結果を HIR に複製せず、
+    グラフが変わった後に以前の revision の事実を再利用することもありません。
   </p>
 
   <p>
-    例の <code>Main</code> には <code>Adjoint Prep.Fanout(reg)</code> があります。このパスはその演算全体の adjoint を
-    <strong>普通の演算</strong>に変えます。反転カーネル（<code>Inverter</code>）を使って逆演算の本体を計算し —
-    <strong>文を逆順にし、各ゲートに dagger を取り</strong> — それを <code>Prep.Fanout__sz3__adj</code> という名の
-    本物の op としてプログラムに追加し、呼び出しを普通の <code>Prep.Fanout__sz3__adj(reg)</code> に書き換えます。
-    H ゲートのファンアウトの逆演算は、各 <code>H</code> に dagger を取った逆向きのループです:
+    逆演算要求も MIR にだけ存在します。コンパイラ内部 scheduler が正確な
+    <code>MirQuantumApply</code> に <code>MirFunctor.Adjoint</code> を付けると、
+    <code>MirAdjointMaterializer</code> が逆方向の MIR callable を合成し、要求を typed callable target
+    へ書き換え、正確な parent と rebased origin を持つ新しい snapshot を発行します。
+    Qora ソースと HIR には <code>Adjoint</code>、逆演算マーカー、conjugation node がありません。
   </p>
 
-  <div class="rule">(U₁ · U₂ · ⋯ · Uₙ)† &nbsp;=&nbsp; Uₙ† · ⋯ · U₂† · U₁†</div>
-
-  <p>
-    この要求は<strong>推移的</strong>です: 逆演算の本体が <code>Adjoint Bar</code> を呼ぶなら <code>Bar</code> の
-    逆演算も実体化され、その集合が閉じるまで続きます。<em>組み込み</em>ゲートへの adjoint（<code>Adjoint H</code>）は
-    そのままにされます — それは出力時に <code>inv @ h</code> になります。ここで実体化されるのはユーザ演算だけです。
-  </p>
+<pre><code>MirQuantumApply(Target = Prepare, Functors = [MirFunctor.Adjoint])
+                         <span class="cm">↓ MirAdjointMaterializer</span>
+MirCallable __qora_inverse_...(reversed unitary body)
+MirQuantumApply(Target = __qora_inverse_..., Functors = [])</code></pre>
 
   <div class="call why">
-    <span class="h">なぜ名前付けの前に実体化するのか（出力時ではなく）?</span>
-    合成された逆演算 def は、最終 QASM が他のすべてのグローバル名（たとえば <code>Prep.Fanout__sz3__adj</code>
-    というユーザレジスタ）と衝突しないよう守るべき<strong>名前</strong>です。名前マングラが走る前に — 本物の op
-    として — ここで作れば、その逆演算は他のすべての演算と<em>同じ</em>衝突解決を通るので、生成された名前が名前付けの
-    後に生まれることは決してありません。単相化器が使うのと同じ手口です: <strong>生成された op はマングリングの
-    前に実体化</strong>し、エミッタは名前をひねり出す必要が一切ありません。
+    <span class="h">なぜこの境界を MIR に置くのか?</span>
+    Automatic uncomputation には SSA version、CFG path、storage state、正確な instruction identity が
+    必要です。要求と合成 callable を MIR に置けば、HIR にコンパイラ専用構文や別の target 経路を
+    追加せずに、scheduler と materializer が同じ根拠を共有できます。
   </div>
 
-  <h2 id="s8"><span class="n">8</span>Mangle &amp; Check — 衝突しない名前、そして検証</h2>
+  <h2 id="s9"><span class="n">9</span>OpenQASM target lowering と出力</h2>
 
-  <p class="stagehead">パス: <code>NameMangler</code> → <code>ReferentialCheck</code></p>
-
-  <p>
-    <strong>Mangle</strong> はすべての Qora 名を、妥当で衝突しない OpenQASM 識別子に対応づけます。2 つのことが
-    起きます: 名前空間付きの名前は<strong>ドットを平坦化し</strong>（<code>Prep.Fanout__sz3</code> →
-    <code>Prep_Fanout__sz3</code>）、衝突しうる名前 — OpenQASM のキーワード、stdgates のゲート名、または既に
-    出力済みの他の名前と — は一意になるまで <code>_</code> を付け足します。したがって衝突は<strong>決して
-    コンパイルエラーではありません</strong>: 自動的に解決され、名前が調整されたことを読者が分かるよう
-    <code>// Qora:</code> ノートが QASM ヘッダに書き込まれます。
-  </p>
-
-  <div class="call">
-    <span class="h">名前は OpenQASM をそのまま映したスコープに住む</span>
-    演算名とエントリ op の最上位宣言は 1 つのグローバルスコープを共有し（stdgates のように）、各 def は
-    パラメータ・変数のための自分のローカルスコープを持ちます。だから（ゲート <code>s</code> とぶつかる）
-    <code>s</code> という変数は <code>s_</code> として出力されますが、同じ名前が別の def の中では自由に再び
-    現れられます。
-  </div>
+  <p class="stagehead">in: materialized MIR &nbsp;·&nbsp; target: <code>MirOpenQasmTargetProgram</code> &nbsp;·&nbsp; パス: <code>MirOpenQasmLowering</code> → <code>MirQasmEmitter</code></p>
 
   <p>
-    <strong>Check</strong>（参照整合性のゲート）は、マングリングの直後に走る安全網です: プログラムが<strong>使う
-    すべての識別子が、宣言された何か</strong>に解決されることを確認します — パラメータ・レジスタ・変数・演算・
-    組み込み。ここでの宙ぶらりんな参照は、あるパスが宣言は改名したのにその使用箇所の 1 つを改名しなかったという
-    意味 — <em>コンパイラ</em>のバグ — なので、静かに壊れた QASM として出力する代わりに <code>QINTERNAL</code>
-    として声高に報告されます。正しいコンパイラでは決して発火しません; その種のバグを出荷不可能にするために存在します。
-  </p>
-
-  <h2 id="s9"><span class="n">9</span>Emit — OpenQASM 3 へ出す単純なプリンタ</h2>
-
-  <p class="stagehead">in: マングル済み IR &nbsp;·&nbsp; out: OpenQASM 3 テキスト &nbsp;·&nbsp; パス: <code>OpenQasmLowering</code> → <code>QasmEmitter</code></p>
-
-  <h3>直前に走る — OpenQASM 向けターゲットローワリング（<code>OpenQasmLowering</code>）</h3>
-
-  <p>
-    プリンタの前に、最後の IR→IR ステップが 1 つ走ります — <strong>OpenQasmLowering</strong>、OpenQASM 固有の
-    ターゲットローワリングです。Qora の <code>const</code> は任意の値を保持しうる不変の<em>束縛</em>（Q# の
-    <code>let</code> 流）ですが、OpenQASM の <code>const</code> はコンパイル時定数の初期化子を要求します。そのため
-    実行時に束縛される <code>const c = n;</code> は、出力のために普通の <code>int c = n;</code> へ格下げされます —
-    それでも再代入されることはないので、その不変性は何も失われません:
-  </p>
-
-<pre><code>int n = 2;
-<span class="hl">const c = n;</span>          <span class="cm">← Qora の const: 不変の束縛、任意の値</span>
-                   <span class="cm">↓ OpenQasmLowering</span>
-int n = 2;
-<span class="add">int c = n;</span>            <span class="cm">← 普通の int（OpenQASM の const はコンパイル時定数でなければならない）</span>
-</code></pre>
-
-  <p>
-    これは<strong>最初のターゲット別ローワリングパス</strong>です — Qora にとって正しい IR が、特定のバックエンドの
-    規則に合わせて調整される場所です。将来の QIR ターゲットは、上位のどのパスにも触れることなく、ここに独自の
-    ローワリングを追加することになります。
+    OpenQASM backend は正確な materialized MIR snapshot を消費します。CFG から構造化された
+    <code>if</code>、<code>while</code>、loop exit を復元し、SSA 値と phi edge を typed target の
+    declaration と assignment に変え、衝突しない OpenQASM 名を決めます。結果の
+    <code>MirOpenQasmTargetProgram</code> は target type、callable、declaration、statement と
+    target-local identity を所有し、HIR を第二の正本として保持しません。
   </p>
 
   <p>
-    最後のパスは意図的に<strong>最も賢くありません</strong>: 名前をひねり出しもせず、何も反転しません — あらゆる
-    変換はすでに上流で起きています。ただ各演算を <code>def</code> として、エントリ op を最上位の本体として出力する
-    だけです。唯一の実質的な雑務は<strong>順序付け</strong>です: OpenQASM に前方宣言はないので、def 群は呼び出し
-    依存（トポロジカル）順で出力されます — だから <code>Prep_Fanout__sz3__adj</code> はそれが必要とするものより
-    先に来ず、すべての def は使われる前に宣言されます。例の完全な出力:
+    次に <code>MirQasmEmitter</code> が target model を直列化します。ソース名を再解決せず、
+    semantic fact を参照せず、逆演算や制御フローを組み立て直しません。将来の backend も HIR pipeline を
+    分岐させず、同じ canonical MIR を独自の typed lowering で消費できます。
   </p>
-
-<pre><code>// generated by Qora v0.18
-OPENQASM 3;
-include "stdgates.inc";
-
-def <span class="hl">Prep_Fanout__sz3</span>(qubit[3] q) {      <span class="cm">← 名前空間 + 特殊化 + 平坦化</span>
-  for int i in [0:3 - 1] {
-    h q[i];
-  }
-}
-
-<span class="add">def Prep_Fanout__sz3__adj(qubit[3] q) {</span>  <span class="cm">← 合成された逆演算（ソースになかったもの）</span>
-<span class="add">  for int i in [3 - 1:-1:0] {</span>            <span class="cm">← 逆向きのループ</span>
-<span class="add">    inv @ h q[i];</span>                         <span class="cm">← dagger されたゲート</span>
-<span class="add">  }</span>
-<span class="add">}</span>
-
-qubit[3] reg;
-bit r;
-Prep_Fanout__sz3(reg);
-<span class="hl">Prep_Fanout__sz3__adj(reg);</span>              <span class="cm">← Adjoint Prep.Fanout(reg) がこの呼び出しになった</span>
-r = measure reg[0];</code></pre>
-
-  <div class="call why">
-    <span class="h">なぜエミッタをこれほど単純に保つのか?</span>
-    出力するだけのプリンタは信頼しやすいからです。反転・特殊化・名前付けがすべて各自のパスに住めば、最後の
-    テキスト生成ステップには下すべき決定が 1 つも残りません — だからそれが書く OpenQASM は、渡された IR そのまま、
-    1 文字まで同じです。
-  </div>
 
   <h2 id="s10"><span class="n">10</span>パイプライン全体を一望する</h2>
 
@@ -595,18 +508,17 @@ r = measure reg[0];</code></pre>
     <table class="amp">
       <tr><th>ステージ</th><th>パス</th><th>何を何に</th></tr>
       <tr><td>Parse</td><td><em>Janglim エンジン</em></td><td>ソーステキスト → 構文木（まだ意味なし）</td></tr>
-      <tr><td>Lower</td><td><code>QoraLowering</code></td><td>エンジンの木 → Qora IR（型付きノード; ファンクタをデータに）</td></tr>
+      <tr><td>Lower HIR</td><td><code>QoraLowering</code></td><td>エンジンの木 → ソース形 typed HIR</td></tr>
       <tr><td>Expand</td><td><code>ModuleLoader</code></td><td>インポート → 1 つに統合されたプログラム</td></tr>
       <tr><td>Desugar measure</td><td><code>MeasureConditionLowering</code></td><td>条件の中の測定 → 巻き上げた <code>bit</code>、代入してから検査</td></tr>
       <tr><td>Resolve</td><td><code>Resolver</code></td><td>演算呼び出し先 → 完全修飾名(FQN)</td></tr>
       <tr><td>Validate</td><td><code>QoraValidator</code> + <code>SymbolTableBuilder</code></td><td>IR → シンボルテーブル + すべての意味エラー（出力を止める固いゲート）</td></tr>
       <tr><td>Monomorphize</td><td><code>Monomorphizer</code></td><td><code>Qubit[]</code> の呼び出し → 呼び出しサイズごとの内部コピー、変化した場合に再検証</td></tr>
-      <tr><td>Flatten conjugation</td><td><code>ConjugationLowering</code></td><td><code>within/apply</code>（<code>QConjugate</code>） → <code>compute; apply;</code> + <code>within</code> の合成された逆演算</td></tr>
-      <tr><td>Materialize</td><td><code>AdjointMaterializer</code></td><td><code>Adjoint Foo</code> → 本物の <code>Foo__adj</code> op + 普通の呼び出し</td></tr>
-      <tr><td>Mangle</td><td><code>NameMangler</code></td><td>Qora 名 → 衝突しない OpenQASM 識別子</td></tr>
-      <tr><td>Check</td><td><code>ReferentialCheck</code></td><td>使われるすべての名前が解決されるか検証（さもなくば <code>QINTERNAL</code>）</td></tr>
-      <tr><td>Target-lower</td><td><code>OpenQasmLowering</code></td><td>OpenQASM 固有の調整（例: 実行時の <code>const</code> → 普通の <code>int</code>/<code>float</code>）</td></tr>
-      <tr><td>Emit</td><td><code>QasmEmitter</code></td><td>最終 IR → OpenQASM 3 テキスト（純粋なプリンタ）</td></tr>
+      <tr><td>Lower MIR</td><td><code>QoraMirLowering</code></td><td>検証済み HIR + 意味情報 → typed SSA/CFG <code>MirSnapshot</code></td></tr>
+      <tr><td>Analyze MIR</td><td><code>MirAnalysisStore</code></td><td>exact MIR revision → control-flow、effect、alias、memory、path facts</td></tr>
+      <tr><td>Materialize</td><td><code>MirAdjointMaterializer</code></td><td>MIR-only inverse request → 合成された inverse MIR callable</td></tr>
+      <tr><td>Target-lower</td><td><code>MirOpenQasmLowering</code></td><td>materialized MIR → typed <code>MirOpenQasmTargetProgram</code></td></tr>
+      <tr><td>Emit</td><td><code>MirQasmEmitter</code></td><td>typed target model → OpenQASM 3 テキスト</td></tr>
     </table>
   </div>
 
@@ -620,24 +532,23 @@ r = measure reg[0];</code></pre>
   <div class="call why">
     <span class="h">この先が向かう場所 — 自動アンコンピュテーション</span>
     Silq 流の自動アンコンピュテーション — <strong>一時的な量子ビットがもう不要になる地点を見つけ、その逆演算を
-    自動的に注入する</strong> — こそ、これらのパスが目指して作られているものです。最初のピースはすでに揃っています:
-    <code>ConjugationLowering</code> が <code>within/apply</code> ノードを compute · apply · uncompute へ平坦化して
-    出力するので、下流の経路全体（逆演算の合成 → <code>__adj</code> の閉包 → マングリング → QASM）が端から端まで
-    実証されています。残るのは、そのノードを自ら<em>生み出す</em>解析です — ライブネス（一時変数がいつ死ぬか）と
-    効果解析（安全に反転できるか） — その後、小さなインジェクタが各死亡地点で <code>QConjugate</code> を出力します。
+    自動的に注入する</strong> — ための境界は MIR にあります。Scheduler は revision-bound SSA/CFG facts を
+    消費して global cleanup order を求め、正確な MIR instruction に inverse request を注入します。
+    <code>MirAdjointMaterializer</code> と typed target path はすでにこの表現を消費します。条件、loop、
+    alias、classical witness stability、複数 ancilla の競合は、該当ケースを有効にする前に証明が必要です。
   </div>
 
   <hr>
 
   <p style="color:var(--muted); font-size:.92rem;">
-    本ドキュメントのすべての AST・IR・OpenQASM リスティングは、上記の例を実際の Qora コンパイラでコンパイルして
-    得たものです（<code>qora --json --stages</code>）。<br>
+    Source・AST・HIR・OpenQASM listing は実際の Qora コンパイラ
+    （<code>qora --json --stages</code>）から得ており、短い MIR listing は実際の MIR type を使った説明用 sketch です。<br>
     ソース、パイプライン順: <code>QoraGrammar.cs</code>（文法） ·
     <code>Ir/QoraLowering.cs</code>（AST→IR） ·
     <code>Ir/Passes/ModuleLoader.cs</code> · <code>MeasureConditionLowering.cs</code> · <code>Resolver.cs</code> · <code>SymbolTable.cs</code> · <code>QoraValidator.cs</code> ·
-    <code>Monomorphizer.cs</code> · <code>ConjugationLowering.cs</code> · <code>AdjointMaterializer.cs</code> · <code>NameMangler.cs</code> ·
-    <code>ReferentialCheck.cs</code> · <code>Ir/Inverter.cs</code>（反転カーネル） ·
-    <code>OpenQasmLowering.cs</code> · <code>Ir/QasmEmitter.cs</code>（IR→OpenQASM）。
+    <code>Monomorphizer.cs</code> · <code>Ir/Mir/QoraMirLowering.cs</code> ·
+    <code>Ir/Mir/MirAdjointMaterializer.cs</code> · <code>Ir/Qasm/MirOpenQasmLowering.cs</code> ·
+    <code>Ir/Qasm/MirQasmEmitter.cs</code>（typed target model→OpenQASM）。
   </p>
 
 </div>
