@@ -10,7 +10,7 @@ namespace Qora.Ir.Passes;
 /// same walk <see cref="EffectAnalysis"/> already does to emit events — this one writes the position down),
 /// then every event's <see cref="QubitEvent.StmtId"/> is a plain dictionary lookup.
 /// </summary>
-public static class ContainerMap
+internal static class ContainerMap
 {
     /// <summary>Build the map for one operation: every statement Id (containers included, at any depth) →
     /// its enclosing container chain, OUTERMOST first. An empty chain means top-level straight-line code; a

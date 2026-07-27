@@ -3,13 +3,13 @@ using Qora.Ir.Mir.Analysis;
 
 namespace Qora.Ir.Mir;
 
-public sealed record MirVerificationError(
+internal sealed record MirVerificationError(
     string Code,
     string Message,
     MirCallableId? Callable = null,
     MirBlockId? Block = null,
     MirInstructionId? Instruction = null,
-    MirSource? Source = null)
+    MirOriginRef? Origin = null)
 {
     public override string ToString()
     {
@@ -28,7 +28,7 @@ public sealed record MirVerificationError(
 /// integrity, CFG edge contracts, dominance, instruction typing, call contracts, and classical-array /
 /// qubit resource references. A failed verification is a compiler defect, not a source-language error.
 /// </summary>
-public static class QoraMirVerifier
+internal static class QoraMirVerifier
 {
     public static IReadOnlyList<MirVerificationError> Verify(MirProgram? program)
     {
@@ -67,6 +67,12 @@ public static class QoraMirVerifier
             if (_program.Revision < 0)
                 Add("MIR001", $"program revision {_program.Revision} is negative");
 
+            if (_program.Origins is null)
+            {
+                Add("MIR006", "program origin table is null");
+                return _errors;
+            }
+
             if (_program.Callables is null)
             {
                 Add("MIR002", "program callable collection is null");
@@ -99,10 +105,7 @@ public static class QoraMirVerifier
             if (string.IsNullOrWhiteSpace(callable.Name))
                 Add("MIR005", "callable name is empty", callable);
 
-            if (callable.SourceOperationId != callable.Source.SourceOperationId)
-                Add("MIR006",
-                    $"callable source operation {callable.SourceOperationId} disagrees with origin {callable.Source.SourceOperationId}",
-                    callable);
+            CheckOrigin(callable.Origin, "callable", callable);
 
             if (callable.Kind == MirCallableKind.Function)
             {
@@ -138,6 +141,34 @@ public static class QoraMirVerifier
                 "MIR013",
                 "qubit resource",
                 callable);
+
+            foreach (var parameter in callable.Parameters)
+                if (parameter is not null)
+                    CheckOrigin(parameter.Origin, $"parameter `{parameter.Name}`", callable);
+            foreach (var value in values.Values)
+                CheckOrigin(value.Origin, $"SSA value {value.Id}", callable);
+            foreach (var storage in storages.Values)
+                CheckOrigin(storage.Origin, $"array storage {storage.Id}", callable);
+            foreach (var qubit in qubits.Values)
+                CheckOrigin(qubit.Origin, $"qubit resource {qubit.Id}", callable);
+            foreach (var block in blocks.Values)
+            {
+                CheckOrigin(block.Origin, $"block {block.Id}", callable, block);
+                foreach (var instruction in block.Instructions)
+                    if (instruction is not null)
+                        CheckOrigin(
+                            instruction.Origin,
+                            $"instruction {instruction.Id}",
+                            callable,
+                            block,
+                            instruction);
+                if (block.Terminator is { } terminator)
+                    CheckOrigin(
+                        terminator.Origin,
+                        $"terminator of {block.Id}",
+                        callable,
+                        block);
+            }
 
             if (!blocks.ContainsKey(callable.EntryBlock))
                 Add("MIR014", $"entry block {callable.EntryBlock} does not exist", callable);
@@ -190,13 +221,13 @@ public static class QoraMirVerifier
                 {
                     if (block.Instructions[index] is not { } instruction) continue;
                     VerifyUses(callable, block, index, instruction.InputValues, values, instructionLocations, dominators,
-                        instruction.Id, instruction.Source);
+                        instruction.Id, instruction.Origin);
                     VerifyInstruction(callable, block, instruction, values, storages, qubits);
                 }
 
                 if (block.Terminator is not { } terminator) continue;
                 VerifyUses(callable, block, block.Instructions.Count, terminator.InputValues, values,
-                    instructionLocations, dominators, instruction: null, terminator.Source);
+                    instructionLocations, dominators, instruction: null, terminator.Origin);
                 VerifyTerminator(callable, block, terminator, blocks, values);
             }
 
@@ -348,7 +379,7 @@ public static class QoraMirVerifier
                             $"edge {block.Id} -> {target.Id} passes stale array state {incoming} into memory Phi argument {index} ({availability.Kind})",
                             callable,
                             block,
-                            source: block.Terminator.Source);
+                            source: block.Terminator.Origin);
                     }
                 }
             }
@@ -700,7 +731,7 @@ public static class QoraMirVerifier
                     if (!blocks.ContainsKey(successor))
                     {
                         Add("MIR062", $"terminator targets missing block {successor}", callable, block,
-                            source: terminator.Source);
+                            source: terminator.Origin);
                         continue;
                     }
                     predecessors[successor].Add(block.Id);
@@ -709,13 +740,13 @@ public static class QoraMirVerifier
                 switch (terminator)
                 {
                     case MirJump jump:
-                        VerifyEdge(callable, block, jump.Target, jump.Arguments, blocks, values, "jump", jump.Source);
+                        VerifyEdge(callable, block, jump.Target, jump.Arguments, blocks, values, "jump", jump.Origin);
                         break;
                     case MirBranch branch:
                         VerifyEdge(callable, block, branch.TrueTarget, branch.TrueArguments, blocks, values,
-                            "true edge", branch.Source);
+                            "true edge", branch.Origin);
                         VerifyEdge(callable, block, branch.FalseTarget, branch.FalseArguments, blocks, values,
-                            "false edge", branch.Source);
+                            "false edge", branch.Origin);
                         break;
                 }
             }
@@ -730,7 +761,7 @@ public static class QoraMirVerifier
             IReadOnlyDictionary<MirBlockId, MirBlock> blocks,
             IReadOnlyDictionary<MirValueId, MirValue> values,
             string edge,
-            MirSource source)
+            MirOriginRef source)
         {
             if (!blocks.TryGetValue(targetId, out var target)) return;
             if (arguments.Count != target.Arguments.Count)
@@ -812,7 +843,7 @@ public static class QoraMirVerifier
             IReadOnlyDictionary<MirInstructionId, (MirBlock Block, int Index, MirInstruction Instruction)> instructions,
             IReadOnlyDictionary<MirBlockId, HashSet<MirBlockId>> dominators,
             MirInstructionId? instruction,
-            MirSource source)
+            MirOriginRef source)
         {
             foreach (var operand in operands)
             {
@@ -1332,29 +1363,29 @@ public static class QoraMirVerifier
                         && condition.Type != MirType.Scalar(QType.Bit))
                         Add("MIR124",
                             $"branch condition {branch.Condition} is {condition.Type}, expected bit",
-                            callable, block, source: branch.Source);
+                            callable, block, source: branch.Origin);
                     break;
                 case MirReturn ret:
                     if (callable.Kind == MirCallableKind.Operation)
                     {
                         if (ret.Value is not null)
-                            Add("MIR125", "operation returns a value", callable, block, source: ret.Source);
+                            Add("MIR125", "operation returns a value", callable, block, source: ret.Origin);
                     }
                     else if (ret.Value is not MirValueId returnValue)
-                        Add("MIR126", "function return has no value", callable, block, source: ret.Source);
+                        Add("MIR126", "function return has no value", callable, block, source: ret.Origin);
                     else if (values.TryGetValue(returnValue, out var value)
                              && callable.ReturnType is { } expected
                              && value.Type != expected)
                         Add("MIR127",
                             $"function returns {value.Type}, expected {expected}",
-                            callable, block, source: ret.Source);
+                            callable, block, source: ret.Origin);
                     break;
                 case MirJump:
                 case MirUnreachable:
                     break;
                 default:
                     Add("MIR128", $"unknown terminator kind {terminator.GetType().Name}",
-                        callable, block, source: terminator.Source);
+                        callable, block, source: terminator.Origin);
                     break;
             }
         }
@@ -1446,19 +1477,38 @@ public static class QoraMirVerifier
             return result;
         }
 
+        private void CheckOrigin(
+            MirOriginRef origin,
+            string role,
+            MirCallable? callable = null,
+            MirBlock? block = null,
+            MirInstruction? instruction = null)
+        {
+            if (!_program.Origins.Contains(origin))
+            {
+                Add(
+                    "MIR006",
+                    $"{role} refers to missing origin {origin}",
+                    callable,
+                    block,
+                    instruction,
+                    origin);
+            }
+        }
+
         private void Add(
             string code,
             string message,
             MirCallable? callable = null,
             MirBlock? block = null,
             MirInstruction? instruction = null,
-            MirSource? source = null) =>
+            MirOriginRef? source = null) =>
             _errors.Add(new MirVerificationError(
                 code,
                 message,
                 callable?.Id,
                 block?.Id,
                 instruction?.Id,
-                source ?? instruction?.Source ?? block?.Source ?? callable?.Source));
+                source ?? instruction?.Origin ?? block?.Origin ?? callable?.Origin));
     }
 }

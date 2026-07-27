@@ -1,17 +1,18 @@
 # Qora module system + namespaces — design
 
-Decided 2026-07-02. This is the next major feature (see TODO.md sequencing): it builds the
-program-symbol-graph / lexical-scope machinery that the effect-analysis step (qfree/mfree/const →
-automatic uncomputation) will reuse.
+Decided 2026-07-02. This feature establishes the unified HIR name-resolution graph that later
+semantic passes reuse. Program declarations and lexical bindings share one containment tree, while
+imports and future inheritance lookup remain explicit typed side edges.
 
 ## Goals
 
 - Multi-file programs (`import`) — adoption basics; a language you cannot split across files caps out
   at toy scale, and no library ecosystem can form without it.
 - Namespaces with `open` and qualified names — Q#-flavored, C#-familiar.
-- One name-resolution pass that EVERY pipeline stage consults (lowering, validation, inversion,
-  emission) — the half-shadowing class of bug (one name meaning different things in different stages)
-  becomes structurally impossible.
+- One authoritative `HirScopeGraph` for program declarations and lexical bindings. Every declaration
+  records its declaring scope, and every source construct that introduces a scope has a stable
+  node-and-role site, preventing different stages from silently assigning different meanings to the
+  same name.
 
 ## Surface syntax
 
@@ -44,9 +45,11 @@ operation Main()                    // files without namespaces keep working (gl
 
 - Backward compatible: a file with no `namespace` block lives in the global namespace; every existing
   `.qor` program compiles unchanged.
-- Exactly one `Main` across the whole import graph (entry rules unchanged).
-- Imports may contain cycles. A cyclic back-edge reaches a canonical path already registered in `loaded`
-  and is skipped without an error; `open` visibility remains non-transitive.
+- At most one global `Main` may exist across the whole import graph. If it is absent, the first
+  callable in deterministic merged order remains the entry, matching the existing entry rule.
+- Imports may contain cycles. `SourceGraphLoader` resolves a cyclic back-edge to the already registered
+  revision-qualified `SourceDocumentRef`, and `ModuleLoader` visits that document only once; `open`
+  visibility remains non-transitive.
 
 ## Name resolution (the standard algorithm)
 
@@ -63,7 +66,7 @@ For an unqualified callable name used inside namespace `A.B`:
 ```
 
 A qualified name (`A.B.f`, `MyLib.Bell`, `MyLib.two()`) is absolute: resolution starts at the
-program root and follows every dotted namespace segment before selecting the final callable. It does
+program scope and follows every dotted namespace scope before selecting the final callable. It does
 not start from the caller's namespace and does not consult `open`; an unknown segment/member is an
 error. This applies equally to statement calls and calls nested in expressions.
 
@@ -71,13 +74,14 @@ error. This applies equally to statement calls and calls nested in expressions.
 expose callables in `A.B`, inherit an `open` written in a containing namespace, or re-export namespaces
 that `A` opened itself. To expose `A.B.f` as bare `f`, write `open A.B;` in the caller's exact namespace.
 
-A dotted declaration is a real ownership chain. Declaring `namespace A.B` creates namespace symbols
-`A` then `B`, so the synthetic intermediate `A` is itself a valid namespace and `open A;` is legal.
-However, opening it still exposes only `A`'s direct callables, not `B`'s members.
+A dotted declaration is a real containment chain. Declaring `namespace A.B` creates a namespace
+scope for `A` and then one for `B`; each namespace symbol is declared in its parent scope. The
+synthetic intermediate `A` is therefore a valid namespace and `open A;` is legal. However, opening
+it still exposes only `A`'s direct callables, not `B`'s members.
 
-Namespace and callable members with the same spelling occupy different roles and may coexist. For
-example, a callable `A.B()` and namespace `A.B` can coexist: the final segment of `A.B()` selects the
-callable, while the intermediate `B` in `A.B.f()` selects the namespace.
+Bindings are role-aware and may retain several symbols under the same spelling. For example, a
+callable `A.B()` and namespace `A.B` can coexist: the final segment of `A.B()` selects the callable
+role, while the intermediate `B` in `A.B.f()` selects the namespace role.
 
 Callable lookup deliberately does not treat a local value with the same spelling as a function
 declaration. A value reference and a call target occupy different semantic roles: `var value = 1;
@@ -109,8 +113,8 @@ ambiguous use is an error" — silent reinterpretation stays impossible:
   the bare built-in and emits `h q;`.
 
 `Qora`, `Intrinsic`, and the built-in gate/function declarations are synthetic symbols in the same
-`ProgramSymbolGraph` used for source declarations. Their origin and role remain explicit, so qualified
-lookup follows ordinary ownership edges while validation and emission still apply built-in policy.
+`HirScopeGraph` used for source declarations. Their origin and role remain explicit, so qualified
+lookup follows ordinary containment scopes while validation and emission still apply built-in policy.
 
 ## Lowering to OpenQASM (no module system there)
 
@@ -124,33 +128,115 @@ Namespaces flatten by name mangling at emit:
 ## Pipeline changes
 
 ```
-files ─parse each─▶ ASTs ─lower each─▶ QProgram fragments
-   ─ModuleLoader merge─▶ merged QProgram
-   ─Resolver (ProgramSymbolGraph, opens, call-target FQNs/Ids, ambiguity)─▶ resolved QProgram
-   ─Validate + SymbolTableBuilder─▶ semantic errors or lexical scopes
-   ─Monomorphize─▶ concrete QProgram
-   ─AdjointMaterializer─▶ inverse ops
-   ─NameMangler─▶ collision-free emitted identifiers
-   ─ReferentialCheck─▶ final safety check
-   ─QasmEmitter─▶ OpenQASM 3
+QoraParser.Parse
+   ─▶ SyntaxSnapshot (Qora-owned immutable tokens / tree projections / text / diagnostics)
+QoraCompiler.Compile
+   ─▶ CompilationSession (branch-safe revision allocator)
+       └─ immutable Compilation (Revision + ParentRevision + OutputPlan)
+       ├─ Sources
+       │   ├─ SourceDocumentSnapshot[] + per-document SyntaxSnapshot
+       │   └─ ImportGraph (revision-qualified SourceDocumentRef edges)
+       ├─ Hir
+       │   ├─ Snapshots + structural stage Milestones
+       │   ├─ Lineage
+       │   │   ├─ identity-preserving NodeDerivation
+       │   │   ├─ provenance-only NodeSynthesis
+       │   │   └─ imported-source HirNodeIntroduction
+       │   └─ SemanticArtifacts[(HirSnapshotId, HirSemanticPhase)]
+       │       ├─ Validation
+       │       └─ EffectAnalysis
+       ├─ Mir (optional typed SSA/CFG snapshot + revision-bound analyses)
+       ├─ Links
+       │   ├─ Hir (the exact Hir.Lineage instance)
+       │   └─ Mir (typed HIR ↔ MIR provenance)
+       ├─ Diagnostics
+       │   └─ typed Source / HIR / MIR / Target(backend, HIR-or-MIR input) origin
+       └─ Targets.Artifacts[TargetBackend]
+           └─ OpenQasmArtifact
+               ├─ exact materialized HIR source + semantic basis
+               ├─ OpenQasmTargetProgram
+               └─ OpenQASM 3 text derived from that target model
 ```
 
-- `SymbolTableBuilder.BuildProgramSymbols` creates the `ProgramSymbolGraph`. Its root symbol owns global
-  callables and the first namespace segment; every dotted segment owns the next, and the final namespace
-  owns its callables. `Symbol.OwnerSymbolId` is the authoritative edge. Child/name indexes are derived
-  lookup accelerators, not a second ownership ledger.
-- The resolver reads that graph. A bare call walks the caller's namespace ownership chain outward
-  (`A.B → A → global`) before inspecting the direct callable members of namespaces opened by the exact
-  caller namespace. A qualified call starts at the graph root. Successful user-callable bindings write
+- `QoraParser` is deliberately syntax-only. A published `SyntaxSnapshot` retains no Janglim object:
+  it owns only immutable Qora projections and captured text. The internal transient
+  `SyntaxParseProduct` carries the mutable `LoweringAst` just long enough for immediate per-document
+  HIR lowering. `SourceGraphLoader` is the sole owner of import I/O: it
+  reads each canonical document once, preserves one `SourceDocumentSnapshot` and `SyntaxSnapshot` per
+  `SourceDocumentRef`, lowers every successfully parsed document with a document-qualified
+  `SourceSpan`, and records resolved and unresolved edges in an immutable `ImportGraph`.
+  `ModuleLoader.Expand(LoadedSourceGraph)` performs no I/O or parsing; it purely merges the prepared
+  `SourceDocumentRef -> QProgram` map by those graph edges and returns an exact
+  `HirNodeIntroduction` for every HIR node imported from another document.
+- `CompilationSession` is the only revision-allocation authority for one logical compilation.
+  Recompiling the same parent twice produces distinct sibling revisions, while each child records that
+  parent in `Compilation.ParentRevision`. `CompilationOutputPlan` independently fixes the exact
+  requested HIR goal, MIR presence, and backend set. A successful result must match that plan exactly;
+  it cannot contain an unsolicited MIR or target artifact.
+- A `HirSnapshot` always owns one published `QProgram` generation and an immutable
+  `nodeId -> SourceSpan` source map. Semantic facts are separate `HirSemanticArtifact` values qualified
+  by that exact snapshot and `HirSemanticPhase`. Each validation artifact owns the authoritative
+  `HirValidationOutcome`: accepted means an empty diagnostic set, while rejected retains the exact
+  immutable diagnostics. Compilation diagnostics project that outcome with stage/origin metadata
+  rather than duplicating validation state. Effect analysis requires the exact accepted validation
+  artifact for the same snapshot and records it as `ValidationBasis`. Structural milestones may alias
+  one snapshot when a pass performs no rewrite. Validation and `EffectAnalysis` therefore do not
+  manufacture another structural HIR stage; callers query `Compilation.Hir.EffectAnalysis` for the
+  exact semantic artifact.
+  Milestones follow the canonical order `Lowered -> ImportsExpanded -> MeasurementLowered -> Resolved
+  -> Specialized -> ConjugationLowered -> AdjointMaterialized`.
+- HIR lineage is owned by `HirCompilation`; `Compilation.Links.Hir` is the same instance, not another
+  ledger. `NodeDerivation` means same semantic identity, `NodeSynthesis` records only provenance for a
+  new entity, and `HirNodeIntroduction` records a source node entering through import expansion.
+  Every newly appearing node must have exactly one classification. An exact `HirSemanticContext`
+  translates only identity-preserving paths from a current HIR snapshot back to the analyzed semantic
+  basis before querying the scope graph. Target renaming therefore never mutates source semantics, and
+  a synthesized temporary can never be mistaken for its owner's symbol.
+- `SymbolTableBuilder.BuildHirScopeGraph` creates one `HirScopeGraph`. Its current containment chain is
+  `Program → Namespace → Callable → Block`. When nominal types arrive, `Type` becomes another
+  containment scope below a namespace and can contain callable scopes without introducing another
+  ownership structure.
+- `Scope.ParentScopeId` is the authoritative containment edge. `Symbol.DeclaringScopeId` independently
+  states where each symbol is declared, while `Scope.DeclaringSymbolId` joins a namespace, type, or
+  callable declaration to the environment it introduces. Child, namespace-path, callable-root, and
+  declaration-node maps are derived indexes owned by the graph.
+- A scope binding is `spelling → [SymbolId…]`, not a single untyped slot. Lookup selects the required
+  role, which preserves namespace/callable same-name coexistence while ordinary value lookup excludes
+  namespace and callable declarations.
+- `open` does not alter containment. It adds a typed `Import` lookup edge from the exact namespace
+  scope to the opened namespace. Future base-class and interface search use their own `BaseType` and
+  `Interface` edges rather than overloading `ParentScopeId`.
+- The resolver reads the graph. A bare call walks the caller's namespace containment chain outward
+  (`A.B → A → program`) before inspecting the direct callable members reached by that exact namespace's
+  `Import` edges. A qualified call starts at the program scope. Successful user-callable bindings write
   the fully-qualified target and declaring operation Id to both statement `QGate` calls and expression
   `QCallNode`s.
 - Resolver recursively rebuilds declaration/assignment/return values, conditions, loop bounds, gate
   arguments, array elements, and nested call arguments, so no expression position keeps an unresolved
   short spelling.
-- Lexical `Scope` is separate from program ownership. It contains only parameters, registers,
-  measurement bits, variables, constants, loop variables, and their use sites inside one callable.
-  A callable body's root scope has `ParentScopeId = null`; only nested body/block scopes link to an
-  enclosing lexical scope. `EnclosingSymbolId` joins the lexical tree back to its callable symbol.
+- Every HIR construct that introduces an environment is indexed by
+  `HirScopeSite(ownerNodeId, role)`. The role distinguishes multiple scopes introduced by one node,
+  such as `IfCondition`, `IfThen`, and `IfElse`, or `ForBinder` and `ForBody`.
+- An exact HIR `HirSemanticModel` retains this one `ScopeGraph`; it does not mirror separate program-symbol and lexical
+  scope tables. Declaration, callable-root, namespace-path, and source-site queries delegate to indexes
+  owned by the graph.
+- `NameMangler` returns an immutable `OpenQasmSymbolMap`; it does not write an emitted name into
+  `HirSemanticModel`. `OpenQasmTargetProgram` owns that map together with the target type environment.
+  `TargetArtifactSet.Artifacts` is the authoritative backend-keyed map, while the current convenience
+  view is `Targets.OpenQasm`. The shared `ITargetArtifact` contract requires only the backend key; it
+  does not impose HIR provenance on future MIR-backed targets. `OpenQasmArtifact.Source` identifies
+  the exact materialized HIR snapshot consumed by this backend and `SemanticBasis` identifies its
+  exact effect-analysis artifact. OpenQASM's `AsInt` rewrite also becomes an explicit
+  `OpenQasmUnsignedCastNode`, never a synthetic `QCallNode` name that could leak into callable lookup
+  or mangling. `QasmBackend` consumes only an exact `HirSemanticContext`, and
+  `OpenQasmArtifact.Text` is emitted from the resulting `OpenQasmTargetProgram` rather than supplied as
+  a second authority. Target diagnostics independently record
+  `TargetDiagnosticInput.Hir` or `TargetDiagnosticInput.Mir`, so diagnostic provenance follows the
+  backend's real input domain.
+- MIR links are exact-reference maps. Every HIR semantic symbol has one
+  `MirSymbolLoweringDisposition`, including explicit namespace, builtin, and unreachable non-lowering
+  reasons. Every MIR value, storage, and qubit has one `MirEntityOriginKind`, distinguishing a
+  source-backed entity from a compiler temporary even when no direct symbol link exists.
 
 New semantic codes:
 
@@ -167,44 +253,49 @@ New semantic codes:
 ## Tooling contract changes
 
 - CLI: `--json <entryFile>` resolves imports relative to the entry file's directory. For stdin input
-  (the extension's live-diagnostics path) a new `--base-dir <dir>` flag supplies the resolution root.
-- VS Code extension: passes `--base-dir` of the open document; diagnostics stay per-keystroke on the
-  lean contract. The stages panel gains nothing new (the resolved IR simply shows qualified names).
+  `--base-dir <dir>` supplies the resolution root and `--source-path <path>` identifies the live entry
+  document. JSON diagnostics include the exact source path and revision-qualified document identity.
+- VS Code extension: passes both `--base-dir` and `--source-path` for the open document; diagnostics stay per-keystroke on the
+  lean contract. The stages panel reads the snapshots already present in the same `Compilation`; it
+  does not rerun resolver, validation, MIR lowering, or a backend to reconstruct a view.
 - Playground: single-file for now (imports error with a clear message there).
 
 ## Increments
 
 1. **Grammar + IR** — DONE: `namespace`/`open`/`import` statements, dotted qualified names; IR nodes carry the
    namespace; no resolution yet (single file, single namespace still works).
-2. **Resolver pass** — DONE (single file, multiple namespaces): `Resolver.cs` reads the program declaration graph,
+2. **Resolver pass** — DONE (single file, multiple namespaces): `Resolver.cs` reads the unified HIR scope graph,
    runs the resolution algorithm above, and rewrites every op/callee name to its FQN; QSEM018 (ambiguous),
    QSEM019 (unknown namespace/member — including `open` of a nonexistent namespace), QSEM022 (duplicate
-   within one namespace; global duplicates stay QSEM008). Pipeline: Lower → Resolve → Validate → Mangle →
-   Emit; resolver errors preempt validation. `NameMangler` encodes FQN dots as `_` (`MyLib.Bell` →
+   within one namespace; global duplicates stay QSEM008). In the current pipeline, document lowering and
+   module merge precede measurement lowering and resolution; resolver errors still preempt validation,
+   specialization, analysis, MIR, and target work. `NameMangler` later encodes FQN dots as `_` (`MyLib.Bell` →
    `MyLib_Bell`) and appends more `_` only on real emitted-name collisions; stages
-   (`ast`/`ir`/`irInverse`/`symbols`) show original/FQN names, only QASM shows mangled names.
-   `import` remains QSEM099-gated until increment 3.
-3. **Multi-file** — DONE: `ModuleLoader.cs` expands the import graph into one merged program before
-   resolution. `import "gates_lib.qor";`, `import "lib/gates.qor";`, and `import "a b.qor";` all use
-   the quoted relative path exactly as written, including the extension. Transitive with diamond-sharing;
-   canonicalized, case-insensitive paths are registered before file I/O, so both diamond sharing and cyclic
-   back-edges are skipped when `loaded.Add` returns false. QSEM020 covers missing/unreadable files;
-   QSEM021 is retired/reserved and is no longer emitted.
-   parse errors in an imported file surface with the file name prefixed, span -1. CLI: entry-file
-   imports resolve next to the file; stdin takes `--base-dir` (extension passes the document's dir —
-   imports resolve live in unsaved buffers). No file context ⇒ clear QSEM020 (playground stays
-   single-file). Merged order keeps the entry file's ops first, so the entry-op rule is unchanged;
-   namespaces merge across files, opens union per namespace.
+   (`ast`/`ir`/`symbols`/`uncompute`/`mir`/`mirEffects`) show source/FQN identities, while only the
+   OpenQASM target artifact contains mangled names.
+3. **Multi-file** — DONE: `SourceGraphLoader` prepares the complete immutable source graph before
+   `ModuleLoader.cs` merges it for resolution. `import "gates_lib.qor";`,
+   `import "lib/gates.qor";`, and `import "a b.qor";` all use the quoted relative path exactly as
+   written, including the extension. Canonical paths map to one revision-qualified document identity,
+   so diamond sharing and cyclic back-edges reuse the same `SourceDocumentSnapshot` without repeated
+   I/O or parsing. QSEM020 covers missing/unreadable files or missing path context; QSEM021 is
+   retired/reserved and is no longer emitted. Imported parse diagnostics retain their exact
+   document-qualified `SourceSpan`, rather than losing the location or borrowing the entry document's
+   offsets. CLI entry-file imports resolve next to the file; stdin takes `--base-dir` and optionally
+   `--source-path` (the extension supplies both for the live document). No file context yields a clear
+   QSEM020. `ModuleLoader.Expand(LoadedSourceGraph)` then performs a pure graph merge: entry operations
+   remain first, imported subtrees follow deterministic depth-first post-order, namespaces merge across
+   files, and opens union per namespace.
 4. **Mangled emission + docs + adversarial review** — DONE. README×3 and the adjoint-pipeline doc×3
    now show real mangled output plus a namespaces/import tour section. The adversarial review found and
    fixed three real bugs: (1) dot flattening could collide (`A.F` vs `A_F`), now auto-renamed by
    `NameMangler` with a note; (2) an entry-op local named like an operation could collide with a top-level
    def, now auto-renamed by the same emitted-scope machinery; (3) `open` of a declared-but-empty namespace
-   was a false QSEM019. `BuildProgramSymbols` now registers empty namespace blocks and every intermediate
+   was a false QSEM019. `BuildHirScopeGraph` registers empty namespace scopes and every intermediate
    segment of a dotted namespace, not just namespaces that directly contain callables.
 5. **Function calls in namespace resolution** — DONE. The expression grammar accepts qualified call
    targets, `QCallNode` carries the same stable callee reference as `QGate`, and the resolver visits every
    expression-bearing IR position. Same-namespace, qualified, and `open`-visible functions now resolve
-   through `ProgramSymbolGraph`; ambiguity remains QSEM018, and monomorphization re-points both the name
-   and Id when it selects a width-specialized `bit[]` function. Lexical `Scope` remains independent and
-   serves callable-body declarations only.
+   through `HirScopeGraph`; ambiguity remains QSEM018, and monomorphization re-points both the name
+   and Id when it selects a width-specialized `bit[]` function. Callable bodies and nested lexical
+   environments remain in the same graph and are addressable through stable `HirScopeSite` keys.

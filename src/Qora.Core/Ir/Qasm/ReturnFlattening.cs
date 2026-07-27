@@ -33,12 +33,28 @@ namespace Qora.Ir.Passes;
 ///
 /// Operations are untouched: an <c>operation</c> is void, and a <c>return</c> in one is QSEM035.
 /// </summary>
-public static class ReturnFlattening
+internal static class ReturnFlattening
 {
-    public static QProgram Run(QProgram program) =>
-        program with { Operations = program.Operations.Select(Flatten).ToList() };
+    public sealed record Result(
+        QProgram Program,
+        OpenQasmTargetFacts Facts);
 
-    private static QOperation Flatten(QOperation op)
+    public static Result Run(QProgram program)
+    {
+        ArgumentNullException.ThrowIfNull(program);
+        var facts = new OpenQasmTargetFactBuilder();
+        var result = program with
+        {
+            Operations = program.Operations
+                .Select(operation => Flatten(operation, facts))
+                .ToList(),
+        };
+        return new Result(result, facts.Build());
+    }
+
+    private static QOperation Flatten(
+        QOperation op,
+        OpenQasmTargetFactBuilder facts)
     {
         if (!op.IsFunction || op.ReturnType is not { } returnType) return op;
         if (!Contains(op.Body, r => true)) return op;   // no return at all — QSEM035's business, not ours
@@ -48,14 +64,38 @@ public static class ReturnFlattening
         var done = HoistName.Make("done", uid++);
         var needsFlag = ContainsLoopReturn(op.Body);
 
-        var body = new List<QStmt>
+        var body = new List<QStmt>();
+        var resultStorage = new QDecl(false, returnType, result, Zero(returnType));
+        facts.Record(
+            resultStorage.Id,
+            op.Id,
+            OpenQasmSynthesisKind.ReturnResultStorage,
+            new OpenQasmClassicalType(returnType, isArray: false));
+        body.Add(resultStorage);
+        if (needsFlag)
         {
-            new QDecl(false, returnType, result, Zero(returnType)),
-        };
-        if (needsFlag) body.Add(new QDecl(false, QType.Int, done, Zero(QType.Int)));
+            var doneStorage = new QDecl(false, QType.Int, done, Zero(QType.Int));
+            facts.Record(
+                doneStorage.Id,
+                op.Id,
+                OpenQasmSynthesisKind.ReturnDoneStorage,
+                new OpenQasmClassicalType(QType.Int, isArray: false));
+            body.Add(doneStorage);
+        }
 
-        body.AddRange(Rewrite(op.Body, result, done, needsFlag, inLoop: false));
-        body.Add(new QReturn(new QText(new QNameRef(result))));
+        body.AddRange(Rewrite(
+            op.Body,
+            result,
+            done,
+            needsFlag,
+            false,
+            facts));
+        var finalReturn = new QReturn(new QText(new QNameRef(result)));
+        facts.Record(
+            finalReturn.Id,
+            op.Id,
+            OpenQasmSynthesisKind.FinalReturn);
+        body.Add(finalReturn);
         return op with { Body = body };
     }
 
@@ -63,7 +103,13 @@ public static class ReturnFlattening
     /// <paramref name="result"/>, and whatever it would have skipped is moved somewhere it cannot run.
     /// <paramref name="inLoop"/> says whether this list is (directly or not) a loop body, which is what makes
     /// <c>break</c> the right way to stop.</summary>
-    private static List<QStmt> Rewrite(IReadOnlyList<QStmt> stmts, string result, string done, bool flag, bool inLoop)
+    private static List<QStmt> Rewrite(
+        IReadOnlyList<QStmt> stmts,
+        string result,
+        string done,
+        bool flag,
+        bool inLoop,
+        OpenQasmTargetFactBuilder facts)
     {
         var output = new List<QStmt>(stmts.Count);
         for (var i = 0; i < stmts.Count; i++)
@@ -77,14 +123,29 @@ public static class ReturnFlattening
                 // loop, leaving it IS the "do nothing further" part, so break out; the flag then tells the
                 // statements after the loop (which no break can reach) not to run.
                 case QReturn ret:
-                    output.Add(new QAssign(result, ret.Value));
+                    var valueAssignment = new QAssign(result, ret.Value);
+                    facts.Record(
+                        valueAssignment.Id,
+                        ret.Id,
+                        OpenQasmSynthesisKind.ReturnValueAssignment);
+                    output.Add(valueAssignment);
                     // The flag exists to stop LOOPS and to skip what follows one; a return reached outside any
                     // loop has nothing left to tell — the statements it skipped are already in a branch that
                     // cannot run — so setting it there would be a write nothing reads.
                     if (flag && inLoop)
                     {
-                        output.Add(new QAssign(done, One()));
-                        output.Add(new QBreak());
+                        var doneAssignment = new QAssign(done, One());
+                        facts.Record(
+                            doneAssignment.Id,
+                            ret.Id,
+                            OpenQasmSynthesisKind.ReturnDoneAssignment);
+                        output.Add(doneAssignment);
+                        var @break = new QBreak();
+                        facts.Record(
+                            @break.Id,
+                            ret.Id,
+                            OpenQasmSynthesisKind.ReturnBreak);
+                        output.Add(@break);
                     }
                     return output;
 
@@ -95,8 +156,14 @@ public static class ReturnFlattening
                 case QIf branch when QoraValidator.AlwaysReturns(branch.Then):
                     output.Add(branch with
                     {
-                        Then = Rewrite(branch.Then, result, done, flag, inLoop),
-                        Else = Rewrite(branch.Else.Concat(tail).ToList(), result, done, flag, inLoop),
+                        Then = Rewrite(branch.Then, result, done, flag, inLoop, facts),
+                        Else = Rewrite(
+                            branch.Else.Concat(tail).ToList(),
+                            result,
+                            done,
+                            flag,
+                            inLoop,
+                            facts),
                     });
                     return output;
 
@@ -104,8 +171,14 @@ public static class ReturnFlattening
                 case QIf branch when branch.Else.Count > 0 && QoraValidator.AlwaysReturns(branch.Else):
                     output.Add(branch with
                     {
-                        Then = Rewrite(branch.Then.Concat(tail).ToList(), result, done, flag, inLoop),
-                        Else = Rewrite(branch.Else, result, done, flag, inLoop),
+                        Then = Rewrite(
+                            branch.Then.Concat(tail).ToList(),
+                            result,
+                            done,
+                            flag,
+                            inLoop,
+                            facts),
+                        Else = Rewrite(branch.Else, result, done, flag, inLoop, facts),
                     });
                     return output;
 
@@ -117,15 +190,34 @@ public static class ReturnFlattening
                 // the earlier `if`-moves-its-tail trick does not apply, because a loop's tail is not inside any
                 // branch to move into.
                 case var _ when ContainsLoopReturn(new[] { s }):
-                    output.Add(Descend(s, result, done, flag, inLoop));
-                    if (inLoop) output.Add(IfDone(new List<QStmt> { new QBreak() }, done));
-                    if (tail.Count > 0) output.Add(NotDone(Rewrite(tail, result, done, flag, inLoop), done));
+                    output.Add(Descend(s, result, done, flag, inLoop, facts));
+                    if (inLoop)
+                    {
+                        var @break = new QBreak();
+                        facts.Record(
+                            @break.Id,
+                            s.Id,
+                            OpenQasmSynthesisKind.ReturnBreak);
+                        output.Add(IfDone(
+                            new List<QStmt> { @break },
+                            done,
+                            s.Id,
+                            facts));
+                    }
+                    if (tail.Count > 0)
+                    {
+                        output.Add(NotDone(
+                            Rewrite(tail, result, done, flag, inLoop, facts),
+                            done,
+                            s.Id,
+                            facts));
+                    }
                     return output;
 
                 // Nothing here returns through a loop; recurse into any nested body so a return deeper inside
                 // (reachable by moving a tail into a branch) is still found.
                 default:
-                    output.Add(Descend(s, result, done, flag, inLoop));
+                    output.Add(Descend(s, result, done, flag, inLoop, facts));
                     break;
             }
         }
@@ -135,29 +227,74 @@ public static class ReturnFlattening
     /// <summary>Recurse into a statement's nested bodies without changing its own shape. A LOOP body is
     /// entered with <c>inLoop: true</c>, so a return anywhere inside it becomes "produce the value, mark done,
     /// leave the loop"; every other nested body keeps the caller's <paramref name="inLoop"/>.</summary>
-    private static QStmt Descend(QStmt s, string result, string done, bool flag, bool inLoop) => s switch
+    private static QStmt Descend(
+        QStmt s,
+        string result,
+        string done,
+        bool flag,
+        bool inLoop,
+        OpenQasmTargetFactBuilder facts) => s switch
     {
         QIf i => i with
         {
-            Then = Rewrite(i.Then, result, done, flag, inLoop),
-            Else = Rewrite(i.Else, result, done, flag, inLoop),
+            Then = Rewrite(i.Then, result, done, flag, inLoop, facts),
+            Else = Rewrite(i.Else, result, done, flag, inLoop, facts),
         },
-        QFor f => f with { Body = Rewrite(f.Body, result, done, flag, inLoop: true) },
-        QWhile w => w with { Body = Rewrite(w.Body, result, done, flag, inLoop: true) },
-        QRepeat r => r with { Body = Rewrite(r.Body, result, done, flag, inLoop: true) },
+        QFor f => f with
+        {
+            Body = Rewrite(f.Body, result, done, flag, true, facts),
+        },
+        QWhile w => w with
+        {
+            Body = Rewrite(w.Body, result, done, flag, true, facts),
+        },
+        QRepeat r => r with
+        {
+            Body = Rewrite(r.Body, result, done, flag, true, facts),
+        },
         QConjugate c => c with
         {
-            Within = Rewrite(c.Within, result, done, flag, inLoop),
-            Apply = Rewrite(c.Apply, result, done, flag, inLoop),
+            Within = Rewrite(c.Within, result, done, flag, inLoop, facts),
+            Apply = Rewrite(c.Apply, result, done, flag, inLoop, facts),
         },
         _ => s,
     };
 
-    private static QStmt NotDone(IReadOnlyList<QStmt> body, string done) =>
-        new QIf(new QCond(new QBinOp("==", new QNameRef(done), new QNumLit(0))), body, new List<QStmt>());
+    private static QStmt NotDone(
+        IReadOnlyList<QStmt> body,
+        string done,
+        int sourceHirNodeId,
+        OpenQasmTargetFactBuilder facts) =>
+        Guard(body, done, 0, sourceHirNodeId, facts);
 
-    private static QStmt IfDone(IReadOnlyList<QStmt> body, string done) =>
-        new QIf(new QCond(new QBinOp("==", new QNameRef(done), new QNumLit(1))), body, new List<QStmt>());
+    private static QStmt IfDone(
+        IReadOnlyList<QStmt> body,
+        string done,
+        int sourceHirNodeId,
+        OpenQasmTargetFactBuilder facts) =>
+        Guard(body, done, 1, sourceHirNodeId, facts);
+
+    private static QStmt Guard(
+        IReadOnlyList<QStmt> body,
+        string done,
+        long expected,
+        int sourceHirNodeId,
+        OpenQasmTargetFactBuilder facts)
+    {
+        var guard = new QIf(
+            new QCond(
+                new QBinOp(
+                    "==",
+                    new QNameRef(done),
+                    new QNumLit(expected))),
+            body,
+            Array.Empty<QStmt>());
+        facts.Record(
+            guard.Id,
+            sourceHirNodeId,
+            OpenQasmSynthesisKind.ReturnGuard);
+        return guard;
+    }
 
     private static bool ContainsReturn(QStmt s) => Contains(new[] { s }, _ => true);
 

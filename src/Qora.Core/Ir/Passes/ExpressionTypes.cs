@@ -14,35 +14,27 @@ internal readonly record struct QValueShape(QType Type, bool IsArray)
 
 /// <summary>
 /// The single expression-type reader used by symbol construction and semantic checks. A user function's
-/// return type is not copied onto its program symbol: the symbol already carries the declaring operation's
-/// stable Id, so a call follows <c>program symbol -&gt; operation Id -&gt; QOperation.ReturnType</c>. Built-in
-/// functions read the same fact from <see cref="QoraGates.Functions"/>.
+/// call node carries the declaring operation's stable Id, so its type follows
+/// <c>QCallNode.CalleeOpId -&gt; QOperation.ReturnType</c>. Built-in functions remain target-independent
+/// language primitives and read their return type from <see cref="QoraGates.Functions"/>.
 /// </summary>
 internal static class ExpressionTypes
 {
-    /// <summary>Resolve a user-function call through the program symbol table's operation Id.</summary>
-    internal static bool TryGetFunction(QCallNode call, ProgramSymbolGraph? programSymbols,
-        IReadOnlyDictionary<int, QOperation>? opById, out QOperation function)
+    /// <summary>
+    /// Resolve a user-function call exclusively through the operation identity installed by
+    /// <see cref="Resolver"/>. A spelling is never used to recover a missing semantic reference.
+    /// </summary>
+    internal static bool TryGetFunction(
+        QCallNode call,
+        IReadOnlyDictionary<int, QOperation> opById,
+        out QOperation function)
     {
         function = null!;
-        if (opById is null) return false;
-
-        var operationId = call.CalleeOpId
-            ?? programSymbols?.LookupCallable(call.Name)?.DeclarationNodeId;
-        QOperation? operation = null;
-        if (operationId is int id)
-            opById.TryGetValue(id, out operation);
-        else
-        {
-            // Standalone backend callers may hand us an already-mangled tree without semantic call IDs.
-            // Mangling flattens namespaces, so graph lookup cannot reconstruct that emitted spelling. An
-            // exact current-name fallback is safe only when it selects one declaration unambiguously.
-            var matches = opById.Values
-                .Where(candidate => candidate.Name == call.Name)
-                .Take(2)
-                .ToList();
-            if (matches.Count == 1) operation = matches[0];
-        }
+        if (call.CalleeOpId is not int operationId)
+            return false;
+        if (!opById.TryGetValue(operationId, out var operation))
+            throw new InvalidOperationException(
+                $"QINTERNAL: function call `{call.Name}` carries dangling CalleeOpId {operationId}");
 
         if (operation is not { IsFunction: true })
             return false;
@@ -51,37 +43,43 @@ internal static class ExpressionTypes
         return true;
     }
 
-    internal static QValueShape? TypeOf(QExpr value, Scope scope, ProgramSymbolGraph? programSymbols,
-        IReadOnlyDictionary<int, QOperation>? opById) => value switch
+    internal static QValueShape? TypeOf(
+        QExpr value,
+        Scope scope,
+        IReadOnlyDictionary<int, QOperation> opById) => value switch
     {
         QMeasure => new(QType.Bit, IsArray: false),
-        QText text => TypeOf(text.Tree, scope, programSymbols, opById),
+        QText text => TypeOf(text.Tree, scope, opById),
         QArrayNew allocation => new(allocation.ElementType, IsArray: true),
-        QArrayLiteral literal => ArrayTypeOf(literal, scope, programSymbols, opById),
+        QArrayLiteral literal => ArrayTypeOf(literal, scope, opById),
         _ => null,
     };
 
-    internal static QValueShape? TypeOf(QNode? node, Scope scope, ProgramSymbolGraph? programSymbols,
-        IReadOnlyDictionary<int, QOperation>? opById) => node switch
+    internal static QValueShape? TypeOf(
+        QNode? node,
+        Scope scope,
+        IReadOnlyDictionary<int, QOperation> opById) => node switch
     {
         null => null,
         QNumLit => new(QType.Int, IsArray: false),
         QLit literal => LiteralType(literal.Text),
         QNameRef name => NameType(name.Name, scope),
         QMember { Base: { } owner, Member: "Count" }
-            when TypeOf(owner, scope, programSymbols, opById) is { IsArray: true }
+            when TypeOf(owner, scope, opById) is { IsArray: true }
             => new(QType.Int, IsArray: false),
-        QUnary unary => UnaryType(unary, scope, programSymbols, opById),
-        QBinOp binary => BinaryType(binary, scope, programSymbols, opById),
-        QIndexNode index => TypeOf(index.Base, scope, programSymbols, opById) is
+        QUnary unary => UnaryType(unary, scope, opById),
+        QBinOp binary => BinaryType(binary, scope, opById),
+        QIndexNode index => TypeOf(index.Base, scope, opById) is
             { IsArray: true } array
             ? new(array.Type, IsArray: false)
             : null,
-        QCallNode call when QoraGates.Functions.TryGetValue(call.Name, out var builtin)
-            => new(builtin.Returns, IsArray: false),
-        QCallNode call when TryGetFunction(call, programSymbols, opById, out var function)
-            && function.ReturnType is { } returns
+        QCallNode call when call.CalleeOpId is not null
+                            && TryGetFunction(call, opById, out var function)
+                            && function.ReturnType is { } returns
             => new(returns, IsArray: false),
+        QCallNode call when call.CalleeOpId is null
+                            && QoraGates.Functions.TryGetValue(call.Name, out var builtin)
+            => new(builtin.Returns, IsArray: false),
         _ => null,
     };
 
@@ -124,10 +122,10 @@ internal static class ExpressionTypes
                 ? new(QType.Float, IsArray: false)
                 : new(QType.Int, IsArray: false);
 
-    private static QValueShape? UnaryType(QUnary unary, Scope scope, ProgramSymbolGraph? programSymbols,
-        IReadOnlyDictionary<int, QOperation>? opById)
+    private static QValueShape? UnaryType(QUnary unary, Scope scope,
+        IReadOnlyDictionary<int, QOperation> opById)
     {
-        var operand = TypeOf(unary.Operand, scope, programSymbols, opById);
+        var operand = TypeOf(unary.Operand, scope, opById);
         if (operand is not { } scalar) return null;
         if (scalar.IsArray) return scalar;   // preserve the offending shape for the boundary diagnostic
         if (unary.Op == "!") return new(QType.Bit, IsArray: false);
@@ -136,11 +134,11 @@ internal static class ExpressionTypes
             : scalar;
     }
 
-    private static QValueShape? BinaryType(QBinOp binary, Scope scope, ProgramSymbolGraph? programSymbols,
-        IReadOnlyDictionary<int, QOperation>? opById)
+    private static QValueShape? BinaryType(QBinOp binary, Scope scope,
+        IReadOnlyDictionary<int, QOperation> opById)
     {
-        var left = TypeOf(binary.Left, scope, programSymbols, opById);
-        var right = TypeOf(binary.Right, scope, programSymbols, opById);
+        var left = TypeOf(binary.Left, scope, opById);
+        var right = TypeOf(binary.Right, scope, opById);
         if (left is not { } lhs || right is not { } rhs) return null;
         if (lhs.IsArray) return lhs;   // preserve the offending shape for the boundary diagnostic
         if (rhs.IsArray) return rhs;
@@ -156,13 +154,13 @@ internal static class ExpressionTypes
         return new(QType.Int, IsArray: false);
     }
 
-    private static QValueShape? ArrayTypeOf(QArrayLiteral literal, Scope scope, ProgramSymbolGraph? programSymbols,
-        IReadOnlyDictionary<int, QOperation>? opById)
+    private static QValueShape? ArrayTypeOf(QArrayLiteral literal, Scope scope,
+        IReadOnlyDictionary<int, QOperation> opById)
     {
         QType? elementType = null;
         foreach (var element in literal.Elements)
         {
-            if (TypeOf(element, scope, programSymbols, opById) is not
+            if (TypeOf(element, scope, opById) is not
                 { IsArray: false } elementShape)
                 return null;
             elementType = elementType is null

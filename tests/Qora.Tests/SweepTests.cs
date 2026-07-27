@@ -216,7 +216,7 @@ public class SweepTests
     [Fact]
     public void ModelStoresAreAddOnlyPerStore()
     {
-        var m = new SemanticModel();
+        var m = new HirSemanticModel();
         var events = new List<QubitEvent> { Ev(Whole("q"), QubitEventKind.Write, 0, 1, 0) };
         var g = new QubitGraph();
         var summary = new OpEffectSummary(

@@ -21,8 +21,8 @@ public class AdversarialIndexValidationTests
             }
             """);
 
-        Assert.True(compiled.Success);
-        Assert.Empty(compiled.Errors);
+        Assert.True(compiled.Succeeded);
+        Assert.Empty(compiled.Diagnostics.Select(diagnostic => diagnostic.Error).ToList());
     }
 
     [Fact]
@@ -39,10 +39,10 @@ public class AdversarialIndexValidationTests
             }
             """);
 
-        var error = Assert.Single(compiled.Errors);
+        var error = Assert.Single(compiled.Diagnostics.Select(diagnostic => diagnostic.Error).ToList());
         Assert.Equal("QSEM016", error.Code);
-        Assert.DoesNotContain(compiled.Errors, candidate => candidate.Code == "QSEM030");
-        Assert.Empty(compiled.Semantics!.UnprovenIndexes);
+        Assert.DoesNotContain(compiled.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(), candidate => candidate.Code == "QSEM030");
+        Assert.Empty(compiled.Hir.ResolvedValidation!.Model.UnprovenIndexes);
     }
 
     [Fact]
@@ -56,11 +56,11 @@ public class AdversarialIndexValidationTests
             }
             """);
 
-        var error = Assert.Single(compiled.Errors);
+        var error = Assert.Single(compiled.Diagnostics.Select(diagnostic => diagnostic.Error).ToList());
         Assert.Equal("QSEM016", error.Code);
         Assert.Contains("ys[99]", error.Message);
-        Assert.DoesNotContain(compiled.Errors, candidate => candidate.Code == "QSEM030");
-        Assert.Empty(compiled.Semantics!.UnprovenIndexes);
+        Assert.DoesNotContain(compiled.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(), candidate => candidate.Code == "QSEM030");
+        Assert.Empty(compiled.Hir.ResolvedValidation!.Model.UnprovenIndexes);
     }
 
     [Fact]
@@ -73,7 +73,7 @@ public class AdversarialIndexValidationTests
             }
             """);
 
-        var error = Assert.Single(compiled.Errors);
+        var error = Assert.Single(compiled.Diagnostics.Select(diagnostic => diagnostic.Error).ToList());
         Assert.Equal("QSEM016", error.Code);
     }
 
@@ -92,11 +92,11 @@ public class AdversarialIndexValidationTests
             }
             """);
 
-        Assert.False(compiled.Success);
-        Assert.Equal(2, compiled.Errors.Count(error => error.Code == "QSEM030"));
-        Assert.DoesNotContain(compiled.Errors, error => error.Code == "QSEM016");
+        Assert.False(compiled.Succeeded);
+        Assert.Equal(2, compiled.Diagnostics.Select(diagnostic => diagnostic.Error).ToList().Count(error => error.Code == "QSEM030"));
+        Assert.DoesNotContain(compiled.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(), error => error.Code == "QSEM016");
         Assert.Collection(
-            compiled.Semantics!.UnprovenIndexes.OrderBy(fact => fact.Array),
+            compiled.Hir.SpecializedValidation!.Model.UnprovenIndexes.OrderBy(fact => fact.Array),
             fact => Assert.Equal(("xs", "ys [ n ]"), (fact.Array, fact.Index)),
             fact => Assert.Equal(("ys", "n"), (fact.Array, fact.Index)));
     }
@@ -119,10 +119,10 @@ public class AdversarialIndexValidationTests
             }
             """);
 
-        var error = Assert.Single(compiled.Errors);
+        var error = Assert.Single(compiled.Diagnostics.Select(diagnostic => diagnostic.Error).ToList());
         Assert.Equal("QSEM016", error.Code);
         Assert.Contains("ys[99]", error.Message);
-        Assert.Empty(compiled.Semantics!.UnprovenIndexes);
+        Assert.Empty(compiled.Hir.ResolvedValidation!.Model.UnprovenIndexes);
     }
 
     [Theory]
@@ -140,10 +140,10 @@ public class AdversarialIndexValidationTests
             }
             """);
 
-        var error = Assert.Single(compiled.Errors);
+        var error = Assert.Single(compiled.Diagnostics.Select(diagnostic => diagnostic.Error).ToList());
         Assert.Equal("QSEM016", error.Code);
         Assert.Contains("ys[99]", error.Message);
-        Assert.Empty(compiled.Semantics!.UnprovenIndexes);
+        Assert.Empty(compiled.Hir.ResolvedValidation!.Model.UnprovenIndexes);
     }
 
     [Fact]
@@ -165,12 +165,12 @@ public class AdversarialIndexValidationTests
             }
             """);
 
-        Assert.False(compiled.Success);
-        Assert.Equal(2, compiled.Errors.Count(error => error.Code == "QSEM030"));
-        Assert.DoesNotContain(compiled.Errors, error => error.Code == "QSEM016");
+        Assert.False(compiled.Succeeded);
+        Assert.Equal(2, compiled.Diagnostics.Select(diagnostic => diagnostic.Error).ToList().Count(error => error.Code == "QSEM030"));
+        Assert.DoesNotContain(compiled.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(), error => error.Code == "QSEM016");
         Assert.Equal(
             ["xs", "ys"],
-            compiled.Semantics!.UnprovenIndexes.Select(fact => fact.Array).Order().ToArray());
+            compiled.Hir.SpecializedValidation!.Model.UnprovenIndexes.Select(fact => fact.Array).Order().ToArray());
     }
 
     [Fact]
@@ -188,8 +188,8 @@ public class AdversarialIndexValidationTests
             }
             """);
 
-        Assert.True(compiled.Success);
-        Assert.Empty(compiled.Errors);
+        Assert.True(compiled.Succeeded);
+        Assert.Empty(compiled.Diagnostics.Select(diagnostic => diagnostic.Error).ToList());
     }
 
     [Fact]
@@ -210,9 +210,9 @@ public class AdversarialIndexValidationTests
             }
             """);
 
-        var error = Assert.Single(compiled.Errors);
+        var error = Assert.Single(compiled.Diagnostics.Select(diagnostic => diagnostic.Error).ToList());
         Assert.Equal("QSEM030", error.Code);
-        Assert.Single(compiled.Semantics!.UnprovenIndexes);
+        Assert.Single(compiled.Hir.SpecializedValidation!.Model.UnprovenIndexes);
     }
 
     [Theory]
@@ -235,9 +235,9 @@ public class AdversarialIndexValidationTests
             }
             """);
 
-        var error = Assert.Single(compiled.Errors);
+        var error = Assert.Single(compiled.Diagnostics.Select(diagnostic => diagnostic.Error).ToList());
         Assert.Equal("QSEM016", error.Code);
-        Assert.Empty(compiled.Semantics!.UnprovenIndexes);
+        Assert.Empty(compiled.Hir.ResolvedValidation!.Model.UnprovenIndexes);
     }
 
     [Theory]
@@ -261,9 +261,9 @@ public class AdversarialIndexValidationTests
             }
             """);
 
-        var error = Assert.Single(compiled.Errors);
+        var error = Assert.Single(compiled.Diagnostics.Select(diagnostic => diagnostic.Error).ToList());
         Assert.Equal("QSEM030", error.Code);
-        Assert.Single(compiled.Semantics!.UnprovenIndexes);
+        Assert.Single(compiled.Hir.SpecializedValidation!.Model.UnprovenIndexes);
     }
 
     [Fact]
@@ -280,8 +280,8 @@ public class AdversarialIndexValidationTests
             }
             """);
 
-        Assert.True(compiled.Success);
-        Assert.Empty(compiled.Errors);
+        Assert.True(compiled.Succeeded);
+        Assert.Empty(compiled.Diagnostics.Select(diagnostic => diagnostic.Error).ToList());
     }
 
     [Fact]
@@ -298,9 +298,9 @@ public class AdversarialIndexValidationTests
             }
             """);
 
-        var error = Assert.Single(compiled.Errors);
+        var error = Assert.Single(compiled.Diagnostics.Select(diagnostic => diagnostic.Error).ToList());
         Assert.Equal("QSEM016", error.Code);
-        Assert.DoesNotContain(compiled.Errors, candidate => candidate.Code == "QSEM030");
+        Assert.DoesNotContain(compiled.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(), candidate => candidate.Code == "QSEM030");
     }
 
     [Fact]
@@ -318,8 +318,8 @@ public class AdversarialIndexValidationTests
             }
             """);
 
-        Assert.True(compiled.Success);
-        Assert.Empty(compiled.Errors);
+        Assert.True(compiled.Succeeded);
+        Assert.Empty(compiled.Diagnostics.Select(diagnostic => diagnostic.Error).ToList());
     }
 
     [Theory]
@@ -337,13 +337,13 @@ public class AdversarialIndexValidationTests
             }
             """);
 
-        Assert.Equal(2, compiled.Errors.Count);
-        Assert.Contains(compiled.Errors,
+        Assert.Equal(2, compiled.Diagnostics.Select(diagnostic => diagnostic.Error).ToList().Count);
+        Assert.Contains(compiled.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(),
             error => error.Code == "QSEM016" && error.Message.Contains("ys[99]"));
-        Assert.Contains(compiled.Errors,
+        Assert.Contains(compiled.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(),
             error => error.Code == "QSEM007" && error.Message.Contains("missing"));
-        Assert.DoesNotContain(compiled.Errors, error => error.Code == "QSEM030");
-        Assert.Empty(compiled.Semantics!.UnprovenIndexes);
+        Assert.DoesNotContain(compiled.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(), error => error.Code == "QSEM030");
+        Assert.Empty(compiled.Hir.ResolvedValidation!.Model.UnprovenIndexes);
     }
 
     [Fact]
@@ -357,13 +357,13 @@ public class AdversarialIndexValidationTests
             }
             """);
 
-        Assert.Equal(2, compiled.Errors.Count(error => error.Code == "QSEM016"));
-        Assert.Contains(compiled.Errors,
+        Assert.Equal(2, compiled.Diagnostics.Select(diagnostic => diagnostic.Error).ToList().Count(error => error.Code == "QSEM016"));
+        Assert.Contains(compiled.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(),
             error => error.Code == "QSEM016" && error.Message.Contains("ys[99]"));
-        Assert.Contains(compiled.Errors,
+        Assert.Contains(compiled.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(),
             error => error.Code == "QSEM016" && error.Message.Contains("value") && error.Message.Contains("scalar"));
-        Assert.DoesNotContain(compiled.Errors, error => error.Code == "QSEM030");
-        Assert.Empty(compiled.Semantics!.UnprovenIndexes);
+        Assert.DoesNotContain(compiled.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(), error => error.Code == "QSEM030");
+        Assert.Empty(compiled.Hir.ResolvedValidation!.Model.UnprovenIndexes);
     }
 
     [Fact]
@@ -377,13 +377,13 @@ public class AdversarialIndexValidationTests
             }
             """);
 
-        Assert.Equal(2, compiled.Errors.Count(error => error.Code == "QSEM016"));
-        Assert.Contains(compiled.Errors,
+        Assert.Equal(2, compiled.Diagnostics.Select(diagnostic => diagnostic.Error).ToList().Count(error => error.Code == "QSEM016"));
+        Assert.Contains(compiled.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(),
             error => error.Code == "QSEM016" && error.Message.Contains("ys[99]"));
-        Assert.Contains(compiled.Errors,
+        Assert.Contains(compiled.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(),
             error => error.Code == "QSEM016" && error.Message.Contains("classical integer index"));
-        Assert.DoesNotContain(compiled.Errors, error => error.Code == "QSEM030");
-        Assert.Empty(compiled.Semantics!.UnprovenIndexes);
+        Assert.DoesNotContain(compiled.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(), error => error.Code == "QSEM030");
+        Assert.Empty(compiled.Hir.ResolvedValidation!.Model.UnprovenIndexes);
     }
 
     [Theory]
@@ -403,10 +403,10 @@ public class AdversarialIndexValidationTests
             }
             """);
 
-        var error = Assert.Single(compiled.Errors);
+        var error = Assert.Single(compiled.Diagnostics.Select(diagnostic => diagnostic.Error).ToList());
         Assert.Equal("QSEM030", error.Code);
-        Assert.Single(compiled.Semantics!.UnprovenIndexes);
-        Assert.Empty(compiled.Qasm);
+        Assert.Single(compiled.Hir.SpecializedValidation!.Model.UnprovenIndexes);
+        Assert.Null(compiled.Targets.OpenQasm);
     }
 
     [Fact]
@@ -425,9 +425,9 @@ public class AdversarialIndexValidationTests
             }
             """);
 
-        var error = Assert.Single(compiled.Errors);
+        var error = Assert.Single(compiled.Diagnostics.Select(diagnostic => diagnostic.Error).ToList());
         Assert.Equal("QSEM030", error.Code);
-        Assert.Single(compiled.Semantics!.UnprovenIndexes);
-        Assert.Empty(compiled.Qasm);
+        Assert.Single(compiled.Hir.SpecializedValidation!.Model.UnprovenIndexes);
+        Assert.Null(compiled.Targets.OpenQasm);
     }
 }

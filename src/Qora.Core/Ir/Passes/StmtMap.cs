@@ -9,7 +9,7 @@ namespace Qora.Ir.Passes;
 /// this Id?"), and built from the SAME single tree walk (<see cref="ContainerMap.Visit"/>) so nesting is never
 /// a place a statement can hide: every statement at any depth is reachable by its Id.
 /// </summary>
-public static class StmtMap
+internal static class StmtMap
 {
     /// <summary>Build the map for one operation: every statement Id (containers included, at any depth) → its
     /// statement node. An absent key means the Id is not a statement of this operation. One walk, O(1) lookups

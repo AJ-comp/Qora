@@ -11,8 +11,8 @@ public class QubitArrayTests
     {
         var result = Compiler.Compile(source);
 
-        Assert.False(result.Success);
-        Assert.DoesNotContain(result.Errors, error => error.Code is "QORA0000" or "QINTERNAL");
+        Assert.False(result.Succeeded);
+        Assert.DoesNotContain(result.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(), error => error.Code is "QORA0000" or "QINTERNAL");
     }
 
     [Fact]
@@ -30,11 +30,11 @@ public class QubitArrayTests
             }
             """);
 
-        var specs = result.AnalyzedIr!.Operations.Where(o => o.DisplayName == "Visit").ToList();
+        var specs = result.Hir.EffectAnalysis!.Program!.Operations.Where(o => o.DisplayName == "Visit").ToList();
         Assert.Equal(new[] { 2, 3 }, specs.Select(o => o.Params.Single().RegisterSize!.Value).Order().ToArray());
-        Assert.DoesNotContain(".Count", result.Qasm);
-        Assert.Contains("def Visit__sz2(qubit[2] qubits)", result.Qasm);
-        Assert.Contains("def Visit__sz3(qubit[3] qubits)", result.Qasm);
+        Assert.DoesNotContain(".Count", result.Targets.OpenQasm!.Text);
+        Assert.Contains("def Visit__sz2(qubit[2] qubits)", result.Targets.OpenQasm!.Text);
+        Assert.Contains("def Visit__sz3(qubit[3] qubits)", result.Targets.OpenQasm!.Text);
     }
 
     [Fact]
@@ -52,7 +52,7 @@ public class QubitArrayTests
             }
             """);
 
-        var pair = result.AnalyzedIr!.Operations.Single(o => o.DisplayName == "Pair");
+        var pair = result.Hir.EffectAnalysis!.Program!.Operations.Single(o => o.DisplayName == "Pair");
         Assert.Equal(new[] { 2, 3 }, pair.Params.Select(p => p.RegisterSize!.Value).ToArray());
         Assert.Contains("Pair__sz2_3", pair.Name);
     }
@@ -71,8 +71,8 @@ public class QubitArrayTests
             }
             """);
 
-        var inner = result.AnalyzedIr!.Operations.Single(o => o.DisplayName == "Inner");
-        var outer = result.AnalyzedIr.Operations.Single(o => o.DisplayName == "Outer");
+        var inner = result.Hir.EffectAnalysis!.Program!.Operations.Single(o => o.DisplayName == "Inner");
+        var outer = result.Hir.EffectAnalysis!.Program.Operations.Single(o => o.DisplayName == "Outer");
         Assert.Equal(4, inner.Params.Single().RegisterSize);
         Assert.Equal(4, outer.Params.Single().RegisterSize);
         var nestedCall = outer.Body.OfType<QGate>().Single();
@@ -84,27 +84,27 @@ public class QubitArrayTests
     {
         var result = Compile("operation Main(){ use work=Qubit[3]; for i in 0..work.Count-1 { X(work[i]); } }");
 
-        Assert.Contains("for int i in [0:3 - 1]", result.Qasm);
-        Assert.DoesNotContain(".Count", result.Qasm);
+        Assert.Contains("for int i in [0:3 - 1]", result.Targets.OpenQasm!.Text);
+        Assert.DoesNotContain(".Count", result.Targets.OpenQasm!.Text);
     }
 
     [Fact]
     public void SpecializationLeavesClassicalArrayCountForSizeofLowering()
     {
         var result = Compile("""
-            operation Mix(q: Qubit[], inout values: int[]) {
+            operation Mix(q: Qubit[], var values: int[]) {
                 for i in 0..q.Count-1 { X(q[i]); }
                 for j in 0..values.Count-1 { values[j] = values[j] + 1; }
             }
             operation Main() {
                 use q = Qubit[2];
                 var values: int[] = [1, 2, 3];
-                Mix(q, inout values);
+                Mix(q, var values);
             }
             """);
 
-        Assert.Contains("for int i in [0:2 - 1]", result.Qasm);
-        Assert.Contains("for int j in [0:sizeof(values) - 1]", result.Qasm);
+        Assert.Contains("for int i in [0:2 - 1]", result.Targets.OpenQasm!.Text);
+        Assert.Contains("for int j in [0:sizeof(values) - 1]", result.Targets.OpenQasm!.Text);
     }
 
     [Fact]
@@ -113,10 +113,15 @@ public class QubitArrayTests
             "operation Bad(q: Qubit[]){ X(q[2]); } operation Main(){ use q=Qubit[2]; Bad(q); }",
             "QSEM016");
 
-    private static QoraParseResult Compile(string source)
+    private static Compilation Compile(string source)
     {
         var result = Compiler.Compile(source);
-        Assert.True(result.Success, string.Join(" | ", result.Errors.Select(e => $"{e.Code}: {e.Message}")));
+        Assert.True(
+            result.Succeeded,
+            string.Join(
+                " | ",
+                result.Diagnostics.Select(diagnostic =>
+                    $"{diagnostic.Error.Code}: {diagnostic.Error.Message}")));
         return result;
     }
 }

@@ -7,10 +7,28 @@ namespace Qora.Ir.Mir.Analysis;
 /// The stable address of one quantum MIR instruction. Instruction identities are local to a callable,
 /// therefore both identities are required when an analysis result is used as a later rewrite anchor.
 /// </summary>
-public readonly record struct MirEffectSite(
-    MirCallableId Callable,
-    MirBlockId Block,
-    MirInstructionId Instruction);
+public readonly record struct MirEffectSite
+{
+    public MirEffectSite(
+        MirBlockRef block,
+        MirInstructionRef instruction)
+    {
+        if (block.Snapshot != instruction.Snapshot
+            || block.Callable != instruction.Callable)
+        {
+            throw new ArgumentException(
+                "an effect block and instruction must belong to the same MIR snapshot and callable");
+        }
+
+        Block = block;
+        Instruction = instruction;
+    }
+
+    public MirBlockRef Block { get; }
+    public MirInstructionRef Instruction { get; }
+    public MirSnapshotId Snapshot => Instruction.Snapshot;
+    public MirCallableRef Callable => Instruction.CallableRef;
+}
 
 /// <summary>
 /// Orthogonal properties of one qubit operand. A value can be read at one point and written at another
@@ -54,7 +72,7 @@ public enum MirQuantumInstructionKind
 /// silently substitute a newer value.
 /// </summary>
 public sealed record MirClassicalWitness(
-    MirValueId Value,
+    MirValueRef Value,
     MirType Type,
     MirClassicalWitnessRole Role,
     int? OperandIndex);
@@ -67,13 +85,13 @@ public sealed record MirClassicalWitness(
 /// interpret this provenance together with the formal-region alias contracts.
 /// </summary>
 public sealed record MirStorageProvenance(
-    IReadOnlyList<MirStorageId> PossibleStorages,
+    IReadOnlyList<MirStorageRef> PossibleStorages,
     bool IsComplete)
 {
-    private IReadOnlyList<MirStorageId> _possibleStorages =
+    private IReadOnlyList<MirStorageRef> _possibleStorages =
         MirCollections.Freeze(PossibleStorages);
 
-    public IReadOnlyList<MirStorageId> PossibleStorages
+    public IReadOnlyList<MirStorageRef> PossibleStorages
     {
         get => _possibleStorages;
         init => _possibleStorages = MirCollections.Freeze(value);
@@ -86,8 +104,8 @@ public sealed record MirStorageProvenance(
 /// </summary>
 public sealed record MirArrayStateOperand(
     int OperandIndex,
-    MirValueId InputState,
-    MirValueId? OutputState,
+    MirValueRef InputState,
+    MirValueRef? OutputState,
     MirType Type,
     QOwnershipMode Ownership,
     QAccessMode Access,
@@ -100,8 +118,26 @@ public sealed record MirArrayStateOperand(
 /// </summary>
 public sealed record MirQubitOperandEffect(
     int? OperandIndex,
-    MirQubitPlace Place,
+    MirQubitPlaceRef Place,
     MirQubitEffectFlags Flags);
+
+/// <summary>A call target resolved within the exact MIR snapshot used by an effect result.</summary>
+public abstract record MirEffectCallTarget
+{
+    public abstract string DisplayName { get; }
+}
+
+public sealed record MirEffectUserCallableTarget(
+    MirCallableRef Callable) : MirEffectCallTarget
+{
+    public override string DisplayName => Callable.ToString();
+}
+
+public sealed record MirEffectBuiltinGateTarget(
+    string Name) : MirEffectCallTarget
+{
+    public override string DisplayName => Name;
+}
 
 /// <summary>
 /// All replay-relevant facts extracted from one <see cref="MirQuantumApply"/> or
@@ -111,24 +147,24 @@ public sealed record MirQubitOperandEffect(
 public sealed record MirQuantumInstructionEffect(
     MirEffectSite Site,
     MirQuantumInstructionKind Kind,
-    MirCallTarget? Target,
+    MirEffectCallTarget? Target,
     IReadOnlyList<MirFunctor> Functors,
     IReadOnlyList<MirQubitOperandEffect> Qubits,
     IReadOnlyList<MirClassicalWitness> ClassicalWitnesses,
     IReadOnlyList<MirArrayStateOperand> ArrayStates,
     MirPathCondition PathCondition,
     MirExecutionMultiplicity ExecutionMultiplicity,
-    IReadOnlyList<MirValueId> Results,
+    IReadOnlyList<MirValueRef> Results,
     bool IsIrreversible,
     bool TransfersOwnership,
-    MirSource Source)
+    MirOriginRef Origin)
 {
     private IReadOnlyList<MirFunctor> _functors = MirCollections.Freeze(Functors);
     private IReadOnlyList<MirQubitOperandEffect> _qubits = MirCollections.Freeze(Qubits);
     private IReadOnlyList<MirClassicalWitness> _classicalWitnesses =
         MirCollections.Freeze(ClassicalWitnesses);
     private IReadOnlyList<MirArrayStateOperand> _arrayStates = MirCollections.Freeze(ArrayStates);
-    private IReadOnlyList<MirValueId> _results = MirCollections.Freeze(Results);
+    private IReadOnlyList<MirValueRef> _results = MirCollections.Freeze(Results);
 
     public IReadOnlyList<MirFunctor> Functors
     {
@@ -154,7 +190,7 @@ public sealed record MirQuantumInstructionEffect(
         init => _arrayStates = MirCollections.Freeze(value);
     }
 
-    public IReadOnlyList<MirValueId> Results
+    public IReadOnlyList<MirValueRef> Results
     {
         get => _results;
         init => _results = MirCollections.Freeze(value);
@@ -167,11 +203,11 @@ public sealed record MirQuantumInstructionEffect(
 /// Element-sensitive interprocedural substitution is intentionally deferred.
 /// </summary>
 public sealed record MirFormalQubitEffect(
-    MirQubitResourceId Resource,
+    MirQubitResourceRef Resource,
     MirQubitEffectFlags Flags);
 
 public sealed record MirCallableEffectSummary(
-    MirCallableId Callable,
+    MirCallableRef Callable,
     IReadOnlyList<MirFormalQubitEffect> FormalQubits,
     bool IsIrreversible,
     bool TransfersOwnership)
@@ -185,8 +221,21 @@ public sealed record MirCallableEffectSummary(
         init => _formalQubits = MirCollections.Freeze(value);
     }
 
-    public MirQubitEffectFlags EffectOf(MirQubitResourceId resource) =>
-        FormalQubits.FirstOrDefault(effect => effect.Resource == resource)?.Flags
+    public MirQubitEffectFlags EffectOf(MirQubitResourceRef resource)
+    {
+        MirReferenceValidation.RequireSnapshot(
+            Callable.Snapshot,
+            resource.Snapshot,
+            nameof(resource));
+        if (resource.Callable != Callable.Callable)
+            throw new ArgumentException(
+                $"qubit resource belongs to callable {resource.Callable}; expected {Callable}",
+                nameof(resource));
+        return EffectOf(resource.Resource);
+    }
+
+    internal MirQubitEffectFlags EffectOf(MirQubitResourceId resource) =>
+        FormalQubits.FirstOrDefault(effect => effect.Resource.Resource == resource)?.Flags
         ?? MirQubitEffectFlags.None;
 }
 
@@ -199,7 +248,7 @@ public sealed class MirEffectSnapshot
 {
     private readonly MirProgram _sourceProgram;
     private readonly FrozenDictionary<MirEffectSite, MirQuantumInstructionEffect> _effectBySite;
-    private readonly FrozenDictionary<MirCallableId, MirCallableEffectSummary> _summaryByCallable;
+    private readonly FrozenDictionary<MirCallableRef, MirCallableEffectSummary> _summaryByCallable;
 
     internal MirEffectSnapshot(
         MirProgram sourceProgram,
@@ -207,33 +256,48 @@ public sealed class MirEffectSnapshot
         IReadOnlyList<MirCallableEffectSummary> summaries)
     {
         _sourceProgram = sourceProgram;
-        ProgramRevision = sourceProgram.Revision;
+        SnapshotId = sourceProgram.SnapshotId;
         Effects = MirCollections.Freeze(effects);
         CallableSummaries = MirCollections.Freeze(summaries);
         _effectBySite = Effects.ToFrozenDictionary(effect => effect.Site);
         _summaryByCallable = CallableSummaries.ToFrozenDictionary(summary => summary.Callable);
     }
 
-    public int ProgramRevision { get; }
+    public MirSnapshotId SnapshotId { get; }
     public IReadOnlyList<MirQuantumInstructionEffect> Effects { get; }
     public IReadOnlyList<MirCallableEffectSummary> CallableSummaries { get; }
 
-    public bool IsFor(MirProgram program) =>
-        ReferenceEquals(_sourceProgram, program) && ProgramRevision == program.Revision;
+    internal bool IsFor(MirProgram program) =>
+        ReferenceEquals(_sourceProgram, program) && SnapshotId == program.SnapshotId;
 
-    public void EnsureFor(MirProgram program)
+    internal void EnsureFor(MirProgram program)
     {
         if (!IsFor(program))
             throw new InvalidOperationException(
-                $"MIR effect snapshot belongs to revision {ProgramRevision} of a different program instance; " +
-                $"reanalyze revision {program.Revision} before consuming it");
+                $"MIR effect snapshot belongs to {SnapshotId} of a different program instance; " +
+                $"reanalyze snapshot {program.SnapshotId} before consuming it");
     }
 
-    public MirQuantumInstructionEffect? EffectAt(MirEffectSite site) =>
-        _effectBySite.GetValueOrDefault(site);
+    public MirQuantumInstructionEffect? EffectAt(MirEffectSite site)
+    {
+        MirReferenceValidation.RequireSnapshot(
+            SnapshotId,
+            site.Snapshot,
+            nameof(site));
+        return _effectBySite.GetValueOrDefault(site);
+    }
 
-    public MirCallableEffectSummary? SummaryOf(MirCallableId callable) =>
-        _summaryByCallable.GetValueOrDefault(callable);
+    public MirCallableEffectSummary? SummaryOf(MirCallableRef callable)
+    {
+        MirReferenceValidation.RequireSnapshot(
+            SnapshotId,
+            callable.Snapshot,
+            nameof(callable));
+        return _summaryByCallable.GetValueOrDefault(callable);
+    }
+
+    internal MirCallableEffectSummary? SummaryOf(MirCallableId callable) =>
+        _summaryByCallable.GetValueOrDefault(new MirCallableRef(SnapshotId, callable));
 
 }
 
@@ -242,26 +306,50 @@ public sealed class MirEffectSnapshot
 /// places, and computes interprocedural formal-resource summaries. It does not decide cleanup safety,
 /// choose a global cleanup order, or mutate MIR.
 /// </summary>
-public static class MirEffectAnalysis
+internal static class MirEffectAnalysis
 {
-    public static MirEffectSnapshot Analyze(MirProgram program)
+    internal static MirEffectSnapshot Analyze(MirProgram program)
     {
         ArgumentNullException.ThrowIfNull(program);
         QoraMirVerifier.VerifyOrThrow(program);
-        return new Analyzer(program).Run();
+        return new Analyzer(
+            program,
+            callable => MirStorageProvenanceAnalysis.Analyze(program, callable),
+            callable => MirPathConditionAnalysis.Analyze(program, callable)).Run();
+    }
+
+    /// <summary>
+    /// Computes effects from dependency providers owned by the same verified MIR snapshot.
+    /// </summary>
+    internal static MirEffectSnapshot AnalyzeVerified(
+        MirProgram program,
+        Func<MirCallableId, MirStorageProvenanceSnapshot> storageProvenance,
+        Func<MirCallableId, MirPathConditionSnapshot> pathConditions)
+    {
+        ArgumentNullException.ThrowIfNull(program);
+        ArgumentNullException.ThrowIfNull(storageProvenance);
+        ArgumentNullException.ThrowIfNull(pathConditions);
+        return new Analyzer(program, storageProvenance, pathConditions).Run();
     }
 
     private sealed class Analyzer
     {
         private readonly MirProgram _program;
         private readonly IReadOnlyDictionary<MirCallableId, MirCallable> _callables;
+        private readonly Func<MirCallableId, MirStorageProvenanceSnapshot> _storageProvenance;
+        private readonly Func<MirCallableId, MirPathConditionSnapshot> _pathConditions;
         private readonly Dictionary<MirCallableId, MirCallableEffectSummary> _summaries = new();
         private readonly HashSet<MirCallableId> _summaryStack = new();
 
-        public Analyzer(MirProgram program)
+        public Analyzer(
+            MirProgram program,
+            Func<MirCallableId, MirStorageProvenanceSnapshot> storageProvenance,
+            Func<MirCallableId, MirPathConditionSnapshot> pathConditions)
         {
             _program = program;
             _callables = program.Callables.ToDictionary(callable => callable.Id);
+            _storageProvenance = storageProvenance;
+            _pathConditions = pathConditions;
         }
 
         public MirEffectSnapshot Run()
@@ -274,10 +362,10 @@ public static class MirEffectAnalysis
             var effects = new List<MirQuantumInstructionEffect>();
             foreach (var callable in _program.Callables)
             {
-                var storage = MirStorageProvenanceAnalysis.Analyze(
-                    _program,
-                    callable.Id);
-                var paths = MirPathConditionAnalysis.Analyze(_program, callable.Id);
+                var storage = _storageProvenance(callable.Id);
+                storage.EnsureFor(_program, callable.Id);
+                var paths = _pathConditions(callable.Id);
+                paths.EnsureFor(_program, callable.Id);
                 foreach (var block in callable.Blocks)
                 {
                     foreach (var instruction in block.Instructions)
@@ -341,14 +429,14 @@ public static class MirEffectAnalysis
                         {
                             case MirQuantumApply apply:
                                 (effects, instructionIrreversible, instructionTransfersOwnership) =
-                                    ClassifyApply(apply);
+                                    ClassifyApply(callable, apply);
                                 break;
                             case MirMeasure measure:
                                 effects = new[]
                                 {
                                     new MirQubitOperandEffect(
                                         OperandIndex: null,
-                                        measure.Place,
+                                        QubitPlace(callable, measure.Place),
                                         MirQubitEffectFlags.Write
                                         | MirQubitEffectFlags.Measure
                                         | MirQubitEffectFlags.Irreversible),
@@ -363,19 +451,22 @@ public static class MirEffectAnalysis
                         irreversible |= instructionIrreversible;
                         transfersOwnership |= instructionTransfersOwnership;
                         foreach (var effect in effects)
-                            if (flagsByResource.ContainsKey(effect.Place.Resource))
-                                flagsByResource[effect.Place.Resource] |= effect.Flags;
+                            if (flagsByResource.ContainsKey(effect.Place.Resource.Resource))
+                                flagsByResource[effect.Place.Resource.Resource] |= effect.Flags;
                     }
                 }
 
                 var formalEffects = callable.Parameters
                     .OfType<MirQubitParameter>()
                     .Select(parameter => new MirFormalQubitEffect(
-                        parameter.Resource,
+                        new MirQubitResourceRef(
+                            _program.SnapshotId,
+                            callable.Id,
+                            parameter.Resource),
                         flagsByResource[parameter.Resource]))
                     .ToArray();
                 complete = new MirCallableEffectSummary(
-                    callable.Id,
+                    new MirCallableRef(_program.SnapshotId, callable.Id),
                     ReadOnly(formalEffects),
                     irreversible,
                     transfersOwnership);
@@ -395,7 +486,7 @@ public static class MirEffectAnalysis
             MirStorageProvenanceSnapshot storage,
             MirPathConditionSnapshot paths)
         {
-            var (qubits, irreversible, transfersOwnership) = ClassifyApply(apply);
+            var (qubits, irreversible, transfersOwnership) = ClassifyApply(callable, apply);
             var witnesses = new List<MirClassicalWitness>();
             var arrays = new List<MirArrayStateOperand>();
             var mutableResultByOperand = apply.MutableArrayResults
@@ -412,8 +503,12 @@ public static class MirEffectAnalysis
                         {
                             arrays.Add(new MirArrayStateOperand(
                                 operandIndex,
-                                classical.Value,
-                                mutableResultByOperand.GetValueOrDefault(operandIndex),
+                                Value(callable, classical.Value),
+                                mutableResultByOperand.TryGetValue(
+                                    operandIndex,
+                                    out var mutableResult)
+                                    ? Value(callable, mutableResult)
+                                    : null,
                                 value.Type,
                                 classical.Ownership,
                                 classical.Access,
@@ -422,7 +517,7 @@ public static class MirEffectAnalysis
                         else
                         {
                             witnesses.Add(new MirClassicalWitness(
-                                classical.Value,
+                                Value(callable, classical.Value),
                                 value.Type,
                                 MirClassicalWitnessRole.CallOperand,
                                 operandIndex));
@@ -433,7 +528,7 @@ public static class MirEffectAnalysis
                     {
                         var value = RequiredValue(callable, index, apply.Id);
                         witnesses.Add(new MirClassicalWitness(
-                            index,
+                            Value(callable, index),
                             value.Type,
                             MirClassicalWitnessRole.QubitIndex,
                             operandIndex));
@@ -443,22 +538,22 @@ public static class MirEffectAnalysis
             }
 
             return new MirQuantumInstructionEffect(
-                new MirEffectSite(callable.Id, block.Id, apply.Id),
+                Site(callable, block, apply),
                 MirQuantumInstructionKind.Apply,
-                apply.Target,
+                Target(apply.Target),
                 ReadOnly(apply.Functors),
                 ReadOnly(qubits),
                 ReadOnly(witnesses),
                 ReadOnly(arrays),
                 paths.ConditionFor(block.Id),
                 paths.MultiplicityOf(block.Id),
-                ReadOnly(apply.ResultValues),
+                ReadOnly(apply.ResultValues.Select(value => Value(callable, value)).ToArray()),
                 irreversible,
                 transfersOwnership,
-                apply.Source);
+                apply.Origin);
         }
 
-        private static MirQuantumInstructionEffect DescribeMeasure(
+        private MirQuantumInstructionEffect DescribeMeasure(
             MirCallable callable,
             MirBlock block,
             MirMeasure measure,
@@ -469,7 +564,7 @@ public static class MirEffectAnalysis
             {
                 var value = RequiredValue(callable, index, measure.Id);
                 witnesses.Add(new MirClassicalWitness(
-                    index,
+                    Value(callable, index),
                     value.Type,
                     MirClassicalWitnessRole.QubitIndex,
                     OperandIndex: null));
@@ -479,13 +574,13 @@ public static class MirEffectAnalysis
             {
                 new MirQubitOperandEffect(
                     OperandIndex: null,
-                    measure.Place,
+                    QubitPlace(callable, measure.Place),
                     MirQubitEffectFlags.Write
                     | MirQubitEffectFlags.Measure
                     | MirQubitEffectFlags.Irreversible),
             };
             return new MirQuantumInstructionEffect(
-                new MirEffectSite(callable.Id, block.Id, measure.Id),
+                Site(callable, block, measure),
                 MirQuantumInstructionKind.Measure,
                 Target: null,
                 Functors: Array.Empty<MirFunctor>(),
@@ -494,23 +589,28 @@ public static class MirEffectAnalysis
                 ArrayStates: Array.Empty<MirArrayStateOperand>(),
                 PathCondition: paths.ConditionFor(block.Id),
                 ExecutionMultiplicity: paths.MultiplicityOf(block.Id),
-                Results: ReadOnly(measure.ResultValues),
+                Results: ReadOnly(
+                    measure.ResultValues.Select(value => Value(callable, value)).ToArray()),
                 IsIrreversible: true,
                 TransfersOwnership: false,
-                measure.Source);
+                measure.Origin);
         }
 
         private (
             IReadOnlyList<MirQubitOperandEffect> Effects,
             bool Irreversible,
             bool TransfersOwnership)
-            ClassifyApply(MirQuantumApply apply)
+            ClassifyApply(
+                MirCallable callable,
+                MirQuantumApply apply)
         {
             var (baseEffects, irreversible, calleeTransfersOwnership) = apply.Target switch
             {
                 MirBuiltinGateTarget builtin =>
-                    AddTransferResult(ClassifyBuiltin(apply, builtin), transfersOwnership: false),
-                MirUserCallableTarget user => ClassifyUserCall(apply, user),
+                    AddTransferResult(
+                        ClassifyBuiltin(callable, apply, builtin),
+                        transfersOwnership: false),
+                MirUserCallableTarget user => ClassifyUserCall(callable, apply, user),
                 _ => throw new InvalidOperationException(
                     $"QINTERNAL: quantum apply {apply.Id} uses non-quantum target `{apply.Target.DisplayName}`"),
             };
@@ -546,8 +646,11 @@ public static class MirEffectAnalysis
                 bool transfersOwnership) =>
             (classified.Effects, classified.Irreversible, transfersOwnership);
 
-        private static (IReadOnlyList<MirQubitOperandEffect> Effects, bool Irreversible)
-            ClassifyBuiltin(MirQuantumApply apply, MirBuiltinGateTarget target)
+        private (IReadOnlyList<MirQubitOperandEffect> Effects, bool Irreversible)
+            ClassifyBuiltin(
+                MirCallable callable,
+                MirQuantumApply apply,
+                MirBuiltinGateTarget target)
         {
             if (!QoraGates.Gates.TryGetValue(target.Name, out var info))
                 throw new InvalidOperationException(
@@ -579,7 +682,10 @@ public static class MirEffectAnalysis
                     flags = MirQubitEffectFlags.Write;
                     if (info.NonQfree) flags |= MirQubitEffectFlags.NonQfree;
                 }
-                effects.Add(new MirQubitOperandEffect(operandIndex, operand.Place, flags));
+                effects.Add(new MirQubitOperandEffect(
+                    operandIndex,
+                    QubitPlace(callable, operand.Place),
+                    flags));
             }
 
             return (ReadOnly(effects), !info.Unitary);
@@ -589,7 +695,10 @@ public static class MirEffectAnalysis
             IReadOnlyList<MirQubitOperandEffect> Effects,
             bool Irreversible,
             bool TransfersOwnership)
-            ClassifyUserCall(MirQuantumApply apply, MirUserCallableTarget target)
+            ClassifyUserCall(
+                MirCallable caller,
+                MirQuantumApply apply,
+                MirUserCallableTarget target)
         {
             if (!_callables.TryGetValue(target.Callable, out var callee))
                 throw new InvalidOperationException(
@@ -610,7 +719,10 @@ public static class MirEffectAnalysis
                     && flags.HasFlag(MirQubitEffectFlags.Write)
                     && !flags.HasFlag(MirQubitEffectFlags.Measure))
                     flags |= MirQubitEffectFlags.Irreversible;
-                effects.Add(new MirQubitOperandEffect(operandIndex, actual.Place, flags));
+                effects.Add(new MirQubitOperandEffect(
+                    operandIndex,
+                    QubitPlace(caller, actual.Place),
+                    flags));
             }
 
             return (
@@ -626,6 +738,43 @@ public static class MirEffectAnalysis
             callable.FindValue(value)
             ?? throw new InvalidOperationException(
                 $"QINTERNAL: instruction {instruction} in `{callable.Name}` references missing value {value}");
+
+        private MirEffectSite Site(
+            MirCallable callable,
+            MirBlock block,
+            MirInstruction instruction) =>
+            new(
+                new MirBlockRef(_program.SnapshotId, callable.Id, block.Id),
+                new MirInstructionRef(_program.SnapshotId, callable.Id, instruction.Id));
+
+        private MirValueRef Value(
+            MirCallable callable,
+            MirValueId value) =>
+            new(_program.SnapshotId, callable.Id, value);
+
+        private MirQubitPlaceRef QubitPlace(
+            MirCallable callable,
+            MirQubitPlace place) =>
+            new(
+                new MirQubitResourceRef(
+                    _program.SnapshotId,
+                    callable.Id,
+                    place.Resource),
+                place.Index is MirValueId index
+                    ? Value(callable, index)
+                    : null);
+
+        private MirEffectCallTarget Target(MirCallTarget target) =>
+            target switch
+            {
+                MirUserCallableTarget user =>
+                    new MirEffectUserCallableTarget(
+                        new MirCallableRef(_program.SnapshotId, user.Callable)),
+                MirBuiltinGateTarget builtin =>
+                    new MirEffectBuiltinGateTarget(builtin.Name),
+                _ => throw new InvalidOperationException(
+                    $"QINTERNAL: unsupported quantum effect target `{target.DisplayName}`"),
+            };
 
         private static ReadOnlyCollection<T> ReadOnly<T>(IReadOnlyList<T> items) =>
             Array.AsReadOnly(items.ToArray());

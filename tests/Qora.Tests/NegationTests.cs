@@ -28,9 +28,9 @@ public class NegationTests
     {
         // an int loop var compared to 1 must stay `i == 1` — NOT wrongly rewritten to `i == true`
         var r = Compiler.Compile("operation Main(){ use q=Qubit[1]; for i in 0..2 { if(i==1){ X(q[0]); } } }");
-        Assert.True(r.Success);
-        Assert.Contains("i == 1", r.Qasm);
-        Assert.DoesNotContain("i == true", r.Qasm);
+        Assert.True(r.Succeeded);
+        Assert.Contains("i == 1", r.Targets.OpenQasm!.Text);
+        Assert.DoesNotContain("i == true", r.Targets.OpenQasm!.Text);
     }
 
     [Fact]
@@ -46,8 +46,8 @@ public class NegationTests
         // (`a == 0 < 2` groups as a == (0 < 2)). The renderer must parenthesize the synthesized
         // subtree so the QASM keeps the tree's grouping.
         var r = Compiler.Compile("operation Main(){ use q=Qubit[1]; var a: int = 0; if (!a < 2) { X(q[0]); } }");
-        Assert.True(r.Success, string.Join(" | ", r.Errors.Select(e => $"{e.Code}: {e.Message}")));
-        Assert.Contains("( a == 0 ) < 2", r.Qasm);
+        Assert.True(r.Succeeded, string.Join(" | ", r.Diagnostics.Select(diagnostic => diagnostic.Error).ToList().Select(e => $"{e.Code}: {e.Message}")));
+        Assert.Contains("( a == 0 ) < 2", r.Targets.OpenQasm!.Text);
     }
 
     [Fact]
@@ -57,7 +57,7 @@ public class NegationTests
         // Unparenthesized, `n == m == 0` re-parses LEFT-associatively as (n == m) == 0 — the opposite
         // branch fires. A same-precedence RIGHT child must be parenthesized.
         var r = Compiler.Compile("operation Main(){ use q=Qubit[1]; var n: int = 2; var m: int = 5; if (n == !m) { X(q[0]); } }");
-        Assert.True(r.Success, string.Join(" | ", r.Errors.Select(e => $"{e.Code}: {e.Message}")));
-        Assert.Contains("n == ( m == 0 )", r.Qasm);
+        Assert.True(r.Succeeded, string.Join(" | ", r.Diagnostics.Select(diagnostic => diagnostic.Error).ToList().Select(e => $"{e.Code}: {e.Message}")));
+        Assert.Contains("n == ( m == 0 )", r.Targets.OpenQasm!.Text);
     }
 }

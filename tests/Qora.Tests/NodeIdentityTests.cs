@@ -1,17 +1,17 @@
 using System.Collections.Generic;
 using System.Linq;
+using Qora.Compiler;
 using Qora.Ir;
 using Qora.Ir.Passes;
 
 namespace Qora.Tests;
 
 /// <summary>
-/// The stable-node-Id + persistent <see cref="SemanticModel"/> architecture: every IR node carries an
+/// The stable-node-Id + persistent <see cref="HirSemanticModel"/> architecture: every IR node carries an
 /// <c>Id</c> minted at <c>new</c> and inherited by <c>with</c>; subtree copiers re-mint via
-/// <see cref="ReId"/> (recording lineage into the model when they run after validation); and the model
-/// built at the final Validate joins a node's FINAL name (post-mangling) to its validation-time facts.
-/// These pin the record-semantics foundation, Id uniqueness through the whole pipeline, the
-/// Id→Symbol join, and the DerivedFrom lineage chain.
+/// <see cref="ReId"/> and return explicit lineage edges; the validation model remains bound to its exact
+/// HIR snapshot; and target names live in the OpenQASM artifact. These tests pin record semantics, Id
+/// uniqueness, the Id→Symbol join, returned copy lineage, and target naming ownership.
 /// </summary>
 public class NodeIdentityTests
 {
@@ -58,11 +58,17 @@ public class NodeIdentityTests
     [Fact]
     public void PipelineWithSpecializationsAndAdjointHasUniqueIds()
     {
-        var r = QoraParser.Parse(
+        var compilation = QoraCompiler.Compile(
             "operation Flip(q: Qubit[]){ for i in 0..q.Count-1 { X(q[i]); } }\n" +
             "operation Main(){ use a=Qubit[2]; use b=Qubit[3]; Flip(a); Flip(b); Adjoint Flip(a); }");
-        Assert.True(r.Success, string.Join(" | ", r.Errors));
-        Assert.DoesNotContain(r.Errors, e => e.Code == "QINTERNAL");
+        Assert.True(
+            compilation.Succeeded,
+            string.Join(
+                " | ",
+                compilation.Diagnostics.Select(diagnostic => diagnostic.Error)));
+        Assert.DoesNotContain(
+            compilation.Diagnostics,
+            diagnostic => diagnostic.Error.Code == "QINTERNAL");
     }
 
     // --- 4. the model joins a final node Id to its validation-time symbol — even when the SURFACE name
@@ -71,52 +77,79 @@ public class NodeIdentityTests
     [Fact]
     public void SemanticsFindSymbolReturnsValidationTimeTypeById()
     {
-        var r = QoraParser.Parse("operation Main(){ use q=Qubit[1]; const x: int = 1; H(q[0]); }");
-        Assert.True(r.Success, string.Join(" | ", r.Errors));
-        Assert.NotNull(r.Semantics);
+        var compilation = QoraCompiler.Compile(
+            "operation Main(){ use q=Qubit[1]; const x: int = 1; H(q[0]); }");
+        Assert.True(
+            compilation.Succeeded,
+            string.Join(
+                " | ",
+                compilation.Diagnostics.Select(diagnostic => diagnostic.Error)));
 
-        var decl = r.Ir!.Operations.SelectMany(o => o.Body).OfType<QDecl>().Single(d => d.Name == "x");
-        var sym = r.Semantics!.FindSymbol(decl.Id);
+        var analyzed = Assert.IsType<HirSemanticArtifact>(compilation.Hir.EffectAnalysis);
+        var semantics = analyzed.Model;
+        var decl = analyzed.Program.Operations
+            .SelectMany(operation => operation.Body)
+            .OfType<QDecl>()
+            .Single(declaration => declaration.Name == "x");
+        var sym = semantics.FindSymbol(decl.Id);
         Assert.NotNull(sym);
         Assert.Equal(QType.Int, sym!.Type);
         Assert.True(sym.IsConst);
     }
 
-    // --- 4b. the `--stages` symbols view: rendering from the persisted model must produce the exact
-    //         text the on-demand rebuild produced (the generic op exercises the still-generic-op
-    //         fallback, since the model keys the post-monomorphize specializations). ---
+    // --- 4b. the `--stages` symbols view reads the exact analyzed HIR/model pair. ---
 
     [Fact]
-    public void ModelBasedSymbolFormatMatchesRebuildText()
+    public void SymbolFormatReadsExactAnalyzedSnapshot()
     {
-        var r = QoraParser.Parse(
+        var compilation = QoraCompiler.Compile(
             "operation Flip(q: Qubit[]){ for i in 0..q.Count-1 { X(q[i]); } }\n" +
             "operation Main(){ use a=Qubit[2]; const x: int = 1; Flip(a); }");
-        Assert.True(r.Success, string.Join(" | ", r.Errors));
-        Assert.Equal(SymbolTableBuilder.Format(r.Ir), SymbolTableBuilder.Format(r.Ir, r.Semantics));
+        Assert.True(
+            compilation.Succeeded,
+            string.Join(
+                " | ",
+                compilation.Diagnostics.Select(diagnostic => diagnostic.Error)));
+
+        var analyzed = Assert.IsType<HirSemanticArtifact>(compilation.Hir.EffectAnalysis);
+        var semantics = analyzed.Model;
+        var formatted = SymbolTableBuilder.Format(analyzed.Program, semantics);
+        Assert.Contains("Main: operation", formatted);
+        Assert.Contains("x: const int = 1", formatted);
     }
 
     // --- 4c. the two name domains, each with ONE home: Symbol.SourceName keeps the user's spelling
-    //         forever (diagnostics, symbol views), while the emitted (post-mangling) name is the
-    //         mangler's own fact recorded on the model. `x` collides with the stdgates gate x → x_;
-    //         `q` doesn't collide and is still recorded, because a null FindEmittedName must mean
-    //         "the mangler never saw this node", never "unchanged". ---
+    //         forever, while emitted names belong exclusively to the OpenQASM target artifact. ---
 
     [Fact]
-    public void ManglerRecordsEmittedNamesAndSourceNameStaysUserSpelling()
+    public void TargetSymbolMapOwnsEmittedNamesAndSourceNameStaysUserSpelling()
     {
-        var r = QoraParser.Parse("operation Main(){ use q=Qubit[1]; const x: int = 1; H(q[0]); }");
-        Assert.True(r.Success, string.Join(" | ", r.Errors));
-        Assert.NotNull(r.Semantics);
+        var compilation = QoraCompiler.Compile(
+            "operation Main(){ use q=Qubit[1]; const x: int = 1; H(q[0]); }");
+        Assert.True(
+            compilation.Succeeded,
+            string.Join(
+                " | ",
+                compilation.Diagnostics.Select(diagnostic => diagnostic.Error)));
 
-        var decl = r.Ir!.Operations.SelectMany(o => o.Body).OfType<QDecl>().Single(d => d.Name == "x");
-        var use = r.Ir!.Operations.SelectMany(o => o.Body).OfType<QUse>().Single();
+        var analyzed = Assert.IsType<HirSemanticArtifact>(compilation.Hir.EffectAnalysis);
+        var semantics = analyzed.Model;
+        var decl = analyzed.Program.Operations
+            .SelectMany(operation => operation.Body)
+            .OfType<QDecl>()
+            .Single(declaration => declaration.Name == "x");
+        var use = analyzed.Program.Operations
+            .SelectMany(operation => operation.Body)
+            .OfType<QUse>()
+            .Single();
+        var artifact = Assert.IsType<OpenQasmArtifact>(
+            compilation.Targets.OpenQasm);
 
-        var sym = r.Semantics!.FindSymbol(decl.Id);
+        var sym = semantics.FindSymbol(decl.Id);
         Assert.Equal("x", sym!.SourceName);                          // source domain: frozen user spelling
-        Assert.Equal("x_", r.Semantics.FindEmittedName(decl.Id));    // emitted domain: renamed past the gate x
-        Assert.Equal("q", r.Semantics.FindEmittedName(use.Id));      // an unchanged name is recorded too
-        Assert.Contains("x_", r.Qasm);                               // and the QASM really uses the emitted name
+        Assert.Equal("x_", artifact.Program.Symbols.GetEmittedName(decl.Id));
+        Assert.Equal("q", artifact.Program.Symbols.GetEmittedName(use.Id));
+        Assert.Contains("x_", artifact.Text);
     }
 
     // --- 4d. every declaring NODE gets its OWN emitted name. Same-name declarations in DISJOINT sibling
@@ -127,17 +160,24 @@ public class NodeIdentityTests
     [Fact]
     public void SiblingSameNameDeclsGetDistinctEmittedNames()
     {
-        var r = QoraParser.Parse(
+        var compilation = QoraCompiler.Compile(
             "operation Main(){ use q=Qubit[2]; for i in 0..1 { H(q[i]); } for i in 0..1 { X(q[i]); } }");
-        Assert.True(r.Success, string.Join(" | ", r.Errors));
+        Assert.True(
+            compilation.Succeeded,
+            string.Join(
+                " | ",
+                compilation.Diagnostics.Select(diagnostic => diagnostic.Error)));
 
-        var fors = r.Ir!.Operations.Single().Body.OfType<QFor>().ToList();
+        var analyzed = Assert.IsType<HirSemanticArtifact>(compilation.Hir.EffectAnalysis);
+        var artifact = Assert.IsType<OpenQasmArtifact>(
+            compilation.Targets.OpenQasm);
+        var fors = analyzed.Program.Operations.Single().Body
+            .OfType<QFor>()
+            .ToList();
         Assert.Equal(2, fors.Count);
-        var first = r.Semantics!.FindEmittedName(fors[0].Id);
-        var second = r.Semantics.FindEmittedName(fors[1].Id);
-        Assert.False(string.IsNullOrEmpty(first));    // every declaring node records a fact
-        Assert.False(string.IsNullOrEmpty(second));
-        Assert.NotEqual(first, second);               // ...and two distinct declarations never share one
+        var first = artifact.Program.Symbols.GetEmittedName(fors[0].Id);
+        var second = artifact.Program.Symbols.GetEmittedName(fors[1].Id);
+        Assert.NotEqual(first, second);
     }
 
     // --- 4e. the parameter and operation record sites (separate code from CollectDecls): a def-local
@@ -147,24 +187,32 @@ public class NodeIdentityTests
     [Fact]
     public void ParameterAndOperationNodesCarryEmittedNameFacts()
     {
-        var r = QoraParser.Parse(
+        var compilation = QoraCompiler.Compile(
             "operation Foo(x: Qubit[]){ H(x[0]); }\noperation Main(){ use q=Qubit[1]; Foo(q); }");
-        Assert.True(r.Success, string.Join(" | ", r.Errors));
+        Assert.True(
+            compilation.Succeeded,
+            string.Join(
+                " | ",
+                compilation.Diagnostics.Select(diagnostic => diagnostic.Error)));
 
-        var foo = r.AnalyzedIr!.Operations.Single(o => o.DisplayName == "Foo");
-        var main = r.AnalyzedIr.Operations.Single(o => o.Name == "Main");
-        Assert.Equal("x_", r.Semantics!.FindEmittedName(foo.Params.Single().Id));
-        Assert.Equal(foo.Name, r.Semantics.FindEmittedName(foo.Id));
-        Assert.Equal("Main", r.Semantics.FindEmittedName(main.Id));
-        Assert.Contains($"def {foo.Name}(qubit[1] x_)", r.Qasm);
+        var analyzed = Assert.IsType<HirSemanticArtifact>(compilation.Hir.EffectAnalysis);
+        var artifact = Assert.IsType<OpenQasmArtifact>(
+            compilation.Targets.OpenQasm);
+        var foo = analyzed.Program.Operations
+            .Single(operation => operation.DisplayName == "Foo");
+        var main = analyzed.Program.Operations
+            .Single(operation => operation.Name == "Main");
+        var symbols = artifact.Program.Symbols;
+        Assert.Equal("x_", symbols.GetEmittedName(foo.Params.Single().Id));
+        Assert.Equal(foo.Name, symbols.GetEmittedName(foo.Id));
+        Assert.Equal("Main", symbols.GetEmittedName(main.Id));
+        Assert.Contains($"def {foo.Name}(qubit[1] x_)", artifact.Text);
     }
 
-    // --- 4f. unit-level Mangle: a namespaced op's DOT-FLATTENED def name lands on the op node's Id, and
-    //         null-before / non-null-after pins the "null means the mangler has not seen this node,
-    //         never 'unchanged'" half of the FindEmittedName contract. ---
+    // --- 4f. unit-level Mangle: a namespaced op's dot-flattened def name lands in the returned target map. ---
 
     [Fact]
-    public void MangleFlattensNamespacedOpNameOntoOpNodeAndNullMeansNotYetMangled()
+    public void MangleFlattensNamespacedOpNameIntoTheTargetSymbolMap()
     {
         var bell = new QOperation("MyLib.Bell", new List<QParam>(), new List<QStmt>());
         var main = new QOperation("Main", new List<QParam>(), new List<QStmt>
@@ -172,12 +220,14 @@ public class NodeIdentityTests
             new QUse("a", 1), Gate("H", Q("a", 0)),
         });
         var program = new QProgram(new List<QOperation> { bell, main });
-        var model = new SemanticModel();
+        var result = NameMangler.Mangle(program);
 
-        Assert.Null(model.FindEmittedName(bell.Id));                    // before mangling: never seen
-        NameMangler.Mangle(program, model);
-        Assert.Equal("MyLib_Bell", model.FindEmittedName(bell.Id));     // dots flatten onto the op node
-        Assert.Equal("Main", model.FindEmittedName(main.Id));           // entry keeps its name, still recorded
+        Assert.Equal(
+            "MyLib_Bell",
+            result.Symbols.GetEmittedName(bell.Id));
+        Assert.Equal(
+            "Main",
+            result.Symbols.GetEmittedName(main.Id));
     }
 
     // --- 4g. operations are symbols too: FindSymbol(op.Id) resolves to an Operation-kind symbol whose
@@ -187,21 +237,29 @@ public class NodeIdentityTests
     [Fact]
     public void OperationIsASymbolWithOneUsePerCallSite()
     {
-        var r = QoraParser.Parse(
+        var compilation = QoraCompiler.Compile(
             "operation Foo(q: Qubit[]){ H(q[0]); }\n" +
             "operation Main(){ use a=Qubit[1]; use b=Qubit[1]; Foo(a); Foo(b); }");
-        Assert.True(r.Success, string.Join(" | ", r.Errors));
+        Assert.True(
+            compilation.Succeeded,
+            string.Join(
+                " | ",
+                compilation.Diagnostics.Select(diagnostic => diagnostic.Error)));
 
-        var foo = r.AnalyzedIr!.Operations.Single(o => o.DisplayName == "Foo");
-        var main = r.AnalyzedIr.Operations.Single(o => o.Name == "Main");
+        var analyzed = Assert.IsType<HirSemanticArtifact>(compilation.Hir.EffectAnalysis);
+        var semantics = analyzed.Model;
+        var foo = analyzed.Program.Operations.Single(
+            operation => operation.DisplayName == "Foo");
+        var main = analyzed.Program.Operations.Single(
+            operation => operation.Name == "Main");
 
-        var fooSym = r.Semantics!.FindSymbol(foo.Id);
+        var fooSym = semantics.FindSymbol(foo.Id);
         Assert.NotNull(fooSym);
         Assert.Equal(SymbolKind.Operation, fooSym!.Kind);
         Assert.Equal(foo.Name, fooSym.SourceName);
         Assert.Equal(2, fooSym.Uses.Count);                          // called from Main twice
 
-        Assert.Empty(r.Semantics.FindSymbol(main.Id)!.Uses);         // the entry op is never called
+        Assert.Empty(semantics.FindSymbol(main.Id)!.Uses);          // the entry op is never called
     }
 
     // --- 5. ConjugationLowering installs the inverse NEXT TO the originals in the same body: the copies
@@ -209,7 +267,7 @@ public class NodeIdentityTests
     //        DerivedFrom chain must resolve a copy's Id back to the source statement's symbol. ---
 
     [Fact]
-    public void ConjugationInverseHasFreshIdsAndLineageReachesSource()
+    public void ConjugationInverseHasFreshIdsAndReturnsLineageToSource()
     {
         var withinDecl = new QDecl(true, QType.Int, "k", new QText(new QNumLit(1)));
         var withinGate = Gate("X", Q("a", 0));
@@ -228,11 +286,11 @@ public class NodeIdentityTests
         Assert.Empty(valErrors);
         Assert.NotNull(model);
 
-        var (lowered, errors) = ConjugationLowering.Run(program, model);
-        Assert.Empty(errors);
+        var lowering = ConjugationLowering.Run(program);
+        Assert.Empty(lowering.Errors);
 
         // use a; k; X; H; k(copy); Adjoint X(copy) — inverse re-emits decls first, then reversed gates.
-        var body = lowered.Operations.Single().Body;
+        var body = lowering.Program.Operations.Single().Body;
         Assert.Equal(6, body.Count);
         var declCopy = Assert.IsType<QDecl>(body[4]);
         var gateCopy = Assert.IsType<QGate>(body[5]);
@@ -242,9 +300,15 @@ public class NodeIdentityTests
         Assert.NotEqual(withinGate.Id, gateCopy.Id);
         Assert.Equal(body.Count, body.Select(s => s.Id).Distinct().Count());  // no duplicate in the body
 
-        // lineage: the copy's Id resolves — through the DerivedFrom chain — to the SOURCE decl's symbol.
-        var viaCopy = model!.FindSymbol(declCopy.Id);
-        Assert.NotNull(viaCopy);
-        Assert.Same(model.FindSymbol(withinDecl.Id), viaCopy);
+        Assert.Contains(
+            lowering.Derivations,
+            derivation => derivation.SourceNodeId == withinDecl.Id
+                && derivation.DerivedNodeId == declCopy.Id);
+        Assert.Contains(
+            lowering.Derivations,
+            derivation => derivation.SourceNodeId == withinGate.Id
+                && derivation.DerivedNodeId == gateCopy.Id);
+        Assert.NotNull(model!.FindSymbol(withinDecl.Id));
+        Assert.Null(model.FindSymbol(declCopy.Id)); // copy lineage does not mutate the exact source model
     }
 }

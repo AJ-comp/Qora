@@ -20,83 +20,115 @@ namespace Qora.Ir.Passes;
 /// (<c>inv @ h</c>) is deliberately left untouched — that lowering is the emitter's job; only user-op
 /// adjoints are materialized here.
 /// </summary>
-public static class AdjointMaterializer
+internal static class AdjointMaterializer
 {
     /// <summary>The transformed program plus one note per synthesized inverse-def name that had to dodge a
     /// user name (surfaced as a <c>// Qora:</c> comment, alongside the mangler's own rename notes).</summary>
-    public sealed record Result(QProgram Program, IReadOnlyList<string> Notes);
+    public sealed record Result(
+        QProgram Program,
+        IReadOnlyList<string> Notes,
+        IReadOnlyList<NodeDerivation> Derivations);
 
-    public static Result Run(QProgram program, SemanticModel? model = null)
+    public static Result Run(QProgram program)
     {
-        if (program.Operations.Count == 0) return new Result(program, Array.Empty<string>());
+        if (program.Operations.Count == 0)
+            return new Result(
+                program,
+                Array.Empty<string>(),
+                Array.Empty<NodeDerivation>());
 
+        var opById = program.Operations.ToDictionary(o => o.Id);
         var opNames = program.Operations.Select(o => o.Name).ToHashSet();
         var inverter = new Inverter(program.Operations);
+        var derivations = new List<NodeDerivation>();
+        void Record(int sourceId, int derivedId) =>
+            derivations.Add(new NodeDerivation(sourceId, derivedId));
 
         // Close the set of ops that need an inverse def: seed with the Adjoint-refs in every body, then
         // follow each inverse body's own Adjoint-refs (`Foo`'s inverse calls `Adjoint Bar`) to a fixpoint.
-        var adjBody = new Dictionary<string, IReadOnlyList<QStmt>>();  // op -> its inverse body (raw)
-        var adjName = new Dictionary<string, string>();                // op -> synthesized inverse-def name
-        var order = new List<string>();                                // discovery order (stable emission)
-        var minted = new HashSet<string>(opNames);                     // taken names: ops + adj names so far
+        var adjBody = new Dictionary<int, IReadOnlyList<QStmt>>();
+        var adjName = new Dictionary<int, string>();
+        var order = new List<int>();
+        var minted = new HashSet<string>(opNames);
 
-        var seen = new HashSet<string>();
-        var work = new Queue<string>();
+        var seen = new HashSet<int>();
+        var work = new Queue<int>();
         void Enqueue(IReadOnlyList<QStmt> body)
         {
-            var refs = new HashSet<string>();
-            CollectAdjointRefs(body, opNames, refs);
+            var refs = new HashSet<int>();
+            CollectAdjointRefs(body, opById, refs);
             foreach (var r in refs) if (seen.Add(r)) work.Enqueue(r);
         }
 
         foreach (var o in program.Operations) Enqueue(o.Body);
         while (work.Count > 0)
         {
-            var name = work.Dequeue();
-            if (!opNames.Contains(name) || adjBody.ContainsKey(name)) continue;
-            // Invertibility is guaranteed for any Adjoint that reaches emission (QSEM001, transitively);
-            // skip defensively rather than crash if a body somehow is not invertible.
-            if (!inverter.TryInvertOperation(name, out var inverse, out _)) continue;
-            adjBody[name] = inverse;
-            order.Add(name);
+            var operationId = work.Dequeue();
+            if (adjBody.ContainsKey(operationId)) continue;
+            var operation = opById[operationId];
+            if (!inverter.TryInvertOperation(operationId, out var inverse, out var reason))
+                throw new InvalidOperationException(
+                    $"QINTERNAL: validated Adjoint target `{operation.Name}` cannot be materialized ({reason})");
+            adjBody[operationId] = inverse;
+            order.Add(operationId);
             // Unique among ALL op names (+ adj names minted so far) so each op keeps a distinct key; the
             // mangler still resolves any remaining collision with a user declaration afterwards.
-            var candidate = name + "__adj";
+            var candidate = operation.Name + "__adj";
             while (minted.Contains(candidate)) candidate += "_";
             minted.Add(candidate);
-            adjName[name] = candidate;
+            adjName[operationId] = candidate;
             Enqueue(inverse);
         }
 
-        if (order.Count == 0) return new Result(program, Array.Empty<string>());
+        if (order.Count == 0)
+            return new Result(
+                program,
+                Array.Empty<string>(),
+                Array.Empty<NodeDerivation>());
 
-        var opByName = program.Operations.ToDictionary(o => o.Name);
-
-        // Rewrite `Adjoint Foo(...)` -> `Foo__adj(...)` in every existing body, then append the synthesized
-        // inverse defs (their bodies get the same rewrite: one inverse can call another op's inverse).
-        var result = program.Operations
-            .Select(o => o with { Body = RewriteAdjointCalls(o.Body, adjName, opNames) })
-            .ToList();
         var notes = new List<string>();
-        foreach (var name in order)
+        var inverseBySourceId = new Dictionary<int, QOperation>();
+        foreach (var operationId in order)
         {
-            var orig = opByName[name];
+            var orig = opById[operationId];
             // When the canonical `Foo__adj` was already a user name, the inverse took `Foo__adj_` (etc.).
             // Note it so a reader who sees the adjusted def name knows why (dots are flattened to match the
             // emitted identifier, mirroring the mangler). No note when the canonical name was free.
-            if (adjName[name] != name + "__adj")
-                notes.Add($"inverse of `{orig.DisplayName ?? orig.Name}` emitted as `{Flat(adjName[name])}` (the name `{Flat(name)}__adj` was already taken)");
+            if (adjName[operationId] != orig.Name + "__adj")
+                notes.Add($"inverse of `{orig.DisplayName ?? orig.Name}` emitted as `{Flat(adjName[operationId])}` (the name `{Flat(orig.Name)}__adj` was already taken)");
             // ReId: the synthesized op is a `with`-copy of the forward op — its op Id, every param Id and
             // every body statement Id would otherwise duplicate the forward definition's. This runs AFTER
             // the semantic model, so each fresh Id's lineage back to the forward node is recorded.
-            result.Add(ReId.Run(orig with
+            inverseBySourceId.Add(operationId, ReId.Run(orig with
             {
-                Name = adjName[name],
+                Name = adjName[operationId],
                 DisplayName = "Adjoint " + (orig.DisplayName ?? orig.Name),
-                Body = RewriteAdjointCalls(adjBody[name], adjName, opNames),
-            }, model is null ? null : model.RecordDerivation));
+                Body = adjBody[operationId],
+            }, Record));
         }
-        return new Result(program with { Operations = result }, notes);
+
+        // Every synthesized declaration receives its identity before any call is rewritten. Consequently,
+        // no intermediate tree relies on a spelling being rebound by a later pass.
+        var targets = inverseBySourceId.ToDictionary(
+            pair => pair.Key,
+            pair => new InverseTarget(pair.Value.Id, pair.Value.Name));
+
+        var result = program.Operations
+            .Select(o => o with { Body = RewriteAdjointCalls(o.Body, targets, opById) })
+            .ToList();
+        foreach (var operationId in order)
+        {
+            var inverse = inverseBySourceId[operationId];
+            result.Add(inverse with
+            {
+                Body = RewriteAdjointCalls(inverse.Body, targets, opById),
+            });
+        }
+
+        return new Result(
+            program with { Operations = result },
+            notes.AsReadOnly(),
+            derivations.AsReadOnly());
     }
 
     /// <summary>Flatten a namespaced name's dots to match the emitted identifier (as NameMangler does).</summary>
@@ -105,38 +137,106 @@ public static class AdjointMaterializer
     // --- rewrite: `Adjoint <user-op>` call -> plain call to the synthesized inverse def ---
 
     private static IReadOnlyList<QStmt> RewriteAdjointCalls(
-        IReadOnlyList<QStmt> stmts, Dictionary<string, string> adjName, HashSet<string> opNames) =>
-        stmts.Select(s => RewriteStmt(s, adjName, opNames)).ToList();
+        IReadOnlyList<QStmt> stmts,
+        IReadOnlyDictionary<int, InverseTarget> targets,
+        IReadOnlyDictionary<int, QOperation> opById) =>
+        stmts.Select(stmt => RewriteStmt(stmt, targets, opById)).ToList();
 
-    private static QStmt RewriteStmt(QStmt s, Dictionary<string, string> adjName, HashSet<string> opNames) => s switch
+    private static QStmt RewriteStmt(
+        QStmt stmt,
+        IReadOnlyDictionary<int, InverseTarget> targets,
+        IReadOnlyDictionary<int, QOperation> opById) => stmt switch
     {
-        QGate g when opNames.Contains(g.Name) && g.Functors.FirstOrDefault() == "Adjoint" && adjName.ContainsKey(g.Name)
-            // CalleeOpId → null: the callee changes from Foo to the synthesized Foo__adj, whose Id is not yet
-            // minted here (created after this rewrite), so clear the now-stale forward reference. null means
-            // "unbound, resolve by name"; no post-adjoint consumer follows the reference (analysis ran earlier).
-            => g with { Name = adjName[g.Name], Functors = g.Functors.Skip(1).ToList(), CalleeOpId = null },
-        QIf i => i with { Then = RewriteAdjointCalls(i.Then, adjName, opNames), Else = RewriteAdjointCalls(i.Else, adjName, opNames) },
-        QFor f => f with { Body = RewriteAdjointCalls(f.Body, adjName, opNames) },
-        QWhile w => w with { Body = RewriteAdjointCalls(w.Body, adjName, opNames) },
-        QRepeat r => r with { Body = RewriteAdjointCalls(r.Body, adjName, opNames) },
-        QConjugate c => c with { Within = RewriteAdjointCalls(c.Within, adjName, opNames), Apply = RewriteAdjointCalls(c.Apply, adjName, opNames) },
-        _ => s,
+        QGate gate => RewriteGate(gate, targets, opById),
+        QIf conditional => conditional with
+        {
+            Then = RewriteAdjointCalls(conditional.Then, targets, opById),
+            Else = RewriteAdjointCalls(conditional.Else, targets, opById),
+        },
+        QFor loop => loop with { Body = RewriteAdjointCalls(loop.Body, targets, opById) },
+        QWhile loop => loop with { Body = RewriteAdjointCalls(loop.Body, targets, opById) },
+        QRepeat loop => loop with { Body = RewriteAdjointCalls(loop.Body, targets, opById) },
+        QConjugate conjugate => conjugate with
+        {
+            Within = RewriteAdjointCalls(conjugate.Within, targets, opById),
+            Apply = RewriteAdjointCalls(conjugate.Apply, targets, opById),
+        },
+        _ => stmt,
     };
 
-    /// <summary>Collect user-op names invoked under an <c>Adjoint</c> functor (recursing into control flow).</summary>
-    private static void CollectAdjointRefs(IReadOnlyList<QStmt> stmts, HashSet<string> ops, HashSet<string> into)
+    private static QGate RewriteGate(
+        QGate gate,
+        IReadOnlyDictionary<int, InverseTarget> targets,
+        IReadOnlyDictionary<int, QOperation> opById)
+    {
+        if (gate.CalleeOpId is int operationId)
+        {
+            if (!opById.ContainsKey(operationId))
+                throw new InvalidOperationException(
+                    $"QINTERNAL: call `{gate.Name}` carries dangling CalleeOpId {operationId}");
+            if (gate.Functors.FirstOrDefault() != "Adjoint")
+                return gate;
+            if (!targets.TryGetValue(operationId, out var target))
+                throw new InvalidOperationException(
+                    $"QINTERNAL: no synthesized inverse exists for Adjoint target `{gate.Name}` ({operationId})");
+            return gate with
+            {
+                Name = target.Name,
+                Functors = gate.Functors.Skip(1).ToList(),
+                CalleeOpId = target.OperationId,
+            };
+        }
+
+        if (!IsBuiltinStatement(gate.Name))
+            throw new InvalidOperationException(
+                $"QINTERNAL: user-callable-looking gate `{gate.Name}` reached adjoint materialization without CalleeOpId");
+        return gate;
+    }
+
+    /// <summary>Collect user-operation identities invoked under an <c>Adjoint</c> functor.</summary>
+    private static void CollectAdjointRefs(
+        IReadOnlyList<QStmt> stmts,
+        IReadOnlyDictionary<int, QOperation> opById,
+        HashSet<int> into)
     {
         foreach (var stmt in stmts)
             switch (stmt)
             {
-                case QGate g when g.Functors.FirstOrDefault() == "Adjoint" && ops.Contains(g.Name):
-                    into.Add(g.Name);
+                case QGate gate when gate.CalleeOpId is int operationId:
+                    if (!opById.ContainsKey(operationId))
+                        throw new InvalidOperationException(
+                            $"QINTERNAL: call `{gate.Name}` carries dangling CalleeOpId {operationId}");
+                    if (gate.Functors.FirstOrDefault() == "Adjoint")
+                        into.Add(operationId);
                     break;
-                case QIf i: CollectAdjointRefs(i.Then, ops, into); CollectAdjointRefs(i.Else, ops, into); break;
-                case QFor f: CollectAdjointRefs(f.Body, ops, into); break;
-                case QWhile w: CollectAdjointRefs(w.Body, ops, into); break;
-                case QRepeat r: CollectAdjointRefs(r.Body, ops, into); break;
-                case QConjugate c: CollectAdjointRefs(c.Within, ops, into); CollectAdjointRefs(c.Apply, ops, into); break;
+                case QGate gate when !IsBuiltinStatement(gate.Name):
+                    throw new InvalidOperationException(
+                        $"QINTERNAL: user-callable-looking gate `{gate.Name}` reached adjoint discovery without CalleeOpId");
+                case QIf conditional:
+                    CollectAdjointRefs(conditional.Then, opById, into);
+                    CollectAdjointRefs(conditional.Else, opById, into);
+                    break;
+                case QFor loop:
+                    CollectAdjointRefs(loop.Body, opById, into);
+                    break;
+                case QWhile loop:
+                    CollectAdjointRefs(loop.Body, opById, into);
+                    break;
+                case QRepeat loop:
+                    CollectAdjointRefs(loop.Body, opById, into);
+                    break;
+                case QConjugate conjugate:
+                    CollectAdjointRefs(conjugate.Within, opById, into);
+                    CollectAdjointRefs(conjugate.Apply, opById, into);
+                    break;
             }
     }
+
+    private static bool IsBuiltinStatement(string name) =>
+        QoraGates.Names.ContainsKey(name)
+        || QoraGates.MeasureLike.Contains(name)
+        || QoraGates.NonUnitary.Contains(name)
+        || name == "reset";
+
+    private sealed record InverseTarget(int OperationId, string Name);
 }

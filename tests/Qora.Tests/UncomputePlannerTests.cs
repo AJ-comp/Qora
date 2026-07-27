@@ -14,13 +14,14 @@ namespace Qora.Tests;
 /// </summary>
 public class UncomputePlannerTests
 {
-    private static (QOperation Op, SemanticModel M, Inverter Inv) Compile(string src)
+    private static (QOperation Op, HirSemanticModel M, Inverter Inv) Compile(string src)
     {
-        var r = QoraParser.Parse(src);
-        Assert.True(r.Success, string.Join(" | ", r.Errors));
-        Assert.NotNull(r.Semantics);
-        var op = r.Ir!.Operations.Single(o => o.Name == "Main");
-        return (op, r.Semantics!, new Inverter(r.Ir!.Operations));
+        var r = QoraCompiler.Compile(src);
+        Assert.True(r.Succeeded, string.Join(" | ", r.Diagnostics.Select(diagnostic => diagnostic.Error).ToList()));
+        var analyzed = r.Hir.EffectAnalysis!;
+        var model = analyzed.Model;
+        var op = analyzed.Program.Operations.Single(o => o.Name == "Main");
+        return (op, model, new Inverter(analyzed.Program.Operations));
     }
 
     private static QubitRef Whole(string reg) => new(reg, null);
@@ -155,11 +156,8 @@ public class UncomputePlannerTests
         Assert.Equal(("Flip", true), Gate(Assert.Single(plan!.Cleanup)));       // Adjoint Flip — clean helper still cleans
     }
 
-    // --- 9. REGRESSION (adversarially found): a GENERIC non-invertible callee is monomorphized to a DIFFERENT name
-    //        (Loop → Loop__sz2), so keying the block by op NAME missed it whenever rung ③ is handed the PRE-MONO
-    //        tree — which Compile does (op from r.Ir) — wrongly returning "safe" and crashing Plan. Keying the block
-    //        by the call statement's StmtId (preserved across mono, unlike the name) blocks it on either tree. ---
 
+    // Ownership transfer consumes the caller's qubit and cannot become an automatic cleanup.
     [Fact]
     public void OwnershipTransferringCallIsBlockedEvenWhenCalleeBodyIsInvertible()
     {
@@ -175,14 +173,13 @@ public class UncomputePlannerTests
     }
 
     [Fact]
-    public void GenericNonInvertibleCalleeIsBlockedOnThePreMonoTree()
+    public void GenericNonInvertibleCalleeIsBlockedOnTheAnalyzedTree()
     {
         var (op, m, inv) = Compile(
             "operation Loop(p: Qubit[]){ repeat { X(p[0]); } until (1 == 1); }\n" +
             "operation Main(){ use a=Qubit[2]; use b=Qubit[1]; Loop(a); CNOT(a[0], b[0]); }");
-        // op is the PRE-MONO Main (r.Ir): its call gate is still named "Loop", not the mono "Loop__sz2"
         Assert.False(m.IsSafelyUncomputable(op, Whole("a")));
         Assert.Equal(UncomputeBlocker.NotInvertibleCall, m.UncomputeSafety(op, Whole("a")).Blocker);
-        Assert.Null(UncomputePlanner.Plan(m, inv, op, Whole("a")));             // no crash on the pre-mono tree
+        Assert.Null(UncomputePlanner.Plan(m, inv, op, Whole("a")));
     }
 }

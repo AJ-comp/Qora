@@ -27,7 +27,7 @@
     },
     "keywords": {
       "name": "keyword.control.qor",
-      "match": "\\b(import|namespace|open|operation|function|return|use|new|const|var|move|inout|if|for|in|while|repeat|until)\\b"
+      "match": "\\b(import|namespace|open|operation|function|return|use|new|const|var|move|if|for|in|while|repeat|until)\\b"
     },
     "types": {
       "name": "storage.type.qor",

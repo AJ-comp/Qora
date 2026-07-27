@@ -7,7 +7,7 @@ namespace Qora.Ir.Passes;
 /// <see cref="QubitEventKind.Write"/> (a target / reset / register birth: value may change), or
 /// <see cref="QubitEventKind.Measure"/> — building each operation's program-ordered use/def stream, plus a
 /// per-operation summary over its formal qubit parameters. PURE analysis: the IR is never changed and no
-/// diagnostics are raised; the event stream and summary are stored on the <see cref="SemanticModel"/> keyed
+/// diagnostics are raised; the event stream and summary are stored on the <see cref="HirSemanticModel"/> keyed
 /// by <c>op.Id</c>. The per-qubit stream (liveness's timeline) and per-statement grouping (entanglement
 /// edges) rung ②/③ need are both READ OFF this one stream.
 ///
@@ -26,9 +26,9 @@ namespace Qora.Ir.Passes;
 /// touch (the Stamp write-before-birth guard), never silently. Hoisting semantics are depth-independent, so
 /// making the pre-walk recursive is the additive fix when the gate lifts.
 /// </summary>
-public static class EffectAnalysis
+internal static class EffectAnalysis
 {
-    public static void Run(QProgram program, SemanticModel model) => new Analyzer(program, model).RunAll();
+    public static void Run(QProgram program, HirSemanticModel model) => new Analyzer(program, model).RunAll();
 
     /// <summary>TEST SEAM (InternalsVisibleTo) for the coherence sweep: lets tests feed a hand-corrupted
     /// (events, graph) pair to the SAME always-on verifier the pipeline runs — without it the sweep is
@@ -39,23 +39,21 @@ public static class EffectAnalysis
 
     private sealed class Analyzer
     {
-        private readonly SemanticModel _model;
+        private readonly HirSemanticModel _model;
         private readonly IReadOnlyList<QOperation> _operations;
-        private readonly Dictionary<string, QOperation> _opByName;
         private readonly Dictionary<int, QOperation> _opById;   // for CALL → callee resolution by reference (CalleeOpId)
-        private readonly Dictionary<string, OpEffectSummary> _summaries = new();
+        private readonly Dictionary<int, OpEffectSummary> _summaries = new();
 
-        public Analyzer(QProgram program, SemanticModel model)
+        public Analyzer(QProgram program, HirSemanticModel model)
         {
             _model = model;
             _operations = program.Operations;
-            _opByName = program.Operations.ToDictionary(o => o.Name);
             _opById = program.Operations.ToDictionary(o => o.Id);
         }
 
         public void RunAll()
         {
-            foreach (var op in _operations) Summarize(op.Name);
+            foreach (var op in _operations) Summarize(op.Id);
 
             // Which user operations cannot be statement-adjoint-inverted (a while/repeat of unknown count, classical
             // mutation, a local `use`, or measure/reset in the body — transitively). The Inverter is the SINGLE
@@ -63,11 +61,8 @@ public static class EffectAnalysis
             // names here are the mono names the mono call sites actually use.
             var inverter = new Inverter(_operations);
             var nonInvertibleOperations = _operations
-                .Where(op => !inverter.TryInvertOperation(op.Name, out _, out _))
+                .Where(op => !inverter.TryInvertOperation(op.Id, out _, out _))
                 .ToList();
-            var nonInvertibleOpNames = nonInvertibleOperations
-                .Select(op => op.Name)
-                .ToHashSet();
             var nonInvertibleOpIds = nonInvertibleOperations
                 .Select(op => op.Id)
                 .ToHashSet();
@@ -89,18 +84,19 @@ public static class EffectAnalysis
                     var transfersOwnership = g.Args.Any(arg => arg.Ownership == QOwnershipMode.Moved);
                     var targetsNonInvertibleOperation =
                         g.CalleeOpId is int calleeId
-                            ? nonInvertibleOpIds.Contains(calleeId)
-                            : nonInvertibleOpNames.Contains(g.Name);
+                        && nonInvertibleOpIds.Contains(calleeId);
                     if (transfersOwnership || targetsNonInvertibleOperation)
                         nonInvertibleCallStmts.Add(g.Id);
                 });
             _model.RecordNonInvertibleCallStmts(nonInvertibleCallStmts);
         }
 
-        private OpEffectSummary Summarize(string opName)
+        private OpEffectSummary Summarize(int operationId)
         {
-            if (_summaries.TryGetValue(opName, out var cached)) return cached;
-            var op = _opByName[opName];
+            if (_summaries.TryGetValue(operationId, out var cached)) return cached;
+            if (!_opById.TryGetValue(operationId, out var op))
+                throw new InvalidOperationException(
+                    $"effect analysis: dangling operation identity {operationId}");
             // THIS op's own stream + graph (a callee's are separate); param seeds give first uses an origin
             var log = new OpEventLog(op.Params.Where(p => p.Type == QType.Qubit).Select(p => p.Name));
             // Registers are HOISTED, exactly like the emitter's declaration hoisting: every `use` allocates
@@ -124,7 +120,7 @@ public static class EffectAnalysis
                 nonQfreeWrites.Where(r => paramNames.Contains(r.Reg)).ToHashSet(),
                 measured.Where(r => paramNames.Contains(r.Reg)).ToHashSet(),
                 irreversible);
-            _summaries[opName] = summary;
+            _summaries[operationId] = summary;
             VerifyGraphCoherence(op.Name, paramNames, log.Events, log.Graph);   // fail-loud BEFORE anything lands on the model
             _model.AddOpEffects(op.Id, summary);
             _model.AddQubitEvents(op.Id, log.Events);
@@ -275,7 +271,7 @@ public static class EffectAnalysis
                 if (g.Functors.Any(f => f != "Adjoint"))
                     throw new System.InvalidOperationException(
                         $"effect analysis: user-op call `{g.Name}` carries a non-Adjoint functor [{string.Join(", ", g.Functors)}]; QSEM002 should have rejected it before analysis");
-                var summary = Summarize(callee.Name);
+                var summary = Summarize(callee.Id);
                 // Adjoint is superposition-agnostic: U† writes exactly what U writes, so the callee's
                 // superposition-write set projects identically to its touched/modified sets. A param the
                 // callee measures projects as measured here too — the caller-side event must be a Measure,

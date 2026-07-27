@@ -12,6 +12,7 @@ x86/
 .vs/
 .vscode/
 .idea/
+.dotnetcli/
 
 # OS
 Thumbs.db

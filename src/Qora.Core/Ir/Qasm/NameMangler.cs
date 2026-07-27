@@ -1,3 +1,5 @@
+using System.Collections.Immutable;
+
 namespace Qora.Ir.Passes;
 
 /// <summary>
@@ -19,47 +21,50 @@ namespace Qora.Ir.Passes;
 /// are never mangled — they are the target world's own names. Runs AFTER validation (diagnostics show
 /// the user's original names) and before the emitter (which stays a dumb printer).
 /// </summary>
-public static class NameMangler
+internal static class NameMangler
 {
     private static readonly HashSet<string> BuiltinConstants = new() { "pi", "tau", "euler" };
 
-    /// <summary>The mangled program plus one note per collision-driven rename (for the QASM header).</summary>
-    public sealed record Result(QProgram Program, IReadOnlyList<string> Notes);
+    /// <summary>
+    /// The mangled program, its immutable declaration-Id → emitted-name map, and one note per
+    /// collision-driven rename. Target naming is deliberately returned as target data; this pass never
+    /// writes into the HIR <see cref="HirSemanticModel"/>.
+    /// </summary>
+    public sealed record Result(
+        QProgram Program,
+        OpenQasmSymbolMap Symbols,
+        ImmutableArray<string> Notes);
 
-    /// <summary>Mangle every name, recording each declaration's emitted name into <paramref name="model"/>
-    /// (<see cref="SemanticModel.RecordEmittedName"/>) — this pass is the single producer of the
-    /// source-name → emitted-name fact. The parameter has NO default on purpose: a caller that has no
-    /// model (a test on a bare program) must say so explicitly with null, so the model can never be
-    /// forgotten silently on the compile path.</summary>
-    public static Result Mangle(QProgram program, SemanticModel? model)
+    public static Result Mangle(QProgram program)
     {
-        var m = new Mangler(model);
+        ArgumentNullException.ThrowIfNull(program);
+
+        var m = new Mangler();
         var prog = m.Run(program);
-        return new Result(prog, m.Notes);
+        return new Result(
+            prog,
+            new OpenQasmSymbolMap(m.EmittedNames),
+            m.Notes.ToImmutableArray());
     }
 
     private sealed class Mangler
     {
         public readonly List<string> Notes = new();
-        private readonly SemanticModel? _model;
-        private HashSet<string> _opNames = new();
-        private readonly Dictionary<string, string> _opMap = new();   // op FQN -> emitted def name
-
-        public Mangler(SemanticModel? model) => _model = model;
+        public readonly Dictionary<int, string> EmittedNames = new();
+        private readonly Dictionary<int, string> _opMap = new(); // operation identity -> emitted def name
 
         public QProgram Run(QProgram program)
         {
             if (program.Operations.Count == 0) return program;
             var entry = program.Operations.FirstOrDefault(o => o.Name == "Main") ?? program.Operations[0];
-            _opNames = program.Operations.Select(o => o.Name).ToHashSet();
 
             // GLOBAL scope: op def names + the entry op's top-level declarations. Assign op def names first
             // (deterministic source order); the entry keeps its own name — it is never emitted as a def.
             var global = new HashSet<string>(QoraGates.QasmReserved);
             foreach (var o in program.Operations)
             {
-                _opMap[o.Name] = o == entry ? o.Name : Fresh(o.Name, global, "operation");
-                _model?.RecordEmittedName(o.Id, _opMap[o.Name]);
+                _opMap[o.Id] = o == entry ? o.Name : Fresh(o.Name, global, "operation");
+                Record(o.Id, _opMap[o.Id]);
             }
 
             var outOps = new List<QOperation>(program.Operations.Count);
@@ -86,6 +91,13 @@ public static class NameMangler
             return name;
         }
 
+        private void Record(int declarationNodeId, string emittedName)
+        {
+            if (!EmittedNames.TryAdd(declarationNodeId, emittedName))
+                throw new InvalidOperationException(
+                    $"QINTERNAL: declaration node {declarationNodeId} was mangled more than once");
+        }
+
         private QOperation MangleOp(QOperation op, bool isEntry, HashSet<string> global)
         {
             // Entry declarations live in the GLOBAL scope (top level). A non-entry def gets its own local
@@ -97,7 +109,7 @@ public static class NameMangler
             foreach (var p in op.Params)
             {
                 if (!map.ContainsKey(p.Name)) map[p.Name] = Fresh(p.Name, scope, "parameter");
-                _model?.RecordEmittedName(p.Id, map[p.Name]);
+                Record(p.Id, map[p.Name]);
             }
             // Qubit REGISTERS are hoisted to the def top and may be forward-referenced, so they are named
             // up front, at OP level. Everything else (var/const, measure bits, loop variables) is named AT
@@ -106,7 +118,7 @@ public static class NameMangler
 
             return op with
             {
-                Name = isEntry ? op.Name : _opMap[op.Name],
+                Name = isEntry ? op.Name : _opMap[op.Id],
                 Params = op.Params.Select(p => p with { Name = map[p.Name] }).ToList(),
                 Body = MangleBody(op.Body, map, scope),
             };
@@ -124,7 +136,7 @@ public static class NameMangler
                 {
                     case QUse u:
                         if (!map.ContainsKey(u.Name)) map[u.Name] = Fresh(u.Name, scope, "register");
-                        _model?.RecordEmittedName(u.Id, map[u.Name]);
+                        Record(u.Id, map[u.Name]);
                         break;
                     case QFor f: CollectRegisters(f.Body, scope, map); break;
                     case QIf i: CollectRegisters(i.Then, scope, map); CollectRegisters(i.Else, scope, map); break;
@@ -163,7 +175,7 @@ public static class NameMangler
             var value = MangleExpr(d.Value, map);
             var name = Fresh(d.Name, scope, "variable");
             map[d.Name] = name;
-            _model?.RecordEmittedName(d.Id, name);
+            Record(d.Id, name);
             return d with { Name = name, Value = value };
         }
 
@@ -175,7 +187,7 @@ public static class NameMangler
             var to = MangleTree(f.To, map)!;
             var step = f.Step is null ? null : MangleTree(f.Step, map);
             var loopName = Fresh(f.Var, scope, "loop variable");
-            _model?.RecordEmittedName(f.Id, loopName);
+            Record(f.Id, loopName);
             var inner = new Dictionary<string, string>(map) { [f.Var] = loopName };
             return f with { Var = loopName, From = from, To = to, Step = step, Body = MangleBody(f.Body, inner, scope) };
         }
@@ -197,7 +209,7 @@ public static class NameMangler
             QUse u => u with { Name = L(u.Name, map) },
             QGate g => g with
             {
-                Name = _opNames.Contains(g.Name) ? _opMap[g.Name] : g.Name,
+                Name = MangleGateName(g),
                 Args = g.Args.Select(a => MangleArg(a, map)).ToList(),
             },
             QDecl d => MangleDecl(d, map, scope),
@@ -244,10 +256,9 @@ public static class NameMangler
         /// <summary>
         /// Rename every free name an expression tree references, structurally: a bare name this def
         /// declares is renamed via the local map; built-in constants pass through; a member NAME is
-        /// structural (never a local); numbers and literals are untouched. A FUNCTION call node renames its
-        /// ARGUMENTS (which reference locals); its NAME is a global function name that can never collide
-        /// (QSEM013/QSEM008 forbid a function taking a reserved/gate/duplicate name), so it stays as-is. A
-        /// measurement call never reaches mangling (QMeasure / measure-condition lowering handle it first).
+        /// structural (never a local); numbers and literals are untouched. Function-call targets use their
+        /// resolved operation identity to select the emitted global name, while their arguments use the local
+        /// lexical map. A measurement call normally reaches this pass as QMeasure.
         /// </summary>
         private QNode? MangleTree(QNode? node, Dictionary<string, string> map) => node switch
         {
@@ -257,17 +268,60 @@ public static class NameMangler
             QIndexNode i => i with { Base = MangleTree(i.Base, map)!, Index = MangleTree(i.Index, map)! },
             QUnary u => u with { Operand = MangleTree(u.Operand, map)! },
             QBinOp b => b with { Left = MangleTree(b.Left, map)!, Right = MangleTree(b.Right, map)! },
+            OpenQasmUnsignedCastNode cast => cast with
+            {
+                Operand = MangleTree(cast.Operand, map)!,
+            },
             // A call's NAME is a reference to an operation/function — it goes through the SAME `_opMap`
             // a QGate call target does, so a renamed callee can never keep an un-renamed call site. (An
             // earlier version left it alone on the assumption that a function name can never collide; a
             // namespaced operation flattening onto that name disproved it.)
             QCallNode c => c with
             {
-                Name = _opNames.Contains(c.Name) ? _opMap[c.Name] : c.Name,
+                Name = MangleCallName(c),
                 Args = c.Args.Select(a => MangleTree(a, map)!).ToList(),
             },
             _ => node,   // QNameRef(pi/tau/euler), QNumLit, QLit
         };
+
+        private string MangleGateName(QGate gate)
+        {
+            if (gate.CalleeOpId is int operationId)
+            {
+                if (_opMap.TryGetValue(operationId, out var emittedName))
+                    return emittedName;
+                throw new InvalidOperationException(
+                    $"QINTERNAL: call `{gate.Name}` carries dangling CalleeOpId {operationId}");
+            }
+
+            if (IsBuiltinStatement(gate.Name))
+                return gate.Name;
+            throw new InvalidOperationException(
+                $"QINTERNAL: user-callable-looking gate `{gate.Name}` reached name mangling without CalleeOpId");
+        }
+
+        private string MangleCallName(QCallNode call)
+        {
+            if (call.CalleeOpId is int operationId)
+            {
+                if (_opMap.TryGetValue(operationId, out var emittedName))
+                    return emittedName;
+                throw new InvalidOperationException(
+                    $"QINTERNAL: call `{call.Name}` carries dangling CalleeOpId {operationId}");
+            }
+
+            if (QoraGates.Functions.ContainsKey(call.Name)
+                || QoraGates.MeasureLike.Contains(call.Name))
+                return call.Name;
+            throw new InvalidOperationException(
+                $"QINTERNAL: user-callable-looking expression call `{call.Name}` reached name mangling without CalleeOpId");
+        }
+
+        private static bool IsBuiltinStatement(string name) =>
+            QoraGates.Names.ContainsKey(name)
+            || QoraGates.MeasureLike.Contains(name)
+            || QoraGates.NonUnitary.Contains(name)
+            || name == "reset";
 
     }
 }

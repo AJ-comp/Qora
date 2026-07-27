@@ -1,3 +1,5 @@
+using System.Collections.Immutable;
+
 namespace Qora.Ir.Passes;
 
 /// <summary>
@@ -38,21 +40,38 @@ namespace Qora.Ir.Passes;
 /// undeclared <c>__m0 = …</c> silently bound to it and its <c>QSEM025</c> was lost; now the user's <c>__m0</c>
 /// stays undeclared and is reported. Uniqueness is the placeholder's uid, so no name-scanning is needed.
 /// </summary>
-public static class MeasureConditionLowering
+internal static class MeasureConditionLowering
 {
-    public static QProgram Run(QProgram program)
+    /// <summary>
+    /// The canonical program plus immutable lineage edges from each owning source control-flow statement
+    /// to the measurement declarations and remeasurement assignments synthesized on its behalf.
+    /// </summary>
+    public sealed record Result(
+        QProgram Program,
+        ImmutableArray<NodeSynthesis> Syntheses);
+
+    public static Result Run(QProgram program)
     {
         var uid = 0;   // program-wide: makes each placeholder a distinct spelling by construction
+        var syntheses = ImmutableArray.CreateBuilder<NodeSynthesis>();
+        void Record(int sourceId, int derivedId) =>
+            syntheses.Add(new NodeSynthesis(sourceId, derivedId));
+
         var ops = program.Operations.Select(op =>
         {
             var n = 0;   // per-op base counter, so the mangler emits __m0, __m1, … within each scope
             string Fresh() => HoistName.Make($"__m{n++}", uid++);
-            return op with { Body = Lower(op.Body, Fresh) };
+            return op with { Body = Lower(op.Body, Fresh, Record) };
         }).ToList();
-        return program with { Operations = ops };
+        return new Result(
+            program with { Operations = ops },
+            syntheses.ToImmutable());
     }
 
-    private static List<QStmt> Lower(IReadOnlyList<QStmt> stmts, Func<string> fresh)
+    private static List<QStmt> Lower(
+        IReadOnlyList<QStmt> stmts,
+        Func<string> fresh,
+        Action<int, int> record)
     {
         var result = new List<QStmt>();
         foreach (var s in stmts)
@@ -62,36 +81,55 @@ public static class MeasureConditionLowering
                 case QIf i:
                 {
                     var (temps, cond) = Extract(i.Cond, i.Span, fresh);
+                    foreach (var temp in temps) record(i.Id, temp.Id);
                     result.AddRange(temps);                                   // measure before the branch
-                    result.Add(new QIf(cond, Lower(i.Then, fresh), Lower(i.Else, fresh)) { Span = i.Span });
+                    result.Add(i with
+                    {
+                        Cond = cond,
+                        Then = Lower(i.Then, fresh, record),
+                        Else = Lower(i.Else, fresh, record),
+                    });
                     break;
                 }
                 case QWhile w:
                 {
-                    var body = Lower(w.Body, fresh);
+                    var body = Lower(w.Body, fresh, record);
                     var (temps, cond) = Extract(w.Cond, w.Span, fresh);
                     if (temps.Count > 0)
                     {
+                        foreach (var temp in temps) record(w.Id, temp.Id);
                         result.AddRange(temps);                              // first check: measure before the loop
-                        var reMeasure = temps.Select(d => (QStmt)new QAssign(d.Name, d.Value) { Span = w.Span });
-                        body = body.Concat(reMeasure).ToList();              // each iteration: re-measure at the end
+                        foreach (var temp in temps)
+                        {
+                            var reMeasure = new QAssign(temp.Name, temp.Value) { Span = w.Span };
+                            record(w.Id, reMeasure.Id);
+                            body.Add(reMeasure);                             // each iteration: re-measure at the end
+                        }
                     }
-                    result.Add(new QWhile(cond, body) { Span = w.Span });
+                    result.Add(w with { Cond = cond, Body = body });
                     break;
                 }
                 case QRepeat r:
                 {
-                    var body = Lower(r.Body, fresh);
+                    var body = Lower(r.Body, fresh, record);
                     var (temps, cond) = Extract(r.Until, r.Span, fresh);
-                    if (temps.Count > 0) body = body.Concat(temps).ToList();  // until sees body-local names
-                    result.Add(new QRepeat(body, cond) { Span = r.Span });
+                    if (temps.Count > 0)
+                    {
+                        foreach (var temp in temps) record(r.Id, temp.Id);
+                        body.AddRange(temps);                                // until sees body-local names
+                    }
+                    result.Add(r with { Body = body, Until = cond });
                     break;
                 }
                 case QFor f:
-                    result.Add(f with { Body = Lower(f.Body, fresh) });
+                    result.Add(f with { Body = Lower(f.Body, fresh, record) });
                     break;
                 case QConjugate c:
-                    result.Add(c with { Within = Lower(c.Within, fresh), Apply = Lower(c.Apply, fresh) });
+                    result.Add(c with
+                    {
+                        Within = Lower(c.Within, fresh, record),
+                        Apply = Lower(c.Apply, fresh, record),
+                    });
                     break;
                 default:
                     result.Add(s);
@@ -105,7 +143,7 @@ public static class MeasureConditionLowering
     /// replace its node with that bit's name — one structural rewrite of the condition tree, left to right.
     /// A non-measurement call node is left in place, so <see cref="QCond.HasCall"/> (derived from the tree)
     /// stays set and the validator still rejects it (QSEM005).</summary>
-    private static (List<QDecl> Temps, QCond Cond) Extract(QCond cond, QSpan? span, Func<string> fresh)
+    private static (List<QDecl> Temps, QCond Cond) Extract(QCond cond, SourceSpan? span, Func<string> fresh)
     {
         if (cond.Tree is null || !cond.HasCall) return (new List<QDecl>(), cond);
 

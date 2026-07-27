@@ -14,8 +14,8 @@ public enum MirMemoryMutationKind
 /// One instruction which changes or consumes the physical contents behind an array-state value.
 /// </summary>
 public sealed record MirMemoryMutation(
-    MirBlockId Block,
-    MirInstructionId Instruction,
+    MirBlockRef Block,
+    MirInstructionRef Instruction,
     MirMemoryMutationKind Kind,
     MirStorageProvenance Storage,
     int? OperandIndex = null);
@@ -79,26 +79,38 @@ public sealed class MirMemoryStateSnapshot
         _callable = callable;
         _cfg = cfg;
         _provenance = provenance;
-        ProgramRevision = sourceProgram.Revision;
-        Callable = callable.Id;
+        SnapshotId = sourceProgram.SnapshotId;
+        Callable = new MirCallableRef(SnapshotId, callable.Id);
         _mutations = MirCollections.Freeze(mutations);
         _mutationsByInstruction = mutations
-            .GroupBy(mutation => mutation.Instruction)
+            .GroupBy(mutation => mutation.Instruction.Instruction)
             .ToFrozenDictionary(
                 group => group.Key,
                 group => MirCollections.Freeze(group));
     }
 
-    public int ProgramRevision { get; }
-    public MirCallableId Callable { get; }
+    public MirSnapshotId SnapshotId { get; }
+    public MirCallableRef Callable { get; }
     public IReadOnlyList<MirMemoryMutation> Mutations => _mutations;
+    internal MirControlFlowSnapshot ControlFlow => _cfg;
+    internal MirStorageProvenanceSnapshot StorageProvenance => _provenance;
 
     public MirMemoryStateAvailability CheckBeforeInstruction(
+        MirValueRef state,
+        MirInstructionRef instruction) =>
+        Check(state, _cfg.PointBeforeInstruction(instruction));
+
+    public MirMemoryStateAvailability CheckAtTerminator(
+        MirValueRef state,
+        MirBlockRef block) =>
+        Check(state, _cfg.TerminatorPoint(block));
+
+    internal MirMemoryStateAvailability CheckBeforeInstruction(
         MirValueId state,
         MirInstructionId instruction) =>
         Check(state, _cfg.PointBeforeInstruction(instruction));
 
-    public MirMemoryStateAvailability CheckAtTerminator(
+    internal MirMemoryStateAvailability CheckAtTerminator(
         MirValueId state,
         MirBlockId block) =>
         Check(state, _cfg.TerminatorPoint(block));
@@ -125,21 +137,29 @@ public sealed class MirMemoryStateSnapshot
                 targetBlock.Instructions[instructionIndex].Id);
     }
 
-    public bool IsFor(MirProgram program, MirCallableId callable) =>
+    internal bool IsFor(MirProgram program, MirCallableId callable) =>
         ReferenceEquals(_sourceProgram, program)
         && ReferenceEquals(_callable, program.FindCallable(callable))
-        && ProgramRevision == program.Revision
-        && Callable == callable;
+        && SnapshotId == program.SnapshotId
+        && Callable.Callable == callable;
 
-    public void EnsureFor(MirProgram program, MirCallableId callable)
+    internal void EnsureFor(MirProgram program, MirCallableId callable)
     {
         if (!IsFor(program, callable))
             throw new InvalidOperationException(
-                $"MIR memory-state snapshot belongs to {Callable} in revision {ProgramRevision} " +
-                $"of a different program instance; reanalyze {callable} in revision {program.Revision}");
+                $"MIR memory-state snapshot belongs to {Callable} in snapshot {SnapshotId}; " +
+                $"reanalyze {callable} in snapshot {program.SnapshotId}");
     }
 
     public MirMemoryStateAvailability Check(
+        MirValueRef state,
+        MirProgramPoint point)
+    {
+        Require(state);
+        return Check(state.Value, point);
+    }
+
+    internal MirMemoryStateAvailability Check(
         MirValueId state,
         MirProgramPoint point)
     {
@@ -177,12 +197,12 @@ public sealed class MirMemoryStateSnapshot
                 requiresSameIteration);
 
         var inState = SolveMustAvailability(state, stateStorage);
-        var current = inState[point.Block].Clone();
+        var current = inState[point.Block.Block].Clone();
         if (value.Definition.Kind == MirValueDefinitionKind.BlockArgument
-            && value.Definition.Block == point.Block)
+            && value.Definition.Block == point.Block.Block)
             current.Define();
 
-        var blockAtPoint = _callable.FindBlock(point.Block)
+        var blockAtPoint = _callable.FindBlock(point.Block.Block)
             ?? throw new InvalidOperationException(
                 $"QINTERNAL: memory point references missing block {point.Block}");
         for (var index = 0; index < point.InstructionIndex; index++)
@@ -198,6 +218,18 @@ public sealed class MirMemoryStateSnapshot
                 MirMemoryStateAvailabilityKind.Clobbered,
                 requiresSameIteration,
                 current.Clobbers);
+    }
+
+    private void Require(MirValueRef state)
+    {
+        MirReferenceValidation.RequireSnapshot(
+            SnapshotId,
+            state.Snapshot,
+            nameof(state));
+        if (state.Callable != Callable.Callable)
+            throw new ArgumentException(
+                $"MIR value belongs to callable {state.Callable}; expected {Callable}",
+                nameof(state));
     }
 
     private Dictionary<MirBlockId, FlowFact> SolveMustAvailability(
@@ -301,7 +333,7 @@ public sealed class MirMemoryStateSnapshot
             new ReadOnlyCollection<MirMemoryMutation>(
                 (clobbers ?? Array.Empty<MirMemoryMutation>())
                     .Distinct()
-                    .OrderBy(mutation => mutation.Instruction.Value)
+                    .OrderBy(mutation => mutation.Instruction.Instruction.Value)
                     .ThenBy(mutation => mutation.OperandIndex)
                     .ToArray()),
             requiresSameIteration);
@@ -355,9 +387,9 @@ public sealed class MirMemoryStateSnapshot
     }
 }
 
-public static class MirMemoryStateAnalysis
+internal static class MirMemoryStateAnalysis
 {
-    public static MirMemoryStateSnapshot Analyze(
+    internal static MirMemoryStateSnapshot Analyze(
         MirProgram program,
         MirCallableId callableId)
     {
@@ -382,7 +414,23 @@ public static class MirMemoryStateAnalysis
     {
         var cfg = MirControlFlowAnalysis.AnalyzeUnchecked(program, callable);
         var provenance = MirStorageProvenanceAnalysis.AnalyzeUnchecked(program, callable);
-        var mutations = CollectMutations(callable, provenance);
+        return AnalyzeVerified(program, callable, cfg, provenance);
+    }
+
+    /// <summary>
+    /// Builds memory facts from dependency snapshots owned by the same verified MIR snapshot.
+    /// <see cref="MirAnalysisStore"/> uses this entry point so all downstream analyses share one CFG
+    /// and one storage-provenance instance per callable.
+    /// </summary>
+    internal static MirMemoryStateSnapshot AnalyzeVerified(
+        MirProgram program,
+        MirCallable callable,
+        MirControlFlowSnapshot cfg,
+        MirStorageProvenanceSnapshot provenance)
+    {
+        cfg.EnsureFor(program, callable.Id);
+        provenance.EnsureFor(program, callable.Id);
+        var mutations = CollectMutations(program, callable, provenance);
         return new MirMemoryStateSnapshot(
             program,
             callable,
@@ -392,6 +440,7 @@ public static class MirMemoryStateAnalysis
     }
 
     private static IReadOnlyList<MirMemoryMutation> CollectMutations(
+        MirProgram program,
         MirCallable callable,
         MirStorageProvenanceSnapshot provenance)
     {
@@ -404,14 +453,15 @@ public static class MirMemoryStateAnalysis
                 {
                     case MirArrayStore store:
                         mutations.Add(new MirMemoryMutation(
-                            block.Id,
-                            store.Id,
+                            new MirBlockRef(program.SnapshotId, callable.Id, block.Id),
+                            new MirInstructionRef(program.SnapshotId, callable.Id, store.Id),
                             MirMemoryMutationKind.ArrayStore,
                             provenance.ProvenanceOf(store.Array)));
                         break;
 
                     case MirPureCall call:
                         AddCallMutation(
+                            program.SnapshotId,
                             block.Id,
                             call.Id,
                             call.Operands,
@@ -422,6 +472,7 @@ public static class MirMemoryStateAnalysis
 
                     case MirQuantumApply apply:
                         AddCallMutation(
+                            program.SnapshotId,
                             block.Id,
                             apply.Id,
                             apply.Operands,
@@ -436,6 +487,7 @@ public static class MirMemoryStateAnalysis
     }
 
     private static void AddCallMutation(
+        MirSnapshotId snapshotId,
         MirBlockId block,
         MirInstructionId instruction,
         IReadOnlyList<MirCallOperand> operands,
@@ -460,8 +512,8 @@ public static class MirMemoryStateAnalysis
                 continue;
 
             mutations.Add(new MirMemoryMutation(
-                block,
-                instruction,
+                new MirBlockRef(snapshotId, callable.Id, block),
+                new MirInstructionRef(snapshotId, callable.Id, instruction),
                 kind.Value,
                 provenance.ProvenanceOf(operand.Value),
                 operandIndex));

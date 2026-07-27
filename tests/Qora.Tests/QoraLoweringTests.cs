@@ -15,8 +15,8 @@ public class QoraLoweringTests
     [Fact]
     public void QubitTypeTokenRemainsInSemanticAst()
     {
-        var result = QoraParser.Parse(Source);
-        var ast = Assert.IsAssignableFrom<AstSymbol>(result.Ast);
+        var parseProduct = QoraParser.ParseProduct(Source);
+        var ast = Assert.IsAssignableFrom<AstSymbol>(parseProduct.LoweringAst);
         var nodes = Descendants(ast).OfType<AstNonTerminal>().ToList();
         var parameters = nodes.Where(n => n.Name == "Param").ToList();
         var use = Assert.Single(nodes, n => n.Name == "Use");
@@ -39,8 +39,11 @@ public class QoraLoweringTests
     [Fact]
     public void RetainedQubitTypeTokenLowersToTheSameIrShape()
     {
-        var result = QoraParser.Parse(Source);
-        var program = Assert.IsType<QProgram>(QoraLowering.Lower(result.Ast));
+        var parseProduct = QoraParser.ParseProduct(Source);
+        var program = Assert.IsType<QProgram>(
+            QoraLowering.Lower(
+                parseProduct.LoweringAst,
+                parseProduct.Snapshot.Document.Ref));
         var probe = Assert.Single(program.Operations, o => o.Name == "Probe");
         var main = Assert.Single(program.Operations, o => o.Name == "Main");
 
@@ -67,8 +70,8 @@ public class QoraLoweringTests
             }
             """;
 
-        var result = QoraParser.Parse(source);
-        var ast = Assert.IsAssignableFrom<AstSymbol>(result.Ast);
+        var parseProduct = QoraParser.ParseProduct(source);
+        var ast = Assert.IsAssignableFrom<AstSymbol>(parseProduct.LoweringAst);
         var nodes = Descendants(ast).OfType<AstNonTerminal>().ToList();
         var accesses = nodes.Where(n => n.Name == "IndexAccess").ToList();
 
@@ -79,7 +82,10 @@ public class QoraLoweringTests
         Assert.DoesNotContain(nodes, n => n.Name == "Qubit");
         Assert.Contains(Descendants(ast).OfType<AstTerminal>(), t => t.ToString() == "Qubit");
 
-        var program = Assert.IsType<QProgram>(QoraLowering.Lower(ast));
+        var program = Assert.IsType<QProgram>(
+            QoraLowering.Lower(
+                ast,
+                parseProduct.Snapshot.Document.Ref));
         var main = Assert.Single(program.Operations);
         var assignment = Assert.IsType<QAssign>(main.Body[2]);
         var measurement = Assert.IsType<QMeasure>(assignment.Value);

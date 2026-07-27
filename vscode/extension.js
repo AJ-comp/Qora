@@ -7,8 +7,8 @@
 // per-platform binary BUNDLED in bin/<platform>-<arch>/ (Qora.exe on Windows, Qora on unix) — no .NET
 // install needed; `qora.command` overrides it, and `qora.args` (+ dotnet) is a fallback. Whatever runs,
 // it gets `--json`, the document is fed on stdin, and it replies with one line of JSON:
-//   { success: bool, qasm: string, errors: [ { message, code, start, end } ] }
-// (start/end are half-open character offsets; -1 when the error has no located token.)
+//   { success: bool, qasm: string, errors: [ { message, code, start, end, path, document } ] }
+// (start/end are half-open offsets in `path`; -1 when the error has no located token.)
 // This spawns one short-lived process per change; a long-running LSP server is the future upgrade.
 const vscode = require('vscode');
 const cp = require('child_process');
@@ -48,7 +48,6 @@ const DOCS = {
   'const': '**const** — 불변 변수\n\n`const n: int = 3;` / `const k = 5`. 한 번 정하면 못 바꿔요.',
   'var': '**var** — 변경 권한\n\n변수를 선언할 때는 `var i = 0;`처럼 가변 바인딩을 만들어요. 연산의 파라미터와 호출 인자 앞에서는 전체 `int[]`, `float[]`, `angle[]`에 대한 가변 빌림을 뜻해요: `operation Clear(var values: int[])` / `Clear(var values);`. 함수 파라미터는 기본 읽기 전용 빌림만 허용해요.',
   'move': '**move** — 소유권 이전\n\n연산의 파라미터와 호출 양쪽에 표시해요. `move values`는 모든 전체 배열과 전체 `Qubit` 바인딩의 읽기 전용 소유권 이전이고, `move var values`는 전체 `int[]`, `float[]`, `angle[]`의 변경 가능한 소유권 이전이에요. 호출 뒤에는 호출자가 그 바인딩을 다시 사용할 수 없어요(QSEM039). `const` 배열도 `move var`로 넘길 수 있는데, 빌려주는 것이 아니라 바인딩 자체를 이전하기 때문이에요.',
-  'inout': '**inout** — `var` 가변 빌림의 호환 별칭\n\n기존 소스를 위해 `operation Clear(inout values: int[])` / `Clear(inout values);`를 계속 받아들여요. 새 코드에서는 같은 계약을 `var`로 쓰는 것이 표준이에요.',
   'bit': '**bit** — 고전 비트 (0/1)\n\n측정 결과를 담아요. `var r: bit = M(q[0]);`',
   'int': '**int** — 정수\n\n`var i: int = 0;` / `const n: int = 3;`',
   'float': '**float** — 실수\n\n`var values: float[] = [0.25, 0.5];`처럼 스칼라나 배열 원소에 써요.',
@@ -176,7 +175,10 @@ function runQora(text, extraArgs = []) {
  */
 function docArgs(document) {
   return document && document.uri && document.uri.scheme === 'file'
-    ? ['--base-dir', path.dirname(document.uri.fsPath)]
+    ? [
+        '--base-dir', path.dirname(document.uri.fsPath),
+        '--source-path', document.uri.fsPath,
+      ]
     : [];
 }
 
@@ -684,7 +686,19 @@ async function refreshDiagnostics(document) {
     return;
   }
 
-  const diags = (result.errors || []).map((e) => {
+  const samePath = (left, right) => {
+    if (!left || !right) return true;
+    const a = path.resolve(left);
+    const b = path.resolve(right);
+    return process.platform === 'win32'
+      ? a.toLowerCase() === b.toLowerCase()
+      : a === b;
+  };
+  const diags = (result.errors || [])
+    // A compilation can diagnose imported files. This collection belongs to the active document, so
+    // only publish coordinates whose qualified source path is this exact editor buffer.
+    .filter((e) => !e.path || samePath(e.path, document.uri.fsPath))
+    .map((e) => {
     const d = new vscode.Diagnostic(
       spanToRange(document, e.start, e.end),
       e.message || 'parse error',
@@ -693,7 +707,7 @@ async function refreshDiagnostics(document) {
     d.code = e.code;
     d.source = 'qora';
     return d;
-  });
+    });
   diagnostics.set(document.uri, diags);
   setParseState(document, 'ready');
   updateStatusBar(document);
@@ -772,7 +786,7 @@ async function transpile() {
 }
 
 // ---- "Show compilation stages" panel ----------------------------------------------------------
-// Explicit-request only: the heavy `--stages` payload (AST / IR / synthesized inverse IR) is fetched
+// Explicit-request only: the heavy `--stages` payload (AST / HIR / MIR / analyses / target) is fetched
 // when the user runs the command, never on keystrokes. While the panel stays open it refreshes on
 // SAVE of the same document (opening the panel is the opt-in; save is a deliberate checkpoint).
 
@@ -813,14 +827,16 @@ function stagesHtml(fileName, result) {
         background: var(--vscode-textCodeBlock-background); padding: 10px; border-radius: 6px; }
 </style></head><body>
   <div class="file">${escapeHtml(fileName)} — 저장하면 갱신돼요</div>
-  <div class="flow">소스 → 파싱 → AST → Lowering → QoraIR → 심벌테이블(Validator) → (Inverter → 역 IR) → Emitter → OpenQASM</div>
+  <div class="flow">소스 → 파싱 → AST → Resolved HIR → HIR 분석 → SSA/CFG MIR → MIR 효과 분석 → OpenQASM</div>
   ${banner}
   <main>
     ${stageColumn('1. AST (파서 출력)', result.ast)}
-    ${stageColumn('2. QoraIR (Lowering)', result.ir)}
-    ${stageColumn('3. 심벌테이블 (Validator)', result.symbols)}
-    ${stageColumn('4. 역 IR (Inverter가 합성)', result.irInverse)}
-    ${stageColumn('5. OpenQASM 3 (Emitter)', result.qasm)}
+    ${stageColumn('2. Resolved HIR', result.ir)}
+    ${stageColumn('3. HIR 심벌 테이블', result.symbols)}
+    ${stageColumn('4. HIR 자동 청소 분석', result.uncompute)}
+    ${stageColumn('5. SSA/CFG MIR', result.mir)}
+    ${stageColumn('6. MIR 효과 분석', result.mirEffects)}
+    ${stageColumn('7. OpenQASM 3', result.qasm)}
   </main>
 </body></html>`;
 }

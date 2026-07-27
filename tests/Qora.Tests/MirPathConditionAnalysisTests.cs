@@ -30,9 +30,9 @@ public sealed class MirPathConditionAnalysisTests
         var condition = paths.ConditionFor(applySite.Block);
         Assert.Equal(MirPathConditionKind.Predicate, condition.Kind);
         var predicate = Assert.IsType<MirPathPredicate>(condition.Predicate);
-        Assert.Equal(branch.Condition, predicate.Condition);
+        Assert.Equal(branch.Condition, predicate.Condition.Value);
         Assert.True(predicate.ExpectedValue);
-        Assert.Equal(branch.TrueTarget, predicate.TakenSuccessor);
+        Assert.Equal(branch.TrueTarget, predicate.TakenSuccessor.Block);
         Assert.Equal(MirExecutionMultiplicity.Single, paths.MultiplicityOf(applySite.Block));
     }
 
@@ -159,14 +159,15 @@ public sealed class MirPathConditionAnalysisTests
             }
             """);
         Assert.True(
-            result.Success,
-            string.Join(" | ", result.Errors.Select(error => $"{error.Code}: {error.Message}")));
-        var program = Assert.IsType<MirProgram>(result.Mir);
-        var effects = Assert.IsType<MirEffectSnapshot>(result.MirEffects);
+            result.Succeeded,
+            string.Join(" | ", result.Diagnostics.Select(diagnostic => diagnostic.Error).ToList().Select(error => $"{error.Code}: {error.Message}")));
+        var program = Assert.IsType<MirProgram>(result.Mir?.Program);
+        var effects = Assert.IsType<MirEffectSnapshot>(result.Mir!.Analyses.Effects);
         var callable = Assert.Single(program.Callables);
         var effect = Assert.Single(
             effects.Effects,
-            candidate => candidate.Site.Callable == callable.Id);
+            candidate => candidate.Site.Callable
+                == new MirCallableRef(program.SnapshotId, callable.Id));
 
         Assert.Equal(MirExecutionMultiplicity.LoopCarried, effect.ExecutionMultiplicity);
         Assert.Equal(MirPathConditionKind.All, effect.PathCondition.Kind);
@@ -210,7 +211,8 @@ public sealed class MirPathConditionAnalysisTests
 
     private static MirProgram OrTailMergeMir()
     {
-        var source = MirSource.Synthetic(1);
+        var context = MirTestContext.Create();
+        var source = context.Origin();
         var callableId = new MirCallableId(0);
         var a = new MirValueId(0);
         var b = new MirValueId(1);
@@ -230,13 +232,11 @@ public sealed class MirPathConditionAnalysisTests
             Array.Empty<MirFunctor>(),
             source);
 
-        return new MirProgram(
-            Revision: 0,
+        return context.Program(
             new[]
             {
                 new MirCallable(
                     callableId,
-                    SourceOperationId: 1,
                     Name: "TailMerge",
                     MirCallableKind.Operation,
                     ReturnType: null,
@@ -244,17 +244,17 @@ public sealed class MirPathConditionAnalysisTests
                     {
                         new MirClassicalParameter(
                             "a",
-                            SourceSymbolId: null,
+                            source,
                             a,
                             MirType.Scalar(QType.Bit)),
                         new MirClassicalParameter(
                             "b",
-                            SourceSymbolId: null,
+                            source,
                             b,
                             MirType.Scalar(QType.Bit)),
                         new MirQubitParameter(
                             "q",
-                            SourceSymbolId: null,
+                            source,
                             qubit,
                             IsArray: false,
                             Length: null),
@@ -305,12 +305,12 @@ public sealed class MirPathConditionAnalysisTests
                             a,
                             MirType.Scalar(QType.Bit),
                             MirValueDefinition.ParameterAt(0),
-                            Source: source),
+                            Origin: source),
                         new MirValue(
                             b,
                             MirType.Scalar(QType.Bit),
                             MirValueDefinition.ParameterAt(1),
-                            Source: source),
+                            Origin: source),
                     },
                     Storages: Array.Empty<MirArrayStorage>(),
                     Qubits: new[]
@@ -321,7 +321,6 @@ public sealed class MirPathConditionAnalysisTests
                             MirQubitResourceKind.Parameter,
                             IsArray: false,
                             Length: null,
-                            SourceSymbolId: null,
                             AllocationInstruction: null,
                             source),
                     },
@@ -333,9 +332,9 @@ public sealed class MirPathConditionAnalysisTests
     {
         var result = Compiler.Compile(source);
         Assert.True(
-            result.Success,
-            string.Join(" | ", result.Errors.Select(error => $"{error.Code}: {error.Message}")));
-        return Assert.IsType<MirProgram>(result.Mir);
+            result.Succeeded,
+            string.Join(" | ", result.Diagnostics.Select(diagnostic => diagnostic.Error).ToList().Select(error => $"{error.Code}: {error.Message}")));
+        return Assert.IsType<MirProgram>(result.Mir?.Program);
     }
 
     private static (MirBlockId Block, MirQuantumApply Apply) ApplySite(MirCallable callable)

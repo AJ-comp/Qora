@@ -19,9 +19,9 @@ public class ValidProgramTests
         // a measure bit is emitted as one flat top-level `bit r;`, with the measurement assigned in place —
         // OpenQASM importers accept only global classical declarations.
         var r = Compiler.Compile("operation Main(){ use q=Qubit[2]; var r: bit = M(q[0]); if(r==1){ X(q[1]); } }");
-        Assert.True(r.Success);
-        Assert.Contains("bit r;", r.Qasm);
-        Assert.Contains("r = measure q[0];", r.Qasm);
+        Assert.True(r.Succeeded);
+        Assert.Contains("bit r;", r.Targets.OpenQasm!.Text);
+        Assert.Contains("r = measure q[0];", r.Targets.OpenQasm!.Text);
     }
 
     [Fact]
@@ -37,6 +37,6 @@ public class ValidProgramTests
     public void EmptyProgramCompiles()
     {
         var r = Compiler.Compile("operation Main(){ }");
-        Assert.True(r.Success, string.Join(" | ", r.Errors.Select(e => $"{e.Code}: {e.Message}")));
+        Assert.True(r.Succeeded, string.Join(" | ", r.Diagnostics.Select(diagnostic => diagnostic.Error).ToList().Select(e => $"{e.Code}: {e.Message}")));
     }
 }

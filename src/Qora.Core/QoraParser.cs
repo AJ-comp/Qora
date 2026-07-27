@@ -1,12 +1,10 @@
-using System.Collections.Generic;
-using System.Linq;
 using Janglim.FrontEnd;
 using Janglim.FrontEnd.Ast;
 using Janglim.FrontEnd.Parsers.LR;
 using Janglim.FrontEnd.ParseTree;
 using Janglim.FrontEnd.Tokenize;
+using Qora.Compiler;
 using Qora.Ir;
-using Qora.Ir.Passes;
 
 namespace Qora;
 
@@ -14,333 +12,164 @@ namespace Qora;
 public sealed record QoraToken(string Text, string Type);
 
 /// <summary>
-/// One parse error with a source span, ready for an editor squiggle. <see cref="Start"/> and
-/// <see cref="End"/> are half-open character offsets into the source (End exclusive), so an editor can
-/// map them straight to a range. Both are -1 when the error has no located token (e.g. an internal or
-/// virtual token) — a consumer should then fall back to a whole-document / first-line marker.
+/// One diagnostic with an optional, revision-qualified source range. <see cref="Start"/> and
+/// <see cref="End"/> remain convenience views for CLI/editor serialization and are -1 when no source
+/// location is available.
 /// </summary>
-public sealed record QoraError(string Message, string Code, int Start, int End)
+public sealed record QoraError(
+    string Message,
+    string Code,
+    SourceSpan? Span = null)
 {
-    public override string ToString()
-        => Start >= 0 ? $"{Message} ({Code} @ {Start}..{End})" : $"{Message} ({Code})";
-}
+    public int Start => Span?.Start ?? -1;
+    public int End => Span?.End ?? -1;
 
-/// <summary>The outcome of parsing a Qora source string.</summary>
-public sealed class QoraParseResult
-{
-    public bool Success { get; init; }
-    public IReadOnlyList<QoraToken> Tokens { get; init; } = new List<QoraToken>();
-    /// <summary>The parse tree rendered to text — computed on demand from <see cref="Tree"/>. Only the
-    /// stages/playground view reads it, and the engine's renderer is O(depth²) on deeply nested input; the
-    /// hot live-diagnostics path (errors + QASM only) never touches it, so it never pays that cost.</summary>
-    public string TreeText => Tree?.ToTreeString() ?? string.Empty;
-    /// <summary>The parse-tree root, for visual rendering (null when parsing failed).</summary>
-    public ParseTreeSymbol? Tree { get; init; }
-    /// <summary>The semantic AST root (MeaningUnit-tagged; null when parsing failed).</summary>
-    public AstSymbol? Ast { get; init; }
-    /// <summary>The semantic AST rendered to text — computed on demand from <see cref="Ast"/> (see
-    /// <see cref="TreeText"/>).</summary>
-    public string AstText => Ast?.ToTreeString() ?? string.Empty;
-    /// <summary>The lowered IR (null when parsing failed, or when the program was rejected as too deep to
-    /// walk — QSEM031) — otherwise present even when semantic errors block emission.</summary>
-    public Ir.QProgram? Ir { get; init; }
-    /// <summary>The AST emitted as OpenQASM 3.0 (empty when parsing failed).</summary>
-    public string Qasm { get; init; } = string.Empty;
-    /// <summary>Parse errors, each carrying a source span (see <see cref="QoraError"/>); empty on success.</summary>
-    public IReadOnlyList<QoraError> Errors { get; init; } = new List<QoraError>();
-    /// <summary>The persistent semantic side table from whichever validation ran LAST (null when validation
-    /// never ran) — Id-keyed symbol/scope facts carried through the rest of the pipeline. A REJECTED program
-    /// keeps the model of the validation that rejected it, so its recorded facts (e.g.
-    /// <see cref="Ir.Passes.SemanticModel.UnprovenIndexes"/>, the data behind each QSEM030) stay readable —
-    /// facts outlive the verdict; consumers must not treat non-null as "compiled".</summary>
-    public Ir.Passes.SemanticModel? Semantics { get; init; }
-    /// <summary>The program <see cref="Ir.Passes.EffectAnalysis"/> actually ran on (post-monomorphize, before
-    /// any tree-copying pass) — the ops whose Ids key the model's event streams, so this is the program the
-    /// uncompute view must iterate (unlike <see cref="Ir"/>, which predates monomorphization and would miss
-    /// specializations). Null when analysis never ran (parse or semantic errors).</summary>
-    public Ir.QProgram? AnalyzedIr { get; init; }
-    /// <summary>The MONOMORPHIZED program whenever monomorphization ran — kept even when the post-mono
-    /// validation REJECTED it (unlike <see cref="AnalyzedIr"/>, which requires a clean program). The final
-    /// <see cref="Semantics"/> of such a rejection keys its facts (e.g.
-    /// <see cref="Ir.Passes.SemanticModel.RequiredArgLengths"/>) by SPECIALIZED op Ids, and those ops exist
-    /// only in this tree — without it, a rejected specialization's recorded facts point into a program the
-    /// consumer cannot see. Facts outlive the verdict, so the tree they describe must too.</summary>
-    public Ir.QProgram? MonoIr { get; init; }
-    /// <summary>
-    /// The validated program lowered into Qora's typed SSA/CFG middle IR. The existing
-    /// <see cref="Ir"/> remains the source-shaped high-level IR; this graph is the analysis boundary for
-    /// value versions, array memory states, qubit resources, and future automatic uncomputation. Null when
-    /// the common front end or conjugation lowering rejected the program.
-    /// </summary>
-    public Ir.Mir.MirProgram? Mir { get; init; }
-    /// <summary>
-    /// MIR-native quantum effects for the exact <see cref="Mir"/> program instance and revision. It records
-    /// exact scalar SSA witnesses, array states/storage provenance, and qubit places, but does not yet
-    /// schedule or inject cleanup.
-    /// </summary>
-    public Ir.Mir.Analysis.MirEffectSnapshot? MirEffects { get; init; }
+    public override string ToString() =>
+        Span is { } span
+            ? $"{Message} ({Code} @ {span})"
+            : $"{Message} ({Code})";
 }
 
 /// <summary>
-/// The front door for Qora: source string in, parse result out. A fresh grammar/lexer/parser is built
-/// per call (cheap for a playground) — but NOT concurrency-safe: the Janglim engine keeps process-GLOBAL
-/// key state (<c>KeyManager</c>) that grammar construction mutates, so concurrent <c>Parse</c> calls
-/// from multiple threads corrupt it. Every current consumer parses one-at-a-time per process (the CLI,
-/// the extension's spawned processes); a future resident host (LSP server) needs an engine-side fix
-/// first — flagged on the engine, not worked around here (engine-boundary rule).
+/// The transient parser-to-lowering hand-off. The immutable snapshot owns only Qora projections, while
+/// the parser-engine AST remains confined to this internal product and is discarded after immediate HIR
+/// lowering.
+/// </summary>
+internal sealed class SyntaxParseProduct
+{
+    public SyntaxParseProduct(
+        SyntaxSnapshot snapshot,
+        AstSymbol? loweringAst)
+    {
+        Snapshot = snapshot ?? throw new ArgumentNullException(nameof(snapshot));
+        LoweringAst = loweringAst;
+    }
+
+    public SyntaxSnapshot Snapshot { get; }
+    public AstSymbol? LoweringAst { get; }
+}
+
+/// <summary>
+/// Qora's syntax front end. Public results are immutable Qora-owned projections rather than parser-engine
+/// objects. This type stops at the syntax boundary; whole-program compilation starts at
+/// <see cref="QoraCompiler"/>. Keeping those entry points separate prevents parser results from becoming a
+/// bag of unrelated HIR, semantic, MIR, and target generations.
 /// </summary>
 public static class QoraParser
 {
-    /// <summary>Single-file mode: no import resolution (an <c>import</c> reports QSEM020).</summary>
-    public static QoraParseResult Parse(string source) => Parse(source, baseDir: null);
+    /// <summary>
+    /// Parse one source document into an immutable syntax snapshot without running imports, semantic
+    /// analysis, MIR, or a backend.
+    /// </summary>
+    public static SyntaxSnapshot Parse(string source, string? sourcePath = null) =>
+        ParseProduct(source, sourcePath).Snapshot;
 
-    /// <param name="baseDir">Directory the entry file's imports resolve against (null = single-file mode).</param>
-    /// <param name="sourcePath">The entry file's own path when known — lets the loader register its
-    /// canonical path up front, so an import back-edge to the entry is skipped without reading it again.</param>
-    public static QoraParseResult Parse(string source, string? baseDir, string? sourcePath = null)
+    /// <summary>
+    /// Parse one standalone document and retain the parser AST only in the internal transient product used
+    /// by immediate HIR lowering and lowering-focused tests.
+    /// </summary>
+    internal static SyntaxParseProduct ParseProduct(
+        string source,
+        string? sourcePath = null)
     {
-        // The whole compilation runs on a dedicated WIDE-STACK thread. Why: the depth guard (QSEM031)
-        // can only run AFTER the engine parse and lowering, but the engine's own parse-stack teardown
-        // and the per-block walkers recurse too — and on the default 1 MB stack, input the engine's
-        // token cap still admits (a few thousand tokens) could overflow BEFORE any guard sees it: an
-        // uncatchable process death with no JSON reply. 64 MB holds every recursion the token cap can
-        // produce with a wide margin, so the "always one reply" contract holds for every byte stream;
-        // QSEM031 remains the DIAGNOSTIC bound for what is reasonable, not the survival bound.
-        QoraParseResult? parsed = null;
-        System.Exception? failure = null;
-        var worker = new System.Threading.Thread(() =>
-        {
-            try { parsed = ParseCore(source, baseDir, sourcePath); }
-            catch (System.Exception ex) { failure = ex; }
-        }, maxStackSize: 64 * 1024 * 1024);
+        var compilationId = CompilationId.New();
+        SyntaxParseProduct? parsed = null;
+        Exception? failure = null;
+        var worker = new Thread(
+            () =>
+            {
+                try
+                {
+                    parsed = ParseOnCurrentThread(
+                        new SourceDocumentSnapshot(
+                            new SourceDocumentRef(
+                                compilationId,
+                                new CompilationRevision(0),
+                                new SourceDocumentId(0)),
+                            source ?? string.Empty,
+                            sourcePath));
+                }
+                catch (Exception ex)
+                {
+                    failure = ex;
+                }
+            },
+            maxStackSize: 64 * 1024 * 1024);
+
         worker.Start();
         worker.Join();
-        if (failure is not null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failure).Throw();
+        if (failure is not null)
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failure).Throw();
         return parsed!;
     }
 
-    private static QoraParseResult ParseCore(string source, string? baseDir, string? sourcePath)
+    /// <summary>
+    /// Parse on the caller's stack. The compiler invokes this from its own wide-stack worker so parsing and
+    /// all recursive HIR passes share one guarded execution boundary.
+    /// </summary>
+    internal static SyntaxParseProduct ParseOnCurrentThread(SourceDocumentSnapshot document)
     {
-        source ??= string.Empty;
+        ArgumentNullException.ThrowIfNull(document);
 
         var grammar = new QoraGrammar();
         var lexer = new Lexer();
-        foreach (var terminal in grammar.TerminalSet) lexer.AddTokenRule(terminal);
+        foreach (var terminal in grammar.TerminalSet)
+            lexer.AddTokenRule(terminal);
 
-        var tokens = lexer.Lexing(source).TokensForParsing;
+        var tokens = lexer.Lexing(document.Text).TokensForParsing;
         var result = new LALRParser(grammar, bLogging: false).Parsing(tokens);
+        var hasTree = result.Success && result.Count > 0;
+        var parseTree = hasTree ? result.ToParseTree : null;
+        var loweringAst = hasTree ? result.AstRoot : null;
+        var snapshot = new SyntaxSnapshot(
+            document,
+            tokens.Select(token => new QoraToken(
+                token.Data,
+                token.PatternInfo?.Terminal?.ToString() ?? "?")),
+            parseTree is null ? null : ProjectParseTree(parseTree),
+            loweringAst is null ? null : ProjectAst(loweringAst),
+            parseTree?.ToTreeString() ?? string.Empty,
+            loweringAst?.ToTreeString() ?? string.Empty,
+            result.Success
+                ? Array.Empty<QoraError>()
+                : result.AllErrors.Select(error => ToQoraError(error, document.Ref)));
 
-        // On success the tree/AST are usually present, but an empty (or whitespace-only) source parses
-        // to zero blocks — and the engine's AstRoot getter calls Last() with no Count guard, so it throws
-        // on that empty-but-successful case. Gate every derived value on there actually being content.
-        var hasParse = result.Success && result.Count > 0;
-        var tree = hasParse ? result.ToParseTree : null;
-        var ast = hasParse ? result.AstRoot : null;
-
-        // Pipeline: AST → Lower → IR → common validation + OpenQASM policy → (only when clean) emit.
-        // Errors gate emission: an invalid program reports every language and target-policy violation and
-        // produces no QASM, so the emitter only ever runs on an accepted IR.
-        var ir = ast != null ? QoraLowering.Lower(ast) : null;
-        // Import expansion first (the merged program is what everything downstream sees), then
-        // resolution (names become fully-qualified). Each step's errors preempt the next: a partially
-        // loaded or partially resolved program would only add unknown-name noise on top.
-        Ir.QProgram? expanded = null;
-        Ir.QProgram? resolved = null;
-        Ir.QProgram? monoProgram = null;   // program after monomorphization — what actually gets emitted
-        var tooDeep = false;               // QSEM031: the lowered IR is unrenderable, expose no IR at all
-        Ir.Passes.SemanticModel? semantics = null;   // side table from the FINAL validation (post-monomorphize)
-        List<QoraError> semanticErrors;
-        if (ir != null)
-        {
-            var (merged, importErrors) = ModuleLoader.Expand(ir, baseDir, sourcePath);
-            expanded = merged;
-            if (importErrors.Count > 0)
-            {
-                semanticErrors = importErrors;
-            }
-            // Depth guard BEFORE every recursive pass (measure-condition lowering, resolution, validation,
-            // monomorphization). Pathologically deep input would otherwise overflow the stack into an
-            // uncatchable crash that bypasses the JSON contract; this rejects it with a clean diagnostic.
-            // The rejected IR is NOT exposed on the result: every downstream renderer (the IR printer, the
-            // symbol-table formatter, the canonical renderer) recurses the tree it prints, so handing a
-            // too-deep tree to the --stages view would crash exactly the way this guard exists to prevent.
-            else if (QoraValidator.ExceedsDepthLimit(merged, out var deepOp))
-            {
-                expanded = null;
-                tooDeep = true;
-                semanticErrors = new List<QoraError>
-                {
-                    new($"in `{deepOp}`: an expression or nested-block structure is too deep for the compiler; simplify or split it", "QSEM031", -1, -1),
-                };
-            }
-            else
-            {
-                // Desugar a measurement written inside a condition (`if (M(q[i]) == v)`) into the two-step
-                // form OpenQASM needs (`var t: bit = M(q[i]); if (t == v)`). Runs before resolution/validation, so
-                // everything downstream sees only the lowered form.
-                merged = MeasureConditionLowering.Run(merged);
-                expanded = merged;
-                var (res, resolveErrors) = Resolver.Resolve(merged);
-                resolved = res;
-                if (resolveErrors.Count > 0)
-                {
-                    semanticErrors = resolveErrors;
-                }
-                else
-                {
-                    var baseErrors = ValidateForOpenQasm(res, out var baseModel);
-                    if (baseErrors.Count > 0)
-                    {
-                        semanticErrors = baseErrors;
-                        semantics = baseModel;   // a rejected program keeps its model — the facts behind the verdict stay readable
-                    }
-                    else
-                    {
-                        // Monomorphization pins each generic register to a concrete size, so re-validate the
-                        // specialized program: size-dependent checks (index bounds, register-size matches)
-                        // can only run once sizes are known. No generics -> Run returns the same program and
-                        // there is nothing new to check. Whichever Validate ran LAST owns the semantic model
-                        // — its scope trees describe the program the rest of the pipeline actually consumes.
-                        // Specialize widths first while preserving `.Count` as a real symbol read. Ownership
-                        // validation must see `move q; use q.Count` even though the final target form can
-                        // replace that Count with a literal. Once the concrete re-validation succeeds, run
-                        // the same pass again in its normal lowering mode to perform the literal substitution
-                        // required by bit-register emission.
-                        monoProgram = Monomorphizer.Run(
-                            res,
-                            preserveKnownCountsForValidation: true);
-                        if (ReferenceEquals(monoProgram, res))
-                        {
-                            semanticErrors = baseErrors;
-                            semantics = baseModel;
-                        }
-                        else
-                        {
-                            semanticErrors = ValidateForOpenQasm(monoProgram, out semantics);
-                            if (semanticErrors.Count == 0)
-                                monoProgram = Monomorphizer.Run(monoProgram);
-                        }
-                    }
-                }
-            }
-        }
-        else
-        {
-            semanticErrors = new List<QoraError>();
-        }
-
-        // The tail of the COMMON front end. Effect analysis first (pure model data, the auto-uncompute
-        // ladder's seed — before any tree-copying pass so every recorded Id is one the model knows), then
-        // backend-shared MATERIALIZATION: within/apply flattens to straight-line gates + a synthesized
-        // inverse (a non-invertible `within` is a clean QSEM027 here), and whole-op Adjoint becomes real
-        // inverse defs. Any backend needs materialized defs — only what comes AFTER is target-specific.
-        // The front's output contract: a validated, monomorphized, MATERIALIZED program.
-        string qasm = string.Empty;
-        Ir.QProgram? analyzedIr = null;   // the program effect analysis ran on (null when it never ran)
-        Ir.Mir.MirProgram? mir = null;
-        Ir.Mir.Analysis.MirEffectSnapshot? mirEffects = null;
-        if (monoProgram != null && semanticErrors.Count == 0)
-        {
-            if (semantics is not null) { EffectAnalysis.Run(monoProgram, semantics); analyzedIr = monoProgram; }
-
-            var (conjugated, conjErrors) = ConjugationLowering.Run(monoProgram, semantics);
-            if (conjErrors.Count > 0)
-            {
-                semanticErrors = conjErrors;
-            }
-            else
-            {
-                // The source-shaped common IR is Qora HIR. Lower it to a separate typed SSA/CFG graph
-                // before backend-only adjoint materialization and QASM legalization. MIR is verified on
-                // every successful compilation; its first native effect layer remains shadow-mode data
-                // until cleanup scheduling and injection are complete.
-                if (semantics is not null)
-                {
-                    mir = Ir.Mir.QoraMirLowering.Lower(conjugated, semantics);
-                    Ir.Mir.QoraMirVerifier.VerifyOrThrow(mir);
-                    mirEffects = Ir.Mir.Analysis.MirEffectAnalysis.Analyze(mir);
-                }
-
-                var materialized = AdjointMaterializer.Run(conjugated, semantics);
-
-                // Hand the materialized program to the TARGET backend (see <see cref="Ir.QasmBackend"/>:
-                // name mangle → referential gate → const demotion → emit).
-                var backend = Ir.QasmBackend.Run(materialized.Program, materialized.Notes, semantics);
-                if (backend.Errors.Count > 0) semanticErrors = backend.Errors.ToList();
-                else qasm = backend.Qasm;
-            }
-        }
-
-        return new QoraParseResult
-        {
-            Success = result.Success && semanticErrors.Count == 0,
-            Tokens = tokens
-                .Select(c => new QoraToken(c.Data, c.PatternInfo?.Terminal?.ToString() ?? "?"))
-                .ToList(),
-            Tree = tree,
-            Ast = ast,
-            Ir = tooDeep ? null : resolved ?? expanded ?? ir,
-            Qasm = qasm,
-            Semantics = semantics,
-            AnalyzedIr = analyzedIr,
-            MonoIr = monoProgram,
-            Mir = mir,
-            MirEffects = mirEffects,
-            Errors = !result.Success
-                ? result.AllErrors.Select(ToQoraError).ToList()
-                : semanticErrors,
-        };
+        return new SyntaxParseProduct(snapshot, loweringAst);
     }
 
-    /// <summary>
-    /// Run the shared validator, then let the selected OpenQASM target dispose of the bounds facts it
-    /// owns. Keeping these as two calls preserves the architectural boundary: direct validator consumers
-    /// see <see cref="SemanticModel.UnprovenIndexes"/> without QSEM030, while this QASM-producing facade
-    /// reports QSEM030 for source-distinct unresolved accesses. The target pass also runs when common errors
-    /// exist so the compiler's collect-all behavior does not depend on which rule happened to fail first.
-    /// </summary>
-    private static List<QoraError> ValidateForOpenQasm(QProgram program, out SemanticModel semantics)
-    {
-        var commonErrors = QoraValidator.Validate(program, out var model);
-        semantics = model
-            ?? throw new InvalidOperationException("QINTERNAL: validation of a non-null program produced no SemanticModel");
-        return commonErrors
-            .Concat(OpenQasmBoundsValidation.Run(semantics))
-            .Distinct()
-            .ToList();
-    }
+    private static SyntaxTreeNode ProjectAst(AstSymbol node) =>
+        node is AstNonTerminal nonTerminal
+            ? new SyntaxTreeNode(
+                SyntaxTreeNodeKind.NonTerminal,
+                nonTerminal.Name ?? nonTerminal.ToString() ?? string.Empty,
+                nonTerminal.Items.Select(ProjectAst))
+            : new SyntaxTreeNode(
+                SyntaxTreeNodeKind.Terminal,
+                node.ToString() ?? string.Empty,
+                Array.Empty<SyntaxTreeNode>());
 
-    /// <summary>
-    /// The lean front end for IMPORTED files (<see cref="ModuleLoader"/>): source → lowered IR, no
-    /// tokens/trees/stages. Parse errors come back positioned in THAT file's offsets — the caller
-    /// re-labels them, since spans in the JSON contract refer to the entry document only.
-    /// </summary>
-    internal static (Ir.QProgram? Program, List<QoraError> ParseErrors) ParseToIr(string source)
-    {
-        var grammar = new QoraGrammar();
-        var lexer = new Lexer();
-        foreach (var terminal in grammar.TerminalSet) lexer.AddTokenRule(terminal);
+    private static SyntaxTreeNode ProjectParseTree(ParseTreeSymbol node) =>
+        node is ParseTreeNonTerminal nonTerminal
+            ? new SyntaxTreeNode(
+                SyntaxTreeNodeKind.NonTerminal,
+                nonTerminal.ToString() ?? string.Empty,
+                nonTerminal.Items.Select(ProjectParseTree))
+            : new SyntaxTreeNode(
+                SyntaxTreeNodeKind.Terminal,
+                node.ToString() ?? string.Empty,
+                Array.Empty<SyntaxTreeNode>());
 
-        var tokens = lexer.Lexing(source ?? string.Empty).TokensForParsing;
-        var result = new LALRParser(grammar, bLogging: false).Parsing(tokens);
-        if (!result.Success) return (null, result.AllErrors.Select(ToQoraError).ToList());
-
-        var ast = result.Count > 0 ? result.AstRoot : null;
-        // spanless: these nodes belong to ANOTHER document, so entry-document offsets would lie.
-        return (ast != null ? QoraLowering.Lower(ast, withSpans: false) : null, new List<QoraError>());
-    }
-
-    /// <summary>Map an engine <see cref="ParsingErrorInfo"/> to a positioned <see cref="QoraError"/>.</summary>
-    private static QoraError ToQoraError(ParsingErrorInfo error)
+    private static QoraError ToQoraError(
+        ParsingErrorInfo error,
+        SourceDocumentRef document)
     {
         var token = error.ErrTokens.FirstOrDefault();
-
-        // TokenData.EndIndex is the inclusive last-char offset; +1 makes it half-open for an editor range.
-        // A virtual/unlocated token reports StartIndex == -1, which we pass through as "no span".
-        var (start, end) = (token != null && token.StartIndex >= 0)
-            ? (token.StartIndex, token.EndIndex + 1)
-            : (-1, -1);
-
-        return new QoraError(error.Message, error.Code, start, end);
+        var span = token is not null && token.StartIndex >= 0
+            ? new SourceSpan(
+                document,
+                token.StartIndex,
+                token.EndIndex + 1)
+            : (SourceSpan?)null;
+        return new QoraError(error.Message, error.Code, span);
     }
 }

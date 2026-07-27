@@ -7,17 +7,20 @@ namespace Qora.Tests;
 /// <summary>
 /// Namespace resolution applies to expression-position calls just as it does to statement calls:
 /// the parser accepts qualified function names, the resolver writes both the canonical name and stable
-/// callee Id, and namespace ownership lives in <see cref="ProgramSymbolGraph"/> independently from lexical
-/// <see cref="Scope"/> objects. These tests pin that contract through resolution, validation,
-/// monomorphization, and emission.
+/// callee Id, and program, namespace, callable, and lexical scopes form one <see cref="HirScopeGraph"/>.
+/// These tests pin that contract through resolution, validation, monomorphization, and emission.
 /// </summary>
 public class NamespaceFunctionTests
 {
-    private static QoraParseResult Compile(string source)
+    private static Compilation Compile(string source)
     {
         var result = Compiler.Compile(source);
-        Assert.True(result.Success,
-            string.Join(" | ", result.Errors.Select(error => $"{error.Code}: {error.Message}")));
+        Assert.True(
+            result.Succeeded,
+            string.Join(
+                " | ",
+                result.Diagnostics.Select(diagnostic =>
+                    $"{diagnostic.Error.Code}: {diagnostic.Error.Message}")));
         return result;
     }
 
@@ -38,8 +41,8 @@ public class NamespaceFunctionTests
             operation Main() { L.Work(); }
             """);
 
-        var function = result.Ir!.Operations.Single(operation => operation.Name == "L.two");
-        var work = result.Ir.Operations.Single(operation => operation.Name == "L.Work");
+        var function = result.Hir.Resolved!.Program!.Operations.Single(operation => operation.Name == "L.two");
+        var work = result.Hir.Resolved!.Program.Operations.Single(operation => operation.Name == "L.Work");
         var call = SoleExpressionCall(work);
 
         Assert.Equal("L.two", call.Name);
@@ -56,14 +59,14 @@ public class NamespaceFunctionTests
             operation Main() { var n: int = L.two(); }
             """);
 
-        var function = result.Ir!.Operations.Single(operation => operation.Name == "L.two");
-        var main = result.Ir.Operations.Single(operation => operation.Name == "Main");
+        var function = result.Hir.Resolved!.Program!.Operations.Single(operation => operation.Name == "L.two");
+        var main = result.Hir.Resolved!.Program.Operations.Single(operation => operation.Name == "Main");
         var call = SoleExpressionCall(main);
 
         Assert.Equal("L.two", call.Name);
         Assert.Equal(function.Id, call.CalleeOpId);
-        Assert.Contains("def L_two() -> int {", result.Qasm);
-        Assert.Contains("int n = L_two();", result.Qasm);
+        Assert.Contains("def L_two() -> int {", result.Targets.OpenQasm!.Text);
+        Assert.Contains("int n = L_two();", result.Targets.OpenQasm!.Text);
     }
 
     [Fact]
@@ -80,8 +83,8 @@ public class NamespaceFunctionTests
             operation Main() { App.Work(); }
             """);
 
-        var function = result.Ir!.Operations.Single(operation => operation.Name == "L.two");
-        var work = result.Ir.Operations.Single(operation => operation.Name == "App.Work");
+        var function = result.Hir.Resolved!.Program!.Operations.Single(operation => operation.Name == "L.two");
+        var work = result.Hir.Resolved!.Program.Operations.Single(operation => operation.Name == "App.Work");
         var call = SoleExpressionCall(work);
 
         Assert.Equal("L.two", call.Name);
@@ -106,9 +109,9 @@ public class NamespaceFunctionTests
             operation Main() { App.Work(); }
             """);
 
-        Assert.False(result.Success);
-        Assert.Equal(new[] { "QSEM018" }, result.Errors.Select(error => error.Code));
-        Assert.DoesNotContain(result.Errors, error => error.Code == "QSEM007");
+        Assert.False(result.Succeeded);
+        Assert.Equal(new[] { "QSEM018" }, result.Diagnostics.Select(diagnostic => diagnostic.Error).ToList().Select(error => error.Code));
+        Assert.DoesNotContain(result.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(), error => error.Code == "QSEM007");
     }
 
     [Fact]
@@ -121,10 +124,10 @@ public class NamespaceFunctionTests
             operation Main() { var n: int = L.Work(); }
             """);
 
-        Assert.False(result.Success);
-        Assert.Contains(result.Errors, error => error.Code == "QSEM005");
-        Assert.DoesNotContain(result.Errors, error => error.Code == "QSEM007");
-        Assert.DoesNotContain(result.Errors, error => error.Code == "QSEM019");
+        Assert.False(result.Succeeded);
+        Assert.Contains(result.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(), error => error.Code == "QSEM005");
+        Assert.DoesNotContain(result.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(), error => error.Code == "QSEM007");
+        Assert.DoesNotContain(result.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(), error => error.Code == "QSEM019");
     }
 
     [Fact]
@@ -134,13 +137,13 @@ public class NamespaceFunctionTests
             operation Main() { var n: int = Qora.Intrinsic.H(); }
             """);
 
-        Assert.False(result.Success);
-        Assert.Equal(new[] { "QSEM005" }, result.Errors.Select(error => error.Code));
-        Assert.DoesNotContain(result.Errors, error => error.Code == "QSEM019");
+        Assert.False(result.Succeeded);
+        Assert.Equal(new[] { "QSEM005" }, result.Diagnostics.Select(diagnostic => diagnostic.Error).ToList().Select(error => error.Code));
+        Assert.DoesNotContain(result.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(), error => error.Code == "QSEM019");
     }
 
     [Fact]
-    public void NamespacedCallablesAreOwnedByTheirNamespaceSymbol()
+    public void NamespacedCallablesAreDeclaredInTheirNamespaceScope()
     {
         var result = Compile("""
             namespace L {
@@ -150,23 +153,28 @@ public class NamespaceFunctionTests
             operation Main() { L.Work(); }
             """);
 
-        var work = result.MonoIr!.Operations.Single(operation => operation.Name == "L.Work");
-        var function = result.MonoIr.Operations.Single(operation => operation.Name == "L.two");
-        var symbols = Assert.IsType<ProgramSymbolGraph>(result.Semantics!.ProgramSymbols);
-        var namespaceSymbol = Assert.IsType<Symbol>(symbols.FindNamespace("L"));
-        var workSymbol = Assert.IsType<Symbol>(symbols.FindDeclaration(work.Id));
-        var functionSymbol = Assert.IsType<Symbol>(symbols.FindDeclaration(function.Id));
-        var operationScope = Assert.IsType<Scope>(result.Semantics.FindRootScope(work.Id));
+        var work = result.Hir.Specialized!.Program!.Operations.Single(operation => operation.Name == "L.Work");
+        var function = result.Hir.Specialized!.Program.Operations.Single(operation => operation.Name == "L.two");
+        var graph = Assert.IsType<HirScopeGraph>(result.Hir.SpecializedValidation!.Model.ScopeGraph);
+        var namespaceScope = Assert.IsType<Scope>(graph.FindNamespaceScope("L"));
+        var namespaceSymbol = Assert.IsType<Symbol>(graph.FindNamespaceSymbol("L"));
+        var workSymbol = Assert.IsType<Symbol>(graph.FindDeclaration(work.Id));
+        var functionSymbol = Assert.IsType<Symbol>(graph.FindDeclaration(function.Id));
+        var operationScope = Assert.IsType<Scope>(result.Hir.SpecializedValidation!.Model.FindRootScope(work.Id));
 
         Assert.Equal(SymbolKind.Namespace, namespaceSymbol.Kind);
-        Assert.Equal(symbols.RootSymbol.Id, namespaceSymbol.OwnerSymbolId);
-        Assert.Equal(namespaceSymbol.Id, workSymbol.OwnerSymbolId);
-        Assert.Equal(namespaceSymbol.Id, functionSymbol.OwnerSymbolId);
+        Assert.Equal(graph.RootScope.Id, namespaceSymbol.DeclaringScopeId);
+        Assert.Equal(graph.RootScope.Id, namespaceScope.ParentScopeId);
+        Assert.Equal(namespaceSymbol.Id, namespaceScope.DeclaringSymbolId);
+        Assert.Equal(namespaceScope.Id, workSymbol.DeclaringScopeId);
+        Assert.Equal(namespaceScope.Id, functionSymbol.DeclaringScopeId);
         Assert.Same(functionSymbol,
-            symbols.LookupMember(namespaceSymbol.Id, "two", SymbolKind.Operation));
+            graph.LookupMember(namespaceScope.Id, "two", SymbolKind.Operation));
         Assert.Same(workSymbol,
-            symbols.LookupMember(namespaceSymbol.Id, "Work", SymbolKind.Operation));
-        Assert.Null(operationScope.ParentScopeId);
+            graph.LookupMember(namespaceScope.Id, "Work", SymbolKind.Operation));
+        Assert.Equal(namespaceScope.Id, operationScope.ParentScopeId);
+        Assert.Equal(HirScopeKind.Callable, operationScope.Kind);
+        Assert.Equal(workSymbol.Id, operationScope.DeclaringSymbolId);
     }
 
     [Fact]
@@ -182,12 +190,12 @@ public class NamespaceFunctionTests
             }
             """);
 
-        var generic = result.Ir!.Operations.Single(operation => operation.Name == "L.count");
+        var generic = result.Hir.Resolved!.Program!.Operations.Single(operation => operation.Name == "L.count");
         var sourceCall = SoleExpressionCall(
-            result.Ir.Operations.Single(operation => operation.Name == "Main"));
+            result.Hir.Resolved!.Program.Operations.Single(operation => operation.Name == "Main"));
         Assert.Equal(generic.Id, sourceCall.CalleeOpId);
 
-        var analyzed = result.AnalyzedIr!;
+        var analyzed = result.Hir.EffectAnalysis!.Program!;
         var specialization = analyzed.Operations.Single(operation =>
             operation.IsFunction
             && operation.Name.StartsWith("L.count__sz", StringComparison.Ordinal));
@@ -198,11 +206,11 @@ public class NamespaceFunctionTests
         Assert.Equal(specialization.Id, specializedCall.CalleeOpId);
         Assert.DoesNotContain(analyzed.Operations, operation => operation.Id == generic.Id);
 
-        var symbols = Assert.IsType<ProgramSymbolGraph>(result.Semantics!.ProgramSymbols);
-        var namespaceSymbol = Assert.IsType<Symbol>(symbols.FindNamespace("L"));
+        var graph = Assert.IsType<HirScopeGraph>(result.Hir.SpecializedValidation!.Model.ScopeGraph);
+        var namespaceScope = Assert.IsType<Scope>(graph.FindNamespaceScope("L"));
         var specializationSymbol = Assert.IsType<Symbol>(
-            symbols.FindDeclaration(specialization.Id));
-        Assert.Equal(namespaceSymbol.Id, specializationSymbol.OwnerSymbolId);
+            graph.FindDeclaration(specialization.Id));
+        Assert.Equal(namespaceScope.Id, specializationSymbol.DeclaringScopeId);
     }
 
     [Fact]
@@ -216,12 +224,12 @@ public class NamespaceFunctionTests
             operation Main() { var n: int = wrapper(); }
             """);
 
-        var callee = result.Qasm.IndexOf("def L_two()", StringComparison.Ordinal);
-        var caller = result.Qasm.IndexOf("def wrapper()", StringComparison.Ordinal);
+        var callee = result.Targets.OpenQasm!.Text.IndexOf("def L_two()", StringComparison.Ordinal);
+        var caller = result.Targets.OpenQasm!.Text.IndexOf("def wrapper()", StringComparison.Ordinal);
 
-        Assert.True(callee >= 0, result.Qasm);
-        Assert.True(caller >= 0, result.Qasm);
-        Assert.True(callee < caller, result.Qasm);
-        Assert.Contains("= L_two();", result.Qasm);
+        Assert.True(callee >= 0, result.Targets.OpenQasm!.Text);
+        Assert.True(caller >= 0, result.Targets.OpenQasm!.Text);
+        Assert.True(callee < caller, result.Targets.OpenQasm!.Text);
+        Assert.Contains("= L_two();", result.Targets.OpenQasm!.Text);
     }
 }

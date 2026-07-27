@@ -18,19 +18,29 @@ namespace Qora.Ir.Passes;
 /// silently dropped can never be emitted. As defense in depth, any <see cref="QConjugate"/> that somehow
 /// survives this pass is caught again by <see cref="ReferentialCheck"/> (QINTERNAL) before emission.
 /// </summary>
-public static class ConjugationLowering
+internal static class ConjugationLowering
 {
-    public static (QProgram Program, List<QoraError> Errors) Run(QProgram program, SemanticModel? model = null)
+    public sealed record Result(
+        QProgram Program,
+        IReadOnlyList<QoraError> Errors,
+        IReadOnlyList<NodeDerivation> Derivations);
+
+    public static Result Run(QProgram program)
     {
         var errors = new List<QoraError>();
+        var derivations = new List<NodeDerivation>();
         var inverter = new Inverter(program.Operations);
         // This pass runs AFTER the semantic model is built, so every copied statement's lineage is recorded
         // — an Id-keyed lookup on a synthesized cleanup statement resolves through to its Within original.
-        Action<int, int>? record = model is null ? null : model.RecordDerivation;
+        void Record(int sourceId, int derivedId) =>
+            derivations.Add(new NodeDerivation(sourceId, derivedId));
         var ops = program.Operations
-            .Select(op => op with { Body = Lower(op.Body, inverter, errors, record) })
+            .Select(op => op with { Body = Lower(op.Body, inverter, errors, Record) })
             .ToList();
-        return (program with { Operations = ops }, errors);
+        return new Result(
+            program with { Operations = ops },
+            errors.AsReadOnly(),
+            derivations.AsReadOnly());
     }
 
     /// <summary>
@@ -39,7 +49,11 @@ public static class ConjugationLowering
     /// <c>Within</c> (the <see cref="Inverter"/> inverts a nested conjugate correctly on its own), and only
     /// then are within/apply/cleanup themselves recursively flattened.
     /// </summary>
-    private static IReadOnlyList<QStmt> Lower(IReadOnlyList<QStmt> stmts, Inverter inverter, List<QoraError> errors, Action<int, int>? record)
+    private static IReadOnlyList<QStmt> Lower(
+        IReadOnlyList<QStmt> stmts,
+        Inverter inverter,
+        List<QoraError> errors,
+        Action<int, int> record)
     {
         var outp = new List<QStmt>(stmts.Count);
         foreach (var stmt in stmts)
@@ -54,7 +68,8 @@ public static class ConjugationLowering
                         // null/empty tail, which would emit the compute with the cleanup silently dropped.
                         errors.Add(new QoraError(
                             $"the `within` block cannot be uncomputed: {reason}",
-                            "QSEM027", c.Span?.Start ?? -1, c.Span?.End ?? -1));
+                            "QSEM027",
+                            c.Span));
                         break;
                     }
                     outp.AddRange(Lower(c.Within, inverter, errors, record));

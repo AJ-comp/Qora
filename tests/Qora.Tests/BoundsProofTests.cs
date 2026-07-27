@@ -220,8 +220,8 @@ public class BoundsProofTests
     public void RejectsALoopStartingAboveZeroWhoseMaximumIsOutOfRange() =>
         Compiler.Rejects("operation Main(){ use q=Qubit[1]; var a: int[] = [1,2,3]; for i in 2..5 { a[i]=1; } H(q[0]); }", "QSEM016");
 
-    // --- P5 through a monomorphized array: the guard's `.Count` becomes a concrete literal after
-    //     specialization (`n < q.Count` -> `n < 2`) and must still prove the index ---
+    // --- P5 through a monomorphized array: the preserved `.Count` reads the specialized symbol's concrete
+    //     size (`n < q.Count`, with q sized to 2) and must still prove the index ---
 
     [Fact]
     public void AcceptsAGuardedIndexIntoAQubitRegister() =>
@@ -254,24 +254,24 @@ public class BoundsProofTests
     [Fact]
     public void RejectsAConstLoopOverAParameterWhenTheArgumentIsTooShort() =>
         Compiler.Rejects("""
-            operation Helper(inout x: int[]) {
+            operation Helper(var x: int[]) {
                 for i in 0..5 { x[i] = 1; }
             }
             operation Main() {
                 var a: int[] = [1, 2];
-                Helper(inout a);
+                Helper(var a);
             }
             """, "QSEM016");
 
     [Fact]
     public void AcceptsAConstLoopOverAParameterWhenTheArgumentIsLongEnough() =>
         Compiler.Accepts("""
-            operation Helper(inout x: int[]) {
+            operation Helper(var x: int[]) {
                 for i in 0..5 { x[i] = 1; }
             }
             operation Main() {
                 var a: int[] = [1, 2, 3, 4, 5, 6];
-                Helper(inout a);
+                Helper(var a);
             }
             """);
 
@@ -339,12 +339,12 @@ public class BoundsProofTests
     [Fact]
     public void RejectsACountBoundedLoopOverAParameterReachingCountItself() =>
         Compiler.Rejects("""
-            operation Helper(inout a: int[]) {
+            operation Helper(var a: int[]) {
                 for i in 0..a.Count { a[i] = 1; }
             }
             operation Main() {
                 var a: int[] = [1, 2, 3];
-                Helper(inout a);
+                Helper(var a);
             }
             """, "QSEM016");
 
@@ -352,12 +352,12 @@ public class BoundsProofTests
     [Fact]
     public void AcceptsACountMinusTwoLoopOverAParameter() =>
         Compiler.Accepts("""
-            operation Helper(inout a: int[]) {
+            operation Helper(var a: int[]) {
                 for i in 0..a.Count-2 { a[i] = 1; }
             }
             operation Main() {
                 var a: int[] = [1, 2, 3];
-                Helper(inout a);
+                Helper(var a);
             }
             """);
 
@@ -473,24 +473,24 @@ public class BoundsProofTests
 
     /// <summary>Facts outlive the verdict, so the tree they describe must too: when the POST-MONO validation
     /// rejects, the specialized ops its facts are keyed by exist only in the monomorphized tree — exposed as
-    /// MonoIr so a consumer can resolve the contract of the op that was actually judged.</summary>
+    /// the specialized HIR snapshot so a consumer can resolve the contract of the op that was actually judged.</summary>
     [Fact]
     public void KeepsASpecializedOpsContractReachableWhenThePostMonoValidationRejects()
     {
         var r = Compiler.Compile("""
-            operation Helper(q: Qubit[], inout x: int[]) {
+            operation Helper(q: Qubit[], var x: int[]) {
                 for i in 0..q.Count*2-2 { x[i] = 1; }
             }
             operation Main() {
                 use r = Qubit[5];
                 var a: int[] = [1, 2];
-                Helper(r, inout a);
+                Helper(r, var a);
             }
             """);
-        Assert.False(r.Success);
-        Assert.NotNull(r.MonoIr);
-        var specialized = r.MonoIr!.Operations.Single(o => o.Name.Contains("Helper"));
-        var contract = r.Semantics!.RequiredArgLengths(specialized.Id);
+        Assert.False(r.Succeeded);
+        var specializedSnapshot = Assert.IsType<HirSnapshot>(r.Hir.Specialized);
+        var specialized = specializedSnapshot.Program.Operations.Single(o => o.Name.Contains("Helper"));
+        var contract = r.Hir.SpecializedValidation!.Model.RequiredArgLengths(specialized.Id);
         Assert.NotNull(contract);
         Assert.Equal(9L, contract!["x"]);
     }
@@ -570,8 +570,8 @@ public class BoundsProofTests
                 for i in m..2 { a[i] = 1; }
             }
             """);
-        Assert.False(r.Success);
-        var u = Assert.Single(r.Semantics!.UnprovenIndexes);
+        Assert.False(r.Succeeded);
+        var u = Assert.Single(r.Hir.SpecializedValidation!.Model.UnprovenIndexes);
         Assert.Equal("m", u.LoopBound);
     }
 
@@ -598,8 +598,8 @@ public class BoundsProofTests
     public void ReportsASingleDiagnosticForAnOutOfRangeMeasureTarget()
     {
         var r = Compiler.Compile("operation Main(){ use q=Qubit[2]; var x: bit = M(q[5]); H(q[0]); }");
-        Assert.False(r.Success);
-        Assert.Single(r.Errors, e => e.Code == "QSEM016");
+        Assert.False(r.Succeeded);
+        Assert.Single(r.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(), e => e.Code == "QSEM016");
     }
 
     /// <summary>An unproven measure index records ONE UnprovenIndexes entry, not two.</summary>
@@ -614,8 +614,8 @@ public class BoundsProofTests
             }
             operation Main() { use r = Qubit[3]; Foo(r); }
             """);
-        Assert.False(r.Success);
-        Assert.Single(r.Semantics!.UnprovenIndexes);
+        Assert.False(r.Succeeded);
+        Assert.Single(r.Hir.SpecializedValidation!.Model.UnprovenIndexes);
     }
 
     /// <summary>A measurement in a WHILE condition lowers to two statements (a pre-loop measure and an
@@ -625,8 +625,8 @@ public class BoundsProofTests
     public void ReportsASingleDiagnosticForAnOutOfRangeMeasureInAWhileCondition()
     {
         var r = Compiler.Compile("operation Main(){ use q=Qubit[3]; while (M(q[9]) == 1) { } }");
-        Assert.False(r.Success);
-        Assert.Single(r.Errors, e => e.Code == "QSEM016");
+        Assert.False(r.Succeeded);
+        Assert.Single(r.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(), e => e.Code == "QSEM016");
     }
 
     /// <summary>For an UNPROVEN measured index, the model preserves both lowered access sites while the
@@ -642,9 +642,9 @@ public class BoundsProofTests
             }
             operation Main() { use r = Qubit[3]; Foo(r); }
             """);
-        Assert.False(r.Success);
-        Assert.Equal(2, r.Semantics!.UnprovenIndexes.Count);
-        Assert.Single(r.Errors, error => error.Code == "QSEM030");
+        Assert.False(r.Succeeded);
+        Assert.Equal(2, r.Hir.SpecializedValidation!.Model.UnprovenIndexes.Count);
+        Assert.Single(r.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(), error => error.Code == "QSEM030");
     }
 
     // --- a `while` condition guard narrows the loop body (re-established each iteration), applied after the
@@ -1076,13 +1076,13 @@ public class BoundsProofTests
     [Fact]
     public void RejectsAConstIndexOnAParameterWhenTheArgumentIsTooShort() =>
         Compiler.Rejects("""
-            operation Helper(inout x: int[]) {
+            operation Helper(var x: int[]) {
                 const k: int = 5;
                 x[k] = 1;
             }
             operation Main() {
                 var a: int[] = [1, 2];
-                Helper(inout a);
+                Helper(var a);
             }
             """, "QSEM016");
 
@@ -1093,14 +1093,14 @@ public class BoundsProofTests
     [Fact]
     public void AcceptsAConstBoundOfAQubitCountWhenTheArgumentIsLongEnough() =>
         Compiler.Accepts("""
-            operation Helper(q: Qubit[], inout x: int[]) {
+            operation Helper(q: Qubit[], var x: int[]) {
                 const hi: int = q.Count;
                 for i in 0..hi { x[i] = 1; }
             }
             operation Main() {
                 use r = Qubit[3];
                 var a: int[] = [1, 2, 3, 4, 5];
-                Helper(r, inout a);
+                Helper(r, var a);
             }
             """);
 
@@ -1109,14 +1109,14 @@ public class BoundsProofTests
     [Fact]
     public void RejectsAConstBoundOfAQubitCountWhenTheArgumentIsTooShort() =>
         Compiler.Rejects("""
-            operation Helper(q: Qubit[], inout x: int[]) {
+            operation Helper(q: Qubit[], var x: int[]) {
                 const hi: int = q.Count;
                 for i in 0..hi { x[i] = 1; }
             }
             operation Main() {
                 use r = Qubit[3];
                 var a: int[] = [1, 2];
-                Helper(r, inout a);
+                Helper(r, var a);
             }
             """, "QSEM016");
 
@@ -1299,19 +1299,19 @@ public class BoundsProofTests
     public void AcceptsAGuardedClampOverAParameterAndRecordsNoFloor()
     {
         var r = Compiler.Compile("""
-            operation Helper(inout x: int[]) {
+            operation Helper(var x: int[]) {
                 for i in 0..5 {
                     if (0 <= i && i < x.Count) { x[i] = 1; }
                 }
             }
             operation Main() {
                 var a: int[] = [1, 2];
-                Helper(inout a);
+                Helper(var a);
             }
             """);
-        Assert.True(r.Success);
-        var helper = r.Ir!.Operations.Single(o => o.Name == "Helper");
-        Assert.Null(r.Semantics!.RequiredArgLengths(helper.Id));
+        Assert.True(r.Succeeded);
+        var helper = r.Hir.Resolved!.Program!.Operations.Single(o => o.Name == "Helper");
+        Assert.Null(r.Hir.SpecializedValidation!.Model.RequiredArgLengths(helper.Id));
     }
 
     /// <summary>A guard proves only the array it names: clamping by ANOTHER array's Count leaves the access
@@ -1472,13 +1472,13 @@ public class BoundsProofTests
     [Fact]
     public void RejectsAPostMonoArithmeticBoundOverAClassicalParameter() =>
         Compiler.Rejects("""
-            operation Helper(q: Qubit[], inout x: int[]) {
+            operation Helper(q: Qubit[], var x: int[]) {
                 for i in 0..q.Count*2-2 { x[i] = 1; }
             }
             operation Main() {
                 use r = Qubit[5];
                 var a: int[] = [1, 2];
-                Helper(r, inout a);
+                Helper(r, var a);
             }
             """, "QSEM016");
 
@@ -1520,12 +1520,12 @@ public class BoundsProofTests
     [Fact]
     public void AcceptsAnEmptyConstantLoopOverAParameterRegardlessOfArgumentLength() =>
         Compiler.Accepts("""
-            operation Helper(inout x: int[]) {
+            operation Helper(var x: int[]) {
                 for i in 5..2 { x[i] = 1; }
             }
             operation Main() {
                 var a: int[] = [1];
-                Helper(inout a);
+                Helper(var a);
             }
             """);
 
@@ -1535,28 +1535,28 @@ public class BoundsProofTests
     [Fact]
     public void RejectsAShadowedInnerLoopWhoseBoundExceedsTheArgument() =>
         Compiler.Rejects("""
-            operation Helper(inout x: int[]) {
+            operation Helper(var x: int[]) {
                 for i in 0..1 {
                     for i in 0..5 { x[i] = 1; }
                 }
             }
             operation Main() {
                 var a: int[] = [1, 2];
-                Helper(inout a);
+                Helper(var a);
             }
             """, "QSEM016");
 
     [Fact]
     public void AcceptsAShadowedInnerLoopWhoseBoundFitsTheArgument() =>
         Compiler.Accepts("""
-            operation Helper(inout x: int[]) {
+            operation Helper(var x: int[]) {
                 for i in 0..5 {
                     for i in 0..1 { x[i] = 1; }
                 }
             }
             operation Main() {
                 var a: int[] = [1, 2];
-                Helper(inout a);
+                Helper(var a);
             }
             """);
 
@@ -1566,22 +1566,22 @@ public class BoundsProofTests
     public void RecordsTheArrayArgumentContractOnTheSemanticModel()
     {
         var r = Compiler.Compile("""
-            operation Helper(inout x: int[]) {
+            operation Helper(var x: int[]) {
                 for i in 0..2+3 { x[i] = 1; }
             }
             operation Main() {
                 var a: int[] = [1, 2, 3, 4, 5, 6];
-                Helper(inout a);
+                Helper(var a);
             }
             """);
-        Assert.True(r.Success);
-        var helper = r.Ir!.Operations.Single(o => o.Name == "Helper");
-        var contract = r.Semantics!.RequiredArgLengths(helper.Id);
+        Assert.True(r.Succeeded);
+        var helper = r.Hir.Resolved!.Program!.Operations.Single(o => o.Name == "Helper");
+        var contract = r.Hir.SpecializedValidation!.Model.RequiredArgLengths(helper.Id);
         Assert.NotNull(contract);
         Assert.Equal(6L, contract!["x"]);
     }
 
-    // --- the failed proof is recorded as DATA (SemanticModel.UnprovenIndexes), and each QSEM030 is DERIVED
+    // --- the failed proof is recorded as DATA (HirSemanticModel.UnprovenIndexes), and each QSEM030 is DERIVED
     //     from an entry: the fact is target-independent, only its disposition is per-backend (the OpenQASM
     //     path rejects; a future QIR backend reads the same list as its runtime-check insertion plan) ---
 
@@ -1599,16 +1599,18 @@ public class BoundsProofTests
                 for i in 0..a.Count-n { a[i] = 1; }
             }
             """);
-        Assert.False(r.Success);
-        Assert.NotNull(r.Semantics);
-        Assert.Collection(r.Semantics!.UnprovenIndexes,
+        Assert.False(r.Succeeded);
+        var specialized = Assert.IsType<HirSnapshot>(r.Hir.Specialized);
+        Assert.Collection(r.Hir.SpecializedValidation!.Model.UnprovenIndexes,
             u => Assert.Equal(("Main", "a", "n", null), (u.Op, u.Array, u.Index, u.LoopBound)),
             u => Assert.Equal(("Main", "a", "i", "a . Count - n"), (u.Op, u.Array, u.Index, u.LoopBound)));   // bound text as the IR stores it (tokenizer-spaced)
-        Assert.Equal(r.Semantics.UnprovenIndexes.Count, r.Errors.Count(e => e.Code == "QSEM030"));
+        Assert.Equal(
+            r.Hir.SpecializedValidation.Model.UnprovenIndexes.Count,
+            r.Diagnostics.Count(diagnostic => diagnostic.Error.Code == "QSEM030"));
     }
 
     // --- the deferral ledger: a "re-check after monomorphization" promise is itself recorded as DATA
-    //     (SemanticModel.DeferredSizeChecks), never a silent return. The pipeline's surviving model is
+    //     (HirSemanticModel.DeferredSizeChecks), never a silent return. The pipeline's surviving model is
     //     empty on success (the post-mono re-check answered every promise); validating the pre-mono
     //     program directly exposes the outstanding entries a no-specialization backend must dispose of. ---
 
@@ -1627,13 +1629,13 @@ public class BoundsProofTests
                 Flip(a, b);
             }
             """);
-        Assert.True(r.Success);
-        Assert.Empty(r.Semantics!.DeferredSizeChecks);   // the specialize→re-validate pair ran: every promise was answered
+        Assert.True(r.Succeeded);
+        Assert.Empty(r.Hir.SpecializedValidation!.Model.DeferredSizeChecks);   // the specialize→re-validate pair ran: every promise was answered
 
         // The same (resolved, pre-mono) program validated directly: the literal index and the CROSS-array
         // loop bound are postponed — and on the ledger. The same-array `0..q.Count-1` loop is NOT: P2
         // proves it for ANY length, so there is no promise to record.
-        var preErrors = QoraValidator.Validate(r.Ir, out var pre);
+        var preErrors = QoraValidator.Validate(r.Hir.Resolved!.Program, out var pre);
         Assert.Empty(preErrors);
         Assert.Collection(pre!.DeferredSizeChecks,
             d => Assert.Equal(("Flip", "q", "q[5]"), (d.Op, d.Array, d.Access)),
@@ -1658,10 +1660,10 @@ public class BoundsProofTests
                 Pick(f, n, q[0]);
             }
             """);
-        Assert.True(r.Success);
-        Assert.Empty(r.Semantics!.DeferredSizeChecks);
+        Assert.True(r.Succeeded);
+        Assert.Empty(r.Hir.SpecializedValidation!.Model.DeferredSizeChecks);
 
-        var preErrors = QoraValidator.Validate(r.Ir, out var pre);
+        var preErrors = QoraValidator.Validate(r.Hir.Resolved!.Program, out var pre);
         Assert.Empty(preErrors);
         Assert.Collection(pre!.DeferredSizeChecks,
             d => Assert.Equal(("Pick", "f", "f[n]"), (d.Op, d.Array, d.Access)),
@@ -1684,10 +1686,10 @@ public class BoundsProofTests
                 Flip(a);
             }
             """);
-        Assert.True(r.Success);
+        Assert.True(r.Succeeded);
 
-        QoraValidator.Validate(r.Ir, out var pre);
-        var ops = r.Ir!.Operations.ToDictionary(o => o.Name, o => o.Id);
+        QoraValidator.Validate(r.Hir.Resolved!.Program, out var pre);
+        var ops = r.Hir.Resolved!.Program!.Operations.ToDictionary(o => o.Name, o => o.Id);
         Assert.True(pre!.WillBeRechecked(ops["Main"]));    // concrete: checks complete without deferral
         Assert.True(pre.WillBeRechecked(ops["Flip"]));     // generic reached from Main
         Assert.False(pre.WillBeRechecked(ops["Dead1"]));   // generic nothing calls
@@ -1695,7 +1697,7 @@ public class BoundsProofTests
         Assert.Null(pre.WillBeRechecked(-1));              // an op this validation never saw
 
         // The FINAL (post-mono) model: every surviving op is concrete, so every verdict is true.
-        Assert.All(r.MonoIr!.Operations, o => Assert.True(r.Semantics!.WillBeRechecked(o.Id)));
+        Assert.All(r.Hir.Specialized!.Program!.Operations, o => Assert.True(r.Hir.SpecializedValidation!.Model.WillBeRechecked(o.Id)));
     }
 
     /// <summary>A digit-run index too large for long lowers to a verbatim literal node — the diagnostic
@@ -1709,12 +1711,14 @@ public class BoundsProofTests
                 X(q[99999999999999999999]);
             }
             """);
-        Assert.False(r.Success);
-        var e = Assert.Single(r.Errors, e => e.Code == "QSEM016");
+        Assert.False(r.Succeeded);
+        var e = Assert.Single(r.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(), e => e.Code == "QSEM016");
         Assert.Contains("99999999999999999999", e.Message);
     }
 
-    // --- deferral soundness: "re-check after monomorphization" is only a proof when the re-check RUNS.
+    // --- Common-HIR deferral soundness: "re-check after monomorphization" is only a proof when the
+    //     re-check RUNS. Unlike target-only QSEM030 policy, alias safety is a source-language contract,
+    //     so an invalid dead generic is rejected before target dead-code elimination.
     //     A generic op nothing calls is dropped by the Monomorphizer, so its deferred aliasing check
     //     falls back to the conservative pre-mono judgement instead of silently skipping. ---
 
@@ -1733,8 +1737,8 @@ public class BoundsProofTests
                 H(q[0]);
             }
             """);
-        Assert.False(r.Success);
-        Assert.Contains(r.Errors, e => e.Code == "QSEM014");
+        Assert.False(r.Succeeded);
+        Assert.Contains(r.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(), e => e.Code == "QSEM014");
     }
 
     [Fact]
@@ -1756,8 +1760,8 @@ public class BoundsProofTests
                 H(q[0]);
             }
             """);
-        Assert.False(r.Success);
-        Assert.Contains(r.Errors, e => e.Code == "QSEM014");
+        Assert.False(r.Succeeded);
+        Assert.Contains(r.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(), e => e.Code == "QSEM014");
     }
 
     [Fact]
@@ -1775,6 +1779,6 @@ public class BoundsProofTests
                 FanIn(a);
             }
             """);
-        Assert.True(r.Success, string.Join(" | ", r.Errors.Select(e => $"{e.Code}: {e.Message}")));
+        Assert.True(r.Succeeded, string.Join(" | ", r.Diagnostics.Select(diagnostic => diagnostic.Error).ToList().Select(e => $"{e.Code}: {e.Message}")));
     }
 }

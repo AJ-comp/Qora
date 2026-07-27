@@ -62,7 +62,7 @@ public class ClassicalArrayTests
     {
         var result = CompileSuccessfully("operation Take(value: int){} operation Main(){ var values: int[] = [1,2]; Take(values[0]); }");
 
-        Assert.Contains("Take(values[0]);", result.Qasm);
+        Assert.Contains("Take(values[0]);", result.Targets.OpenQasm!.Text);
     }
 
     [Fact]
@@ -118,28 +118,28 @@ public class ClassicalArrayTests
         RejectsCleanly("operation Main(){ var value: int = 1; for i in 0..value.Count-1 { value=i; } }");
 
     [Fact]
-    public void RejectsSameArrayPassedToReadonlyAndInOutParameters()
+    public void RejectsSameArrayPassedToReadonlyAndMutableParameters()
     {
         RejectsCleanly("""
-            operation Copy(inout left: int[], right: int[]) {
+            operation Copy(var left: int[], right: int[]) {
                 left[0] = right[0];
             }
             operation Main() {
                 var values: int[] = [1, 2];
-                Copy(inout values, values);
+                Copy(var values, values);
             }
             """);
     }
 
     [Theory]
     [InlineData("operation Main(){ const values: int[] = [1,2]; values[0]=3; }")]
-    [InlineData("operation Change(inout values: int[]){ values[0]=3; } operation Main(){ const values: int[] = [1,2]; Change(inout values); }")]
+    [InlineData("operation Change(var values: int[]){ values[0]=3; } operation Main(){ const values: int[] = [1,2]; Change(var values); }")]
     public void RejectsMutationOfConstArray(string source)
     {
         var result = Compiler.Compile(source);
 
-        Assert.False(result.Success);
-        Assert.Contains(result.Errors, error => error.Code == "QSEM024");
+        Assert.False(result.Succeeded);
+        Assert.Contains(result.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(), error => error.Code == "QSEM024");
     }
 
     /// <summary>Every element type EXCEPT bit takes the general array form. See <see cref="EmitsBitArrayAsNativeBitRegister"/>.</summary>
@@ -152,7 +152,7 @@ public class ClassicalArrayTests
     {
         var result = CompileSuccessfully($"operation Main(){{ var values: {type}[] = [{sourceElements}]; }}");
 
-        Assert.Contains($"array[{type}, 2] values = {{{qasmElements}}};", result.Qasm);
+        Assert.Contains($"array[{type}, 2] values = {{{qasmElements}}};", result.Targets.OpenQasm!.Text);
     }
 
     /// <summary>
@@ -165,10 +165,10 @@ public class ClassicalArrayTests
     {
         var result = CompileSuccessfully("operation Main(){ var flags: bit[] = [0,1]; }");
 
-        Assert.Contains("bit[2] flags;", result.Qasm);
-        Assert.Contains("flags[0] = 0;", result.Qasm);
-        Assert.Contains("flags[1] = 1;", result.Qasm);
-        Assert.DoesNotContain("array[bit", result.Qasm);
+        Assert.Contains("bit[2] flags;", result.Targets.OpenQasm!.Text);
+        Assert.Contains("flags[0] = 0;", result.Targets.OpenQasm!.Text);
+        Assert.Contains("flags[1] = 1;", result.Targets.OpenQasm!.Text);
+        Assert.DoesNotContain("array[bit", result.Targets.OpenQasm!.Text);
     }
 
     /// <summary>
@@ -180,8 +180,8 @@ public class ClassicalArrayTests
     {
         var result = CompileSuccessfully("operation Main(){ var flags: bit[] = new bit[3]; }");
 
-        Assert.Contains("bit[3] flags = \"000\";", result.Qasm);
-        Assert.DoesNotContain("array[bit", result.Qasm);
+        Assert.Contains("bit[3] flags = \"000\";", result.Targets.OpenQasm!.Text);
+        Assert.DoesNotContain("array[bit", result.Targets.OpenQasm!.Text);
     }
 
     /// <summary><c>sizeof</c> is not defined on a bit register, so a bit array's Count must fold to a literal.
@@ -199,43 +199,43 @@ public class ClassicalArrayTests
             }
             """);
 
-        Assert.Contains("[0:2 - 1]", result.Qasm);
-        Assert.DoesNotContain("sizeof(flags)", result.Qasm);
+        Assert.Contains("[0:2 - 1]", result.Targets.OpenQasm!.Text);
+        Assert.DoesNotContain("sizeof(flags)", result.Targets.OpenQasm!.Text);
     }
 
     [Fact]
     public void EmitsMutableOneDimensionalArrayParameter()
     {
         var result = CompileSuccessfully("""
-            operation SetFirst(inout values: int[]) {
+            operation SetFirst(var values: int[]) {
                 values[0] = 7;
             }
             operation Main() {
                 var values: int[] = [1, 2];
-                SetFirst(inout values);
+                SetFirst(var values);
             }
             """);
 
-        Assert.Contains("mutable array[int, #dim = 1] values", result.Qasm);
+        Assert.Contains("mutable array[int, #dim = 1] values", result.Targets.OpenQasm!.Text);
     }
 
     [Fact]
     public void EmitsCountAsSizeof()
     {
         var result = CompileSuccessfully("""
-            operation Visit(inout values: int[]) {
+            operation Visit(var values: int[]) {
                 for i in 0..values.Count-1 {
                     values[i] = values[i] + 1;
                 }
             }
             operation Main() {
                 var values: int[] = [1, 2, 3];
-                Visit(inout values);
+                Visit(var values);
             }
             """);
 
-        Assert.Contains("sizeof(values)", result.Qasm);
-        Assert.DoesNotContain(".Count", result.Qasm);
+        Assert.Contains("sizeof(values)", result.Targets.OpenQasm!.Text);
+        Assert.DoesNotContain(".Count", result.Targets.OpenQasm!.Text);
     }
 
     [Fact]
@@ -243,7 +243,7 @@ public class ClassicalArrayTests
     {
         var result = CompileSuccessfully("operation Main(){ var values: int[] = new int[3]; }");
 
-        Assert.Contains("array[int, 3] values = {0, 0, 0};", result.Qasm);
+        Assert.Contains("array[int, 3] values = {0, 0, 0};", result.Targets.OpenQasm!.Text);
     }
 
     [Fact]
@@ -251,8 +251,8 @@ public class ClassicalArrayTests
     {
         var result = CompileSuccessfully("operation Main(){ var values: int[] = [1,2]; var saved: int = values[1]; values[0]=saved; }");
 
-        Assert.Contains("int saved = values[1];", result.Qasm);
-        Assert.Contains("values[0] = saved;", result.Qasm);
+        Assert.Contains("int saved = values[1];", result.Targets.OpenQasm!.Text);
+        Assert.Contains("values[0] = saved;", result.Targets.OpenQasm!.Text);
     }
 
     [Fact]
@@ -260,23 +260,27 @@ public class ClassicalArrayTests
     {
         var result = CompileSuccessfully("operation Main(){ var flags: bit[] = [0,1]; if(flags[1]==1){ flags[0]=1; } }");
 
-        Assert.Contains("if (flags[1] == true)", result.Qasm);
+        Assert.Contains("if (flags[1] == true)", result.Targets.OpenQasm!.Text);
     }
 
-    private static QoraParseResult CompileSuccessfully(string source)
+    private static Compilation CompileSuccessfully(string source)
     {
         var result = Compiler.Compile(source);
-        Assert.True(result.Success, Explain(result));
-        Assert.False(string.IsNullOrWhiteSpace(result.Qasm), "a successful array program must emit OpenQASM");
+        Assert.True(result.Succeeded, Explain(result));
+        Assert.False(
+            string.IsNullOrWhiteSpace(result.Targets.OpenQasm?.Text),
+            "a successful array program must emit OpenQASM");
         return result;
     }
 
     private static void RejectsCleanly(string source)
     {
         var result = Compiler.Compile(source);
-        Assert.False(result.Success, $"expected the array program to be rejected, but it compiled:\n{source}\n{result.Qasm}");
-        Assert.NotEmpty(result.Errors);
-        Assert.DoesNotContain(result.Errors, e => e.Code is "QORA0000" or "QINTERNAL");
+        Assert.False(
+            result.Succeeded,
+            $"expected the array program to be rejected, but it compiled:\n{source}\n{result.Targets.OpenQasm?.Text}");
+        Assert.NotEmpty(result.Diagnostics.Select(diagnostic => diagnostic.Error).ToList());
+        Assert.DoesNotContain(result.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(), e => e.Code is "QORA0000" or "QINTERNAL");
     }
 
     // --- literal out-of-bounds THROUGH a parameter. A `T[]` parameter carries no length of its own (the
@@ -288,8 +292,8 @@ public class ClassicalArrayTests
     [Fact]
     public void RejectsLiteralOutOfBoundsThroughAnArrayParameter() =>
         Compiler.Rejects("""
-            operation Helper(inout x: int[]) { x[5] = 99; }
-            operation Main() { use q=Qubit[1]; var a: int[] = [1, 2, 3]; Helper(inout a); H(q[0]); }
+            operation Helper(var x: int[]) { x[5] = 99; }
+            operation Main() { use q=Qubit[1]; var a: int[] = [1, 2, 3]; Helper(var a); H(q[0]); }
             """, "QSEM016");
 
     /// <summary>The requirement folds through a CHAIN: Middle never indexes `y` itself, but it hands it to
@@ -297,17 +301,17 @@ public class ClassicalArrayTests
     [Fact]
     public void RejectsLiteralOutOfBoundsThroughAChainOfArrayParameters() =>
         Compiler.Rejects("""
-            operation Deep(inout x: int[]) { x[5] = 99; }
-            operation Middle(inout y: int[]) { Deep(inout y); }
-            operation Main() { use q=Qubit[1]; var a: int[] = [1, 2, 3]; Middle(inout a); H(q[0]); }
+            operation Deep(var x: int[]) { x[5] = 99; }
+            operation Middle(var y: int[]) { Deep(var y); }
+            operation Main() { use q=Qubit[1]; var a: int[] = [1, 2, 3]; Middle(var a); H(q[0]); }
             """, "QSEM016");
 
     /// <summary>NOT over-broad: an array long enough for the callee's literal index is fine.</summary>
     [Fact]
     public void AcceptsAnArrayLongEnoughForTheCalleeLiteralIndex() =>
         Compiler.Accepts("""
-            operation Helper(inout x: int[]) { x[5] = 99; }
-            operation Main() { use q=Qubit[1]; var a: int[] = new int[8]; Helper(inout a); H(q[0]); }
+            operation Helper(var x: int[]) { x[5] = 99; }
+            operation Main() { use q=Qubit[1]; var a: int[] = new int[8]; Helper(var a); H(q[0]); }
             """);
 
     /// <summary>A DYNAMIC index imposes no static floor — it stays a runtime concern, exactly as it does for a
@@ -315,8 +319,8 @@ public class ClassicalArrayTests
     [Fact]
     public void AcceptsDynamicIndexingOfAnArrayParameter() =>
         Compiler.Accepts("""
-            operation Helper(inout x: int[]) { for i in 0..x.Count-1 { x[i] = 1; } }
-            operation Main() { use q=Qubit[1]; var a: int[] = [1, 2, 3]; Helper(inout a); H(q[0]); }
+            operation Helper(var x: int[]) { for i in 0..x.Count-1 { x[i] = 1; } }
+            operation Main() { use q=Qubit[1]; var a: int[] = [1, 2, 3]; Helper(var a); H(q[0]); }
             """);
 
     // --- A WHOLE bit[] register is a CONTAINER OF BITS, not a number (QSEM036) ---
@@ -342,8 +346,8 @@ public class ClassicalArrayTests
     public void RejectsAWholeBitRegisterUsedAsANumber(string statement, string why)
     {
         var r = Compiler.Compile($"operation Main(){{ use q=Qubit[1]; var f: bit[] = new bit[2]; {statement} }}");
-        Assert.False(r.Success, $"{why}: expected QSEM036 but the program compiled");
-        Assert.Contains(r.Errors, e => e.Code == "QSEM036");
+        Assert.False(r.Succeeded, $"{why}: expected QSEM036 but the program compiled");
+        Assert.Contains(r.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(), e => e.Code == "QSEM036");
     }
 
     /// <summary>`AsInt(f)` is the ONE reading, and it emits the WIDTH-QUALIFIED unsigned cast: the spec allows
@@ -353,10 +357,10 @@ public class ClassicalArrayTests
     public void AsIntEmitsTheWidthQualifiedUnsignedCast()
     {
         var r = Compiler.Compile("operation Main(){ use q=Qubit[1]; var f: bit[] = new bit[2]; if (AsInt(f) == 1) { X(q[0]); } }");
-        Assert.True(r.Success, Explain(r));
-        Assert.Contains("if (uint[2](f) == 1)", r.Qasm);
-        Assert.DoesNotContain("(int[2](f)", r.Qasm);   // never the SIGNED cast (`uint[2](f)` contains `int[2](f)`)
-        Assert.DoesNotContain("uint(f)", r.Qasm);      // never width-less: the spec requires n == m
+        Assert.True(r.Succeeded, Explain(r));
+        Assert.Contains("if (uint[2](f) == 1)", r.Targets.OpenQasm!.Text);
+        Assert.DoesNotContain("(int[2](f)", r.Targets.OpenQasm!.Text);   // never the SIGNED cast (`uint[2](f)` contains `int[2](f)`)
+        Assert.DoesNotContain("uint(f)", r.Targets.OpenQasm!.Text);      // never width-less: the spec requires n == m
     }
 
     /// <summary>The width follows the REGISTER, not a single op-wide guess — two same-named registers in
@@ -371,9 +375,9 @@ public class ClassicalArrayTests
                 else        { var f: bit[] = new bit[5]; if (AsInt(f) == 1) { X(q[0]); } }
             }
             """);
-        Assert.True(r.Success, Explain(r));
-        Assert.Contains("uint[2](", r.Qasm);
-        Assert.Contains("uint[5](", r.Qasm);
+        Assert.True(r.Succeeded, Explain(r));
+        Assert.Contains("uint[2](", r.Targets.OpenQasm!.Text);
+        Assert.Contains("uint[5](", r.Targets.OpenQasm!.Text);
     }
 
     /// <summary>Register-to-register comparison needs no numeric reading — it matches bit patterns — so it
@@ -382,9 +386,9 @@ public class ClassicalArrayTests
     public void EqualWidthRegistersCompareDirectly()
     {
         var r = Compiler.Compile("operation Main(){ use q=Qubit[1]; var f: bit[] = new bit[2]; var g: bit[] = new bit[2]; if (f == g) { X(q[0]); } }");
-        Assert.True(r.Success, Explain(r));
-        Assert.Contains("if (f == g)", r.Qasm);
-        Assert.DoesNotContain("uint", r.Qasm);
+        Assert.True(r.Succeeded, Explain(r));
+        Assert.Contains("if (f == g)", r.Targets.OpenQasm!.Text);
+        Assert.DoesNotContain("uint", r.Targets.OpenQasm!.Text);
     }
 
     /// <summary>Different widths are never equal in OpenQASM whatever bits they hold — `bit[2] "10"` and
@@ -394,8 +398,8 @@ public class ClassicalArrayTests
     public void RejectsComparingRegistersOfDifferentWidths()
     {
         var r = Compiler.Compile("operation Main(){ use q=Qubit[1]; var f: bit[] = new bit[2]; var g: bit[] = new bit[3]; if (f == g) { X(q[0]); } }");
-        Assert.False(r.Success);
-        Assert.Contains(r.Errors, e => e.Code == "QSEM036");
+        Assert.False(r.Succeeded);
+        Assert.Contains(r.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(), e => e.Code == "QSEM036");
     }
 
     /// <summary>ORDERING between registers is rejected even at equal width: the target compares `&lt;`/`&gt;`
@@ -405,8 +409,8 @@ public class ClassicalArrayTests
     public void RejectsOrderingBetweenRegisters()
     {
         var r = Compiler.Compile("operation Main(){ use q=Qubit[1]; var f: bit[] = new bit[2]; var g: bit[] = new bit[2]; if (f < g) { X(q[0]); } }");
-        Assert.False(r.Success);
-        Assert.Contains(r.Errors, e => e.Code == "QSEM036");
+        Assert.False(r.Succeeded);
+        Assert.Contains(r.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(), e => e.Code == "QSEM036");
     }
 
     /// <summary>`AsInt` reads a whole register; anything else has no width to cast with, so it is refused at
@@ -419,8 +423,8 @@ public class ClassicalArrayTests
     public void RejectsAsIntOnAnythingButAWholeRegister(string statement, string why)
     {
         var r = Compiler.Compile($"operation Main(){{ use q=Qubit[1]; var f: bit[] = new bit[2]; var k: int = 3; {statement} }}");
-        Assert.False(r.Success, $"{why}: expected QSEM006 but the program compiled");
-        Assert.Contains(r.Errors, e => e.Code == "QSEM006");
+        Assert.False(r.Succeeded, $"{why}: expected QSEM006 but the program compiled");
+        Assert.Contains(r.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(), e => e.Code == "QSEM006");
     }
 
     /// <summary>The built-in name is reserved: an expression-position call is spelled by BARE name, so no
@@ -436,8 +440,8 @@ public class ClassicalArrayTests
     public void AnUntilConditionSeesARegisterTheRepeatBodyDeclared()
     {
         var r = Compiler.Compile("operation Main(){ use q=Qubit[1]; repeat { var f: bit[] = new bit[2]; f[0] = M(q[0]); } until (AsInt(f) == 1); }");
-        Assert.True(r.Success, Explain(r));
-        Assert.Contains("uint[2](f) == 1", r.Qasm);
+        Assert.True(r.Succeeded, Explain(r));
+        Assert.Contains("uint[2](f) == 1", r.Targets.OpenQasm!.Text);
     }
 
     /// <summary>A whole register passed as an ARGUMENT is judged by the callee's signature, not by the rule —
@@ -465,9 +469,9 @@ public class ClassicalArrayTests
                 Read(f, q[0]);
             }
             """);
-        Assert.True(r.Success, Explain(r));
-        Assert.Contains("def Read__sz2(bit[2] values, qubit q)", r.Qasm);
-        Assert.DoesNotContain("array[bit", r.Qasm);   // the invalid base type never appears
+        Assert.True(r.Succeeded, Explain(r));
+        Assert.Contains("def Read__sz2(bit[2] values, qubit q)", r.Targets.OpenQasm!.Text);
+        Assert.DoesNotContain("array[bit", r.Targets.OpenQasm!.Text);   // the invalid base type never appears
     }
 
     [Fact]
@@ -484,9 +488,9 @@ public class ClassicalArrayTests
                 Scan(f, q[0]);
             }
             """);
-        Assert.True(r.Success, Explain(r));
-        Assert.Contains("[0:3 - 1]", r.Qasm);
-        Assert.DoesNotContain("sizeof", r.Qasm);
+        Assert.True(r.Succeeded, Explain(r));
+        Assert.Contains("[0:3 - 1]", r.Targets.OpenQasm!.Text);
+        Assert.DoesNotContain("sizeof", r.Targets.OpenQasm!.Text);
     }
 
     [Fact]
@@ -504,9 +508,9 @@ public class ClassicalArrayTests
                 Read(b, q[1]);
             }
             """);
-        Assert.True(r.Success, Explain(r));
-        Assert.Contains("def Read__sz2(bit[2] values, qubit q)", r.Qasm);
-        Assert.Contains("def Read__sz3(bit[3] values, qubit q)", r.Qasm);
+        Assert.True(r.Succeeded, Explain(r));
+        Assert.Contains("def Read__sz2(bit[2] values, qubit q)", r.Targets.OpenQasm!.Text);
+        Assert.Contains("def Read__sz3(bit[3] values, qubit q)", r.Targets.OpenQasm!.Text);
     }
 
     /// <summary>Functions are called as <see cref="QCallNode"/> values inside expression trees rather than
@@ -530,8 +534,8 @@ public class ClassicalArrayTests
             }
             """);
 
-        Assert.True(r.Success, Explain(r));
-        var specs = r.AnalyzedIr!.Operations.Where(o => o.DisplayName == "CountBits").ToList();
+        Assert.True(r.Succeeded, Explain(r));
+        var specs = r.Hir.EffectAnalysis!.Program!.Operations.Where(o => o.DisplayName == "CountBits").ToList();
         Assert.Equal(2, specs.Count);
         Assert.Equal(new[] { 2, 3 },
             specs.Select(o => o.Params.Single().RegisterSize!.Value).Order().ToArray());
@@ -540,11 +544,11 @@ public class ClassicalArrayTests
             Assert.True(specialization.IsFunction);
             Assert.Equal(QType.Int, specialization.ReturnType);
         });
-        Assert.Equal(1, r.Qasm.Split("def CountBits__sz2(").Length - 1);
-        Assert.Equal(1, r.Qasm.Split("def CountBits__sz3(").Length - 1);
-        Assert.Contains("int a = CountBits__sz2(first);", r.Qasm);
-        Assert.Contains("int b = CountBits__sz3(second);", r.Qasm);
-        Assert.Contains("Increment(CountBits__sz2(sameWidth)) + CountBits__sz2(first)", r.Qasm);
+        Assert.Equal(1, r.Targets.OpenQasm!.Text.Split("def CountBits__sz2(").Length - 1);
+        Assert.Equal(1, r.Targets.OpenQasm!.Text.Split("def CountBits__sz3(").Length - 1);
+        Assert.Contains("int a = CountBits__sz2(first);", r.Targets.OpenQasm!.Text);
+        Assert.Contains("int b = CountBits__sz3(second);", r.Targets.OpenQasm!.Text);
+        Assert.Contains("Increment(CountBits__sz2(sameWidth)) + CountBits__sz2(first)", r.Targets.OpenQasm!.Text);
     }
 
     [Fact]
@@ -560,9 +564,9 @@ public class ClassicalArrayTests
             }
             """);
 
-        Assert.True(r.Success, Explain(r));
-        Assert.Contains("def CountBits__sz2(bit[2] flags) -> int", r.Qasm);
-        Assert.Contains("count = CountBits__sz2(flags);", r.Qasm);
+        Assert.True(r.Succeeded, Explain(r));
+        Assert.Contains("def CountBits__sz2(bit[2] flags) -> int", r.Targets.OpenQasm!.Text);
+        Assert.Contains("count = CountBits__sz2(flags);", r.Targets.OpenQasm!.Text);
     }
 
     /// <summary>A function specialization can itself expose another expression-position call. Rewriting
@@ -581,11 +585,11 @@ public class ClassicalArrayTests
             }
             """);
 
-        Assert.True(r.Success, Explain(r));
-        Assert.Contains("def ForwardCount__sz3(bit[3] flags) -> int", r.Qasm);
-        Assert.Contains("def CountBits__sz3(bit[3] flags) -> int", r.Qasm);
-        Assert.Contains("CountBits__sz3(flags)", r.Qasm);
-        Assert.Contains("int count = ForwardCount__sz3(flags);", r.Qasm);
+        Assert.True(r.Succeeded, Explain(r));
+        Assert.Contains("def ForwardCount__sz3(bit[3] flags) -> int", r.Targets.OpenQasm!.Text);
+        Assert.Contains("def CountBits__sz3(bit[3] flags) -> int", r.Targets.OpenQasm!.Text);
+        Assert.Contains("CountBits__sz3(flags)", r.Targets.OpenQasm!.Text);
+        Assert.Contains("int count = ForwardCount__sz3(flags);", r.Targets.OpenQasm!.Text);
     }
 
     [Fact]
@@ -600,10 +604,10 @@ public class ClassicalArrayTests
             }
             """);
 
-        Assert.True(r.Success, Explain(r));
-        Assert.Contains("if (CountBits__sz2(flags) == 0)", r.Qasm);
-        Assert.Contains("rx(CountBits__sz2(flags)) q[0];", r.Qasm);
-        Assert.Equal(1, r.Qasm.Split("def CountBits__sz2(").Length - 1);
+        Assert.True(r.Succeeded, Explain(r));
+        Assert.Contains("if (CountBits__sz2(flags) == 0)", r.Targets.OpenQasm!.Text);
+        Assert.Contains("rx(CountBits__sz2(flags)) q[0];", r.Targets.OpenQasm!.Text);
+        Assert.Equal(1, r.Targets.OpenQasm!.Text.Split("def CountBits__sz2(").Length - 1);
     }
 
     [Fact]
@@ -622,14 +626,14 @@ public class ClassicalArrayTests
             }
             """);
 
-        Assert.True(r.Success, Explain(r));
-        Assert.Contains("def CountBits__sz2(bit[2] flags) -> int", r.Qasm);
-        Assert.Contains("def CountBits__sz3(bit[3] flags) -> int", r.Qasm);
-        Assert.Contains("bit[2] flags = \"00\";", r.Qasm);
-        Assert.Contains("bit[3] flags_ = \"000\";", r.Qasm);
-        Assert.Contains("CountBits__sz2(flags) == 2", r.Qasm);
-        Assert.DoesNotContain("CountBits__sz2(flags_)", r.Qasm);
-        Assert.Contains("int outerCount = CountBits__sz3(flags_);", r.Qasm);
+        Assert.True(r.Succeeded, Explain(r));
+        Assert.Contains("def CountBits__sz2(bit[2] flags) -> int", r.Targets.OpenQasm!.Text);
+        Assert.Contains("def CountBits__sz3(bit[3] flags) -> int", r.Targets.OpenQasm!.Text);
+        Assert.Contains("bit[2] flags = \"00\";", r.Targets.OpenQasm!.Text);
+        Assert.Contains("bit[3] flags_ = \"000\";", r.Targets.OpenQasm!.Text);
+        Assert.Contains("CountBits__sz2(flags) == 2", r.Targets.OpenQasm!.Text);
+        Assert.DoesNotContain("CountBits__sz2(flags_)", r.Targets.OpenQasm!.Text);
+        Assert.Contains("int outerCount = CountBits__sz3(flags_);", r.Targets.OpenQasm!.Text);
     }
 
     [Fact]
@@ -646,11 +650,11 @@ public class ClassicalArrayTests
             }
             """);
 
-        Assert.True(r.Success, Explain(r));
-        Assert.Contains("int value = 0;", r.Qasm);
-        Assert.Contains("int value_ = 1;", r.Qasm);
-        Assert.Contains("Echo(value_) == 1", r.Qasm);
-        Assert.DoesNotContain("Echo(value) == 1", r.Qasm);
+        Assert.True(r.Succeeded, Explain(r));
+        Assert.Contains("int value = 0;", r.Targets.OpenQasm!.Text);
+        Assert.Contains("int value_ = 1;", r.Targets.OpenQasm!.Text);
+        Assert.Contains("Echo(value_) == 1", r.Targets.OpenQasm!.Text);
+        Assert.DoesNotContain("Echo(value) == 1", r.Targets.OpenQasm!.Text);
     }
 
     [Fact]
@@ -673,12 +677,12 @@ public class ClassicalArrayTests
             }
             """);
 
-        Assert.True(r.Success, Explain(r));
-        Assert.Contains("int value_ = 1;", r.Qasm);
-        Assert.Contains("Echo(value_) == 1", r.Qasm);
-        Assert.Contains("for int value__ in", r.Qasm);
-        Assert.Contains("Echo(value__)", r.Qasm);
-        Assert.DoesNotContain("Echo(value) == 1", r.Qasm);
+        Assert.True(r.Succeeded, Explain(r));
+        Assert.Contains("int value_ = 1;", r.Targets.OpenQasm!.Text);
+        Assert.Contains("Echo(value_) == 1", r.Targets.OpenQasm!.Text);
+        Assert.Contains("for int value__ in", r.Targets.OpenQasm!.Text);
+        Assert.Contains("Echo(value__)", r.Targets.OpenQasm!.Text);
+        Assert.DoesNotContain("Echo(value) == 1", r.Targets.OpenQasm!.Text);
     }
 
     /// <summary>A bit[] parameter is READ-ONLY: its QASM form is a by-value register, so a write would
@@ -700,7 +704,7 @@ public class ClassicalArrayTests
             operation Both(a: bit[], b: bit[], q: Qubit) { if (a[0] == 1) { X(q); } if (b[0] == 1) { X(q); } }
             operation Main() { use q = Qubit[1]; var f: bit[] = new bit[2]; Both(f, f, q[0]); }
             """);
-        Assert.True(r.Success, Explain(r));
+        Assert.True(r.Succeeded, Explain(r));
     }
 
     [Fact]
@@ -710,7 +714,7 @@ public class ClassicalArrayTests
             operation Read(f: bit[], q: Qubit) { if (f[0] == 1) { X(q); } }
             operation Main() { use q = Qubit[1]; const f: bit[] = [0, 1]; Read(f, q[0]); }
             """);
-        Assert.True(r.Success, Explain(r));
+        Assert.True(r.Succeeded, Explain(r));
     }
 
     /// <summary>bit[] parameters specialize like Qubit[], so their bounds facts DEFER to the post-mono
@@ -730,7 +734,7 @@ public class ClassicalArrayTests
                 Zip(a, b, q[0]);
             }
             """);
-        Assert.True(r.Success, Explain(r));
+        Assert.True(r.Succeeded, Explain(r));
     }
 
     [Fact]
@@ -747,7 +751,7 @@ public class ClassicalArrayTests
                 Pick(f, n, q[0]);
             }
             """);
-        Assert.True(r.Success, Explain(r));
+        Assert.True(r.Succeeded, Explain(r));
     }
 
     // --- ArrayLocalHoisting: a classical-array LOCAL in a def-emitted op is inexpressible in OpenQASM
@@ -769,15 +773,15 @@ public class ClassicalArrayTests
             }
             """);
 
-        Assert.Contains("array[int, 3] SetTable_tbl = {0, 0, 0};", result.Qasm);   // global backing, default-init
-        Assert.Contains("mutable array[int, #dim = 1] tbl", result.Qasm);          // hidden parameter on the def
-        Assert.Contains("tbl[0] = 1;", result.Qasm);                               // declaration site = re-init
-        Assert.Contains("tbl[2] = 3;", result.Qasm);
-        Assert.Contains("SetTable(q[0], SetTable_tbl);", result.Qasm);             // caller supplies the backing
-        Assert.DoesNotContain("array[int, 3] tbl", result.Qasm);                   // no array DECLARATION inside the def
+        Assert.Contains("array[int, 3] SetTable_tbl = {0, 0, 0};", result.Targets.OpenQasm!.Text);   // global backing, default-init
+        Assert.Contains("mutable array[int, #dim = 1] tbl", result.Targets.OpenQasm!.Text);          // hidden parameter on the def
+        Assert.Contains("tbl[0] = 1;", result.Targets.OpenQasm!.Text);                               // declaration site = re-init
+        Assert.Contains("tbl[2] = 3;", result.Targets.OpenQasm!.Text);
+        Assert.Contains("SetTable(q[0], SetTable_tbl);", result.Targets.OpenQasm!.Text);             // caller supplies the backing
+        Assert.DoesNotContain("array[int, 3] tbl", result.Targets.OpenQasm!.Text);                   // no array DECLARATION inside the def
         // the backing declaration precedes the call that hands it over
-        Assert.True(result.Qasm.IndexOf("array[int, 3] SetTable_tbl")
-                    < result.Qasm.IndexOf("SetTable(q[0], SetTable_tbl);"));
+        Assert.True(result.Targets.OpenQasm!.Text.IndexOf("array[int, 3] SetTable_tbl")
+                    < result.Targets.OpenQasm!.Text.IndexOf("SetTable(q[0], SetTable_tbl);"));
     }
 
     [Fact]
@@ -797,9 +801,9 @@ public class ClassicalArrayTests
             }
             """);
 
-        Assert.Contains("array[int, 2] Inner_t = {0, 0};", result.Qasm);   // one backing global
-        Assert.Contains("Inner(q, Inner_t);", result.Qasm);                // Outer hands its pass-through on
-        Assert.Contains("Outer(q[0], Inner_t);", result.Qasm);             // Main names the global directly
+        Assert.Contains("array[int, 2] Inner_t = {0, 0};", result.Targets.OpenQasm!.Text);   // one backing global
+        Assert.Contains("Inner(q, Inner_t);", result.Targets.OpenQasm!.Text);                // Outer hands its pass-through on
+        Assert.Contains("Outer(q[0], Inner_t);", result.Targets.OpenQasm!.Text);             // Main names the global directly
     }
 
     [Fact]
@@ -817,10 +821,10 @@ public class ClassicalArrayTests
             }
             """);
 
-        Assert.Contains("array[int, 2] a = {0, 0};", result.Qasm);   // declaration at global top…
-        Assert.Contains("a[0] = 7;", result.Qasm);                   // …site keeps element-wise re-init
-        Assert.Contains("a[1] = 8;", result.Qasm);
-        Assert.True(result.Qasm.IndexOf("array[int, 2] a") < result.Qasm.IndexOf("if ("));
+        Assert.Contains("array[int, 2] a = {0, 0};", result.Targets.OpenQasm!.Text);   // declaration at global top…
+        Assert.Contains("a[0] = 7;", result.Targets.OpenQasm!.Text);                   // …site keeps element-wise re-init
+        Assert.Contains("a[1] = 8;", result.Targets.OpenQasm!.Text);
+        Assert.True(result.Targets.OpenQasm!.Text.IndexOf("array[int, 2] a") < result.Targets.OpenQasm!.Text.IndexOf("if ("));
     }
 
     /// <summary>bit[] locals are sized REGISTERS in OpenQASM — legal inside a def, not "arrays" — so the
@@ -840,9 +844,9 @@ public class ClassicalArrayTests
             }
             """);
 
-        Assert.Contains("bit[2] f = \"00\";", result.Qasm);   // register declaration stays in the def
-        Assert.Contains("Flag(q[0]);", result.Qasm);          // no hidden parameter added
-        Assert.DoesNotContain("Flag_f", result.Qasm);         // no backing global minted
+        Assert.Contains("bit[2] f = \"00\";", result.Targets.OpenQasm!.Text);   // register declaration stays in the def
+        Assert.Contains("Flag(q[0]);", result.Targets.OpenQasm!.Text);          // no hidden parameter added
+        Assert.DoesNotContain("Flag_f", result.Targets.OpenQasm!.Text);         // no backing global minted
     }
 
     /// <summary>A bit[] NESTED in a control-flow block hoists only to the top of its own op (importers
@@ -867,11 +871,11 @@ public class ClassicalArrayTests
             }
             """);
 
-        Assert.Contains("bit[2] f = \"00\";", result.Qasm);          // storage at the def's top
-        Assert.Contains("f[0] = 0;", result.Qasm);                   // site re-initializes per entry
-        Assert.Contains("Tally(q[0], n);", result.Qasm);             // signature unchanged — no threading
-        Assert.DoesNotContain("Tally_f", result.Qasm);
-        Assert.True(result.Qasm.IndexOf("bit[2] f") < result.Qasm.IndexOf("if ("));
+        Assert.Contains("bit[2] f = \"00\";", result.Targets.OpenQasm!.Text);          // storage at the def's top
+        Assert.Contains("f[0] = 0;", result.Targets.OpenQasm!.Text);                   // site re-initializes per entry
+        Assert.Contains("Tally(q[0], n);", result.Targets.OpenQasm!.Text);             // signature unchanged — no threading
+        Assert.DoesNotContain("Tally_f", result.Targets.OpenQasm!.Text);
+        Assert.True(result.Targets.OpenQasm!.Text.IndexOf("bit[2] f") < result.Targets.OpenQasm!.Text.IndexOf("if ("));
     }
 
     // --- ArrayLocalHoisting name-uniqueness (R13/R14): the pass mints every global / parameter / storage
@@ -896,10 +900,10 @@ public class ClassicalArrayTests
             operation Main() { use q = Qubit[2]; A(q[0]); A_b(q[1]); }
             """);
 
-        Assert.Contains("array[int, 2] A_b_c = {0, 0};", result.Qasm);   // A's b_c
-        Assert.Contains("array[int, 1] A_b_c_ = {0};", result.Qasm);     // A_b's c — split apart
-        Assert.Contains("A(q[0], A_b_c);", result.Qasm);
-        Assert.Contains("A_b(q[1], A_b_c_);", result.Qasm);
+        Assert.Contains("array[int, 2] A_b_c = {0, 0};", result.Targets.OpenQasm!.Text);   // A's b_c
+        Assert.Contains("array[int, 1] A_b_c_ = {0};", result.Targets.OpenQasm!.Text);     // A_b's c — split apart
+        Assert.Contains("A(q[0], A_b_c);", result.Targets.OpenQasm!.Text);
+        Assert.Contains("A_b(q[1], A_b_c_);", result.Targets.OpenQasm!.Text);
     }
 
     /// <summary>Vector 1 — a minted backing global and a user top-level variable of the same spelling get
@@ -912,10 +916,10 @@ public class ClassicalArrayTests
             operation Main() { use q = Qubit[1]; var Foo_bar: int = 5; Foo(q[0]); if (Foo_bar == 5) { X(q[0]); } }
             """);
 
-        Assert.Contains("array[int, 1] Foo_bar = {0};", result.Qasm);   // the backing global
-        Assert.Contains("int Foo_bar_ = 5;", result.Qasm);             // the user scalar, split apart
-        Assert.Contains("Foo(q[0], Foo_bar);", result.Qasm);           // the call supplies the backing global
-        Assert.Contains("Foo_bar_ == 5", result.Qasm);                 // the user scalar's own use follows its rename
+        Assert.Contains("array[int, 1] Foo_bar = {0};", result.Targets.OpenQasm!.Text);   // the backing global
+        Assert.Contains("int Foo_bar_ = 5;", result.Targets.OpenQasm!.Text);             // the user scalar, split apart
+        Assert.Contains("Foo(q[0], Foo_bar);", result.Targets.OpenQasm!.Text);           // the call supplies the backing global
+        Assert.Contains("Foo_bar_ == 5", result.Targets.OpenQasm!.Text);                 // the user scalar's own use follows its rename
     }
 
     /// <summary>Vector 3 — a pass-through parameter (named after the global it forwards) must be freshened
@@ -930,9 +934,9 @@ public class ClassicalArrayTests
             """);
 
         // Mid owns array `D_g` (its own param) AND forwards D's global `D_g` — the two params must differ.
-        Assert.Contains("def Mid(qubit q, mutable array[int, #dim = 1] D_g, mutable array[int, #dim = 1] D_g_) {", result.Qasm);
-        Assert.Contains("D(q, D_g_);", result.Qasm);              // D receives the forwarded (freshened) slot
-        Assert.Contains("Mid(q[0], Mid_D_g, D_g);", result.Qasm); // Main supplies Mid's own + D's backing
+        Assert.Contains("def Mid(qubit q, mutable array[int, #dim = 1] D_g, mutable array[int, #dim = 1] D_g_) {", result.Targets.OpenQasm!.Text);
+        Assert.Contains("D(q, D_g_);", result.Targets.OpenQasm!.Text);              // D receives the forwarded (freshened) slot
+        Assert.Contains("Mid(q[0], Mid_D_g, D_g);", result.Targets.OpenQasm!.Text); // Main supplies Mid's own + D's backing
     }
 
     /// <summary>Vector 4 — an array local that shadows a same-named parameter gets a freshened parameter,
@@ -951,10 +955,10 @@ public class ClassicalArrayTests
             operation Main() { use q = Qubit[1]; Helper(q, 0); }
             """);
 
-        Assert.Contains("if (a == 0)", result.Qasm);        // the PARAMETER comparison — untouched
-        Assert.Contains("a_[0] = 1;", result.Qasm);         // the ARRAY — freshened and rewritten
-        Assert.Contains("if (a_[0] == 1)", result.Qasm);
-        Assert.DoesNotContain("if (a_ == 0)", result.Qasm); // the rename must NOT leak to the param comparison
+        Assert.Contains("if (a == 0)", result.Targets.OpenQasm!.Text);        // the PARAMETER comparison — untouched
+        Assert.Contains("a_[0] = 1;", result.Targets.OpenQasm!.Text);         // the ARRAY — freshened and rewritten
+        Assert.Contains("if (a_[0] == 1)", result.Targets.OpenQasm!.Text);
+        Assert.DoesNotContain("if (a_ == 0)", result.Targets.OpenQasm!.Text); // the rename must NOT leak to the param comparison
     }
 
     // --- ArrayLocalHoisting seed completeness (R14): the Namer that mints unique names must be seeded
@@ -978,10 +982,10 @@ public class ClassicalArrayTests
             operation Main() { use q = Qubit[1]; Helper(q[0]); }
             """);
 
-        Assert.Contains("mutable array[int, #dim = 1] g_)", result.Qasm);   // the array parameter
-        Assert.Contains("for int g__ in", result.Qasm);                     // the loop variable, split apart
-        Assert.Contains("g_[0] == 1", result.Qasm);                         // the array reference points at the parameter
-        Assert.Contains("Helper(q[0], Helper_g);", result.Qasm);            // the backing global is distinct too
+        Assert.Contains("mutable array[int, #dim = 1] g_)", result.Targets.OpenQasm!.Text);   // the array parameter
+        Assert.Contains("for int g__ in", result.Targets.OpenQasm!.Text);                     // the loop variable, split apart
+        Assert.Contains("g_[0] == 1", result.Targets.OpenQasm!.Text);                         // the array reference points at the parameter
+        Assert.Contains("Helper(q[0], Helper_g);", result.Targets.OpenQasm!.Text);            // the backing global is distinct too
     }
 
     /// <summary>A minted backing global and a user variable declared inside a NESTED block of the entry op
@@ -1000,10 +1004,10 @@ public class ClassicalArrayTests
             }
             """);
 
-        Assert.Contains("array[int, 3] SetTable_tbl = {0, 0, 0};", result.Qasm);   // the backing global
-        Assert.Contains("int SetTable_tbl_ = 1;", result.Qasm);                    // the nested user scalar, split apart
-        Assert.Contains("if (SetTable_tbl_ == 1)", result.Qasm);                   // its own use follows the rename
-        Assert.Contains("SetTable(q[0], SetTable_tbl);", result.Qasm);
+        Assert.Contains("array[int, 3] SetTable_tbl = {0, 0, 0};", result.Targets.OpenQasm!.Text);   // the backing global
+        Assert.Contains("int SetTable_tbl_ = 1;", result.Targets.OpenQasm!.Text);                    // the nested user scalar, split apart
+        Assert.Contains("if (SetTable_tbl_ == 1)", result.Targets.OpenQasm!.Text);                   // its own use follows the rename
+        Assert.Contains("SetTable(q[0], SetTable_tbl);", result.Targets.OpenQasm!.Text);
     }
 
     /// <summary>A pass-through parameter and a caller body-local of the same spelling get DISTINCT names
@@ -1017,12 +1021,15 @@ public class ClassicalArrayTests
             operation Main() { use q = Qubit[1]; Outer(q[0]); }
             """);
 
-        Assert.Contains("mutable array[int, #dim = 1] Inner_t)", result.Qasm);   // Outer's pass-through parameter
-        Assert.Contains("int Inner_t_ = 0;", result.Qasm);                       // Outer's own scalar, split apart
-        Assert.Contains("Inner(q, Inner_t);", result.Qasm);                      // the pass-through is forwarded
-        Assert.Contains("Inner_t_ == 0", result.Qasm);                           // the scalar's use follows its rename
+        Assert.Contains("mutable array[int, #dim = 1] Inner_t)", result.Targets.OpenQasm!.Text);   // Outer's pass-through parameter
+        Assert.Contains("int Inner_t_ = 0;", result.Targets.OpenQasm!.Text);                       // Outer's own scalar, split apart
+        Assert.Contains("Inner(q, Inner_t);", result.Targets.OpenQasm!.Text);                      // the pass-through is forwarded
+        Assert.Contains("Inner_t_ == 0", result.Targets.OpenQasm!.Text);                           // the scalar's use follows its rename
     }
 
-    private static string Explain(QoraParseResult result) =>
-        string.Join(" | ", result.Errors.Select(e => $"{e.Code}: {e.Message}"));
+    private static string Explain(Compilation result) =>
+        string.Join(
+            " | ",
+            result.Diagnostics.Select(diagnostic =>
+                $"{diagnostic.Error.Code}: {diagnostic.Error.Message}"));
 }

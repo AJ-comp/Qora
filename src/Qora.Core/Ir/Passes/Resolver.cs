@@ -1,32 +1,32 @@
 namespace Qora.Ir.Passes;
 
 /// <summary>
-/// Resolves every user-callable reference to one declaration. Program ownership lives in a
-/// <see cref="ProgramSymbolGraph"/>:
+/// Resolves every user-callable reference to one declaration through the unified
+/// <see cref="HirScopeGraph"/>:
 /// <code>
-/// global namespace symbol
-/// ├─ global callables
-/// └─ namespace A
-///    ├─ A's callables
-///    └─ namespace B
-///       └─ A.B's callables
+/// program scope
+/// ├─ global callable scopes
+/// └─ namespace A scope
+///    ├─ A's callable scopes
+///    └─ namespace B scope
+///       └─ A.B's callable scopes
 /// </code>
-/// Each ownership edge is the child's <see cref="Symbol.OwnerSymbolId"/>. Thus an unqualified call in
-/// <c>A.B</c> walks <c>A.B -&gt; A -&gt; global</c>, while a qualified call starts at the global symbol
+/// Each containment edge is <see cref="Scope.ParentScopeId"/>. Thus an unqualified call in
+/// <c>A.B</c> walks <c>A.B -&gt; A -&gt; program</c>, while a qualified call starts at the program scope
 /// and follows every namespace segment exactly. <c>open</c> is deliberately not another ownership edge:
-/// only direct callable members of the namespaces opened by the caller's exact namespace are inspected,
+/// it is a typed lookup edge, and only direct callable members of namespaces opened by the caller's exact
+/// namespace are inspected,
 /// so two matches remain an explicit QSEM018 ambiguity and opens never become transitive.
 ///
-/// Lexical <see cref="Scope"/> objects are separate: they contain parameters, registers, variables and
-/// block-local declarations only. Callable resolution never walks a lexical scope, and operation root
-/// scopes therefore need no namespace/global parent.
+/// Value and callable lookup remain separate policies over the same graph. Connecting a callable body to
+/// its namespace parent therefore never makes an operation or namespace usable as a classical value.
 ///
 /// Both statement calls (<see cref="QGate"/>) and calls nested anywhere in an expression
 /// (<see cref="QCallNode"/>) receive the canonical name and the declaring operation's stable node Id.
 /// Later passes follow that Id instead of re-matching a spelling that may change during specialization
 /// or mangling.
 /// </summary>
-public static class Resolver
+internal static class Resolver
 {
     public static (QProgram Program, List<QoraError> Errors) Resolve(QProgram program)
     {
@@ -34,7 +34,7 @@ public static class Resolver
 
         // Build the declaration graph before resolving any body, so forward calls and declarations across
         // repeated namespace blocks share the same namespace/callable symbols.
-        var programSymbols = SymbolTableBuilder.BuildProgramSymbols(program);
+        var scopeGraph = SymbolTableBuilder.BuildHirScopeGraph(program);
 
         // Empty/open-only namespace blocks are represented by Opens keys; operation-bearing namespaces
         // come from declarations. The intrinsic namespace exists implicitly but users may not declare it.
@@ -58,9 +58,12 @@ public static class Resolver
                 foreach (var open in opens.DistinctBy(item => item.Target)
                              .Where(item =>
                              {
-                                 var target = programSymbols.FindNamespace(item.Target);
+                                 var target = scopeGraph.FindNamespaceScope(item.Target);
+                                 var targetSymbol = target?.DeclaringSymbolId is { } symbolId
+                                     ? scopeGraph.FindSymbol(symbolId)
+                                     : null;
                                  return target is null
-                                        || (target.Origin == SymbolOrigin.Builtin
+                                        || (targetSymbol?.Origin == SymbolOrigin.Builtin
                                             && item.Target != QoraGates.IntrinsicNamespace);
                              }))
                     Add(errors, "QSEM019",
@@ -70,18 +73,17 @@ public static class Resolver
         var resolvedOperations = new List<QOperation>(program.Operations.Count);
         foreach (var operation in program.Operations)
         {
-            var operationSymbol = programSymbols.FindDeclaration(operation.Id)
+            var operationSymbol = scopeGraph.FindDeclaration(operation.Id)
                 ?? throw new InvalidOperationException(
                     $"QINTERNAL: operation `{operation.Name}` has no program symbol");
             var callerNamespace = operation.Namespace.Length == 0
-                ? programSymbols.RootSymbol
-                : programSymbols.FindNamespace(operation.Namespace) ?? programSymbols.RootSymbol;
+                ? scopeGraph.RootScope
+                : scopeGraph.FindNamespaceScope(operation.Namespace) ?? scopeGraph.RootScope;
             var operationResolver = new OperationResolver(
-                program, programSymbols, callerNamespace, operation.Namespace, operation.Name,
-                errors);
+                scopeGraph, callerNamespace, operation.Name, errors);
             resolvedOperations.Add(operation with
             {
-                Name = programSymbols.QualifiedName(operationSymbol),
+                Name = scopeGraph.QualifiedName(operationSymbol),
                 Body = operationResolver.ResolveBody(operation.Body),
             });
         }
@@ -99,25 +101,19 @@ public static class Resolver
 
     private sealed class OperationResolver
     {
-        private readonly QProgram _program;
-        private readonly ProgramSymbolGraph _programSymbols;
-        private readonly Symbol _callerNamespace;
-        private readonly string _namespace;
+        private readonly HirScopeGraph _scopeGraph;
+        private readonly Scope _callerNamespace;
         private readonly string _operationName;
         private readonly List<QoraError> _errors;
 
         internal OperationResolver(
-            QProgram program,
-            ProgramSymbolGraph programSymbols,
-            Symbol callerNamespace,
-            string namespacePath,
+            HirScopeGraph scopeGraph,
+            Scope callerNamespace,
             string operationName,
             List<QoraError> errors)
         {
-            _program = program;
-            _programSymbols = programSymbols;
+            _scopeGraph = scopeGraph;
             _callerNamespace = callerNamespace;
-            _namespace = namespacePath;
             _operationName = operationName;
             _errors = errors;
         }
@@ -178,14 +174,14 @@ public static class Resolver
             };
         }
 
-        private QArg ResolveArgument(QArg argument, QSpan? span) => argument switch
+        private QArg ResolveArgument(QArg argument, SourceSpan? span) => argument switch
         {
             QTextArg text => text with { Tree = ResolveNode(text.Tree, span) },
             QQubitArg qubit => qubit with { Index = ResolveNode(qubit.Index, span)! },
             _ => argument,
         };
 
-        private QExpr ResolveExpression(QExpr expression, QSpan? span) => expression switch
+        private QExpr ResolveExpression(QExpr expression, SourceSpan? span) => expression switch
         {
             QText text => text with { Tree = ResolveNode(text.Tree, span) },
             QMeasure measurement => measurement with { Target = ResolveNode(measurement.Target, span)! },
@@ -196,10 +192,10 @@ public static class Resolver
             _ => expression,
         };
 
-        private QCond ResolveCondition(QCond condition, QSpan? span) =>
+        private QCond ResolveCondition(QCond condition, SourceSpan? span) =>
             condition with { Tree = ResolveNode(condition.Tree, span) };
 
-        private QNode? ResolveNode(QNode? node, QSpan? span) => node switch
+        private QNode? ResolveNode(QNode? node, SourceSpan? span) => node switch
         {
             null => null,
             QUnary unary => unary with { Operand = ResolveNode(unary.Operand, span)! },
@@ -218,7 +214,7 @@ public static class Resolver
             _ => node,
         };
 
-        private QCallNode ResolveExpressionCall(QCallNode call, QSpan? span)
+        private QCallNode ResolveExpressionCall(QCallNode call, SourceSpan? span)
         {
             var arguments = call.Args.Select(argument => ResolveNode(argument, span)!).ToList();
             var callee = ResolveCallee(call.Name, CallForm.Expression, span);
@@ -230,7 +226,7 @@ public static class Resolver
             };
         }
 
-        private ResolvedCallee ResolveCallee(string name, CallForm form, QSpan? span)
+        private ResolvedCallee ResolveCallee(string name, CallForm form, SourceSpan? span)
         {
             if (name.Contains('.'))
                 return ResolveQualified(name, span);
@@ -241,31 +237,27 @@ public static class Resolver
                 return new ResolvedCallee(name, null);
 
             var isBuiltinGate = QoraGates.Names.ContainsKey(name);
-            var enclosing = _programSymbols.LookupCallableOutward(_callerNamespace.Id, name);
+            var enclosing = _scopeGraph.LookupCallableOutward(_callerNamespace.Id, name);
             if (enclosing is not null)
             {
-                var isGlobal = enclosing.OwnerSymbolId == _programSymbols.RootSymbol.Id;
+                var isGlobal = enclosing.DeclaringScopeId == _scopeGraph.RootScope.Id;
                 if (!isBuiltinGate) return Bound(enclosing);
                 if (!isGlobal)
                 {
                     Add(_errors, "QSEM018",
-                        BuiltinAmbiguity(name, $"`{_programSymbols.QualifiedName(enclosing)}`"), span);
+                        BuiltinAmbiguity(name, $"`{_scopeGraph.QualifiedName(enclosing)}`"), span);
                     return new ResolvedCallee(name, null);
                 }
                 // A same-named global declaration is invalid on its own (QSEM013), so the built-in
                 // remains the only usable meaning while validation reports that declaration.
             }
 
-            var opens = _program.Opens is not null
-                        && _namespace.Length > 0
-                        && _program.Opens.TryGetValue(_namespace, out var declaredOpens)
-                ? declaredOpens
-                : (IReadOnlyList<QOpen>)Array.Empty<QOpen>();
-            var candidates = opens
-                .Select(open => _programSymbols.FindNamespace(open.Target))
-                .Where(namespaceSymbol => namespaceSymbol is not null)
-                .Select(namespaceSymbol => _programSymbols.LookupMember(
-                    namespaceSymbol!.Id,
+            var openedScopes = _callerNamespace.Kind == HirScopeKind.Namespace
+                ? _scopeGraph.ImportedScopes(_callerNamespace.Id)
+                : Array.Empty<Scope>();
+            var candidates = openedScopes
+                .Select(namespaceScope => _scopeGraph.LookupMember(
+                    namespaceScope.Id,
                     name,
                     SymbolKind.Operation))
                 .OfType<Symbol>()
@@ -292,16 +284,19 @@ public static class Resolver
             return new ResolvedCallee(name, null);
         }
 
-        private ResolvedCallee ResolveQualified(string name, QSpan? span)
+        private ResolvedCallee ResolveQualified(string name, SourceSpan? span)
         {
             var segments = name.Split('.');
-            var owner = _programSymbols.RootSymbol;
+            var owner = _scopeGraph.RootScope;
             for (var i = 0; i < segments.Length - 1; i++)
             {
-                if (_programSymbols.LookupMember(
+                if (_scopeGraph.LookupMember(
                         owner.Id,
                         segments[i],
-                        SymbolKind.Namespace) is { } next)
+                        SymbolKind.Namespace) is { } namespaceSymbol
+                    && _scopeGraph.FindOwnedScope(
+                        namespaceSymbol.Id,
+                        HirScopeKind.Namespace) is { } next)
                 {
                     owner = next;
                     continue;
@@ -315,32 +310,32 @@ public static class Resolver
             }
 
             var memberName = segments[^1];
-            if (_programSymbols.LookupMember(
+            if (_scopeGraph.LookupMember(
                     owner.Id,
                     memberName,
                     SymbolKind.Operation) is { } sourceCallable)
                 return Bound(sourceCallable);
 
-            if (_programSymbols.LookupMember(owner.Id, memberName, SymbolKind.BuiltinGate) is not null
-                || _programSymbols.LookupMember(owner.Id, memberName, SymbolKind.BuiltinFunction) is not null)
+            if (_scopeGraph.LookupMember(owner.Id, memberName, SymbolKind.BuiltinGate) is not null
+                || _scopeGraph.LookupMember(owner.Id, memberName, SymbolKind.BuiltinFunction) is not null)
                 return new ResolvedCallee(memberName, null);
 
             Add(_errors, "QSEM019",
-                $"in `{_operationName}`: namespace `{_programSymbols.QualifiedName(owner)}` has no callable `{memberName}`",
+                $"in `{_operationName}`: namespace `{_scopeGraph.QualifiedName(owner)}` has no callable `{memberName}`",
                 span);
             return new ResolvedCallee(name, null);
         }
 
         private ResolvedCallee Bound(Symbol symbol) =>
             symbol.DeclarationNodeId is { } declarationId
-                ? new ResolvedCallee(_programSymbols.QualifiedName(symbol), declarationId)
+                ? new ResolvedCallee(_scopeGraph.QualifiedName(symbol), declarationId)
                 : throw new InvalidOperationException(
-                    $"QINTERNAL: source callable `{_programSymbols.QualifiedName(symbol)}` has no declaration node");
+                    $"QINTERNAL: source callable `{_scopeGraph.QualifiedName(symbol)}` has no declaration node");
 
         private string BuiltinAmbiguity(string name, string userCandidates) =>
             $"in `{_operationName}`: `{name}` is ambiguous here: it could be {userCandidates} or the built-in `{name}` — qualify the call (`{QoraGates.IntrinsicNamespace}.{name}(...)` names the built-in)";
     }
 
-    private static void Add(List<QoraError> errors, string code, string message, QSpan? span = null) =>
-        errors.Add(new QoraError(message, code, span?.Start ?? -1, span?.End ?? -1));
+    private static void Add(List<QoraError> errors, string code, string message, SourceSpan? span = null) =>
+        errors.Add(new QoraError(message, code, span));
 }

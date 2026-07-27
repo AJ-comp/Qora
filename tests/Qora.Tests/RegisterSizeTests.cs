@@ -22,9 +22,9 @@ public class RegisterSizeTests
     {
         // the crux of the fix: a clean diagnostic, never an internal-error crash
         var r = Compiler.Compile(source);
-        Assert.False(r.Success);
-        Assert.DoesNotContain("QORA0000", r.Errors.Select(e => e.Code));
-        Assert.DoesNotContain("QINTERNAL", r.Errors.Select(e => e.Code));
+        Assert.False(r.Succeeded);
+        Assert.DoesNotContain("QORA0000", r.Diagnostics.Select(diagnostic => diagnostic.Error).ToList().Select(e => e.Code));
+        Assert.DoesNotContain("QINTERNAL", r.Diagnostics.Select(diagnostic => diagnostic.Error).ToList().Select(e => e.Code));
     }
 
     [Theory]

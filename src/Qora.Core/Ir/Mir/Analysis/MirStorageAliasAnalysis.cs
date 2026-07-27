@@ -8,7 +8,7 @@ namespace Qora.Ir.Mir.Analysis;
 /// is the single place where consumers turn provenance into a disjointness decision, so they cannot
 /// accidentally treat different formal <see cref="MirStorageId"/> values as proof of non-aliasing.
 /// </summary>
-public static class MirStorageAliasAnalysis
+internal static class MirStorageAliasAnalysis
 {
     /// <summary>
     /// Returns whether the two array states can refer to any common physical storage.
@@ -34,9 +34,13 @@ public static class MirStorageAliasAnalysis
             foreach (var rightId in right.PossibleStorages)
             {
                 if (leftId == rightId) return true;
+                if (leftId.Snapshot != rightId.Snapshot
+                    || leftId.Callable != callable.Id
+                    || rightId.Callable != callable.Id)
+                    return true;
 
-                var leftStorage = callable.FindStorage(leftId);
-                var rightStorage = callable.FindStorage(rightId);
+                var leftStorage = callable.FindStorage(leftId.Storage);
+                var rightStorage = callable.FindStorage(rightId.Storage);
                 if (leftStorage is null || rightStorage is null)
                     return true;
 

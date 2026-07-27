@@ -31,76 +31,6 @@ public static class IrPrinter
         return sb.ToString().TrimEnd();
     }
 
-    /// <summary>
-    /// The synthesized inverse of every operation the program needs — stage 3 of the pipeline, the part
-    /// no source line wrote. Mirrors the emitter exactly: the set is closed TRANSITIVELY (an inverse
-    /// body's plain calls become <c>Adjoint</c> calls needing their own inverses) and each block is
-    /// headed by the same uniquified def name the QASM will contain, so the stages panel's inverse
-    /// column maps one-to-one onto the emitted defs. Non-invertible targets are listed with the reason.
-    /// </summary>
-    public static string PrintInverses(QProgram? program)
-    {
-        if (program is null) return string.Empty;
-
-        var ops = program.Operations.Select(o => o.Name).ToHashSet();
-        var opByName = new Dictionary<string, QOperation>();
-        foreach (var o in program.Operations) opByName.TryAdd(o.Name, o);
-
-        // transitive closure over Adjoint references — same worklist the emitter runs.
-        var inverter = new Inverter(program.Operations);
-        var inverses = new Dictionary<string, IReadOnlyList<QStmt>>();
-        var adjOrder = new List<string>();
-        var notInvertible = new Dictionary<string, string>();
-        var seen = new HashSet<string>();
-        var worklist = new Queue<string>();
-        void Enqueue(IReadOnlyList<QStmt> body)
-        {
-            var refs = new HashSet<string>();
-            CollectAdjointRefs(body, ops, refs);
-            foreach (var r in refs) if (seen.Add(r)) worklist.Enqueue(r);
-        }
-        foreach (var op in program.Operations) Enqueue(op.Body);
-        while (worklist.Count > 0)
-        {
-            var name = worklist.Dequeue();
-            if (!opByName.ContainsKey(name)) continue;
-            if (inverter.TryInvertOperation(name, out var inverse, out var reason))
-            {
-                inverses[name] = inverse;
-                adjOrder.Add(name);
-                Enqueue(inverse);
-            }
-            else
-            {
-                notInvertible[name] = reason;
-            }
-        }
-        if (adjOrder.Count == 0 && notInvertible.Count == 0) return string.Empty;
-
-        // same uniquify rule as the emitter, so the shown def names match the QASM.
-        var adjNames = new Dictionary<string, string>();
-        foreach (var name in adjOrder)
-        {
-            var candidate = name + "__adj";
-            while (ops.Contains(candidate) || adjNames.ContainsValue(candidate)) candidate += "_";
-            adjNames[name] = candidate;
-        }
-
-        var sb = new StringBuilder();
-        foreach (var name in adjOrder)
-        {
-            sb.AppendLine($"def {adjNames[name]}  (inverse of {name}):");
-            PrintBody(inverses[name], sb, "  ");
-            sb.AppendLine();
-        }
-        foreach (var (name, reason) in notInvertible.OrderBy(kv => kv.Key))
-        {
-            sb.AppendLine($"inverse of {name}: (not invertible: {reason})");
-            sb.AppendLine();
-        }
-        return sb.ToString().TrimEnd();
-    }
-
     private static string PrintParam(QParam p)
     {
         var value = p.Type switch
@@ -200,33 +130,4 @@ public static class IrPrinter
         _ => string.Empty,
     };
 
-    private static void CollectAdjointRefs(IReadOnlyList<QStmt> stmts, HashSet<string> ops, HashSet<string> into)
-    {
-        foreach (var stmt in stmts)
-        {
-            switch (stmt)
-            {
-                case QGate g when g.Functors.FirstOrDefault() == "Adjoint" && ops.Contains(g.Name):
-                    into.Add(g.Name);
-                    break;
-                case QIf i:
-                    CollectAdjointRefs(i.Then, ops, into);
-                    CollectAdjointRefs(i.Else, ops, into);
-                    break;
-                case QFor f:
-                    CollectAdjointRefs(f.Body, ops, into);
-                    break;
-                case QWhile w:
-                    CollectAdjointRefs(w.Body, ops, into);
-                    break;
-                case QRepeat r:
-                    CollectAdjointRefs(r.Body, ops, into);
-                    break;
-                case QConjugate c:
-                    CollectAdjointRefs(c.Within, ops, into);
-                    CollectAdjointRefs(c.Apply, ops, into);
-                    break;
-            }
-        }
-    }
 }

@@ -3,644 +3,479 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Qora 컴파일러 데이터시트 — 파이프라인 · 패스 · IR · 자동 uncomputation</title>
+<title>Qora 컴파일러 데이터시트 — Compilation, SourceSet, HIR, MIR, Target</title>
 <style>
   :root {
-    --bg: #ffffff; --ink: #1f2430; --muted: #5b6472; --line: #e6e8ee; --panel: #f7f8fb;
-    --plus: #1457d6; --minus: #d62b39; --accent: #6b3fd4; --good: #11875b; --amber: #b5810a;
+    --bg:#fff; --ink:#1f2430; --muted:#5b6472; --line:#e1e5eb; --panel:#f6f7f9;
+    --blue:#1457d6; --green:#11875b; --amber:#9a6700; --purple:#6b4fc6; --navy:#263141;
   }
-  * { box-sizing: border-box; }
-  html { scroll-behavior: smooth; }
+  * { box-sizing:border-box; }
+  html { scroll-behavior:smooth; }
   body {
-    margin: 0; background: var(--bg); color: var(--ink);
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo",
-      "Malgun Gothic", "Noto Sans KR", "Segoe UI Symbol", "Cambria Math", sans-serif;
-    line-height: 1.7; font-size: 16.5px;
+    margin:0; background:var(--bg); color:var(--ink); word-break:keep-all; overflow-wrap:break-word;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Apple SD Gothic Neo",
+      "Malgun Gothic","Noto Sans KR","Segoe UI Symbol",sans-serif;
+    font-size:16.5px; line-height:1.72;
   }
-  .wrap { max-width: 940px; margin: 0 auto; padding: 0 20px 120px; }
-  header.hero {
-    padding: 60px 20px 36px; text-align: center; border-bottom: 1px solid var(--line);
-    background: linear-gradient(180deg, #faf9ff, #ffffff);
+  a { color:#1745b5; }
+  code,pre { font-family:"SF Mono","JetBrains Mono","D2Coding",Consolas,monospace; }
+  code { padding:1px 6px; border:1px solid var(--line); border-radius:5px;
+         background:var(--panel); font-size:.9em; word-break:normal; }
+  pre { margin:16px 0; padding:15px 17px; overflow-x:auto; border-radius:10px;
+        background:#111827; color:#eef4ff; font-size:.84rem; line-height:1.55;
+        white-space:pre; word-break:normal; }
+  pre code { padding:0; border:0; background:none; color:inherit; font-size:inherit; }
+  .wrap { max-width:980px; margin:0 auto; padding:0 20px 110px; }
+  .hero { padding:60px 20px 38px; text-align:center; border-bottom:1px solid var(--line);
+          background:#f7f8fa; }
+  .hero h1 { margin:0 0 10px; font-size:2.05rem; letter-spacing:-.55px; }
+  .hero p { margin:0; color:var(--muted); }
+  .tag { display:inline-block; margin-bottom:14px; color:var(--muted); font-size:.78rem;
+         font-weight:800; letter-spacing:.12em; text-transform:uppercase; }
+  h2 { margin:54px 0 12px; padding-bottom:10px; border-bottom:1px solid var(--line);
+       font-size:1.42rem; letter-spacing:-.3px; }
+  h3 { margin:28px 0 8px; font-size:1.08rem; }
+  p { margin:12px 0; }
+  .lead { margin-top:24px; font-size:1.04rem; }
+  .toc,.doc-links { display:flex; flex-wrap:wrap; gap:9px; margin:20px 0; }
+  .toc a,.doc-link { display:inline-flex; padding:7px 14px; border:1px solid #cddcff;
+                     border-radius:999px; background:#f6f9ff; color:#1745b5;
+                     font-size:.89rem; font-weight:750; text-decoration:none; }
+  .toc a:hover,.doc-link:hover { border-color:#9bb8ff; background:#eef4ff; }
+  .summary { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:11px; margin:22px 0; }
+  .summary div { padding:13px 14px; border:1px solid #dce2e9; border-radius:9px; background:#f8fafc; }
+  .summary dt { color:#596579; font-size:.72rem; font-weight:850; letter-spacing:.07em;
+                text-transform:uppercase; }
+  .summary dd { margin:5px 0 0; color:#24344d; font-size:.91rem; font-weight:700; }
+  .diagram { margin:22px 0; overflow:hidden; border:1px solid #d4dde8;
+             border-radius:12px; background:#f8fafc; }
+  .diagram-scroll { overflow-x:auto; }
+  .diagram svg { display:block; width:100%; min-width:900px; height:auto; }
+  .diagram figcaption { padding:11px 15px; border-top:1px solid #dfe5ed;
+                       background:#fff; color:#536074; font-size:.82rem; }
+  .svg-ui { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Apple SD Gothic Neo",
+            "Malgun Gothic","Noto Sans KR",sans-serif; }
+  .svg-code { font-family:"SF Mono","JetBrains Mono","D2Coding",Consolas,monospace; }
+  .panel { margin:16px 0; overflow-x:auto; border:1px solid var(--line);
+           border-radius:9px; background:#fff; }
+  table.spec { width:100%; border-collapse:collapse; font-size:.9rem; }
+  table.spec th,table.spec td { padding:9px 11px; border-bottom:1px solid var(--line);
+                               text-align:left; vertical-align:top; }
+  table.spec th { background:#fbfbfe; color:var(--muted); font-size:.76rem;
+                  font-weight:800; letter-spacing:.02em; }
+  table.spec tr:last-child td { border-bottom:0; }
+  table.spec td.k { width:1%; color:#1a2740; font-weight:750; white-space:nowrap; }
+  .callout { margin:18px 0; padding:15px 17px; border:1px solid #dfe3e9;
+             border-radius:9px; background:#f8f9fb; }
+  .callout.good { border-color:#b9decf; background:#f5faf7; }
+  .callout.warn { border-color:#e6d2ad; background:#fffaf1; }
+  .callout .h { display:block; margin-bottom:7px; color:#526071; font-size:.72rem;
+                font-weight:850; letter-spacing:.08em; text-transform:uppercase; }
+  .owner-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; margin:16px 0; }
+  .owner { padding:14px 15px; border:1px solid #dce2e9; border-radius:9px; background:#f8fafc; }
+  .owner b { display:block; margin-bottom:5px; color:#24344d; }
+  .owner p { margin:0; font-size:.91rem; }
+  footer { margin-top:58px; padding-top:24px; border-top:1px solid var(--line);
+           color:var(--muted); text-align:center; font-size:.9rem; }
+  @media (max-width:760px) {
+    .wrap { padding-right:16px; padding-left:16px; }
+    .hero { padding-right:16px; padding-left:16px; }
+    .hero h1 { font-size:1.55rem; line-height:1.38; }
+    .summary,.owner-grid { grid-template-columns:1fr; }
+    table.spec td.k { white-space:normal; }
   }
-  header.hero h1 { font-size: 2.0rem; margin: 0 0 10px; letter-spacing: -0.5px; }
-  header.hero p { color: var(--muted); margin: 0; font-size: 1.02rem; }
-  .tag { display:inline-block; font-size:.78rem; letter-spacing:.12em; text-transform:uppercase;
-         color: var(--accent); font-weight:700; margin-bottom:14px; }
-  h2 { margin: 54px 0 12px; font-size: 1.42rem; letter-spacing: -0.3px;
-       padding-top: 14px; border-top: 2px solid var(--line); }
-  h2 .n { display:inline-flex; align-items:center; justify-content:center;
-    width: 1.7em; height: 1.7em; border-radius: 50%;
-    background: var(--accent); color:#fff; font-size: .8rem; font-weight:700;
-    margin-right: 10px; vertical-align: middle; }
-  h3 { margin: 30px 0 8px; font-size: 1.1rem; }
-  p { margin: 12px 0; }
-  strong { color: #11203a; }
-  .lead { font-size: 1.05rem; }
-  code, .mono, pre {
-    font-family: "SF Mono", "JetBrains Mono", "D2Coding", Consolas, "Segoe UI Symbol", monospace;
-  }
-  code { background: var(--panel); border: 1px solid var(--line); border-radius: 5px; padding: 1px 6px; font-size: .9em; }
-  pre { background: #111827; color: #eef4ff; border-radius: 10px; padding: 15px 17px; margin: 16px 0;
-        overflow-x: auto; font-size: .86rem; line-height: 1.55; }
-  pre code { background: none; border: none; padding: 0; font-size: inherit; color: inherit; }
-  pre .cm { color: #8ba0c7; }
-  pre .hl { color: #c4a7ff; font-weight: 700; }
-  pre .add { color: #7fe0b0; font-weight: 700; }
-  pre .rd { color: #ff9db0; font-weight: 700; }
-  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
-           padding: 14px 16px; margin: 16px 0; overflow-x: auto; }
-  table.spec { border-collapse: collapse; width: 100%; font-size: .92rem; }
-  table.spec th, table.spec td { padding: 8px 11px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: top; }
-  table.spec th { font-size: .78rem; color: var(--muted); font-weight: 700; letter-spacing:.02em; background:#fbfbfe; }
-  table.spec tr:last-child td { border-bottom: none; }
-  table.spec code { white-space: nowrap; }
-  table.spec td.k { white-space: nowrap; font-weight: 700; color:#1a2740; }
-  .call { border-left: 4px solid var(--accent); background: #faf8ff;
-          padding: 13px 17px; border-radius: 0 8px 8px 0; margin: 18px 0; }
-  .call.why { border-color: var(--good); background: #f2fbf7; }
-  .call.warn { border-color: #e6a417; background: #fff9ec; }
-  .call .h { font-weight: 700; display:block; margin-bottom: 4px; }
-  .call p { margin: 8px 0 0; }
-  .rule { text-align:center; font-size: 1.02rem; font-weight: 700; color:#1a1140;
-          background: #f3efff; border:1px solid #e2d8ff; border-radius: 10px; padding: 15px; margin: 20px 0; }
-  .toc { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 20px; margin: 24px 0; }
-  .toc ol { margin: 6px 0 0; padding-left: 20px; columns: 2; column-gap: 30px; }
-  .toc a { color: var(--ink); text-decoration: none; }
-  .toc a:hover { color: var(--accent); }
-  .doc-links { display:flex; flex-wrap:wrap; gap:10px; margin: 18px 0 6px; }
-  .doc-link { display:inline-flex; align-items:center; gap:8px; border:1px solid #cddcff;
-              background:#f6f9ff; color:#1745b5; border-radius:999px; padding:7px 15px; font-weight:700; text-decoration:none; font-size:.92rem; }
-  .doc-link:hover { border-color:#9bb8ff; background:#eef4ff; }
-  .doc-meta { border: 1px solid #dfe5f2; border-left: 5px solid var(--accent); border-radius: 8px;
-              background: #f8faff; padding: 16px 18px; margin: 22px 0; }
-  .doc-meta .meta-title { font-weight: 800; color: #11203a; margin-bottom: 12px; }
-  .meta-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 18px; margin: 0; }
-  .meta-grid dt { color: var(--muted); font-size: .74rem; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; }
-  .meta-grid dd { margin: 3px 0 0; }
-  footer { text-align:center; color:var(--muted); font-size:.9rem; margin-top: 60px; padding-top: 24px; border-top:1px solid var(--line); }
-  /* datasheet-specific */
-  .pipe { display:flex; flex-direction:column; gap:0; margin: 18px 0; }
-  .pipe .stg { display:flex; align-items:center; gap:12px; }
-  .pipe .box { flex:1; background:#fff; border:1px solid var(--line); border-radius:8px; padding:9px 13px; font-size:.92rem; }
-  .pipe .box b { color:#1a2740; }
-  .pipe .box .d { color:var(--muted); font-size:.85rem; }
-  .pipe .box.key { border-color:#c9b6f4; background:#faf7ff; }
-  .pipe .arr { text-align:center; color:var(--accent); font-size:1.2rem; line-height:1; margin:5px 0; }
-  .ladder { display:grid; gap:10px; margin:18px 0; }
-  .rung { display:grid; grid-template-columns:auto 1fr; gap:14px; align-items:start;
-          border:1px solid var(--line); border-radius:10px; padding:13px 16px; background:#fff; }
-  .rung .rn { width:38px; height:38px; border-radius:8px; background:var(--accent); color:#fff;
-              font-weight:800; display:flex; align-items:center; justify-content:center; font-size:1.05rem; }
-  .rung.done { border-left:5px solid var(--good); }
-  .rung.done .rn { background:var(--good); }
-  .rung .rt { font-weight:800; color:#1a2740; }
-  .rung .rd { color:var(--muted); font-size:.92rem; margin-top:2px; }
-  .rung .st { display:inline-block; font-size:.72rem; font-weight:800; border-radius:999px; padding:2px 9px; margin-left:8px; vertical-align:middle; }
-  .rung .st.ok { background:#e4f7ee; color:var(--good); }
-  .rung .st.next { background:#f3efff; color:var(--accent); }
-  .badge { display:inline-block; font-size:.72rem; font-weight:800; border-radius:5px; padding:1px 7px; }
-  .badge.r { background:#eef4ff; color:var(--plus); }
-  .badge.w { background:#fdeef0; color:var(--minus); }
-  .badge.m { background:#f3efff; color:var(--accent); }
-  .grid2 { display:grid; grid-template-columns:1fr; gap:14px; margin:16px 0; }
-  @media (min-width:740px){ .grid2 { grid-template-columns:repeat(2,minmax(0,1fr)); } }
-  .card { background:#fff; border:1px solid var(--line); border-radius:8px; padding:14px 16px; }
-  .card.good { border-top:4px solid var(--good); }
-  .card.bad { border-top:4px solid var(--minus); }
-  .card h4 { margin:0 0 8px; font-size:1rem; }
-  @media (max-width: 720px) { .meta-grid, .toc ol { grid-template-columns: 1fr; columns:1; } }
 </style>
 </head>
 <body>
-<div class="qora-lang-switch" style="position:sticky;top:0;z-index:99;text-align:right;padding:8px 16px;background:rgba(255,255,255,.92);backdrop-filter:blur(4px);border-bottom:1px solid #e6e8ee;font-size:13px;font-family:sans-serif;"><a href="../en/index.html" onclick="try{localStorage.setItem('qora-lang','en')}catch(e){}">English</a> · <strong>한국어</strong> · <a href="../ja/index.html" onclick="try{localStorage.setItem('qora-lang','ja')}catch(e){}">日本語</a></div>
+<div class="qora-lang-switch" style="position:sticky;top:0;z-index:99;text-align:right;padding:8px 16px;background:rgba(255,255,255,.92);backdrop-filter:blur(4px);border-bottom:1px solid #e6e8ee;font-size:13px;font-family:sans-serif;"><a href="../en/index.html">English</a> · <strong>한국어</strong> · <a href="../ja/index.html">日本語</a></div>
 
 <header class="hero">
-  <div class="tag">Qora · 컴파일러 데이터시트</div>
+  <div class="tag">Qora · Compiler Architecture Datasheet</div>
   <h1>Qora 컴파일러 데이터시트</h1>
-  <p>소스에서 OpenQASM 3까지 — 파이프라인 · 패스 · IR · SemanticModel · 자동 uncomputation</p>
+  <p>Compilation · SourceSet · HIR semantics · MIR · cross-stage links · target artifacts</p>
 </header>
 
 <div class="wrap">
-
-  <p class="lead">
-    이 문서는 Qora 컴파일러의 <strong>내부 구조를 정리한 레퍼런스</strong>입니다 —
-    컴파일 파이프라인, 패스, IR, <code>SemanticModel</code>, 그리고
-    <a href="#s8">자동 uncomputation</a>.
-  </p>
-
-  <section class="doc-meta" aria-label="문서 정보">
-    <div class="meta-title">한눈에</div>
-    <dl class="meta-grid">
-      <div><dt>대상 언어</dt><dd>Q#/C# 감성의 학습·프로덕션 지향 양자 언어</dd></div>
-      <div><dt>파서 엔진</dt><dd>Janglim (NuGet) — 소스 → AST</dd></div>
-      <div><dt>방출 타깃</dt><dd>OpenQASM 3.0</dd></div>
-      <div><dt>실행 검증 오라클</dt><dd>Amazon Braket LocalSimulator (전체 언어 실행)</dd></div>
-      <div><dt>중심 자료구조</dt><dd>강타입 IR(<code>QProgram</code>) + 지속 <code>SemanticModel</code></dd></div>
-      <div><dt>문서 버전</dt><dd>Qora v0.30 기준</dd></div>
-    </dl>
-  </section>
-
-  <nav class="doc-links" aria-label="관련 문서">
-    <a class="doc-link" href="adjoint-pipeline.html">역합성 파이프라인 — Adjoint 실체화 방식</a>
-    <a class="doc-link" href="index.html">컴파일 파이프라인 개관</a>
-    <a class="doc-link" href="hadamard.html">H 게이트를 화살표로</a>
+  <nav class="toc" aria-label="문서 목차">
+    <a href="#s1">전체 구조</a>
+    <a href="#passes">패스 목차</a>
+    <a href="#s3">SourceSet</a>
+    <a href="#s4">HIR</a>
+    <a href="#s5">MIR</a>
+    <a href="#s6">단계 링크</a>
+    <a href="#s7">Targets</a>
+    <a href="#s8">진단·불변 조건</a>
   </nav>
 
-  <div class="toc">
-    <strong>차례</strong>
-    <ol>
-      <li><a href="#s1">컴파일 파이프라인</a></li>
-      <li><a href="#s2">패스 카탈로그</a></li>
-      <li><a href="#s3">IR 노드 레퍼런스</a></li>
-      <li><a href="#s4">SemanticModel — 지속 사이드테이블</a></li>
-      <li><a href="#s5">프로그램 심벌 그래프, 렉시컬 스코프 & 이름의 두 도메인</a></li>
-      <li><a href="#s6">효과분석 & 큐빗이벤트 (rung ①)</a></li>
-      <li><a href="#s7">자동 uncomputation 사다리</a></li>
-      <li><a href="#s8">자동 uncomputation</a></li>
-      <li><a href="#s9">진단 코드 (QSEM)</a></li>
-      <li><a href="#s10">버전 히스토리</a></li>
-    </ol>
-  </div>
-
-  <!-- ============ 1 ============ -->
-  <h2 id="s1"><span class="n">1</span>컴파일 파이프라인</h2>
-  <p>
-    이 장은 소스 한 줄이 OpenQASM으로 출력되기까지 거치는 단계를 보여줍니다.<br>
-    검증은 방출을 통제하는 <strong>게이트</strong>입니다.<br>
-    의미 에러가 하나라도 있으면 방출은 실행되지 않고, 컴파일러는 발견한 모든 위반을 보고합니다.<br>
-    <strong>SemanticModel은 마지막 검증(모노모피제이션 후)에서 한 번 만들어지며</strong> 파이프라인 끝까지 재사용됩니다.
+  <p class="lead">
+    Qora의 공개 컴파일 결과는 한 source revision을 나타내는 불변 <code>Compilation</code>입니다.<br>
+    <code>CompilationSession</code>이 한 논리 컴파일의 identity와 branch-safe revision 발급을 소유하고, 각 결과는 자신의 <code>Revision</code>과 선택적 <code>ParentRevision</code>을 기록합니다.<br>
+    이 aggregate가 <code>Sources</code>, <code>Hir</code>, 요청된 경우의 <code>Mir</code>, <code>Links</code>, <code>Targets</code>, <code>Diagnostics</code>를 소유하며, 각 단계의 사실은 자신이 설명하는 정확한 snapshot identity로 한정됩니다.<br>
+    따라서 HIR 트리와 다른 세대의 의미 모델을 우연히 결합하거나, backend가 원본 의미 정보를 덮어쓰는 구조를 허용하지 않습니다.
   </p>
 
-  <div class="pipe">
-    <div class="stg"><div class="box"><b>소스</b> <span class="d">— Qora 텍스트</span></div></div>
-    <div class="arr">▼ Janglim 파싱</div>
-    <div class="stg"><div class="box"><b>AST</b> <span class="d">— 엔진 문법 트리 (이후 읽기만)</span></div></div>
-    <div class="arr">▼ QoraLowering</div>
-    <div class="stg"><div class="box"><b>Qora HIR</b> <span class="d">— 소스 구조를 보존하는 강타입 <code>QProgram</code> (안정 Id 발급)</span></div></div>
-    <div class="arr">▼ ModuleLoader → MeasureConditionLowering → Resolver</div>
-    <div class="stg"><div class="box"><b>해소된 HIR</b> <span class="d">— import 병합, 측정-조건 desugar, 이름 FQN화</span></div></div>
-    <div class="arr">▼ QoraValidator + QASM 범위 정책 → Monomorphizer → 재검증 + 정책</div>
-    <div class="stg"><div class="box key"><b>검증된 · 특수화된 HIR</b> <span class="d">— ★ 마지막 검증의 <strong>SemanticModel</strong> 유지</span></div></div>
-    <div class="arr">▼ EffectAnalysis (rung ①)</div>
-    <div class="stg"><div class="box"><b>+ 큐빗이벤트 / 요약</b> <span class="d">— 모델에 적재 (IR 무변경)</span></div></div>
-    <div class="arr">▼ ConjugationLowering → QoraMirLowering → QoraMirVerifier → CFG·경로·저장소 provenance 분석 → MirEffectAnalysis</div>
-    <div class="stg"><div class="box key"><b>Qora MIR</b> <span class="d">— 기본 블록, SSA 값, 배열 상태·별칭 계약, 큐빗 리소스와 효과 witness</span></div></div>
-    <div class="arr">▼ 현재 전환 단계: 검증된 MIR은 분석용으로 보존하고, 기존 HIR을 AdjointMaterializer → NameMangler → ReferentialCheck → OpenQasmLowering으로 전달</div>
-    <div class="stg"><div class="box"><b>방출용 IR</b> <span class="d">— within/apply 평탄화, 역연산 실체화, 이름 맹글링, Id 무결성</span></div></div>
-    <div class="arr">▼ QasmEmitter</div>
-    <div class="stg"><div class="box"><b>OpenQASM 3</b> <span class="d">— 순수 프린터 출력</span></div></div>
-  </div>
+  <dl class="summary">
+    <div><dt>컴파일 단위</dt><dd><code>CompilationSession</code> + revision snapshot</dd></div>
+    <div><dt>소스 위치</dt><dd>document-qualified <code>SourceSpan</code></dd></div>
+    <div><dt>산출물 계약</dt><dd><code>CompilationOutputPlan</code></dd></div>
+  </dl>
 
-  <div class="call">
-    <span class="h">두 번 검증하는 이유</span>
-    모노모피제이션이 제네릭 레지스터 크기를 확정하므로, 크기 의존 검사(인덱스 범위·레지스터 크기 일치)는 크기가
-    정해진 뒤에야 정확하게 실행될 수 있습니다. 그래서 검증은 <strong>기저 IR에서 1회, 특수화 후 1회</strong> 수행되며,
-    <strong>마지막 검증 결과가 SemanticModel을 소유</strong>합니다.
-  </div>
+  <h2 id="s1">1. 권위 있는 전체 구조</h2>
 
-  <div class="call">
-    <span class="h">HIR과 MIR을 분리하는 이유</span>
-    HIR은 네임스페이스·선언·조건문·루프처럼 사용자가 작성한 구조를 보존하므로,
-    이름 해소와 언어 규칙 진단에 적합합니다.<br>
-    반면에 MIR은 모든 고전 값의 대입을 새 <code>MirValueId</code>로 만들고,
-    분기 합류점에는 블록 인수(Phi)를 둡니다.<br>
-    따라서 같은 변수에 새 값을 대입해도 이전 값의 Id가 바뀌지 않으며,
-    자동 cleanup은 소스 이름을 다시 찾지 않고 정방향 실행에서 사용한 정확한 값 버전을 참조할 수 있습니다.<br>
-    배열은 스칼라와 달리 저장소가 실제로 변경되므로, <code>MirMemoryStateAnalysis</code>가
-    SSA 지배 관계와 별개로 과거 배열 상태가 청소 지점까지 남아 있는지 계산합니다.
-  </div>
+  <figure class="diagram" aria-labelledby="pipeline-title pipeline-caption">
+    <div class="diagram-scroll" tabindex="0">
+      <svg viewBox="0 0 1100 680" role="img" aria-labelledby="pipeline-title pipeline-desc">
+        <title id="pipeline-title">Compilation이 소스, HIR, MIR, 링크, 대상 아티팩트를 소유하는 구조</title>
+        <desc id="pipeline-desc">SourceGraphLoader가 SourceSet을 만들고 구조 HIR snapshot과 별도 semantic artifact가 이어집니다. MIR은 HIR에서 lowering되며, cross-stage links가 관계를 기록합니다. OpenQASM은 현재 materialized HIR에서 만들어져 Targets의 backend map에 저장됩니다.</desc>
+        <defs>
+          <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+            <path d="M0 0 L10 5 L0 10 Z" fill="#64748b"/>
+          </marker>
+        </defs>
 
-  <div class="call">
-    <span class="h">미증명 인덱스의 사실과 QASM 정책</span>
-    <code>QoraValidator</code>는 범위를 증명하지 못한 접근을 오류로 확정하지 않고
-    <code>SemanticModel.UnprovenIndexes</code>에 기록합니다.<br>
-    이때 이미 범위를 벗어났거나 정수가 아닌 인덱스는 공통 오류 <code>QSEM016</code>이 됩니다.<br>
-    반면에 안전 여부가 끝내 정해지지 않은 접근은 <code>OpenQasmBoundsValidation</code>이
-    <code>QSEM030</code>으로 바꿉니다. OpenQASM에는 이 실패를 처리할 이식 가능한 실행 중단 경로가 없기 때문입니다.<br>
-    현재 기록은 진단 문맥을 보존하지만 표현식 위치의 안정 Id는 담지 않으므로, 앞으로 실행 중 검사 삽입을 지원하려면
-    별도의 위치 식별자와 동적 별칭 정책을 추가해야 합니다.
-  </div>
+        <rect x="35" y="28" width="1030" height="620" rx="18" fill="#fff" stroke="#bac5d2" stroke-width="2"/>
+        <rect x="35" y="28" width="1030" height="54" rx="18" fill="#263141"/>
+        <path d="M35 64 H1065 V82 H35 Z" fill="#263141"/>
+        <text class="svg-code" x="60" y="61" fill="#f8fafc" font-size="18" font-weight="850">Compilation</text>
+        <text class="svg-code" x="1040" y="61" text-anchor="end" fill="#cbd5e1" font-size="13">Session · Revision · ParentRevision</text>
 
-  <!-- ============ 2 ============ -->
-  <h2 id="s2"><span class="n">2</span>패스 카탈로그</h2>
-  <p>앞단 패스는 소스 구조를 보존하는 HIR을 처리하고, <code>QoraMirLowering</code> 이후 분석은 SSA/CFG MIR을 사용합니다.<br>
-    방출 단계에서는 <code>QasmEmitter</code>가 순수 프린터 역할만 맡습니다.</p>
+        <rect x="68" y="112" width="224" height="178" rx="12" fill="#fff8eb" stroke="#d7ae5f" stroke-width="2"/>
+        <text class="svg-code" x="180" y="142" text-anchor="middle" fill="#745013" font-size="16" font-weight="850">Sources</text>
+        <text class="svg-code" x="88" y="174" fill="#334155" font-size="12.5">SourceDocumentSnapshot[]</text>
+        <text class="svg-code" x="88" y="201" fill="#334155" font-size="12.5">SyntaxByDocument</text>
+        <text class="svg-code" x="88" y="228" fill="#334155" font-size="12.5">ImportGraph</text>
+        <text class="svg-code" x="88" y="255" fill="#64748b" font-size="11.5">SourceDocumentRef edges</text>
 
-  <div class="panel">
-    <table class="spec">
-      <tr><th>패스</th><th>역할</th><th>비고 / 진단</th></tr>
-      <tr><td class="k">QoraLowering</td><td>엔진 AST → Qora HIR (1회). 문자열 태그 → 강타입 노드.</td><td>여기서 노드 안정 <code>Id</code> 발급</td></tr>
-      <tr><td class="k">ModuleLoader</td><td>import 확장 — 여러 파일을 하나의 프로그램으로 병합.</td><td>QSEM020 · QSEM021은 폐기된 예약 코드</td></tr>
-      <tr><td class="k"><a href="ir-pass-03-measure-condition-lowering.html">MeasureConditionLowering</a></td><td><code>if (M(q[i]) == v)</code>를 측정 문장과 그 결과를 읽는 비트 조건으로 분리.</td><td>해소·검증 前</td></tr>
-      <tr><td class="k">Resolver</td><td>이름을 완전수식명(FQN)으로 해소 (네임스페이스/open).</td><td>QSEM018/019</td></tr>
-      <tr><td class="k">QoraValidator</td><td>공유 의미 검증 — 수집형(조기중단 없음). 스코프 트리와 미증명 인덱스 사실을 SemanticModel에 적재.</td><td>확정 오류는 QSEM016, 미증명은 데이터</td></tr>
-      <tr><td class="k">OpenQasmBoundsValidation</td><td><code>UnprovenIndexes</code>를 OpenQASM의 최종 범위 정책에 따라 진단으로 변환.</td><td>QSEM030 · 각 검증 직후와 백엔드 입구</td></tr>
-      <tr><td class="k">Monomorphizer</td><td>소스의 <code>Qubit[]</code> 파라미터를 호출부의 실제 크기로 특수화하고 <code>Count</code>를 정수로 치환. 복제 노드는 <code>ReId</code>로 새 Id.</td><td>모델 소유 검증 이후</td></tr>
-      <tr><td class="k">EffectAnalysis</td><td><strong>rung ①</strong> — 리프 문장마다 큐빗이벤트(Read/Write/Measure) + op 요약. 순수 분석.</td><td>IR 무변경</td></tr>
-      <tr><td class="k">ConjugationLowering</td><td><code>QConjugate</code>(within/apply)를 <code>W ++ A ++ inverse(W)</code>로 평탄화.</td><td>QSEM027 (역함수 없으면 거부)</td></tr>
-      <tr><td class="k">QoraMirLowering</td><td>검증된 HIR → 타입이 붙은 SSA/CFG MIR. 이름은 <code>SymbolId</code>로, 호출은 <code>MirCallableId</code>로 확정.</td><td>블록 인수가 Phi 역할</td></tr>
-      <tr><td class="k">QoraMirVerifier</td><td>MIR의 Id 유일성, 정의-사용, 지배 관계, 분기 인수, 호출·배열·큐빗 계약을 검사합니다. 또한 memory Phi로 들어오는 배열 버전이 해당 간선의 최신 상태인지 확인하고, 가변·이동 인수끼리 저장소가 겹치는 변형 MIR을 거부합니다.</td><td>위반은 QINTERNAL</td></tr>
-      <tr><td class="k">MirControlFlowAnalysis</td><td>기본 블록의 선행·후속 관계, 도달 가능성, dominator·post-dominator와 SSA 값 가용성을 계산.</td><td>프로그램 객체와 revision에 결속된 스냅샷</td></tr>
-      <tr><td class="k">MirPathConditionAnalysis</td><td>양자 명령이 실행되는 조건을 <code>Always</code>·<code>Never</code>·predicate·AND·OR 식으로 기록합니다. 각 predicate는 정확한 조건 <code>MirValueId</code>와 참·거짓 간선을 보존합니다.</td><td>루프 안 실행은 <code>LoopCarried</code>로 별도 표시</td></tr>
-      <tr><td class="k">MirStorageProvenanceAnalysis</td><td>배열 상태가 어느 저장소 후보에서 왔는지 store·mutable call·memory Phi를 따라 계산.</td><td>서로 다른 formal storage Id만으로 비별칭을 단정하지 않음</td></tr>
-      <tr><td class="k">MirStorageAliasAnalysis</td><td>지역 고유 저장소, 공유 읽기 전용 파라미터, 배타 파라미터의 계약을 합쳐 두 배열 상태의 별칭 가능성을 판정.</td><td>불완전 provenance는 보수적으로 별칭 가능</td></tr>
-      <tr><td class="k">MirMemoryStateAnalysis</td><td>store·가변 호출·소유권 이전이 과거 배열 상태를 죽였는지 CFG must-dataflow로 계산.</td><td>스칼라 SSA 가용성과 배열 내용 가용성을 분리</td></tr>
-      <tr><td class="k">MirScalarValueAvailabilityAnalysis</td><td>스칼라 값이 청소 지점을 지배하는지 확인하고, 그렇지 않으면 상수·순수 연산·순수 호출·유효한 배열 읽기에서 정확히 다시 만들 수 있는지 계산.</td><td>측정 결과와 사용할 수 없는 Phi는 재계산하지 않음</td></tr>
-      <tr><td class="k">MirWitnessAvailabilityAnalysis</td><td>양자 효과의 직접 인수·큐빗 인덱스·경로 조건·배열 상태를 제안된 청소 지점에서 함께 조회.</td><td>가역성·큐빗 청소 순서와 분리된 입력 가용성 판정</td></tr>
-      <tr><td class="k">MirEffectAnalysis</td><td>양자 명령이 사용한 정확한 스칼라 SSA 값, 배열 상태·저장소 후보, 실행 경로, 큐빗 위치와 효과를 revision별 스냅샷으로 생성.</td><td>효과 사실만 생성하며 cleanup 가능 여부는 판정하지 않음</td></tr>
-      <tr><td class="k">AdjointMaterializer</td><td><code>Adjoint Foo</code>를 진짜 역연산 op <code>Foo__adj</code>로 실체화 + 호출부 재작성.</td><td>맹글 前</td></tr>
-      <tr><td class="k">Inverter</td><td>순수 IR→IR 역전 커널 (함자 토글, for 역방향, if 역전, 전이 클로저).</td><td>위 두 패스의 부품</td></tr>
-      <tr><td class="k">NameMangler</td><td>이름 → 충돌 없는 OpenQASM 식별자. 방출이름을 모델에 기록.</td><td>충돌은 에러가 아니며 자동으로 <code>_</code>를 붙임</td></tr>
-      <tr><td class="k">ReferentialCheck</td><td>방출 前 무결성 게이트 — 노드 Id 유일성 + 참조 해소.</td><td>QINTERNAL (컴파일러 버그)</td></tr>
-      <tr><td class="k">OpenQasmLowering</td><td>OQ3 특유 조정 (런타임 <code>const</code>를 평범한 var로 강등 등).</td><td>방출 직전</td></tr>
-      <tr><td class="k">QasmEmitter</td><td>IR → OpenQASM 3 텍스트. 인버터·명명 로직 없는 <strong>순수 프린터</strong>.</td><td>모델의 방출이름/타입 소비</td></tr>
-    </table>
-  </div>
+        <path d="M292 201 H350" fill="none" stroke="#64748b" stroke-width="3" marker-end="url(#arr)"/>
 
-  <h3>패스별 데이터시트</h3>
-  <p>
-    위 카탈로그는 전체 패스 순서를 빠르게 확인하기 위한 색인입니다.<br>
-    아래 문서는 각 패스가 왜 필요한지부터 시작하여 입력과 출력, IR 변경 여부, 핵심 자료구조, 후속 패스 계약을 같은 형식으로 설명합니다.
-  </p>
-  <div class="panel">
-    <table class="spec">
-      <tr><th>장</th><th>패스</th><th>다루는 것</th></tr>
-      <tr><td class="k">1</td><td><a href="ir-pass-01-qora-lowering.html"><code>QoraLowering</code> — AST를 Qora IR로 옮기는 경계</a></td><td>파서가 만든 AST를 후속 패스가 읽는 <code>QProgram</code>으로 바꾸는 과정과 자료구조</td></tr>
-      <tr><td class="k">2</td><td><a href="ir-pass-02-module-loader.html"><code>ModuleLoader</code> — import 그래프를 한 프로그램으로</a></td><td>상대 경로 정규화 → <code>loaded</code> 사전 등록 → 순환 back-edge·중복 경로 생략 → 자식 import 우선 연산 추가 → namespace별 <code>open</code> 병합·중복 제거</td></tr>
-      <tr><td class="k">3</td><td><a href="ir-pass-03-measure-condition-lowering.html"><code>MeasureConditionLowering</code> — 조건 속 측정을 측정 문장과 비트 조건으로 분리</a></td><td><code>QIf</code>·<code>QWhile</code>·<code>QRepeat</code> 조건의 <code>M(q[i])</code>를 <code>QMeasure</code>와 임시 비트로 분리하고 평가 시점에 맞춰 배치</td></tr>
-    </table>
-  </div>
+        <rect x="358" y="103" width="356" height="260" rx="12" fill="#eef5ff" stroke="#75a3d8" stroke-width="2"/>
+        <text class="svg-code" x="536" y="135" text-anchor="middle" fill="#174f8a" font-size="16" font-weight="850">Hir</text>
+        <rect x="382" y="158" width="144" height="84" rx="9" fill="#fff" stroke="#9bbddd"/>
+        <text class="svg-code" x="454" y="184" text-anchor="middle" fill="#334155" font-size="12.5" font-weight="800">HirSnapshot</text>
+        <text class="svg-code" x="454" y="207" text-anchor="middle" fill="#64748b" font-size="10.8">QProgram</text>
+        <text class="svg-code" x="454" y="226" text-anchor="middle" fill="#64748b" font-size="10.8">Structure + SourceMap</text>
+        <rect x="550" y="158" width="140" height="84" rx="9" fill="#f7f1ff" stroke="#a994dc"/>
+        <text class="svg-code" x="620" y="184" text-anchor="middle" fill="#5a3fa7" font-size="12.2" font-weight="800">SemanticArtifact</text>
+        <text class="svg-code" x="620" y="207" text-anchor="middle" fill="#64748b" font-size="10.8">Validation</text>
+        <text class="svg-code" x="620" y="226" text-anchor="middle" fill="#64748b" font-size="10.8">EffectAnalysis</text>
+        <path d="M526 200 H550" fill="none" stroke="#8b75c4" stroke-width="2" marker-end="url(#arr)"/>
+        <text class="svg-code" x="382" y="278" fill="#334155" font-size="12">Snapshots · Milestones</text>
+        <text class="svg-code" x="382" y="305" fill="#334155" font-size="12">SemanticArtifacts</text>
+        <text class="svg-code" x="382" y="332" fill="#64748b" font-size="11">분석은 새 HIR stage를 만들지 않음</text>
 
-  <!-- ============ 3 ============ -->
-  <h2 id="s3"><span class="n">3</span>IR 노드 레퍼런스</h2>
-  <p>
-    IR은 봉인된 record 계층입니다.<br>
-    모든 문장·연산·파라미터는 생성 시점에 <strong>안정 <code>Id</code></strong>를 가집니다.<br>
-    <code>with</code> 재작성은 같은 노드를 편집하는 방식이므로 Id를 상속하고, <code>new</code>는 다른 노드를 만드는 방식이므로 새 Id를 발급합니다.<br>
-    복제 패스는 <code>ReId</code>로 새 Id를 찍고 <code>DerivedFrom</code> 계보를 남깁니다.<br>
-    이것이 Id-키 사이드테이블이
-    복사본에서도 원본을 되짚게 하는 근거입니다.
-  </p>
+        <path d="M536 363 V414" fill="none" stroke="#64748b" stroke-width="3" marker-end="url(#arr)"/>
 
-  <div class="panel">
-    <table class="spec">
-      <tr><th>노드</th><th>의미</th><th>주요 필드</th></tr>
-      <tr><td class="k">QProgram</td><td>프로그램 전체</td><td>Operations</td></tr>
-      <tr><td class="k">QOperation</td><td>연산 정의 (Q#의 operation)</td><td>Name, Params, Body, Id</td></tr>
-      <tr><td class="k">QParam</td><td>스칼라 또는 배열 파라미터 슬롯</td><td>Name, Type, IsArray, Ownership, Access, RegisterSize, Id</td></tr>
-      <tr><td class="k">QUse</td><td>큐빗 레지스터 할당 <code>use q = Qubit[n]</code></td><td>Name, Size, Id</td></tr>
-      <tr><td class="k">QGate</td><td>게이트 적용 또는 <strong>op 호출</strong> (같은 노드)</td><td>Functors, Name, Args, Id</td></tr>
-      <tr><td class="k">QDecl / QAssign</td><td>고전 스칼라·배열 선언 / 전체 변수 또는 배열 원소 대입</td><td>Name, Type, IsArray / Index, Value, Id</td></tr>
-      <tr><td class="k">QIf / QFor / QWhile / QRepeat</td><td>제어흐름 (컨테이너)</td><td>Cond/Var·From·To·Step, Body, Id</td></tr>
-      <tr><td class="k">QConjugate</td><td>within/apply 켤레 — <strong>내부 IR 전용</strong> (표면 문법 없음)</td><td>Within, Apply, Id</td></tr>
-      <tr><td class="k">QArg</td><td>게이트·연산 호출 인자: <code>QQubitArg</code>(reg[idx]) / <code>QTextArg</code>(통짜·각도식)</td><td>Ownership, Access</td></tr>
-      <tr><td class="k">QExpr / QCond</td><td>값 표현식 (<code>QText</code>·<code>QMeasure</code>·<code>QArrayLiteral</code>·<code>QArrayNew</code>) / 조건</td><td>HasCall 플래그 또는 배열 원소·타입·길이</td></tr>
-    </table>
-  </div>
+        <rect x="358" y="422" width="356" height="170" rx="12" fill="#f3faf7" stroke="#78b89f" stroke-width="2"/>
+        <text class="svg-code" x="536" y="452" text-anchor="middle" fill="#116347" font-size="16" font-weight="850">Mir</text>
+        <text class="svg-code" x="382" y="484" fill="#334155" font-size="12.5">MirSnapshot · typed SSA / CFG</text>
+        <text class="svg-code" x="382" y="512" fill="#334155" font-size="12.5">Structure · Origins · Links</text>
+        <text class="svg-code" x="382" y="540" fill="#334155" font-size="12.5">Analyses.ControlFlow(...)</text>
+        <text class="svg-code" x="382" y="568" fill="#334155" font-size="12.5">Analyses.Effects</text>
 
-  <div class="call">
-    <span class="h">파라미터 계약은 소유권과 접근 권한의 두 축입니다</span>
-    <code>QParam</code>과 <code>QArg</code>는 소유권을 <code>QOwnershipMode</code>로,
-    접근 권한을 <code>QAccessMode</code>로 각각 기록합니다.<br>
-    따라서 타입 호환성, 소유권 이전, 읽기·쓰기 권한을 서로 독립된 규칙으로 검증할 수 있습니다.
-    <table class="spec">
-      <tr><th>표면 문법</th><th>Ownership</th><th>Access</th></tr>
-      <tr><td><code>x</code></td><td><code>Borrowed</code></td><td><code>ReadOnly</code></td></tr>
-      <tr><td><code>var x</code></td><td><code>Borrowed</code></td><td><code>Mutable</code></td></tr>
-      <tr><td><code>move x</code></td><td><code>Moved</code></td><td><code>ReadOnly</code></td></tr>
-      <tr><td><code>move var x</code></td><td><code>Moved</code></td><td><code>Mutable</code></td></tr>
-    </table>
-    다만 저장소 형태에 따라 허용되는 조합이 다릅니다.<br>
-    <code>var</code>와 <code>move var</code>는 현재 백엔드가 호출자에게 변경을 반영할 수 있는
-    <code>int[]</code>·<code>float[]</code>·<code>angle[]</code> 전체 바인딩에만 적용됩니다.<br>
-    반면에 읽기 전용 <code>move</code>는 모든 배열과 전체 <code>Qubit</code> 바인딩을 받을 수 있으며,
-    호출 뒤에는 호출자가 해당 배열이나 큐빗 바인딩을 다시 사용할 수 없습니다.<br>
-    고전 스칼라는 값을 복사하므로 <code>move</code>를 허용하지 않고, 모든 <code>function</code> 파라미터는
-    기본 계약인 <code>Borrowed + ReadOnly</code>만 허용합니다.<br>
-    선언과 호출 인자는 같은 계약을 표시해야 하며, 기존 <code>inout x</code>는
-    <code>var x</code>와 같은 가변 빌림으로 계속 허용되는 호환 별칭입니다.
-  </div>
+        <rect x="758" y="112" width="272" height="178" rx="12" fill="#f8fafc" stroke="#9aa7b7" stroke-width="2"/>
+        <text class="svg-code" x="894" y="142" text-anchor="middle" fill="#334155" font-size="16" font-weight="850">Links</text>
+        <text class="svg-code" x="780" y="175" fill="#334155" font-size="12.5">HirLineage</text>
+        <text class="svg-code" x="780" y="202" fill="#334155" font-size="12.5">MirCrossStageLinks</text>
+        <text class="svg-code" x="780" y="229" fill="#64748b" font-size="11.5">HIR ↔ MIR typed references</text>
+        <text class="svg-code" x="780" y="256" fill="#64748b" font-size="11.5">revision-bound provenance</text>
 
-  <div class="call warn">
-    <span class="h"><code>var</code> 빌림과 <code>move var</code> 이전은 권한의 출처가 다릅니다</span>
-    <code>var</code>는 호출자의 저장소를 빌리므로 <code>const</code> 바인딩을 전달할 수 없습니다.<br>
-    반면에 <code>move var</code>는 바인딩 자체를 새 소유자에게 넘기므로 <code>const</code> 바인딩도 전달할 수 있습니다.<br>
-    다만 <code>move</code> 또는 <code>move var</code> 호출이 끝난 뒤 호출자가 같은 바인딩을 다시 읽거나 쓰거나 전달하면
-    이미 소유권이 없으므로 <code>QSEM039</code>입니다.
-  </div>
+        <path d="M714 233 H758" fill="none" stroke="#64748b" stroke-width="3" marker-end="url(#arr)"/>
+        <path d="M714 507 H742 V263 H758" fill="none" stroke="#64748b" stroke-width="3" marker-end="url(#arr)"/>
 
-  <div class="call warn">
-    <span class="h">within/apply는 의도적으로 표면 문법이 없습니다</span>
-    <code>QConjugate</code>는 <strong>자동 주입기(rung ④)만 생성</strong>하는 내부 노드입니다. 사용자는 앤실라만 작성하고,
-    켤레(compute–act–uncompute) 구조는 컴파일러가 자동으로 만듭니다 (Silq식 완전 자동).
-  </div>
+        <rect x="758" y="422" width="272" height="170" rx="12" fill="#fff6f3" stroke="#d79a86" stroke-width="2"/>
+        <text class="svg-code" x="894" y="452" text-anchor="middle" fill="#8f432c" font-size="16" font-weight="850">Targets</text>
+        <text class="svg-code" x="780" y="484" fill="#334155" font-size="12.5">Artifacts[TargetBackend]</text>
+        <text class="svg-code" x="780" y="512" fill="#334155" font-size="12.5">OpenQasmArtifact</text>
+        <text class="svg-code" x="780" y="540" fill="#64748b" font-size="11.5">Source HIR + SemanticBasis</text>
+        <text class="svg-code" x="780" y="568" fill="#64748b" font-size="11.5">TargetProgram + Text</text>
 
-  <!-- ============ 4 ============ -->
-  <h2 id="s4"><span class="n">4</span>SemanticModel — 지속 사이드테이블</h2>
-  <p>
-    검증이 증명한 사실은 버리지 않고 <strong>안정 Id를 키로 한 사이드테이블</strong>에 담아 파이프라인 끝까지 전달합니다
-    (Roslyn SemanticModel / rust-analyzer AstId 방식).<br>
-    설계 원칙은 <strong>SSOT</strong>입니다.<br>
-    각 사실은 <strong>정확히 하나의 생산자 패스</strong>가 만들며, 한번 기록된 사실은 <strong>추가만 하고 덮어쓰지 않습니다</strong>.
-  </p>
-
-  <div class="panel">
-    <table class="spec">
-      <tr><th>테이블</th><th>키 → 값</th><th>생산자</th></tr>
-      <tr><td class="k">_rootScopeByOp</td><td>op.Id → 부모가 없는 연산·함수 본문 루트 Scope</td><td>Validator</td></tr>
-      <tr><td class="k">_symbolByDeclId</td><td>선언 노드 Id → Symbol</td><td>Validator</td></tr>
-      <tr><td class="k">_programSymbols</td><td>ProgramSymbolGraph — 네임스페이스·호출 가능 선언 소유 관계</td><td>Validator</td></tr>
-      <tr><td class="k">_derivedFrom</td><td>복사본 Id → 원본 Id (계보)</td><td>복제 패스 (ReId)</td></tr>
-      <tr><td class="k">_qubitEventsByOp</td><td>op.Id → 큐빗이벤트 스트림 (시간·역할·플래그)</td><td>EffectAnalysis</td></tr>
-      <tr><td class="k">_qubitGraphByOp</td><td>op.Id → 큐빗그래프 (값 버전 노드 + "만들어짐" 부모 엣지) — 이벤트와 같은 손·같은 순간에 기록, 상시 일치성 스윕이 어긋남을 QINTERNAL로 차단</td><td>EffectAnalysis</td></tr>
-      <tr><td class="k">_effectSummaryByOpId</td><td>op.Id → 파라미터 효과 요약</td><td>EffectAnalysis</td></tr>
-      <tr><td class="k">_emittedNameByDeclId</td><td>선언 노드 Id → 방출(맹글링 후) 이름</td><td>NameMangler</td></tr>
-    </table>
-  </div>
-
-  <div class="call why">
-    <span class="h">SSOT — 동기화 누락을 구조로 막습니다</span>
-    조회가 복사본 노드에서 실패하면 <code>Resolve</code>가 <code>DerivedFrom</code> 계보를 따라 원본까지 올라갑니다.
-    같은 사실을 두 군데 넣지 않으므로(예: 방출이름은 별도 테이블, 소스이름은 Symbol) 동기화 코드가 필요하지 않습니다.
-    따라서 동기화 누락이라는 실패 모드 자체가 사라집니다.
-  </div>
-
-  <!-- ============ 5 ============ -->
-  <h2 id="s5"><span class="n">5</span>프로그램 심벌 그래프, 렉시컬 스코프 & 이름의 두 도메인</h2>
-  <p>
-    프로그램 전체의 선언 소유 관계와 연산·함수 본문의 지역 이름은 <strong>서로 다른 구조</strong>에 저장됩니다.<br>
-    먼저 <code>ProgramSymbolGraph</code>는 모든 의미 심벌을 안정된 ID로 보관하며,
-    그중 전역 루트·네임스페이스·연산·함수·내장 호출 가능 선언(callable)을 수식 이름으로 조회할 수 있게 인덱싱합니다.<br>
-    이때 각 <code>Symbol.OwnerSymbolId</code>가 하나의 원본 소유 관계를 나타냅니다.<br>
-    반면에 <code>Scope</code>는 연산·함수 본문의 파라미터·레지스터·변수·상수·루프 변수를
-    <code>이름 → SymbolId</code> 지역 바인딩으로만 묶습니다.<br>
-    따라서 네임스페이스 소유 관계와 블록 지역 가시성이 하나의 부모 링크에 섞이지 않습니다.
-  </p>
-
-  <div class="panel">
-    <table class="spec">
-      <tr><th>구조</th><th>담는 값</th><th>권위 있는 연결</th><th>주요 조회</th></tr>
-      <tr><td class="k">ProgramSymbolGraph</td><td>모든 Symbol ID; Namespace · Operation · BuiltinGate · BuiltinFunction은 수식 멤버로 인덱싱</td><td><code>Symbol.OwnerSymbolId</code></td><td>네임스페이스 경로, 호출 가능 선언, 완전수식명</td></tr>
-      <tr><td class="k">Scope</td><td>Parameter · Register · MeasureBit · Var · Const · LoopVar의 지역 바인딩</td><td><code>Scope.ParentScopeId</code></td><td>연산·함수 본문과 중첩 블록의 가장 가까운 지역 선언</td></tr>
-    </table>
-  </div>
-
-  <p>
-    예를 들어 <code>namespace A.B</code>는 점이 포함된 문자열 하나가 아니라
-    <code>global → A → B</code> 심벌 체인으로 등록됩니다.<br>
-    이때 <code>A</code>는 합성된 중간 심벌이어도 유효한 네임스페이스이므로 <code>open A;</code> 자체는 허용됩니다.<br>
-    다만 <code>open</code>은 지정한 네임스페이스가 직접 소유한 호출 가능 선언만 가져오므로,
-    <code>open A;</code>가 <code>A.B</code>의 멤버를 노출하지는 않습니다.<br>
-    <code>A.B</code> 안에서 네임스페이스를 붙이지 않은 호출(bare call)은 먼저 <code>A.B</code>,
-    다음으로 <code>A</code>, 마지막으로 전역 순서로 탐색합니다.<br>
-    반면에 <code>A.B.f()</code>처럼 수식된 호출은 언제나 전역 루트에서 시작하여 <code>A</code>, <code>B</code>, <code>f</code>를 순서대로 따라갑니다.
-  </p>
-
-  <p>
-    <code>open</code>은 소유 관계가 아니라 정확히 지정한 네임스페이스에 붙는 별도 후보 목록입니다.<br>
-    따라서 하위 네임스페이스를 재귀적으로 열지 않고, 대상 네임스페이스가 다시 연 이름도 재수출하지 않습니다.<br>
-    또한 네임스페이스와 호출 가능 선언은 역할이 다르므로 같은 소유자 아래에서 같은 이름으로 공존할 수 있습니다.<br>
-    중간 경로에서는 Namespace 역할을, 호출의 마지막 이름에서는 Operation 역할을 선택하므로
-    <code>A.B()</code>와 <code>A.B.f()</code>를 각각 다른 선언에 연결할 수 있습니다.
-  </p>
-
-  <p>
-    연산·함수 본문의 루트 <code>Scope</code>는 <code>ParentScopeId = null</code>이며,
-    네임스페이스나 전역 심벌을 부모 스코프로 사용하지 않습니다.<br>
-    중첩 블록만 <code>ParentScopeId</code>로 바깥 블록에 연결되고,
-    루트의 <code>EnclosingSymbolId</code>가 해당 연산·함수 심벌과 렉시컬 트리를 조인합니다.<br>
-    이 분리 덕분에 Resolver는 프로그램 선언 그래프만 따라 호출 대상을 결정하고,
-    Validator는 렉시컬 스코프만 따라 지역 값의 가시성과 중복 선언을 검사합니다.
-  </p>
-
-  <p><code>SymbolKind</code> = Namespace · Parameter · Register · MeasureBit · Var · Const · LoopVar · <strong>Operation</strong> · BuiltinGate · BuiltinFunction.</p>
-
-  <div class="grid2">
-    <div class="card">
-      <h4>소스 이름 (Symbol.SourceName)</h4>
-      <p>사용자가 쓴 표기입니다.<br>
-    검증 시점에 고정되어 <strong>영구 불변</strong>으로 남습니다.<br>
-    진단·<code>--stages</code> 심벌 뷰는 이 이름을 사용합니다.</p>
+        <path d="M714 327 H735 V507 H758" fill="none" stroke="#b2745e" stroke-width="3" marker-end="url(#arr)"/>
+      </svg>
     </div>
-    <div class="card">
-      <h4>방출 이름 (FindEmittedName)</h4>
-      <p>맹글링 후 QASM에 나가는 이름입니다.<br>
-    <strong>NameMangler가 기록</strong>합니다.<br>
-    null이면 "맹글러가 아직 처리하지 않음"을 뜻하며, "무변경"을 뜻하지 않습니다.</p>
-    </div>
-  </div>
-  <p>
-    같은 선언에 대해 두 이름은 <strong>각자 한 곳</strong>에 저장되고 노드 Id로 조인됩니다.<br>
-    그래서
-    <code>var x = Foo</code>처럼 연산을 값으로 쓰면 정확히 <strong>QSEM028</strong>로 거부됩니다.<br>
-    연산 선언이 <code>ProgramSymbolGraph</code>의 심벌로 연결되어 있으므로
-    "Foo는 연산이라 값이 아니다"라고 정확히 진단할 수 있습니다.
-  </p>
+    <figcaption id="pipeline-caption">
+      상자는 소유권을, 화살표는 typed identity로 기록되는 관계를 나타냅니다.<br>
+      현재 OpenQASM backend는 MIR이 아니라 <code>AdjointMaterialized</code> HIR을 직접 소비하며, 그 사실도 target artifact에 명시됩니다.
+    </figcaption>
+  </figure>
 
-  <!-- ============ 6 ============ -->
-  <h2 id="s6"><span class="n">6</span>효과분석 & 큐빗이벤트 (rung ①)</h2>
-  <p>
-    효과분석은 <strong>리프 문장(게이트·측정·<code>use</code>)마다 큐빗당 이벤트 하나</strong>를 방출해,
-    각 연산의 <strong>프로그램 순서 use/def 스트림</strong>을 만듭니다.<br>
-    컨테이너(for/if)는 자기 이벤트를 만들지 않고
-    자식 리프가 정밀한 세부를 가집니다.<br>
-    레지스터의 탄생(<code>use</code>)은 방출기의 선언 호이스팅과 동일하게
-    <strong>스트림 맨 앞에 기록</strong>되므로, 게이트가 텍스트상 자기 레지스터의 <code>use</code>보다 앞에 와도
-    올바르게 분석됩니다.
-  </p>
+  <div class="owner-grid">
+    <div class="owner"><b><code>Sources</code></b><p>원문과 구문을 소유합니다.<br>HIR·의미 사실·backend 이름을 흡수하지 않습니다.</p></div>
+    <div class="owner"><b><code>Hir</code></b><p>구조 세대, semantic artifact, <code>HirLineage</code>를 함께 소유합니다.<br><code>Links.Hir</code>는 같은 lineage의 aggregate 편의 뷰입니다.</p></div>
+    <div class="owner"><b><code>Mir</code></b><p>typed SSA/CFG 구조, origin, 구조 인덱스, 분석 cache를 한 snapshot에 묶습니다.<br>동일한 callable-local 정수 Id는 composite reference로 구분합니다.</p></div>
+    <div class="owner"><b><code>Targets</code></b><p>backend별 최종 아티팩트를 맵으로 소유합니다.<br>대상 전용 이름·타입·합성 사실은 원본 HIR로 역류하지 않습니다.</p></div>
+  </div>
+
+  <h3>세션, revision, 요청 산출물</h3>
 
   <div class="panel">
     <table class="spec">
-      <tr><th>이벤트 종류</th><th>의미</th><th>예</th></tr>
-      <tr><td><span class="badge r">Read</span></td><td>참조하되 계산기저 값 보존 (컨트롤, 또는 대각 게이트 타깃)</td><td><code>CNOT(q0,q1)</code>의 q0</td></tr>
-      <tr><td><span class="badge w">Write</span></td><td>값이 바뀔 수 있음 (타깃·reset·레지스터 탄생)</td><td><code>X(q0)</code>의 q0</td></tr>
-      <tr><td><span class="badge m">Measure</span></td><td>측정으로 붕괴 (비가역)</td><td><code>M(q0)</code>의 q0</td></tr>
+      <tr><th>계약</th><th>보장</th></tr>
+      <tr><td class="k"><code>CompilationSession</code></td><td>하나의 <code>CompilationId</code>와 단조 증가하는 revision 발급 권한을 소유하며, 같은 부모에서 여러 자식을 만들어도 revision이 충돌하지 않음</td></tr>
+      <tr><td class="k"><code>Compilation.ParentRevision</code></td><td>선형 순서와 별개로 실제 재컴파일 부모를 기록하므로 sibling revision의 분기 관계를 잃지 않음</td></tr>
+      <tr><td class="k"><code>CompilationOutputPlan</code></td><td><code>HirGoal</code>, <code>ProduceMir</code>, backend 집합을 불변 요청으로 고정</td></tr>
+      <tr><td class="k"><code>HirCompilationGoal.EffectAnalyzedCanonical</code></td><td>현재 유일한 HIR terminal이며 resolved·specialized validation, effect analysis, conjugation-lowered canonical HIR을 요구</td></tr>
+      <tr><td class="k">성공 결과</td><td>요청한 MIR 존재 여부와 target backend 집합이 정확히 일치하며, 요청하지 않은 아티팩트는 포함하지 않음</td></tr>
     </table>
   </div>
 
   <p>
-    <code>QubitEvent(Qubit, Kind, Order, StmtId, Irreversible, NonQfree, NodeId)</code> —
-    <code>Irreversible</code>은 역연산이 없는 접촉(reset·비가역 호출의 <em>쓰기</em>에만) 표시이고,
-    <code>NonQfree</code>는 자동 청소를 불가능하게 만드는 쓰기(H·Rx·Ry의 중첩 생성 또는 Y·CY의 위상 치환 —
-    <a href="uncompute-09-qfree.html">qfree</a>와 <a href="uncompute-10-y-gate.html">Y·CY 차단</a>에서 설명, 호출을 통해 전이 전파) 표시이며,
-    <code>NodeId</code>는 <strong>큐빗그래프</strong>(값 버전의 족보 DAG — 쓰기·측정은 그 이벤트가 태어나게 한 노드와 1:1, 읽기는 읽힌 당시의 현재 버전)로 가는 열쇠입니다.<br>
-    역할 분담은 다음과 같습니다: 이벤트는 시간·역할·플래그를, 그래프는 관계(버전과 부모)를, IR은 구조(컨테이너)를 담으며, <strong>한 사실은 정확히 한 곳에만 저장됩니다</strong>.<br>
-    하나의 스트림에서 <strong>두 뷰가 유도</strong>됩니다.
+    예를 들어 revision 0에서 두 번 재컴파일하면 두 결과의 <code>ParentRevision</code>은 모두 0이지만 세션이 revision 1과 2를 각각 발급합니다.<br>
+    따라서 revision을 단순히 <code>parent + 1</code>로 계산할 때 생기는 sibling 충돌이 없으며, 이전 <code>Compilation</code>도 변경되지 않습니다.
   </p>
 
-  <div class="grid2">
-    <div class="card">
-      <h4>큐빗별 타임라인 → liveness</h4>
-      <p>큐빗 <code>q</code>로 필터(Overlaps)하면 <strong>Order의 최솟값이 탄생, 최댓값이 마지막 사용(사망점)</strong>입니다.<br>
-    <code>LiveRange</code>는 이 min/max 조회 결과일 뿐이며 별도로 저장하지 않습니다.</p>
-    </div>
-    <div class="card">
-      <h4>StmtId로 그룹핑 → 얽힘</h4>
-      <p>같은 <code>StmtId</code>를 공유하는 이벤트들이 그 문장에서 <strong>상호작용한 큐빗들</strong>입니다.<br>
-    여기서 얽힘 엣지가 읽힙니다.</p>
-    </div>
+  <span id="s2"></span>
+  <h2 id="passes">2. 패스와 생산 아티팩트</h2>
+
+  <div class="panel">
+    <table class="spec">
+      <tr><th>구간</th><th>생산자</th><th>입력 → 출력</th><th>권위 경계</th></tr>
+      <tr><td class="k">구문 경계</td><td><code>QoraParser.Parse</code> / <code>ParseOnCurrentThread</code></td><td>문서 텍스트 → 불변 <code>SyntaxSnapshot</code> + 내부 transient <code>SyntaxParseProduct</code></td><td>Janglim AST는 즉시 lowering하는 내부 산출물에만 있고 공개 snapshot에는 없음</td></tr>
+      <tr><td class="k">소스 그래프</td><td><code>SourceGraphLoader</code></td><td>entry + 경로 문맥 → <code>SourceSetSnapshot</code>, 문서별 <code>QProgram</code>, import 진단</td><td>파일 I/O를 수행하며 각 문서에서 parser와 lowering을 순서대로 호출</td></tr>
+      <tr><td class="k">↳ 문서별</td><td><a href="ir-pass-01-qora-lowering.html"><code>QoraLowering</code></a></td><td><code>SyntaxParseProduct.LoweringAst</code> + <code>SourceDocumentRef</code> → source-shaped <code>QProgram</code></td><td>parser-owned AST를 장기 snapshot에 저장하지 않는 document-qualified 변환</td></tr>
+      <tr><td class="k">통합 HIR 1</td><td><a href="ir-pass-02-module-loader.html"><code>ModuleLoader</code></a></td><td>prepared <code>LoadedSourceGraph</code> → 통합 <code>QProgram</code> + <code>HirNodeIntroduction</code></td><td>I/O·파싱 없이 순수 병합하고 imported node를 source introduction으로 분류</td></tr>
+      <tr><td class="k">통합 HIR 2</td><td><a href="ir-pass-03-measure-condition-lowering.html"><code>MeasureConditionLowering</code></a></td><td>조건 속 측정 → 선행 측정 문장 + 조건 + <code>NodeSynthesis</code></td><td>새 임시 node의 provenance만 기록하며 semantic identity로 번역하지 않음</td></tr>
+      <tr><td class="k">통합 HIR 3</td><td><code>Resolver</code></td><td>short name → FQN + <code>CalleeOpId</code></td><td><code>HirScopeGraph</code> 기반 이름 해소</td></tr>
+      <tr><td class="k">semantic 1</td><td><code>QoraValidator</code></td><td>resolved HIR → validation <code>HirSemanticArtifact</code>가 소유하는 Accepted/Rejected outcome</td><td>모델·상태·진단을 exact snapshot의 하나의 권위 결과로 발행</td></tr>
+      <tr><td class="k">통합 HIR 4</td><td><code>Monomorphizer</code></td><td>resolved HIR → size-specialized HIR</td><td>실제 rewrite가 없으면 기존 snapshot alias</td></tr>
+      <tr><td class="k">semantic 2</td><td><code>EffectAnalysis</code></td><td>exact accepted specialized validation artifact → effect-analysis artifact</td><td>같은 snapshot의 <code>ValidationBasis</code>를 명시하며 새 HIR stage 없음</td></tr>
+      <tr><td class="k">통합 HIR 5</td><td><code>ConjugationLowering</code></td><td>structured conjugation → 명시적 HIR 구조</td><td>같은 논리 entity의 copy만 <code>NodeDerivation</code>으로 기록</td></tr>
+      <tr><td class="k">MIR</td><td><code>QoraMirLowering</code></td><td>conjugated HIR + exact <code>HirSemanticContext</code> → <code>MirSnapshot</code></td><td>typed SSA/CFG, exact semantic basis, total symbol/entity 분류</td></tr>
+      <tr><td class="k">MIR 분석</td><td><code>MirAnalysisStore</code></td><td>verified MIR → CFG·효과 등 revision-bound 분석</td><td>공유 의존성을 snapshot 안에서 재사용</td></tr>
+      <tr><td class="k">target HIR</td><td><code>AdjointMaterializer</code></td><td>HIR의 adjoint 호출 → target 입력용 materialized HIR</td><td>MIR과 독립된 현재 OpenQASM 경로</td></tr>
+      <tr><td class="k">target</td><td><code>QasmBackend</code></td><td>exact <code>HirSemanticContext</code> → <code>OpenQasmTargetProgram</code></td><td><code>OpenQasmArtifact</code>가 target model을 받아 text를 파생</td></tr>
+    </table>
   </div>
 
-  <div class="call">
-    <span class="h">얽힘 두 종류 — 값 vs 위상</span>
-    <p><strong>값얽힘</strong>은 0/1 값이 바뀌는 상호작용(CNOT·CCX)으로, 그 문장에 쓰기(Write) 이벤트가 있습니다.<br>
-    <strong>위상얽힘</strong>은 값은 그대로 두고 부호만 새기는 상호작용으로, 두 큐빗 이상이 한 문장(StmtId)을
-    공유하며 이벤트가 <strong>전부 읽기(all-Read)</strong>일 때입니다 (CZ, Controlled S/T/Z/Rz).<br>
-    단독 S·T·Z·Rz는 국소 위상일 뿐이어서 1-큐빗 그룹은 얽힘 엣지를 만들지 않습니다.<br>
-    두 종류 모두 StmtId 그룹핑에서 유도되므로 별도 추적이 필요 없습니다.<br>
-    어떤 상호작용이 되돌림을 막는지는 <a href="uncompute-03-ledger.html">상태벡터</a>에서 시작하는 장들이 자세히 설명합니다.</p>
+  <div class="callout warn">
+    <span class="h">구조 stage와 분석 phase를 구분합니다</span>
+    <code>Resolved</code>, <code>Specialized</code>, <code>ConjugationLowered</code> 같은 이름은 <code>QProgram</code> 구조 milestone입니다.<br>
+    반면에 validation과 effect analysis는 같은 구조를 설명하는 별도 <code>HirSemanticArtifact</code>이며, 분석 때문에 새로운 구조 HIR stage를 만들지 않습니다.
   </div>
 
-  <!-- ============ 7 ============ -->
-  <h2 id="s7"><span class="n">7</span>자동 uncomputation 사다리</h2>
+  <h2 id="s3">3. SourceSet과 문서 그래프</h2>
+
   <p>
-    목표는 <strong>사용자가 작성하지 않은 정리(uncompute) 코드를 컴파일러가 자동으로 끼워 넣는 것</strong>입니다.<br>
-    사다리는 아래→위로 의존하는 4단 구조이며, rung ①·②는 8장의 자료구조 위에서 <strong>조회</strong>로 끝납니다.
+    <code>Compilation.Sources</code>는 한 revision에 입력된 모든 문서를 독립적으로 보존합니다.<br>
+    각 <code>SourceDocumentSnapshot</code>은 <code>SourceDocumentRef</code>, 텍스트, 선택적 경로를 소유하며, <code>SyntaxByDocument</code>는 각 문서에 정확히 하나의 <code>SyntaxSnapshot</code>을 연결합니다.<br>
+    각 구문 스냅샷은 parser-engine 객체가 아니라 Qora 소유의 불변 트리 투영과 캡처된 문자열을 담으므로, import 문서는 통합 HIR에 병합된 뒤에도 외부 AST 변경에 흔들리지 않는 구문 정보를 문서 단위로 조회할 수 있습니다.
   </p>
 
-  <div class="call">
-    <span class="h">현재 구현 경계</span>
-    기존 HIR 분석은 앤실라 하나의 이벤트·사망점·안전성·역연산 목록을 계산할 수 있습니다.<br>
-    새 MIR 분석은 그 판단에 필요한 스칼라 값 버전, 분기 경로, 배열 저장소 별칭과
-    배열 내용 버전을 이름이 아닌 Id 기반 사실로 제공합니다.<br>
-    다만 여러 앤실라의 청소 순서를 한꺼번에 정하는 전역 스케줄러와
-    실제 MIR 주입기는 아직 연결되지 않았습니다.<br>
-    따라서 현재 컴파일러는 MIR 분석 결과를 보존하지만 자동 cleanup 코드를 방출하지 않습니다.
+  <div class="panel">
+    <table class="spec">
+      <tr><th>타입</th><th>담는 값</th><th>identity</th></tr>
+      <tr><td class="k"><code>SourceSetSnapshot</code></td><td>entry, 모든 문서, 문서별 syntax, <code>ImportGraph</code></td><td><code>CompilationId</code> + <code>CompilationRevision</code></td></tr>
+      <tr><td class="k"><code>SourceDocumentSnapshot</code></td><td>정확한 텍스트와 선택적 canonical/original path</td><td><code>SourceDocumentRef</code></td></tr>
+      <tr><td class="k"><code>SyntaxSnapshot</code></td><td>토큰, Qora 소유의 불변 파스 트리·AST 투영, 캡처된 문자열, 구문 진단</td><td>소유 문서의 <code>SourceDocumentRef</code></td></tr>
+      <tr><td class="k"><code>SyntaxParseProduct</code></td><td>snapshot과 Janglim <code>LoweringAst</code>를 잠시 묶는 내부 파싱 산출물</td><td>공개·저장 대상이 아니며 문서별 lowering 뒤 폐기</td></tr>
+      <tr><td class="k"><code>ImportGraph</code></td><td>순서 있는 resolved/unresolved <code>ImportEdge</code></td><td>importer와 선택적 imported <code>SourceDocumentRef</code></td></tr>
+      <tr><td class="k"><code>SourceSpan</code></td><td>반열림 문자 범위 <code>[Start, End)</code></td><td>revision-qualified <code>SourceDocumentRef</code></td></tr>
+    </table>
   </div>
 
-  <div class="call warn">
-    <span class="h">배열 내용 버전과 소유권 capability는 같은 상태가 아닙니다</span>
-    배열 store와 가변 호출은 같은 저장소의 내용을 바꾸므로 <code>MirMemoryStateAnalysis</code>가
-    이전 배열 상태를 더 이상 현재 버전이 아니라고 판정합니다.<br>
-    반면에 <code>move</code>는 배열 내용을 쓴 것이 아니라 호출자가 가진 사용 권한을 넘긴 동작입니다.<br>
-    현재 소스 프로그램의 권한 이전은 HIR의 <code>OwnershipValidation</code>이 <code>QSEM039</code>로 검사합니다.<br>
-    MIR 단계에서 같은 검사를 정확히 반복하려면 반복문이 0회, 정확히 1회, 여러 번 실행될 수 있는지를 먼저 증명하고,
-    지역 allocation마다 새 capability가 생긴다는 사실까지 추적해야 합니다.<br>
-    따라서 MIR 검증기는 소유권 이전을 store처럼 취급하는 근사 검사를 사용하지 않습니다.<br>
-    이후 loop trip 분석과 선형 capability dataflow가 준비되면 별도 분석으로 연결합니다.
-  </div>
-
-  <div class="ladder">
-    <div class="rung done">
-      <div class="rn">①</div>
-      <div><span class="rt">use/def — 효과분석</span><span class="st ok">구현됨</span>
-        <div class="rd">리프마다 큐빗이벤트(Read/Write/Measure). SemanticModel에 op별 스트림으로 적재.</div></div>
-    </div>
-    <div class="rung done">
-      <div class="rn">②</div>
-      <div><span class="rt">liveness</span><span class="st ok">구현됨 (조회)</span>
-        <div class="rd"><code>LiveRange</code> = 이벤트 Order의 min/max = 탄생·사망점. 무거운 패스가 아니라 min/max 조회.</div></div>
-    </div>
-    <div class="rung done">
-      <div class="rn">③</div>
-      <div><span class="rt">되돌림 안전 판정 — <code>IsSafelyUncomputable</code></span><span class="st ok">구현됨 (조회)</span>
-        <div class="rd"><code>UncomputeSafety(op, q)</code> = 전제 + 4-clause 판정 + 사유·범인 문장.
-        <strong>전제</strong>: 안전 질문은 청소 후보에게만 던집니다 — 측정 여부는 <a href="uncompute-02-ladder.html">앤실라와 청소 후보</a>의 판별(청소 대상인가)의
-        판결이므로 여기서 재판정하지 않고 그대로 전달합니다.
-        조항: 비가역 접촉 없음(Irreversible) · 비-qfree 쓰기 없음(NonQfreeWrite — <a href="uncompute-09-qfree.html">qfree</a>·<a href="uncompute-10-y-gate.html">Y·CY 차단</a>) ·
-        컨테이너 안 쓰기 없음(ContainedWrite — <a href="uncompute-12-loops.html">루프와 호출</a>) · 재료 생존(CoWrittenPartner/SourceDied —
-        그래프에 기록된 부모(재료)가 청소 지점까지 그 값 그대로여야 하며, 컨테이너 안에서 죽으면
-        검사 구간이 최외곽 컨테이너 끝까지 연장됩니다).</div></div>
-    </div>
-    <div class="rung">
-      <div class="rn">④</div>
-      <div><span class="rt">전역 스케줄과 자동 주입</span><span class="st next">다음</span>
-        <div class="rd">모든 청소 후보의 의존 관계와 삽입 가능 구간을 함께 계산한 뒤,
-        파생된 앤실라부터 역순으로 배치합니다. 이때 MIR의 경로 조건과 정확한 스칼라 SSA 값,
-        현재까지 살아 있는 배열 상태를 다시 확인합니다. 공통 스케줄이 없으면 조용히 건너뛰지 않고
-        컴파일 오류를 만들며, 완성된 스케줄만 주입기가 새 MIR revision으로 변환합니다.
-        역연산 커널은 이미 존재합니다 → <a href="adjoint-pipeline.html">역합성 파이프라인</a>.</div></div>
-    </div>
-  </div>
-
-  <div class="rule">
-    사다리의 핵심: <strong>측정으로 고정되지 않은 유도값은 전부 되돌려 |0⟩로 정리합니다.</strong>
-  </div>
-
-  <!-- ============ 8 ============ -->
-  <h2 id="s8"><span class="n">8</span>자동 uncomputation</h2>
   <p>
-    Qora는 다 쓴 보조 큐빗(앤실라)을 |0⟩로 되돌리는 정리 코드를 <strong>컴파일러가 자동으로
-    삽입</strong>합니다.<br>
-    어떤 큐빗이 정리 대상이 되는지, 어떤 계산은 자동으로 되돌릴 수 있고
-    어떤 계산은 왜 컴파일 에러가 되는지 — 아래 장들이 기초부터 차례로 답합니다.
+    공개 <code>QoraParser.Parse</code>도 구문 전용 API이며, 단일 문서를 revision 0의 독립된 syntax snapshot으로 반환합니다.<br>
+    whole-program 결과가 필요하면 <code>QoraCompiler.Compile</code>을 사용해야 하며, parser 결과에 HIR이나 target을 덧붙이거나 mutable <code>LoweringAst</code>를 꺼내는 방식은 지원하지 않습니다.
   </p>
-  <div class="panel">
-    <table class="spec">
-      <tr><th>장</th><th>제목</th><th>다루는 것</th></tr>
-      <tr><td class="k">1</td><td><a href="uncompute-01-ancilla.html">앤실라와 uncomputation — 작업 큐빗은 왜 되돌려야 하는가</a></td><td>use로 만든 작업 큐빗과 자동 되돌리기</td></tr>
-      <tr><td class="k">2</td><td><a href="uncompute-02-ladder.html">컴파일러는 어떤 큐빗을 정리하는가 — 판별 사다리</a></td><td>세 질문으로 정리 대상을 가려낸다 — 소유·측정·복원 가능성</td></tr>
-      <tr><td class="k">3</td><td><a href="uncompute-03-ledger.html">상태를 읽는 법 — 상태벡터와 진폭</a></td><td>기저 상태와 진폭 — 이후 모든 판정을 설명하는 틀</td></tr>
-      <tr><td class="k">4</td><td><a href="uncompute-04-entangle.html">상태벡터를 큐빗별로 분해할 수 있는가 — 곱 상태와 얽힌 상태</a></td><td>네 진폭의 대각선 곱 비교와 텐서 곱 분해 — 곱 상태와 얽힌 상태의 판정</td></tr>
-      <tr><td class="k">5</td><td><a href="uncompute-05-trace.html">곱에서 얽힘으로 — 프로그램 단계별 확인</a></td><td>H는 곱 상태, CNOT 한 줄은 얽힌 상태 — 단계별로 확인</td></tr>
-      <tr><td class="k">6</td><td><a href="uncompute-06-phase.html">언제 위상이 측정에 드러나는가 — 전역 위상과 상대 위상</a></td><td>복소수 진폭의 위상 — 공통 인자는 전역 위상, 항 사이의 위상 차이는 상대 위상</td></tr>
-      <tr><td class="k">7</td><td><a href="uncompute-07-observe.html">전역 위상과 상대 위상 — 측정으로 확인하기</a></td><td>같은 Z 게이트가 항 1개엔 전역 위상(결과 유지), 항 2개엔 상대 위상(결과 뒤집힘)</td></tr>
-      <tr><td class="k">8</td><td><a href="uncompute-08-gates.html">게이트는 상태벡터를 어떻게 바꾸는가</a></td><td>기저 값 · 진폭 · 중첩 생성 — 편집의 세 종류</td></tr>
-      <tr><td class="k">9</td><td><a href="uncompute-09-qfree.html">청소의 계약과 qfree</a></td><td>되돌릴 수 있는 쓰기의 조건</td></tr>
-      <tr><td class="k">10</td><td><a href="uncompute-10-y-gate.html">Y·CY가 차단되는 이유 — 위상</a></td><td>값에 따라 달라지는 위상과 얽힘</td></tr>
-      <tr><td class="k">11</td><td><a href="uncompute-11-injector.html">주입기 — 문장 붙여넣기 기계</a></td><td>자동 청소가 실제로 하는 일</td></tr>
-      <tr><td class="k">12</td><td><a href="uncompute-12-loops.html">루프와 호출 — 왜 판정이 달라지는가</a></td><td>문장 구조가 판정을 가르는 이유</td></tr>
-      <tr><td class="k">13</td><td><a href="uncompute-13-blanket.html">담요 문제 — 질의 폭과 문장 폭</a></td><td>레지스터 통짜 쓰기와 원소 질문의 충돌</td></tr>
-      <tr><td class="k">14</td><td><a href="uncompute-14-limits.html">차단의 두 종류</a></td><td>에러의 지도 — 물리의 벽과 구현의 여지</td></tr>
-      <tr><td class="k">15</td><td><a href="uncompute-15-two-runtimes.html">왜 정적 컴파일인가 — 두 개의 런타임</a></td><td>호스트와 QPU — 인터프리터가 들어갈 수 없는 곳</td></tr>
-      <tr><td class="k">16</td><td><a href="uncompute-16-landscape.html">언어 지형 속의 Qora</a></td><td>2026년의 도구들과 Qora의 자리</td></tr>
-    </table>
-  </div>
-  <p><a class="doc-link" href="uncompute-01-ancilla.html">첫 장부터 읽기 →</a></p>
 
-  <!-- ============ 9 ============ -->
-  <h2 id="s9"><span class="n">9</span>진단 코드 (QSEM)</h2>
-  <p>검증은 수집형(조기중단 없음)이므로 위반을 전부 보고합니다.<br>
-    코드는 에디터 툴링용 안정 식별자입니다.</p>
+  <h2 id="s4">4. HIR 구조와 semantic artifact</h2>
+
+  <p>
+    <code>HirSnapshot</code>은 한 세대의 <code>QProgram</code>, 부모 snapshot Id, 구조 인덱스, node Id 기반 source map을 소유합니다.<br>
+    이 객체에는 의미 모델을 넣지 않으며, 의미 사실은 <code>HirSemanticArtifactId(Source, Phase)</code>로 식별되는 별도 <code>HirSemanticArtifact</code>가 소유합니다.<br>
+    validation artifact는 모델과 함께 <code>HirValidationOutcome</code>을 소유하며, 그 outcome의 <code>Status</code>와 불변 <code>Diagnostics</code>가 accepted/rejected 판단의 유일한 권위입니다.<br>
+    <code>HirCompilation</code>은 이 구조 세대와 의미 산출물뿐 아니라 같은 snapshot 객체 집합을 사용하는 <code>HirLineage</code>도 직접 소유하므로, 계보와 HIR history가 서로 분리된 권위 저장소로 어긋날 수 없습니다.<br>
+    결과적으로 분석을 추가해도 기존 HIR tree snapshot은 변경되지 않습니다.
+  </p>
+
   <div class="panel">
     <table class="spec">
-      <tr><th>코드</th><th>의미</th></tr>
-      <tr><td class="k">QSEM001–003</td><td>함자 오류 — 역함수 없는 <code>Adjoint</code>, 유저 op에 <code>Controlled</code>, <code>Reset</code>에 함자</td></tr>
-      <tr><td class="k">QSEM004–005</td><td>bare 측정문 / 표현식 안의 호출</td></tr>
-      <tr><td class="k">QSEM006–007</td><td>인자 수·종류·모양 오류 / 미지 게이트·연산 이름</td></tr>
-      <tr><td class="k">QSEM008 · 022</td><td>중복 연산 정의 (전역 / 네임스페이스 내)</td></tr>
-      <tr><td class="k">QSEM009–012</td><td>entry 호출·함자 / entry 파라미터 / 재귀 사이클 / 잘못된 <code>use</code>·고전 배열 선언 위치</td></tr>
-      <tr><td class="k">QSEM013 · 015</td><td>내장 가림 예약 이름 / 같은 스코프 중복 선언 (단일 삽입 문)</td></tr>
-      <tr><td class="k">QSEM014</td><td>한 게이트의 중복 큐빗 피연산자 또는 가변 빌림·소유권 이전 슬롯과 겹치는 저장소 인자</td></tr>
-      <tr><td class="k">QSEM016–017</td><td>잘못된 배열·큐빗 인덱스와 할당 크기 / 측정을 비-bit에 대입</td></tr>
-      <tr><td class="k">QSEM018–020</td><td>모호한 참조 / 미지 네임스페이스 (Resolver) · import 파일 없음·읽기 실패·경로 문맥 없음 (ModuleLoader)</td></tr>
-      <tr><td class="k">QSEM021</td><td>폐기된 예약 코드 — 순환 back-edge는 <code>loaded.Add(full) = false</code>일 때 오류 없이 생략</td></tr>
-      <tr><td class="k">QSEM024–026</td><td><code>const</code> 재대입·<code>var</code> 가변 빌림(<code>move var</code> 제외) / 미해소·선언전 사용 / 큐빗을 고전값 자리에</td></tr>
-      <tr><td class="k">QSEM027</td><td>역함수 없는 within 블록 (ConjugationLowering)</td></tr>
-      <tr><td class="k">QSEM028</td><td>연산을 값으로 사용 (<code>var x = Foo</code>) — 연산은 호출만 가능</td></tr>
-      <tr><td class="k">QSEM029</td><td>배열 형태·초기화·멤버 접근 또는 전체 배열 대입 오류</td></tr>
-      <tr><td class="k">QSEM030–032</td><td>OpenQASM에서 범위를 증명하지 못한 인덱스 / 재귀 깊이 제한 초과 / 읽기 전용 <code>bit[]</code> 파라미터 쓰기</td></tr>
-      <tr><td class="k">QSEM033–035</td><td>함수의 비순수 문장 / 함수 시그니처의 큐빗 / 잘못된 <code>return</code> 또는 반환 경로 누락</td></tr>
-      <tr><td class="k">QSEM036–037</td><td>통짜 <code>bit[]</code>를 숫자로 사용 / 함수 반환값과 받는 자리의 타입·배열 형태 불일치</td></tr>
-      <tr><td class="k">QSEM038</td><td>지원하지 않는 소유권·접근 계약, 선언·호출 표식 불일치, 읽기 전용 파라미터 변경·전달</td></tr>
-      <tr><td class="k">QSEM039</td><td><code>move</code>로 소유권을 넘긴 뒤 호출자 바인딩을 다시 읽거나 쓰거나 전달</td></tr>
-      <tr><td class="k">QINTERNAL</td><td>컴파일러 불변식 위반 — 조용히 틀리는 대신 크게 실패 (ReferentialCheck / 효과분석 자물쇠)</td></tr>
+      <tr><th>조회</th><th>반환 값</th><th>의미</th></tr>
+      <tr><td class="k"><code>Hir.Snapshots</code></td><td>실제로 생성된 HIR 세대의 chronological list</td><td>dense <code>HirRevision</code></td></tr>
+      <tr><td class="k"><code>Hir.Milestones</code></td><td><code>HirStage → HirSnapshot</code></td><td>rewrite가 없으면 여러 stage가 같은 snapshot을 가리킬 수 있음</td></tr>
+      <tr><td class="k"><code>Hir.Lineage</code></td><td>부모 세대, identity derivation, synthesis provenance, source introduction</td><td>정확히 같은 <code>HirSnapshot</code> 객체 집합에 결합</td></tr>
+      <tr><td class="k"><code>Hir.SemanticArtifacts</code></td><td><code>HirSemanticArtifactId → artifact</code></td><td>구조 identity와 분석 phase의 정확한 결합</td></tr>
+      <tr><td class="k"><code>Hir.ResolvedValidation</code></td><td>resolved HIR의 accepted 또는 rejected validation artifact</td><td>scope·symbol·type·bounds 사실과 exact <code>ValidationOutcome</code></td></tr>
+      <tr><td class="k"><code>Hir.SpecializedValidation</code></td><td>specialized HIR의 validation artifact</td><td>specialization이 alias면 resolved artifact와 같은 exact object를 재사용</td></tr>
+      <tr><td class="k"><code>Hir.EffectAnalysis</code></td><td>accepted validation에서만 생성되는 effect-analysis artifact</td><td>큐빗 사실과 exact <code>ValidationBasis</code></td></tr>
     </table>
   </div>
 
-  <!-- ============ 10 ============ -->
-  <h2 id="s10"><span class="n">10</span>버전 히스토리</h2>
+  <p>
+    milestone의 정식 순서는 <code>Lowered → ImportsExpanded → MeasurementLowered → Resolved → Specialized → ConjugationLowered → AdjointMaterialized</code>입니다.<br>
+    실제 rewrite가 없을 때 뒤 milestone이 앞 snapshot을 alias할 수는 있지만, 뒤 단계가 앞 단계보다 오래된 revision을 가리킬 수는 없습니다.
+  </p>
+
+  <h3>의미 모델과 typed HIR 계보</h3>
+
+  <p>
+    <code>HirSemanticModel</code>은 자신이 분석한 exact HIR의 scope graph와 의미 사실만 담습니다.<br>
+    <code>HirSemanticArtifact.Diagnostics</code>는 자신이 소유한 <code>ValidationOutcome.Diagnostics</code>의 뷰이며, <code>CompilationDiagnostic</code>은 여기에 stage와 origin을 붙여 투영할 뿐 별도의 validation 결과를 유지하지 않습니다.<br>
+    effect-analysis artifact는 같은 snapshot의 exact accepted validation artifact를 <code>ValidationBasis</code>로 명시하고 동일한 validation outcome을 공유합니다.<br>
+    후속 구조 패스의 관계는 <code>HirCompilation.Lineage</code>가 소유하고, <code>Compilation.Links.Hir</code>는 그 exact instance를 다시 노출합니다.<br>
+    <code>HirSemanticContext</code>는 owner <code>HirCompilation</code>에 실제로 들어 있는 current snapshot과 semantic artifact 객체만 받으며, semantic identity를 보존하는 경로를 통해서만 node Id를 분석 기준 snapshot으로 변환합니다.<br>
+    따라서 copy lineage와 의미 사실이 하나의 mutable bag에서 서로 drift하지 않으며, 새 임시 선언을 원본 제어문의 symbol로 잘못 해석하지 않습니다.
+  </p>
+
   <div class="panel">
     <table class="spec">
-      <tr><th>버전</th><th>핵심</th></tr>
-      <tr><td class="k">v0.12</td><td>모듈 시스템 — 네임스페이스·다중파일 import·총 맹글링·소스 스팬</td></tr>
-      <tr><td class="k">v0.13</td><td><code>const</code> 불변 바인딩, 측정 실행 경로, 에디터 내 Run</td></tr>
-      <tr><td class="k">v0.14</td><td>float/angle 타입, <code>Qubit[n]</code> 모노모피제이션, 충돌 안전 맹글링, Adjoint를 IR 패스로</td></tr>
-      <tr><td class="k">v0.15</td><td>측정-조건, 블록 스코프 측정비트, 런타임 const 강등, 의미 강화</td></tr>
-      <tr><td class="k">v0.16</td><td>within/apply IR 켤레, 안정 노드 Id + 지속 SemanticModel</td></tr>
-      <tr><td class="k">v0.17</td><td>효과분석(touched/modified), 연산을 1급 심벌로(연결 스코프), 소스/방출 이름 도메인 분리</td></tr>
-      <tr><td class="k">v0.18</td><td>큐빗이벤트 스트림으로 저장 통일, <strong>rung ② liveness</strong>(<code>LiveRange</code> 조회)</td></tr>
-      <tr><td class="k">v0.19</td><td><strong>rung ③ 안전판정</strong>(4-clause + 사유·범인, 비-qfree 기준에 Y·CY 위상치환 포함), <strong>큐빗그래프</strong>(값 족보 DAG, 이벤트와 동시 기록 + 상시 일치성 스윕), 반납 규칙(스코프 끝 |0⟩ 반납, 못 치우면 에러), 앤실라/청소 후보 용어 체계와 원소별 리포트</td></tr>
-      <tr><td class="k">v0.20</td><td>자동 uncompute 정리 계획 생성기, 문장 Id 조회, 호출 대상 <code>CalleeOpId</code> 연결</td></tr>
-      <tr><td class="k">v0.21</td><td><code>Qubit[]</code>·<code>Count</code> 기반 크기 독립 파라미터와 호출부 특수화, <code>int[]</code>·<code>float[]</code>·<code>bit[]</code>·<code>angle[]</code> 고전 배열</td></tr>
+      <tr><th>전이 분류</th><th>뜻</th><th>허용 질의</th></tr>
+      <tr><td class="k"><code>NodeDerivation</code></td><td>같은 kind와 논리 identity를 유지한 명시적 복사</td><td><code>ResolveNodeId</code>와 provenance 질의 모두 통과</td></tr>
+      <tr><td class="k"><code>NodeSynthesis</code></td><td>기존 owner에서 만들어진 새로운 HIR entity</td><td><code>ResolveProvenance</code>만 통과하며 semantic identity 번역 금지</td></tr>
+      <tr><td class="k"><code>HirNodeIntroduction</code></td><td>import 문서에서 부모 HIR history로 처음 들어온 source node</td><td><code>FindIntroduction</code>으로 exact 문서와 도입 사유 조회</td></tr>
+      <tr><td class="k">암시적 동일 Id</td><td>부모에도 같은 Id·kind·소유 operation이 존재하는 보존 node</td><td>별도 edge 없이 부모로 이동</td></tr>
     </table>
   </div>
+
+  <p>
+    첫 HIR snapshot을 제외한 모든 node는 부모에 동일 identity로 이미 존재하거나, 위 세 명시 분류 가운데 정확히 하나를 가져야 합니다.<br>
+    이 totality 검사가 누락된 origin과 이중 분류를 publication 시점에 거부합니다.
+  </p>
+
+  <div class="callout good">
+    <span class="h">장기 확장 경계</span>
+    사용자 정의 타입·클래스·필드·메서드·상속·인터페이스·제네릭·오버로드가 추가되어도 선언 관계는 typed scope/symbol graph를 확장하는 방향으로 유지합니다.<br>
+    namespace containment, import edge, 미래의 base-type/interface edge를 하나의 문자열 맵이나 mutable 전역 표로 합치지 않습니다.
+  </div>
+
+  <h2 id="s5">5. MIR snapshot과 분석 저장소</h2>
+
+  <p>
+    <code>Compilation.Mir</code>는 컴파일이 MIR lowering까지 도달했을 때만 존재하는 <code>MirSnapshot</code>입니다.<br>
+    이 snapshot은 <code>MirSnapshotId</code>, lowering 원본 <code>HirSnapshotId</code>, lowering profile, typed SSA/CFG 프로그램, origin table, 구조 인덱스, cross-stage links, 분석 저장소를 함께 소유합니다.<br>
+    생성 시 verifier를 통과해야 하므로 downstream 분석은 검증된 구조만 받습니다.
+  </p>
+
+  <div class="panel">
+    <table class="spec">
+      <tr><th>구성 요소</th><th>역할</th></tr>
+      <tr><td class="k"><code>MirStructuralIndex</code></td><td>callable·block·instruction·value·storage·qubit을 snapshot-qualified composite reference로 조회</td></tr>
+      <tr><td class="k"><code>MirOriginTable</code></td><td>MIR instruction이 어떤 HIR/source 구조에서 왔는지 보존</td></tr>
+      <tr><td class="k"><code>SymbolDispositions</code></td><td>exact semantic artifact의 모든 symbol을 callable·scalar·array storage·qubit 또는 명시적 non-lowered 사유로 정확히 한 번 분류</td></tr>
+      <tr><td class="k"><code>ValueOrigins</code> / <code>StorageOrigins</code> / <code>QubitOrigins</code></td><td>모든 구조 MIR entity를 <code>SourceSymbol</code> 또는 <code>CompilerTemporary</code>로 빠짐없이 분류</td></tr>
+      <tr><td class="k"><code>MirAnalysisStore</code></td><td>CFG와 effect snapshot 같은 분석을 exact MIR snapshot 안에서 lazy cache</td></tr>
+      <tr><td class="k"><code>Mir.Analyses.Effects</code></td><td>정확한 SSA 값·storage state·path condition·qubit location에 대한 MIR 효과 사실</td></tr>
+    </table>
+  </div>
+
+  <p>
+    HIR의 <code>EffectAnalysis</code>와 MIR의 <code>Mir.Analyses.Effects</code>는 같은 이름의 중복 결과가 아닙니다.<br>
+    전자는 source-shaped HIR에서 자동 uncomputation 판단에 필요한 semantic event와 summary를 만들고, 후자는 SSA/CFG에서 실행 경로와 storage 상태를 포함한 MIR 수준 사실을 만듭니다.
+  </p>
+
+  <h2 id="s6">6. 단계 간 링크와 source map</h2>
+
+  <p>
+    각 IR은 자신의 구조와 자기 단계 내부의 관계를 소유하며, <code>Compilation.Links</code>는 단계 간 질의를 위한 exact 공유 뷰를 제공합니다.<br>
+    HIR 내부 계보의 권위 소유자는 <code>HirCompilation.Lineage</code>이고 <code>Links.Hir</code>는 같은 instance이며, <code>Links.Mir</code>는 MIR이 lowering된 exact HIR snapshot과 symbol semantic artifact를 명시합니다.<br>
+    MIR callable은 HIR operation node와 symbol에서 찾을 수 있는 typed 참조로 연결됩니다.<br>
+    반면에 HIR symbol과 MIR value·storage·qubit의 관계는 양쪽에서 조회할 수 있는 typed many-to-many 맵이며, 별도의 total disposition map이 링크가 없는 경우도 의도적인 non-lowering 또는 compiler temporary로 설명합니다.
+  </p>
+
+  <div class="panel">
+    <table class="spec">
+      <tr><th>관계</th><th>참조 형식</th><th>사용 예</th></tr>
+      <tr><td class="k">HIR 세대 간</td><td><code>HirNodeRef(HirSnapshotId, NodeId)</code></td><td>복제된 후속 노드에서 분석 기준 조상 노드 찾기</td></tr>
+      <tr><td class="k">MIR callable</td><td><code>CallablesByHirOperation</code>, <code>CallablesBySymbol</code></td><td>HIR operation 또는 exact semantic symbol에서 MIR callable 찾기</td></tr>
+      <tr><td class="k">HIR symbol</td><td><code>HirSymbolRef(HirSemanticArtifactId, SymbolId)</code></td><td>exact semantic artifact의 symbol과 MIR value·storage·qubit을 양방향으로 연결</td></tr>
+      <tr><td class="k">symbol lowering 결과</td><td><code>MirSymbolLoweringDisposition</code></td><td>모든 HIR symbol이 어떤 MIR 종류가 되었거나 왜 내려가지 않았는지 확인</td></tr>
+      <tr><td class="k">MIR entity 기원</td><td><code>MirEntityOriginKind</code></td><td>모든 value·storage·qubit이 source-backed인지 compiler temporary인지 확인</td></tr>
+      <tr><td class="k">MIR local identity</td><td><code>MirValueRef</code>, <code>MirStorageRef</code>, <code>MirQubitResourceRef</code></td><td>서로 다른 callable의 같은 dense Id 구분</td></tr>
+      <tr><td class="k">소스 위치</td><td><code>SourceSpan(SourceDocumentRef, Start, End)</code></td><td>다중 문서와 재컴파일 revision을 넘나드는 정확한 진단</td></tr>
+    </table>
+  </div>
+
+  <h2 id="s7">7. target artifact backend map</h2>
+
+  <p>
+    <code>Compilation.Targets</code>는 <code>TargetArtifactSet</code>이며, 내부 권위 저장소는 <code>TargetBackend → ITargetArtifact</code> 불변 맵입니다.<br>
+    현재 backend key는 <code>OpenQasm</code> 하나이지만, 소비자는 필요하면 <code>Find(TargetBackend)</code>를 사용하고 기존 편의 속성 <code>Targets.OpenQasm</code>도 사용할 수 있습니다.<br>
+    공통 <code>ITargetArtifact</code> 계약은 <code>Backend</code>만 요구하며 HIR source를 강제하지 않으므로, 앞으로 여러 backend가 서로 다른 원본 IR을 소비하더라도 하나의 nullable target 필드나 공용 mutable 상태를 공유하지 않습니다.
+  </p>
+
+  <p>
+    현재 <code>QasmBackend.Run</code>은 detached program/model 쌍이 아니라 owner HIR, current HIR, semantic basis의 exact object 관계를 검증한 <code>HirSemanticContext</code>만 소비합니다.<br>
+    backend는 이 context에서 <code>OpenQasmTargetProgram</code>을 만들고, <code>OpenQasmArtifact</code>가 target model을 소유한 뒤 <code>QasmEmitter.Emit(Program)</code>으로 <code>Text</code>를 파생합니다.<br>
+    따라서 target text는 독립적으로 저장된 또 하나의 권위 입력이 아니라 target model의 직렬화 결과입니다.
+  </p>
+
+  <div class="panel">
+    <table class="spec">
+      <tr><th>OpenQASM artifact 구성</th><th>보존하는 값</th></tr>
+      <tr><td class="k"><code>Backend</code></td><td><code>TargetBackend.OpenQasm</code></td></tr>
+      <tr><td class="k"><code>Source</code></td><td>backend가 직접 소비한 exact <code>AdjointMaterialized</code> HIR snapshot Id</td></tr>
+      <tr><td class="k"><code>SemanticBasis</code></td><td>lineage를 통해 조회하는 exact effect-analysis semantic artifact Id</td></tr>
+      <tr><td class="k"><code>Program</code></td><td>target type 환경·symbol map·합성 node fact를 소유하는 <code>OpenQasmTargetProgram</code></td></tr>
+      <tr><td class="k"><code>OpenQasmUnsignedCastNode</code></td><td>소스의 <code>AsInt(bits)</code>를 폭이 명시된 <code>uint[N](bits)</code>로 나타내는 target 전용 식 노드</td></tr>
+      <tr><td class="k"><code>Text</code></td><td><code>OpenQasmTargetProgram</code>에서 순수 emitter로 파생한 최종 OpenQASM 3 텍스트</td></tr>
+    </table>
+  </div>
+
+  <div class="callout warn">
+    <span class="h">현재 backend 경계를 정확히 기록합니다</span>
+    MIR이 같은 <code>Compilation</code>에 존재하더라도 현재 OpenQASM 방출의 직접 입력은 HIR입니다.<br>
+    미래 backend가 MIR을 소비하면 해당 artifact가 자신의 target-specific source provenance를 명시해야 하며, 공통 interface나 기존 OpenQASM artifact가 HIR을 모든 backend의 전제로 만들지 않습니다.<br>
+    또한 <code>AsInt</code>는 source HIR에서는 내장 호출이지만 target lowering 뒤에는 명시적 <code>OpenQasmUnsignedCastNode</code>가 되므로, <code>QCallNode.Name = "uint[N]"</code> 같은 이름 예외가 callable lookup·call graph·name mangling에 유입되지 않습니다.
+  </div>
+
+  <h2 id="s8">8. 진단, 실패, 재컴파일</h2>
+
+  <p>
+    <code>CompilationDiagnostic</code>은 <code>CompilationStage</code>, 원래 <code>QoraError</code>, typed <code>DiagnosticOrigin</code>을 함께 보존합니다.<br>
+    origin은 <code>Source</code>, <code>Hir</code>, <code>Mir</code>, <code>Target</code> 가운데 하나이며, 각 variant가 자기 단계에 맞는 identity를 요구합니다.<br>
+    특히 target 진단은 <code>DiagnosticOrigin.Target(Backend, TargetDiagnosticInput)</code>을 사용하고, 입력 union은 exact <code>Hir(snapshot)</code> 또는 <code>Mir(snapshot, optional location)</code>입니다.<br>
+    진단이 하나라도 있으면 <code>Compilation.Succeeded</code>는 false이고 성공한 target artifact는 존재하지 않지만, 실패 전에 완성된 source·HIR·semantic·MIR 아티팩트는 그대로 조회할 수 있습니다.<br>
+    반면에 성공한 결과는 <code>CompilationOutputPlan</code>의 MIR 여부와 target 집합을 정확히 충족해야 하며, 요청하지 않은 결과를 관성적으로 생성하지 않습니다.
+  </p>
+
+  <div class="panel">
+    <table class="spec">
+      <tr><th>상황</th><th>남는 값</th><th>없는 값</th></tr>
+      <tr><td class="k">entry 구문 실패</td><td><code>Sources</code>, entry <code>SyntaxSnapshot</code>, syntax 진단</td><td>HIR·MIR·target</td></tr>
+      <tr><td class="k">빈 소스에서 entry HIR 미생성</td><td><code>Sources</code>, <code>SyntaxSnapshot</code>, <code>HirPreflight</code>의 <code>QSEM040</code></td><td>HIR·MIR·target</td></tr>
+      <tr><td class="k">통합 <code>QProgram</code>에 callable 없음</td><td>검증 전까지 공개된 구조 HIR milestone, <code>HirValidation</code>의 <code>QSEM040</code></td><td>validation artifact·MIR·target</td></tr>
+      <tr><td class="k">import 실패</td><td>전체 <code>SourceSet</code>, <code>ImportGraph</code>, lowered/expanded HIR milestone, import 진단</td><td>후속 semantic·MIR·target</td></tr>
+      <tr><td class="k">HIR 검증 실패</td><td>실패한 구조 HIR, rejected validation artifact와 그 exact diagnostics, stage-qualified 진단 투영</td><td>effect-analysis artifact·후속 MIR·성공 target</td></tr>
+      <tr><td class="k">target policy 실패</td><td>source/HIR/semantic, 도달했다면 MIR, backend + exact HIR/MIR input을 담은 target origin 진단</td><td><code>Targets.OpenQasm</code></td></tr>
+    </table>
+  </div>
+
+  <p>
+    <code>QoraCompiler.Compile</code>은 새 <code>CompilationSession</code>에서 root revision을 만들고, <code>QoraCompiler.Recompile</code>은 이전 결과가 속한 같은 세션에 다음 revision을 요청합니다.<br>
+    각 자식은 실제 부모를 <code>ParentRevision</code>으로 기록하므로, 같은 부모에서 분기해도 revision identity와 ancestry가 모두 보존됩니다.<br>
+    이전 snapshot은 변경되지 않으며, source·HIR·MIR identity가 revision을 포함하므로 새 결과와 섞이지 않습니다.<br>
+    다만 문서 의존성 기반 invalidation, snapshot 재사용, 별도 컴파일은 아직 구현되지 않았으며 현재 구조가 이를 위한 경계만 제공합니다.
+  </p>
+
+  <h3>핵심 불변 조건</h3>
+
+  <div class="panel">
+    <table class="spec">
+      <tr><th>불변 조건</th><th>목적</th></tr>
+      <tr><td class="k">한 <code>Compilation</code> 안의 모든 identity가 같은 Id·revision 사용</td><td>재컴파일 간 fact 혼합 방지</td></tr>
+      <tr><td class="k">모든 <code>SourceSpan.Document</code>가 <code>Sources</code>에 존재</td><td>다중 파일 진단의 정확성</td></tr>
+      <tr><td class="k">semantic artifact가 exact HIR source를 명시</td><td>detached tree/model 조합 방지</td></tr>
+      <tr><td class="k">validation artifact가 outcome과 diagnostics를 직접 소유</td><td>artifact 존재와 별도 성공 플래그·진단 목록의 drift 방지</td></tr>
+      <tr><td class="k">effect artifact가 exact accepted <code>ValidationBasis</code> 명시</td><td>rejected 또는 다른 snapshot의 의미 사실을 분석 입력으로 사용하는 문제 방지</td></tr>
+      <tr><td class="k"><code>HirCompilation</code>과 <code>HirLineage</code>가 같은 snapshot 객체 집합 공유</td><td>같은 Id를 가장한 detached HIR 계보 방지</td></tr>
+      <tr><td class="k">새 HIR node가 derivation·synthesis·introduction 가운데 정확히 하나로 분류</td><td>semantic identity와 provenance 혼동 및 origin 누락 방지</td></tr>
+      <tr><td class="k">MIR source와 semantic basis가 HIR lineage 안에 존재</td><td>cross-stage query의 검증 가능성</td></tr>
+      <tr><td class="k">모든 HIR symbol과 모든 MIR value·storage·qubit에 total disposition 존재</td><td>링크 누락이 조용히 anonymous entity로 바뀌는 문제 방지</td></tr>
+      <tr><td class="k">target 진단의 HIR/MIR input이 같은 <code>Compilation</code>에 존재</td><td>backend 독립성을 유지하면서도 진단 provenance 검증</td></tr>
+      <tr><td class="k">성공 결과가 <code>CompilationOutputPlan</code>과 정확히 일치</td><td>요청 누락과 unsolicited MIR·target artifact 방지</td></tr>
+      <tr><td class="k">backend당 target artifact 최대 하나</td><td>대상 결과의 단일 권위 맵 유지</td></tr>
+      <tr><td class="k">실패한 compilation에 성공 OpenQASM artifact 없음</td><td>부분 산출물을 성공 결과로 오인하지 않음</td></tr>
+    </table>
+  </div>
+
+  <nav class="doc-links" aria-label="IR 패스 문서">
+    <a class="doc-link" href="ir-pass-01-qora-lowering.html">1. QoraLowering</a>
+    <a class="doc-link" href="ir-pass-02-module-loader.html">2. SourceGraphLoader / ModuleLoader</a>
+    <a class="doc-link" href="ir-pass-03-measure-condition-lowering.html">3. MeasureConditionLowering</a>
+  </nav>
 
   <footer>
-    Qora 컴파일러 데이터시트 · v0.30 기준 · 개념 배경은 <a href="adjoint-pipeline.html">역합성 파이프라인</a>과
-    <a href="hadamard.html">H 게이트 문서</a> 참조
+    Qora 컴파일러 데이터시트 · 현재 권위 모델: <code>Compilation</code>
   </footer>
-
 </div>
 </body>
 </html>

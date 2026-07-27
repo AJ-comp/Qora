@@ -1,11 +1,13 @@
 using System.Text;
 using System.Text.Json;
 using Qora;
+using Qora.Compiler;
+using Qora.Ir.Mir.Analysis;
 
 // Two modes:
 //   qora --json [file]   parse [file] (or stdin when no path) and print ONE line of JSON — the machine
 //                       contract the VS Code extension consumes for squiggles + transpile.
-//                       `--stages` additionally includes the compilation stages (ast / hir / mir / inverse) —
+//                       `--stages` additionally includes the compilation stages and analyses —
 //                       kept out of the default reply because diagnostics run on every keystroke.
 //   qora                 parse a built-in sample and pretty-print the result (console demo).
 if (args.Contains("--json"))
@@ -20,10 +22,13 @@ if (args.Contains("--json"))
         // live-diagnostics path). Its VALUE must not be mistaken for the source-file argument, so pull
         // the pair out before finding the first non-flag argument.
         string? baseDir = null;
+        string? stdinSourcePath = null;
         var positional = new List<string>();
         for (var i = 0; i < args.Length; i++)
         {
             if (args[i] == "--base-dir" && i + 1 < args.Length) baseDir = args[++i];
+            else if (args[i] == "--source-path" && i + 1 < args.Length)
+                stdinSourcePath = Path.GetFullPath(args[++i]);
             else positional.Add(args[i]);
         }
 
@@ -43,33 +48,71 @@ if (args.Contains("--json"))
         {
             using var stdin = new StreamReader(Console.OpenStandardInput(), Encoding.UTF8);
             source = stdin.ReadToEnd();
+            sourcePath = stdinSourcePath;
         }
 
-        var r = QoraParser.Parse(source, baseDir, sourcePath);
+        var compilation = QoraCompiler.Compile(
+            source,
+            new CompilationOptions(baseDir, sourcePath));
+        var resolved = compilation.Hir.Resolved;
+        var resolvedValidation = compilation.Hir.ResolvedValidation;
+        var effectAnalysis = compilation.Hir.EffectAnalysis;
+        var mir = compilation.Mir;
+        var openQasm = compilation.Targets.OpenQasm;
         if (args.Contains("--stages"))
         {
-            // stage texts are present even when semantic errors block emission (qasm is empty then):
-            // the stages view teaches best when it can show WHERE in the pipeline things stopped.
+            // Each view consumes one exact, revision-bound stage. A missing stage stays empty instead of
+            // borrowing a program or semantic model from another HIR generation.
             Console.WriteLine(JsonSerializer.Serialize(new
             {
-                success = r.Success,
-                qasm = r.Qasm,
-                errors = r.Errors.Select(e => new { message = e.Message, code = e.Code, start = e.Start, end = e.End }),
-                ast = r.AstText,
-                ir = Qora.Ir.IrPrinter.Print(r.Ir),
-                mir = Qora.Ir.Mir.MirPrinter.Print(r.Mir),
-                irInverse = Qora.Ir.IrPrinter.PrintInverses(r.Ir),
-                symbols = Qora.Ir.Passes.SymbolTableBuilder.Format(r.Ir, r.Semantics),
-                uncompute = Qora.Ir.Passes.UncomputeReport.Format(r.AnalyzedIr, r.Semantics),
+                success = compilation.Succeeded,
+                qasm = openQasm?.Text ?? string.Empty,
+                errors = compilation.Diagnostics.Select(d => new
+                {
+                    message = d.Error.Message,
+                    code = d.Error.Code,
+                    start = d.Error.Start,
+                    end = d.Error.End,
+                    document = DiagnosticSource(d)?.ToString(),
+                    path = DiagnosticSource(d) is { } document
+                        ? compilation.Sources.RequireDocument(document).Path
+                        : null,
+                }),
+                ast = compilation.Sources.EntrySyntax.AstText,
+                ir = resolved is null
+                    ? string.Empty
+                    : Qora.Ir.IrPrinter.Print(resolved.Program),
+                symbols = resolvedValidation is null
+                    ? string.Empty
+                    : CompilationReports.FormatSymbols(resolvedValidation),
+                uncompute = effectAnalysis is null
+                    ? string.Empty
+                    : CompilationReports.FormatUncompute(effectAnalysis),
+                mir = mir is null
+                    ? string.Empty
+                    : Qora.Ir.Mir.MirPrinter.Print(mir.Program),
+                mirEffects = mir is null
+                    ? string.Empty
+                    : FormatMirEffects(mir.Analyses.Effects),
             }));
         }
         else
         {
             Console.WriteLine(JsonSerializer.Serialize(new
             {
-                success = r.Success,
-                qasm = r.Qasm,
-                errors = r.Errors.Select(e => new { message = e.Message, code = e.Code, start = e.Start, end = e.End }),
+                success = compilation.Succeeded,
+                qasm = openQasm?.Text ?? string.Empty,
+                errors = compilation.Diagnostics.Select(d => new
+                {
+                    message = d.Error.Message,
+                    code = d.Error.Code,
+                    start = d.Error.Start,
+                    end = d.Error.End,
+                    document = DiagnosticSource(d)?.ToString(),
+                    path = DiagnosticSource(d) is { } document
+                        ? compilation.Sources.RequireDocument(document).Path
+                        : null,
+                }),
             }));
         }
     }
@@ -108,18 +151,69 @@ const string sample = """
     }
     """;
 
-var result = QoraParser.Parse(sample);
+var result = QoraCompiler.Compile(sample);
 
 Console.WriteLine($"=== Qora v{Qora.Ir.QoraVersion.Value} (console) ===\n");
-Console.WriteLine($"parse: {(result.Success ? "ACCEPTED" : "REJECTED")}\n");
+Console.WriteLine($"parse: {(result.Succeeded ? "ACCEPTED" : "REJECTED")}\n");
 
-if (result.Success)
+if (result.Succeeded)
 {
     Console.WriteLine("OpenQASM 3.0:");
-    Console.WriteLine(result.Qasm);
+    Console.WriteLine(result.Targets.OpenQasm?.Text ?? string.Empty);
 }
 else
 {
     Console.WriteLine("errors:");
-    foreach (var e in result.Errors) Console.WriteLine("  " + e);
+    foreach (var diagnostic in result.Diagnostics)
+        Console.WriteLine("  " + diagnostic.Error);
 }
+
+static string FormatMirEffects(MirEffectSnapshot effects)
+{
+    var text = new StringBuilder();
+    text.AppendLine($"mir effects snapshot {effects.SnapshotId}");
+
+    foreach (var summary in effects.CallableSummaries)
+    {
+        var formalEffects = summary.FormalQubits.Count == 0
+            ? "none"
+            : string.Join(
+                ", ",
+                summary.FormalQubits.Select(effect =>
+                    $"&{effect.Resource}={effect.Flags}"));
+        text.AppendLine(
+            $"callable @{summary.Callable}: qubits [{formalEffects}], "
+            + $"irreversible={summary.IsIrreversible}, ownership-transfer={summary.TransfersOwnership}");
+    }
+
+    foreach (var effect in effects.Effects)
+    {
+        var target = effect.Target is null
+            ? effect.Kind.ToString().ToLowerInvariant()
+            : effect.Target.DisplayName;
+        var qubits = effect.Qubits.Count == 0
+            ? "none"
+            : string.Join(
+                ", ",
+                effect.Qubits.Select(qubit =>
+                    $"{qubit.Place}={qubit.Flags}"));
+        var witnesses = effect.ClassicalWitnesses.Count == 0
+            ? "none"
+            : string.Join(
+                ", ",
+                effect.ClassicalWitnesses.Select(witness =>
+                    $"%{witness.Value}:{witness.Role}"));
+
+        text.AppendLine(
+            $"@{effect.Site.Callable}/{effect.Site.Block}/%{effect.Site.Instruction}: "
+            + $"{target}; qubits [{qubits}]; witnesses [{witnesses}]");
+    }
+
+    return text.ToString().TrimEnd();
+}
+
+static SourceDocumentRef? DiagnosticSource(CompilationDiagnostic diagnostic) =>
+    diagnostic.Error.Span?.Document
+    ?? (diagnostic.Origin is DiagnosticOrigin.Source source
+        ? source.Document
+        : null);

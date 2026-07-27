@@ -27,11 +27,13 @@ public class GeneralIndexExpressionLoweringTests
             }
             """;
 
-        var parsed = QoraParser.Parse(source);
-        Assert.DoesNotContain(parsed.Errors, error => error.Code == "CE0001");
+        var parseProduct = QoraParser.ParseProduct(source);
+        var snapshot = parseProduct.Snapshot;
+        Assert.DoesNotContain(snapshot.Diagnostics, error => error.Code == "CE0001");
 
-        var ast = Assert.IsAssignableFrom<AstSymbol>(parsed.Ast);
-        var program = Assert.IsType<QProgram>(QoraLowering.Lower(ast));
+        var ast = Assert.IsAssignableFrom<AstSymbol>(parseProduct.LoweringAst);
+        var program = Assert.IsType<QProgram>(
+            QoraLowering.Lower(ast, snapshot.Document.Ref));
         var main = Assert.Single(program.Operations, operation => operation.Name == "Main");
 
         var write = Assert.IsType<QAssign>(main.Body[2]);
@@ -69,11 +71,13 @@ public class GeneralIndexExpressionLoweringTests
             }
             """;
 
-        var parsed = QoraParser.Parse(source);
-        Assert.DoesNotContain(parsed.Errors, error => error.Code == "CE0001");
+        var parseProduct = QoraParser.ParseProduct(source);
+        var snapshot = parseProduct.Snapshot;
+        Assert.DoesNotContain(snapshot.Diagnostics, error => error.Code == "CE0001");
 
-        var ast = Assert.IsAssignableFrom<AstSymbol>(parsed.Ast);
-        var program = Assert.IsType<QProgram>(QoraLowering.Lower(ast));
+        var ast = Assert.IsAssignableFrom<AstSymbol>(parseProduct.LoweringAst);
+        var program = Assert.IsType<QProgram>(
+            QoraLowering.Lower(ast, snapshot.Document.Ref));
         var main = Assert.Single(program.Operations, operation => operation.Name == "Main");
         var declaration = Assert.IsType<QDecl>(main.Body[1]);
         var read = Assert.IsType<QIndexNode>(Assert.IsType<QText>(declaration.Value).Tree);

@@ -33,11 +33,10 @@ declared at `Main` top level and lowers to OpenQASM general arrays. (clean)
 
 ## ⏸ Deferred to the ENGINE (not to be hacked around in Qora)
 
-- **Comments `//` and `/* */`.** Blocked by the Janglim lexer, which only *fakes* longest-match: a single
-  `/` operator out-prioritizes the `//` / `/*` comment pattern, so `//` lexes as `/` `/`. This is the
-  documented "true longest-match" lexer TODO in `AJPGS/docs/TODO.md`. Fix it in the engine; do **not**
-  work it around in Qora (e.g. pre-lexing string passes) — that would blur the engine/language boundary
-  and make Qora fragile.
+- **Block comments `/* */`.** Line comments `//` shipped in v0.9, but block comments still depend on
+  the Janglim lexer's true longest-match support. Fix that capability in the engine; do **not** add a
+  Qora-side pre-lexing string pass, which would blur the engine/language boundary and make source spans
+  fragile.
 - **Parser crash on very large inputs.** Found incidentally during a 2026-07-10 adversarial review's
   performance probe: a generated source with tens of thousands of statements makes the Janglim parse-tree
   path throw a raw `InvalidOperationException` ("Sequence contains no elements" — an internal
@@ -50,23 +49,26 @@ declared at `Main` top level and lowers to OpenQASM general arrays. (clean)
 
 - **Module system + namespaces** ⚛️ — ✅ SHIPPED in v0.12 (2026-07-03): `namespace` / `open` /
   qualified call targets resolve (Resolver.cs, QSEM018/019/022), `import` loads real multi-file programs
-  (ModuleLoader.cs, QSEM020, cyclic/repeated paths deduplicated through `loaded`, CLI `--base-dir`, extension passes the document dir), and emission
-  flattens namespace names (`MyLib.Bell` → `MyLib_Bell`) while auto-renaming only real collisions. The symbol-table machinery the
+  (`SourceGraphLoader` owns path resolution, I/O, per-document syntax/lowering, and the immutable
+  `ImportGraph`; `ModuleLoader` purely merges the prepared graph; QSEM020; CLI `--base-dir` /
+  `--source-path`), and emission flattens namespace names (`MyLib.Bell` → `MyLib_Bell`) while
+  auto-renaming only real collisions. Canonical document identities deduplicate cyclic and repeated
+  paths without discarding imported-document source spans. The symbol-table machinery the
   effect-analysis step needs now exists. The QSEM013 follow-up also shipped: built-in gate names are
   relaxed Q#-style ("declaration allowed, ambiguous use is an error") with the built-ins living in the
   implicit `Qora.Intrinsic` namespace; the measurement family, `pi`/`tau`/`euler`, and global
   gate-named ops stay reserved.
 
-- **`function` vs `operation`** ⚛️ — a deterministic-classical `function` alongside the effectful quantum
-  `operation` (Q#'s central classical/quantum boundary). Trivial as a keyword; the real value needs a
-  light purity check (reject qubit ops inside a `function`). Both still lower to `def`. (workable)
-- **Return values + typed returns** — `: Int` / `: bit` / `: Unit` and `return expr;` (ops are void
-  today). This is the gateway to using calls as expressions. OpenQASM `def` supports typed `return`, but
-  the emitter treats `Main` as the un-returnable top-level and hard-codes expression-calls as
-  measurement, so it is real front-end + emitter rework. (workable)
-- **Calls used as expressions** — `let x = Foo(a);` binding a returned value (today the only
-  expression-position call is hard-wired to mean measurement). Sequenced right after return values.
-  (workable)
+- **`function` vs `operation`** ⚛️ — ✅ SHIPPED in v0.30: deterministic-classical `function` declarations
+  coexist with effectful quantum `operation` declarations. The validator enforces pure function bodies,
+  classical-only signatures, and the operation/function call boundary. The entry callable becomes the
+  OpenQASM top-level body, while every non-entry function or operation lowers to a `def`.
+- **Return values + typed returns** — ✅ SHIPPED in v0.30: functions declare one scalar
+  `int` / `bit` / `float` / `angle` return type and use `return expr;`, while operations remain void.
+  Return paths and result types are validated before MIR and target lowering.
+- **Calls used as expressions** — ✅ SHIPPED in v0.30: `QCallNode` preserves nested function calls in
+  values, conditions, arguments, and returns. Resolver binds each call to `CalleeOpId`; validation,
+  monomorphization, MIR lowering, and OpenQASM emission consume that identity.
 - **`bool` classical type** — `float` and `angle` have shipped, while a Boolean type distinct from the
   measurement-oriented `bit` remains. It maps directly to OpenQASM 3 `bool`. (clean)
 - **`within { } apply { }` conjugation (auto-uncompute)** ⚛️ — run U, then V, then automatically
@@ -87,9 +89,10 @@ declared at `Main` top level and lowers to OpenQASM general arrays. (clean)
 - **Expression-sized qubit allocation** — loop bounds now accept expressions, and `Qubit[]` helpers can
   iterate with `.Count`. However, `use q = Qubit[N]` still requires a positive literal size; accepting a
   const/expression there needs compile-time evaluation before allocation. (workable)
-- **Register measurement + `MResetZ`** ⚛️ — measure a whole register (`M(q)` → `c = measure q;`) and a
-  measure-and-reset combinator, beyond the current single-`q[i]`-on-decl-RHS form. OpenQASM handles both
-  natively; mostly relaxing Qora's restrictive call-RHS recognition. (clean)
+- **Register measurement + `MResetZ`** ⚛️ — measure a whole register (`M(q)` → `c = measure q;`) and add
+  a measure-and-reset combinator. Today a whole declaration or assignment RHS accepts one single-qubit
+  reference, either `M(a)` or `M(q[i])`, and conditions also accept indexed `M(q[i])`; whole-register
+  measurement and measure-reset remain. OpenQASM handles both natively. (clean)
 
 ## ⚪ LOW — later (limited near-term value / target limits)
 
@@ -104,10 +107,6 @@ declared at `Main` top level and lowers to OpenQASM general arrays. (clean)
 - **`Pauli` type + Pauli-basis ops/measurement** ⚛️ — `PauliI/X/Y/Z` to select rotation/measurement bases.
   No native Pauli in OpenQASM; must desugar by case analysis (basis-change + measure + uncompute). Only
   after functors + richer measurement. (hard)
-- **Namespaces + `open` / import** — organizational familiarity, but OpenQASM has no module system (only
-  textual `include`); a namespace can only be name-mangled/flattened and erases at the target. Cosmetic on
-  a single-file toy. (not-expressible)
-
 ---
 
 ## Auto-uncompute — rung ④ injector prerequisites (2026-07-12 deep-dive on blanket+all-scratch)
@@ -134,20 +133,24 @@ The rung-③ analysis (events + qubit graph + ContainerMap) answers the injector
   (`if (r==1) { inverse }`) requires proving the condition bit unchanged between the compute and the
   injected inverse; classical bits are not in the event stream (only `Symbol.Uses`, thin). Fill when
   building the if-tools.
-- **#14 — post-injection re-analysis.** The model's analysis stores are add-only (re-analysis throws
-  QINTERNAL), so re-verifying an injected tree needs generation-keyed storage. Decide during rung-④
-  design.
+- **#14 — post-injection re-analysis.** Snapshot- and phase-qualified storage now exists through
+  `HirSemanticArtifactId(HirSnapshotId, HirSemanticPhase)`. Rung ④ must publish the injected tree as a
+  new HIR snapshot, record its lineage, and wire validation/effect analysis to produce new artifacts
+  over that exact snapshot instead of reusing the pre-injection facts.
 - **#16 — ancilla-identification conditions coupled to FUTURE features** (2026-07-11 literature
   cross-check: Silq PLDI'20, Q#, Unqomp PLDI'21/Reqomp, Twist POPL'22, Quipper, Bennett'73, Gidney'18 —
   20/20 key claims source-verified). `IsCleanupCandidate`'s two conditions (`IsAncilla` use-birth + never
-  measured) are provably COMPLETE for today's feature set (void ops, no aliasing, no closures: measurement
-  is the only value-escape channel). Future escape channels add conditions to the CANDIDACY layer
+  measured) are provably COMPLETE for today's quantum feature set (operations remain void, functions
+  are classical-only, and there are no general qubit aliases or closures: measurement is the only
+  value-escape channel). Future escape channels add conditions to the CANDIDACY layer
   (`IsCleanupCandidate`); the birth layer (`IsAncilla`) is feature-invariant. Add each in the SAME change:
-  - **Return values** (roadmap) → add "not returned / does not escape" (Silq: return consumes; Bennett:
-    outputs are copied out of scratch).
-  - **Aliasing / borrowing** → add "no live alias"; and `borrow` splits ancillas into clean (end |0⟩,
-    value-verifiable) vs **dirty** (end = original unknown state — verifiable only by structural
-    compute/uncompute pairing à la within/apply, never by value reasoning). Q# precedent.
+  - **Future qubit-returning values or other qubit escape channels** → add "not returned / does not
+    escape" (Silq: return consumes; Bennett: outputs are copied out of scratch). Current functions are
+    classical-only, so the shipped scalar return feature does not create this escape channel.
+  - **Future general qubit aliasing beyond the current checked call contracts** → add "no live alias";
+    long-lived borrowed aliases split ancillas into clean (end |0⟩, value-verifiable) vs **dirty**
+    (end = original unknown state — verifiable only by structural compute/uncompute pairing à la
+    within/apply, never by value reasoning). Q# precedent.
   - **Measure-reset reuse** (`MResetZ` idiom) → "never measured" must become per-LIFETIME-SEGMENT
     (Reset ends one segment, starts a fresh |0⟩ one). Today: whole-register disqualification = sound
     over-rejection.
@@ -173,50 +176,72 @@ The rung-③ analysis (events + qubit graph + ContainerMap) answers the injector
   Sound (untainted ⟹ definite basis value ⟹ global phase) and validatable by the round-5 fuzzer (its
   Y/CY-removed control already ran clean). Deferred deliberately: matching Silq is the correct minimal
   fix, and a new taint subsystem is bug surface better added under test than unsupervised.
-- **#18 — model facts must be keyed by node Id, never by a name that crosses tree domains (invariant,
-  2026-07-14).** A rung-③ regression (found by adversarial verify) keyed the non-invertible-call set by op
-  NAME. Names are domain-dependent — a generic call is `Loop` pre-mono, `Loop__sz2` post-mono, a third form
-  post-mangle — so a fact BUILT in the mono domain but QUERIED against a caller-passed pre-mono tree silently
-  missed and crashed `Plan` (the wrong-tree guard was defeated because monomorphization's `with`-copies preserve
-  StmtIds, so only the NAME differed). Fixed by keying the fact by the call statement's **StmtId** (stable across
-  mono, unlike the name). INVARIANT: any analysis fact exposed on `SemanticModel` and consumed against a
-  caller-supplied tree must be keyed by a stable node Id (StmtId / opId / declId), not a name string — names live
-  only at the EDGES (source-name→node binding in the `Scope`; node→name for diagnostics/emit via
-  `FindSymbol`/`FindEmittedName`). Only remaining name-key in the model = `QubitRef.Reg` (register name), safe
-  ONLY because ancilla registers live in the never-specialized entry op (QSEM012 + QSEM010). Optional hardening:
-  a reflection audit test asserting no model fact dictionary is keyed by `string`.
+- **#18 — facts require revision-qualified identities; names never cross IR domains (invariant,
+  2026-07-14, architecture hardened 2026-07-27).** A rung-③ regression keyed the
+  non-invertible-call set by operation name. Names change across specialization and target mangling, so
+  a fact built in one tree could silently miss when queried against another. The durable rule is now
+  stronger than “use a node Id”: a reference crossing HIR generations uses
+  `HirNodeRef(HirSnapshotId, NodeId)`, a semantic symbol uses
+  `HirSymbolRef(HirSemanticArtifactId, SymbolId)`, and callable-local MIR identities use composite
+  references such as `MirValueRef(MirSnapshotId, MirCallableId, MirValueId)`. HIR lineage lives in
+  `HirCompilation.Lineage`, outside `HirSemanticModel`, while `Compilation.Links.Hir` exposes that same
+  exact instance and OpenQASM emitted names live only in
+  `OpenQasmSymbolMap`. Source names remain lookup/diagnostic data at the edge; they are never analysis
+  identity.
 - **#19 — bind calls to their callee by node reference, not by name — ✅ SHIPPED (2026-07-14, working tree).**
-  `QGate` now carries `int? CalleeOpId`: a user-op call is BOUND to its callee's stable node Id ONCE at name
-  resolution (`Resolver.ResolveCall`, via an Fqn→opId map), RE-POINTED to the size specialization at
-  monomorphization (`SpecializeCall`), and CLEARED to null by `AdjointMaterializer` on the `Adjoint Foo`→`Foo__adj`
-  rewrite (inverse Id not yet minted; runs after analysis). `CalleeOpId is int` ⟺ a user-op call; built-ins stay
-  null. `EffectAnalysis.AnalyzeGate` now FOLLOWS the reference (`_opById[cid]`) instead of re-matching the name,
-  fail-loud on a dangling Id. This is the standard "resolve once, reference after" (Rust DefId / Roslyn ISymbol),
-  cross-file-safe (node Ids globally unique under whole-program compilation), and it removes name-matching from
-  the analysis middle — decided worth doing as the long-term-correct structural direction (not on a current-scale
-  cost/benefit basis). Tests: `CalleeOpIdTests` (4 — plain call binds, built-in null, Adjoint survives functor,
-  generic re-points generic→specialization across mono); full suite 259/259; adversarial verify (3 lenses:
-  null-on-valid / stale-dangling / effect-regression) confirmed 0 defects. Remaining name-based call resolution
-  in NON-analytical passes (validator/printer/emitter) left as-is (single-tree, safe); may migrate to CalleeOpId
-  incrementally.
-- **#20 — incremental / separate compilation: NOT needed for Qora; foundation already salsa-shaped
-  (2026-07-14, checked against fresh data).** Qora compiles whole-program from scratch (`QoraParser.Parse`
-  rebuilds everything; no caching/invalidation). At classical scale that would not scale, but quantum programs
-  are tiny (tens–hundreds of gates), so from-scratch stays instant indefinitely — neither incremental nor
-  separate compilation is ever required. Reference if the question resurfaces (2026-07 data): whole-program +
-  incremental reaches ~millions of lines only as a HYBRID — TypeScript 7 (tsgo, Go-native, RC 2026-06) checks
-  the 1.5M-line VS Code codebase in 7.5s (10.4×) via native binary + shared-memory parallelism + `--incremental`
-  + project references (a coarse separation); rust-analyzer's salsa (3.0 adding parallelism) is the
-  query-incremental standard. Qora's stable node Ids + Id-keyed persistent `SemanticModel` ARE the salsa
-  foundation, so the start point is good IF ever wanted — but it is a non-goal at Qora's scale. Sources: MS
-  DevBlogs "Progress on TypeScript 7" (2025-12); Visual Studio Magazine (2026-06); rust-analyzer #17491 (salsa).
+  Statement calls (`QGate`) and expression calls (`QCallNode`) carry `int? CalleeOpId`. Resolver binds a
+  user call to its callee's stable node Id once, and monomorphization re-points the reference to the selected
+  specialization. `AdjointMaterializer` first synthesizes and re-Ids the inverse operation, then rewrites
+  `Adjoint Foo` to the inverse name **and** its minted `CalleeOpId`; built-ins remain null. Validation,
+  effect analysis, MIR lowering, target referential checks, name mangling, and emission follow the typed
+  reference and fail loudly on a missing or dangling Id. `IrPrinter` may display the readable call name,
+  but that spelling is no longer semantic identity.
+- **#20 — immutable compilation snapshots and explicit stage ownership — ✅ SHIPPED
+  (2026-07-27); incremental invalidation remains future work.** `QoraParser.Parse` is syntax-only and
+  `QoraCompiler.Compile` returns one immutable `Compilation` whose authoritative top-level owners are
+  `Sources`, `Hir`, optional `Mir`, `Links`, `Targets`, and stage-qualified `Diagnostics`.
+  `CompilationSession` owns branch-safe monotonic revision allocation, and each result records its
+  actual `ParentRevision`; sibling recompiles therefore cannot collide. `CompilationOutputPlan`
+  separately fixes the exact canonical HIR goal, MIR request, and backend set, and a successful result
+  must match that plan without unsolicited artifacts.
+  `SourceGraphLoader` preserves every root/import document as an exact
+  `SourceDocumentSnapshot` + immutable Qora-owned `SyntaxSnapshot`, records revision-qualified
+  `ImportGraph` edges, and lowers each successfully parsed document with a document-qualified
+  `SourceSpan`. Mutable Janglim AST exists only in a transient internal `SyntaxParseProduct` and is
+  discarded immediately after lowering. `ModuleLoader` performs only the deterministic merge of that
+  prepared graph and returns a `HirNodeIntroduction` for every imported HIR node.
+  A `HirSnapshot` owns structural `QProgram` state, while validation and effect facts are separate
+  snapshot-qualified semantic results. A validation artifact owns one authoritative
+  `HirValidationOutcome` with accepted/rejected status and immutable diagnostics; effect analysis can
+  consume only the exact accepted validation artifact for the same snapshot and records that
+  `ValidationBasis`. `HirCompilation` owns both its exact snapshot history and
+  `HirLineage`; `Compilation.Links.Hir` is the same lineage instance. Every newly appearing HIR node is
+  classified exactly once as an identity-preserving `NodeDerivation`, provenance-only `NodeSynthesis`,
+  or source `HirNodeIntroduction`. Analysis never creates a fake structural HIR stage, and canonical
+  milestones cannot move backwards.
+  `MirSnapshot` owns its structural index and lazily cached analysis store; shared dependencies such as
+  CFG are reused within that snapshot. MIR callables and entities use exact HIR/semantic references.
+  Every HIR symbol has one `MirSymbolLoweringDisposition`, while every MIR value/storage/qubit has one
+  `MirEntityOriginKind`, so non-lowering and compiler temporaries are explicit rather than missing.
+  Target results live in the backend-keyed `TargetArtifactSet.Artifacts` map. `QasmBackend` consumes an
+  exact `HirSemanticContext` and produces `OpenQasmTargetProgram`; `OpenQasmArtifact.Text` is derived
+  from that model. The current artifact records both its exact HIR source and semantic basis instead of
+  pretending to be MIR-backed, while the common `ITargetArtifact` contract does not force HIR
+  provenance on future backends. Target diagnostics likewise carry a backend plus a typed HIR-or-MIR
+  input union. The CLI renders `--stages` from this completed aggregate without rerunning passes.
+  This revision-bound model is the required foundation for IDE queries and future incremental
+  compilation, but document dependency invalidation, snapshot reuse, and separate compilation are
+  **not implemented yet** and must not be described as unnecessary.
 
 ## Sequencing note
 
-Updated 2026-07-03 (post-v0.12: the module system — resolver, multi-file imports, total name
-mangling — landed on top of v0.10/0.11's typed IR pipeline and validation, now QSEM001–023). The next
-chunk is the **effect analysis** (qfree/mfree/const + liveness), which reuses the resolver's symbol
-table and in turn unlocks the end goal: **automatic uncomputation** (Silq-style, injected as the
-synthetic `QConjugate` IR node the pipeline already carries). The return-value gateway
-(function-vs-operation → typed returns → calls-as-expressions) and **float/angle types** slot in
-alongside; whole-operation auto-`Controlled` and the erasing types (Result/Pauli) come last.
+Updated 2026-07-27. The module system, typed functions and returns, expression calls, float/angle
+types, effect analysis, ownership contracts, MIR, and immutable compilation snapshots have landed.
+The main dependent track is now **automatic uncomputation**: the injector must consume the existing
+effect/liveness facts, insert identity-bound adjoint calls, preserve the scope-exit |0⟩ guarantee, and
+publish a new HIR snapshot with the correct typed lineage classification rather than mutate an earlier
+snapshot. Local allocation lowering
+depends on that guarantee. Incremental invalidation and IDE query indexes should extend the existing
+document identities, typed cross-stage links, and source maps; they must not introduce a second mutable
+ledger of semantic facts. `bool`, automatic controlled-operation generation, and the target-erased
+`Result` / `Pauli` abstractions remain later language work.

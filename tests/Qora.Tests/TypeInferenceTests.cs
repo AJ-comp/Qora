@@ -1,4 +1,6 @@
+using Qora.Compiler;
 using Qora.Ir;
+using Qora.Ir.Passes;
 
 namespace Qora.Tests;
 
@@ -17,10 +19,16 @@ public class TypeInferenceTests
         // `var res = mb` where mb is a bit must emit `bit res = mb;` — not `int res = mb;` — and the condition
         // that reads it must compare as a bit (`res == true`), matching an explicitly-typed `bit res`.
         var r = Compiler.Compile("operation Main(){ use q=Qubit[1]; var mb: bit = M(q[0]); var res = mb; if(res==1){ X(q[0]); } }");
-        Assert.True(r.Success, string.Join(" | ", r.Errors.Select(e => $"{e.Code}: {e.Message}")));
-        Assert.Contains("bit res = mb;", r.Qasm);
-        Assert.DoesNotContain("int res", r.Qasm);
-        Assert.Contains("res == true", r.Qasm);
+        Assert.True(
+            r.Succeeded,
+            string.Join(
+                " | ",
+                r.Diagnostics.Select(diagnostic =>
+                    $"{diagnostic.Error.Code}: {diagnostic.Error.Message}")));
+        var qasm = Assert.IsType<OpenQasmArtifact>(r.Targets.OpenQasm).Text;
+        Assert.Contains("bit res = mb;", qasm);
+        Assert.DoesNotContain("int res", qasm);
+        Assert.Contains("res == true", qasm);
     }
 
     [Fact]
@@ -101,38 +109,81 @@ public class TypeInferenceTests
         var r = Compiler.Compile(
             "function value(): float { return 0.5; }\n" +
             "operation Main(){ use q=Qubit[1]; var value: int = 1; var result = value(); }");
-        Assert.True(r.Success, string.Join(" | ", r.Errors.Select(e => $"{e.Code}: {e.Message}")));
+        Assert.True(
+            r.Succeeded,
+            string.Join(
+                " | ",
+                r.Diagnostics.Select(diagnostic =>
+                    $"{diagnostic.Error.Code}: {diagnostic.Error.Message}")));
 
-        var result = r.Ir!.Operations.SelectMany(op => op.Body).OfType<QDecl>()
+        var analyzed = Assert.IsType<HirSemanticArtifact>(r.Hir.EffectAnalysis);
+        var semantics = analyzed.Model;
+        var result = analyzed.Program.Operations
+            .SelectMany(op => op.Body)
+            .OfType<QDecl>()
             .Single(d => d.Name == "result");
-        Assert.Equal(QType.Float, r.Semantics!.FindSymbol(result.Id)!.Type);
+        Assert.Equal(QType.Float, semantics.FindSymbol(result.Id)!.Type);
+
+        var graph = Assert.IsType<HirScopeGraph>(semantics.ScopeGraph);
+        var main = analyzed.Program.Operations.Single(
+            operation => operation.Name == "Main");
+        var mainScope = Assert.IsType<Scope>(graph.FindCallableScope(main.Id));
+        var localValue = Assert.IsType<Symbol>(mainScope.Lookup("value"));
+        var callable = Assert.IsType<Symbol>(graph.LookupCallable("value"));
+
+        Assert.Equal(SymbolKind.Var, localValue.Kind);
+        Assert.Equal(SymbolKind.Operation, callable.Kind);
+        Assert.NotEqual(localValue.Id, callable.Id);
     }
 
     [Fact]
-    public void StandaloneEmitterUsesTheSameFunctionReturnLookup()
+    public void TargetTypeEnvironmentCarriesValidatedFunctionReturnType()
     {
-        var r = Compiler.Compile(
+        var compilation = QoraCompiler.Compile(
             "function half(): float { return 0.5; }\n" +
             "operation Main(){ use q=Qubit[1]; var result = half(); }");
-        Assert.True(r.Success, string.Join(" | ", r.Errors.Select(e => $"{e.Code}: {e.Message}")));
+        Assert.True(
+            compilation.Succeeded,
+            string.Join(
+                " | ",
+                compilation.Diagnostics.Select(diagnostic =>
+                    $"{diagnostic.Error.Code}: {diagnostic.Error.Message}")));
 
-        Assert.Contains("float result = half();", QasmEmitter.Emit(r.Ir));
+        var analyzed = Assert.IsType<HirSemanticArtifact>(compilation.Hir.EffectAnalysis);
+        var declaration = analyzed.Program.Operations
+            .SelectMany(operation => operation.Body)
+            .OfType<QDecl>()
+            .Single(item => item.Name == "result");
+        var artifact = Assert.IsType<OpenQasmArtifact>(
+            compilation.Targets.OpenQasm);
+        var targetType = artifact.Program.Types.GetType(declaration.Id);
+
+        Assert.Equal(QType.Float, targetType.ElementType);
+        Assert.False(targetType.IsArray);
+        Assert.Contains("float result = half();", artifact.Text);
     }
 
     [Fact]
-    public void StandaloneEmitterCanInferAnIdlessMangledNamespaceFunctionCall()
+    public void TargetArtifactRejectsAnIdlessNamespaceFunctionCall()
     {
-        var result = Compiler.Compile("""
+        var compilation = QoraCompiler.Compile("""
             namespace L {
                 function half(): float { return 0.5; }
             }
             operation Main() { var result = L.half(); }
             """);
-        Assert.True(result.Success,
-            string.Join(" | ", result.Errors.Select(error => $"{error.Code}: {error.Message}")));
+        Assert.True(
+            compilation.Succeeded,
+            string.Join(
+                " | ",
+                compilation.Diagnostics.Select(diagnostic =>
+                    $"{diagnostic.Error.Code}: {diagnostic.Error.Message}")));
 
-        var mangled = Qora.Ir.Passes.NameMangler.Mangle(result.Ir!, model: null).Program;
-        var main = mangled.Operations.Single(operation => operation.Name == "Main");
+        var artifact = Assert.IsType<OpenQasmArtifact>(
+            compilation.Targets.OpenQasm);
+        var target = artifact.Program;
+        var main = target.Program.Operations.Single(
+            operation => operation.Name == "Main");
         var declaration = main.Body.OfType<QDecl>().Single();
         var text = Assert.IsType<QText>(declaration.Value);
         var call = Assert.IsType<QCallNode>(text.Tree);
@@ -148,14 +199,20 @@ public class TypeInferenceTests
                     : statement)
                 .ToList(),
         };
-        var idlessProgram = mangled with
+        var idlessProgram = target.Program with
         {
-            Operations = mangled.Operations
+            Operations = target.Program.Operations
                 .Select(operation => operation.Id == main.Id ? idlessMain : operation)
                 .ToList(),
         };
-
-        Assert.Contains("float result = L_half();", QasmEmitter.Emit(idlessProgram));
+        var error = Assert.Throws<ArgumentException>(
+            () => new OpenQasmTargetProgram(
+                idlessProgram,
+                target.Symbols,
+                target.Types,
+                target.Facts,
+                target.Notes));
+        Assert.Contains("has no user-callable identity", error.Message);
     }
 
     [Fact]
@@ -164,15 +221,26 @@ public class TypeInferenceTests
         var r = Compiler.Compile(
             "function half(): float { return 0.5; }\n" +
             "operation Main(){ use q=Qubit[1]; var result = half(); }");
-        Assert.True(r.Success, string.Join(" | ", r.Errors.Select(e => $"{e.Code}: {e.Message}")));
+        Assert.True(
+            r.Succeeded,
+            string.Join(
+                " | ",
+                r.Diagnostics.Select(diagnostic =>
+                    $"{diagnostic.Error.Code}: {diagnostic.Error.Message}")));
 
-        var decl = r.Ir!.Operations.SelectMany(op => op.Body).OfType<QDecl>().Single(d => d.Name == "result");
-        var symbol = r.Semantics!.FindSymbol(decl.Id);
+        var analyzed = Assert.IsType<HirSemanticArtifact>(r.Hir.EffectAnalysis);
+        var semantics = analyzed.Model;
+        var decl = analyzed.Program.Operations
+            .SelectMany(op => op.Body)
+            .OfType<QDecl>()
+            .Single(d => d.Name == "result");
+        var symbol = semantics.FindSymbol(decl.Id);
         Assert.NotNull(symbol);
         Assert.Equal(QType.Float, symbol!.Type);
 
-        var function = r.Ir.Operations.Single(op => op.Name == "half");
-        var callable = r.Semantics.ProgramSymbols!.LookupCallable("half");
+        var function = analyzed.Program.Operations.Single(op => op.Name == "half");
+        var graph = Assert.IsType<HirScopeGraph>(semantics.ScopeGraph);
+        var callable = graph.LookupCallable("half");
         Assert.Equal(function.Id, callable!.DeclarationNodeId);
         Assert.Null(callable.Type);   // return type stays on QOperation; it is not copied into the symbol
     }

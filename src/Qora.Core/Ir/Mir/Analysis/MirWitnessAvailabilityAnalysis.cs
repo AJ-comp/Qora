@@ -15,7 +15,7 @@ public enum MirWitnessIssueKind
 /// </summary>
 public sealed record MirWitnessIssue(
     MirWitnessIssueKind Kind,
-    MirValueId Value,
+    MirValueRef Value,
     MirMemoryStateAvailability? Memory = null);
 
 /// <summary>
@@ -77,52 +77,73 @@ public sealed class MirWitnessAvailabilitySnapshot
         _cfg = cfg;
         _memory = memory;
         _scalars = scalars;
-        ProgramRevision = sourceProgram.Revision;
-        Callable = callable.Id;
+        SnapshotId = sourceProgram.SnapshotId;
+        Callable = new MirCallableRef(SnapshotId, callable.Id);
         _effectBySite = effects.Effects
-            .Where(effect => effect.Site.Callable == callable.Id)
+            .Where(effect => effect.Site.Callable == Callable)
             .ToFrozenDictionary(effect => effect.Site);
     }
 
-    public int ProgramRevision { get; }
-    public MirCallableId Callable { get; }
+    public MirSnapshotId SnapshotId { get; }
+    public MirCallableRef Callable { get; }
+    internal MirControlFlowSnapshot ControlFlow => _cfg;
+    internal MirMemoryStateSnapshot MemoryState => _memory;
+    internal MirScalarValueAvailabilitySnapshot ScalarAvailability => _scalars;
 
-    public bool IsFor(
+    internal bool IsFor(
         MirProgram program,
         MirEffectSnapshot effects,
         MirCallableId callable) =>
         ReferenceEquals(_sourceProgram, program)
         && ReferenceEquals(_effects, effects)
         && ReferenceEquals(_callable, program.FindCallable(callable))
-        && ProgramRevision == program.Revision
-        && Callable == callable
+        && SnapshotId == program.SnapshotId
+        && Callable.Callable == callable
         && effects.IsFor(program);
 
-    public void EnsureFor(
+    internal void EnsureFor(
         MirProgram program,
         MirEffectSnapshot effects,
         MirCallableId callable)
     {
         if (!IsFor(program, effects, callable))
             throw new InvalidOperationException(
-                $"MIR witness snapshot belongs to {Callable} in revision {ProgramRevision} " +
-                $"of a different program/effect snapshot; reanalyze {callable} in revision {program.Revision}");
+                $"MIR witness snapshot belongs to {Callable} in snapshot {SnapshotId}; " +
+                $"reanalyze {callable} in snapshot {program.SnapshotId}");
     }
 
     public MirWitnessAvailability CheckBeforeInstruction(
         MirEffectSite effect,
-        MirInstructionId target) =>
+        MirInstructionRef target) =>
         Check(effect, _cfg.PointBeforeInstruction(target));
 
     public MirWitnessAvailability CheckAtTerminator(
         MirEffectSite effect,
-        MirBlockId target) =>
+        MirBlockRef target) =>
         Check(effect, _cfg.TerminatorPoint(target));
+
+    internal MirWitnessAvailability CheckBeforeInstruction(
+        MirEffectSite effect,
+        MirInstructionId target) =>
+        CheckBeforeInstruction(
+            effect,
+            new MirInstructionRef(SnapshotId, Callable.Callable, target));
+
+    internal MirWitnessAvailability CheckAtTerminator(
+        MirEffectSite effect,
+        MirBlockId target) =>
+        CheckAtTerminator(
+            effect,
+            new MirBlockRef(SnapshotId, Callable.Callable, target));
 
     private MirWitnessAvailability Check(
         MirEffectSite site,
         MirProgramPoint point)
     {
+        MirReferenceValidation.RequireSnapshot(
+            SnapshotId,
+            site.Snapshot,
+            nameof(site));
         if (site.Callable != Callable
             || !_effectBySite.TryGetValue(site, out var effect))
             throw new ArgumentOutOfRangeException(
@@ -134,7 +155,7 @@ public sealed class MirWitnessAvailabilitySnapshot
         var rematerializations = new List<MirScalarValueAvailability>();
         foreach (var witness in effect.ClassicalWitnesses)
         {
-            var availability = _scalars.Check(witness.Value, point);
+            var availability = _scalars.Check(witness.Value.Value, point);
             if (!availability.CanSupplyValue)
                 issues.Add(new MirWitnessIssue(
                     MirWitnessIssueKind.ScalarValueUnavailable,
@@ -149,7 +170,7 @@ public sealed class MirWitnessAvailabilitySnapshot
         foreach (var predicate in effect.PathCondition.Predicates
                      .DistinctBy(predicate => predicate.Condition))
         {
-            var availability = _scalars.Check(predicate.Condition, point);
+            var availability = _scalars.Check(predicate.Condition.Value, point);
             if (!availability.CanSupplyValue)
                 issues.Add(new MirWitnessIssue(
                     MirWitnessIssueKind.PathPredicateUnavailable,
@@ -163,8 +184,8 @@ public sealed class MirWitnessAvailabilitySnapshot
         foreach (var array in effect.ArrayStates)
         {
             var availability = _memory.CheckAtLocation(
-                array.InputState,
-                point.Block,
+                array.InputState.Value,
+                point.Block.Block,
                 point.InstructionIndex);
             requiresIterationLocalPlacement |= availability.RequiresSameIteration;
             if (!availability.IsAvailable)
@@ -187,9 +208,9 @@ public sealed class MirWitnessAvailabilitySnapshot
     }
 }
 
-public static class MirWitnessAvailabilityAnalysis
+internal static class MirWitnessAvailabilityAnalysis
 {
-    public static MirWitnessAvailabilitySnapshot Analyze(
+    internal static MirWitnessAvailabilitySnapshot Analyze(
         MirProgram program,
         MirEffectSnapshot effects,
         MirCallableId callableId)
@@ -206,10 +227,10 @@ public static class MirWitnessAvailabilityAnalysis
                 $"callable {callableId} does not belong to the MIR program");
         var cfg = MirControlFlowAnalysis.Analyze(program, callableId);
         var memory = MirMemoryStateAnalysis.Analyze(program, callableId);
-        return new MirWitnessAvailabilitySnapshot(
+        return AnalyzeVerified(
             program,
-            callable,
             effects,
+            callable,
             cfg,
             memory,
             new MirScalarValueAvailabilitySnapshot(
@@ -217,5 +238,34 @@ public static class MirWitnessAvailabilityAnalysis
                 callable,
                 cfg,
                 memory));
+    }
+
+    /// <summary>
+    /// Joins exact effect, CFG, memory, and scalar snapshots already owned by one
+    /// <see cref="MirAnalysisStore"/>.
+    /// </summary>
+    internal static MirWitnessAvailabilitySnapshot AnalyzeVerified(
+        MirProgram program,
+        MirEffectSnapshot effects,
+        MirCallable callable,
+        MirControlFlowSnapshot cfg,
+        MirMemoryStateSnapshot memory,
+        MirScalarValueAvailabilitySnapshot scalars)
+    {
+        effects.EnsureFor(program);
+        cfg.EnsureFor(program, callable.Id);
+        memory.EnsureFor(program, callable.Id);
+        if (!scalars.IsFor(program, callable.Id))
+            throw new InvalidOperationException(
+                $"MIR scalar-availability snapshot does not belong to {callable.Id} " +
+                $"in snapshot {program.SnapshotId}");
+
+        return new MirWitnessAvailabilitySnapshot(
+            program,
+            callable,
+            effects,
+            cfg,
+            memory,
+            scalars);
     }
 }

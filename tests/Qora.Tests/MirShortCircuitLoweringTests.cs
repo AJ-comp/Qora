@@ -7,7 +7,7 @@ public sealed class MirShortCircuitLoweringTests
     [Fact]
     public void LogicalAndEvaluatesRightCallOnlyOnTrueEdge()
     {
-        var main = CompileMain("""
+        var (_, main) = CompileMain("""
             function value(): int {
                 return 1;
             }
@@ -33,7 +33,7 @@ public sealed class MirShortCircuitLoweringTests
     [Fact]
     public void LogicalOrEvaluatesRightCallOnlyOnFalseEdge()
     {
-        var main = CompileMain("""
+        var (_, main) = CompileMain("""
             function value(): int {
                 return 1;
             }
@@ -59,7 +59,7 @@ public sealed class MirShortCircuitLoweringTests
     [Fact]
     public void BoundsGuardKeepsArrayLoadBehindTheSuccessfulLeftCondition()
     {
-        var main = CompileMain("""
+        var (program, main) = CompileMain("""
             operation Main() {
                 var values: int[] = [1];
                 var index: int = 0;
@@ -76,7 +76,7 @@ public sealed class MirShortCircuitLoweringTests
             block => block.Instructions.OfType<MirArrayLoad>().Any());
 
         var cfg = Qora.Ir.Mir.Analysis.MirControlFlowAnalysis.Analyze(
-            new MirProgram(0, new[] { main }),
+            program,
             main.Id);
         Assert.False(cfg.Dominates(loadBlock.Id, main.EntryBlock));
         Assert.Contains(
@@ -85,13 +85,15 @@ public sealed class MirShortCircuitLoweringTests
             block => cfg.Dominates(block.Id, loadBlock.Id));
     }
 
-    private static MirCallable CompileMain(string source)
+    private static (MirProgram Program, MirCallable Main) CompileMain(string source)
     {
         var result = Compiler.Compile(source);
         Assert.True(
-            result.Success,
-            string.Join(" | ", result.Errors.Select(error => $"{error.Code}: {error.Message}")));
-        var program = Assert.IsType<MirProgram>(result.Mir);
-        return Assert.Single(program.Callables, callable => callable.Name == "Main");
+            result.Succeeded,
+            string.Join(" | ", result.Diagnostics.Select(diagnostic => diagnostic.Error).ToList().Select(error => $"{error.Code}: {error.Message}")));
+        var program = Assert.IsType<MirProgram>(result.Mir?.Program);
+        return (
+            program,
+            Assert.Single(program.Callables, callable => callable.Name == "Main"));
     }
 }

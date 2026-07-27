@@ -39,7 +39,7 @@ public sealed class MirMemoryStateAnalysisTests
             oldAvailability.Kind);
         Assert.Equal(
             store.Id,
-            Assert.Single(oldAvailability.ClobberingMutations).Instruction);
+            Assert.Single(oldAvailability.ClobberingMutations).Instruction.Instruction);
 
         var currentAvailability = analysis.CheckAtTerminator(store.Result, exit.Id);
         Assert.True(currentAvailability.IsAvailable);
@@ -189,7 +189,7 @@ public sealed class MirMemoryStateAnalysisTests
         Assert.Equal(
             2,
             analysis.Mutations.Count(
-                mutation => mutation.Instruction == call.Id));
+                mutation => mutation.Instruction.Instruction == call.Id));
     }
 
     [Fact]
@@ -326,9 +326,9 @@ public sealed class MirMemoryStateAnalysisTests
     {
         var result = Compiler.Compile(source);
         Assert.True(
-            result.Success,
-            string.Join(" | ", result.Errors.Select(error => $"{error.Code}: {error.Message}")));
-        return Assert.IsType<MirProgram>(result.Mir);
+            result.Succeeded,
+            string.Join(" | ", result.Diagnostics.Select(diagnostic => diagnostic.Error).ToList().Select(error => $"{error.Code}: {error.Message}")));
+        return Assert.IsType<MirProgram>(result.Mir?.Program);
     }
 
     private static MirCallable Callable(MirProgram program, string name) =>
@@ -352,14 +352,13 @@ public sealed class MirMemoryStateAnalysisTests
                     : block)
                 .ToArray(),
         };
-        return program with
-        {
-            Revision = program.Revision + 1,
-            Callables = program.Callables
+        return new MirProgram(
+            program.SnapshotId,
+            program.Origins,
+            program.Callables
                 .Select(candidate => candidate.Id == callable.Id
                     ? rewrittenCallable
                     : candidate)
-                .ToArray(),
-        };
+                .ToArray());
     }
 }

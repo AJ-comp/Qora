@@ -8,26 +8,29 @@ namespace Qora.Ir.Passes;
 /// (a parameter, caller-owned, not an ancilla), ancilla promoted to OUTPUT (measured — its value was
 /// delivered, so it left the cleanup pool), or ancilla that is a CLEANUP CANDIDATE — and each candidate
 /// carries its rung-③ verdict: safe to uncompute, or which clause blocked it and at which event. Pure
-/// CONSUMPTION of the persistent <see cref="SemanticModel"/> (the first consumer of
-/// <see cref="SemanticModel.IsCleanupCandidate"/> / <see cref="SemanticModel.UncomputeSafety"/> /
-/// <see cref="SemanticModel.LiveRange"/>); the rung-④ injector will act on exactly these answers, so this
+/// CONSUMPTION of the persistent <see cref="HirSemanticModel"/> (the first consumer of
+/// <see cref="HirSemanticModel.IsCleanupCandidate"/> / <see cref="HirSemanticModel.UncomputeSafety"/> /
+/// <see cref="HirSemanticModel.LiveRange"/>); the rung-④ injector will act on exactly these answers, so this
 /// view IS the injection plan, readable before it exists.
 /// </summary>
-public static class UncomputeReport
+internal static class UncomputeReport
 {
     /// <summary>Render the per-operation uncompute verdicts as text (same shape as
-    /// <see cref="SymbolTableBuilder.Format"/>: an op header line, its qubits indented beneath). Empty when
-    /// there is nothing to say — no program, no model (semantic errors blocked analysis), or no qubits.</summary>
-    public static string Format(QProgram? program, SemanticModel? model)
+    /// <see cref="SymbolTableBuilder.Format"/>: an op header line, its qubits indented beneath). The
+    /// program and model must be the exact analyzed HIR pair; an empty program or one with no qubits
+    /// produces an empty report.</summary>
+    public static string Format(QProgram program, HirSemanticModel model)
     {
-        if (program is null || model is null || program.Operations.Count == 0) return string.Empty;
+        ArgumentNullException.ThrowIfNull(program);
+        ArgumentNullException.ThrowIfNull(model);
+        if (program.Operations.Count == 0) return string.Empty;
         var sb = new StringBuilder();
         foreach (var op in program.Operations)
         {
-            // No scope means the model never validated this op (it is absent from the post-monomorphize
-            // model this view reads — pass QoraParseResult.AnalyzedIr, whose ops all have scopes AND streams).
-            var root = model.FindRootScope(op.Id);
-            if (root is null) continue;
+            // No scope means this operation does not belong to the exact analyzed HIR/model pair.
+            var root = model.FindRootScope(op.Id)
+                ?? throw new InvalidOperationException(
+                    $"QINTERNAL: operation {op.Id} is absent from the supplied analyzed HIR model");
             var qubits = root.AllSymbols()
                 .Where(s => s.Kind is SymbolKind.Parameter or SymbolKind.Register && s.Type == QType.Qubit)
                 .ToList();
@@ -49,7 +52,7 @@ public static class UncomputeReport
     /// <summary>One qubit's classification — the code IS the terminology ladder, one rung per line:
     /// ancilla (birth: a <c>use</c> workspace)? → cleanup candidate (liveness: value never delivered)?
     /// → safe (rung ③ verdict). Each rung's failure names what the qubit IS, not just what it is not.</summary>
-    private static string Describe(SemanticModel model, QOperation op, Symbol sym)
+    private static string Describe(HirSemanticModel model, QOperation op, Symbol sym)
     {
         var q = new QubitRef(sym.SourceName, null);
 
@@ -73,7 +76,7 @@ public static class UncomputeReport
     /// which an element-level culprit — e.g. a broadcast's statement-wide write under an element query — is
     /// actually rendered). Elements blocked by the SAME reason as the register headline are omitted as
     /// redundant.</summary>
-    private static string PerElement(SemanticModel model, QOperation op, Symbol sym)
+    private static string PerElement(HirSemanticModel model, QOperation op, Symbol sym)
     {
         if (sym.RegisterSize is not int n || n < 2) return string.Empty;
         var whole = model.UncomputeSafety(op, new QubitRef(sym.SourceName, null));

@@ -8,25 +8,27 @@ namespace Qora.Tests;
 /// <summary>
 /// Effect analysis (auto-uncompute rung ①): each operation's program-ordered qubit-EVENT stream — every
 /// leaf statement's reads/writes/measures — plus a per-operation summary, recorded on the persistent
-/// <see cref="SemanticModel"/>. A Read preserves the computational-basis value (a control or diagonal-gate
+/// <see cref="HirSemanticModel"/>. A Read preserves the computational-basis value (a control or diagonal-gate
 /// target); a Write may change it (a target / reset / register birth); a Measure collapses it. Per-statement
 /// touched/modified is READ OFF the stream by filtering on StmtId; entanglement edges by grouping on it.
-/// Parse-based tests use NON-generic programs on purpose — <c>r.Ir</c> is the pre-monomorphize program, and
-/// only for a generics-free program is that the exact program the analysis (and its Ids) ran on.
+/// Tests query the analyzed HIR snapshot and its exact semantic model, so generic specializations and their
+/// effect identities stay in the same revision.
 /// </summary>
 public class EffectAnalysisTests
 {
-    private static (QoraParseResult R, SemanticModel M) Compile(string src)
+    private static (Compilation R, HirSemanticModel M) Compile(string src)
     {
-        var r = QoraParser.Parse(src);
-        Assert.True(r.Success, string.Join(" | ", r.Errors));
-        Assert.NotNull(r.Semantics);
-        return (r, r.Semantics!);
+        var r = QoraCompiler.Compile(src);
+        Assert.True(
+            r.Succeeded,
+            string.Join(" | ", r.Diagnostics.Select(diagnostic => diagnostic.Error)));
+        var model = r.Hir.EffectAnalysis!.Model;
+        return (r, model);
     }
 
-    private static QOperation Op(QoraParseResult r, string name)
+    private static QOperation Op(Compilation r, string name)
     {
-        var analyzed = r.AnalyzedIr ?? r.Ir!;
+        var analyzed = r.Hir.EffectAnalysis!.Program;
         return analyzed.Operations.FirstOrDefault(o => o.Name == name)
                ?? analyzed.Operations.Single(o => o.DisplayName == name);
     }
@@ -35,7 +37,7 @@ public class EffectAnalysisTests
     private static QubitRef Whole(string reg) => new(reg, null);
 
     /// <summary>The events one leaf statement emitted (empty for a container or a classical statement).</summary>
-    private static List<QubitEvent> EventsOf(SemanticModel m, QOperation op, QStmt stmt) =>
+    private static List<QubitEvent> EventsOf(HirSemanticModel m, QOperation op, QStmt stmt) =>
         m.QubitEvents(op.Id).Where(e => e.StmtId == stmt.Id).ToList();
 
     /// <summary>Reconstruct the old per-statement views from a statement's events: TOUCHED is every qubit it
@@ -329,8 +331,8 @@ public class EffectAnalysisTests
         }
 
         // pure analysis: emission is untouched
-        Assert.Contains("h q[0];", r.Qasm);
-        Assert.Contains("cx q[0], q[1];", r.Qasm);
+        Assert.Contains("h q[0];", r.Targets.OpenQasm!.Text);
+        Assert.Contains("cx q[0], q[1];", r.Targets.OpenQasm!.Text);
     }
 
     // --- 17. rung ② liveness (DERIVED, no storage): LiveRange is min/max-Order over a qubit's events —
@@ -562,16 +564,13 @@ public class EffectAnalysisTests
         var (r, m) = Compile(
             "operation Foo(p: Qubit){ X(p); }\n" +
             "operation Main(){ use a=Qubit[1]; use h=Qubit[1]; use o=Qubit[1]; X(a[0]); H(h[0]); var b: bit = M(o[0]); Foo(a[0]); }");
-        var report = UncomputeReport.Format(r.AnalyzedIr, m);
+        var report = UncomputeReport.Format(r.Hir.EffectAnalysis!.Program, m);
 
         Assert.Contains("p: input (parameter) — caller-owned, not an ancilla", report);                          // param = input
         Assert.Contains("a: ancilla, cleanup candidate — safe to uncompute", report);                        // clean scratch
         Assert.Contains("h: ancilla, cleanup candidate — NOT uncomputable: non-qfree write", report);        // H-born
         Assert.Contains("o: ancilla, measured — promoted to output, not a cleanup candidate", report);                          // read out
 
-        // nothing to say ⇒ empty (no model / no program)
-        Assert.Equal(string.Empty, UncomputeReport.Format(r.AnalyzedIr, null));
-        Assert.Equal(string.Empty, UncomputeReport.Format(null, m));
     }
 
     // --- 27. co-written partners (adversarially found): a statement that WRITES q and another qubit at once
@@ -639,7 +638,7 @@ public class EffectAnalysisTests
         Assert.False(call.Irreversible);                      // the Measure kind carries the irreversibility
 
         Assert.False(m.IsCleanupCandidate(main.Id, Whole("o")));
-        Assert.Contains("o: ancilla, measured — promoted to output, not a cleanup candidate", UncomputeReport.Format(r.AnalyzedIr, m));
+        Assert.Contains("o: ancilla, measured — promoted to output, not a cleanup candidate", UncomputeReport.Format(r.Hir.EffectAnalysis!.Program, m));
     }
 
     // --- 30. clause-(c) window boundaries: a source killed AT the death statement blocks; one killed strictly
@@ -736,7 +735,7 @@ public class EffectAnalysisTests
                 Within: new List<QStmt> { xStmt },
                 Apply: new List<QStmt> { new QGate(new List<string>(), "CNOT", new List<QArg> { new QQubitArg("a", "0"), new QQubitArg("d", "0") }) }),
         }) });
-        var m = new SemanticModel();
+        var m = new HirSemanticModel();
         EffectAnalysis.Run(program, m);
         var op = program.Operations.Single();
 
@@ -761,7 +760,7 @@ public class EffectAnalysisTests
         var (r, m) = Compile(
             "operation Prep(p: Qubit[]){ X(p[0]); }\n" +
             "operation Main(){ use w=Qubit[2]; Prep(w); }");
-        var report = UncomputeReport.Format(r.AnalyzedIr, m);
+        var report = UncomputeReport.Format(r.Hir.EffectAnalysis!.Program, m);
 
         Assert.Contains("Prep", report);                              // the specialization row exists
         Assert.Contains("p: input (parameter) — caller-owned, not an ancilla", report);
@@ -769,7 +768,7 @@ public class EffectAnalysisTests
 
         // the generic DEF itself was never analyzed (only its specializations were) — never a vacuous safe
         Assert.Equal(UncomputeBlocker.NotAnalyzed,
-            m.UncomputeSafety(r.Ir!.Operations.Single(o => o.Name == "Prep"), Whole("p")).Blocker);
+            m.UncomputeSafety(r.Hir.Resolved!.Program!.Operations.Single(o => o.Name == "Prep"), Whole("p")).Blocker);
     }
 
     // --- 36. per-element refinement: one blocked element must not hide that the others are clean candidates ---
@@ -778,7 +777,7 @@ public class EffectAnalysisTests
     public void ReportNamesCleanElementsWhenTheRegisterIsBlocked()
     {
         var (r, m) = Compile("operation Main(){ use q=Qubit[2]; X(q[0]); H(q[1]); }");
-        var report = UncomputeReport.Format(r.AnalyzedIr, m);
+        var report = UncomputeReport.Format(r.Hir.EffectAnalysis!.Program, m);
 
         Assert.Contains("NOT uncomputable: non-qfree write", report);       // whole-register headline
         Assert.Contains("per element: q[0] safe cleanup candidate", report);        // the clean element is named
@@ -858,7 +857,7 @@ public class EffectAnalysisTests
                     G("X", new QQubitArg("s", "0")),
                 }),
         });
-        var m = new SemanticModel();
+        var m = new HirSemanticModel();
         EffectAnalysis.Run(new QProgram(new List<QOperation> { op }), m);
         Assert.Equal(UncomputeBlocker.SourceDied, m.UncomputeSafety(op, Whole("a")).Blocker);
     }
@@ -952,7 +951,7 @@ public class EffectAnalysisTests
                 Within: new List<QStmt> { w1, w2 },
                 Apply: new List<QStmt> { G("CNOT", new QQubitArg("a", "0"), new QQubitArg("o", "0")) }),
         });
-        var m = new SemanticModel();
+        var m = new HirSemanticModel();
         EffectAnalysis.Run(new QProgram(new List<QOperation> { op }), m);
 
         var all = m.QubitEvents(op.Id);
@@ -975,7 +974,7 @@ public class EffectAnalysisTests
     {
         var (r, m) = Compile("operation Main(){ use q=Qubit[2]; X(q[1]); var b: bit = M(q[0]); }");
         Assert.Contains("q: ancilla, measured — promoted to output, not a cleanup candidate — per element: q[1] safe cleanup candidate",
-            UncomputeReport.Format(r.AnalyzedIr, m));
+            UncomputeReport.Format(r.Hir.EffectAnalysis!.Program, m));
     }
 
     // --- 46. one call that measures one argument and resets another: the per-qubit Measure/Write +
@@ -1018,7 +1017,7 @@ public class EffectAnalysisTests
         var v1 = m1.UncomputeSafety(main1, At("a", 1));
         Assert.Equal(UncomputeBlocker.CoWrittenPartner, v1.Blocker);
         Assert.Equal(main1.Body[1].Id, v1.Culprit!.StmtId);              // the Bcast call itself
-        Assert.DoesNotContain("a[1] safe cleanup candidate", UncomputeReport.Format(r1.AnalyzedIr, m1));
+        Assert.DoesNotContain("a[1] safe cleanup candidate", UncomputeReport.Format(r1.Hir.EffectAnalysis!.Program, m1));
 
         // plain broadcast — same hole, same block
         var (r2, m2) = Compile("operation Main(){ use a=Qubit[2]; X(a); var c: bit = M(a[0]); }");
@@ -1053,7 +1052,7 @@ public class EffectAnalysisTests
     {
         var (r, m) = Compile("operation Main(){ use q=Qubit[1]; X(q[0]); }");
         Assert.Throws<System.InvalidOperationException>(
-            () => EffectAnalysis.Run(r.AnalyzedIr!, m));                 // same ops, same model → QINTERNAL
+            () => EffectAnalysis.Run(r.Hir.EffectAnalysis!.Program!, m));                 // same ops, same model → QINTERNAL
     }
 
     // --- 36b. per-element "same reason" means same blocker AND same culprit STATEMENT: an element blocked by a
@@ -1067,7 +1066,7 @@ public class EffectAnalysisTests
         // a[1]: blocked CoWrittenPartner too — but by the broadcast X(a), a different statement and story
         var (r, m) = Compile(
             "operation Main(){ use a=Qubit[2]; use x=Qubit[1]; X(x[0]); SWAP(a[0], x[0]); X(a); }");
-        var report = UncomputeReport.Format(r.AnalyzedIr, m);
+        var report = UncomputeReport.Format(r.Hir.EffectAnalysis!.Program, m);
 
         Assert.Contains("co-written partner `x[0]`", report);                        // headline: the SWAP story
         Assert.Contains("a[1] blocked: statement-wide write of `a`", report);        // a[1]: its own story
@@ -1118,7 +1117,7 @@ public class EffectAnalysisTests
             new QGate(new List<string>(), "X", new List<QArg> { new QQubitArg("n", "0") }),
         });
         var ex = Assert.Throws<System.InvalidOperationException>(
-            () => EffectAnalysis.Run(new QProgram(new List<QOperation> { op }), new SemanticModel()));
+            () => EffectAnalysis.Run(new QProgram(new List<QOperation> { op }), new HirSemanticModel()));
         Assert.Contains("before any birth", ex.Message);
         Assert.Contains("only a `use` may create", ex.Message);
     }
@@ -1155,7 +1154,7 @@ public class EffectAnalysisTests
         var (r, m) = Compile(
             "operation Bcast(p: Qubit[]){ for i in 0..1 { X(p[i]); } }\n" +
             "operation Main(){ use a=Qubit[2]; Bcast(a); var c: bit = M(a[0]); }");
-        var report = UncomputeReport.Format(r.AnalyzedIr, m);
+        var report = UncomputeReport.Format(r.Hir.EffectAnalysis!.Program, m);
         Assert.Contains("a: ancilla, measured — promoted to output, not a cleanup candidate", report);                    // headline: a[0] measured
         Assert.Contains("a[1] blocked: statement-wide write of `a`", report);        // element reason rendered
     }

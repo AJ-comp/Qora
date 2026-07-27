@@ -1,3 +1,5 @@
+using Qora.Compiler;
+
 namespace Qora.Ir.Passes;
 
 /// <summary>
@@ -74,7 +76,38 @@ public sealed record OpEffectSummary(
     IReadOnlySet<QubitRef> ParamModified,
     IReadOnlySet<QubitRef> ParamModifiedNonQfree,
     IReadOnlySet<QubitRef> ParamMeasured,
-    bool Irreversible);
+    bool Irreversible)
+{
+    private IReadOnlySet<QubitRef> _paramTouched = HirCollections.FreezeSet(ParamTouched);
+    private IReadOnlySet<QubitRef> _paramModified = HirCollections.FreezeSet(ParamModified);
+    private IReadOnlySet<QubitRef> _paramModifiedNonQfree =
+        HirCollections.FreezeSet(ParamModifiedNonQfree);
+    private IReadOnlySet<QubitRef> _paramMeasured = HirCollections.FreezeSet(ParamMeasured);
+
+    public IReadOnlySet<QubitRef> ParamTouched
+    {
+        get => _paramTouched;
+        init => _paramTouched = HirCollections.FreezeSet(value);
+    }
+
+    public IReadOnlySet<QubitRef> ParamModified
+    {
+        get => _paramModified;
+        init => _paramModified = HirCollections.FreezeSet(value);
+    }
+
+    public IReadOnlySet<QubitRef> ParamModifiedNonQfree
+    {
+        get => _paramModifiedNonQfree;
+        init => _paramModifiedNonQfree = HirCollections.FreezeSet(value);
+    }
+
+    public IReadOnlySet<QubitRef> ParamMeasured
+    {
+        get => _paramMeasured;
+        init => _paramMeasured = HirCollections.FreezeSet(value);
+    }
+}
 
 /// <summary>One parent edge of a <see cref="QubitNode"/>: the value was made from node <see cref="NodeId"/>,
 /// accessed THROUGH the reference <see cref="Via"/>. Via keeps the access BREADTH: a loop-blanketed read
@@ -98,7 +131,16 @@ public sealed record QubitNode(
     QubitRef Qubit,
     int Version,
     IReadOnlyList<QubitEdge> Parents,
-    bool IsParamSeed);
+    bool IsParamSeed)
+{
+    private IReadOnlyList<QubitEdge> _parents = HirCollections.Freeze(Parents);
+
+    public IReadOnlyList<QubitEdge> Parents
+    {
+        get => _parents;
+        init => _parents = HirCollections.Freeze(value);
+    }
+}
 
 /// <summary>
 /// One operation's qubit graph — the value-genealogy DAG built by <see cref="EffectAnalysis"/> WITH the event
@@ -114,7 +156,7 @@ public sealed class QubitGraph
     private readonly Dictionary<string, int> _paramSeedByReg = new();
     private readonly Dictionary<string, int> _versionByReg = new();
 
-    public IReadOnlyList<QubitNode> Nodes => _nodes;
+    public IReadOnlyList<QubitNode> Nodes => HirCollections.Freeze(_nodes);
     public QubitNode Node(int id) => _nodes[id];
 
     /// <summary>The initial "value from outside" node of a qubit parameter register, if any.</summary>
@@ -140,7 +182,7 @@ public sealed class QubitGraph
 }
 
 /// <summary>Why a qubit is NOT safely auto-uncomputable — <see cref="None"/> means it is safe. Two values are
-/// RUNG-1 rulings relayed by <see cref="SemanticModel.UncomputeSafety"/> rather than safety clauses of its own:
+/// RUNG-1 rulings relayed by <see cref="HirSemanticModel.UncomputeSafety"/> rather than safety clauses of its own:
 /// <see cref="NotACleanupCandidate"/> (not an ancilla at all — a caller-owned parameter or an unknown name) and
 /// <see cref="Measured"/> (an ancilla promoted to OUTPUT — its value was delivered, and a collapse has no
 /// unitary inverse either; the culprit is the measuring event). The rest are one value per safety clause:
@@ -181,7 +223,7 @@ public sealed record UncomputeVerdict(UncomputeBlocker Blocker, QubitEvent? Culp
 /// extend the model with such identity (and dynamic-alias policy) before using failed proofs as a rewrite
 /// work list. <see cref="LoopBound"/> is the undetermined loop upper bound when <see cref="Index"/> is a
 /// <c>for</c> variable, and null for any other runtime index expression.</summary>
-public sealed record UnprovenIndex(string Op, string Array, string Index, string? LoopBound, QSpan? Span);
+public sealed record UnprovenIndex(string Op, string Array, string Index, string? LoopBound, SourceSpan? Span);
 
 /// <summary>One outstanding "re-check after monomorphization" PROMISE (the deferral ledger): a size-dependent
 /// judgement the validator postponed because <see cref="Array"/> is a parameter whose length only
@@ -194,65 +236,299 @@ public sealed record UnprovenIndex(string Op, string Array, string Index, string
 /// the postponed judgements would silently evaporate on any no-specialization path. (Deferred ALIASING
 /// precision — QSEM014's post-mono domain re-check — is NOT ledgered yet: a no-pair backend must decide
 /// its own distinctness policy before it can dispose of those.)</summary>
-public sealed record DeferredSizeCheck(string Op, string Array, string Access, string Reason, QSpan? Span);
+public sealed record DeferredSizeCheck(string Op, string Array, string Access, string Reason, SourceSpan? Span);
 
 /// <summary>
-/// The PERSISTENT semantic side table: everything <see cref="SymbolTableBuilder"/> proved during the final
-/// validation, keyed by stable node <see cref="QStmt.Id"/>s and carried to the END of the pipeline instead
-/// of being rebuilt on demand (Roslyn's SemanticModel / rust-analyzer's AstId-keyed queries, in miniature).
-/// Passes that run AFTER the model is built never invalidate it: rewrites via <c>with</c> keep the node's
-/// Id, and passes that COPY subtrees (<see cref="ConjugationLowering"/>, <see cref="AdjointMaterializer"/>)
-/// register each copy's lineage through <see cref="RecordDerivation"/>, so a lookup on a copied node walks
-/// the derivation chain back to the node the model actually saw. <see cref="EffectAnalysis"/> stores its
-/// per-operation qubit-event stream (the use/def timeline) and per-operation summary here too, and <see cref="NameMangler"/> records each
-/// declaration's EMITTED name — so the model holds both name domains explicitly: the SOURCE name (what the
-/// user wrote, <see cref="Symbol.SourceName"/>, frozen at validation) and the emitted name (what the QASM
-/// says, <see cref="FindEmittedName"/>, written at mangling). Each fact has exactly ONE producer pass;
-/// facts are only ever added, never rewritten.
+/// The persistent semantic side table produced for one exact HIR generation. Cross-generation node
+/// lineage belongs to Compilation's HIR graph, and emitted names belong to each target artifact. This
+/// model therefore contains only HIR facts: scopes, symbols, validation results, and the temporary
+/// HIR-native quantum analysis that remains until the MIR cleanup planner replaces it.
 /// </summary>
-public sealed class SemanticModel
+public sealed class HirSemanticModel
 {
-    private readonly Dictionary<ScopeId, Scope> _scopeById = new();
-    private readonly Dictionary<int, Scope> _rootScopeByOp = new();     // QOperation.Id → root scope
-    private readonly Dictionary<int, Symbol> _symbolByDeclId = new();   // declaring node Id → Symbol
-    private readonly Dictionary<int, int> _derivedFrom = new();         // copied node Id → source node Id
+    private static readonly IReadOnlyDictionary<ScopeId, Scope> EmptyScopes =
+        HirCollections.Freeze(new Dictionary<ScopeId, Scope>());
+    private static readonly IReadOnlyDictionary<int, Scope> EmptyRootScopes =
+        HirCollections.Freeze(new Dictionary<int, Scope>());
+
+    /// <summary>
+    /// Validation-owned facts shared by the validation snapshot and its effect-analysis fork. Effect
+    /// analysis never writes this state; its dictionaries live directly on each model instance below.
+    /// Grouping the facts makes the sharing boundary explicit and prevents a fork from copying a second,
+    /// drift-prone symbol/scope truth.
+    /// </summary>
+    private sealed class ValidationFacts
+    {
+        internal readonly List<UnprovenIndex> UnprovenIndexes = new();
+        internal readonly List<DeferredSizeCheck> DeferredSizeChecks = new();
+        internal readonly Dictionary<int, bool> WillBeRecheckedByOp = new();
+        internal readonly Dictionary<int, IReadOnlyDictionary<string, long>>
+            RequiredArgLengthsByOp = new();
+        internal HirScopeGraph? ScopeGraph;
+        internal HirValidationOutcome? Outcome;
+        internal bool ProducerCompleted;
+        internal bool IsSealed;
+    }
+
     private readonly Dictionary<int, IReadOnlyList<QubitEvent>> _qubitEventsByOp = new(); // QOperation.Id → program-ordered qubit-event stream
     private readonly Dictionary<int, QubitGraph> _qubitGraphByOp = new();   // QOperation.Id → value-genealogy DAG
     private readonly Dictionary<int, OpEffectSummary> _effectSummaryByOpId = new(); // QOperation.Id → summary
-    private readonly Dictionary<int, string> _emittedNameByDeclId = new(); // declaring node Id → emitted (post-mangling) name
     private readonly HashSet<int> _nonInvertibleCallStmts = new();      // StmtIds of CALL statements whose callee the Inverter cannot invert
-    private readonly List<UnprovenIndex> _unprovenIndexes = new();      // rung B′: accesses whose bounds proof never settled
-    private readonly List<DeferredSizeCheck> _deferredSizeChecks = new(); // rung B′: judgements postponed to the post-mono re-check (empty on the final model today)
-    private readonly Dictionary<int, bool> _willBeRecheckedByOp = new();  // rung B′: the walk's per-op liveness prediction — does the post-mono re-check come?
-    private readonly Dictionary<int, IReadOnlyDictionary<string, long>> _requiredArgLengthsByOp = new(); // rung B′/P4: op → classical-array param → min length
-    private ProgramSymbolGraph? _programSymbols;
+    private readonly ValidationFacts _validation;
+    private readonly HirSnapshot? _sourceSnapshot;
+    private readonly HirSemanticPhase _artifactPhase;
+    private bool _nonInvertibleCallSweepCompleted;
+    private bool _effectAnalysisCompleted;
+    private bool _effectsSealed;
 
-    internal void AddOperation(QOperation op, Scope root)
+    /// <summary>
+    /// Creates detached mutable facts for focused pass tests. A detached model can never be published as a
+    /// <see cref="HirSemanticArtifact"/>; production validation must use the snapshot-bound constructor.
+    /// </summary>
+    internal HirSemanticModel()
+        : this(
+            sourceSnapshot: null,
+            HirSemanticPhase.Validation,
+            new ValidationFacts())
     {
-        _rootScopeByOp[op.Id] = root;
-        RegisterScopeTree(root);
-        foreach (var sym in root.AllSymbols())
-            if (sym.DeclarationNodeId is int declarationId)
-                _symbolByDeclId[declarationId] = sym;
     }
 
-    private void RegisterScopeTree(Scope scope)
+    internal HirSemanticModel(HirSnapshot sourceSnapshot)
+        : this(
+            sourceSnapshot ?? throw new ArgumentNullException(nameof(sourceSnapshot)),
+            HirSemanticPhase.Validation,
+            new ValidationFacts())
     {
-        foreach (var item in scope.ScopeTree())
-            _scopeById[item.Id] = item;
+    }
+
+    private HirSemanticModel(
+        HirSnapshot? sourceSnapshot,
+        HirSemanticPhase artifactPhase,
+        ValidationFacts validation)
+    {
+        if (!Enum.IsDefined(artifactPhase))
+            throw new ArgumentOutOfRangeException(
+                nameof(artifactPhase),
+                artifactPhase,
+                "unknown HIR semantic phase");
+
+        _sourceSnapshot = sourceSnapshot;
+        _artifactPhase = artifactPhase;
+        _validation = validation;
     }
 
     /// <summary>
-    /// Register the program declaration graph and index every source declaration by its QIR node Id.
-    /// Namespace/callable ownership remains in <see cref="ProgramSymbolGraph"/>; this index only joins a
-    /// declaration node to the corresponding semantic symbol.
+    /// Proves that this model was allocated for one exact HIR snapshot and semantic phase. Snapshot IDs are
+    /// deliberately insufficient because a detached tree may reuse an otherwise valid ID.
     /// </summary>
-    internal void SetProgramSymbols(ProgramSymbolGraph programSymbols)
+    internal bool IsBoundTo(
+        HirSnapshot sourceSnapshot,
+        HirSemanticPhase artifactPhase) =>
+        ReferenceEquals(_sourceSnapshot, sourceSnapshot)
+        && _artifactPhase == artifactPhase;
+
+    internal HirValidationOutcome? ValidationOutcome => _validation.Outcome;
+
+    /// <summary>
+    /// A model becomes publishable only after the phase-specific producer has sealed all of its sinks.
+    /// This prevents an exact source token from being attached before validation/effect analysis completed.
+    /// </summary>
+    internal bool IsSealedForArtifact(HirSemanticPhase artifactPhase)
     {
-        _programSymbols = programSymbols;
-        foreach (var sym in programSymbols.AllSymbols)
-            if (sym.DeclarationNodeId is int declarationId)
-                _symbolByDeclId[declarationId] = sym;
+        if (_artifactPhase != artifactPhase
+            || !_validation.ProducerCompleted
+            || _validation.Outcome is null
+            || !_validation.IsSealed
+            || _validation.ScopeGraph is not { IsSealed: true }
+            || !_effectsSealed)
+        {
+            return false;
+        }
+
+        return artifactPhase switch
+        {
+            HirSemanticPhase.Validation => !_effectAnalysisCompleted,
+            HirSemanticPhase.EffectAnalysis => _effectAnalysisCompleted,
+            _ => false,
+        };
+    }
+
+    /// <summary>
+    /// Create the semantic model for the effect-analyzed HIR snapshot. Validation facts and the unified
+    /// scope graph remain the one shared authority, while every effect-owned table starts empty. Therefore
+    /// running <see cref="EffectAnalysis"/> on the returned model cannot mutate the validation-only model.
+    /// </summary>
+    internal HirSemanticModel ForkForEffectAnalysis()
+    {
+        if (!_validation.IsSealed
+            || _validation.ScopeGraph is not { IsSealed: true }
+            || _validation.Outcome is not { IsAccepted: true })
+            throw new InvalidOperationException(
+                "QINTERNAL: accepted validation facts and their scope graph must be sealed "
+                + "before effect analysis is forked");
+        if (_artifactPhase != HirSemanticPhase.Validation
+            || _sourceSnapshot is null)
+        {
+            throw new InvalidOperationException(
+                "QINTERNAL: only an exact snapshot-bound validation artifact can start effect analysis");
+        }
+        if (_qubitEventsByOp.Count != 0
+            || _qubitGraphByOp.Count != 0
+            || _effectSummaryByOpId.Count != 0
+            || _nonInvertibleCallStmts.Count != 0
+            || _nonInvertibleCallSweepCompleted
+            || _effectAnalysisCompleted)
+            throw new InvalidOperationException(
+                "QINTERNAL: only a validation-only HIR semantic model can be forked for effect analysis");
+        return new HirSemanticModel(
+            _sourceSnapshot,
+            HirSemanticPhase.EffectAnalysis,
+            _validation);
+    }
+
+    /// <summary>
+    /// Freeze a validation result before a <c>HirSemanticArtifact</c> publishes it. The validation-only
+    /// model cannot later acquire effect facts; effect analysis must use a dedicated fork.
+    /// </summary>
+    internal void SealValidationArtifact(IEnumerable<QoraError> diagnostics)
+    {
+        ArgumentNullException.ThrowIfNull(diagnostics);
+        RequireValidationOpen();
+        if (_artifactPhase != HirSemanticPhase.Validation
+            || _sourceSnapshot is null
+            || !_validation.ProducerCompleted)
+        {
+            throw new InvalidOperationException(
+                "QINTERNAL: a validation artifact requires one completed snapshot-bound validation pass");
+        }
+        var scopeGraph = _validation.ScopeGraph
+            ?? throw new InvalidOperationException(
+                "QINTERNAL: a validation artifact requires a completed HIR scope graph");
+        if (_qubitEventsByOp.Count != 0
+            || _qubitGraphByOp.Count != 0
+            || _effectSummaryByOpId.Count != 0
+            || _nonInvertibleCallStmts.Count != 0)
+        {
+            throw new InvalidOperationException(
+                "QINTERNAL: a validation artifact cannot contain effect-analysis facts");
+        }
+
+        _validation.Outcome = new HirValidationOutcome(diagnostics);
+        scopeGraph.Seal();
+        _validation.IsSealed = true;
+        _effectsSealed = true;
+    }
+
+    /// <summary>Freeze an effect-analysis fork before publishing its semantic artifact.</summary>
+    internal void SealEffectAnalysisArtifact()
+    {
+        if (_artifactPhase != HirSemanticPhase.EffectAnalysis
+            || _sourceSnapshot is null
+            || !_validation.IsSealed
+            || _validation.ScopeGraph is not { IsSealed: true })
+        {
+            throw new InvalidOperationException(
+                "QINTERNAL: an effect artifact requires an exact source and sealed validation facts");
+        }
+        if (_effectsSealed)
+            throw new InvalidOperationException(
+                "QINTERNAL: effect-analysis facts were already sealed");
+
+        var expectedOperations = _sourceSnapshot.Program.Operations
+            .Select(operation => operation.Id)
+            .ToHashSet();
+        if (!expectedOperations.SetEquals(_effectSummaryByOpId.Keys)
+            || !expectedOperations.SetEquals(_qubitEventsByOp.Keys)
+            || !expectedOperations.SetEquals(_qubitGraphByOp.Keys))
+        {
+            throw new InvalidOperationException(
+                "QINTERNAL: effect analysis did not publish one coherent summary, event stream, "
+                + "and qubit graph for every source operation");
+        }
+        if (!_nonInvertibleCallSweepCompleted)
+        {
+            throw new InvalidOperationException(
+                "QINTERNAL: effect analysis did not complete its non-invertible-call sweep");
+        }
+        foreach (var statementId in _nonInvertibleCallStmts)
+        {
+            if (!_sourceSnapshot.Structure.Contains(statementId)
+                || _sourceSnapshot.Structure.RequireKind(statementId) != HirNodeKind.Statement)
+            {
+                throw new InvalidOperationException(
+                    $"QINTERNAL: effect analysis recorded non-invertible call statement "
+                    + $"{statementId} outside its exact source snapshot");
+            }
+        }
+
+        _effectAnalysisCompleted = true;
+        _effectsSealed = true;
+    }
+
+    /// <summary>
+    /// Mark the end of the validation producer after its collect-all walk has populated every operation's
+    /// scope and recheck verdict. Sealing is deliberately separate: this completion proof is recorded by
+    /// the producer, while publication later freezes the graph and all fact sinks.
+    /// </summary>
+    internal void CompleteValidation(QProgram program)
+    {
+        ArgumentNullException.ThrowIfNull(program);
+        RequireValidationOpen();
+        if (_artifactPhase != HirSemanticPhase.Validation)
+            throw new InvalidOperationException(
+                "QINTERNAL: only a validation-phase model can complete validation");
+        if (_validation.ProducerCompleted)
+            throw new InvalidOperationException(
+                "QINTERNAL: validation was already marked complete");
+        if (_sourceSnapshot is { } source
+            && !ReferenceEquals(source.Program, program))
+        {
+            throw new InvalidOperationException(
+                "QINTERNAL: validation completed against a different HIR program than its exact source");
+        }
+
+        var scopeGraph = _validation.ScopeGraph
+            ?? throw new InvalidOperationException(
+                "QINTERNAL: validation completed without a HIR scope graph");
+        var expectedOperations = program.Operations
+            .Select(operation => operation.Id)
+            .ToHashSet();
+        if (!expectedOperations.SetEquals(_validation.WillBeRecheckedByOp.Keys))
+        {
+            throw new InvalidOperationException(
+                "QINTERNAL: validation did not publish one recheck verdict for every source operation");
+        }
+        foreach (var operation in program.Operations)
+        {
+            if (scopeGraph.FindCallableScope(operation.Id) is null
+                || scopeGraph.FindDeclaration(operation.Id) is not
+                    { Kind: SymbolKind.Operation })
+            {
+                throw new InvalidOperationException(
+                    $"QINTERNAL: validation did not publish the callable symbol and scope for "
+                    + $"operation {operation.Id}");
+            }
+        }
+
+        _validation.ProducerCompleted = true;
+    }
+
+    /// <summary>
+    /// Register the one HIR scope graph. It already owns the scope, symbol, declaration, callable-root, and
+    /// source-site indexes, so this model must not mirror those tables.
+    /// </summary>
+    internal void SetScopeGraph(HirScopeGraph scopeGraph)
+    {
+        ArgumentNullException.ThrowIfNull(scopeGraph);
+        RequireValidationOpen();
+        if (scopeGraph.IsSealed)
+            throw new InvalidOperationException(
+                "QINTERNAL: a mutable validation model cannot attach an already-published HIR scope graph");
+        if (_validation.ScopeGraph is not null
+            && !ReferenceEquals(_validation.ScopeGraph, scopeGraph))
+            throw new InvalidOperationException(
+                "QINTERNAL: HirSemanticModel already owns a different HIR scope graph");
+        _validation.ScopeGraph = scopeGraph;
     }
 
     /// <summary>Store an operation's qubit-event stream — its leaf statements' reads/writes/measures in
@@ -262,7 +538,8 @@ public sealed class SemanticModel
     /// storage, registered as a known design gap).</summary>
     internal void AddQubitEvents(int opId, IReadOnlyList<QubitEvent> events)
     {
-        if (!_qubitEventsByOp.TryAdd(opId, events))
+        RequireEffectsOpen();
+        if (!_qubitEventsByOp.TryAdd(opId, HirCollections.Freeze(events)))
             throw new System.InvalidOperationException(
                 $"QINTERNAL: op {opId} already has an event stream — re-analysis would silently replace add-only facts");
     }
@@ -271,6 +548,7 @@ public sealed class SemanticModel
     /// event stream, coherence-swept before it lands here. Add-only, like the stream.</summary>
     internal void AddQubitGraph(int opId, QubitGraph graph)
     {
+        RequireEffectsOpen();
         if (!_qubitGraphByOp.TryAdd(opId, graph))
             throw new System.InvalidOperationException(
                 $"QINTERNAL: op {opId} already has a qubit graph — re-analysis would silently replace add-only facts");
@@ -286,20 +564,34 @@ public sealed class SemanticModel
     /// cannot actually uncompute — keeping the safety verdict and the Inverter (the single authority) in agreement.</summary>
     internal void RecordNonInvertibleCallStmts(IEnumerable<int> stmtIds)
     {
-        foreach (var id in stmtIds) _nonInvertibleCallStmts.Add(id);
+        RequireEffectsOpen();
+        ArgumentNullException.ThrowIfNull(stmtIds);
+        if (_nonInvertibleCallSweepCompleted)
+            throw new InvalidOperationException(
+                "QINTERNAL: the non-invertible-call sweep was already recorded");
+        foreach (var id in stmtIds)
+            _nonInvertibleCallStmts.Add(id);
+        _nonInvertibleCallSweepCompleted = true;
     }
 
     /// <summary>Record one unproven indexed access (rung B′) — produced by <see cref="QoraValidator"/> during
     /// the bounds-proof walk, add-only like every other fact. The backend decides the disposition; the
     /// OpenQASM path derives source-distinct QSEM030 diagnostics from this list.</summary>
-    internal void AddUnprovenIndex(UnprovenIndex access) => _unprovenIndexes.Add(access);
+    internal void AddUnprovenIndex(UnprovenIndex access)
+    {
+        RequireValidationOpen();
+        _validation.UnprovenIndexes.Add(access);
+    }
 
     /// <summary>Record an operation's array-argument CONTRACT (rung B′/P4): the minimum length each of its
     /// classical-array parameters requires, settled after call-graph propagation. Single producer
     /// (<see cref="QoraValidator"/>, once per validation), add-only like every other fact.</summary>
     internal void SetRequiredArgLengths(int opId, IReadOnlyDictionary<string, long> needs)
     {
-        if (!_requiredArgLengthsByOp.TryAdd(opId, needs))
+        RequireValidationOpen();
+        if (!_validation.RequiredArgLengthsByOp.TryAdd(
+                opId,
+                HirCollections.Freeze(needs)))
             throw new System.InvalidOperationException(
                 $"QINTERNAL: op {opId} already has an array-argument contract — re-validation would silently replace add-only facts");
     }
@@ -308,13 +600,14 @@ public sealed class SemanticModel
     /// when the op demands nothing. The call-site QSEM016s are DERIVED from this table; consumers (signature
     /// help, docs, backends) can read the same contract.</summary>
     public IReadOnlyDictionary<string, long>? RequiredArgLengths(int opId) =>
-        _requiredArgLengthsByOp.TryGetValue(opId, out var needs) ? needs : null;
+        _validation.RequiredArgLengthsByOp.TryGetValue(opId, out var needs) ? needs : null;
 
     /// <summary>Every indexed access this validation could not prove in bounds, in walk order — empty when
     /// the whole program is proven. Non-empty NEVER coexists with a successful OpenQASM compile because its
     /// target-policy pass derives QSEM030. Entries currently provide diagnostic context only, not the stable
     /// site identity a future checked-access lowering would require.</summary>
-    public IReadOnlyList<UnprovenIndex> UnprovenIndexes => _unprovenIndexes;
+    public IReadOnlyList<UnprovenIndex> UnprovenIndexes =>
+        HirCollections.Freeze(_validation.UnprovenIndexes);
 
     /// <summary>The deferral ledger (see <see cref="DeferredSizeCheck"/>): the size-dependent judgements
     /// THIS validation postponed to the post-monomorphization re-check, in walk order. On a SUCCESSFUL
@@ -325,11 +618,16 @@ public sealed class SemanticModel
     /// re-validation keeps the post-mono model, whose ledger is empty like any sized program's. A backend
     /// that skips specialization must dispose of every entry (runtime checks) instead of letting them
     /// evaporate.</summary>
-    public IReadOnlyList<DeferredSizeCheck> DeferredSizeChecks => _deferredSizeChecks;
+    public IReadOnlyList<DeferredSizeCheck> DeferredSizeChecks =>
+        HirCollections.Freeze(_validation.DeferredSizeChecks);
 
     /// <summary>Deferral-ledger sink (rung B′): single producer (<see cref="QoraValidator"/>), recorded
     /// during the bounds walk, add-only like every other fact.</summary>
-    internal void AddDeferredSizeCheck(DeferredSizeCheck deferred) => _deferredSizeChecks.Add(deferred);
+    internal void AddDeferredSizeCheck(DeferredSizeCheck deferred)
+    {
+        RequireValidationOpen();
+        _validation.DeferredSizeChecks.Add(deferred);
+    }
 
     /// <summary>Will the post-monomorphization re-validation come for this operation? The validator's own
     /// PREDICTION, made BEFORE the Monomorphizer runs, from the same transitive reachability (concrete ops
@@ -340,13 +638,14 @@ public sealed class SemanticModel
     /// this validation never saw. This is the ledger's companion question — a <see cref="DeferredSizeCheck"/>
     /// whose op answers false is a promise nothing will ever answer.</summary>
     public bool? WillBeRechecked(int opId) =>
-        _willBeRecheckedByOp.TryGetValue(opId, out var will) ? will : null;
+        _validation.WillBeRecheckedByOp.TryGetValue(opId, out var will) ? will : null;
 
     /// <summary>Liveness-prediction sink (rung B′): single producer (<see cref="QoraValidator"/>, once per
     /// op), add-only — recording the same op twice is a pipeline bug, not a merge.</summary>
     internal void SetWillBeRechecked(int opId, bool willBeRechecked)
     {
-        if (!_willBeRecheckedByOp.TryAdd(opId, willBeRechecked))
+        RequireValidationOpen();
+        if (!_validation.WillBeRecheckedByOp.TryAdd(opId, willBeRechecked))
             throw new System.InvalidOperationException(
                 $"QINTERNAL: op {opId} already has a WillBeRechecked verdict — re-recording would silently replace an add-only fact");
     }
@@ -357,34 +656,33 @@ public sealed class SemanticModel
     public QubitGraph? Graph(int opId) => _qubitGraphByOp.TryGetValue(opId, out var g) ? g : null;
     internal void AddOpEffects(int opId, OpEffectSummary s)
     {
+        RequireEffectsOpen();
         if (!_effectSummaryByOpId.TryAdd(opId, s))
             throw new System.InvalidOperationException(
                 $"QINTERNAL: op {opId} already has an effect summary — re-analysis would silently replace add-only facts");
     }
 
-    /// <summary>Register that node <paramref name="freshId"/> is a copy of <paramref name="sourceId"/>.
-    /// The (source, fresh) order matches <see cref="ReId"/>'s record callback, so a model can be passed
-    /// to it directly as <c>model.RecordDerivation</c>.</summary>
-    public void RecordDerivation(int sourceId, int freshId) => _derivedFrom[freshId] = sourceId;
+    /// <summary>The symbol declared by this node in this exact HIR generation, if any.</summary>
+    public Symbol? FindSymbol(int nodeId) =>
+        _validation.ScopeGraph?.FindDeclaration(nodeId);
 
-    /// <summary>Record the name a declaration EMITS as — written by <see cref="NameMangler"/>, the one pass
-    /// that owns the source-name → emitted-name mapping. Recorded for every declared name (operations,
-    /// parameters, registers, variables, loop variables), renamed or not, so a null lookup MEANS "the
-    /// mangler has not seen this node", never "unchanged".</summary>
-    internal void RecordEmittedName(int declNodeId, string name) => _emittedNameByDeclId[declNodeId] = name;
+    /// <summary>The callable scope of this operation (or of the operation it was derived from), if any.</summary>
+    public Scope? FindRootScope(int opId) =>
+        _validation.ScopeGraph?.FindCallableScope(opId);
 
-    /// <summary>The symbol DECLARED by this node (or by the node it was copied from), if any.</summary>
-    public Symbol? FindSymbol(int nodeId) => Resolve(nodeId, _symbolByDeclId);
+    /// <summary>
+    /// The scope at a stable HIR node-and-role site. A copied owner node follows the same derivation chain
+    /// as declaration lookup before consulting the graph.
+    /// </summary>
+    public Scope? FindScope(HirScopeSite site) =>
+        _validation.ScopeGraph?.FindScope(site);
 
-    /// <summary>The root scope of this operation (or of the operation it was derived from), if any.</summary>
-    public Scope? FindRootScope(int opId) => Resolve(opId, _rootScopeByOp);
+    /// <summary>One HIR scope by semantic scope identity.</summary>
+    public Scope? FindScope(ScopeId scopeId) => _validation.ScopeGraph?.FindScope(scopeId);
 
-    /// <summary>One lexical scope by semantic scope identity.</summary>
-    public Scope? FindScope(ScopeId scopeId) =>
-        _scopeById.TryGetValue(scopeId, out var scope) ? scope : null;
-
-    /// <summary>Every lexical scope in the model, keyed by semantic scope identity.</summary>
-    public IReadOnlyDictionary<ScopeId, Scope> Scopes => _scopeById;
+    /// <summary>Every HIR scope in the model, keyed by semantic scope identity.</summary>
+    public IReadOnlyDictionary<ScopeId, Scope> Scopes =>
+        _validation.ScopeGraph?.Scopes ?? EmptyScopes;
 
     /// <summary>This operation's qubit-event stream (leaf reads/writes/measures in program order), or an
     /// empty list if the model never analyzed this op. Keyed by <c>op.Id</c> directly — events are emitted
@@ -560,7 +858,7 @@ public sealed class SemanticModel
             // that silently as "not contained" would be an unsafe default inside the safety checker.
             if (!containers.TryGetValue(e.StmtId, out var chain))
                 throw new System.InvalidOperationException(
-                    $"UncomputeSafety: statement {e.StmtId} of `{op.Name}`'s event stream is not in the tree passed — pass the operation effect analysis ran on (QoraParseResult.AnalyzedIr), not a later rewritten copy");
+                    $"UncomputeSafety: statement {e.StmtId} of `{op.Name}`'s event stream is not in the supplied HIR snapshot — use Compilation.Hir.EffectAnalysis, the exact generation this analysis describes");
             if (e.Irreversible) return new(UncomputeBlocker.Irreversible, e);                          // (a) lossy touch
             if (e.Kind == QubitEventKind.Write && e.NonQfree)
                 return new(UncomputeBlocker.NonQfreeWrite, e);                                    // (b) superposition (H/Rx/Ry) or phase-permutation (Y/CY)
@@ -639,29 +937,30 @@ public sealed class SemanticModel
     public bool IsSafelyUncomputable(QOperation op, QubitRef q) => UncomputeSafety(op, q).IsSafe;
 
     /// <summary>This operation's effect summary (or its derivation source's), if any.</summary>
-    public OpEffectSummary? FindOpEffects(int opId) => Resolve(opId, _effectSummaryByOpId);
-
-    /// <summary>The name this declaration EMITS as in the final QASM (post-mangling). Null means the
-    /// mangler has not run over this node — NOT "same as source". The source name stays untouched on
-    /// <see cref="Symbol.SourceName"/>; the two are different name domains, each with one home.</summary>
-    public string? FindEmittedName(int nodeId) => Resolve(nodeId, _emittedNameByDeclId);
+    public OpEffectSummary? FindOpEffects(int opId) =>
+        _effectSummaryByOpId.TryGetValue(opId, out var summary) ? summary : null;
 
     /// <summary>Every operation root scope in the model, keyed by operation Id.</summary>
-    public IReadOnlyDictionary<int, Scope> RootScopes => _rootScopeByOp;
+    public IReadOnlyDictionary<int, Scope> RootScopes =>
+        _validation.ScopeGraph?.CallableScopes ?? EmptyRootScopes;
 
     /// <summary>
-    /// The program declaration graph. Namespace and callable ownership lives here; lexical scopes remain
-    /// separately available through <see cref="RootScopes"/> and <see cref="FindScope"/>.
+    /// The unified HIR scope graph containing program, namespace, callable, and lexical scopes.
     /// </summary>
-    public ProgramSymbolGraph? ProgramSymbols => _programSymbols;
+    public HirScopeGraph? ScopeGraph => _validation.ScopeGraph;
 
-    private T? Resolve<T>(int id, Dictionary<int, T> table) where T : class
+    private void RequireValidationOpen()
     {
-        // Fresh Ids are minted after their sources, so a derivation chain strictly decreases — no cycles.
-        while (true)
-        {
-            if (table.TryGetValue(id, out var v)) return v;
-            if (!_derivedFrom.TryGetValue(id, out id)) return null;
-        }
+        if (_validation.IsSealed)
+            throw new InvalidOperationException(
+                "QINTERNAL: validation facts are sealed by an immutable HIR semantic artifact");
     }
+
+    private void RequireEffectsOpen()
+    {
+        if (_effectsSealed)
+            throw new InvalidOperationException(
+                "QINTERNAL: effect facts are sealed by an immutable HIR semantic artifact");
+    }
+
 }

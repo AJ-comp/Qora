@@ -1,4 +1,4 @@
-# Qora v0.30 — complete language reference for AI assistants
+# Qora v0.31 — complete language reference for AI assistants
 
 Qora is a quantum programming language (Q#/C#-flavored syntax) that compiles to OpenQASM 3.
 File extension: `.qor`. This file is the full, authoritative surface spec: everything below is
@@ -16,8 +16,57 @@ VS Code extension: `qora-lang.qora-language` (bundles the compiler; errors as yo
 - The operation named `Main` (in the global namespace) is the entry point: its body becomes the
   QASM top level. Every other operation becomes a `def`. If no `Main` exists, the first operation
   is the entry.
-- Compilation is all-or-nothing: ANY semantic error (codes below) blocks emission and reports every
-  violation at once, each with a source span.
+- Compilation is all-or-nothing: any diagnostic blocks emission. Each reached stage reports all
+  violations it collects, but a failing stage prevents later stages from running. Located diagnostics
+  use a half-open, document-qualified `SourceSpan`, so an imported document's offsets are never
+  interpreted as entry-file offsets.
+- Library API boundary: `QoraParser.Parse` returns a syntax-only `SyntaxSnapshot`; use
+  `QoraCompiler.Compile` for semantic analysis, MIR, diagnostics, and target output. The latter returns
+  one immutable `Compilation`, whose authoritative owners are `Sources`, `Hir`, optional `Mir`,
+  `Links`, `Targets`, and `Diagnostics`. `Sources` preserves every root/import
+  `SourceDocumentSnapshot`, its exact `SyntaxSnapshot`, and revision-qualified `ImportGraph` edges.
+  A public syntax snapshot contains only Qora-owned immutable token/tree projections, captured tree
+  text, and diagnostics. The mutable Janglim AST lives only in an internal transient
+  `SyntaxParseProduct` and is discarded immediately after per-document HIR lowering.
+  The internal `SourceGraphLoader` owns import I/O and per-document parsing/lowering;
+  `ModuleLoader` only merges that prepared graph and never reads or reparses files. Its result also
+  classifies every imported HIR node with a document-qualified `HirNodeIntroduction`.
+- `CompilationSession` owns one logical compilation identity and allocates monotonically unique
+  revisions. `Compilation.ParentRevision` records the actual recompile parent, so two children of the
+  same snapshot receive different revisions without losing their shared ancestry. `QoraCompiler.Compile`
+  starts a new session; `QoraCompiler.Recompile` asks the previous snapshot's session for a child.
+- `CompilationOptions.OutputPlan` is the immutable requested-output contract. It records the exact
+  `HirCompilationGoal`, whether MIR is required, and the backend set. A successful compilation must
+  contain exactly those requested MIR/target artifacts and no unsolicited ones. The current canonical
+  HIR goal is `EffectAnalyzedCanonical`; `CompilationOutputPlan.HirOnly` requests no MIR or target,
+  while `Default` requests MIR plus OpenQASM.
+- A `HirSnapshot` contains structural `QProgram` state and its source map. Validation and effect facts
+  are separate, exact-snapshot `HirSemanticArtifact` values. A validation artifact always owns one
+  immutable `HirValidationOutcome`: `Accepted` has no diagnostics, while `Rejected` owns the exact
+  diagnostics that caused rejection. Compilation diagnostics only add stage/origin metadata to that
+  outcome; they are not a second validation truth. Effect analysis accepts only the exact accepted
+  validation artifact for the same snapshot and records it as `ValidationBasis`. Analysis does not create another
+  structural HIR stage. Query the effect artifact as `Compilation.Hir.EffectAnalysis`. The canonical
+  milestone order is `Lowered -> ImportsExpanded -> MeasurementLowered -> Resolved -> Specialized ->
+  ConjugationLowered -> AdjointMaterialized`; a no-op pass may alias its predecessor but may not move
+  a later milestone backwards.
+  `HirCompilation` also owns the exact `HirLineage` over those same snapshot objects. Identity-preserving
+  `NodeDerivation`, provenance-only `NodeSynthesis`, and source `HirNodeIntroduction` are distinct typed
+  classifications. Every node newly appearing after the first snapshot must have exactly one of them.
+  Semantic lookup follows only identity-preserving edges; provenance queries may follow synthesis.
+  `Compilation.Mir` is a separate typed SSA/CFG snapshot with revision-bound analyses and explicit
+  HIR-to-MIR links. Its cross-stage map gives every HIR semantic symbol one
+  `MirSymbolLoweringDisposition` and every MIR value/storage/qubit one `MirEntityOriginKind`, so
+  unlowered symbols and compiler temporaries are explicit rather than missing links.
+- `Compilation.Targets.Artifacts` is the authoritative backend-keyed target map;
+  `Compilation.Targets.OpenQasm` is the current typed convenience view. The OpenQASM artifact records
+  the exact materialized HIR source and semantic basis it consumed; the current backend is HIR-backed,
+  not MIR-backed. The shared target interface does not force HIR provenance on future backends, and
+  target diagnostics carry the backend plus an exact HIR-or-MIR input identity. A failed compilation
+  retains every artifact already published before the failure, while later artifacts and successful
+  target output are absent. `QasmBackend` accepts only an exact `HirSemanticContext`, produces an
+  `OpenQasmTargetProgram`, and `OpenQasmArtifact.Text` is then derived from that target model by the
+  pure emitter; emitted text is not an independent authoritative input.
 - In the emitted QASM, user-defined names pass through unchanged when they are already safe.
   Namespaces flatten dots with `_` (`MyLib.Bell` -> `MyLib_Bell`), and `_` is appended only when
   an emitted identifier would collide with a keyword, stdgates gate, or another emitted name.
@@ -92,8 +141,6 @@ operation Main()                // global namespace; the entry point; takes NO p
   | `move var values` | transferred | mutable |
 
   For example, declare `operation Increment(var values: int[])` and call `Increment(var values)`.
-  `inout values` remains accepted on either side as a compatibility alias for `var values`, but canonical
-  new code uses `var`.
 - The supported combinations depend on storage shape. `var` and `move var` require a whole
   `int[]`/`float[]`/`angle[]`, because those are the caller-visible mutable reference types in the current
   backend. Read-only `move` accepts any whole array (including `bit[]` and `Qubit[]`) and a whole single
@@ -102,10 +149,10 @@ operation Main()                // global namespace; the entry point; takes NO p
   through gates continue to follow Qora's quantum-state rules, while `move` controls whether the caller may
   use that qubit binding again.
 - A mutable borrow (`var`) requires mutable caller storage, so a `const` array cannot be passed with
-  `var` or its `inout` alias (QSEM024). `move var` is different: it transfers the binding instead of
-  borrowing it, so a `const` binding MAY be passed with `move var` and becomes mutable under its new
-  owner. After either `move` form, the caller must not read, write, borrow, or move that binding again;
-  any such use is QSEM039.
+  `var` (QSEM024). `move var` is different: it transfers the binding instead of borrowing it, so a
+  `const` binding MAY be passed with `move var` and becomes mutable under its new owner. After either
+  `move` form, the caller must not read, write, borrow, or move that binding again; any such use is
+  QSEM039.
 - Read-only borrowed array arguments may alias each other. A mutable borrow or ownership transfer is
   exclusive, so the same storage cannot also occupy another argument position in that call (QSEM014).
   A borrowed parameter cannot be forwarded with `move`, because it does not own the storage. Whole-array
@@ -118,8 +165,10 @@ operation Main()                // global namespace; the entry point; takes NO p
   Literals, referenced variables, operators, array elements, and function calls use the same rule:
   `var truth = true` is `bit`, `var copy = anAngle` is `angle`, and `var x = f()` uses `f`'s return type.
 - `var r: bit = M(q[i]);` — measure qubit i into a fresh bit. `r = M(q[i]);` re-measures.
-  M() is legal ONLY as the whole right-hand side of a declaration/assignment. Never in conditions,
-  arguments, or arithmetic (measure into a bit first).
+  A whole declaration/assignment RHS may instead use `M(a)` when `a` is one `Qubit`. An indexed
+  measurement is also legal inside an `if`/`while`/`repeat` condition as `M(q[i])`; the common lowering
+  pass hoists it to a fresh bit at the condition's evaluation point. Measurement is not a value for
+  ordinary arithmetic or call arguments (measure into a bit first).
 - An `operation` is void (no return value); its call is a STATEMENT only. To return a value, use a
   `function` (see below). Qubit allocation sizes and `new T[N]` array lengths must be positive literal integers.
 
@@ -127,7 +176,7 @@ operation Main()                // global namespace; the entry point; takes NO p
 
 - `function Name(params): T { … return e; }` — a classical, pure subroutine (Q#'s `function`). Parameters
   are read-only classical scalars or arrays and accept only the default borrowed/read-only spelling;
-  `var`, `move`, and the legacy `inout` alias are not allowed. The return type `T` is a classical scalar
+  `var`, `move`, and `move var` are not allowed. The return type `T` is a classical scalar
   (`int`/`bit`/`float`/`angle`); neither may be a qubit. A `bit[]` parameter is specialized to the concrete
   argument width at every expression call site, so width-2 and width-3 calls receive separate generated
   definitions while repeated calls of the same width reuse one. The body is
@@ -206,15 +255,15 @@ For an unqualified call inside namespace `A.B`, in order:
   may NOT take gate names (QSEM013). Reserved everywhere: `M`, `Measure`, `measure`, `pi`, `tau`,
   `euler`, `AsInt`, and declaring namespace `Qora.Intrinsic`.
 
-## Error codes (collect-all; every error carries a source span)
+## Error codes (collect-all within each reached stage; located errors carry a source span)
 
 QSEM001 Adjoint target not invertible (measures/resets, reason chained through calls)
 QSEM002 Controlled on a user operation        QSEM003 functor on Reset/ResetAll
-QSEM004 bare measurement statement            QSEM005 call inside an expression/condition/argument
+QSEM004 bare measurement statement            QSEM005 void/measurement call used in an unsupported value position
 QSEM006 wrong argument count/kind/type for a call
-QSEM007 unknown gate/operation name           QSEM008 duplicate global operation name
+QSEM007 unknown gate/operation name           QSEM008 duplicate global callable name
 QSEM009 calling the entry operation           QSEM010 entry operation has parameters
-QSEM011 recursive operation calls             QSEM012 `use` outside `Main` top level
+QSEM011 recursive callable calls              QSEM012 `use` outside the entry operation's top level
 QSEM013 name shadows a built-in where qualification cannot disambiguate
 QSEM014 same qubit (or overlapping register/element) twice in one gate; overlapping exclusive storage access
 QSEM015 duplicate declared names in one operation
@@ -222,15 +271,17 @@ QSEM016 non-integer or proven-out-of-range array/qubit index / indexing a scalar
 QSEM017 measurement assigned to a non-bit     QSEM018 ambiguous unqualified name (candidates listed)
 QSEM019 unknown namespace/member in qualified name or `open`
 QSEM020 import file not found/unreadable/no file context
-QSEM021 retired/reserved; cyclic back-edges are skipped when loaded.Add returns false
-QSEM022 duplicate operation name within one namespace
+QSEM021 retired/reserved; cyclic back-edges reuse the canonical `SourceDocumentRef` and are visited once
+QSEM022 duplicate callable name within one namespace
 QSEM023 reserved; emitted-name collisions are auto-renamed by NameMangler with a `// Qora:` note
-QSEM024 mutation of a `const` value/array, including a `var`/`inout` mutable borrow (not `move var`)
+QSEM024 mutation of a `const` value/array, including a `var` mutable borrow (not `move var`)
 QSEM025 identifier not declared in scope here (unknown name, or classical used before declaration)
 QSEM026 qubit used as a classical value       QSEM027 non-invertible `within` body
 QSEM028 operation name used as a value
 QSEM029 invalid array shape, initializer, member, or whole-array assignment
 QSEM030 OpenQASM target cannot emit an index whose in-bounds proof remains unresolved
+QSEM031 expression or nested-block structure exceeds the compiler depth limit
+QSEM032 write to a `bit[]` parameter (OpenQASM passes bit registers by value)
 QSEM033 impure function body (a gate, `use`, measurement, or operation call inside a function)
 QSEM034 a qubit in a function signature (function parameters/return are classical)
 QSEM035 `return` outside a function (an operation is void), or a function has a path that returns nothing
@@ -238,19 +289,25 @@ QSEM036 a whole `bit[]` register used as a number, compared across widths, or or
 QSEM037 incompatible function return/result type, or a whole classical array used as one scalar
 QSEM038 invalid ownership/access contract (unsupported shape, marker mismatch, or read-only mutation)
 QSEM039 use of a caller binding after its ownership was transferred with `move`
+QSEM040 the program contains no operation or function
 
 ## CLI contract (for tooling/agents)
 
 ```
-qora --json [file] [--stages] [--base-dir <dir>]
+qora --json [file] [--stages] [--base-dir <dir>] [--source-path <path>]
 ```
 - Source from `file` or stdin (UTF-8). Imports resolve next to `file`, or against `--base-dir`
   for stdin. Reply: ONE line of JSON:
-  `{"success":bool,"qasm":"...","errors":[{"message","code","start","end"}]}`
-  `start`/`end` are half-open character offsets into the entry document (-1 = no location).
-- `--stages` adds `"ast"`, `"ir"`, `"mir"`, `"irInverse"`, `"symbols"` (`ir` is the source-shaped
-  HIR; `mir` is the typed SSA/CFG analysis form; original/FQN names remain unmangled).
-- Emitted QASM starts with `// generated by Qora v0.30`.
+  `{"success":bool,"qasm":"...","errors":[{"message","code","start","end","path","document"}]}`
+  `start`/`end` are half-open character offsets in the exact source `path`; `document` is the
+  compilation-revision-qualified document identity. `--source-path` supplies that identity's path when
+  live source text is sent on stdin.
+- `--stages` adds `"ast"`, `"ir"`, `"symbols"`, `"uncompute"`, `"mir"`, and `"mirEffects"`.
+  `ir` is the resolved source-shaped HIR; `mir` is the typed SSA/CFG analysis form; both keep
+  original/FQN source names unmangled. These views are read from the same completed immutable
+  `Compilation`; the CLI does not rerun compiler passes to reconstruct them. A stage not reached
+  because of an earlier error is returned as an empty string.
+- Emitted QASM starts with `// generated by Qora v0.31`.
 
 ## Executing programs
 
@@ -305,7 +362,7 @@ namespace Lib {
     operation Flip(q: Qubit) { X(q); }
 }
 // main.qor
-import lib;
+import "lib.qor";
 operation Main() {
     use q = Qubit[1];
     Lib.Flip(q[0]);
@@ -316,7 +373,8 @@ operation Main() {
 
 - `use` inside a non-entry operation or inside a loop/branch (QSEM012) — allocate in Main, pass
   qubits as parameters.
-- `if (M(q[0]) == 1)` (QSEM005) — measure into a bit first, then test the bit.
+- A measurement inside arithmetic or a call argument, such as `Rx(M(q[0]), q[1])` (QSEM005) —
+  measure into a bit first. An indexed measurement directly inside a condition is supported.
 - `var n: int = f;` / `f + 1` / `if (f)` / `f == 1` on a `bit[]` (QSEM036) — a whole register is not a
   number; write `AsInt(f)`. (A single bit `f[i]` is already a value and needs no conversion.)
 - `Rx(q[0], pi/2)` (QSEM006) — rotations take the ANGLE first.
@@ -324,7 +382,7 @@ operation Main() {
 - Type BEFORE the name (`int n`, `Qubit[] q`) — annotations are trailing: `n: int`, `q: Qubit[]`.
 - Writing an ordinary array parameter, omitting `var` at either the declaration or call site, or adding an
   unsupported mode to a function/scalar slot (QSEM038) — the operation declaration and call must use the same
-  `x` / `var x` / `move x` / `move var x` contract. Legacy `inout x` means `var x`.
+  `x` / `var x` / `move x` / `move var x` contract.
 - Using an array or qubit binding after passing it with `move` or `move var` (QSEM039) — ownership has left the caller.
   A `const` array cannot be borrowed with `var`, but it may be transferred with `move var`.
 - `q: Qubit[2]` as a parameter — register parameters omit the length: `q: Qubit[]`; allocate the

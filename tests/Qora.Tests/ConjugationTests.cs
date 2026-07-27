@@ -35,10 +35,10 @@ public class ConjugationTests
     [Fact]
     public void FlattenProducesWithinThenApplyThenInverse()
     {
-        var (lowered, errors) = ConjugationLowering.Run(Canonical());
-        Assert.Empty(errors);
+        var lowering = ConjugationLowering.Run(Canonical());
+        Assert.Empty(lowering.Errors);
 
-        var body = lowered.Operations.Single(o => o.Name == "Main").Body;
+        var body = lowering.Program.Operations.Single(o => o.Name == "Main").Body;
         // use a; use d; X(a[0]); CNOT(a[0],d[0]); Adjoint X(a[0])
         Assert.Equal(5, body.Count);
         Assert.IsType<QUse>(body[0]);
@@ -59,10 +59,16 @@ public class ConjugationTests
     [Fact]
     public void FlattenEmitsCompute_Apply_Uncompute()
     {
-        var (lowered, errors) = ConjugationLowering.Run(Canonical());
-        Assert.Empty(errors);
+        var lowering = ConjugationLowering.Run(Canonical());
+        Assert.Empty(lowering.Errors);
 
-        var qasm = QasmEmitter.Emit(OpenQasmLowering.Run(lowered));
+        var validationErrors = QoraValidator.Validate(lowering.Program, out var semantics);
+        Assert.Empty(validationErrors);
+        var targetTree = OpenQasmLowering.Run(
+            lowering.Program,
+            new ExactHirSemanticContext(
+                Assert.IsType<HirSemanticModel>(semantics)));
+        var qasm = QasmEmitter.EmitExplicitForTesting(targetTree);
         Assert.Contains("x a[0];", qasm);            // compute
         Assert.Contains("cx a[0], d[0];", qasm);     // apply
         Assert.Contains("inv @ x a[0];", qasm);      // uncompute (synthesized inverse of within)
@@ -79,8 +85,8 @@ public class ConjugationTests
                 Within: new List<QStmt> { new QDecl(false, QType.Bit, "r", new QMeasure(MTarget("a", 0))) },
                 Apply: new List<QStmt> { Gate("X", Q("a", 0)) }));
 
-        var (_, errors) = ConjugationLowering.Run(program);
-        Assert.Equal("QSEM027", Assert.Single(errors).Code);
+        var lowering = ConjugationLowering.Run(program);
+        Assert.Equal("QSEM027", Assert.Single(lowering.Errors).Code);
     }
 
     [Fact]
@@ -121,9 +127,10 @@ public class ConjugationTests
                     Apply: new QStmt[] { Gate("Consume", movedValues) }),
             });
 
-        var errors = QoraValidator.Validate(
-            new QProgram(new[] { inspect, consume, main }),
-            out _);
+        var (resolved, resolutionErrors) = Resolver.Resolve(
+            new QProgram(new[] { inspect, consume, main }));
+        Assert.Empty(resolutionErrors);
+        var errors = QoraValidator.Validate(resolved, out _);
 
         Assert.Equal("QSEM039", Assert.Single(errors).Code);
     }
@@ -142,7 +149,7 @@ public class ConjugationTests
     {
         // Defense in depth: even bypassing the flatten pass AND ReferentialCheck, the emitter must never
         // silently drop the node — it emits a visible marker (the old latent bug was a silent drop).
-        var qasm = QasmEmitter.Emit(Canonical());
+        var qasm = QasmEmitter.EmitExplicitForTesting(Canonical());
         Assert.Contains("internal error", qasm);
     }
 }

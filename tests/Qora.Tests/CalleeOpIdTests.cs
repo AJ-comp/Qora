@@ -12,10 +12,12 @@ namespace Qora.Tests;
 /// </summary>
 public class CalleeOpIdTests
 {
-    private static QoraParseResult Parse(string src)
+    private static Compilation Parse(string src)
     {
-        var r = QoraParser.Parse(src);
-        Assert.True(r.Success, string.Join(" | ", r.Errors));
+        var r = QoraCompiler.Compile(src);
+        Assert.True(
+            r.Succeeded,
+            string.Join(" | ", r.Diagnostics.Select(diagnostic => diagnostic.Error)));
         return r;
     }
 
@@ -27,8 +29,8 @@ public class CalleeOpIdTests
     public void UserCallBindsToItsCalleeId()
     {
         var r = Parse("operation Foo(p: Qubit){ X(p); }\noperation Main(){ use a=Qubit[1]; Foo(a[0]); }");
-        var foo = r.Ir!.Operations.Single(o => o.Name == "Foo");
-        Assert.Equal(foo.Id, SoleUserCall(r.Ir!).CalleeOpId);
+        var foo = r.Hir.Resolved!.Program!.Operations.Single(o => o.Name == "Foo");
+        Assert.Equal(foo.Id, SoleUserCall(r.Hir.Resolved!.Program!).CalleeOpId);
     }
 
     // --- 2. a built-in gate binds to nothing (null ⇒ "not a user-op call") ---
@@ -36,7 +38,7 @@ public class CalleeOpIdTests
     public void BuiltinGateHasNullCalleeOpId()
     {
         var r = Parse("operation Main(){ use a=Qubit[1]; X(a[0]); }");
-        var x = r.Ir!.Operations.Single(o => o.Name == "Main").Body.OfType<QGate>().Single(g => g.Name == "X");
+        var x = r.Hir.Resolved!.Program!.Operations.Single(o => o.Name == "Main").Body.OfType<QGate>().Single(g => g.Name == "X");
         Assert.Null(x.CalleeOpId);
     }
 
@@ -45,8 +47,8 @@ public class CalleeOpIdTests
     public void AdjointCallBindsToTheForwardOp()
     {
         var r = Parse("operation Foo(p: Qubit){ X(p); }\noperation Main(){ use a=Qubit[1]; Adjoint Foo(a[0]); }");
-        var foo = r.Ir!.Operations.Single(o => o.Name == "Foo");
-        var call = SoleUserCall(r.Ir!);
+        var foo = r.Hir.Resolved!.Program!.Operations.Single(o => o.Name == "Foo");
+        var call = SoleUserCall(r.Hir.Resolved!.Program!);
         Assert.Equal("Adjoint", call.Functors.Single());
         Assert.Equal(foo.Id, call.CalleeOpId);
     }
@@ -58,13 +60,13 @@ public class CalleeOpIdTests
     {
         var r = Parse("operation Loop(p: Qubit[]){ X(p[0]); }\noperation Main(){ use a=Qubit[2]; Loop(a); }");
 
-        // pre-mono (r.Ir): bound to the GENERIC Loop
-        var genLoop = r.Ir!.Operations.Single(o => o.Name == "Loop");
-        Assert.Equal(genLoop.Id, SoleUserCall(r.Ir!).CalleeOpId);
+        // pre-mono (r.Hir.Resolved!.Program): bound to the GENERIC Loop
+        var genLoop = r.Hir.Resolved!.Program!.Operations.Single(o => o.Name == "Loop");
+        Assert.Equal(genLoop.Id, SoleUserCall(r.Hir.Resolved!.Program!).CalleeOpId);
 
         // analyzed (mono): re-pointed to the size-2 specialization — a DIFFERENT op, and NOT the generic
-        var spec = r.AnalyzedIr!.Operations.Single(o => o.Name.StartsWith("Loop__sz"));
-        var monoCall = SoleUserCall(r.AnalyzedIr!);
+        var spec = r.Hir.EffectAnalysis!.Program!.Operations.Single(o => o.Name.StartsWith("Loop__sz"));
+        var monoCall = SoleUserCall(r.Hir.EffectAnalysis!.Program!);
         Assert.Equal(spec.Id, monoCall.CalleeOpId);
         Assert.NotEqual(genLoop.Id, monoCall.CalleeOpId);
     }

@@ -10,14 +10,16 @@ public class BoundFoldingTests
     [Fact]
     public void DoesNotCombineCountsFromDifferentSameNamedSymbols()
     {
-        var graph = new ProgramSymbolGraph();
-        var outerScope = new Scope(graph, graph.RootSymbol.Id);
+        var graph = new HirScopeGraph();
+        var outerScope = graph.CreateScope(
+            HirScopeKind.Callable,
+            graph.RootScope.Id);
         var outerArray = new Symbol(
+            outerScope.Id,
             "xs",
             SymbolKind.Parameter,
             QType.Int,
-            isArray: true,
-            ownerSymbolId: graph.RootSymbol.Id);
+            isArray: true);
         Assert.True(outerScope.TryAdd(outerArray));
 
         var outerLength = BoundFolder.Fold(
@@ -25,22 +27,24 @@ public class BoundFoldingTests
             outerScope);
         Assert.IsType<ArrayLengthBound>(outerLength);
 
-        var innerScope = new Scope(outerScope);
+        var innerScope = graph.CreateScope(
+            HirScopeKind.Block,
+            outerScope.Id);
         var outerLengthAlias = new Symbol(
+            innerScope.Id,
             "outerLength",
             SymbolKind.Const,
             QType.Int,
-            isConst: true,
-            ownerSymbolId: graph.RootSymbol.Id)
+            isConst: true)
         {
             FoldedBound = outerLength,
         };
         var innerArray = new Symbol(
+            innerScope.Id,
             "xs",
             SymbolKind.Var,
             QType.Int,
-            isArray: true,
-            ownerSymbolId: graph.RootSymbol.Id);
+            isArray: true);
         Assert.True(innerScope.TryAdd(outerLengthAlias));
         Assert.True(innerScope.TryAdd(innerArray));
         Assert.NotEqual(outerArray.Id, innerArray.Id);

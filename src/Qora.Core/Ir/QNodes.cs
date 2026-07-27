@@ -33,6 +33,7 @@ public static class QNodes
         QUnary u => $"{u.Op} {Render(u.Operand)}",
         QBinOp b => $"{Render(b.Left)} {b.Op} {Render(b.Right)}",
         QIndexNode i => $"{Render(i.Base)} [ {Render(i.Index)} ]",
+        OpenQasmUnsignedCastNode cast => $"uint[{cast.Width}]({Render(cast.Operand)})",
         // A measurement glues its single index argument (the historical RenderCall shape, `M(q[0])`),
         // unlike the spaced bare index form; a function call renders its arguments comma-separated.
         QCallNode { Args: [QIndexNode idx] } c => $"{c.Name}({Render(idx.Base)}[{Render(idx.Index)}])",
@@ -67,6 +68,7 @@ public static class QNodes
         QBinOp b => ContainsCall(b.Left) || ContainsCall(b.Right),
         QMember m => ContainsCall(m.Base),
         QIndexNode i => ContainsCall(i.Base) || ContainsCall(i.Index),
+        OpenQasmUnsignedCastNode cast => ContainsCall(cast.Operand),
         _ => false,
     };
 
@@ -96,6 +98,9 @@ public static class QNodes
             case QIndexNode i:
                 foreach (var n in CallsIn(i.Base)) yield return n;
                 foreach (var n in CallsIn(i.Index)) yield return n;
+                break;
+            case OpenQasmUnsignedCastNode cast:
+                foreach (var n in CallsIn(cast.Operand)) yield return n;
                 break;
         }
     }

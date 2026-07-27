@@ -27,40 +27,47 @@ namespace Qora.Ir;
 /// time); local qubit allocation (that cleanup is precisely the future uncompute pass's job);
 /// <c>Controlled</c> on a user operation (no QASM lowering for ctrl-of-def yet); recursive calls.
 /// </summary>
-public sealed class Inverter
+internal sealed class Inverter
 {
-    private readonly IReadOnlyDictionary<string, QOperation> _ops;
     private readonly IReadOnlyDictionary<int, QOperation> _opsById;   // call-site → callee resolution by reference (CalleeOpId)
-    private readonly Dictionary<string, (IReadOnlyList<QStmt>? Inverse, string Reason)> _cache = new();
-    private readonly HashSet<string> _inProgress = new();
+    private readonly Dictionary<int, (IReadOnlyList<QStmt>? Inverse, string Reason)> _cache = new();
+    private readonly HashSet<int> _inProgress = new();
 
     public Inverter(IEnumerable<QOperation> operations)
     {
-        var map = new Dictionary<string, QOperation>();
         var byId = new Dictionary<int, QOperation>();
-        foreach (var op in operations) { map[op.Name] = op; byId[op.Id] = op; }
-        _ops = map;
+        foreach (var op in operations)
+            if (!byId.TryAdd(op.Id, op))
+                throw new ArgumentException(
+                    $"operation identity {op.Id} occurs more than once",
+                    nameof(operations));
         _opsById = byId;
     }
 
-    /// <summary>Invert a user operation's body by name. Memoized; safe under (and rejecting of) call cycles.</summary>
-    public bool TryInvertOperation(string name, out IReadOnlyList<QStmt> inverse, out string reason)
+    /// <summary>
+    /// Invert a user operation by its resolved declaration identity. Memoized and cycle-safe; no spelling
+    /// is ever rebound here.
+    /// </summary>
+    public bool TryInvertOperation(int operationId, out IReadOnlyList<QStmt> inverse, out string reason)
     {
-        var result = InvertOperationCached(name);
+        var result = InvertOperationCached(operationId);
         inverse = result.Inverse ?? Array.Empty<QStmt>();
         reason = result.Reason;
         return result.Inverse is not null;
     }
 
-    private (IReadOnlyList<QStmt>? Inverse, string Reason) InvertOperationCached(string name)
+    private (IReadOnlyList<QStmt>? Inverse, string Reason) InvertOperationCached(int operationId)
     {
-        if (_cache.TryGetValue(name, out var hit)) return hit;
-        if (!_ops.TryGetValue(name, out var op)) return (null, $"`{name}` is not a defined operation");
-        if (!_inProgress.Add(name)) return (null, $"`{name}` calls itself (directly or via a cycle)");
+        if (_cache.TryGetValue(operationId, out var hit)) return hit;
+        if (!_opsById.TryGetValue(operationId, out var op))
+            throw new InvalidOperationException(
+                $"QINTERNAL: inversion requested dangling operation identity {operationId}");
+        if (!_inProgress.Add(operationId))
+            return (null, $"`{op.Name}` calls itself (directly or via a cycle)");
 
         var result = InvertBody(op.Body);
-        _inProgress.Remove(name);
-        _cache[name] = result;
+        _inProgress.Remove(operationId);
+        _cache[operationId] = result;
         return result;
     }
 
@@ -152,11 +159,20 @@ public sealed class Inverter
         if (g.Args.Any(arg => arg.Ownership == QOwnershipMode.Moved))
             return (null, "it transfers ownership in a call, and reversing statement order could use the value after it was moved");
 
-        // Resolve the callee by REFERENCE (CalleeOpId) when the call carries one; fall back to the name for
-        // hand-built IR (test gates carry no CalleeOpId). isUserOp ⟺ the call resolves to a user operation;
-        // the resolved op's own name then drives the memoized, single-tree op inversion below.
-        var callee = g.CalleeOpId is int cid && _opsById.TryGetValue(cid, out var byId) ? byId
-                   : _ops.TryGetValue(g.Name, out var byName) ? byName : null;
+        // Resolver establishes the only semantic call edge: CalleeOpId. A missing identity is legal only
+        // for a built-in statement; user-callable spellings are never rebound inside this later pass.
+        QOperation? callee = null;
+        if (g.CalleeOpId is int calleeId)
+        {
+            if (!_opsById.TryGetValue(calleeId, out callee))
+                throw new InvalidOperationException(
+                    $"QINTERNAL: call `{g.Name}` carries dangling CalleeOpId {calleeId}");
+        }
+        else if (!IsBuiltinStatement(g.Name))
+        {
+            throw new InvalidOperationException(
+                $"QINTERNAL: user-callable-looking gate `{g.Name}` reached inversion without CalleeOpId");
+        }
         var isUserOp = callee is not null;
         var hasAdjoint = g.Functors.FirstOrDefault() == "Adjoint";
 
@@ -178,7 +194,7 @@ public sealed class Inverter
         // Requiring it on the Adjoint side also routes cycles through the _inProgress guard.
         if (isUserOp)
         {
-            var target = InvertOperationCached(callee!.Name);
+            var target = InvertOperationCached(callee!.Id);
             if (target.Inverse is null)
                 return (null, hasAdjoint
                     ? $"it applies Adjoint to `{g.Name}`, which cannot be inverted ({target.Reason})"
@@ -190,4 +206,10 @@ public sealed class Inverter
             : g.Functors.Prepend("Adjoint").ToList();
         return (g with { Functors = functors }, string.Empty);
     }
+
+    private static bool IsBuiltinStatement(string name) =>
+        QoraGates.Names.ContainsKey(name)
+        || QoraGates.MeasureLike.Contains(name)
+        || QoraGates.NonUnitary.Contains(name)
+        || name == "reset";
 }

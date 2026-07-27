@@ -3,30 +3,24 @@ namespace Qora.Ir;
 /// <summary>The compiler's version, stamped into emitted QASM for provenance.</summary>
 public static class QoraVersion
 {
-    public const string Value = "0.30";
+    public const string Value = "0.31";
 }
-
-/// <summary>
-/// A half-open character span <c>[Start, End)</c> into the ENTRY source document — the offsets the
-/// editor contract (<c>errors[].start/end</c>) speaks. Null wherever a node has no location: nodes
-/// lowered from IMPORTED files (their offsets would lie about the entry document) and synthesized
-/// nodes (inverse bodies, uncompute injections).
-/// </summary>
-public readonly record struct QSpan(int Start, int End);
 
 /// <summary>
 /// Issues the stable node identity every identity-bearing IR record stamps at construction
 /// (<c>public int Id { get; init; } = QNodeIds.Next();</c>). C# record semantics do the rest: a
 /// property initializer runs only in the constructor, and a <c>with</c> expression CLONES fields —
 /// so <c>new</c> mints a fresh Id while every pass rewrite via <c>with</c> inherits the Id for free.
-/// That inherited Id is what lets side tables (the <see cref="Passes.SemanticModel"/>) keyed by Id
-/// survive the whole pipeline while node CONTENT (names, sizes) keeps changing underneath.
-/// The counter is global and monotonic across compilations — only uniqueness WITHIN one program
+/// That inherited Id keeps a logical node stable inside one HIR lineage while node content (names, sizes)
+/// changes underneath. Cross-generation references are always qualified by
+/// <see cref="Qora.Compiler.HirSnapshotId"/> and translated through
+/// <see cref="Qora.Compiler.HirLineage"/>; a raw
+/// integer is never a cross-snapshot identity. The counter is global and monotonic across compilations — only uniqueness WITHIN one program
 /// matters, and a process-wide counter avoids threading an allocator through all of lowering.
 /// A pass that COPIES a subtree into a second tree position must re-mint Ids via <see cref="ReId"/>;
 /// <see cref="Passes.ReferentialCheck"/> fails loudly on any duplicate that slips through.
 /// </summary>
-public static class QNodeIds
+internal static class QNodeIds
 {
     private static int _next;
     public static int Next() => System.Threading.Interlocked.Increment(ref _next);
@@ -55,9 +49,10 @@ public static class QNodeIds
 /// </summary>
 /// <param name="Operations">The program's operations (global namespace, until resolution lands).</param>
 /// <param name="Imports">
-/// The file's <c>import</c> declarations, in source order. <see cref="Passes.ModuleLoader"/> consumes them
-/// (loading each file and merging its operations/opens into this program); after expansion the merged
-/// program carries null here. Null/empty = none.
+/// The file's <c>import</c> declarations, in source order. The compiler's source-graph loader resolves,
+/// reads, parses, and lowers every document first; <see cref="Passes.ModuleLoader"/> then consumes this
+/// already prepared graph and purely merges its operations/opens. The expanded program carries null here.
+/// Null/empty = none.
 /// </param>
 /// <param name="Opens">Per-namespace <c>open</c> directives (namespace name → opened namespaces).</param>
 public sealed record QProgram(
@@ -65,12 +60,35 @@ public sealed record QProgram(
     IReadOnlyList<QImport>? Imports = null,
     IReadOnlyDictionary<string, IReadOnlyList<QOpen>>? Opens = null)
 {
+    private IReadOnlyList<QOperation> _operations = HirCollections.Freeze(Operations);
+    private IReadOnlyList<QImport>? _imports = HirCollections.FreezeNullable(Imports);
+    private IReadOnlyDictionary<string, IReadOnlyList<QOpen>>? _opens =
+        HirCollections.FreezeNested(Opens);
+
+    public IReadOnlyList<QOperation> Operations
+    {
+        get => _operations;
+        init => _operations = HirCollections.Freeze(value);
+    }
+
+    public IReadOnlyList<QImport>? Imports
+    {
+        get => _imports;
+        init => _imports = HirCollections.FreezeNullable(value);
+    }
+
+    public IReadOnlyDictionary<string, IReadOnlyList<QOpen>>? Opens
+    {
+        get => _opens;
+        init => _opens = HirCollections.FreezeNested(value);
+    }
+
     /// <summary>Stable node identity (see <see cref="QNodeIds"/>): fresh at <c>new</c>, inherited by <c>with</c>.</summary>
     public int Id { get; init; } = QNodeIds.Next();
 }
 
 /// <summary>One <c>open Target;</c> directive inside a namespace block.</summary>
-public sealed record QOpen(string Target, QSpan? Span = null);
+public sealed record QOpen(string Target, SourceSpan? Span = null);
 
 /// <summary>
 /// One <c>import</c> declaration. Qora has a single import form — a quoted relative path including
@@ -82,13 +100,28 @@ public sealed record QImport(string Target)
     /// <summary>The declaration as the user wrote it (for error messages).</summary>
     public string Display => $"\"{Target}\"";
 
-    public QSpan? Span { get; init; }
+    public SourceSpan? Span { get; init; }
 }
 
 /// <param name="Namespace">The namespace the op was declared in ("" = global). After the resolver
 /// pass runs, <see cref="Name"/> is the FULLY-QUALIFIED name and this records the origin.</param>
 public sealed record QOperation(string Name, IReadOnlyList<QParam> Params, IReadOnlyList<QStmt> Body, string Namespace = "") : ICallableSig
 {
+    private IReadOnlyList<QParam> _params = HirCollections.Freeze(Params);
+    private IReadOnlyList<QStmt> _body = HirCollections.Freeze(Body);
+
+    public IReadOnlyList<QParam> Params
+    {
+        get => _params;
+        init => _params = HirCollections.Freeze(value);
+    }
+
+    public IReadOnlyList<QStmt> Body
+    {
+        get => _body;
+        init => _body = HirCollections.Freeze(value);
+    }
+
     /// <summary>Stable node identity (see <see cref="QNodeIds"/>): fresh at <c>new</c>, inherited by <c>with</c>.</summary>
     public int Id { get; init; } = QNodeIds.Next();
 
@@ -124,7 +157,7 @@ public sealed record QOperation(string Name, IReadOnlyList<QParam> Params, IRead
     IReadOnlyList<IParamSpec> ICallableSig.Params => Params;
 
     /// <summary>Span of the operation's NAME token (op-level errors point here).</summary>
-    public QSpan? Span { get; init; }
+    public SourceSpan? Span { get; init; }
 }
 
 public enum QType { Qubit, Int, Bit, Float, Angle }
@@ -228,7 +261,7 @@ public sealed record QParam(string Name, QType Type, int? RegisterSize) : IParam
     public bool QubitBroadcast => false;
 
     /// <summary>Span of the parameter's NAME token.</summary>
-    public QSpan? Span { get; init; }
+    public SourceSpan? Span { get; init; }
 }
 
 // ---- statements ----
@@ -238,8 +271,8 @@ public abstract record QStmt
     /// <summary>Stable node identity (see <see cref="QNodeIds"/>): fresh at <c>new</c>, inherited by <c>with</c>.</summary>
     public int Id { get; init; } = QNodeIds.Next();
 
-    /// <summary>Span of the whole statement in the entry document (see <see cref="QSpan"/>).</summary>
-    public QSpan? Span { get; init; }
+    /// <summary>Revision-qualified source span of the whole statement, or null for synthesized HIR.</summary>
+    public SourceSpan? Span { get; init; }
 }
 
 /// <summary><c>use q = Qubit[Size];</c></summary>
@@ -254,6 +287,21 @@ public sealed record QUse(string Name, int Size) : QStmt;
 /// </summary>
 public sealed record QGate(IReadOnlyList<string> Functors, string Name, IReadOnlyList<QArg> Args) : QStmt
 {
+    private IReadOnlyList<string> _functors = HirCollections.Freeze(Functors);
+    private IReadOnlyList<QArg> _args = HirCollections.Freeze(Args);
+
+    public IReadOnlyList<string> Functors
+    {
+        get => _functors;
+        init => _functors = HirCollections.Freeze(value);
+    }
+
+    public IReadOnlyList<QArg> Args
+    {
+        get => _args;
+        init => _args = HirCollections.Freeze(value);
+    }
+
     /// <summary>For a user-operation CALL, the stable node Id of the callee operation — bound ONCE at name
     /// resolution (<see cref="Passes.Resolver"/>) and re-pointed when the call is rewritten (monomorphization
     /// aims it at the size specialization). Null for a built-in gate (X, CNOT, …), which resolves to no
@@ -280,7 +328,23 @@ public sealed record QAssign(string Name, QExpr Value) : QStmt
     public QNode? Index { get; init; }
 }
 
-public sealed record QIf(QCond Cond, IReadOnlyList<QStmt> Then, IReadOnlyList<QStmt> Else) : QStmt;
+public sealed record QIf(QCond Cond, IReadOnlyList<QStmt> Then, IReadOnlyList<QStmt> Else) : QStmt
+{
+    private IReadOnlyList<QStmt> _then = HirCollections.Freeze(Then);
+    private IReadOnlyList<QStmt> _else = HirCollections.Freeze(Else);
+
+    public IReadOnlyList<QStmt> Then
+    {
+        get => _then;
+        init => _then = HirCollections.Freeze(value);
+    }
+
+    public IReadOnlyList<QStmt> Else
+    {
+        get => _else;
+        init => _else = HirCollections.Freeze(value);
+    }
+}
 
 /// <summary><c>return e;</c> — only inside a <c>function</c>; <see cref="Value"/> is the returned expression,
 /// whose type must match the function's declared <see cref="QOperation.ReturnType"/>. Emits <c>return …;</c>.</summary>
@@ -301,18 +365,61 @@ public sealed record QBreak : QStmt;
 /// <see cref="Step"/> has no surface syntax: the surface form always steps by +1 (null); the inversion
 /// pass sets <c>-1</c> to run a loop backwards, which emits OpenQASM's <c>[From:Step:To]</c> range.
 /// </summary>
-public sealed record QFor(string Var, QNode From, QNode To, IReadOnlyList<QStmt> Body, QNode? Step = null) : QStmt;
+public sealed record QFor(string Var, QNode From, QNode To, IReadOnlyList<QStmt> Body, QNode? Step = null) : QStmt
+{
+    private IReadOnlyList<QStmt> _body = HirCollections.Freeze(Body);
 
-public sealed record QWhile(QCond Cond, IReadOnlyList<QStmt> Body) : QStmt;
+    public IReadOnlyList<QStmt> Body
+    {
+        get => _body;
+        init => _body = HirCollections.Freeze(value);
+    }
+}
 
-public sealed record QRepeat(IReadOnlyList<QStmt> Body, QCond Until) : QStmt;
+public sealed record QWhile(QCond Cond, IReadOnlyList<QStmt> Body) : QStmt
+{
+    private IReadOnlyList<QStmt> _body = HirCollections.Freeze(Body);
+
+    public IReadOnlyList<QStmt> Body
+    {
+        get => _body;
+        init => _body = HirCollections.Freeze(value);
+    }
+}
+
+public sealed record QRepeat(IReadOnlyList<QStmt> Body, QCond Until) : QStmt
+{
+    private IReadOnlyList<QStmt> _body = HirCollections.Freeze(Body);
+
+    public IReadOnlyList<QStmt> Body
+    {
+        get => _body;
+        init => _body = HirCollections.Freeze(value);
+    }
+}
 
 /// <summary>
 /// Synthetic node — no surface syntax produces it. A later uncompute pass injects it to mean
 /// "run <see cref="Within"/>, then <see cref="Apply"/>, then the inverse of <see cref="Within"/>".
 /// Present now so the IR is ready for that pass; nothing emits it yet.
 /// </summary>
-public sealed record QConjugate(IReadOnlyList<QStmt> Within, IReadOnlyList<QStmt> Apply) : QStmt;
+public sealed record QConjugate(IReadOnlyList<QStmt> Within, IReadOnlyList<QStmt> Apply) : QStmt
+{
+    private IReadOnlyList<QStmt> _within = HirCollections.Freeze(Within);
+    private IReadOnlyList<QStmt> _apply = HirCollections.Freeze(Apply);
+
+    public IReadOnlyList<QStmt> Within
+    {
+        get => _within;
+        init => _within = HirCollections.Freeze(value);
+    }
+
+    public IReadOnlyList<QStmt> Apply
+    {
+        get => _apply;
+        init => _apply = HirCollections.Freeze(value);
+    }
+}
 
 // ---- arguments ----
 
@@ -382,7 +489,16 @@ public sealed record QText(QNode? Tree = null) : QExpr
 }
 
 /// <summary>A source array initializer such as <c>[1, 2, 3]</c>.</summary>
-public sealed record QArrayLiteral(IReadOnlyList<QExpr> Elements) : QExpr;
+public sealed record QArrayLiteral(IReadOnlyList<QExpr> Elements) : QExpr
+{
+    private IReadOnlyList<QExpr> _elements = HirCollections.Freeze(Elements);
+
+    public IReadOnlyList<QExpr> Elements
+    {
+        get => _elements;
+        init => _elements = HirCollections.Freeze(value);
+    }
+}
 
 /// <summary>A zero-initialized source array allocation such as <c>new float[4]</c>.</summary>
 public sealed record QArrayNew(QType ElementType, int Length) : QExpr;
@@ -447,6 +563,14 @@ public sealed record QIndexNode(QNode Base, QNode Index) : QNode;
 /// zero-argument call.</summary>
 public sealed record QCallNode(string Name, IReadOnlyList<QNode> Args) : QNode
 {
+    private IReadOnlyList<QNode> _args = HirCollections.Freeze(Args);
+
+    public IReadOnlyList<QNode> Args
+    {
+        get => _args;
+        init => _args = HirCollections.Freeze(value);
+    }
+
     /// <summary>For a resolved user-function call, the stable node Id of the declaring
     /// <see cref="QOperation"/>. Bound once by <see cref="Passes.Resolver"/> and re-pointed when a pass changes
     /// the callee (for example, monomorphization selects a concrete array-width specialization). Null for a
@@ -507,6 +631,14 @@ public sealed record GateParam(string Name, QType Type, bool QubitBroadcast = fa
 /// <summary>A built-in gate's signature (see <see cref="QoraGates.SigOf"/>).</summary>
 public sealed record GateSig(string CalleeName, IReadOnlyList<IParamSpec> Params) : ICallableSig
 {
+    private IReadOnlyList<IParamSpec> _params = HirCollections.Freeze(Params);
+
+    public IReadOnlyList<IParamSpec> Params
+    {
+        get => _params;
+        init => _params = HirCollections.Freeze(value);
+    }
+
     public bool IsBuiltin => true;
 }
 
@@ -524,8 +656,9 @@ public sealed record BuiltinFunction(QType Returns, bool TakesBitRegister);
 
 public static class QoraGates
 {
-    public static readonly IReadOnlyDictionary<string, GateInfo> Gates = new Dictionary<string, GateInfo>
-    {
+    public static readonly IReadOnlyDictionary<string, GateInfo> Gates =
+        HirCollections.Freeze(new Dictionary<string, GateInfo>
+        {
         ["H"] = new("h", 1, NonQfree: true), ["X"] = new("x", 1), ["Y"] = new("y", 1, NonQfree: true),
         ["Z"] = new("z", 1, Diagonal: true),
         ["S"] = new("s", 1, Diagonal: true), ["T"] = new("t", 1, Diagonal: true),
@@ -539,7 +672,7 @@ public static class QoraGates
         ["Rz"] = new("rz", 2, AngleFirst: true, Diagonal: true),
         ["Reset"] = new("reset", 1, Unitary: false),
         ["ResetAll"] = new("reset", 1, Unitary: false),
-    };
+        });
 
     // --- derived views (do NOT edit these; edit Gates above) ---
 
@@ -562,15 +695,18 @@ public static class QoraGates
 
     /// <summary>Qora gate name → OpenQASM gate name.</summary>
     public static readonly IReadOnlyDictionary<string, string> Names =
-        Gates.ToDictionary(kv => kv.Key, kv => kv.Value.QasmName);
+        HirCollections.Freeze(Gates.Select(kv =>
+            new KeyValuePair<string, string>(kv.Key, kv.Value.QasmName)));
 
     /// <summary>Rotation gates take an angle first: <c>Rx(θ, q)</c> → <c>rx(θ) q;</c>.</summary>
     public static readonly IReadOnlySet<string> Rotations =
-        Gates.Where(kv => kv.Value.AngleFirst).Select(kv => kv.Key).ToHashSet();
+        HirCollections.FreezeSet(
+            Gates.Where(kv => kv.Value.AngleFirst).Select(kv => kv.Key));
 
     /// <summary>Non-unitary built-ins (reset-like): no functors, never invertible.</summary>
     public static readonly IReadOnlySet<string> NonUnitary =
-        Gates.Where(kv => !kv.Value.Unitary).Select(kv => kv.Key).ToHashSet();
+        HirCollections.FreezeSet(
+            Gates.Where(kv => !kv.Value.Unitary).Select(kv => kv.Key));
 
     /// <summary>
     /// The one registered measurement function. Only a lone <c>M(q[i])</c> is a legal value
@@ -585,10 +721,10 @@ public static class QoraGates
     /// a gate is a void quantum statement while a function IS a value.
     /// </summary>
     public static readonly IReadOnlyDictionary<string, BuiltinFunction> Functions =
-        new Dictionary<string, BuiltinFunction>
+        HirCollections.Freeze(new Dictionary<string, BuiltinFunction>
         {
             [BitsAsInt] = new(QType.Int, TakesBitRegister: true),
-        };
+        });
 
     /// <summary>
     /// The reading of a whole <c>bit[]</c> register as a number — the ONE explicit conversion, because a bit
@@ -610,20 +746,22 @@ public static class QoraGates
     /// Names that read as measurement attempts. NOT legal — used only to classify errors, so a user who
     /// writes <c>Measure(q[0]);</c> gets a measurement-specific message instead of "unknown gate".
     /// </summary>
-    public static readonly IReadOnlySet<string> MeasureLike = new HashSet<string> { "M", "Measure", "measure" };
+    public static readonly IReadOnlySet<string> MeasureLike =
+        HirCollections.FreezeSet(new[] { "M", "Measure", "measure" });
 
     /// <summary>
     /// OpenQASM 3 keywords, types, and built-in constants — lexically reserved, so NO Qora declaration
     /// may use them anywhere (a local named <c>pi</c> or <c>def</c> cannot even parse in QASM).
     /// </summary>
-    public static readonly IReadOnlySet<string> QasmKeywords = new HashSet<string>
-    {
+    public static readonly IReadOnlySet<string> QasmKeywords =
+        HirCollections.FreezeSet(new[]
+        {
         "OPENQASM", "include", "def", "gate", "qubit", "bit", "int", "uint", "float", "angle", "bool",
         "complex", "array", "duration", "stretch", "let", "const", "readonly", "mutable", "measure", "reset", "barrier",
         "delay", "if", "else", "for", "while", "in", "return", "break", "continue", "end", "input",
         "output", "extern", "box", "ctrl", "negctrl", "inv", "pow", "im", "true", "false", "pi",
         "euler", "tau", "defcal", "defcalgrammar", "cal", "durationof", "sizeof", "U", "gphase",
-    };
+        });
 
     /// <summary>
     /// Gate names <c>stdgates.inc</c> defines (plus — derived — whatever a <see cref="Gates"/> entry
@@ -631,14 +769,15 @@ public static class QoraGates
     /// (operation names, the entry op's registers/top-level variables) may not collide; def-local
     /// parameters/variables/loop variables may legally shadow them (OpenQASM scoping rules).
     /// </summary>
-    public static readonly IReadOnlySet<string> StdgatesNames = new HashSet<string>
-    {
+    public static readonly IReadOnlySet<string> StdgatesNames =
+        HirCollections.FreezeSet(new[]
+        {
         "p", "x", "y", "z", "h", "s", "sdg", "t", "tdg", "sx", "rx", "ry", "rz", "cx", "cy", "cz",
         "cp", "crx", "cry", "crz", "ch", "swap", "ccx", "cswap", "cu", "CX", "phase", "cphase", "id",
         "u1", "u2", "u3",
-    }.Concat(Gates.Values.Select(g => g.QasmName)).ToHashSet();
+        }.Concat(Gates.Values.Select(g => g.QasmName)));
 
     /// <summary>Everything above combined — names that can never be a global identifier.</summary>
     public static readonly IReadOnlySet<string> QasmReserved =
-        QasmKeywords.Concat(StdgatesNames).ToHashSet();
+        HirCollections.FreezeSet(QasmKeywords.Concat(StdgatesNames));
 }

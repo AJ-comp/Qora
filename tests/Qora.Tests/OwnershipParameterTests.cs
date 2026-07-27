@@ -32,8 +32,8 @@ public class OwnershipParameterTests
             }
             """);
 
-        Assert.True(result.Success, Describe(result));
-        var transfer = Assert.Single(result.Ir!.Operations, operation => operation.Name == "Transfer");
+        Assert.True(result.Succeeded, Describe(result));
+        var transfer = Assert.Single(result.Hir.Resolved!.Program!.Operations, operation => operation.Name == "Transfer");
         Assert.Collection(
             transfer.Params,
             parameter => AssertMode(parameter, QOwnershipMode.Borrowed, QAccessMode.ReadOnly),
@@ -43,27 +43,10 @@ public class OwnershipParameterTests
     }
 
     [Fact]
-    public void LegacyInOutIsAcceptedButIrUsesCanonicalVarSpelling()
-    {
-        var result = Compiler.Compile("""
-            operation Clear(inout values: int[]) {
-                values[0] = 0;
-            }
-
-            operation Main() {
-                var values: int[] = [1];
-                Clear(inout values);
-            }
-            """);
-
-        Assert.True(result.Success, Describe(result));
-        var clear = Assert.Single(result.Ir!.Operations, operation => operation.Name == "Clear");
-        AssertMode(Assert.Single(clear.Params), QOwnershipMode.Borrowed, QAccessMode.Mutable);
-
-        var printed = IrPrinter.Print(result.Ir);
-        Assert.Contains("QOperation Clear(var int[] values)", printed);
-        Assert.DoesNotContain("inout values", printed);
-    }
+    public void RemovedInOutSpellingIsRejected() =>
+        Compiler.RejectsExactly(
+            "operation Bad(inout values: int[]) {}\noperation Main() {}",
+            "CE0001");
 
     [Theory]
     [InlineData("""
@@ -554,7 +537,7 @@ public class OwnershipParameterTests
     }
 
     [Fact]
-    public void FinalMonomorphizedIrFoldsCountOnlyAfterOwnershipValidation()
+    public void SpecializedHirPreservesCountAndOpenQasmTargetFoldsItAfterOwnershipValidation()
     {
         var result = Compiler.Compile("""
             operation Observe(register: Qubit[]) {
@@ -566,13 +549,22 @@ public class OwnershipParameterTests
             }
             """);
 
-        Assert.True(result.Success, Describe(result));
+        Assert.True(result.Succeeded, Describe(result));
         var specialized = Assert.Single(
-            result.MonoIr!.Operations,
+            result.Hir.Specialized!.Program!.Operations,
             operation => operation.DisplayName == "Observe");
         var declaration = Assert.IsType<QDecl>(Assert.Single(specialized.Body));
         var value = Assert.IsType<QText>(declaration.Value);
-        Assert.Equal(2, Assert.IsType<QNumLit>(value.Tree).Value);
+        Assert.IsType<QMember>(value.Tree);
+
+        var target = Assert.IsType<OpenQasmArtifact>(result.Targets.OpenQasm);
+        var targetObserve = Assert.Single(
+            target.Program.Program.Operations,
+            operation => operation.DisplayName == "Observe");
+        var targetDeclaration =
+            Assert.IsType<QDecl>(Assert.Single(targetObserve.Body));
+        var targetValue = Assert.IsType<QText>(targetDeclaration.Value);
+        Assert.Equal(2, Assert.IsType<QNumLit>(targetValue.Tree).Value);
     }
 
     [Fact]
@@ -592,10 +584,10 @@ public class OwnershipParameterTests
             }
             """);
 
-        Assert.False(result.Success);
+        Assert.False(result.Succeeded);
         Assert.Equal(
             new[] { "QSEM039", "QSEM039", "QSEM039", "QSEM039", "QSEM039" },
-            result.Errors.Select(error => error.Code).OrderBy(code => code));
+            result.Diagnostics.Select(diagnostic => diagnostic.Error).ToList().Select(error => error.Code).OrderBy(code => code));
     }
 
     [Fact]
@@ -765,9 +757,9 @@ public class OwnershipParameterTests
             }
             """);
 
-        Assert.False(result.Success);
-        Assert.Contains(result.Errors, error => error.Code == "QSEM039");
-        Assert.All(result.Errors, error => Assert.Equal("QSEM039", error.Code));
+        Assert.False(result.Succeeded);
+        Assert.Contains(result.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(), error => error.Code == "QSEM039");
+        Assert.All(result.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(), error => Assert.Equal("QSEM039", error.Code));
     }
 
     [Fact]
@@ -782,9 +774,9 @@ public class OwnershipParameterTests
                 } until (values.Count == 0);
             }
             """);
-        Assert.False(outer.Success);
-        Assert.Contains(outer.Errors, error => error.Code == "QSEM039");
-        Assert.All(outer.Errors, error => Assert.Equal("QSEM039", error.Code));
+        Assert.False(outer.Succeeded);
+        Assert.Contains(outer.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(), error => error.Code == "QSEM039");
+        Assert.All(outer.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(), error => Assert.Equal("QSEM039", error.Code));
 
         Compiler.Accepts("""
             operation Consume(move values: int[]) {}
@@ -854,16 +846,16 @@ public class OwnershipParameterTests
             }
             """);
 
-        Assert.True(result.Success, Describe(result));
+        Assert.True(result.Succeeded, Describe(result));
         var specialized = Assert.Single(
-            result.AnalyzedIr!.Operations,
+            result.Hir.EffectAnalysis!.Program!.Operations,
             operation => operation.DisplayName == "Buffers.Transfer");
         Assert.Collection(
             specialized.Params,
             parameter => AssertMode(parameter, QOwnershipMode.Moved, QAccessMode.ReadOnly),
             parameter => AssertMode(parameter, QOwnershipMode.Moved, QAccessMode.Mutable));
-        Assert.Contains("mutable array[int, #dim = 1] values", result.Qasm);
-        Assert.DoesNotContain("move ", result.Qasm);
+        Assert.Contains("mutable array[int, #dim = 1] values", result.Targets.OpenQasm!.Text);
+        Assert.DoesNotContain("move ", result.Targets.OpenQasm!.Text);
     }
 
     private static void AssertMode(QParam parameter, QOwnershipMode ownership, QAccessMode access)
@@ -872,6 +864,9 @@ public class OwnershipParameterTests
         Assert.Equal(access, parameter.Access);
     }
 
-    private static string Describe(QoraParseResult result) =>
-        string.Join(" | ", result.Errors.Select(error => $"{error.Code}: {error.Message}"));
+    private static string Describe(Compilation result) =>
+        string.Join(
+            " | ",
+            result.Diagnostics.Select(diagnostic =>
+                $"{diagnostic.Error.Code}: {diagnostic.Error.Message}"));
 }

@@ -2,6 +2,19 @@
 
 All notable changes to the Qora Language extension.
 
+## 0.24.0
+
+- Bundles the **Qora v0.31** compiler and its immutable, revision-bound compilation pipeline.
+  Diagnostics, stage views, MIR analyses, and OpenQASM output now come from one exact compilation
+  snapshot with document-qualified source locations and verified HIR-to-MIR-to-target provenance.
+- Uses `var` as the only mutable-borrow spelling. The former `inout` compatibility alias has been
+  removed; ownership/access contracts are now `values`, `var values`, `move values`, and
+  `move var values`.
+- Includes the unified ID-based HIR scope graph, exact accepted/rejected semantic artifacts, total MIR
+  symbol/entity dispositions, and hardened OpenQASM target artifacts. These foundations keep later
+  incremental-compilation, IntelliSense, and automatic-uncomputation work from rebuilding or guessing
+  semantic relationships.
+
 ## 0.23.0
 
 - Bundles the **Qora v0.30** compiler with four explicit operation-resource contracts:

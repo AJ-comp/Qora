@@ -8,7 +8,7 @@ namespace Qora.Ir.Passes;
 /// splice. An EMPTY <see cref="Cleanup"/> is legal and means "born |0…0⟩ and never value-written (used only as
 /// a control) — already clean, nothing to inject."
 /// </summary>
-public sealed record CleanupPlan(QubitRef Ancilla, IReadOnlyList<QStmt> Cleanup, QubitEvent Death);
+internal sealed record CleanupPlan(QubitRef Ancilla, IReadOnlyList<QStmt> Cleanup, QubitEvent Death);
 
 /// <summary>
 /// Rung ④, step 3 — the cleanup PLAN builder. Pure: given the analysis facts and one ancilla, it computes the
@@ -16,7 +16,7 @@ public sealed record CleanupPlan(QubitRef Ancilla, IReadOnlyList<QStmt> Cleanup,
 ///
 /// The recipe, each part backed by an existing tool:
 /// <list type="number">
-///   <item>SAFETY GATE — <see cref="SemanticModel.IsSafelyUncomputable"/> (rung ③). Not safe ⇒ no plan
+///   <item>SAFETY GATE — <see cref="HirSemanticModel.IsSafelyUncomputable"/> (rung ③). Not safe ⇒ no plan
 ///         (<c>null</c>). The step-6 driver pre-filters to safe ancillas; this is the guard, not the filter.</item>
 ///   <item>WRITE LIST — q's <see cref="QubitEventKind.Write"/> events in program order (<see cref="QubitEvent.Order"/>),
 ///         with the <c>use</c> |0…0⟩ birth excluded (its StmtId resolves to a <see cref="QUse"/>, never replayed).</item>
@@ -29,12 +29,12 @@ public sealed record CleanupPlan(QubitRef Ancilla, IReadOnlyList<QStmt> Cleanup,
 /// rung-③-SAFE ancilla whose writes do not invert is a contradiction between the two analyses — thrown, not
 /// swallowed into a cleanup that silently drops statements.
 /// </summary>
-public static class UncomputePlanner
+internal static class UncomputePlanner
 {
     /// <summary>Build the cleanup plan for ancilla <paramref name="q"/> in operation <paramref name="op"/>, or
     /// <c>null</c> if q is not safely uncomputable. <paramref name="inverter"/> carries the operation table so a
     /// qfree user-op call in the write list resolves (build it once from the program's operations, reuse it).</summary>
-    public static CleanupPlan? Plan(SemanticModel model, Inverter inverter, QOperation op, QubitRef q)
+    public static CleanupPlan? Plan(HirSemanticModel model, Inverter inverter, QOperation op, QubitRef q)
     {
         if (!model.IsSafelyUncomputable(op, q)) return null;   // rung ③ guard — caller should pre-filter
 

@@ -3,200 +3,86 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>1. QoraLowering — AST를 Qora IR로 옮기는 경계 — Qora IR 패스 데이터시트</title>
+<title>1. QoraLowering — 문서 AST를 source-shaped HIR로 — Qora IR 패스 데이터시트</title>
 <style>
   :root {
     --bg:#fff; --ink:#1f2430; --muted:#5b6472; --line:#e1e5eb; --panel:#f6f7f9;
-    --accent:#485568; --blue:#1457d6; --green:#11875b; --amber:#b5810a;
+    --blue:#1457d6; --green:#11875b; --amber:#9a6700; --navy:#263141;
   }
   * { box-sizing:border-box; }
   html { scroll-behavior:smooth; }
   body {
     margin:0; background:var(--bg); color:var(--ink); word-break:keep-all; overflow-wrap:break-word;
     font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Apple SD Gothic Neo",
-      "Malgun Gothic","Noto Sans KR","Segoe UI Symbol","Cambria Math",sans-serif;
-    line-height:1.72; font-size:16.5px;
+      "Malgun Gothic","Noto Sans KR","Segoe UI Symbol",sans-serif;
+    font-size:16.5px; line-height:1.72;
   }
-  .wrap { max-width:940px; margin:0 auto; padding:0 20px 120px; }
-  header.hero {
-    padding:60px 20px 36px; text-align:center; border-bottom:1px solid var(--line); background:#f7f8fa;
-  }
-  header.hero h1 { margin:0 0 10px; font-size:2rem; letter-spacing:-.5px; }
-  header.hero p { margin:0; color:var(--muted); font-size:1.02rem; }
-  .tag { display:inline-block; margin-bottom:14px; color:var(--muted); font-size:.78rem;
-         font-weight:800; letter-spacing:.1em; text-transform:uppercase; }
-  h2 { margin:54px 0 12px; padding-bottom:10px; border-bottom:1px solid var(--line);
-       font-size:1.42rem; letter-spacing:-.3px; }
-  h3 { margin:30px 0 8px; font-size:1.08rem; }
-  p { margin:12px 0; }
-  strong { color:#11203a; }
   a { color:#1745b5; }
-  code,.mono,pre { font-family:"SF Mono","JetBrains Mono","D2Coding",Consolas,"Segoe UI Symbol",monospace; }
+  code,pre { font-family:"SF Mono","JetBrains Mono","D2Coding",Consolas,monospace; }
   code { padding:1px 6px; border:1px solid var(--line); border-radius:5px;
          background:var(--panel); font-size:.9em; word-break:normal; }
   pre { margin:16px 0; padding:15px 17px; overflow-x:auto; border-radius:10px;
-        background:#111827; color:#eef4ff; font-size:.84rem; line-height:1.56;
-        word-break:normal; white-space:pre; }
+        background:#111827; color:#eef4ff; font-size:.84rem; line-height:1.55;
+        white-space:pre; word-break:normal; }
   pre code { padding:0; border:0; background:none; color:inherit; font-size:inherit; }
-  pre .cm { color:#9badce; }
-  pre .hl { color:#93c5fd; font-weight:800; }
-  pre .add { color:#7fe0b0; font-weight:800; }
-  pre .warn { color:#fcd58d; font-weight:800; }
+  .wrap { max-width:940px; margin:0 auto; padding:0 20px 110px; }
+  .hero { padding:58px 20px 36px; text-align:center; border-bottom:1px solid var(--line);
+          background:#f7f8fa; }
+  .hero h1 { margin:0 0 10px; font-size:2rem; letter-spacing:-.5px; }
+  .hero p { margin:0; color:var(--muted); }
+  .tag { display:inline-block; margin-bottom:14px; color:var(--muted); font-size:.78rem;
+         font-weight:800; letter-spacing:.12em; text-transform:uppercase; }
+  h2 { margin:52px 0 12px; padding-bottom:10px; border-bottom:1px solid var(--line);
+       font-size:1.4rem; letter-spacing:-.3px; }
+  h3 { margin:28px 0 8px; font-size:1.08rem; }
+  p { margin:12px 0; }
   .lead { margin-top:24px; font-size:1.04rem; }
   .doc-links { display:flex; flex-wrap:wrap; gap:10px; margin:20px 0 6px; }
-  .doc-link { display:inline-flex; align-items:center; padding:7px 15px; border:1px solid #cddcff;
-              border-radius:999px; background:#f6f9ff; color:#1745b5; font-size:.92rem;
-              font-weight:750; text-decoration:none; }
+  .doc-link { display:inline-flex; align-items:center; padding:7px 15px;
+              border:1px solid #cddcff; border-radius:999px; background:#f6f9ff;
+              color:#1745b5; font-size:.92rem; font-weight:750; text-decoration:none; }
   .doc-link:hover { border-color:#9bb8ff; background:#eef4ff; }
-  .doc-meta { margin:22px 0; overflow:hidden; border:1px solid #d9dee6;
-              border-radius:10px; background:#fff; box-shadow:0 8px 22px rgba(24,32,45,.055); }
-  .doc-meta .meta-title { display:flex; align-items:center; justify-content:space-between; gap:16px;
-                          padding:11px 18px; background:#263141; color:#f7f9fc;
-                          font-size:.76rem; font-weight:800; letter-spacing:.1em; }
-  .meta-pass { color:#cbd3df; font-family:"SF Mono","JetBrains Mono","D2Coding",Consolas,monospace;
-               font-size:.74rem; font-weight:650; letter-spacing:.02em; text-transform:none; }
-  .meta-body { min-width:0; padding:18px; }
-  .meta-section-label { display:flex; align-items:center; gap:12px; margin-bottom:11px;
-                        color:#586273; font-size:.69rem; font-weight:850; letter-spacing:.12em; }
-  .meta-section-label::after { content:""; flex:1; height:1px; background:#e5e9ef; }
-  .pass-purpose { margin:0; color:#283445; font-size:.98rem; line-height:1.68; }
-  .walkthrough { display:grid; gap:15px; margin-top:18px; }
-  .walk-stage { min-width:0; overflow:hidden; scroll-margin-top:52px;
-                border:1px solid #dce2e9; border-radius:10px; background:#f8fafc; }
-  .walk-head { display:grid; grid-template-columns:34px minmax(0,1fr); align-items:center; gap:11px;
-               padding:11px 13px; border-bottom:1px solid #dfe4eb; background:#eef1f5; }
-  .walk-number { display:flex; align-items:center; justify-content:center; width:30px; height:30px;
-                 border-radius:7px; background:#263141; color:#fff; font-size:.78rem; font-weight:850; }
-  .walk-number.input { background:#422d16; color:#ffedd5; font-size:.66rem; letter-spacing:-.03em; }
-  .walk-head h3 { margin:0; color:#253044; font-size:1rem; line-height:1.42; }
-  .walk-body { min-width:0; padding:12px; }
-  .walk-body > p:first-child { margin-top:0; }
-  .walk-body > p:last-child { margin-bottom:0; }
-  .file-grid,.outcome-grid { display:grid; grid-template-columns:minmax(0,1fr); gap:10px; align-items:start; }
-  .source-ast-flow { display:grid; grid-template-columns:minmax(0,1fr); gap:8px; align-items:start; }
-  .source-ast-flow .file-card,.source-ast-flow .ast-card { margin:0; }
-  .source-ast-flow .ast-card pre { font-size:.77rem; line-height:1.52; }
-  .flow-arrow { display:flex; align-self:stretch; align-items:center; justify-content:center; min-height:28px;
-                color:#667184; font-size:1.15rem; font-weight:850; }
-  .flow-arrow::before { content:"↓"; }
-  .file-card { min-width:0; overflow:hidden; border:1px solid #313d50; border-radius:8px; background:#111827; }
-  .file-label { display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:7px 11px;
-                border-bottom:1px solid #344155; background:#202b3c; color:#d7deea;
-                font-size:.7rem; font-weight:800; letter-spacing:.035em; }
-  .file-label.entry { border-bottom-color:#60a5fa; background:#183153; color:#dbeafe; }
-  .file-role { padding:2px 6px; border:1px solid currentColor; border-radius:999px;
-               font-size:.61rem; line-height:1.3; letter-spacing:.02em; white-space:nowrap; }
-  .file-path { min-width:0; overflow-wrap:anywhere; }
-  .file-card pre { max-width:100%; margin:0; padding:12px 14px; border-radius:0;
-                   overflow-x:auto; white-space:pre; font-size:.77rem; line-height:1.52; }
-  .ast-card { margin-top:10px; overflow:hidden; border:1px solid #313d50; border-radius:8px; }
-  .ast-card .file-label.ast-output { border-bottom-color:#f59e0b; background:#422d16; color:#ffedd5; }
-  .ast-card pre { margin:0; border-radius:0; }
-  .outcome-grid { margin-top:10px; }
-  .outcome { min-width:0; padding:10px 11px; border:1px solid #dce2e9; border-radius:8px;
-             background:#fff; color:#455164; font-size:.84rem; line-height:1.58; }
-  .outcome.good { border-color:#cfe4da; background:#f5faf7; }
-  .outcome.warn { border-color:#ead8bd; background:#fffaf1; }
-  .outcome-title { display:block; margin-bottom:5px; color:#334155; font-size:.74rem;
-                   font-weight:850; letter-spacing:.025em; }
-  .outcome.good .outcome-title { color:#167351; }
-  .outcome.warn .outcome-title { color:#8a5b13; }
-  .outcome pre { margin:7px 0 0; padding:9px 10px; border-radius:7px; font-size:.73rem; line-height:1.48; }
-  .snapshot { margin:10px 0 0; padding:10px 12px; border:1px solid #d7dee8; border-radius:8px;
-              background:#fff; }
-  .snapshot pre { margin:0; font-size:.77rem; }
-  .lowering-map { margin:12px 0 14px; overflow:hidden; border:1px solid #d7dee8;
-                  border-radius:10px; background:#f8fafc; box-shadow:0 4px 14px rgba(24,32,45,.04); }
-  .lowering-map .diagram-scroll-hint { display:none; }
-  .lowering-map .diagram-scroll { overflow-x:auto; scrollbar-gutter:stable; }
-  .lowering-map .diagram-scroll:focus-visible { outline:3px solid rgba(20,87,214,.35); outline-offset:-3px; }
-  .lowering-map svg { display:block; width:100%; min-width:820px; height:auto; }
-  .lowering-map figcaption { padding:9px 13px 10px; border-top:1px solid #e1e6ed;
-                            background:#fff; color:#536074; font-size:.78rem; line-height:1.55; }
-  .lowering-map .svg-ui { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Apple SD Gothic Neo",
-                          "Malgun Gothic","Noto Sans KR",sans-serif; }
-  .lowering-map .svg-code { font-family:"SF Mono","JetBrains Mono","D2Coding",Consolas,monospace; }
-  #input-ast .lowering-map { margin:0 0 14px; box-shadow:none; }
-  .panel { margin:16px 0; overflow-x:auto; border:1px solid var(--line); border-radius:9px; background:#fff; }
-  .walk-body .panel { margin:10px 0; }
-  table.spec { width:100%; border-collapse:collapse; font-size:.9rem; }
-  table.spec th,table.spec td { padding:8px 11px; border-bottom:1px solid var(--line);
+  .meta,.callout { margin:20px 0; overflow:hidden; border:1px solid #d9dee6;
+                   border-radius:10px; background:#fff; }
+  .meta-title { display:flex; justify-content:space-between; gap:16px; padding:11px 18px;
+                background:var(--navy); color:#f7f9fc; font-size:.76rem; font-weight:800;
+                letter-spacing:.09em; }
+  .meta-body { padding:17px 18px; }
+  .callout { padding:15px 17px; background:#f8fafc; }
+  .callout.good { border-color:#b9decf; background:#f5faf7; }
+  .callout.warn { border-color:#e6d2ad; background:#fffaf1; }
+  .callout .h { display:block; margin-bottom:7px; color:#526071; font-size:.72rem;
+                font-weight:850; letter-spacing:.08em; text-transform:uppercase; }
+  .diagram { margin:22px 0; overflow:hidden; border:1px solid #d4dde8;
+             border-radius:12px; background:#f8fafc; }
+  .diagram-scroll { overflow-x:auto; }
+  .diagram svg { display:block; width:100%; min-width:820px; height:auto; }
+  .diagram figcaption { padding:11px 15px; border-top:1px solid #dfe5ed;
+                       background:#fff; color:#536074; font-size:.82rem; }
+  .svg-ui { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Apple SD Gothic Neo",
+            "Malgun Gothic","Noto Sans KR",sans-serif; }
+  .svg-code { font-family:"SF Mono","JetBrains Mono","D2Coding",Consolas,monospace; }
+  .panel { margin:16px 0; overflow-x:auto; border:1px solid var(--line);
+           border-radius:9px; background:#fff; }
+  table.spec { width:100%; border-collapse:collapse; font-size:.91rem; }
+  table.spec th,table.spec td { padding:9px 11px; border-bottom:1px solid var(--line);
                                text-align:left; vertical-align:top; }
-  table.spec th { background:#fbfbfe; color:var(--muted); font-size:.76rem;
+  table.spec th { background:#fbfbfe; color:var(--muted); font-size:.77rem;
                   font-weight:800; letter-spacing:.02em; }
   table.spec tr:last-child td { border-bottom:0; }
   table.spec td.k { width:1%; color:#1a2740; font-weight:750; white-space:nowrap; }
-  table.spec code { white-space:nowrap; }
-  .param-shape-table .shape-result { display:flex; align-items:center; flex-wrap:wrap; gap:8px; }
-  .array-state {
-    display:inline-flex; align-items:stretch; overflow:hidden; border:1px solid;
-    border-radius:999px; font-size:.72rem; font-weight:800; line-height:1.3; white-space:nowrap;
-  }
-  .array-state .shape-name { display:flex; align-items:center; padding:3px 8px; }
-  .array-state .shape-value {
-    display:flex; align-items:center; padding:3px 8px;
-    font-family:"SF Mono","JetBrains Mono","D2Coding",Consolas,monospace;
-    font-size:.69rem; font-weight:750;
-  }
-  .array-state.scalar { border-color:#cbd3df; color:#526071; background:#f5f7fa; }
-  .array-state.scalar .shape-value { border-left:1px solid #cbd3df; background:#e9edf2; }
-  .array-state.array { border-color:#8fb8df; color:#164f82; background:#edf5fd; }
-  .array-state.array .shape-value { border-left:1px solid #8fb8df; background:#dcecff; }
-  .diagram-ref {
-    display:inline-flex; align-items:center; min-height:18px; margin-left:5px; padding:1px 7px;
-    transform:translateY(-.08em); border:1px solid; border-radius:999px;
-    font-size:.66rem; font-weight:850; line-height:1.25; letter-spacing:.01em; white-space:nowrap;
-    vertical-align:baseline;
-  }
-  .diagram-ref.blue { border-color:#8fb8df; background:#e7f1fc; color:#164f82; }
-  .diagram-ref.amber { border-color:#dfb55f; background:#fff1d5; color:#7a5114; }
-  .diagram-ref.green { border-color:#8fc9b2; background:#e8f6f0; color:#116347; }
-  .call { margin:18px 0; padding:15px 17px; border:1px solid #dfe3e9;
-          border-radius:9px; background:#f8f9fb; box-shadow:0 4px 14px rgba(24,32,45,.045); }
-  .call.good { background:#f6faf8; }
-  .call.warn { background:#fbfaf5; }
-  .call .h { display:block; margin-bottom:7px; color:#576171; font-size:.72rem;
-             font-weight:850; letter-spacing:.1em; text-transform:uppercase; }
-  .call p { margin:0; }
-  .diagram-reading-rule {
-    display:grid; grid-template-columns:auto minmax(0,1fr); align-items:start; gap:13px;
-    margin:0; padding:13px 15px; border:1px solid #dec9a7; border-radius:9px;
-    background:#fffaf2; box-shadow:0 4px 14px rgba(66,45,22,.045);
-  }
-  .diagram-reading-badge {
-    display:inline-flex; align-items:center; justify-content:center; min-height:25px; padding:3px 10px;
-    border-radius:999px; background:#422d16; color:#ffedd5; font-size:.7rem; font-weight:850;
-    letter-spacing:.025em; white-space:nowrap;
-  }
-  .diagram-reading-rule p { margin:0; color:#374151; font-size:.9rem; line-height:1.68; }
-  .diagram-reading-rule strong { color:#253044; }
-  .meta-reference { display:flex; align-items:baseline; flex-wrap:wrap; gap:5px 10px;
-                    margin-top:16px; padding-top:13px; border-top:1px solid #e5e9ef;
-                    color:var(--muted); font-size:.75rem; }
-  .reference-label { color:#667184; font-size:.67rem; font-weight:850; letter-spacing:.08em; }
-  .meta-reference code { white-space:normal; overflow-wrap:anywhere; }
+  .cards { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; margin:16px 0; }
+  .card { padding:14px 15px; border:1px solid #dce2e9; border-radius:9px; background:#f8fafc; }
+  .card b { display:block; margin-bottom:5px; color:#24344d; }
+  .card p { margin:0; font-size:.91rem; }
   footer { margin-top:58px; padding-top:24px; border-top:1px solid var(--line);
            color:var(--muted); text-align:center; font-size:.9rem; }
-  @media (min-width:760px) {
-    .file-grid.two,.outcome-grid.two { grid-template-columns:repeat(2,minmax(0,1fr)); }
-    .source-ast-flow { grid-template-columns:minmax(0,.94fr) 34px minmax(0,1.06fr); }
-    .flow-arrow::before { content:"→"; }
-  }
   @media (max-width:720px) {
     .wrap { padding-right:16px; padding-left:16px; }
-    .meta-body { padding:14px; }
-    .walk-body { padding:10px; }
-    .walk-head { grid-template-columns:30px minmax(0,1fr); gap:9px; padding:10px; }
-    .walk-number { width:28px; height:28px; }
-    .diagram-reading-rule { grid-template-columns:minmax(0,1fr); gap:8px; padding:12px; }
-    .diagram-reading-badge { justify-self:start; }
-    header.hero { padding-right:16px; padding-left:16px; }
-    header.hero h1 { font-size:1.5rem; line-height:1.38; overflow-wrap:anywhere; }
-    header.hero p { font-size:.94rem; }
+    .hero { padding-right:16px; padding-left:16px; }
+    .hero h1 { font-size:1.5rem; line-height:1.38; }
+    .cards { grid-template-columns:1fr; }
     table.spec td.k { white-space:normal; }
-    .lowering-map .diagram-scroll-hint { display:block; padding:7px 10px; border-bottom:1px solid #e1e6ed;
-                                         background:#fff8ec; color:#7a5114; font-size:.72rem; font-weight:750;
-                                         text-align:center; }
   }
 </style>
 </head>
@@ -205,1939 +91,240 @@
 
 <header class="hero">
   <div class="tag">Qora · IR 패스 데이터시트 · 1장</div>
-  <h1>1. QoraLowering — AST를 Qora IR로 옮기는 경계</h1>
-  <p>파서가 알아본 구조를 Qora가 직접 처리할 수 있는 자료로 바꾸는 단계</p>
+  <h1>1. QoraLowering</h1>
+  <p>문서 AST를 source-shaped HIR와 하나의 표현식 트리로 변환</p>
 </header>
 
 <div class="wrap">
   <nav class="doc-links" aria-label="IR 패스 데이터시트 내비게이션">
-    <a class="doc-link" href="datasheet.html#s2">패스 목차</a>
-    <a class="doc-link" href="ir-pass-02-module-loader.html">2. ModuleLoader →</a>
+    <a class="doc-link" href="datasheet.html#passes">패스 목차</a>
+    <a class="doc-link" href="ir-pass-02-module-loader.html">2. SourceGraphLoader / ModuleLoader →</a>
   </nav>
 
   <p class="lead">
-    <code>QoraLowering</code>이 호출되기 전에, Janglim 파서는 Qora 코드가 문법에 맞는지 확인하고 코드의 구성 요소를 의미 AST로 정리합니다.<br>
-    그러나 이 트리는 파서 라이브러리인 Janglim의 자료구조에 직접 의존하므로, 이후 컴파일러 패스까지 그대로 사용하면 파서와 후속 처리 단계 사이의 결합도가 지나치게 높아집니다.<br>
-    따라서 파서가 알아낸 의미는 그대로 유지하면서도, 같은 내용을 Qora 전용 중간 표현으로 옮길 필요가 있습니다.<br>
-    이 역할을 <code>QoraLowering</code>이 맡으며, 변환된 프로그램은 <code>QProgram</code>에 담깁니다.<br>
-    아래에서는 <code>main.qor</code>를 파싱한 결과인 의미 AST를 입력으로 두고, AST의 각 부분이 어떤 IR 값으로 바뀌는지 바로 확인합니다.
+    공개 <code>QoraParser.Parse</code>는 토큰, Qora 소유의 불변 파스 트리·AST 투영, 캡처된 트리 문자열, 구문 진단을 담은 <code>SyntaxSnapshot</code>에서 멈춥니다.<br>
+    이 스냅샷은 Janglim AST를 보관하지 않으며, parser가 만든 변경 가능한 AST는 내부 <code>SyntaxParseProduct</code>가 HIR lowering 직전까지만 임시로 소유합니다.<br>
+    whole-program 컴파일에서는 <code>SourceGraphLoader</code>가 이 임시 AST와 revision-qualified <code>SourceDocumentRef</code>를 <code>QoraLowering</code>에 전달하고, 변환이 끝나면 parser-owned AST를 공개 아티팩트에 남기지 않습니다.<br>
+    <code>QoraLowering</code>은 파일 하나의 선언·문장·표현식을 Qora의 source-shaped HIR인 <code>QProgram</code>으로 옮겨 이후 단계가 Janglim 타입에 의존하지 않도록 합니다.
   </p>
 
-  <section class="doc-meta" aria-label="QoraLowering 패스 사양">
-    <div class="meta-title"><span>PASS SPECIFICATION</span><span class="meta-pass">QoraLowering</span></div>
+  <section class="meta" aria-label="QoraLowering 핵심 사양">
+    <div class="meta-title"><span>PASS SPECIFICATION</span><span>QoraLowering.Lower(AstSymbol?, SourceDocumentRef)</span></div>
     <div class="meta-body">
-      <div class="meta-section-label">이 패스가 하는 일</div>
-      <p class="pass-purpose">
-        <code>QoraLowering</code>은 파일 하나의 의미 AST를 읽어 연산, 파라미터, 문장, import와 <code>open</code>을 Qora IR 노드로 바꿉니다.<br>
-        이때 프로그램의 동작을 최적화하거나 이름의 유효성을 판정하지 않으며, 다음 패스가 Janglim 없이 같은 정보를 읽을 수 있는 형태를 만드는 데 집중합니다.
-      </p>
-
-      <div class="walkthrough">
-        <section class="walk-stage" id="input-ast">
-          <div class="walk-head">
-            <div class="walk-number input">입력</div>
-            <h3><code>QoraLowering</code>의 입력은 파서가 미리 만든 Janglim AST입니다</h3>
-          </div>
-          <div class="walk-body">
-            <figure class="lowering-map" aria-labelledby="parser-ast-map-title parser-ast-map-caption">
-              <div class="diagram-scroll-hint" aria-hidden="true">↔ 좌우로 밀어 실제 코드와 파서가 만든 AST 객체 계층을 함께 확인합니다</div>
-              <div class="diagram-scroll" tabindex="0" aria-label="main.qor의 실제 코드와 Janglim이 만든 AstNonTerminal 및 AstTerminal 계층을 연결한 도식, 작은 화면에서는 좌우로 스크롤할 수 있습니다">
-                <svg id="parser-ast-map-svg" class="lowering-flow" viewBox="0 0 1000 1288" role="img"
-                     aria-labelledby="parser-ast-map-title parser-ast-map-desc" focusable="false">
-                <title id="parser-ast-map-title">Qora 소스에서 실제 Janglim AST 객체 계층이 만들어지는 과정</title>
-                <desc id="parser-ast-map-desc">main.qor의 전체 코드를 왼쪽에 그대로 두고, 오른쪽에는 실제 파서 출력과 같은 AstNonTerminal Name 및 Items 순서와 AstTerminal 값을 부모 자식 트리로 펼쳤습니다.</desc>
-                <defs>
-                  <marker id="parser-detail-arrow-amber" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
-                    <path d="M0 0 L10 5 L0 10 Z" fill="#b7791f"/>
-                  </marker>
-                  <marker id="parser-detail-arrow-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
-                    <path d="M0 0 L10 5 L0 10 Z" fill="#2563a8"/>
-                  </marker>
-                  <marker id="parser-detail-arrow-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
-                    <path d="M0 0 L10 5 L0 10 Z" fill="#16805b"/>
-                  </marker>
-                  <marker id="parser-detail-arrow-slate" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
-                    <path d="M0 0 L10 5 L0 10 Z" fill="#64748b"/>
-                  </marker>
-                </defs>
-
-                <g class="parser-map-legacy" display="none" aria-hidden="true">
-
-                <rect x="24" y="20" width="126" height="27" rx="13.5" fill="#422d16"/>
-                <text class="svg-ui" x="87" y="38" text-anchor="middle" fill="#ffedd5" font-size="12" font-weight="800">소스 → AST</text>
-                <text class="svg-ui" x="166" y="39" fill="#253044" font-size="17.5" font-weight="800">요약하지 않고 실제 AST 객체 계층을 그대로 펼칩니다</text>
-                <text class="svg-ui" x="166" y="59" fill="#667184" font-size="11.5">오른쪽의 Items 번호와 부모·자식 깊이는 현재 파서가 출력한 구조와 같습니다.</text>
-
-                <!-- main.qor와 AST가 위에서 아래까지 이어지는 하나의 본체 -->
-                <rect x="24" y="78" width="872" height="1902" rx="11" fill="#0f2035"/>
-
-                <!-- 통합 카드 머리: 소스와 AST 열을 한 카드 안에서 구분 -->
-                <path d="M35 78 H885 Q896 78 896 89 V120 H24 V89 Q24 78 35 78 Z" fill="#422d16"/>
-                <path d="M35 78 H366 V120 H35 Q24 120 24 109 V89 Q24 78 35 78 Z" fill="#183153"/>
-                <rect x="39" y="88" width="78" height="22" rx="11" fill="none" stroke="#bfdbfe"/>
-                <text class="svg-ui" x="78" y="103" text-anchor="middle" fill="#dbeafe" font-size="10.5" font-weight="800">Qora 소스</text>
-                <text class="svg-code" x="129" y="103" fill="#dbeafe" font-size="11.2" font-weight="750">C:\work\app\main.qor</text>
-
-                <rect x="397" y="88" width="86" height="22" rx="11" fill="none" stroke="#ffedd5"/>
-                <text class="svg-ui" x="440" y="103" text-anchor="middle" fill="#ffedd5" font-size="10.5" font-weight="800">Janglim AST</text>
-                <text class="svg-ui" x="495" y="103" fill="#ffedd5" font-size="12" font-weight="750">AstNonTerminal · Items · AstTerminal</text>
-
-                <!-- 파일 전체 → Program 루트 -->
-                <rect x="24" y="120" width="872" height="62" fill="#141d2a"/>
-                <line x1="24" y1="120" x2="896" y2="120" stroke="#475569"/>
-                <text class="svg-code" x="42" y="154" fill="#f5f7fb" font-size="11.2" font-weight="750">main.qor</text>
-                <text class="svg-ui" x="42" y="171" fill="#aeb9c9" font-size="9.5">전체 소스 파일</text>
-
-                <text class="svg-code" x="400" y="153" fill="#dbeafe" font-size="10.8" font-weight="800">AstNonTerminal</text>
-                <text class="svg-code" x="400" y="171" fill="#f5f7fb" font-size="10.4">Name = "Program" · Items[0..2]</text>
-
-                <!-- Import -->
-                <rect x="24" y="182" width="872" height="76" fill="#342711"/>
-                <line x1="24" y1="182" x2="896" y2="182" stroke="#7c5a1c"/>
-                <rect x="36" y="216" width="28" height="18" rx="9" fill="#b7791f"/>
-                <text class="svg-ui" x="50" y="229" text-anchor="middle" fill="#fff" font-size="9.5" font-weight="850">1</text>
-                <text class="svg-code" x="76" y="230" fill="#f5f7fb" font-size="10.8">import "lib/gates.qor";</text>
-
-                <rect x="394" y="203" width="28" height="18" rx="9" fill="#b7791f"/>
-                <text class="svg-ui" x="408" y="216" text-anchor="middle" fill="#fff" font-size="9.5" font-weight="850">1</text>
-                <text class="svg-code" x="434" y="216" fill="#fcd58d" font-size="10.5" font-weight="800">Program.Items[0] · AstNonTerminal</text>
-                <text class="svg-code" x="434" y="235" fill="#f5f7fb" font-size="10.2">Name = "Import"</text>
-                <text class="svg-code" x="434" y="251" fill="#f7dfae" font-size="9.8">└─ Items[0] · AstTerminal("\"lib/gates.qor\"")</text>
-
-                <!-- Main: 소스 부모 범위 -->
-                <rect x="24" y="258" width="872" height="982" fill="#0f2035"/>
-                <line x1="24" y1="258" x2="896" y2="258" stroke="#315274"/>
-                <rect x="36" y="287" width="28" height="18" rx="9" fill="#2563a8"/>
-                <text class="svg-ui" x="50" y="300" text-anchor="middle" fill="#fff" font-size="9.5" font-weight="850">2</text>
-                <text class="svg-code" x="76" y="301" fill="#f5f7fb" font-size="10.8">operation Main()</text>
-                <text class="svg-code" x="76" y="320" fill="#f5f7fb" font-size="10.8">{</text>
-                <text class="svg-ui" x="338" y="301" text-anchor="end" fill="#9fc7ef" font-size="8.8">부모 범위</text>
-
-                <!-- Main: AST 부모 -->
-                <rect x="856" y="282" width="28" height="18" rx="9" fill="#2563a8"/>
-                <text class="svg-ui" x="870" y="295" text-anchor="middle" fill="#fff" font-size="9.5" font-weight="850">2</text>
-                <text class="svg-code" x="400" y="295" fill="#bfdbfe" font-size="10.5" font-weight="800">Program.Items[1] · AstNonTerminal</text>
-                <text class="svg-code" x="430" y="310" fill="#f5f7fb" font-size="10.2">├─ Name = "Operation"</text>
-                <g>
-                <g transform="translate(16 0)">
-                <text class="svg-code" x="414" y="328" fill="#dbeafe" font-size="9.8">├─ Items[0] · AstTerminal("Main")</text>
-                </g>
-
-                <!-- 2.1 Use -->
-                <rect x="40" y="346" width="298" height="84" rx="8" fill="#132b48" stroke="#4c8bc7"/>
-                <rect x="50" y="358" width="38" height="18" rx="9" fill="#2563a8"/>
-                <text class="svg-ui" x="69" y="371" text-anchor="middle" fill="#fff" font-size="9" font-weight="850">2.1</text>
-                <text class="svg-code" x="102" y="392" fill="#f5f7fb" font-size="10.8">use q = Qubit[2];</text>
-
-                <g transform="translate(16 0)">
-                <rect x="398" y="346" width="466" height="84" rx="8" fill="#132b48" stroke="#4c8bc7"/>
-                <rect x="826" y="355" width="38" height="18" rx="9" fill="#2563a8"/>
-                <text class="svg-ui" x="845" y="368" text-anchor="middle" fill="#fff" font-size="9" font-weight="850">2.1</text>
-                <text class="svg-code" x="414" y="368" fill="#bfdbfe" font-size="10.2" font-weight="800">├─ Items[1] · AstNonTerminal · Name = "Use"</text>
-                <text class="svg-code" x="434" y="386" fill="#dbeafe" font-size="9.8">├─ Items[0] · AstTerminal("q")</text>
-                <text class="svg-code" x="434" y="403" fill="#dbeafe" font-size="9.8">├─ Items[1] · AstTerminal("Qubit")</text>
-                <text class="svg-code" x="434" y="420" fill="#dbeafe" font-size="9.8">└─ Items[2] · AstTerminal("2")</text>
-                </g>
-
-                <!-- 2.2 Gate -->
-                <rect x="40" y="438" width="298" height="112" rx="8" fill="#132b48" stroke="#4c8bc7"/>
-                <rect x="50" y="451" width="38" height="18" rx="9" fill="#2563a8"/>
-                <text class="svg-ui" x="69" y="464" text-anchor="middle" fill="#fff" font-size="9" font-weight="850">2.2</text>
-                <text class="svg-code" x="102" y="498" fill="#f5f7fb" font-size="10.8">Demo.Prepare(q);</text>
-
-                <g transform="translate(16 0)">
-                <rect x="398" y="438" width="466" height="112" rx="8" fill="#132b48" stroke="#4c8bc7"/>
-                <rect x="826" y="447" width="38" height="18" rx="9" fill="#2563a8"/>
-                <text class="svg-ui" x="845" y="460" text-anchor="middle" fill="#fff" font-size="9" font-weight="850">2.2</text>
-                <text class="svg-code" x="414" y="460" fill="#bfdbfe" font-size="10.2" font-weight="800">├─ Items[2] · AstNonTerminal · Name = "Gate"</text>
-                <text class="svg-code" x="434" y="478" fill="#dbeafe" font-size="9.8">├─ Items[0] · AstTerminal("Demo")</text>
-                <text class="svg-code" x="434" y="495" fill="#dbeafe" font-size="9.8">├─ Items[1] · AstTerminal(".")</text>
-                <text class="svg-code" x="434" y="512" fill="#dbeafe" font-size="9.8">├─ Items[2] · AstTerminal("Prepare")</text>
-                <text class="svg-code" x="434" y="529" fill="#dbeafe" font-size="9.8">└─ Items[3] · AstNonTerminal · Name = "Expr"</text>
-                <text class="svg-code" x="454" y="546" fill="#dbeafe" font-size="9.8">└─ Items[0] · AstTerminal("q")</text>
-                </g>
-
-                <!-- 2.3 VarDecl -->
-                <rect x="40" y="558" width="298" height="144" rx="8" fill="#132b48" stroke="#4c8bc7"/>
-                <rect x="50" y="571" width="38" height="18" rx="9" fill="#2563a8"/>
-                <text class="svg-ui" x="69" y="584" text-anchor="middle" fill="#fff" font-size="9" font-weight="850">2.3</text>
-                <rect x="162" y="602" width="104" height="26" rx="5" fill="#1d4f7a" stroke="#60a5fa"/>
-                <text class="svg-code" x="82" y="620" fill="#f5f7fb" font-size="10.4">var results: bit[] = new bit[2];</text>
-                <rect x="276" y="606" width="50" height="18" rx="9" fill="#2563a8"/>
-                <text class="svg-ui" x="301" y="619" text-anchor="middle" fill="#fff" font-size="8" font-weight="850">2.3.1</text>
-
-                <g transform="translate(16 0)">
-                <rect x="398" y="558" width="466" height="144" rx="8" fill="#132b48" stroke="#4c8bc7"/>
-                <rect x="826" y="567" width="38" height="18" rx="9" fill="#2563a8"/>
-                <text class="svg-ui" x="845" y="580" text-anchor="middle" fill="#fff" font-size="9" font-weight="850">2.3</text>
-                <text class="svg-code" x="414" y="580" fill="#bfdbfe" font-size="10.2" font-weight="800">├─ Items[3] · AstNonTerminal · Name = "VarDecl"</text>
-                <text class="svg-code" x="434" y="598" fill="#dbeafe" font-size="9.8">├─ Items[0] · AstTerminal("results")</text>
-                <text class="svg-code" x="434" y="615" fill="#dbeafe" font-size="9.8">├─ Items[1] · AstNonTerminal · Name = "ArrayType"</text>
-                <text class="svg-code" x="454" y="632" fill="#dbeafe" font-size="9.8">└─ Items[0] · AstTerminal("bit")</text>
-                <rect x="414" y="638" width="450" height="58" rx="6" fill="#173657" stroke="#4c8bc7"/>
-                <rect x="802" y="650" width="50" height="18" rx="9" fill="#2563a8"/>
-                <text class="svg-ui" x="827" y="663" text-anchor="middle" fill="#fff" font-size="8" font-weight="850">2.3.1</text>
-                <text class="svg-code" x="434" y="654" fill="#dbeafe" font-size="9.6">└─ Items[2] · AstNonTerminal · Name = "ArrayNew"</text>
-                <text class="svg-code" x="454" y="672" fill="#dbeafe" font-size="9.6">├─ Items[0] · AstTerminal("bit")</text>
-                <text class="svg-code" x="454" y="689" fill="#dbeafe" font-size="9.6">└─ Items[1] · AstTerminal("2")</text>
-                </g>
-
-                <!-- 2.4 Assign -->
-                <g transform="translate(0 16)">
-                <rect x="40" y="694" width="298" height="202" rx="8" fill="#132b48" stroke="#4c8bc7"/>
-                <rect x="50" y="707" width="38" height="18" rx="9" fill="#2563a8"/>
-                <text class="svg-ui" x="69" y="720" text-anchor="middle" fill="#fff" font-size="9" font-weight="850">2.4</text>
-                <rect x="141" y="751" width="92" height="26" rx="5" fill="#1d4f7a" stroke="#60a5fa"/>
-                <text class="svg-code" x="82" y="769" fill="#f5f7fb" font-size="10.4">results[0] = M(q[0]);</text>
-                <rect x="245" y="755" width="50" height="18" rx="9" fill="#2563a8"/>
-                <text class="svg-ui" x="270" y="768" text-anchor="middle" fill="#fff" font-size="8" font-weight="850">2.4.1</text>
-
-                <g transform="translate(16 0)">
-                <rect x="398" y="694" width="466" height="202" rx="8" fill="#132b48" stroke="#4c8bc7"/>
-                <rect x="826" y="703" width="38" height="18" rx="9" fill="#2563a8"/>
-                <text class="svg-ui" x="845" y="716" text-anchor="middle" fill="#fff" font-size="9" font-weight="850">2.4</text>
-                <text class="svg-code" x="414" y="716" fill="#bfdbfe" font-size="10.2" font-weight="800">├─ Items[4] · AstNonTerminal · Name = "Assign"</text>
-                <text class="svg-code" x="434" y="734" fill="#dbeafe" font-size="9.7">├─ Items[0] · AstNonTerminal · Name = "IndexAccess"</text>
-                <text class="svg-code" x="454" y="751" fill="#dbeafe" font-size="9.7">├─ Items[0] · AstTerminal("results")</text>
-                <text class="svg-code" x="454" y="768" fill="#dbeafe" font-size="9.7">└─ Items[1] · AstTerminal("0")</text>
-                <rect x="414" y="775" width="450" height="114" rx="6" fill="#173657" stroke="#4c8bc7"/>
-                <rect x="802" y="786" width="50" height="18" rx="9" fill="#2563a8"/>
-                <text class="svg-ui" x="827" y="799" text-anchor="middle" fill="#fff" font-size="8" font-weight="850">2.4.1</text>
-                <text class="svg-code" x="430" y="796" fill="#dbeafe" font-size="9.5">└─ Items[1] · AstNonTerminal · Name = "Expr"</text>
-                <text class="svg-code" x="450" y="813" fill="#dbeafe" font-size="9.5">└─ Items[0] · AstNonTerminal · Name = "Call"</text>
-                <text class="svg-code" x="470" y="830" fill="#dbeafe" font-size="9.5">├─ Items[0] · AstTerminal("M")</text>
-                <text class="svg-code" x="470" y="847" fill="#dbeafe" font-size="9.5">└─ Items[1] · AstNonTerminal · Name = "IndexAccess"</text>
-                <text class="svg-code" x="490" y="864" fill="#dbeafe" font-size="9.5">├─ Items[0] · AstTerminal("q")</text>
-                <text class="svg-code" x="490" y="881" fill="#dbeafe" font-size="9.5">└─ Items[1] · AstTerminal("0")</text>
-                </g>
-                </g>
-
-                <!-- 2.5 If -->
-                <g transform="translate(0 50)">
-                <rect x="40" y="870" width="298" height="296" rx="8" fill="#132b48" stroke="#4c8bc7"/>
-                <rect x="50" y="883" width="38" height="18" rx="9" fill="#2563a8"/>
-                <text class="svg-ui" x="69" y="896" text-anchor="middle" fill="#fff" font-size="9" font-weight="850">2.5</text>
-                <text class="svg-code" x="82" y="934" fill="#f5f7fb" font-size="10.4">if (results[0] == 1)</text>
-                <text class="svg-code" x="82" y="951" fill="#f5f7fb" font-size="10.4">{</text>
-                <rect x="58" y="953" width="264" height="54" rx="7" fill="#173657" stroke="#4c8bc7"/>
-                <rect x="68" y="964" width="48" height="18" rx="9" fill="#2563a8"/>
-                <text class="svg-ui" x="92" y="977" text-anchor="middle" fill="#fff" font-size="8.5" font-weight="850">2.5.1</text>
-                <text class="svg-code" x="130" y="987" fill="#f5f7fb" font-size="10.6">X(q[1]);</text>
-                <text class="svg-code" x="82" y="1115" fill="#f5f7fb" font-size="10.4">}</text>
-
-                <g transform="translate(16 0)">
-                <rect x="398" y="870" width="466" height="296" rx="8" fill="#132b48" stroke="#4c8bc7"/>
-                <rect x="826" y="879" width="38" height="18" rx="9" fill="#2563a8"/>
-                <text class="svg-ui" x="845" y="892" text-anchor="middle" fill="#fff" font-size="9" font-weight="850">2.5</text>
-                <text class="svg-code" x="414" y="892" fill="#bfdbfe" font-size="10.2" font-weight="800">└─ Items[5] · AstNonTerminal · Name = "If"</text>
-                <text class="svg-code" x="434" y="910" fill="#dbeafe" font-size="9.4">├─ Items[0] · AstNonTerminal · Name = "Condition"</text>
-                <text class="svg-code" x="454" y="927" fill="#dbeafe" font-size="9.4">├─ Items[0] · AstNonTerminal · Name = "Expr"</text>
-                <text class="svg-code" x="474" y="944" fill="#dbeafe" font-size="9.4">└─ Items[0] · AstNonTerminal · Name = "IndexAccess"</text>
-                <text class="svg-code" x="494" y="961" fill="#dbeafe" font-size="9.4">├─ Items[0] · AstTerminal("results")</text>
-                <text class="svg-code" x="494" y="978" fill="#dbeafe" font-size="9.4">└─ Items[1] · AstTerminal("0")</text>
-                <text class="svg-code" x="454" y="995" fill="#dbeafe" font-size="9.4">├─ Items[1] · AstTerminal("==")</text>
-                <text class="svg-code" x="454" y="1012" fill="#dbeafe" font-size="9.4">└─ Items[2] · AstNonTerminal · Name = "Expr"</text>
-                <text class="svg-code" x="474" y="1029" fill="#dbeafe" font-size="9.4">└─ Items[0] · AstTerminal("1")</text>
-                <rect x="414" y="1036" width="450" height="123" rx="6" fill="#173657" stroke="#4c8bc7"/>
-                <rect x="804" y="1047" width="48" height="18" rx="9" fill="#2563a8"/>
-                <text class="svg-ui" x="828" y="1060" text-anchor="middle" fill="#fff" font-size="8.5" font-weight="850">2.5.1</text>
-                <text class="svg-code" x="430" y="1057" fill="#dbeafe" font-size="9.3">└─ Items[1] · AstNonTerminal · Name = "Gate"</text>
-                <text class="svg-code" x="450" y="1074" fill="#dbeafe" font-size="9.3">├─ Items[0] · AstTerminal("X")</text>
-                <text class="svg-code" x="450" y="1091" fill="#dbeafe" font-size="9.3">└─ Items[1] · AstNonTerminal · Name = "Expr"</text>
-                <text class="svg-code" x="470" y="1108" fill="#dbeafe" font-size="9.3">└─ Items[0] · AstNonTerminal · Name = "IndexAccess"</text>
-                <text class="svg-code" x="490" y="1125" fill="#dbeafe" font-size="9.3">├─ Items[0] · AstTerminal("q")</text>
-                <text class="svg-code" x="490" y="1142" fill="#dbeafe" font-size="9.3">└─ Items[1] · AstTerminal("1")</text>
-                </g>
-                </g>
-                </g>
-                <text class="svg-code" x="42" y="1231" fill="#f5f7fb" font-size="10.5">}</text>
-
-                <!-- Namespace: 소스 부모 범위 -->
-                <g transform="translate(0 118)">
-                <rect x="24" y="1122" width="872" height="740" fill="#0e2924"/>
-                <line x1="24" y1="1122" x2="896" y2="1122" stroke="#285b4c"/>
-                <text class="svg-code" x="42" y="1165" fill="#f5f7fb" font-size="10.8">namespace Demo</text>
-                <text class="svg-code" x="42" y="1184" fill="#f5f7fb" font-size="10.8">{</text>
-                <text class="svg-ui" x="338" y="1165" text-anchor="end" fill="#9fdbc5" font-size="8.8">부모 범위</text>
-
-                <!-- Namespace: AST 부모 -->
-                <text class="svg-code" x="400" y="1159" fill="#a7f3d0" font-size="10.5" font-weight="800">Program.Items[2] · AstNonTerminal</text>
-                <text class="svg-code" x="414" y="1178" fill="#f5f7fb" font-size="10.2">├─ Name = "Namespace"</text>
-                <text class="svg-code" x="414" y="1200" fill="#d1fae5" font-size="9.8">├─ Items[0] · AstTerminal("Demo")</text>
-
-                <!-- Open -->
-                <rect x="40" y="1210" width="298" height="60" rx="8" fill="#123d32" stroke="#2f9b77"/>
-                <rect x="50" y="1221" width="28" height="18" rx="9" fill="#16805b"/>
-                <text class="svg-ui" x="64" y="1234" text-anchor="middle" fill="#fff" font-size="9.5" font-weight="850">3</text>
-                <text class="svg-code" x="92" y="1246" fill="#f5f7fb" font-size="10.8">open Shared;</text>
-
-                <rect x="398" y="1210" width="482" height="60" rx="8" fill="#123d32" stroke="#2f9b77"/>
-                <rect x="840" y="1219" width="28" height="18" rx="9" fill="#16805b"/>
-                <text class="svg-ui" x="854" y="1232" text-anchor="middle" fill="#fff" font-size="9.5" font-weight="850">3</text>
-                <text class="svg-code" x="414" y="1232" fill="#a7f3d0" font-size="10.1" font-weight="800">├─ Items[1] · AstNonTerminal · Name = "Open"</text>
-                <text class="svg-code" x="434" y="1253" fill="#d1fae5" font-size="9.8">└─ Items[0] · AstTerminal("Shared")</text>
-
-                <!-- Prepare 부모 -->
-                <rect x="40" y="1282" width="298" height="566" rx="9" fill="#0e2924" stroke="#2f9b77" stroke-dasharray="5 4"/>
-                <rect x="50" y="1297" width="28" height="18" rx="9" fill="#16805b"/>
-                <text class="svg-ui" x="64" y="1310" text-anchor="middle" fill="#fff" font-size="9.5" font-weight="850">4</text>
-                <text class="svg-code" x="92" y="1311" fill="#f5f7fb" font-size="9.8">operation Prepare(q: Qubit[])</text>
-                <text class="svg-code" x="92" y="1330" fill="#f5f7fb" font-size="9.8">{</text>
-
-                <rect x="398" y="1282" width="482" height="566" rx="9" fill="#0e2924" stroke="#2f9b77" stroke-dasharray="5 4"/>
-                <rect x="840" y="1292" width="28" height="18" rx="9" fill="#16805b"/>
-                <text class="svg-ui" x="854" y="1305" text-anchor="middle" fill="#fff" font-size="9.5" font-weight="850">4</text>
-                <text class="svg-code" x="414" y="1305" fill="#a7f3d0" font-size="10.1" font-weight="800">└─ Items[2] · AstNonTerminal</text>
-                <text class="svg-code" x="430" y="1323" fill="#f5f7fb" font-size="9.9">├─ Name = "Operation"</text>
-                <text class="svg-code" x="430" y="1342" fill="#d1fae5" font-size="9.6">├─ Items[0] · AstTerminal("Prepare")</text>
-
-                <!-- 4.1 Param -->
-                <rect x="56" y="1350" width="266" height="90" rx="8" fill="#123d32" stroke="#2f9b77"/>
-                <rect x="66" y="1361" width="38" height="18" rx="9" fill="#16805b"/>
-                <text class="svg-ui" x="85" y="1374" text-anchor="middle" fill="#fff" font-size="9" font-weight="850">4.1</text>
-                <text class="svg-code" x="118" y="1398" fill="#f5f7fb" font-size="10.5">q: Qubit[]</text>
-
-                <rect x="414" y="1350" width="450" height="90" rx="8" fill="#123d32" stroke="#2f9b77"/>
-                <rect x="814" y="1359" width="38" height="18" rx="9" fill="#16805b"/>
-                <text class="svg-ui" x="833" y="1372" text-anchor="middle" fill="#fff" font-size="9" font-weight="850">4.1</text>
-                <text class="svg-code" x="430" y="1372" fill="#a7f3d0" font-size="9.9" font-weight="800">├─ Items[1] · AstNonTerminal · Name = "Param"</text>
-                <text class="svg-code" x="450" y="1390" fill="#d1fae5" font-size="9.5">├─ Items[0] · AstTerminal("q")</text>
-                <text class="svg-code" x="450" y="1407" fill="#d1fae5" font-size="9.5">└─ Items[1] · AstNonTerminal · Name = "ArrayType"</text>
-                <text class="svg-code" x="470" y="1424" fill="#d1fae5" font-size="9.5">└─ Items[0] · AstTerminal("Qubit")</text>
-
-                <!-- 4.2 For -->
-                <rect x="56" y="1448" width="266" height="284" rx="8" fill="#123d32" stroke="#2f9b77"/>
-                <rect x="66" y="1461" width="38" height="18" rx="9" fill="#16805b"/>
-                <text class="svg-ui" x="85" y="1474" text-anchor="middle" fill="#fff" font-size="9" font-weight="850">4.2</text>
-                <text class="svg-code" x="118" y="1490" fill="#f5f7fb" font-size="10.1">for i in 0..q.Count-1</text>
-                <text class="svg-code" x="118" y="1510" fill="#f5f7fb" font-size="10.1">{</text>
-                <rect x="72" y="1514" width="234" height="58" rx="7" fill="#17513f" stroke="#2f9b77"/>
-                <rect x="82" y="1526" width="48" height="18" rx="9" fill="#16805b"/>
-                <text class="svg-ui" x="106" y="1539" text-anchor="middle" fill="#fff" font-size="8.5" font-weight="850">4.2.1</text>
-                <text class="svg-code" x="144" y="1551" fill="#f5f7fb" font-size="10.4">H(q[i]);</text>
-                <text class="svg-code" x="78" y="1705" fill="#f5f7fb" font-size="10.2">}</text>
-
-                <rect x="414" y="1448" width="450" height="284" rx="8" fill="#123d32" stroke="#2f9b77"/>
-                <rect x="814" y="1457" width="38" height="18" rx="9" fill="#16805b"/>
-                <text class="svg-ui" x="833" y="1470" text-anchor="middle" fill="#fff" font-size="9" font-weight="850">4.2</text>
-                <text class="svg-code" x="430" y="1470" fill="#a7f3d0" font-size="9.8" font-weight="800">├─ Items[2] · AstNonTerminal · Name = "For"</text>
-                <text class="svg-code" x="450" y="1487" fill="#d1fae5" font-size="9.2">├─ Items[0] · AstTerminal("i")</text>
-                <text class="svg-code" x="450" y="1503" fill="#d1fae5" font-size="9.2">├─ Items[1] · AstNonTerminal · Name = "Expr"</text>
-                <text class="svg-code" x="470" y="1519" fill="#d1fae5" font-size="9.2">└─ Items[0] · AstTerminal("0")</text>
-                <text class="svg-code" x="450" y="1535" fill="#d1fae5" font-size="9.2">├─ Items[2] · AstNonTerminal · Name = "Expr"</text>
-                <text class="svg-code" x="470" y="1551" fill="#d1fae5" font-size="9.2">├─ Items[0] · AstTerminal("q")</text>
-                <text class="svg-code" x="470" y="1567" fill="#d1fae5" font-size="9.2">├─ Items[1] · AstTerminal(".")</text>
-                <text class="svg-code" x="470" y="1583" fill="#d1fae5" font-size="9.2">├─ Items[2] · AstTerminal("Count")</text>
-                <text class="svg-code" x="470" y="1599" fill="#d1fae5" font-size="9.2">├─ Items[3] · AstTerminal("-")</text>
-                <text class="svg-code" x="470" y="1615" fill="#d1fae5" font-size="9.2">└─ Items[4] · AstTerminal("1")</text>
-                <rect x="430" y="1622" width="418" height="103" rx="6" fill="#17513f" stroke="#2f9b77"/>
-                <rect x="788" y="1633" width="48" height="18" rx="9" fill="#16805b"/>
-                <text class="svg-ui" x="812" y="1646" text-anchor="middle" fill="#fff" font-size="8.5" font-weight="850">4.2.1</text>
-                <text class="svg-code" x="446" y="1642" fill="#d1fae5" font-size="9">└─ Items[3] · AstNonTerminal · Name = "Gate"</text>
-                <text class="svg-code" x="466" y="1658" fill="#d1fae5" font-size="9">├─ Items[0] · AstTerminal("H")</text>
-                <text class="svg-code" x="466" y="1674" fill="#d1fae5" font-size="9">└─ Items[1] · AstNonTerminal · Name = "Expr"</text>
-                <text class="svg-code" x="486" y="1690" fill="#d1fae5" font-size="9">└─ Items[0] · AstNonTerminal · Name = "IndexAccess"</text>
-                <text class="svg-code" x="506" y="1706" fill="#d1fae5" font-size="9">├─ Items[0] · AstTerminal("q")</text>
-                <text class="svg-code" x="506" y="1722" fill="#d1fae5" font-size="9">└─ Items[1] · AstTerminal("i")</text>
-
-                <!-- 4.3 Flip -->
-                <rect x="56" y="1740" width="266" height="84" rx="8" fill="#123d32" stroke="#2f9b77"/>
-                <rect x="66" y="1753" width="38" height="18" rx="9" fill="#16805b"/>
-                <text class="svg-ui" x="85" y="1766" text-anchor="middle" fill="#fff" font-size="9" font-weight="850">4.3</text>
-                <text class="svg-code" x="118" y="1789" fill="#f5f7fb" font-size="10.5">Flip(q);</text>
-
-                <rect x="414" y="1740" width="450" height="84" rx="8" fill="#123d32" stroke="#2f9b77"/>
-                <rect x="814" y="1749" width="38" height="18" rx="9" fill="#16805b"/>
-                <text class="svg-ui" x="833" y="1762" text-anchor="middle" fill="#fff" font-size="9" font-weight="850">4.3</text>
-                <text class="svg-code" x="430" y="1762" fill="#a7f3d0" font-size="9.8" font-weight="800">└─ Items[3] · AstNonTerminal · Name = "Gate"</text>
-                <text class="svg-code" x="450" y="1780" fill="#d1fae5" font-size="9.4">├─ Items[0] · AstTerminal("Flip")</text>
-                <text class="svg-code" x="450" y="1797" fill="#d1fae5" font-size="9.4">└─ Items[1] · AstNonTerminal · Name = "Expr"</text>
-                <text class="svg-code" x="470" y="1814" fill="#d1fae5" font-size="9.4">└─ Items[0] · AstTerminal("q")</text>
-                <text class="svg-code" x="48" y="1838" fill="#f5f7fb" font-size="10.5">}</text>
-                <text class="svg-code" x="42" y="1854" fill="#f5f7fb" font-size="10.5">}</text>
-                </g>
-
-                <!-- 하나의 본체를 가르는 열 기준선과 최종 외곽선 -->
-                <line x1="366" y1="78" x2="366" y2="1980" stroke="#475569" stroke-width="1.1"/>
-                <rect x="24" y="78" width="872" height="1902" rx="11" fill="none" stroke="#313d50" stroke-width="1.2"/>
-
-                <!-- 같은 높이의 소스 범위와 AST 노드를 짧은 직선으로 연결 -->
-                <g fill="none" stroke-width="2.3" stroke-linecap="round">
-                  <path d="M354 157 H382" stroke="#64748b" marker-end="url(#parser-detail-arrow-slate)"/>
-                  <path d="M354 226 H382" stroke="#b7791f" marker-end="url(#parser-detail-arrow-amber)"/>
-                  <path d="M354 296 H382" stroke="#2563a8" marker-end="url(#parser-detail-arrow-blue)"/>
-                  <path d="M338 388 H414" stroke="#2563a8" marker-end="url(#parser-detail-arrow-blue)"/>
-                  <path d="M338 494 H414" stroke="#2563a8" marker-end="url(#parser-detail-arrow-blue)"/>
-                  <path d="M338 622 H414" stroke="#2563a8" marker-end="url(#parser-detail-arrow-blue)"/>
-                  <path d="M338 794 H414" stroke="#2563a8" marker-end="url(#parser-detail-arrow-blue)"/>
-                  <path d="M338 1034 H414" stroke="#2563a8" marker-end="url(#parser-detail-arrow-blue)"/>
-                  <path d="M354 1278 H382" stroke="#16805b" marker-end="url(#parser-detail-arrow-green)"/>
-                  <path d="M338 1358 H398" stroke="#16805b" marker-end="url(#parser-detail-arrow-green)"/>
-                  <path d="M338 1424 H398" stroke="#16805b" marker-end="url(#parser-detail-arrow-green)"/>
-                  <path d="M322 1513 H414" stroke="#16805b" marker-end="url(#parser-detail-arrow-green)"/>
-                  <path d="M322 1708 H414" stroke="#16805b" marker-end="url(#parser-detail-arrow-green)"/>
-                  <path d="M322 1900 H414" stroke="#16805b" marker-end="url(#parser-detail-arrow-green)"/>
-                </g>
-
-                </g>
-
-                <!-- 실제 코드는 한 번만, AST는 카드 없이 전체 Items 계층을 펼친 평면 도식 -->
-                <g id="parser-ast-flat-map">
-                  <!-- 하나의 연속된 카드 면 -->
-                  <rect x="0" y="0" width="420" height="1288" fill="#111827"/>
-                  <rect x="420" y="0" width="580" height="1288" fill="#f8fafc"/>
-                  <rect x="0" y="0" width="420" height="48" fill="#422d16"/>
-                  <rect x="420" y="0" width="580" height="48" fill="#263141"/>
-
-                  <!-- 헤더 -->
-                  <rect x="20" y="13" width="92" height="22" rx="11" fill="none" stroke="#ffedd5"/>
-                  <text class="svg-ui" x="66" y="28" text-anchor="middle" fill="#ffedd5" font-size="10.5" font-weight="800">Qora 소스</text>
-                  <text class="svg-code" x="132" y="29" fill="#ffedd5" font-size="11" font-weight="750">C:\work\app\main.qor</text>
-                  <rect x="450" y="13" width="94" height="22" rx="11" fill="none" stroke="#dbeafe"/>
-                  <text class="svg-ui" x="497" y="28" text-anchor="middle" fill="#dbeafe" font-size="10.5" font-weight="800">Janglim AST</text>
-                  <text class="svg-ui" x="562" y="29" fill="#f5f7fb" font-size="11.6" font-weight="750">실제 AstNonTerminal.Items 계층</text>
-                  <path d="M397 17 H420 V10 L441 24 L420 38 V31 H397 Z" fill="#d69a2d"/>
-
-                  <!-- 오른쪽은 세 상위 서브트리만 얕게 구분 -->
-                  <rect x="436" y="80" width="548" height="31" rx="7" fill="#fff6e6"/>
-                  <rect x="436" y="80" width="4" height="31" rx="2" fill="#b7791f"/>
-                  <rect x="436" y="113" width="548" height="675" rx="9" fill="#f0f6fd"/>
-                  <rect x="436" y="113" width="4" height="675" rx="2" fill="#2563a8"/>
-                  <rect x="436" y="793" width="548" height="467" rx="9" fill="#eff9f4"/>
-                  <rect x="436" y="793" width="4" height="467" rx="2" fill="#16805b"/>
-
-                  <!-- 번호가 붙은 AST 노드의 시작줄만 별도 색으로 강조 -->
-                  <g fill="#ddd6fe" opacity=".78" aria-hidden="true">
-                    <rect x="444" y="80" width="540" height="14.5" rx="3"/>
-                    <rect x="444" y="111" width="540" height="14.5" rx="3"/>
-                    <rect x="444" y="142" width="540" height="14.5" rx="3"/>
-                    <rect x="444" y="203.5" width="540" height="14.5" rx="3"/>
-                    <rect x="444" y="296" width="540" height="14.5" rx="3"/>
-                    <rect x="444" y="357.5" width="540" height="14.5" rx="3"/>
-                    <rect x="444" y="403.5" width="540" height="14.5" rx="3"/>
-                    <rect x="444" y="465.5" width="540" height="14.5" rx="3"/>
-                    <rect x="444" y="557.5" width="540" height="14.5" rx="3"/>
-                    <rect x="444" y="696.5" width="540" height="14.5" rx="3"/>
-                    <rect x="444" y="819.5" width="540" height="14.5" rx="3"/>
-                    <rect x="444" y="850.5" width="540" height="14.5" rx="3"/>
-                    <rect x="444" y="881" width="540" height="14.5" rx="3"/>
-                    <rect x="444" y="942.5" width="540" height="14.5" rx="3"/>
-                    <rect x="444" y="1096.5" width="540" height="14.5" rx="3"/>
-                    <rect x="444" y="1188.5" width="540" height="14.5" rx="3"/>
-                  </g>
-
-                  <!-- 왼쪽 실제 코드의 상위 범위 -->
-                  <rect x="16" y="80" width="388" height="31" rx="7" fill="#342711"/>
-                  <rect x="20" y="113" width="4" height="675" rx="2" fill="#2563a8"/>
-                  <rect x="20" y="793" width="4" height="467" rx="2" fill="#16805b"/>
-
-                  <!-- 중첩 노드가 시작되는 실제 토큰만 작게 강조 -->
-                  <rect x="184" y="233" width="84" height="21" rx="5" fill="#173657" stroke="#60a5fa"/>
-                  <rect x="165" y="257" width="63" height="21" rx="5" fill="#173657" stroke="#60a5fa"/>
-                  <rect x="102" y="329" width="62" height="21" rx="5" fill="#173657" stroke="#60a5fa"/>
-                  <rect x="203" y="900" width="64" height="21" rx="5" fill="#124738" stroke="#34b98b"/>
-                  <rect x="137" y="948" width="62" height="21" rx="5" fill="#124738" stroke="#34b98b"/>
-
-                  <!-- 왼쪽: main.qor 전체 코드를 소스 순서대로 한 번만 표시 -->
-                  <g class="svg-code" fill="#f5f7fb" font-size="11.5">
-                    <text x="68" y="93">import "lib/gates.qor";</text>
-
-                    <text x="68" y="132">operation Main()</text>
-                    <text x="68" y="156">{</text>
-                    <text x="92" y="180">use q = Qubit[2];</text>
-                    <text x="92" y="204">Demo.Prepare(q);</text>
-                    <text x="92" y="248">var results: bit[] = new bit[2];</text>
-                    <text x="92" y="272">results[0] = M(q[0]);</text>
-                    <text x="92" y="296">if (results[0] == 1)</text>
-                    <text x="92" y="320">{</text>
-                    <text x="116" y="344">X(q[1]);</text>
-                    <text x="92" y="368">}</text>
-                    <text x="68" y="392">}</text>
-
-                    <text x="68" y="824">namespace Demo</text>
-                    <text x="68" y="848">{</text>
-                    <text x="92" y="872">open Shared;</text>
-                    <text x="92" y="916">operation Prepare(q: Qubit[])</text>
-                    <text x="92" y="940">{</text>
-                    <text x="116" y="964">for i in 0..q.Count-1</text>
-                    <text x="116" y="988">{</text>
-                    <text x="140" y="1012">H(q[i]);</text>
-                    <text x="116" y="1036">}</text>
-                    <text x="116" y="1060">Flip(q);</text>
-                    <text x="92" y="1084">}</text>
-                    <text x="68" y="1108">}</text>
-                  </g>
-
-                  <!-- 왼쪽 코드의 대응 번호 -->
-                  <g class="svg-ui" fill="#fff" font-size="8.4" font-weight="850" text-anchor="middle">
-                    <rect x="28" y="81" width="28" height="18" rx="9" fill="#b7791f"/><text x="42" y="94">1</text>
-                    <rect x="28" y="120" width="28" height="18" rx="9" fill="#2563a8"/><text x="42" y="133">2</text>
-                    <rect x="34" y="168" width="38" height="18" rx="9" fill="#2563a8"/><text x="53" y="181">2.1</text>
-                    <rect x="34" y="192" width="38" height="18" rx="9" fill="#2563a8"/><text x="53" y="205">2.2</text>
-                    <rect x="34" y="236" width="38" height="18" rx="9" fill="#2563a8"/><text x="53" y="249">2.3</text>
-                    <rect x="272" y="235" width="48" height="18" rx="9" fill="#2563a8"/><text x="296" y="248">2.3.1</text>
-                    <rect x="34" y="260" width="38" height="18" rx="9" fill="#2563a8"/><text x="53" y="273">2.4</text>
-                    <rect x="232" y="259" width="48" height="18" rx="9" fill="#2563a8"/><text x="256" y="272">2.4.1</text>
-                    <rect x="34" y="284" width="38" height="18" rx="9" fill="#2563a8"/><text x="53" y="297">2.5</text>
-                    <rect x="168" y="331" width="48" height="18" rx="9" fill="#2563a8"/><text x="192" y="344">2.5.1</text>
-
-                    <rect x="34" y="860" width="28" height="18" rx="9" fill="#16805b"/><text x="48" y="873">3</text>
-                    <rect x="34" y="904" width="28" height="18" rx="9" fill="#16805b"/><text x="48" y="917">4</text>
-                    <rect x="288" y="903" width="38" height="18" rx="9" fill="#16805b"/><text x="307" y="916">4.1</text>
-                    <rect x="68" y="952" width="38" height="18" rx="9" fill="#16805b"/><text x="87" y="965">4.2</text>
-                    <rect x="205" y="999" width="48" height="18" rx="9" fill="#16805b"/><text x="229" y="1012">4.2.1</text>
-                    <rect x="68" y="1048" width="38" height="18" rx="9" fill="#16805b"/><text x="87" y="1061">4.3</text>
-                  </g>
-
-                  <!-- 오른쪽: 현재 파서 출력의 모든 AST 노드를 평면 트리로 표시 -->
-                  <text class="svg-code" x="448" y="76" fill="#334155" font-size="10.1" xml:space="preserve">
-                    <tspan x="448" font-size="10.8" font-weight="850" fill="#1e293b">AstNonTerminal · Name = "Program"</tspan>
-                    <tspan x="448" dy="15.4" font-weight="800" fill="#8a5b13">├─ Items[0] · AstNonTerminal · Name = "Import"</tspan>
-                    <tspan x="448" dy="15.4" fill="#6b4b18">│  └─ Items[0] · AstTerminal("\"lib/gates.qor\"")</tspan>
-                    <tspan x="448" dy="15.4" font-weight="800" fill="#1d4f7a">├─ Items[1] · AstNonTerminal · Name = "Operation"</tspan>
-                    <tspan x="448" dy="15.4">│  ├─ Items[0] · AstTerminal("Main")</tspan>
-                    <tspan x="448" dy="15.4" font-weight="750" fill="#1d4f7a">│  ├─ Items[1] · AstNonTerminal · Name = "Use"</tspan>
-                    <tspan x="448" dy="15.4">│  │  ├─ Items[0] · AstTerminal("q")</tspan>
-                    <tspan x="448" dy="15.4">│  │  ├─ Items[1] · AstTerminal("Qubit")</tspan>
-                    <tspan x="448" dy="15.4">│  │  └─ Items[2] · AstTerminal("2")</tspan>
-                    <tspan x="448" dy="15.4" font-weight="750" fill="#1d4f7a">│  ├─ Items[2] · AstNonTerminal · Name = "Gate"</tspan>
-                    <tspan x="448" dy="15.4">│  │  ├─ Items[0] · AstTerminal("Demo")</tspan>
-                    <tspan x="448" dy="15.4">│  │  ├─ Items[1] · AstTerminal(".")</tspan>
-                    <tspan x="448" dy="15.4">│  │  ├─ Items[2] · AstTerminal("Prepare")</tspan>
-                    <tspan x="448" dy="15.4">│  │  └─ Items[3] · AstNonTerminal · Name = "Expr"</tspan>
-                    <tspan x="448" dy="15.4">│  │     └─ Items[0] · AstTerminal("q")</tspan>
-                    <tspan x="448" dy="15.4" font-weight="750" fill="#1d4f7a">│  ├─ Items[3] · AstNonTerminal · Name = "VarDecl"</tspan>
-                    <tspan x="448" dy="15.4">│  │  ├─ Items[0] · AstTerminal("results")</tspan>
-                    <tspan x="448" dy="15.4">│  │  ├─ Items[1] · AstNonTerminal · Name = "ArrayType"</tspan>
-                    <tspan x="448" dy="15.4">│  │  │  └─ Items[0] · AstTerminal("bit")</tspan>
-                    <tspan x="448" dy="15.4">│  │  └─ Items[2] · AstNonTerminal · Name = "ArrayNew"</tspan>
-                    <tspan x="448" dy="15.4">│  │     ├─ Items[0] · AstTerminal("bit")</tspan>
-                    <tspan x="448" dy="15.4">│  │     └─ Items[1] · AstTerminal("2")</tspan>
-                    <tspan x="448" dy="15.4" font-weight="750" fill="#1d4f7a">│  ├─ Items[4] · AstNonTerminal · Name = "Assign"</tspan>
-                    <tspan x="448" dy="15.4">│  │  ├─ Items[0] · AstNonTerminal · Name = "IndexAccess"</tspan>
-                    <tspan x="448" dy="15.4">│  │  │  ├─ Items[0] · AstTerminal("results")</tspan>
-                    <tspan x="448" dy="15.4">│  │  │  └─ Items[1] · AstTerminal("0")</tspan>
-                    <tspan x="448" dy="15.4">│  │  └─ Items[1] · AstNonTerminal · Name = "Expr"</tspan>
-                    <tspan x="448" dy="15.4">│  │     └─ Items[0] · AstNonTerminal · Name = "Call"</tspan>
-                    <tspan x="448" dy="15.4">│  │        ├─ Items[0] · AstTerminal("M")</tspan>
-                    <tspan x="448" dy="15.4">│  │        └─ Items[1] · AstNonTerminal · Name = "IndexAccess"</tspan>
-                    <tspan x="448" dy="15.4">│  │           ├─ Items[0] · AstTerminal("q")</tspan>
-                    <tspan x="448" dy="15.4">│  │           └─ Items[1] · AstTerminal("0")</tspan>
-                    <tspan x="448" dy="15.4" font-weight="750" fill="#1d4f7a">│  └─ Items[5] · AstNonTerminal · Name = "If"</tspan>
-                    <tspan x="448" dy="15.4">│     ├─ Items[0] · AstNonTerminal · Name = "Condition"</tspan>
-                    <tspan x="448" dy="15.4">│     │  ├─ Items[0] · AstNonTerminal · Name = "Expr"</tspan>
-                    <tspan x="448" dy="15.4">│     │  │  └─ Items[0] · AstNonTerminal · Name = "IndexAccess"</tspan>
-                    <tspan x="448" dy="15.4">│     │  │     ├─ Items[0] · AstTerminal("results")</tspan>
-                    <tspan x="448" dy="15.4">│     │  │     └─ Items[1] · AstTerminal("0")</tspan>
-                    <tspan x="448" dy="15.4">│     │  ├─ Items[1] · AstTerminal("==")</tspan>
-                    <tspan x="448" dy="15.4">│     │  └─ Items[2] · AstNonTerminal · Name = "Expr"</tspan>
-                    <tspan x="448" dy="15.4">│     │     └─ Items[0] · AstTerminal("1")</tspan>
-                    <tspan x="448" dy="15.4">│     └─ Items[1] · AstNonTerminal · Name = "Gate"</tspan>
-                    <tspan x="448" dy="15.4">│        ├─ Items[0] · AstTerminal("X")</tspan>
-                    <tspan x="448" dy="15.4">│        └─ Items[1] · AstNonTerminal · Name = "Expr"</tspan>
-                    <tspan x="448" dy="15.4">│           └─ Items[0] · AstNonTerminal · Name = "IndexAccess"</tspan>
-                    <tspan x="448" dy="15.4">│              ├─ Items[0] · AstTerminal("q")</tspan>
-                    <tspan x="448" dy="15.4">│              └─ Items[1] · AstTerminal("1")</tspan>
-                    <tspan x="448" dy="15.4" font-weight="800" fill="#11664b">└─ Items[2] · AstNonTerminal · Name = "Namespace"</tspan>
-                    <tspan x="448" dy="15.4">   ├─ Items[0] · AstTerminal("Demo")</tspan>
-                    <tspan x="448" dy="15.4" font-weight="750" fill="#11664b">   ├─ Items[1] · AstNonTerminal · Name = "Open"</tspan>
-                    <tspan x="448" dy="15.4">   │  └─ Items[0] · AstTerminal("Shared")</tspan>
-                    <tspan x="448" dy="15.4" font-weight="750" fill="#11664b">   └─ Items[2] · AstNonTerminal · Name = "Operation"</tspan>
-                    <tspan x="448" dy="15.4">      ├─ Items[0] · AstTerminal("Prepare")</tspan>
-                    <tspan x="448" dy="15.4" font-weight="750" fill="#11664b">      ├─ Items[1] · AstNonTerminal · Name = "Param"</tspan>
-                    <tspan x="448" dy="15.4">      │  ├─ Items[0] · AstTerminal("q")</tspan>
-                    <tspan x="448" dy="15.4">      │  └─ Items[1] · AstNonTerminal · Name = "ArrayType"</tspan>
-                    <tspan x="448" dy="15.4">      │     └─ Items[0] · AstTerminal("Qubit")</tspan>
-                    <tspan x="448" dy="15.4" font-weight="750" fill="#11664b">      ├─ Items[2] · AstNonTerminal · Name = "For"</tspan>
-                    <tspan x="448" dy="15.4">      │  ├─ Items[0] · AstTerminal("i")</tspan>
-                    <tspan x="448" dy="15.4">      │  ├─ Items[1] · AstNonTerminal · Name = "Expr"</tspan>
-                    <tspan x="448" dy="15.4">      │  │  └─ Items[0] · AstTerminal("0")</tspan>
-                    <tspan x="448" dy="15.4">      │  ├─ Items[2] · AstNonTerminal · Name = "Expr"</tspan>
-                    <tspan x="448" dy="15.4">      │  │  ├─ Items[0] · AstTerminal("q")</tspan>
-                    <tspan x="448" dy="15.4">      │  │  ├─ Items[1] · AstTerminal(".")</tspan>
-                    <tspan x="448" dy="15.4">      │  │  ├─ Items[2] · AstTerminal("Count")</tspan>
-                    <tspan x="448" dy="15.4">      │  │  ├─ Items[3] · AstTerminal("-")</tspan>
-                    <tspan x="448" dy="15.4">      │  │  └─ Items[4] · AstTerminal("1")</tspan>
-                    <tspan x="448" dy="15.4" font-weight="750" fill="#11664b">      │  └─ Items[3] · AstNonTerminal · Name = "Gate"</tspan>
-                    <tspan x="448" dy="15.4">      │     ├─ Items[0] · AstTerminal("H")</tspan>
-                    <tspan x="448" dy="15.4">      │     └─ Items[1] · AstNonTerminal · Name = "Expr"</tspan>
-                    <tspan x="448" dy="15.4">      │        └─ Items[0] · AstNonTerminal · Name = "IndexAccess"</tspan>
-                    <tspan x="448" dy="15.4">      │           ├─ Items[0] · AstTerminal("q")</tspan>
-                    <tspan x="448" dy="15.4">      │           └─ Items[1] · AstTerminal("i")</tspan>
-                    <tspan x="448" dy="15.4" font-weight="750" fill="#11664b">      └─ Items[3] · AstNonTerminal · Name = "Gate"</tspan>
-                    <tspan x="448" dy="15.4">         ├─ Items[0] · AstTerminal("Flip")</tspan>
-                    <tspan x="448" dy="15.4">         └─ Items[1] · AstNonTerminal · Name = "Expr"</tspan>
-                    <tspan x="448" dy="15.4">            └─ Items[0] · AstTerminal("q")</tspan>
-                  </text>
-
-                  <!-- 오른쪽 tree 행의 대응 번호: 연결선 대신 같은 번호를 사용 -->
-                  <g class="svg-ui" fill="#fff" font-size="8.2" font-weight="850" text-anchor="middle">
-                    <rect x="950" y="79" width="28" height="16" rx="8" fill="#b7791f"/><text x="964" y="91">1</text>
-                    <rect x="950" y="110" width="28" height="16" rx="8" fill="#2563a8"/><text x="964" y="122">2</text>
-                    <rect x="940" y="141" width="38" height="16" rx="8" fill="#2563a8"/><text x="959" y="153">2.1</text>
-                    <rect x="940" y="203" width="38" height="16" rx="8" fill="#2563a8"/><text x="959" y="215">2.2</text>
-                    <rect x="940" y="295" width="38" height="16" rx="8" fill="#2563a8"/><text x="959" y="307">2.3</text>
-                    <rect x="930" y="357" width="48" height="16" rx="8" fill="#2563a8"/><text x="954" y="369">2.3.1</text>
-                    <rect x="940" y="403" width="38" height="16" rx="8" fill="#2563a8"/><text x="959" y="415">2.4</text>
-                    <rect x="930" y="465" width="48" height="16" rx="8" fill="#2563a8"/><text x="954" y="477">2.4.1</text>
-                    <rect x="940" y="557" width="38" height="16" rx="8" fill="#2563a8"/><text x="959" y="569">2.5</text>
-                    <rect x="930" y="696" width="48" height="16" rx="8" fill="#2563a8"/><text x="954" y="708">2.5.1</text>
-
-                    <rect x="950" y="819" width="28" height="16" rx="8" fill="#16805b"/><text x="964" y="831">3</text>
-                    <rect x="950" y="850" width="28" height="16" rx="8" fill="#16805b"/><text x="964" y="862">4</text>
-                    <rect x="940" y="880" width="38" height="16" rx="8" fill="#16805b"/><text x="959" y="892">4.1</text>
-                    <rect x="940" y="942" width="38" height="16" rx="8" fill="#16805b"/><text x="959" y="954">4.2</text>
-                    <rect x="930" y="1096" width="48" height="16" rx="8" fill="#16805b"/><text x="954" y="1108">4.2.1</text>
-                    <rect x="940" y="1188" width="38" height="16" rx="8" fill="#16805b"/><text x="959" y="1200">4.3</text>
-                  </g>
-
-                  <line x1="420" y1="0" x2="420" y2="1288" stroke="#334155"/>
-                  <line x1="0" y1="48" x2="1000" y2="48" stroke="#313d50"/>
-                </g>
-
-                </svg>
-              </div>
-              <figcaption id="parser-ast-map-caption">
-                오른쪽은 현재 파서가 만든 <code>AstNonTerminal.Name</code>과 <code>Items</code>, <code>AstTerminal</code> 값을 실제 순서대로 펼친 결과입니다.<br>
-                같은 번호는 원본 코드와 대응하는 AST 노드를, 들여쓰기와 트리 가지는 부모·자식 관계를 나타냅니다.
-              </figcaption>
-            </figure>
-
-            <p>
-              왼쪽 Qora 소스를 오른쪽 의미 AST로 바꾸는 작업은 <code>QoraLowering</code>이 아니라 앞선 파싱 단계에서 수행됩니다.<br>
-              파서가 구문 분석과 AST 생성을 마친 뒤 <code>QoraLowering.Lower(ast)</code>를 호출하므로, 이 패스의 실제 처리는 오른쪽 <code>Program</code> 노드를 읽는 지점부터 시작합니다.
-            </p>
-
-            <p>
-              Janglim AST에서 <code>Use</code>, <code>Gate</code>, <code>VarDecl</code>은 서로 다른 전용 클래스가 아니라 <code>AstNonTerminal.Name</code>에 들어가는 구분값입니다.<br>
-              해당 노드의 실제 자식은 <code>Items</code>에 소스 순서대로 저장되고, 식별자·타입 키워드·숫자·연산자는 더 나뉘지 않는 <code>AstTerminal</code>로 남습니다.<br>
-              다만 괄호와 세미콜론처럼 문법 확인에만 사용한 토큰은 의미 AST에서 제외됩니다.
-            </p>
-          </div>
-        </section>
-
-        <section class="walk-stage" id="stage-1">
-          <div class="walk-head">
-            <div class="walk-number">1</div>
-            <h3>최상위 항목을 <code>QProgram</code>의 세 영역으로 나눕니다</h3>
-          </div>
-          <div class="walk-body">
-            <p>
-              <code>QoraLowering</code>은 입력 AST의 루트인 <code>Program</code>에서 <code>Items[0..2]</code>를 소스 순서대로 방문합니다.<br>
-              아래 도식은 원본 코드를 다시 보여주지 않고, 이 패스가 실제로 전달받는 <code>AstNonTerminal</code>과 <code>AstTerminal</code> 계층에서 시작합니다.<br>
-              번호가 붙은 AST 노드에서 화살표를 따라가면, 해당 노드가 <code>QProgram</code>의 어느 필드에 기록되는지 확인할 수 있습니다.
-            </p>
-
-            <figure class="lowering-map" aria-labelledby="top-level-map-title top-level-map-caption">
-              <div class="diagram-scroll-hint" aria-hidden="true">↔ 좌우로 밀어 실제 AST와 저장 위치를 이어서 확인합니다</div>
-              <div class="diagram-scroll" tabindex="0" aria-label="실제 Janglim AST의 Program.Items와 QProgram 저장 위치를 연결한 도식, 작은 화면에서는 좌우로 스크롤할 수 있습니다">
-                <svg class="lowering-flow" viewBox="0 0 920 650" role="img"
-                     aria-labelledby="top-level-map-title top-level-map-desc" focusable="false">
-                <title id="top-level-map-title">Janglim AST의 최상위 항목이 QProgram의 세 필드로 저장되는 흐름</title>
-                <desc id="top-level-map-desc">Janglim AST의 Program 루트와 실제 Items 계층에서 Import, Main Operation, Demo Namespace 아래의 Open과 Prepare Operation을 방문합니다. 각 노드는 Imports, Operations, Opens에 기록되며 Namespace 노드는 별도로 남기지 않고 Demo 문맥만 자식에게 전달합니다.</desc>
-                <defs>
-                  <marker id="map-arrow-amber" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="12" markerHeight="12" markerUnits="userSpaceOnUse" orient="auto">
-                    <path d="M 0 0 L 10 5 L 0 10 z" fill="#b7791f"/>
-                  </marker>
-                  <marker id="map-arrow-blue" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="12" markerHeight="12" markerUnits="userSpaceOnUse" orient="auto">
-                    <path d="M 0 0 L 10 5 L 0 10 z" fill="#2563a8"/>
-                  </marker>
-                  <marker id="map-arrow-green" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="12" markerHeight="12" markerUnits="userSpaceOnUse" orient="auto">
-                    <path d="M 0 0 L 10 5 L 0 10 z" fill="#16805b"/>
-                  </marker>
-                  <marker id="map-arrow-slate" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="12" markerHeight="12" markerUnits="userSpaceOnUse" orient="auto">
-                    <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b"/>
-                  </marker>
-                </defs>
-
-                <rect x="1" y="1" width="918" height="648" rx="14" fill="#f8fafc" stroke="#d7dee8"/>
-                <rect x="24" y="20" width="112" height="27" rx="13.5" fill="#422d16"/>
-                <text class="svg-ui" x="80" y="38" text-anchor="middle" fill="#ffedd5" font-size="12" font-weight="800">AST → QProgram</text>
-                <text class="svg-ui" x="151" y="39" fill="#253044" font-size="18" font-weight="800">실제 Program.Items가 어느 필드로 가는지 따라갑니다</text>
-                <text class="svg-ui" x="151" y="59" fill="#667184" font-size="11.5">왼쪽은 원본 코드가 아니라 QoraLowering이 실제로 읽는 Janglim AST입니다.</text>
-
-                <!-- 왼쪽: QoraLowering이 실제로 읽는 Program.Items 계층 -->
-                <rect x="24" y="78" width="385" height="390" rx="11" fill="#111827" stroke="#313d50"/>
-                <path d="M35 78 H398 Q409 78 409 89 V123 H24 V89 Q24 78 35 78 Z" fill="#422d16"/>
-                <rect x="39" y="90" width="86" height="22" rx="11" fill="none" stroke="#ffedd5"/>
-                <text class="svg-ui" x="82" y="105" text-anchor="middle" fill="#ffedd5" font-size="10.5" font-weight="800">Janglim AST</text>
-                <text class="svg-ui" x="138" y="105" fill="#ffedd5" font-size="12" font-weight="750">Program.Items[0..2] 실제 계층</text>
-
-                <!-- Program 루트 -->
-                <rect x="40" y="132" width="351" height="42" rx="7" fill="#172231" stroke="#64748b"/>
-                <text class="svg-code" x="54" y="150" fill="#bfdbfe" font-size="10.5" font-weight="800">AstNonTerminal · Name = "Program"</text>
-                <text class="svg-code" x="54" y="166" fill="#cbd5e1" font-size="9.6">Items[0..2]</text>
-
-                <!-- Program.Items[0]: Import -->
-                <rect x="40" y="182" width="351" height="52" rx="7" fill="#342711" stroke="#d69a2d"/>
-                <rect x="52" y="191" width="28" height="18" rx="9" fill="#b7791f"/>
-                <text class="svg-ui" x="66" y="204" text-anchor="middle" fill="#fff" font-size="9.5" font-weight="850">1</text>
-                <text class="svg-code" x="90" y="202" fill="#fcd58d" font-size="9.7" font-weight="800">├─ Items[0] · AstNonTerminal · Name = "Import"</text>
-                <text class="svg-code" x="108" y="220" fill="#f7dfae" font-size="9.3">└─ Items[0] · AstTerminal("\"lib/gates.qor\"")</text>
-
-                <!-- Program.Items[1]: Main Operation -->
-                <rect x="40" y="242" width="351" height="64" rx="8" fill="#132b48" stroke="#4c8bc7"/>
-                <rect x="52" y="251" width="28" height="18" rx="9" fill="#2563a8"/>
-                <text class="svg-ui" x="66" y="264" text-anchor="middle" fill="#fff" font-size="9.5" font-weight="850">2</text>
-                <text class="svg-code" x="90" y="262" fill="#bfdbfe" font-size="9.7" font-weight="800">├─ Items[1] · AstNonTerminal · Name = "Operation"</text>
-                <text class="svg-code" x="108" y="280" fill="#dbeafe" font-size="9.3">├─ Items[0] · AstTerminal("Main")</text>
-                <text class="svg-code" x="108" y="298" fill="#9fc7ef" font-size="8.8">└─ Items[1..5] · Use · Gate · VarDecl · Assign · If</text>
-
-                <!-- Program.Items[2]: Namespace와 그 직접 자식 -->
-                <rect x="40" y="314" width="351" height="154" rx="8" fill="#0e2924" stroke="#2f9b77"/>
-                <text class="svg-code" x="90" y="333" fill="#a7f3d0" font-size="9.7" font-weight="800">└─ Items[2] · AstNonTerminal · Name = "Namespace"</text>
-                <text class="svg-code" x="108" y="350" fill="#d1fae5" font-size="9.3">├─ Items[0] · AstTerminal("Demo")</text>
-
-                <rect x="54" y="357" width="325" height="43" rx="6" fill="#123d32" stroke="#2f9b77"/>
-                <rect x="64" y="365" width="28" height="18" rx="9" fill="#16805b"/>
-                <text class="svg-ui" x="78" y="378" text-anchor="middle" fill="#fff" font-size="9.5" font-weight="850">3</text>
-                <text class="svg-code" x="108" y="375" fill="#a7f3d0" font-size="9.4" font-weight="800">├─ Items[1] · AstNonTerminal · Name = "Open"</text>
-                <text class="svg-code" x="126" y="392" fill="#d1fae5" font-size="9.1">└─ Items[0] · AstTerminal("Shared")</text>
-
-                <rect x="54" y="407" width="325" height="54" rx="6" fill="#132b48" stroke="#4c8bc7"/>
-                <rect x="64" y="415" width="28" height="18" rx="9" fill="#2563a8"/>
-                <text class="svg-ui" x="78" y="428" text-anchor="middle" fill="#fff" font-size="9.5" font-weight="850">4</text>
-                <text class="svg-code" x="108" y="425" fill="#bfdbfe" font-size="9.4" font-weight="800">└─ Items[2] · AstNonTerminal · Name = "Operation"</text>
-                <text class="svg-code" x="126" y="442" fill="#dbeafe" font-size="9.1">├─ Items[0] · AstTerminal("Prepare")</text>
-                <text class="svg-code" x="126" y="457" fill="#9fc7ef" font-size="8.7">└─ Items[1..3] · Param · For · Gate</text>
-
-                <!-- 오른쪽: 각 방문에서 QProgram에 기록하는 값 -->
-                <rect x="465" y="78" width="430" height="390" rx="11" fill="#fff" stroke="#cfd7e2"/>
-                <path d="M476 78 H884 Q895 78 895 89 V123 H465 V89 Q465 78 476 78 Z" fill="#263141"/>
-                <rect x="480" y="90" width="105" height="22" rx="11" fill="none" stroke="#d6dde8"/>
-                <text class="svg-code" x="532.5" y="105" text-anchor="middle" fill="#f7f9fc" font-size="10.5" font-weight="750">QoraLowering</text>
-                <text class="svg-ui" x="598" y="105" fill="#f7f9fc" font-size="12.5" font-weight="750">AST 노드를 읽어 기록하는 값</text>
-
-                <rect x="480" y="182" width="399" height="52" rx="8" fill="#fffaf0" stroke="#e4bd72"/>
-                <rect x="480" y="182" width="5" height="52" rx="2.5" fill="#b7791f"/>
-                <text class="svg-code" x="499" y="203" fill="#7a5114" font-size="12" font-weight="800">Imports[0]</text>
-                <text class="svg-code" x="499" y="221" fill="#354052" font-size="12.5">QImport(Target = "lib/gates.qor")</text>
-
-                <rect x="480" y="242" width="399" height="64" rx="8" fill="#f2f7fd" stroke="#9bbddd"/>
-                <rect x="480" y="242" width="5" height="64" rx="2.5" fill="#2563a8"/>
-                <text class="svg-code" x="499" y="267" fill="#164f82" font-size="12" font-weight="800">Operations[0]</text>
-                <text class="svg-code" x="499" y="288" fill="#354052" font-size="12.5">Name = "Main" · Namespace = ""</text>
-
-                <rect x="480" y="320" width="399" height="34" rx="7" fill="#eef2f6" stroke="#b7c1ce"/>
-                <rect x="480" y="320" width="5" height="34" rx="2.5" fill="#64748b"/>
-                <text class="svg-code" x="499" y="341" fill="#526071" font-size="10.8" font-weight="750">Namespace "Demo" · 별도 노드 없이 자식에 문맥 전달</text>
-
-                <rect x="480" y="357" width="399" height="43" rx="8" fill="#f3faf7" stroke="#9bcbb8"/>
-                <rect x="480" y="357" width="5" height="43" rx="2.5" fill="#16805b"/>
-                <text class="svg-code" x="499" y="375" fill="#116347" font-size="11.5" font-weight="800">Opens["Demo"][0]</text>
-                <text class="svg-code" x="499" y="392" fill="#354052" font-size="12">QOpen(Target = "Shared")</text>
-
-                <rect x="480" y="407" width="399" height="49" rx="8" fill="#f2f7fd" stroke="#9bbddd"/>
-                <rect x="480" y="407" width="5" height="49" rx="2.5" fill="#2563a8"/>
-                <text class="svg-code" x="499" y="427" fill="#164f82" font-size="11.5" font-weight="800">Operations[1]</text>
-                <text class="svg-code" x="499" y="445" fill="#354052" font-size="12">Name = "Prepare" · Namespace = "Demo"</text>
-
-                <!-- 카드 위에서 화살촉을 그려 각 카드의 왼쪽 중앙을 정확히 가리킴 -->
-                <path d="M409 208 H480" fill="none" stroke="#b7791f" stroke-width="3" stroke-linecap="round" marker-end="url(#map-arrow-amber)"/>
-                <path d="M409 274 H480" fill="none" stroke="#2563a8" stroke-width="3" stroke-linecap="round" marker-end="url(#map-arrow-blue)"/>
-                <path d="M409 337 H480" fill="none" stroke="#64748b" stroke-width="2.3" stroke-dasharray="4 4" stroke-linecap="round" marker-end="url(#map-arrow-slate)"/>
-                <path d="M409 378.5 H480" fill="none" stroke="#16805b" stroke-width="3" stroke-linecap="round" marker-end="url(#map-arrow-green)"/>
-                <path d="M409 431.5 H480" fill="none" stroke="#2563a8" stroke-width="3" stroke-linecap="round" marker-end="url(#map-arrow-blue)"/>
-
-                <!-- 네 번의 기록이 끝난 뒤 만들어진 QProgram -->
-                <line x1="680" y1="477" x2="680" y2="510" stroke="#64748b" stroke-width="2.5" stroke-linecap="round" marker-end="url(#map-arrow-slate)"/>
-                <rect x="614" y="477" width="132" height="22" rx="11" fill="#eef1f5"/>
-                <text class="svg-ui" x="680" y="492" text-anchor="middle" fill="#526071" font-size="10.5" font-weight="750">방문이 끝나면</text>
-
-                <rect x="24" y="510" width="871" height="117" rx="11" fill="#111827" stroke="#313d50"/>
-                <path d="M35 510 H884 Q895 510 895 521 V541 H24 V521 Q24 510 35 510 Z" fill="#263141"/>
-                <text class="svg-code" x="42" y="531" fill="#f7f9fc" font-size="13" font-weight="800">QProgram</text>
-                <text class="svg-ui" x="119" y="531" fill="#cbd3df" font-size="10.5">lowering 직후</text>
-
-                <rect x="40" y="553" width="352" height="58" rx="8" fill="#132b48" stroke="#4c8bc7"/>
-                <text class="svg-code" x="55" y="575" fill="#93c5fd" font-size="11.5" font-weight="800">Operations</text>
-                <text class="svg-code" x="55" y="596" fill="#f1f7ff" font-size="13">[ Main, Prepare ]</text>
-                <text class="svg-ui" x="374" y="596" text-anchor="end" fill="#b8d5ef" font-size="9.5">연산끼리 소스 순서 보존</text>
-
-                <rect x="405" y="553" width="233" height="58" rx="8" fill="#342711" stroke="#d69a2d"/>
-                <text class="svg-code" x="420" y="575" fill="#f4c979" font-size="11.5" font-weight="800">Imports</text>
-                <text class="svg-code" x="420" y="596" fill="#fff7e2" font-size="12">[ "lib/gates.qor" ]</text>
-
-                <rect x="651" y="553" width="228" height="58" rx="8" fill="#102d27" stroke="#2f9b77"/>
-                <text class="svg-code" x="666" y="575" fill="#7fe0b0" font-size="11.5" font-weight="800">Opens</text>
-                <text class="svg-code" x="666" y="596" fill="#edfff8" font-size="12">Demo → [ Shared ]</text>
-                </svg>
-              </div>
-              <figcaption id="top-level-map-caption">
-                왼쪽은 <code>QoraLowering</code>이 전달받는 실제 <code>Program.Items</code> 계층이며, 번호가 붙은 <code>AstNonTerminal</code>이 같은 색의 <code>QProgram</code> 필드로 이어집니다.<br>
-                namespace는 별도의 IR 노드가 되지 않고, 이름인 <code>Demo</code>만 내부 <code>Open</code>과 <code>Operation</code>에 전달됩니다.
-              </figcaption>
-            </figure>
-
-            <p>
-              이때 <code>import "lib/gates.qor";</code>에서는 경로 문자열만 <code>QImport</code>로 옮기며, 대상 파일은 읽지 않습니다.<span class="diagram-ref amber" aria-label="1번 도식">1</span><br>
-              실제 파일을 찾아 읽는 작업은 다음 패스인 <code>ModuleLoader</code>가 맡습니다.<span class="diagram-ref amber" aria-label="1번 도식의 보충 설명">1 보충</span>
-            </p>
-
-            <p>
-              namespace 블록 자체는 별도의 <code>QNamespace</code> 노드로 남지 않습니다.<span class="diagram-ref green" aria-label="3번 도식">3</span><span class="diagram-ref blue" aria-label="4번 도식">4</span><br>
-              대신 그 안의 연산에는 <code>Namespace = "Demo"</code>를 붙이고, <code>open Shared</code>는 <code>Demo</code>를 키로 하는 목록에 넣습니다.<span class="diagram-ref green" aria-label="3번 도식">3</span><span class="diagram-ref blue" aria-label="4번 도식">4</span><br>
-              따라서 같은 namespace 블록이 여러 번 등장하더라도 연산과 <code>open</code>을 같은 이름 아래 계속 모을 수 있습니다.<span class="diagram-ref green" aria-label="3번 도식의 보충 설명">3 보충</span><span class="diagram-ref blue" aria-label="4번 도식의 보충 설명">4 보충</span>
-            </p>
-          </div>
-        </section>
-
-        <aside class="diagram-reading-rule" aria-label="2번 절 이후 도식 표기 기준">
-          <span class="diagram-reading-badge">도식 표기 기준</span>
-          <p>
-            <strong>1번 절 이후의 도식에서도 <code>QoraLowering</code>이 실제로 전달받는 입력은 변함없이 Janglim AST입니다.</strong><br>
-            다만 AST 객체 계층을 매번 펼치면 변환 규칙보다 노드 구조를 해석하는 데 시선이 분산되므로, 아래 도식부터는 이해를 돕기 위해 각 AST 노드에 대응하는 원본 Qora 코드 범위를 왼쪽에 표시합니다.<br>
-            <strong>따라서 화살표는 소스 코드를 직접 입력받는다는 뜻이 아니라, 강조한 코드 범위에 대응하는 AST 노드가 오른쪽 Qora IR로 변환됨을 나타냅니다.</strong>
-          </p>
-        </aside>
-
-        <section class="walk-stage" id="stage-2">
-          <div class="walk-head">
-            <div class="walk-number">2</div>
-            <h3>연산 선언부를 읽어 <code>QOperation</code>의 이름·<code>namespace</code>와 <code>QParam</code>을 만듭니다</h3>
-          </div>
-          <div class="walk-body">
-            <p>
-              <code>QoraLowering</code>은 연산 AST에서 연산 이름과 파라미터를 읽고, 그 연산을 감싼 namespace가 있으면 선언 위치도 함께 기록합니다.<br>
-              아래 도식에는 두 연산의 실제 본문을 모두 남겨 두고, 이번 절에서 읽는 선언부만 밝게 표시했습니다.
-            </p>
-
-            <figure class="lowering-map" aria-labelledby="operation-head-map-title operation-head-map-caption">
-              <div class="diagram-scroll-hint" aria-hidden="true">↔ 좌우로 밀어 연산 선언부와 생성된 IR을 이어서 확인합니다</div>
-              <div class="diagram-scroll" tabindex="0" aria-label="Main과 Prepare의 실제 선언부가 QOperation과 QParam으로 변환되는 도식, 작은 화면에서는 좌우로 스크롤할 수 있습니다">
-                <svg class="lowering-flow" viewBox="0 0 920 796" role="img"
-                     aria-labelledby="operation-head-map-title operation-head-map-desc" focusable="false">
-                <title id="operation-head-map-title">실제 연산 선언부에서 QOperation과 QParam 필드를 만드는 흐름</title>
-                <desc id="operation-head-map-desc">Main이 속한 이름 없는 전역 namespace와 Prepare를 감싼 Demo namespace를 실제 코드 위에서 구분하고, 강조한 선언부에서 대응하는 QOperation 및 QParam 필드로 직접 연결했습니다.</desc>
-                <defs>
-                  <marker id="op-arrow-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-                    <path d="M 0 0 L 10 5 L 0 10 z" fill="#2563a8"/>
-                  </marker>
-                  <marker id="op-arrow-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-                    <path d="M 0 0 L 10 5 L 0 10 z" fill="#16805b"/>
-                  </marker>
-                  <marker id="op-arrow-slate" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-                    <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b"/>
-                  </marker>
-                  <marker id="op-arrow-amber" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-                    <path d="M 0 0 L 10 5 L 0 10 z" fill="#b7791f"/>
-                  </marker>
-                  <clipPath id="op-main-card-clip">
-                    <rect x="24" y="78" width="871" height="338" rx="11"/>
-                  </clipPath>
-                  <clipPath id="op-prepare-card-clip">
-                    <rect x="24" y="365" width="871" height="338" rx="11"/>
-                  </clipPath>
-                </defs>
-
-                <rect x="1" y="1" width="918" height="794" rx="14" fill="#f8fafc" stroke="#d7dee8"/>
-                <rect x="24" y="20" width="142" height="27" rx="13.5" fill="#422d16"/>
-                <text class="svg-ui" x="95" y="38" text-anchor="middle" fill="#ffedd5" font-size="12" font-weight="800">AST → QOperation</text>
-                <text class="svg-ui" x="181" y="39" fill="#253044" font-size="17.5" font-weight="800">실제 선언부에서 IR 필드가 만들어지는 위치를 따라갑니다</text>
-                <text class="svg-ui" x="181" y="59" fill="#667184" font-size="11.5">왼쪽 코드는 입력 AST의 대응 범위를 대신 보여주며, 강조한 선언부는 생성되는 IR 필드로 연결됩니다.</text>
-
-                <!-- Main: 하나의 카드 안에서 AST 선언부와 QOperation을 직접 연결 -->
-                <g clip-path="url(#op-main-card-clip)">
-                  <rect x="24" y="78" width="385" height="338" fill="#111827"/>
-                  <rect x="409" y="78" width="486" height="338" fill="#fff"/>
-                  <rect x="24" y="78" width="385" height="42" fill="#422d16"/>
-                  <rect x="409" y="78" width="486" height="42" fill="#263141"/>
-                </g>
-                <rect x="24" y="78" width="871" height="338" rx="11" fill="none" stroke="#cfd7e2"/>
-                <rect x="39" y="89" width="86" height="22" rx="11" fill="none" stroke="#ffedd5"/>
-                <text class="svg-ui" x="82" y="104" text-anchor="middle" fill="#ffedd5" font-size="10.5" font-weight="800">Qora 소스</text>
-                <text class="svg-ui" x="138" y="104" fill="#ffedd5" font-size="12" font-weight="750">전역 연산의 실제 코드</text>
-                <text class="svg-code" x="394" y="104" text-anchor="end" fill="#dcc9a2" font-size="10.5">main.qor</text>
-
-                <rect x="38" y="130" width="220" height="26" rx="6" fill="#172231" stroke="#64748b"/>
-                <text class="svg-ui" x="50" y="147" fill="#d5dde8" font-size="10.2" font-weight="750">이름 없는 전역 namespace</text>
-                <line x1="38" y1="159" x2="258" y2="159" stroke="#526176"/>
-
-                <g transform="translate(0 19)">
-                <rect x="38" y="164" width="150" height="24" rx="6" fill="#132b48" stroke="#4c8bc7"/>
-                <rect x="103" y="167" width="31" height="18" rx="4" fill="#2563a8"/>
-                <rect x="136" y="167" width="19" height="18" rx="4" fill="#8a5b13"/>
-
-                <g class="svg-code" font-size="10.5">
-                  <text x="42" y="181" fill="#e8edf5">operation</text>
-                  <text x="106" y="181" fill="#fff" font-weight="800">Main</text>
-                  <text x="139" y="181" fill="#fff8e8" font-weight="800">()</text>
-                  <text x="42" y="199" fill="#e8edf5">{</text>
-                  <text x="58" y="217" fill="#aeb9c9">use q = Qubit[2];</text>
-                  <text x="58" y="235" fill="#aeb9c9">Demo.Prepare(q);</text>
-                  <text x="58" y="263" fill="#aeb9c9">var results: bit[] = new bit[2];</text>
-                  <text x="58" y="281" fill="#aeb9c9">results[0] = M(q[0]);</text>
-                  <text x="58" y="299" fill="#aeb9c9">if (results[0] == 1)</text>
-                  <text x="58" y="317" fill="#aeb9c9">{</text>
-                  <text x="74" y="335" fill="#aeb9c9">X(q[1]);</text>
-                  <text x="58" y="353" fill="#aeb9c9">}</text>
-                  <text x="42" y="371" fill="#aeb9c9">}</text>
-                </g>
-                </g>
-
-                <!-- Main: 같은 카드 안의 QOperation 결과 -->
-                <rect x="424" y="89" width="92" height="22" rx="11" fill="none" stroke="#d6dde8"/>
-                <text class="svg-code" x="470" y="104" text-anchor="middle" fill="#f7f9fc" font-size="10.5" font-weight="750">QOperation</text>
-                <text class="svg-ui" x="529" y="104" fill="#f7f9fc" font-size="12" font-weight="750">Main의 선언부에서 만든 값</text>
-
-                <rect x="480" y="130" width="399" height="38" rx="8" fill="#f5f7fa" stroke="#c7d0dc"/>
-                <rect x="480" y="130" width="5" height="38" rx="2.5" fill="#64748b"/>
-                <rect x="496" y="132" width="102" height="22" rx="6" fill="#e9edf2"/>
-                <text class="svg-ui" x="547" y="147" text-anchor="middle" fill="#4f5e72" font-size="9.5" font-weight="800">전역 namespace</text>
-                <text class="svg-ui" x="610" y="147" fill="#718096" font-size="12">→</text>
-                <text class="svg-code" x="632" y="147" fill="#263446" font-size="12.5">Namespace = ""</text>
-                <rect x="838" y="140" width="28" height="18" rx="9" fill="#64748b"/>
-                <text class="svg-ui" x="852" y="153" text-anchor="middle" fill="#fff" font-size="9.5" font-weight="850">1</text>
-
-                <g transform="translate(0 -9)">
-                <rect x="480" y="193" width="399" height="34" rx="8" fill="#f2f7fd" stroke="#9bbddd"/>
-                <rect x="480" y="193" width="5" height="34" rx="2.5" fill="#2563a8"/>
-                <rect x="496" y="204" width="50" height="22" rx="6" fill="#dceafa"/>
-                <text class="svg-code" x="521" y="219" text-anchor="middle" fill="#164f82" font-size="11" font-weight="800">Main</text>
-                <text class="svg-ui" x="558" y="219" fill="#718096" font-size="12">→</text>
-                <text class="svg-code" x="580" y="219" fill="#263446" font-size="12.5">Name = "Main"</text>
-                <rect x="838" y="201" width="28" height="18" rx="9" fill="#2563a8"/>
-                <text class="svg-ui" x="852" y="214" text-anchor="middle" fill="#fff" font-size="9.5" font-weight="850">2</text>
-
-                <g transform="translate(0 -13)">
-                <rect x="480" y="256" width="399" height="55" rx="8" fill="#fffaf0" stroke="#e4bd72"/>
-                <rect x="480" y="256" width="5" height="55" rx="2.5" fill="#b7791f"/>
-                <rect x="496" y="257" width="38" height="22" rx="6" fill="#fae8bd"/>
-                <text class="svg-code" x="515" y="272" text-anchor="middle" fill="#7a5114" font-size="11.5" font-weight="800">()</text>
-                <text class="svg-ui" x="546" y="272" fill="#718096" font-size="12">→</text>
-                <text class="svg-code" x="568" y="272" fill="#263446" font-size="12.5">Params = []</text>
-                <text class="svg-ui" x="496" y="303" fill="#64748b" font-size="9.5">AST에 Param 노드 없음</text>
-                <rect x="838" y="264" width="28" height="18" rx="9" fill="#b7791f"/>
-                <text class="svg-ui" x="852" y="277" text-anchor="middle" fill="#fff" font-size="9.5" font-weight="850">3</text>
-                </g>
-                </g>
-
-                <g transform="translate(0 68)">
-                <!-- Prepare: 하나의 카드 안에서 AST 선언부와 QOperation을 직접 연결 -->
-                <g clip-path="url(#op-prepare-card-clip)">
-                  <rect x="24" y="365" width="385" height="338" fill="#111827"/>
-                  <rect x="409" y="365" width="486" height="338" fill="#fff"/>
-                  <rect x="24" y="365" width="385" height="42" fill="#422d16"/>
-                  <rect x="409" y="365" width="486" height="42" fill="#263141"/>
-                </g>
-                <rect x="24" y="365" width="871" height="338" rx="11" fill="none" stroke="#cfd7e2"/>
-                <rect x="39" y="376" width="86" height="22" rx="11" fill="none" stroke="#ffedd5"/>
-                <text class="svg-ui" x="82" y="391" text-anchor="middle" fill="#ffedd5" font-size="10.5" font-weight="800">Qora 소스</text>
-                <text class="svg-ui" x="138" y="391" fill="#ffedd5" font-size="12" font-weight="750">namespace 안 연산의 실제 코드</text>
-                <text class="svg-code" x="394" y="391" text-anchor="end" fill="#dcc9a2" font-size="10.5">main.qor</text>
-
-                <rect x="38" y="414" width="112" height="25" rx="6" fill="#102d27" stroke="#2f9b77"/>
-                <rect x="103" y="417" width="35" height="19" rx="4" fill="#16805b"/>
-                <rect x="54" y="483" width="225" height="25" rx="6" fill="#132b48" stroke="#4c8bc7"/>
-                <rect x="119" y="486" width="48" height="19" rx="4" fill="#2563a8"/>
-                <rect x="173" y="486" width="72" height="19" rx="4" fill="#8a5b13"/>
-
-                <g class="svg-code" font-size="10.5">
-                  <text x="42" y="432" fill="#e8edf5">namespace</text>
-                  <text x="106" y="432" fill="#fff" font-weight="800">Demo</text>
-                  <text x="42" y="450" fill="#e8edf5">{</text>
-                  <text x="58" y="473" fill="#aeb9c9">open Shared;</text>
-                  <text x="58" y="501" fill="#e8edf5">operation</text>
-                  <text x="122" y="501" fill="#fff" font-weight="800">Prepare</text>
-                  <text x="169" y="501" fill="#e8edf5">(</text>
-                  <text x="176" y="501" fill="#fff8e8" font-weight="800">q: Qubit[]</text>
-                  <text x="247" y="501" fill="#e8edf5">)</text>
-                  <text x="58" y="519" fill="#e8edf5">{</text>
-                  <text x="74" y="545" fill="#aeb9c9">for i in 0..q.Count-1</text>
-                  <text x="74" y="563" fill="#aeb9c9">{</text>
-                  <text x="90" y="581" fill="#aeb9c9">H(q[i]);</text>
-                  <text x="74" y="599" fill="#aeb9c9">}</text>
-                  <text x="74" y="617" fill="#aeb9c9">Flip(q);</text>
-                  <text x="58" y="635" fill="#aeb9c9">}</text>
-                  <text x="42" y="653" fill="#aeb9c9">}</text>
-                </g>
-
-                <!-- Prepare: 같은 카드 안의 QOperation과 QParam 결과 -->
-                <rect x="424" y="376" width="92" height="22" rx="11" fill="none" stroke="#d6dde8"/>
-                <text class="svg-code" x="470" y="391" text-anchor="middle" fill="#f7f9fc" font-size="10.5" font-weight="750">QOperation</text>
-                <text class="svg-ui" x="529" y="391" fill="#f7f9fc" font-size="12" font-weight="750">Prepare의 선언부에서 만든 값</text>
-
-                <g transform="translate(0 5)">
-                <rect x="480" y="412" width="399" height="38" rx="8" fill="#f3faf7" stroke="#9bcbb8"/>
-                <rect x="480" y="412" width="5" height="38" rx="2.5" fill="#16805b"/>
-                <rect x="496" y="416" width="52" height="22" rx="6" fill="#dcefe7"/>
-                <text class="svg-code" x="522" y="431" text-anchor="middle" fill="#116347" font-size="11" font-weight="800">Demo</text>
-                <text class="svg-ui" x="560" y="431" fill="#718096" font-size="12">→</text>
-                <text class="svg-code" x="582" y="431" fill="#263446" font-size="12.5">Namespace = "Demo"</text>
-                <rect x="838" y="422" width="28" height="18" rx="9" fill="#16805b"/>
-                <text class="svg-ui" x="852" y="435" text-anchor="middle" fill="#fff" font-size="9.5" font-weight="850">4</text>
-
-                <g transform="translate(0 8)">
-                <rect x="480" y="458" width="399" height="38" rx="8" fill="#f2f7fd" stroke="#9bbddd"/>
-                <rect x="480" y="458" width="5" height="38" rx="2.5" fill="#2563a8"/>
-                <rect x="496" y="466" width="68" height="22" rx="6" fill="#dceafa"/>
-                <text class="svg-code" x="530" y="481" text-anchor="middle" fill="#164f82" font-size="11" font-weight="800">Prepare</text>
-                <text class="svg-ui" x="576" y="481" fill="#718096" font-size="12">→</text>
-                <text class="svg-code" x="598" y="481" fill="#263446" font-size="12.5">Name = "Prepare"</text>
-                <rect x="838" y="466" width="28" height="18" rx="9" fill="#2563a8"/>
-                <text class="svg-ui" x="852" y="479" text-anchor="middle" fill="#fff" font-size="9.5" font-weight="850">5</text>
-                </g>
-
-                <g transform="translate(0 12)">
-                <rect x="480" y="508" width="399" height="168" rx="9" fill="#fffaf0" stroke="#e4bd72"/>
-                <path d="M489 508 H870 Q879 508 879 517 V539 H480 V517 Q480 508 489 508 Z" fill="#5a3b16"/>
-                <text class="svg-code" x="496" y="529" fill="#fff7e2" font-size="11.5" font-weight="800">QOperation.Params[0] · QParam</text>
-                <text class="svg-ui" x="826" y="529" text-anchor="end" fill="#ead7b2" font-size="9.5">q: Qubit[]</text>
-                <rect x="838" y="514" width="28" height="18" rx="9" fill="#b7791f"/>
-                <text class="svg-ui" x="852" y="527" text-anchor="middle" fill="#fff" font-size="9.5" font-weight="850">6</text>
-
-                <text class="svg-code" x="497" y="560" fill="#7a5114" font-size="11.5">q</text>
-                <text class="svg-ui" x="572" y="560" fill="#9a7b4c" font-size="11">→</text>
-                <text class="svg-code" x="596" y="560" fill="#263446" font-size="12">Name = "q"</text>
-                <line x1="496" y1="570" x2="863" y2="570" stroke="#ead8b7"/>
-
-                <text class="svg-code" x="497" y="590" fill="#7a5114" font-size="11.5">Qubit</text>
-                <text class="svg-ui" x="572" y="590" fill="#9a7b4c" font-size="11">→</text>
-                <text class="svg-code" x="596" y="590" fill="#263446" font-size="12">Type = Qubit</text>
-                <line x1="496" y1="600" x2="863" y2="600" stroke="#ead8b7"/>
-
-                <text class="svg-code" x="497" y="620" fill="#7a5114" font-size="11.5">ArrayType 노드</text>
-                <text class="svg-ui" x="572" y="620" fill="#9a7b4c" font-size="11">→</text>
-                <text class="svg-code" x="596" y="620" fill="#263446" font-size="12">IsArray = true</text>
-                <line x1="496" y1="630" x2="863" y2="630" stroke="#ead8b7"/>
-
-                <text class="svg-ui" x="497" y="650" fill="#7a5114" font-size="10.5" font-weight="750">크기 숫자 없음</text>
-                <text class="svg-ui" x="572" y="650" fill="#9a7b4c" font-size="11">→</text>
-                <text class="svg-code" x="596" y="650" fill="#263446" font-size="12">RegisterSize = null</text>
-                </g>
-                </g>
-                </g>
-
-                <!-- 강조한 AST 선언부 → 같은 카드 안의 IR 필드 -->
-                <g fill="none" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="3 4" opacity=".92">
-                  <path d="M258 143 C330 143 410 149 480 149" stroke="#64748b" marker-end="url(#op-arrow-slate)"/>
-                  <path d="M118.5 186 C136.5 164 285 170 350 188 C395 197 440 201 480 201" stroke="#2563a8" marker-end="url(#op-arrow-blue)"/>
-                  <path d="M145.5 204 C145.5 234 400 262 480 262" stroke="#b7791f" marker-end="url(#op-arrow-amber)"/>
-                  <path d="M150 427 C250 427 400 436 480 436" transform="translate(0 68)" stroke="#16805b" marker-end="url(#op-arrow-green)"/>
-                  <path d="M143 486 C161 462 315 472 375 477 C415 488 450 490 480 490" transform="translate(0 68)" stroke="#2563a8" marker-end="url(#op-arrow-blue)"/>
-                  <path d="M209 505 C209 515 400 541 480 541" transform="translate(0 68)" stroke="#b7791f" marker-end="url(#op-arrow-amber)"/>
-                </g>
-                </svg>
-              </div>
-              <figcaption id="operation-head-map-caption">
-                왼쪽의 <code>Qora 소스</code>는 입력 AST의 연산 노드에 대응하는 원본 코드 범위이며, 흐리게 표시한 본문도 생략된 것이 아닙니다.<br>
-                별도의 중계 열을 두지 않고, 강조한 선언부에서 오른쪽 IR 필드로 점선 화살표를 직접 연결했습니다.<br>
-                파란색은 연산 이름, 초록색은 namespace, 주황색은 파라미터가 옮겨지는 경로를 나타냅니다.
-              </figcaption>
-            </figure>
-
-            <p>
-              파서는 <code>q: Qubit[]</code>를 <code>Param(q, ArrayType(Qubit))</code> 형태의 의미 AST로 전달합니다.<span class="diagram-ref amber" aria-label="6번 도식">6</span><br>
-              따라서 <code>QoraLowering</code>은 <code>q</code>에서 파라미터 이름을, <code>Qubit</code>에서 원소 타입을 읽고, <code>ArrayType</code> 노드가 있다는 사실로 <code>IsArray=true</code>를 정합니다.<span class="diagram-ref amber" aria-label="6번 도식">6</span><br>
-              또한 소스의 <code>Qubit[]</code>에는 크기 숫자가 없으므로, 구체적인 큐빗 배열 크기를 나타내는 <code>RegisterSize</code>는 이 시점에 <code>null</code>입니다.<span class="diagram-ref amber" aria-label="6번 도식">6</span><br>
-              <code>int[]</code> 같은 고전 배열은 <code>IsArray</code>로 배열 여부만 기록하며, <code>RegisterSize</code>를 배열 길이로 사용하지 않습니다.<span class="diagram-ref amber" aria-label="6번 도식의 보충 설명">6 보충</span>
-            </p>
-
-            <div class="panel">
-              <table class="spec param-shape-table">
-                <tr><th>원래 선언</th><th>AST에서 읽는 값</th><th>변환 결과</th></tr>
-                <tr>
-                  <td class="k"><code>q: Qubit</code></td>
-                  <td><code>q</code>, <code>Qubit</code></td>
-                  <td><div class="shape-result"><code>Type=Qubit</code><span class="array-state scalar" aria-label="IsArray false, 단일 값"><span class="shape-name">단일 값</span><span class="shape-value">IsArray=false</span></span></div></td>
-                </tr>
-                <tr>
-                  <td class="k"><code>q: Qubit[]</code></td>
-                  <td><code>q</code>, <code>ArrayType(Qubit)</code></td>
-                  <td><div class="shape-result"><code>Type=Qubit</code><span class="array-state array" aria-label="IsArray true, 배열"><span class="shape-name">배열</span><span class="shape-value">IsArray=true</span></span></div></td>
-                </tr>
-                <tr>
-                  <td class="k"><code>theta: angle</code></td>
-                  <td><code>theta</code>, <code>angle</code></td>
-                  <td><div class="shape-result"><code>Type=Angle</code><span class="array-state scalar" aria-label="IsArray false, 단일 값"><span class="shape-name">단일 값</span><span class="shape-value">IsArray=false</span></span></div></td>
-                </tr>
-                <tr>
-                  <td class="k"><code>values: int[]</code></td>
-                  <td><code>values</code>, <code>ArrayType(int)</code></td>
-                  <td><div class="shape-result"><code>Type=Int</code><span class="array-state array" aria-label="IsArray true, 배열"><span class="shape-name">배열</span><span class="shape-value">IsArray=true</span></span></div></td>
-                </tr>
-              </table>
-            </div>
-
-            <p>
-              이 단계에서는 <code>Prepare</code>와 <code>Demo</code>를 <code>Demo.Prepare</code>라는 하나의 문자열로 합치지 않습니다.<span class="diagram-ref green" aria-label="4번 도식">4</span><span class="diagram-ref blue" aria-label="5번 도식">5</span><br>
-              연산 이름은 <code>Name = "Prepare"</code>, 선언된 namespace는 <code>Namespace = "Demo"</code>로 각각 보존합니다.<span class="diagram-ref green" aria-label="4번 도식">4</span><span class="diagram-ref blue" aria-label="5번 도식">5</span>
-            </p>
-          </div>
-        </section>
-
-        <section class="walk-stage" id="stage-3">
-          <div class="walk-head">
-            <div class="walk-number">3</div>
-            <h3>연산 본문의 각 문장을 <code>QStmt</code>로 바꾸어 <code>QOperation.Body</code>에 저장합니다</h3>
-          </div>
-          <div class="walk-body">
-            <figure class="lowering-map" aria-labelledby="statement-map-title statement-map-caption">
-              <div class="diagram-scroll-hint" aria-hidden="true">↔ 좌우로 밀어 실제 문장과 생성된 QStmt를 이어서 확인합니다</div>
-              <div class="diagram-scroll" tabindex="0" aria-label="Main과 Prepare의 실제 코드 문장이 QOperation Body의 QStmt로 변환되는 도식, 작은 화면에서는 좌우로 스크롤할 수 있습니다">
-                <svg class="lowering-flow" viewBox="0 0 920 1102" role="img"
-                     aria-labelledby="statement-map-title statement-map-desc" focusable="false">
-                <title id="statement-map-title">연산 본문의 실제 문장이 QStmt로 변환되는 흐름</title>
-                <desc id="statement-map-desc">Main과 Prepare의 실제 코드를 생략 없이 표시하고, 각 문장이 QOperation Body의 어느 QStmt로 저장되는지 연결합니다. 선언과 대입의 값은 부모 문장 안에, if와 for의 자식 문장은 각 부모의 자식 목록 안에 표시합니다.</desc>
-                <defs>
-                  <marker id="stmt-arrow-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-                    <path d="M0 0 L10 5 L0 10 z" fill="#2563a8"/>
-                  </marker>
-                  <marker id="stmt-arrow-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-                    <path d="M0 0 L10 5 L0 10 z" fill="#16805b"/>
-                  </marker>
-                  <clipPath id="stmt-main-card-clip"><rect x="24" y="78" width="871" height="608" rx="11"/></clipPath>
-                  <clipPath id="stmt-prepare-card-clip"><rect x="24" y="676" width="871" height="360" rx="11"/></clipPath>
-                </defs>
-
-                <rect x="1" y="1" width="918" height="1100" rx="14" fill="#f8fafc" stroke="#d7dee8"/>
-                <rect x="24" y="20" width="126" height="27" rx="13.5" fill="#422d16"/>
-                <text class="svg-ui" x="87" y="38" text-anchor="middle" fill="#ffedd5" font-size="12" font-weight="800">AST → QStmt</text>
-                <text class="svg-ui" x="166" y="39" fill="#253044" font-size="17.5" font-weight="800">실제 본문의 각 문장이 저장되는 Body 위치를 따라갑니다</text>
-                <text class="svg-ui" x="166" y="59" fill="#667184" font-size="11.5">같은 번호는 입력 AST에 대응하는 원본 코드 범위와 생성된 QStmt를 연결하며, 하위 번호는 부모 안에 저장되는 값을 나타냅니다.</text>
-
-                <!-- Main: 실제 본문과 Main.Body를 하나의 카드에서 연결 -->
-                <g clip-path="url(#stmt-main-card-clip)">
-                  <rect x="24" y="78" width="385" height="608" fill="#111827"/>
-                  <rect x="409" y="78" width="486" height="608" fill="#fff"/>
-                  <rect x="24" y="78" width="385" height="42" fill="#183153"/>
-                  <rect x="409" y="78" width="486" height="42" fill="#263141"/>
-                </g>
-                <rect x="24" y="78" width="871" height="608" rx="11" fill="none" stroke="#cfd7e2"/>
-
-                <rect x="39" y="89" width="86" height="22" rx="11" fill="none" stroke="#bfdbfe"/>
-                <text class="svg-ui" x="82" y="104" text-anchor="middle" fill="#dbeafe" font-size="10.5" font-weight="800">Qora 소스</text>
-                <text class="svg-ui" x="138" y="104" fill="#dbeafe" font-size="12" font-weight="750">Main 본문의 실제 코드</text>
-                <text class="svg-code" x="394" y="104" text-anchor="end" fill="#b8d5ef" font-size="9.5">main.qor</text>
-                <rect x="424" y="89" width="122" height="22" rx="11" fill="none" stroke="#d6dde8"/>
-                <text class="svg-code" x="485" y="104" text-anchor="middle" fill="#f7f9fc" font-size="10.2" font-weight="750">QOperation.Body</text>
-                <text class="svg-ui" x="560" y="104" fill="#f7f9fc" font-size="12" font-weight="750">Main.Body에 저장되는 값</text>
-
-                <text class="svg-code" x="42" y="145" fill="#d8e2ef" font-size="10.5">operation Main()</text>
-                <text class="svg-code" x="42" y="169" fill="#d8e2ef" font-size="10.5">{</text>
-                <rect x="480" y="128" width="210" height="26" rx="7" fill="#f5f7fa" stroke="#d4dae3"/>
-                <text class="svg-code" x="493" y="145" fill="#526071" font-size="10.5">QOperation("Main").Body</text>
-                <text class="svg-ui" x="704" y="145" fill="#718096" font-size="9.5">소스 순서대로 추가</text>
-
-                <g transform="translate(0 28)">
-                <!-- Main 1 · QUse -->
-                <rect x="54" y="160" width="325" height="44" rx="7" fill="#132b48" stroke="#4c8bc7"/>
-                <rect x="62" y="173" width="28" height="18" rx="9" fill="#2563a8"/>
-                <text class="svg-ui" x="76" y="186" text-anchor="middle" fill="#fff" font-size="9.5" font-weight="850">1</text>
-                <text class="svg-code" x="102" y="188" fill="#f5f7fb" font-size="10.2">use q = Qubit[2];</text>
-
-                <rect x="480" y="160" width="399" height="44" rx="7" fill="#f2f7fd" stroke="#9bbddd"/>
-                <rect x="492" y="168" width="28" height="18" rx="9" fill="#2563a8"/>
-                <text class="svg-ui" x="506" y="181" text-anchor="middle" fill="#fff" font-size="9.5" font-weight="850">1</text>
-                <text class="svg-code" x="532" y="180" fill="#164f82" font-size="10.5" font-weight="800">Body[0]: QUse</text>
-                <text class="svg-code" x="532" y="196" fill="#354052" font-size="9.8">Name = "q" · Size = 2</text>
-
-                <!-- Main 2 · QGate -->
-                <rect x="54" y="212" width="325" height="44" rx="7" fill="#132b48" stroke="#4c8bc7"/>
-                <rect x="62" y="225" width="28" height="18" rx="9" fill="#2563a8"/>
-                <text class="svg-ui" x="76" y="238" text-anchor="middle" fill="#fff" font-size="9.5" font-weight="850">2</text>
-                <text class="svg-code" x="102" y="240" fill="#f5f7fb" font-size="10.2">Demo.Prepare(q);</text>
-
-                <rect x="480" y="212" width="399" height="44" rx="7" fill="#f2f7fd" stroke="#9bbddd"/>
-                <rect x="492" y="220" width="28" height="18" rx="9" fill="#2563a8"/>
-                <text class="svg-ui" x="506" y="233" text-anchor="middle" fill="#fff" font-size="9.5" font-weight="850">2</text>
-                <text class="svg-code" x="532" y="232" fill="#164f82" font-size="10.5" font-weight="800">Body[1]: QGate</text>
-                <text class="svg-code" x="532" y="248" fill="#354052" font-size="9.2">Name = "Demo.Prepare" · Args[0] = QTextArg("q")</text>
-
-                <!-- Main 3 · QDecl 안의 QArrayNew -->
-                <rect x="54" y="264" width="325" height="108" rx="8" fill="#0f2035" stroke="#4c8bc7" stroke-dasharray="5 4"/>
-                <rect x="62" y="273" width="28" height="18" rx="9" fill="#2563a8"/>
-                <text class="svg-ui" x="76" y="286" text-anchor="middle" fill="#fff" font-size="9.5" font-weight="850">3</text>
-                <text class="svg-code" x="102" y="288" fill="#f5f7fb" font-size="9.6">bit[] results =</text>
-                <rect x="190" y="270" width="144" height="24" rx="5" fill="#1d4f7a" stroke="#60a5fa"/>
-                <text class="svg-code" x="198" y="287" fill="#fff" font-size="9.6" font-weight="800">new bit[2];</text>
-                <rect x="290" y="273" width="36" height="18" rx="9" fill="#2563a8"/>
-                <text class="svg-ui" x="308" y="286" text-anchor="middle" fill="#fff" font-size="8.5" font-weight="850">3.1</text>
-
-                <rect x="480" y="264" width="399" height="108" rx="8" fill="#f2f7fd" stroke="#4c8bc7" stroke-dasharray="5 4"/>
-                <rect x="492" y="272" width="28" height="18" rx="9" fill="#2563a8"/>
-                <text class="svg-ui" x="506" y="285" text-anchor="middle" fill="#fff" font-size="9.5" font-weight="850">3</text>
-                <text class="svg-code" x="532" y="283" fill="#164f82" font-size="11" font-weight="800">Body[2]: QDecl</text>
-                <g class="svg-code" fill="#354052" font-size="10.2">
-                  <text x="532" y="298">├─ Name = "results"</text>
-                  <text x="532" y="311">├─ Type = Bit</text>
-                  <text x="532" y="324">├─ IsArray = true</text>
-                  <text x="532" y="337" fill="#164f82" font-weight="800">└─ Value: QArrayNew</text>
-                  <text x="550" y="350">├─ ElementType = Bit</text>
-                  <text x="550" y="363">└─ Length = 2</text>
-                </g>
-                <rect x="492" y="324" width="35" height="18" rx="9" fill="#2563a8"/>
-                <text class="svg-ui" x="509.5" y="337" text-anchor="middle" fill="#fff" font-size="8.5" font-weight="850">3.1</text>
-
-                <!-- Main 4 · QAssign 안의 QMeasure -->
-                <rect x="54" y="380" width="325" height="100" rx="8" fill="#0f2035" stroke="#4c8bc7" stroke-dasharray="5 4"/>
-                <rect x="62" y="389" width="28" height="18" rx="9" fill="#2563a8"/>
-                <text class="svg-ui" x="76" y="402" text-anchor="middle" fill="#fff" font-size="9.5" font-weight="850">4</text>
-                <text class="svg-code" x="102" y="404" fill="#f5f7fb" font-size="9.6">results[0] =</text>
-                <rect x="178" y="386" width="132" height="24" rx="5" fill="#1d4f7a" stroke="#60a5fa"/>
-                <text class="svg-code" x="186" y="403" fill="#fff" font-size="9.6" font-weight="800">M(q[0]);</text>
-                <rect x="266" y="389" width="36" height="18" rx="9" fill="#2563a8"/>
-                <text class="svg-ui" x="284" y="402" text-anchor="middle" fill="#fff" font-size="8.5" font-weight="850">4.1</text>
-
-                <rect x="480" y="380" width="399" height="100" rx="8" fill="#f2f7fd" stroke="#4c8bc7" stroke-dasharray="5 4"/>
-                <rect x="492" y="388" width="28" height="18" rx="9" fill="#2563a8"/>
-                <text class="svg-ui" x="506" y="401" text-anchor="middle" fill="#fff" font-size="9.5" font-weight="850">4</text>
-                <text class="svg-code" x="532" y="400" fill="#164f82" font-size="11" font-weight="800">Body[3]: QAssign</text>
-                <g class="svg-code" fill="#354052" font-size="10.2">
-                  <text x="532" y="415">├─ Name = "results"</text>
-                  <text x="532" y="429">├─ Index = "0"</text>
-                  <text x="532" y="443" fill="#164f82" font-weight="800">└─ Value: QMeasure</text>
-                  <text x="550" y="459">└─ Target: QQubitArg(Reg="q", Index="0")</text>
-                </g>
-                <rect x="492" y="430" width="35" height="18" rx="9" fill="#2563a8"/>
-                <text class="svg-ui" x="509.5" y="443" text-anchor="middle" fill="#fff" font-size="8.5" font-weight="850">4.1</text>
-
-                <!-- Main 5 · QIf와 Then[0] -->
-                <rect x="54" y="488" width="325" height="156" rx="9" fill="#0f2035" stroke="#4c8bc7" stroke-dasharray="5 4"/>
-                <rect x="62" y="497" width="28" height="18" rx="9" fill="#2563a8"/>
-                <text class="svg-ui" x="76" y="510" text-anchor="middle" fill="#fff" font-size="9.5" font-weight="850">5</text>
-                <text class="svg-code" x="102" y="513" fill="#f5f7fb" font-size="9.8">if (results[0] == 1)</text>
-                <text class="svg-code" x="102" y="535" fill="#d5deea" font-size="10.2">{</text>
-                <rect x="70" y="549" width="295" height="40" rx="7" fill="#132b48" stroke="#4c8bc7"/>
-                <rect x="78" y="560" width="38" height="18" rx="9" fill="#2563a8"/>
-                <text class="svg-ui" x="97" y="573" text-anchor="middle" fill="#fff" font-size="8.5" font-weight="850">5.1</text>
-                <text class="svg-code" x="128" y="574" fill="#f5f7fb" font-size="10">X(q[1]);</text>
-                <text class="svg-code" x="102" y="620" fill="#d5deea" font-size="10.2">}</text>
-
-                <rect x="480" y="488" width="399" height="156" rx="9" fill="#f2f7fd" stroke="#4c8bc7" stroke-dasharray="5 4"/>
-                <rect x="492" y="497" width="28" height="18" rx="9" fill="#2563a8"/>
-                <text class="svg-ui" x="506" y="510" text-anchor="middle" fill="#fff" font-size="9.5" font-weight="850">5</text>
-                <text class="svg-code" x="532" y="510" fill="#164f82" font-size="11" font-weight="800">Body[4]: QIf</text>
-                <g fill="none" stroke="#7f98b6" stroke-width="1.1" shape-rendering="crispEdges">
-                  <path d="M540 517 V635 M540 521 H548 M540 547 H548 M540 635 H548"/>
-                  <path d="M558 526 V533 H566"/>
-                  <path d="M558 552 V569 H566"/>
-                </g>
-                <text class="svg-code" x="550" y="524" fill="#354052" font-size="9.8">Cond: QCond</text>
-                <text class="svg-code" x="568" y="536" fill="#354052" font-size="9.6">Text = "results [ 0 ] == 1"</text>
-                <text class="svg-code" x="550" y="550" fill="#354052" font-size="9.8">Then</text>
-
-                <rect x="566" y="554" width="297" height="70" rx="7" fill="#e7f0fb" stroke="#4c8bc7"/>
-                <rect x="574" y="560" width="38" height="18" rx="9" fill="#2563a8"/>
-                <text class="svg-ui" x="593" y="573" text-anchor="middle" fill="#fff" font-size="8.5" font-weight="850">5.1</text>
-                <g class="svg-code" fill="#354052" font-size="9.2">
-                  <text x="622" y="573" fill="#164f82" font-size="9.8" font-weight="800">[0]: QGate</text>
-                  <text x="622" y="585">├─ Name = "X"</text>
-                  <text x="622" y="597">└─ Args[0]: QQubitArg</text>
-                  <text x="638" y="609">├─ Reg = "q"</text>
-                  <text x="638" y="621">└─ Index = "1"</text>
-                </g>
-                <text class="svg-code" x="550" y="638" fill="#354052" font-size="9.8">Else = []</text>
-                <text class="svg-code" x="42" y="652" fill="#d5deea" font-size="10.5">}</text>
-                </g>
-
-                <!-- Prepare: 실제 본문과 Prepare.Body를 하나의 카드에서 연결 -->
-                <g transform="translate(0 40)">
-                <g clip-path="url(#stmt-prepare-card-clip)">
-                  <rect x="24" y="676" width="385" height="360" fill="#111827"/>
-                  <rect x="409" y="676" width="486" height="360" fill="#fff"/>
-                  <rect x="24" y="676" width="385" height="42" fill="#124c3f"/>
-                  <rect x="409" y="676" width="486" height="42" fill="#263141"/>
-                </g>
-                <rect x="24" y="676" width="871" height="360" rx="11" fill="none" stroke="#cfd7e2"/>
-
-                <rect x="39" y="687" width="86" height="22" rx="11" fill="none" stroke="#a7f3d0"/>
-                <text class="svg-ui" x="82" y="702" text-anchor="middle" fill="#d1fae5" font-size="10.5" font-weight="800">Qora 소스</text>
-                <text class="svg-ui" x="138" y="702" fill="#d1fae5" font-size="12" font-weight="750">Demo.Prepare 본문의 실제 코드</text>
-                <text class="svg-code" x="394" y="702" text-anchor="end" fill="#9fdbc5" font-size="9.5">main.qor</text>
-                <rect x="424" y="687" width="122" height="22" rx="11" fill="none" stroke="#d6dde8"/>
-                <text class="svg-code" x="485" y="702" text-anchor="middle" fill="#f7f9fc" font-size="10.2" font-weight="750">QOperation.Body</text>
-                <text class="svg-ui" x="560" y="702" fill="#f7f9fc" font-size="12" font-weight="750">Prepare.Body에 저장되는 값</text>
-
-                <text class="svg-code" x="42" y="743" fill="#d8e2ef" font-size="10.5">operation Prepare(q: Qubit[])</text>
-                <text class="svg-code" x="42" y="767" fill="#d8e2ef" font-size="10.5">{</text>
-                <rect x="480" y="726" width="226" height="26" rx="7" fill="#f5f7fa" stroke="#d4dae3"/>
-                <text class="svg-code" x="493" y="743" fill="#526071" font-size="10.5">QOperation("Prepare").Body</text>
-                <text class="svg-ui" x="720" y="743" fill="#718096" font-size="9.5">소스 순서대로 추가</text>
-
-                <g transform="translate(0 28)">
-                <!-- Prepare 1 · QFor와 Body[0] -->
-                <rect x="54" y="758" width="325" height="156" rx="9" fill="#0e2924" stroke="#2f9b77" stroke-dasharray="5 4"/>
-                <rect x="62" y="767" width="28" height="18" rx="9" fill="#16805b"/>
-                <text class="svg-ui" x="76" y="780" text-anchor="middle" fill="#fff" font-size="9.5" font-weight="850">1</text>
-                <text class="svg-code" x="102" y="783" fill="#f5f7fb" font-size="9.8">for i in 0..q.Count-1</text>
-                <text class="svg-code" x="102" y="805" fill="#d5deea" font-size="10.2">{</text>
-                <rect x="70" y="819" width="295" height="40" rx="7" fill="#123d32" stroke="#2f9b77"/>
-                <rect x="78" y="830" width="38" height="18" rx="9" fill="#16805b"/>
-                <text class="svg-ui" x="97" y="843" text-anchor="middle" fill="#fff" font-size="8.5" font-weight="850">1.1</text>
-                <text class="svg-code" x="128" y="844" fill="#f5f7fb" font-size="10">H(q[i]);</text>
-                <text class="svg-code" x="102" y="890" fill="#d5deea" font-size="10.2">}</text>
-
-                <rect x="480" y="758" width="399" height="156" rx="9" fill="#f3faf7" stroke="#2f9b77" stroke-dasharray="5 4"/>
-                <rect x="492" y="767" width="28" height="18" rx="9" fill="#16805b"/>
-                <text class="svg-ui" x="506" y="780" text-anchor="middle" fill="#fff" font-size="9.5" font-weight="850">1</text>
-                <text class="svg-code" x="532" y="780" fill="#116347" font-size="10.5" font-weight="800">Body[0]: QFor</text>
-                <g fill="none" stroke="#79a996" stroke-width="1.1" shape-rendering="crispEdges">
-                  <path d="M540 787 V899 M540 803 H548 M540 819 H548"/>
-                  <path d="M558 822 V839 H566"/>
-                </g>
-                <text class="svg-code" x="550" y="803" fill="#354052" font-size="9.2">Var = "i" · From = "0" · To = "q . Count - 1"</text>
-                <text class="svg-code" x="550" y="819" fill="#354052" font-size="9.5">Body</text>
-                <rect x="566" y="824" width="297" height="70" rx="7" fill="#e7f5ef" stroke="#2f9b77"/>
-                <rect x="574" y="830" width="38" height="18" rx="9" fill="#16805b"/>
-                <text class="svg-ui" x="593" y="843" text-anchor="middle" fill="#fff" font-size="8.5" font-weight="850">1.1</text>
-                <g class="svg-code" fill="#354052" font-size="9">
-                  <text x="622" y="843" fill="#116347" font-size="9.8" font-weight="800">[0]: QGate</text>
-                  <text x="622" y="855">├─ Name = "H"</text>
-                  <text x="622" y="867">└─ Args[0]: QQubitArg</text>
-                  <text x="638" y="879">├─ Reg = "q"</text>
-                  <text x="638" y="891">└─ Index = "i"</text>
-                </g>
-
-                <!-- Prepare 2 · QGate -->
-                <rect x="54" y="922" width="325" height="44" rx="7" fill="#123d32" stroke="#2f9b77"/>
-                <rect x="62" y="935" width="28" height="18" rx="9" fill="#16805b"/>
-                <text class="svg-ui" x="76" y="948" text-anchor="middle" fill="#fff" font-size="9.5" font-weight="850">2</text>
-                <text class="svg-code" x="102" y="950" fill="#f5f7fb" font-size="10.2">Flip(q);</text>
-
-                <rect x="480" y="922" width="399" height="44" rx="7" fill="#f3faf7" stroke="#2f9b77"/>
-                <rect x="492" y="930" width="28" height="18" rx="9" fill="#16805b"/>
-                <text class="svg-ui" x="506" y="943" text-anchor="middle" fill="#fff" font-size="9.5" font-weight="850">2</text>
-                <text class="svg-code" x="532" y="942" fill="#116347" font-size="10.5" font-weight="800">Body[1]: QGate</text>
-                <text class="svg-code" x="532" y="958" fill="#354052" font-size="9.4">Name = "Flip" · Args[0] = QTextArg("q")</text>
-                <text class="svg-code" x="42" y="990" fill="#d5deea" font-size="10.5">}</text>
-                </g>
-                </g>
-
-                <!-- 실제 문장과 생성된 QStmt를 같은 높이에서 연결 -->
-                <g fill="none" stroke-width="2.5" stroke-linecap="round">
-                  <g transform="translate(0 28)">
-                    <path d="M379 182 H480" stroke="#2563a8" marker-end="url(#stmt-arrow-blue)"/>
-                    <path d="M379 234 H480" stroke="#2563a8" marker-end="url(#stmt-arrow-blue)"/>
-                    <path d="M379 282 H480" stroke="#2563a8" marker-end="url(#stmt-arrow-blue)"/>
-                    <path d="M379 398 H480" stroke="#2563a8" marker-end="url(#stmt-arrow-blue)"/>
-                    <path d="M379 510 H480" stroke="#2563a8" marker-end="url(#stmt-arrow-blue)"/>
-                    <path d="M365 569 H566" stroke="#2563a8" marker-end="url(#stmt-arrow-blue)"/>
-                  </g>
-                  <g transform="translate(0 68)">
-                    <path d="M379 780 H480" stroke="#16805b" marker-end="url(#stmt-arrow-green)"/>
-                    <path d="M365 839 H566" stroke="#16805b" marker-end="url(#stmt-arrow-green)"/>
-                    <path d="M379 944 H480" stroke="#16805b" marker-end="url(#stmt-arrow-green)"/>
-                  </g>
-                </g>
-                </svg>
-              </div>
-              <figcaption id="statement-map-caption">
-                왼쪽의 <code>Qora 소스</code>는 입력 AST의 각 문장에 대응하는 원본 코드 범위이며, 오른쪽은 해당 AST 노드에서 생성되어 <code>QOperation.Body</code>에 저장되는 <code>QStmt</code>입니다.<br>
-                <code>Body[n]</code>은 최상위 문장의 소스 순서를 나타내며, <code>Then → [0]</code>과 안쪽 <code>Body[0]</code>은 각각 <code>QIf</code>와 <code>QFor</code>에 포함된 자식 문장입니다.
-              </figcaption>
-            </figure>
-
-            <p>
-              <code>QDecl.Value</code>와 <code>QAssign.Value</code>에 들어가는 <code>QArrayNew</code>와 <code>QMeasure</code>는 독립된 본문 문장이 아니라, 선언이나 대입의 오른쪽 값을 나타내는 <code>QExpr</code>입니다.<span class="diagram-ref blue" aria-label="Main 도식 3.1번">3.1</span><span class="diagram-ref blue" aria-label="Main 도식 4.1번">4.1</span><br>
-              따라서 이 값들은 <code>QOperation.Body</code>에 별도의 <code>QStmt</code>로 추가되지 않고 해당 <code>QDecl</code> 또는 <code>QAssign</code> 안에 포함됩니다.<span class="diagram-ref blue" aria-label="Main 도식 3.1번">3.1</span><span class="diagram-ref blue" aria-label="Main 도식 4.1번">4.1</span>
-            </p>
-
-            <p>
-              이 단계에서는 게이트 적용과 사용자 연산 호출을 포함한 모든 호출형 문장을 <code>QGate</code>로 보존합니다.<span class="diagram-ref blue" aria-label="Main 도식 2번">2</span><span class="diagram-ref blue" aria-label="Main 도식 5.1번">5.1</span><span class="diagram-ref green" aria-label="Prepare 도식 1.1번">1.1</span><span class="diagram-ref green" aria-label="Prepare 도식 2번">2</span><br>
-              <code>QoraLowering</code>은 호출 이름과 인자만 기록하고, 이후 <code>Resolver</code>가 이름을 해소하여 실제 호출 대상을 결정합니다.<span class="diagram-ref blue" aria-label="Main 도식 2번">2</span><span class="diagram-ref blue" aria-label="Main 도식 5.1번">5.1</span><span class="diagram-ref green" aria-label="Prepare 도식 1.1번">1.1</span><span class="diagram-ref green" aria-label="Prepare 도식 2번">2</span>
-            </p>
-          </div>
-        </section>
-
-        <section class="walk-stage" id="stage-4">
-          <div class="walk-head">
-            <div class="walk-number">4</div>
-            <h3>호출 인자의 단독 인덱스 참조와 단독 측정은 구조화하고, 일반 식·조건은 텍스트로 보존합니다</h3>
-          </div>
-          <div class="walk-body">
-            <p>
-              3절에서 만든 <code>QGate</code>, <code>QAssign</code>, <code>QIf</code> 안에는 각각 호출 인자, 오른쪽 값, 조건이 들어갑니다.<br>
-              <code>QoraLowering</code>은 이 하위 값을 모두 같은 형태로 뭉개지 않고, 후속 패스가 구조를 직접 읽어야 하는 값만 전용 노드로 만들며 나머지는 AST의 토큰 순서를 공백으로 정규화한 텍스트로 보존합니다.
-            </p>
-
-            <figure class="lowering-map" aria-labelledby="value-map-title value-map-caption">
-              <div class="diagram-scroll-hint" aria-hidden="true">↔ 좌우로 밀어 실제 코드의 값과 생성된 하위 IR 노드를 이어서 확인합니다</div>
-              <div class="diagram-scroll" tabindex="0" aria-label="실제 코드의 인자와 식과 조건이 QArg, QExpr, QCond로 변환되는 도식, 작은 화면에서는 좌우로 스크롤할 수 있습니다">
-                <svg class="lowering-flow" viewBox="0 0 920 634" role="img"
-                     aria-labelledby="value-map-title value-map-desc" focusable="false">
-                <title id="value-map-title">실제 코드의 인자·식·조건이 QArg, QExpr, QCond로 보존되는 흐름</title>
-                <desc id="value-map-desc">Demo.Prepare의 q는 QTextArg, H의 q 인덱스 참조는 QQubitArg, 단독 측정 M q 0은 QMeasure, if 조건은 QCond로 변환됩니다. 호출과 산술이 섞인 비교 식은 QText와 HasCall true로 보존됩니다.</desc>
-                <defs>
-                  <clipPath id="value-card-clip"><rect x="24" y="78" width="871" height="532" rx="11"/></clipPath>
-                </defs>
-
-                <rect x="1" y="1" width="918" height="632" rx="14" fill="#f8fafc" stroke="#d7dee8"/>
-                <rect x="24" y="20" width="96" height="27" rx="13.5" fill="#422d16"/>
-                <text class="svg-ui" x="72" y="38" text-anchor="middle" fill="#ffedd5" font-size="12" font-weight="800">값 → IR</text>
-                <text class="svg-ui" x="136" y="39" fill="#253044" font-size="17.5" font-weight="800">실제 문장에서 선택한 값이 어떤 하위 IR 노드로 남는지 따라갑니다</text>
-                <text class="svg-ui" x="136" y="59" fill="#667184" font-size="11.5">같은 색은 같은 종류의 하위 값이며, 왼쪽에서 밝게 표시한 부분만 오른쪽 카드로 연결됩니다.</text>
-
-                <g clip-path="url(#value-card-clip)">
-                  <rect x="24" y="78" width="385" height="532" fill="#111827"/>
-                  <rect x="409" y="78" width="486" height="532" fill="#fff"/>
-                  <rect x="24" y="78" width="385" height="42" fill="#422d16"/>
-                  <rect x="409" y="78" width="486" height="42" fill="#263141"/>
-                </g>
-                <rect x="24" y="78" width="871" height="532" rx="11" fill="none" stroke="#cfd7e2"/>
-
-                <rect x="39" y="89" width="86" height="22" rx="11" fill="none" stroke="#ffedd5"/>
-                <text class="svg-ui" x="82" y="104" text-anchor="middle" fill="#ffedd5" font-size="10.5" font-weight="800">Qora 소스</text>
-                <text class="svg-ui" x="138" y="104" fill="#ffedd5" font-size="12" font-weight="750">AST 노드에 대응하는 실제 코드 범위</text>
-                <rect x="424" y="89" width="144" height="22" rx="11" fill="none" stroke="#d6dde8"/>
-                <text class="svg-code" x="496" y="104" text-anchor="middle" fill="#f7f9fc" font-size="10.2" font-weight="750">QArg · QExpr · QCond</text>
-                <text class="svg-ui" x="582" y="104" fill="#f7f9fc" font-size="12" font-weight="750">부모 문장 안에 기록되는 값</text>
-
-                <!-- 1 · 전체 이름 인자 → QTextArg -->
-                <rect x="42" y="136" width="351" height="62" rx="8" fill="#132b48" stroke="#4c8bc7"/>
-                <rect x="52" y="146" width="28" height="18" rx="9" fill="#2563a8"/>
-                <text class="svg-ui" x="66" y="159" text-anchor="middle" fill="#fff" font-size="9.5" font-weight="850">1</text>
-                <text class="svg-ui" x="376" y="153" text-anchor="end" fill="#9fc7ef" font-size="8.8">Main · 호출 인자</text>
-                <text class="svg-code" x="82" y="180" fill="#f5f7fb" font-size="10.3">Demo.Prepare(</text>
-                <rect x="168" y="163" width="24" height="24" rx="5" fill="#1d4f7a" stroke="#60a5fa"/>
-                <text class="svg-code" x="176" y="180" fill="#fff" font-size="10.3" font-weight="800">q</text>
-                <text class="svg-code" x="195" y="180" fill="#f5f7fb" font-size="10.3">);</text>
-
-                <rect x="480" y="136" width="399" height="62" rx="8" fill="#f2f7fd" stroke="#9bbddd"/>
-                <rect x="492" y="145" width="28" height="18" rx="9" fill="#2563a8"/>
-                <text class="svg-ui" x="506" y="158" text-anchor="middle" fill="#fff" font-size="9.5" font-weight="850">1</text>
-                <text class="svg-code" x="532" y="158" fill="#164f82" font-size="10.8" font-weight="800">Args[0]: QTextArg</text>
-                <text class="svg-code" x="532" y="177" fill="#354052" font-size="9.8">├─ Text = "q"</text>
-                <text class="svg-code" x="532" y="191" fill="#354052" font-size="9.8">└─ HasCall = false</text>
-
-                <!-- 2 · 인덱스 인자 → QQubitArg -->
-                <rect x="42" y="206" width="351" height="70" rx="8" fill="#132b48" stroke="#4c8bc7"/>
-                <rect x="52" y="216" width="28" height="18" rx="9" fill="#2563a8"/>
-                <text class="svg-ui" x="66" y="229" text-anchor="middle" fill="#fff" font-size="9.5" font-weight="850">2</text>
-                <text class="svg-ui" x="376" y="223" text-anchor="end" fill="#9fc7ef" font-size="8.8">Demo.Prepare · 호출 인자</text>
-                <text class="svg-code" x="82" y="251" fill="#f5f7fb" font-size="10.3">H(</text>
-                <rect x="98" y="234" width="48" height="24" rx="5" fill="#1d4f7a" stroke="#60a5fa"/>
-                <text class="svg-code" x="105" y="251" fill="#fff" font-size="10.3" font-weight="800">q[i]</text>
-                <text class="svg-code" x="149" y="251" fill="#f5f7fb" font-size="10.3">);</text>
-
-                <rect x="480" y="206" width="399" height="70" rx="8" fill="#f2f7fd" stroke="#9bbddd"/>
-                <rect x="492" y="215" width="28" height="18" rx="9" fill="#2563a8"/>
-                <text class="svg-ui" x="506" y="228" text-anchor="middle" fill="#fff" font-size="9.5" font-weight="850">2</text>
-                <text class="svg-code" x="532" y="228" fill="#164f82" font-size="10.8" font-weight="800">Args[0]: QQubitArg</text>
-                <text class="svg-code" x="532" y="249" fill="#354052" font-size="9.8">├─ Reg = "q"</text>
-                <text class="svg-code" x="532" y="265" fill="#354052" font-size="9.8">└─ Index = "i"</text>
-
-                <!-- 3 · 단독 측정 → QMeasure -->
-                <rect x="42" y="284" width="351" height="90" rx="8" fill="#342711" stroke="#d69a2d"/>
-                <rect x="52" y="294" width="28" height="18" rx="9" fill="#b7791f"/>
-                <text class="svg-ui" x="66" y="307" text-anchor="middle" fill="#fff" font-size="9.5" font-weight="850">3</text>
-                <text class="svg-ui" x="376" y="301" text-anchor="end" fill="#f7dfae" font-size="8.8">Main · 대입의 오른쪽 값</text>
-                <text class="svg-code" x="82" y="337" fill="#f5f7fb" font-size="10.3">results[0] =</text>
-                <rect x="168" y="320" width="66" height="24" rx="5" fill="#80591c" stroke="#f1bd52"/>
-                <text class="svg-code" x="175" y="337" fill="#fff" font-size="10.3" font-weight="800">M(q[0])</text>
-                <text class="svg-code" x="237" y="337" fill="#f5f7fb" font-size="10.3">;</text>
-
-                <rect x="480" y="284" width="399" height="90" rx="8" fill="#fffaf0" stroke="#e4bd72"/>
-                <rect x="492" y="293" width="28" height="18" rx="9" fill="#b7791f"/>
-                <text class="svg-ui" x="506" y="306" text-anchor="middle" fill="#fff" font-size="9.5" font-weight="850">3</text>
-                <text class="svg-code" x="532" y="306" fill="#7a5114" font-size="10.8" font-weight="800">Value: QMeasure</text>
-                <text class="svg-code" x="532" y="327" fill="#354052" font-size="9.8">└─ Target: QQubitArg</text>
-                <text class="svg-code" x="550" y="345" fill="#354052" font-size="9.8">├─ Reg = "q"</text>
-                <text class="svg-code" x="550" y="361" fill="#354052" font-size="9.8">└─ Index = "0"</text>
-
-                <!-- 4 · 일반 조건 → QCond -->
-                <rect x="42" y="382" width="351" height="80" rx="8" fill="#102d27" stroke="#2f9b77"/>
-                <rect x="52" y="392" width="28" height="18" rx="9" fill="#16805b"/>
-                <text class="svg-ui" x="66" y="405" text-anchor="middle" fill="#fff" font-size="9.5" font-weight="850">4</text>
-                <text class="svg-ui" x="376" y="399" text-anchor="end" fill="#9fdbc5" font-size="8.8">Main · if 조건</text>
-                <text class="svg-code" x="82" y="435" fill="#f5f7fb" font-size="10.3">if (</text>
-                <rect x="108" y="418" width="124" height="24" rx="5" fill="#176a55" stroke="#34b88b"/>
-                <text class="svg-code" x="115" y="435" fill="#fff" font-size="10.3" font-weight="800">results[0] == 1</text>
-                <text class="svg-code" x="235" y="435" fill="#f5f7fb" font-size="10.3">)</text>
-                <text class="svg-code" x="82" y="453" fill="#f5f7fb" font-size="10.3">{</text>
-
-                <rect x="480" y="382" width="399" height="80" rx="8" fill="#f3faf7" stroke="#9bcbb8"/>
-                <rect x="492" y="391" width="28" height="18" rx="9" fill="#16805b"/>
-                <text class="svg-ui" x="506" y="404" text-anchor="middle" fill="#fff" font-size="9.5" font-weight="850">4</text>
-                <text class="svg-code" x="532" y="404" fill="#116347" font-size="10.8" font-weight="800">Cond: QCond</text>
-                <text class="svg-code" x="532" y="425" fill="#354052" font-size="9.6">├─ Text = "results [ 0 ] == 1"</text>
-                <text class="svg-code" x="532" y="445" fill="#354052" font-size="9.8">└─ HasCall = false</text>
-
-                <!-- 5 · 호출이 섞인 일반 식 → QText + HasCall -->
-                <rect x="42" y="470" width="351" height="116" rx="8" fill="#342711" stroke="#d69a2d" stroke-dasharray="5 4"/>
-                <rect x="52" y="480" width="28" height="18" rx="9" fill="#b7791f"/>
-                <text class="svg-ui" x="66" y="493" text-anchor="middle" fill="#fff" font-size="9.5" font-weight="850">5</text>
-                <text class="svg-ui" x="376" y="487" text-anchor="end" fill="#f7dfae" font-size="8.8">비교 예제 · 선언의 초기값</text>
-                <text class="svg-code" x="82" y="531" fill="#f5f7fb" font-size="10.3">var value =</text>
-                <rect x="156" y="514" width="128" height="24" rx="5" fill="#80591c" stroke="#f1bd52"/>
-                <text class="svg-code" x="163" y="531" fill="#fff" font-size="10.3" font-weight="800">M(q[0]) + 1</text>
-                <text class="svg-code" x="287" y="531" fill="#f5f7fb" font-size="10.3">;</text>
-                <text class="svg-ui" x="82" y="562" fill="#dcc9a2" font-size="9.2">호출과 산술식이 섞여 있으므로 단독 측정이 아닙니다.</text>
-
-                <rect x="480" y="470" width="399" height="116" rx="8" fill="#fffaf0" stroke="#d69a2d" stroke-dasharray="5 4"/>
-                <rect x="492" y="479" width="28" height="18" rx="9" fill="#b7791f"/>
-                <text class="svg-ui" x="506" y="492" text-anchor="middle" fill="#fff" font-size="9.5" font-weight="850">5</text>
-                <text class="svg-code" x="532" y="492" fill="#7a5114" font-size="10.8" font-weight="800">Value: QText</text>
-                <text class="svg-code" x="532" y="513" fill="#354052" font-size="9.6">├─ Text = "M(q[0]) + 1"</text>
-                <text class="svg-code" x="532" y="531" fill="#7a5114" font-size="9.8" font-weight="800">└─ HasCall = true</text>
-                <rect x="532" y="545" width="246" height="25" rx="12.5" fill="#f8e8c9" stroke="#d69a2d"/>
-                <text class="svg-ui" x="655" y="562" text-anchor="middle" fill="#7a5114" font-size="9.2" font-weight="800">후속 QoraValidator → QSEM005</text>
-
-                <!-- 고정 크기 화살촉을 직접 그려 카드 경계에서 모양이 변하지 않도록 함 -->
-                <g stroke-width="2.7" stroke-linecap="round">
-                  <path d="M393 167 H469" fill="none" stroke="#2563a8"/>
-                  <path d="M468 161 L480 167 L468 173 Z" fill="#2563a8" stroke="none"/>
-
-                  <path d="M393 241 H469" fill="none" stroke="#2563a8"/>
-                  <path d="M468 235 L480 241 L468 247 Z" fill="#2563a8" stroke="none"/>
-
-                  <path d="M393 329 H469" fill="none" stroke="#b7791f"/>
-                  <path d="M468 323 L480 329 L468 335 Z" fill="#b7791f" stroke="none"/>
-
-                  <path d="M393 422 H469" fill="none" stroke="#16805b"/>
-                  <path d="M468 416 L480 422 L468 428 Z" fill="#16805b" stroke="none"/>
-
-                  <path d="M393 528 H469" fill="none" stroke="#b7791f"/>
-                  <path d="M468 522 L480 528 L468 534 Z" fill="#b7791f" stroke="none"/>
-                </g>
-                </svg>
-              </div>
-              <figcaption id="value-map-caption">
-                왼쪽의 <code>Qora 소스</code>는 입력 AST의 각 하위 노드에 대응하는 원본 코드 범위이며, 오른쪽은 그 값이 부모 <code>QStmt</code> 안에 저장되는 형태입니다.<br>
-                파란색은 호출 인자, 주황색은 오른쪽 식, 초록색은 조건을 나타내며, 5번은 단독 측정과 호출이 섞인 일반 식의 차이를 보여 주는 비교 예제입니다.
-              </figcaption>
-            </figure>
-
-            <p>
-              호출 인자 전체가 <code>q[i]</code>처럼 하나의 인덱스 참조이면 레지스터 이름과 인덱스를 나눈 <code>QQubitArg</code>가 되지만, 인덱스가 없는 <code>q</code>는 이 단계에서 <code>QTextArg</code>로 남습니다.<span class="diagram-ref blue" aria-label="도식 1번">1</span><span class="diagram-ref blue" aria-label="도식 2번">2</span><br>
-              따라서 <code>q</code>가 단일 큐빗인지, 큐빗 배열 전체인지, 고전 값인지는 이후 선언 정보와 호출 대상의 파라미터를 함께 확인하여 판정합니다.<span class="diagram-ref blue" aria-label="도식 1번">1</span><span class="diagram-ref blue" aria-label="도식 2번">2</span>
-            </p>
-
-            <p>
-              선언이나 대입의 오른쪽 식 전체가 정확히 대문자 <code>M(q[i])</code> 한 호출이면 <code>QMeasure</code>가 만들어집니다.<span class="diagram-ref amber" aria-label="도식 3번">3</span><br>
-              반면에 호출이 산술식이나 다른 값과 섞이면 내용을 버리지 않고 <code>QText</code>와 <code>HasCall=true</code>로 보존합니다.<span class="diagram-ref amber" aria-label="도식 5번">5</span><br>
-              이때 <code>HasCall</code>은 오류 자체가 아니라 원래 AST에 호출 노드가 있었다는 표식이며, 이후 패스가 호출이 놓인 위치에 맞는 처리를 선택할 때 사용합니다.<span class="diagram-ref amber" aria-label="도식 5번">5</span><br>
-              일반 식에 남은 호출은 <code>QoraValidator</code>가 <code>QSEM005</code>로 보고합니다.<span class="diagram-ref amber" aria-label="도식 5번">5</span><br>
-              조건에 포함된 <code>M(q[i])</code>는 먼저 <code>QCond</code>의 텍스트와 <code>HasCall=true</code>로 남고, 다음 전용 패스인 <code>MeasureConditionLowering</code>이 측정 문장과 측정 결과를 사용하는 조건으로 분리합니다.<span class="diagram-ref green" aria-label="도식 4번 관련 보충 설명">4 보충</span>
-            </p>
-          </div>
-        </section>
-
-        <section class="walk-stage" id="stage-5">
-          <div class="walk-head">
-            <div class="walk-number">5</div>
-            <h3>변환한 값을 파일 하나의 <code>QProgram</code>으로 조립합니다</h3>
-          </div>
-          <div class="walk-body">
-            <figure class="lowering-map qprogram-tree" aria-labelledby="qprogram-tree-title qprogram-tree-caption">
-              <div class="diagram-scroll-hint" aria-hidden="true">↔ 좌우로 밀어 QProgram의 실제 부모·자식 구조를 확인합니다</div>
-              <div class="diagram-scroll" tabindex="0" aria-label="QoraLowering 직후 QProgram의 실제 객체 트리, 작은 화면에서는 좌우로 스크롤할 수 있습니다">
-                <svg class="lowering-flow" viewBox="0 0 1000 1505" role="img"
-                     aria-labelledby="qprogram-tree-title qprogram-tree-desc" focusable="false">
-                <title id="qprogram-tree-title">main.qor를 lowering한 직후 만들어지는 QProgram 객체 트리</title>
-                <desc id="qprogram-tree-desc">QProgram 루트에서 Operations, Imports, Opens가 갈라지고, 두 QOperation의 Params와 Body 아래에 실제 QStmt와 QExpr 노드가 부모 자식 관계로 연결됩니다.</desc>
-
-                <defs>
-                  <filter id="qprogram-tree-shadow" x="-12%" y="-18%" width="124%" height="145%">
-                    <feDropShadow dx="0" dy="2" stdDeviation="2.2" flood-color="#172231" flood-opacity=".12"/>
-                  </filter>
-                </defs>
-
-                <rect x="1" y="1" width="998" height="1503" rx="14" fill="#f8fafc" stroke="#d7dee8"/>
-                <path d="M15 1 H985 Q999 1 999 15 V49 H1 V15 Q1 1 15 1 Z" fill="#202b3c"/>
-                <text class="svg-ui" x="24" y="32" fill="#f7f9fc" font-size="14" font-weight="800">OUTPUT · main.qor의 QoraLowering 직후</text>
-                <text class="svg-ui" x="976" y="32" text-anchor="end" fill="#c4cfdd" font-size="11.5">실제 부모·자식 계층 · 핵심 필드</text>
-
-                <!-- 전체 트리의 가지를 카드보다 먼저 그려 연결 관계가 끊기지 않게 합니다. -->
-                <g fill="none" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M500 134 V150 H150 M500 150 H850 M150 150 V170 M500 150 V170 M850 150 V170"
-                        stroke="#64748b" stroke-width="2.4"/>
-
-                  <path d="M150 220 V260" stroke="#b7791f" stroke-width="2.4"/>
-                  <path d="M850 220 V260 M850 304 V334" stroke="#16805b" stroke-width="2.4"/>
-
-                  <path d="M500 220 V410 H250 M500 410 H750 M250 410 V430 M750 410 V430"
-                        stroke="#2563a8" stroke-width="2.6"/>
-
-                  <path d="M250 512 V552" stroke="#2563a8" stroke-width="2.4"/>
-                  <path d="M750 512 V530 H632.5 M750 530 H850 M632.5 530 V552 M850 530 V552"
-                        stroke="#16805b" stroke-width="2.4"/>
-
-                  <path d="M250 598 H85 V1265" stroke="#2563a8" stroke-width="2.2"/>
-                  <path d="M85 663 H110 M85 780 H110 M85 930 H110 M85 1093 H110 M85 1265 H110"
-                        stroke="#2563a8" stroke-width="2.2"/>
-                  <path d="M130 1336 V1354 H150 V1372" stroke="#2563a8" stroke-width="2.2"/>
-
-                  <path d="M632.5 598 V634" stroke="#b7791f" stroke-width="2.2"/>
-                  <path d="M850 598 H730 V1012 M730 704 H745 M730 1012 H745"
-                        stroke="#16805b" stroke-width="2.2"/>
-                  <path d="M770 774 V792 H785 V810" stroke="#16805b" stroke-width="2.2"/>
-                </g>
-
-                <!-- 루트 -->
-                <rect x="380" y="72" width="240" height="62" rx="13" fill="#263141" stroke="#172231"
-                      filter="url(#qprogram-tree-shadow)"/>
-                <rect x="400" y="88" width="94" height="26" rx="13" fill="#183153" stroke="#60a5fa"/>
-                <text class="svg-code" x="447" y="105" text-anchor="middle" fill="#dbeafe" font-size="12.5" font-weight="800">QProgram</text>
-                <text class="svg-ui" x="512" y="105" fill="#eef3f9" font-size="11.5">단일 파일 IR 루트</text>
-
-                <!-- QProgram의 세 필드 -->
-                <rect x="40" y="170" width="220" height="50" rx="10" fill="#fffaf0" stroke="#d69a2d"/>
-                <rect x="40" y="170" width="6" height="50" rx="3" fill="#b7791f"/>
-                <text class="svg-code" x="64" y="191" fill="#7a5114" font-size="12.3" font-weight="800">Imports</text>
-                <text class="svg-ui" x="64" y="209" fill="#78684f" font-size="11">IReadOnlyList · 1개</text>
-
-                <rect x="390" y="170" width="220" height="50" rx="10" fill="#f2f7fd" stroke="#9bbddd"/>
-                <rect x="390" y="170" width="6" height="50" rx="3" fill="#2563a8"/>
-                <text class="svg-code" x="414" y="191" fill="#164f82" font-size="12.3" font-weight="800">Operations</text>
-                <text class="svg-ui" x="414" y="209" fill="#526b84" font-size="11">IReadOnlyList · 소스 순서 2개</text>
-
-                <rect x="740" y="170" width="220" height="50" rx="10" fill="#f3faf7" stroke="#9bcbb8"/>
-                <rect x="740" y="170" width="6" height="50" rx="3" fill="#16805b"/>
-                <text class="svg-code" x="764" y="191" fill="#116347" font-size="12.3" font-weight="800">Opens</text>
-                <text class="svg-ui" x="764" y="209" fill="#4e7668" font-size="11">namespace별 목록</text>
-
-                <!-- Imports와 Opens의 자식 -->
-                <rect x="30" y="260" width="240" height="78" rx="10" fill="#fff" stroke="#e4bd72"/>
-                <rect x="46" y="272" width="151" height="24" rx="12" fill="#fae8bd"/>
-                <text class="svg-code" x="121.5" y="288" text-anchor="middle" fill="#7a5114" font-size="11.6" font-weight="800">Imports[0] · QImport</text>
-                <text class="svg-code" x="46" y="318" fill="#263446" font-size="12">Target = "lib/gates.qor"</text>
-
-                <rect x="770" y="260" width="160" height="44" rx="9" fill="#e7f5ef" stroke="#78bca2"/>
-                <text class="svg-code" x="850" y="287" text-anchor="middle" fill="#116347" font-size="12" font-weight="800">Opens["Demo"]</text>
-                <rect x="740" y="334" width="220" height="68" rx="10" fill="#fff" stroke="#9bcbb8"/>
-                <rect x="756" y="346" width="94" height="24" rx="12" fill="#dcefe7"/>
-                <text class="svg-code" x="803" y="362" text-anchor="middle" fill="#116347" font-size="11.6" font-weight="800">[0] · QOpen</text>
-                <text class="svg-code" x="756" y="388" fill="#263446" font-size="12">Target = "Shared"</text>
-
-                <!-- Operations[0], Operations[1] -->
-                <rect x="45" y="430" width="410" height="82" rx="11" fill="#edf5fd" stroke="#7faed8"
-                      filter="url(#qprogram-tree-shadow)"/>
-                <rect x="45" y="430" width="6" height="82" rx="3" fill="#2563a8"/>
-                <rect x="65" y="443" width="202" height="24" rx="12" fill="#dceafa"/>
-                <text class="svg-code" x="166" y="459" text-anchor="middle" fill="#164f82" font-size="12" font-weight="800">Operations[0] · QOperation</text>
-                <text class="svg-code" x="65" y="490" fill="#263446" font-size="12">Name = "Main" · Namespace = ""</text>
-                <text class="svg-code" x="365" y="490" fill="#526071" font-size="11.3">Params = []</text>
-
-                <rect x="545" y="430" width="410" height="82" rx="11" fill="#eef9f4" stroke="#78bca2"
-                      filter="url(#qprogram-tree-shadow)"/>
-                <rect x="545" y="430" width="6" height="82" rx="3" fill="#16805b"/>
-                <rect x="565" y="443" width="202" height="24" rx="12" fill="#dcefe7"/>
-                <text class="svg-code" x="666" y="459" text-anchor="middle" fill="#116347" font-size="12" font-weight="800">Operations[1] · QOperation</text>
-                <text class="svg-code" x="565" y="490" fill="#263446" font-size="12">Name = "Prepare" · Namespace = "Demo"</text>
-
-                <!-- Main의 Body -->
-                <rect x="75" y="552" width="350" height="46" rx="10" fill="#dceafa" stroke="#7faed8"/>
-                <text class="svg-code" x="97" y="580" fill="#164f82" font-size="12.5" font-weight="800">Body · IReadOnlyList&lt;QStmt&gt; · 5개</text>
-
-                <rect x="110" y="634" width="345" height="58" rx="9" fill="#fff" stroke="#9bbddd"/>
-                <rect x="110" y="634" width="6" height="58" rx="3" fill="#2563a8"/>
-                <text class="svg-code" x="132" y="657" fill="#164f82" font-size="12.3" font-weight="800">Body[0] · QUse</text>
-                <text class="svg-code" x="132" y="679" fill="#354052" font-size="11.4">Name = "q" · Size = 2</text>
-
-                <rect x="110" y="728" width="345" height="104" rx="9" fill="#fff" stroke="#9bbddd"/>
-                <rect x="110" y="728" width="6" height="104" rx="3" fill="#2563a8"/>
-                <text class="svg-code" x="132" y="751" fill="#164f82" font-size="12.3" font-weight="800">Body[1] · QGate</text>
-                <text class="svg-code" x="132" y="773" fill="#354052" font-size="11.3">Name = "Demo.Prepare"</text>
-                <path d="M124 777 V801 H132" fill="none" stroke="#7faed8" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                <rect x="132" y="784" width="305" height="38" rx="7" fill="#edf5fd" stroke="#d8e6f4"/>
-                <text class="svg-code" x="146" y="800" fill="#164f82" font-size="11.2" font-weight="800">Args[0] · QTextArg</text>
-                <text class="svg-code" x="146" y="816" fill="#354052" font-size="10.9">Text = "q" · HasCall = false</text>
-
-                <rect x="110" y="868" width="345" height="124" rx="9" fill="#fff" stroke="#9bbddd"/>
-                <rect x="110" y="868" width="6" height="124" rx="3" fill="#2563a8"/>
-                <text class="svg-code" x="132" y="891" fill="#164f82" font-size="12.3" font-weight="800">Body[2] · QDecl</text>
-                <text class="svg-code" x="132" y="913" fill="#354052" font-size="11.1">Name = "results" · IsConst = false</text>
-                <text class="svg-code" x="132" y="932" fill="#354052" font-size="11.1">Type = Bit · IsArray = true</text>
-                <path d="M124 936 V961 H132" fill="none" stroke="#7faed8" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                <rect x="132" y="944" width="305" height="38" rx="7" fill="#edf5fd" stroke="#c6daee"/>
-                <text class="svg-code" x="146" y="960" fill="#164f82" font-size="11.2" font-weight="800">Value · QArrayNew</text>
-                <text class="svg-code" x="146" y="977" fill="#354052" font-size="10.9">ElementType = Bit · Length = 2</text>
-
-                <rect x="110" y="1028" width="345" height="130" rx="9" fill="#fff" stroke="#9bbddd"/>
-                <rect x="110" y="1028" width="6" height="130" rx="3" fill="#2563a8"/>
-                <text class="svg-code" x="132" y="1051" fill="#164f82" font-size="12.3" font-weight="800">Body[3] · QAssign</text>
-                <text class="svg-code" x="132" y="1073" fill="#354052" font-size="11.2">Name = "results" · Index = "0"</text>
-                <path d="M124 1077 V1108 H132" fill="none" stroke="#7faed8" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                <rect x="132" y="1086" width="305" height="60" rx="7" fill="#edf5fd" stroke="#c6daee"/>
-                <text class="svg-code" x="146" y="1104" fill="#164f82" font-size="11.2" font-weight="800">Value · QMeasure</text>
-                <text class="svg-code" x="146" y="1123" fill="#354052" font-size="10.9">Target · QQubitArg</text>
-                <text class="svg-code" x="146" y="1141" fill="#354052" font-size="10.9">Reg = "q" · Index = "0"</text>
-
-                <rect x="110" y="1194" width="345" height="142" rx="9" fill="#fff" stroke="#9bbddd"/>
-                <rect x="110" y="1194" width="6" height="142" rx="3" fill="#2563a8"/>
-                <text class="svg-code" x="132" y="1217" fill="#164f82" font-size="12.3" font-weight="800">Body[4] · QIf</text>
-                <path d="M124 1221 V1252 H132" fill="none" stroke="#7faed8" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                <rect x="132" y="1230" width="305" height="66" rx="7" fill="#edf5fd" stroke="#c6daee"/>
-                <text class="svg-code" x="146" y="1248" fill="#164f82" font-size="11.2" font-weight="800">Cond · QCond</text>
-                <text class="svg-code" x="146" y="1269" fill="#354052" font-size="10.8">Text = "results [ 0 ] == 1"</text>
-                <text class="svg-code" x="146" y="1289" fill="#354052" font-size="10.8">HasCall = false</text>
-                <text class="svg-code" x="132" y="1318" fill="#526071" font-size="11.1">Then[0] ↓ · Else = []</text>
-
-                <rect x="135" y="1372" width="320" height="104" rx="9" fill="#e7f0fb" stroke="#7faed8"/>
-                <rect x="135" y="1372" width="6" height="104" rx="3" fill="#2563a8"/>
-                <text class="svg-code" x="157" y="1395" fill="#164f82" font-size="12.1" font-weight="800">Then[0] · QGate</text>
-                <text class="svg-code" x="157" y="1417" fill="#354052" font-size="11.2">Name = "X"</text>
-                <rect x="157" y="1426" width="280" height="40" rx="7" fill="#f4f8fd" stroke="#d8e6f4"/>
-                <text class="svg-code" x="171" y="1443" fill="#164f82" font-size="11.1" font-weight="800">Args[0] · QQubitArg</text>
-                <text class="svg-code" x="171" y="1461" fill="#354052" font-size="10.9">Reg = "q" · Index = "1"</text>
-
-                <!-- Prepare의 Params와 Body -->
-                <rect x="545" y="552" width="175" height="46" rx="10" fill="#fae8bd" stroke="#d69a2d"/>
-                <text class="svg-code" x="567" y="580" fill="#7a5114" font-size="12.5" font-weight="800">Params · 1개</text>
-
-                <rect x="545" y="634" width="175" height="134" rx="9" fill="#fffaf0" stroke="#e4bd72"/>
-                <rect x="545" y="634" width="6" height="134" rx="3" fill="#b7791f"/>
-                <text class="svg-code" x="567" y="657" fill="#7a5114" font-size="12" font-weight="800">Params[0] · QParam</text>
-                <text class="svg-code" x="567" y="681" fill="#354052" font-size="11.2">Name = "q"</text>
-                <text class="svg-code" x="567" y="703" fill="#354052" font-size="11.2">Type = Qubit</text>
-                <text class="svg-code" x="567" y="725" fill="#354052" font-size="11.2">IsArray = true</text>
-                <text class="svg-code" x="567" y="747" fill="#354052" font-size="11.2">RegisterSize = null</text>
-
-                <rect x="745" y="552" width="210" height="46" rx="10" fill="#dcefe7" stroke="#78bca2"/>
-                <text class="svg-code" x="767" y="580" fill="#116347" font-size="12.5" font-weight="800">Body · 2개</text>
-
-                <rect x="745" y="634" width="210" height="140" rx="9" fill="#fff" stroke="#9bcbb8"/>
-                <rect x="745" y="634" width="6" height="140" rx="3" fill="#16805b"/>
-                <text class="svg-code" x="767" y="657" fill="#116347" font-size="12.1" font-weight="800">Body[0] · QFor</text>
-                <text class="svg-code" x="767" y="681" fill="#354052" font-size="11.2">Var = "i"</text>
-                <text class="svg-code" x="767" y="702" fill="#354052" font-size="11.2">From = "0"</text>
-                <text class="svg-code" x="767" y="723" fill="#354052" font-size="11.2">To = "q . Count - 1"</text>
-                <text class="svg-code" x="767" y="744" fill="#354052" font-size="11.2">Step = null</text>
-                <text class="svg-code" x="767" y="765" fill="#526071" font-size="11.2">Body[0] ↓</text>
-
-                <rect x="770" y="810" width="185" height="104" rx="9" fill="#e7f5ef" stroke="#78bca2"/>
-                <rect x="770" y="810" width="6" height="104" rx="3" fill="#16805b"/>
-                <text class="svg-code" x="792" y="833" fill="#116347" font-size="11.1" font-weight="800">QFor.Body[0] · QGate</text>
-                <text class="svg-code" x="792" y="855" fill="#354052" font-size="11.1">Name = "H"</text>
-                <text class="svg-code" x="792" y="876" fill="#116347" font-size="11" font-weight="800">Args[0] · QQubitArg</text>
-                <text class="svg-code" x="792" y="897" fill="#354052" font-size="10.9">Reg = "q" · Index = "i"</text>
-
-                <rect x="745" y="950" width="210" height="124" rx="9" fill="#fff" stroke="#9bcbb8"/>
-                <rect x="745" y="950" width="6" height="124" rx="3" fill="#16805b"/>
-                <text class="svg-code" x="767" y="973" fill="#116347" font-size="12.1" font-weight="800">Body[1] · QGate</text>
-                <text class="svg-code" x="767" y="995" fill="#354052" font-size="11.2">Name = "Flip"</text>
-                <text class="svg-code" x="767" y="1016" fill="#116347" font-size="11" font-weight="800">Args[0] · QTextArg</text>
-                <text class="svg-code" x="767" y="1037" fill="#354052" font-size="10.9">Text = "q"</text>
-                <text class="svg-code" x="767" y="1058" fill="#354052" font-size="10.9">HasCall = false</text>
-
-                <!-- 가지 접점 -->
-                <g>
-                  <circle cx="500" cy="150" r="4" fill="#64748b"/>
-                  <circle cx="500" cy="410" r="4" fill="#2563a8"/>
-                  <circle cx="750" cy="530" r="4" fill="#16805b"/>
-                  <circle cx="85" cy="663" r="3.5" fill="#2563a8"/>
-                  <circle cx="85" cy="780" r="3.5" fill="#2563a8"/>
-                  <circle cx="85" cy="930" r="3.5" fill="#2563a8"/>
-                  <circle cx="85" cy="1093" r="3.5" fill="#2563a8"/>
-                  <circle cx="85" cy="1265" r="3.5" fill="#2563a8"/>
-                  <circle cx="730" cy="704" r="3.5" fill="#16805b"/>
-                  <circle cx="730" cy="1012" r="3.5" fill="#16805b"/>
-                </g>
-                </svg>
-              </div>
-              <figcaption id="qprogram-tree-caption">
-                위쪽의 큰 가지는 <code>QProgram</code>의 컬렉션과 <code>QOperation</code>을, 세로로 이어지는 가지는 각 목록 안의 실제 자식 노드를 나타냅니다.<br>
-                <code>Operations[n]</code>과 <code>Body[n]</code>은 소스 순서를 유지합니다. 반복되는 <code>QGate.Functors=[]</code>와 아직 해소되지 않은 <code>CalleeOpId</code>, 그리고 6절에서 다루는 <code>Id</code>·<code>Span</code>은 조립 계층에 집중할 수 있도록 생략했습니다.
-              </figcaption>
-            </figure>
-
-            <div class="panel">
-              <table class="spec">
-                <tr><th>이미 결정된 내용</th><th>아직 결정하지 않은 내용</th><th>이어받는 단계</th></tr>
-                <tr><td>import에 적힌 상대 경로</td><td>실제 파일 위치와 파일 내용</td><td><code>ModuleLoader</code></td></tr>
-                <tr><td><code>Prepare</code>의 원래 namespace</td><td><code>Demo.Prepare</code> 완전 수식 이름</td><td><code>Resolver</code></td></tr>
-                <tr><td><code>Flip</code>이라는 호출 이름과 인자</td><td>호출 대상이 사용자 연산인지 여부</td><td><code>Resolver</code></td></tr>
-                <tr><td>문장 종류와 원래 값</td><td>크기·타입·인덱스·호출의 유효성</td><td><code>QoraValidator</code></td></tr>
-              </table>
-            </div>
-
-            <p>
-              결과적으로 <code>main.qor</code>의 IR에는 아직 <code>gates.qor</code>의 <code>Flip</code> 연산이 없습니다.<br>
-              다음 패스가 그 파일을 읽어 별도의 단일 파일 <code>QProgram</code>으로 만든 뒤에야 두 프로그램이 병합됩니다.
-            </p>
-          </div>
-        </section>
-
-        <section class="walk-stage" id="stage-6">
-          <div class="walk-head">
-            <div class="walk-number">6</div>
-            <h3>노드를 만들 때 함께 기록한 Id와 소스 위치를 확인합니다</h3>
-          </div>
-          <div class="walk-body">
-            <p>
-              앞 단계에서 각 IR 노드를 생성할 때, 계속 추적해야 하는 주요 노드에는 고유한 <code>Id</code>도 함께 발급했습니다.<br>
-              또한 진입 문서에서 오류가 발생했을 때 정확한 위치를 표시할 수 있도록 지원 노드에는 <code>QSpan(Start, End)</code>를 기록했습니다.
-            </p>
-
-            <div class="panel">
-              <table class="spec">
-                <tr><th>생성 노드</th><th>고유 Id</th><th>진입 문서에서 Span이 가리키는 범위</th></tr>
-                <tr><td class="k"><code>QProgram</code></td><td>있음</td><td>Span 필드 없음</td></tr>
-                <tr><td class="k"><code>QOperation</code></td><td>있음</td><td><code>Main</code>, <code>Prepare</code> 같은 연산 이름 토큰</td></tr>
-                <tr><td class="k"><code>QParam</code></td><td>있음</td><td>파라미터 이름 토큰</td></tr>
-                <tr><td class="k">모든 <code>QStmt</code></td><td>있음</td><td>키워드·괄호·중괄호·세미콜론을 포함한 문장 전체</td></tr>
-                <tr><td class="k"><code>QImport</code> / <code>QOpen</code></td><td>없음</td><td>선언문 전체</td></tr>
-                <tr><td class="k"><code>QArg</code> / <code>QExpr</code> / <code>QCond</code></td><td>없음</td><td>자체 Span 없음</td></tr>
-              </table>
-            </div>
-
-            <div class="outcome-grid two">
-              <div class="outcome good">
-                <span class="outcome-title">진입 파일 · main.qor</span>
-                기본값 <code>withSpans=true</code>를 사용하므로 지원 노드에 실제 문자 범위를 기록합니다.
-              </div>
-              <div class="outcome warn">
-                <span class="outcome-title">import 파일 · gates.qor</span>
-                <code>withSpans=false</code>로 다시 lowering하므로 모든 지원 Span이 <code>null</code>입니다.<br>
-                다른 파일의 위치가 진입 문서 위치로 오해되는 일을 막기 위한 규칙입니다.
-              </div>
-            </div>
-
-            <p>
-              Id 번호는 프로세스 전체에서 계속 증가하므로 예제처럼 특정 숫자로 고정할 수 없지만, Id가 있는 각 노드는 서로 다른 값을 받습니다.<br>
-              이로써 <code>QoraLowering</code>은 Janglim AST와의 연결을 끝내고, 구조·원본 값·추적 정보를 갖춘 단일 파일 <code>QProgram</code>을 다음 패스에 반환합니다.
-            </p>
-          </div>
-        </section>
-      </div>
-
-      <div class="meta-reference">
-        <span class="reference-label">SOURCE</span><code>src/Qora.Core/Ir/QoraLowering.cs</code>
-        <span class="reference-label">API</span><code>QoraLowering.Lower(AstSymbol?, bool)</code>
+      <div class="panel">
+        <table class="spec">
+          <tr><th>항목</th><th>계약</th></tr>
+          <tr><td class="k">입력 구조</td><td>문서 하나의 Janglim <code>AstSymbol</code>과 exact <code>SourceDocumentRef</code></td></tr>
+          <tr><td class="k">성공 출력</td><td>문서 하나의 <code>Operations</code>, <code>Imports</code>, namespace별 <code>Opens</code>를 담은 <code>QProgram</code></td></tr>
+          <tr><td class="k">출력 없음</td><td>AST가 없거나 program nonterminal이 아니면 <code>null</code>; entry에서 이 상태가 발생하면 compiler가 <code>QSEM040</code>으로 중단</td></tr>
+          <tr><td class="k">위치</td><td>노드가 속한 문서를 포함하는 반열림 <code>SourceSpan(Document, Start, End)</code></td></tr>
+          <tr><td class="k">하지 않는 일</td><td>import I/O, 문서 병합, 이름 해소, 타입·소유권·범위 검증, MIR·target 생성</td></tr>
+        </table>
       </div>
     </div>
   </section>
 
-  <h2 id="reference">참고 사양</h2>
+  <figure class="diagram" aria-labelledby="lowering-title lowering-caption">
+    <div class="diagram-scroll" tabindex="0">
+      <svg viewBox="0 0 1000 520" role="img" aria-labelledby="lowering-title lowering-desc">
+        <title id="lowering-title">문서 AST가 QProgram과 QNode 표현식 트리로 변환되는 과정</title>
+        <desc id="lowering-desc">내부 SyntaxParseProduct의 일시적인 LoweringAst와 SourceDocumentRef가 QoraLowering으로 들어갑니다. 공개 SyntaxSnapshot에는 Qora 소유의 불변 투영만 남습니다. 결과 QProgram에는 operations, imports, opens와 문서 한정 SourceSpan이 있고, 표현식은 QNode 트리로 한 번 구조화됩니다.</desc>
+        <defs>
+          <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+            <path d="M0 0 L10 5 L0 10 Z" fill="#64748b"/>
+          </marker>
+        </defs>
 
-  <h3>입력과 반환 조건</h3>
+        <rect x="34" y="50" width="214" height="142" rx="12" fill="#fff8eb" stroke="#d7ae5f" stroke-width="2"/>
+        <text class="svg-ui" x="141" y="79" text-anchor="middle" fill="#745013" font-size="16" font-weight="850">내부 일시 입력</text>
+        <text class="svg-code" x="56" y="112" fill="#334155" font-size="12.5">SyntaxParseProduct</text>
+        <text class="svg-code" x="56" y="141" fill="#334155" font-size="12.5">LoweringAst + DocumentRef</text>
+        <text class="svg-code" x="56" y="170" fill="#64748b" font-size="11.5">snapshot에는 AST 참조 없음</text>
+
+        <path d="M248 121 H326" fill="none" stroke="#64748b" stroke-width="3" marker-end="url(#arr)"/>
+
+        <rect x="334" y="38" width="280" height="166" rx="12" fill="#eef5ff" stroke="#75a3d8" stroke-width="2"/>
+        <text class="svg-code" x="474" y="69" text-anchor="middle" fill="#174f8a" font-size="16" font-weight="850">QoraLowering</text>
+        <text class="svg-ui" x="358" y="103" fill="#334155" font-size="12.5">• 선언과 문장을 typed HIR node로 변환</text>
+        <text class="svg-ui" x="358" y="131" fill="#334155" font-size="12.5">• 표현식·조건을 QNode tree로 변환</text>
+        <text class="svg-ui" x="358" y="159" fill="#334155" font-size="12.5">• node Id와 SourceSpan 기록</text>
+        <text class="svg-ui" x="358" y="187" fill="#64748b" font-size="11.5">문서 I/O와 semantic 판단 없음</text>
+
+        <path d="M614 121 H684" fill="none" stroke="#64748b" stroke-width="3" marker-end="url(#arr)"/>
+
+        <rect x="692" y="38" width="274" height="166" rx="12" fill="#f3faf7" stroke="#78b89f" stroke-width="2"/>
+        <text class="svg-code" x="829" y="69" text-anchor="middle" fill="#116347" font-size="16" font-weight="850">QProgram</text>
+        <text class="svg-code" x="716" y="103" fill="#334155" font-size="12.5">Operations</text>
+        <text class="svg-code" x="716" y="131" fill="#334155" font-size="12.5">Imports</text>
+        <text class="svg-code" x="716" y="159" fill="#334155" font-size="12.5">Opens[namespace]</text>
+        <text class="svg-code" x="716" y="187" fill="#64748b" font-size="11.5">source-shaped, unresolved</text>
+
+        <path d="M474 204 V268" fill="none" stroke="#64748b" stroke-width="3" marker-end="url(#arr)"/>
+
+        <rect x="126" y="278" width="748" height="190" rx="13" fill="#fff" stroke="#cbd5e1" stroke-width="2"/>
+        <text class="svg-code" x="500" y="308" text-anchor="middle" fill="#334155" font-size="15" font-weight="850">표현식의 단일 권위 표현: QNode tree</text>
+        <rect x="151" y="334" width="190" height="104" rx="9" fill="#f8fafc" stroke="#aeb9c7"/>
+        <text class="svg-code" x="246" y="360" text-anchor="middle" fill="#334155" font-size="12.5" font-weight="800">results[0] == 1</text>
+        <text class="svg-code" x="171" y="390" fill="#64748b" font-size="11">QBinOp("==",</text>
+        <text class="svg-code" x="171" y="412" fill="#64748b" font-size="11">  QIndexNode(...),</text>
+        <text class="svg-code" x="171" y="434" fill="#64748b" font-size="11">  QNumLit(1))</text>
+        <rect x="405" y="334" width="190" height="104" rx="9" fill="#f8fafc" stroke="#aeb9c7"/>
+        <text class="svg-code" x="500" y="360" text-anchor="middle" fill="#334155" font-size="12.5" font-weight="800">M(q[i]) + 1</text>
+        <text class="svg-code" x="425" y="390" fill="#64748b" font-size="11">QBinOp("+",</text>
+        <text class="svg-code" x="425" y="412" fill="#64748b" font-size="11">  QCallNode("M", ...),</text>
+        <text class="svg-code" x="425" y="434" fill="#64748b" font-size="11">  QNumLit(1))</text>
+        <rect x="659" y="334" width="190" height="104" rx="9" fill="#f8fafc" stroke="#aeb9c7"/>
+        <text class="svg-code" x="754" y="360" text-anchor="middle" fill="#334155" font-size="12.5" font-weight="800">M(a)</text>
+        <text class="svg-code" x="679" y="390" fill="#64748b" font-size="11">QMeasure(</text>
+        <text class="svg-code" x="679" y="412" fill="#64748b" font-size="11">  QNameRef("a"))</text>
+      </svg>
+    </div>
+    <figcaption id="lowering-caption">
+      표현식 문자열을 각 소비자가 다시 해석하지 않습니다.<br>
+      lowering에서 만든 <code>QNode</code> 트리가 유일한 저장 표현이며, 진단·IR 출력·target 방출에 필요한 문자열은 이 트리에서 렌더링합니다.
+    </figcaption>
+  </figure>
+
+  <h2 id="top-level">1. 최상위 선언 변환</h2>
+
   <div class="panel">
     <table class="spec">
-      <tr><th>상황 또는 입력</th><th><code>QoraLowering</code>의 동작</th><th>호출자가 관찰하는 결과</th></tr>
-      <tr><td class="k">구문 분석 실패</td><td>호출되지 않음</td><td>파서가 구문 오류를 반환하며 IR은 만들어지지 않습니다.</td></tr>
-      <tr><td class="k">빈 파일</td><td>변환할 AST가 없으므로 호출되지 않음</td><td><code>QProgram</code> 대신 <code>null</code></td></tr>
-      <tr><td class="k"><code>ast = null</code> 또는 <code>AstNonTerminal</code>이 아님</td><td>즉시 종료</td><td><code>null</code></td></tr>
-      <tr><td class="k">올바른 의미 AST</td><td>최상위 항목과 중첩 문장을 변환</td><td>현재 파일 하나를 나타내는 새 <code>QProgram</code></td></tr>
-      <tr><td class="k"><code>withSpans=true</code></td><td>진입 문서의 문자 위치 기록</td><td>지원 노드의 <code>Span</code>에 반열림 범위 <code>[Start, End)</code></td></tr>
-      <tr><td class="k"><code>withSpans=false</code></td><td>모든 위치 생략</td><td>지원 노드의 <code>Span = null</code></td></tr>
+      <tr><th>AST 구성</th><th>HIR 결과</th><th>보존하는 값</th></tr>
+      <tr><td class="k"><code>operation</code></td><td><code>QOperation</code></td><td>이름, 파라미터, 본문, 이름 token의 <code>SourceSpan</code></td></tr>
+      <tr><td class="k"><code>function</code></td><td><code>QOperation</code></td><td><code>IsFunction = true</code>, return type, 파라미터, <code>QReturn</code> 포함 본문</td></tr>
+      <tr><td class="k"><code>import "lib.qor"</code></td><td><code>QImport</code></td><td>따옴표를 제거한 target과 선언문 전체 <code>SourceSpan</code></td></tr>
+      <tr><td class="k"><code>namespace A.B</code></td><td>내부 callable의 <code>Namespace = "A.B"</code></td><td>별도 namespace HIR node를 만들지 않음</td></tr>
+      <tr><td class="k"><code>open A.B</code></td><td><code>Opens[currentNamespace]</code>의 <code>QOpen</code></td><td>target과 선언문 전체 <code>SourceSpan</code></td></tr>
     </table>
   </div>
 
   <p>
-    이 메서드는 <code>QProgram?</code>만 반환하며 별도의 오류 목록을 만들지 않습니다.<br>
-    구문 오류는 앞의 파서가 처리하고, import·이름·타입·크기 같은 의미 오류는 필요한 정보가 준비되는 후속 패스가 판정합니다.
+    이 단계의 callable 이름은 아직 소스에 적힌 이름이며 <code>CalleeOpId</code>도 연결되지 않습니다.<br>
+    여러 문서의 <code>QProgram</code>이 준비된 뒤 <code>ModuleLoader</code>가 병합하고, 그 다음 <code>Resolver</code>가 namespace와 <code>open</code>을 사용해 완전 수식 이름과 user-callable Id를 결정합니다.
   </p>
 
-  <h3>입력 AST에서 실제로 읽는 값</h3>
-  <div class="panel">
-    <table class="spec">
-      <tr><th>입력 정보</th><th>쉬운 의미</th><th>이 패스에서 사용하는 곳</th></tr>
-      <tr><td class="k"><code>AstNonTerminal.Name</code></td><td>현재 조각이 import, 연산, 게이트, 분기 가운데 무엇인지 나타내는 이름</td><td>알맞은 Qora IR 타입을 선택합니다.</td></tr>
-      <tr><td class="k"><code>AstNonTerminal.Items</code></td><td>현재 조각 안에 들어 있는 이름, 숫자, 식과 하위 문장</td><td>연산 이름, 파라미터, 호출 인자, 조건과 본문을 소스 순서대로 읽습니다.</td></tr>
-      <tr><td class="k"><code>AstTerminal</code></td><td>더 나눌 필요가 없는 타입 키워드·식별자·숫자·문자열·연산자</td><td>타입과 실제 이름·값을 꺼내고 이름 토큰의 위치를 계산합니다.</td></tr>
-      <tr><td class="k"><code>ConnectedParseTree</code></td><td>의미 AST에서 빠진 괄호와 세미콜론까지 남아 있는 완전한 구문 트리</td><td>문장 전체의 <code>QSpan</code>을 계산할 때 우선 사용합니다.</td></tr>
-    </table>
-  </div>
-
-  <div class="call warn">
-    <span class="h">CLI 단계 출력과 원시 lowering 결과의 차이</span>
-    <p>
-      CLI의 <code>--stages</code>에 표시되는 <code>ir</code>은 상황에 따라 이미 import 병합, 조건 속 측정 변환과 이름 해소를 거친 결과일 수 있습니다.<br>
-      따라서 그 출력에서 <code>Shared.Flip</code>이나 import 파일의 연산이 보이더라도, 해당 값이 <code>QoraLowering</code> 직후부터 존재했다고 해석하면 안 됩니다.<br>
-      위의 <code>QoraLowering</code> 출력 트리는 <code>ModuleLoader</code>와 <code>Resolver</code>가 실행되기 전의 원시 <code>QProgram</code>만 나타냅니다.
-    </p>
-  </div>
-
-  <h3>파라미터 변환표</h3>
-  <div class="panel">
-    <table class="spec">
-      <tr><th>Qora 선언</th><th><code>QParam.Type</code></th><th><code>IsArray</code></th><th><code>RegisterSize</code></th></tr>
-      <tr><td class="k"><code>q: Qubit</code></td><td><code>Qubit</code></td><td><code>false</code></td><td><code>null</code></td></tr>
-      <tr><td class="k"><code>q: Qubit[]</code></td><td><code>Qubit</code></td><td><code>true</code></td><td><code>null</code></td></tr>
-      <tr><td class="k"><code>n: int</code></td><td><code>Int</code></td><td><code>false</code></td><td><code>null</code></td></tr>
-      <tr><td class="k"><code>values: int[]</code></td><td><code>Int</code></td><td><code>true</code></td><td><code>null</code></td></tr>
-      <tr><td class="k"><code>results: bit[]</code></td><td><code>Bit</code></td><td><code>true</code></td><td><code>null</code></td></tr>
-      <tr><td class="k"><code>samples: float[]</code></td><td><code>Float</code></td><td><code>true</code></td><td><code>null</code></td></tr>
-      <tr><td class="k"><code>phases: angle[]</code></td><td><code>Angle</code></td><td><code>true</code></td><td><code>null</code></td></tr>
-    </table>
-  </div>
+  <h2 id="statements">2. 문장과 중첩 본문</h2>
 
   <p>
-    파라미터의 <code>[]</code>는 배열이라는 형태만 나타내며 길이를 포함하지 않습니다.<br>
-    반면에 <code>use q = Qubit[2];</code>와 <code>new int[3]</code>의 숫자는 실제로 만들 배열의 길이이므로 각각 <code>QUse.Size</code>와 <code>QArrayNew.Length</code>에 기록됩니다.
+    lowering은 AST tag에 따라 전용 <code>QStmt</code> record를 선택하고, 중첩 본문을 소스 순서대로 재귀 변환합니다.<br>
+    모든 문장은 <code>LowerSpanned</code> 한 지점을 통과하므로 키워드·괄호·중괄호·세미콜론을 포함한 문장 전체 범위가 같은 규칙으로 기록됩니다.
   </p>
 
-  <h3>문장 변환표</h3>
   <div class="panel">
     <table class="spec">
-      <tr><th>Qora 소스 형태</th><th>생성 IR</th><th>보존하는 값</th></tr>
-      <tr><td class="k"><code>use q = Qubit[2];</code></td><td><code>QUse</code></td><td>레지스터 이름과 정수 크기</td></tr>
-      <tr><td class="k"><code>H(q[0]);</code></td><td><code>QGate</code></td><td>호출 이름, functor 목록, 인자 목록</td></tr>
-      <tr><td class="k"><code>Adjoint S(q[0]);</code></td><td><code>QGate</code></td><td><code>Functors = ["Adjoint"]</code></td></tr>
-      <tr><td class="k"><code>Controlled X(c[0], t[0]);</code></td><td><code>QGate</code></td><td><code>Functors = ["Controlled"]</code></td></tr>
-      <tr><td class="k"><code>const a: angle = pi / 2;</code></td><td><code>QDecl</code></td><td><code>IsConst=true</code>, 선택적 타입, 이름, 초기값</td></tr>
-      <tr><td class="k"><code>var count = 0;</code></td><td><code>QDecl</code></td><td><code>IsConst=false</code>, <code>Type=null</code>, 이름, 초기값</td></tr>
-      <tr><td class="k"><code>var values: int[] = [1, 2];</code></td><td><code>QDecl</code> + <code>QArrayLiteral</code></td><td><code>Type=Int</code>, <code>IsArray=true</code>, 원소 식 목록</td></tr>
-      <tr><td class="k"><code>var buffer: float[] = new float[4];</code></td><td><code>QDecl</code> + <code>QArrayNew</code></td><td><code>Type=Float</code>, <code>IsArray=true</code>, 원소 타입과 길이 4</td></tr>
-      <tr><td class="k"><code>count = count + 1;</code></td><td><code>QAssign</code></td><td>대입 대상과 오른쪽 식</td></tr>
-      <tr><td class="k"><code>values[i] = values[i] + 1;</code></td><td><code>QAssign</code></td><td><code>Name="values"</code>, <code>Index="i"</code>, 오른쪽 식</td></tr>
-      <tr><td class="k"><code>if (...) { ... } else { ... }</code></td><td><code>QIf</code></td><td>조건, then 문장, else 문장</td></tr>
-      <tr><td class="k"><code>for i in 0..values.Count-1 { ... }</code></td><td><code>QFor</code></td><td>반복 변수, 시작 식, <code>Count</code>가 포함된 종료 식, 본문</td></tr>
-      <tr><td class="k"><code>while (...) { ... }</code></td><td><code>QWhile</code></td><td>조건과 본문</td></tr>
-      <tr><td class="k"><code>repeat { ... } until (...);</code></td><td><code>QRepeat</code></td><td>본문과 종료 조건</td></tr>
+      <tr><th>소스 형태</th><th>생성 HIR</th><th>핵심 필드</th></tr>
+      <tr><td class="k"><code>use q = Qubit[2];</code></td><td><code>QUse</code></td><td>이름과 정수 크기</td></tr>
+      <tr><td class="k">gate / operation 호출</td><td><code>QGate</code></td><td>functor, 아직 해소되지 않은 이름, 구조화된 인자</td></tr>
+      <tr><td class="k"><code>var</code> / <code>const</code></td><td><code>QDecl</code></td><td>선택적 타입, 배열 여부, 이름, <code>QExpr</code></td></tr>
+      <tr><td class="k">대입</td><td><code>QAssign</code></td><td>이름, 선택적 index <code>QNode</code>, 오른쪽 <code>QExpr</code></td></tr>
+      <tr><td class="k"><code>if</code> / <code>else</code></td><td><code>QIf</code></td><td><code>QCond</code>, then/else 문장 목록</td></tr>
+      <tr><td class="k"><code>for</code></td><td><code>QFor</code></td><td>binder, <code>From</code>/<code>To</code> <code>QNode</code>, 본문, source 단계의 <code>Step = null</code></td></tr>
+      <tr><td class="k"><code>while</code> / <code>repeat</code></td><td><code>QWhile</code> / <code>QRepeat</code></td><td>구조화된 조건과 본문</td></tr>
+      <tr><td class="k"><code>return expr;</code></td><td><code>QReturn</code></td><td>반환값 <code>QExpr</code></td></tr>
     </table>
   </div>
+
+  <h2 id="expressions">3. 표현식은 lowering에서 한 번 구조화</h2>
 
   <p>
-    <code>else if</code>는 바깥 <code>QIf.Else</code> 목록 안에 또 다른 <code>QIf</code>가 들어가는 형태로 보존됩니다.<br>
-    또한 표면 문법에는 반복 간격이 없으므로 lowering 직후 <code>QFor.Step</code>은 항상 <code>null</code>이며, 역변환 같은 후속 패스가 필요한 경우에만 별도 값을 넣습니다.
+    Janglim의 평평한 expression AST는 <code>ExprTree</code>가 연산자 우선순위를 적용해 하나의 <code>QNode</code> 트리로 바꿉니다.<br>
+    기본 node는 숫자·literal·이름을 나타내는 <code>QNumLit</code>, <code>QLit</code>, <code>QNameRef</code>이며, 조합 node는 <code>QUnary</code>, <code>QBinOp</code>, <code>QMember</code>, <code>QIndexNode</code>, <code>QCallNode</code>입니다.<br>
+    문법이 허용한 token을 일부만 소비한 경우에는 짧아진 트리를 조용히 반환하지 않고 내부 오류로 중단합니다.
   </p>
 
-  <h3>식과 조건에서 적용하는 예외 규칙</h3>
-  <div class="panel">
-    <table class="spec">
-      <tr><th>Qora 표현의 해당 부분</th><th>lowering 결과</th><th>주의할 점</th></tr>
-      <tr><td class="k"><code>Apply(q[0])</code> 안의 <code>q[0]</code></td><td><code>QQubitArg("q", "0")</code></td><td>전체 문장은 <code>QGate</code>이며, 호출 인자 전체가 단독 인덱스 참조일 때 이 타입으로 구조화합니다.<br>기본 값의 실제 타입은 후속 검증에서 판정합니다.</td></tr>
-      <tr><td class="k"><code>Apply(q)</code> 안의 <code>q</code></td><td><code>QTextArg("q")</code></td><td>전체 문장은 <code>QGate</code>이며, 이 인자가 전체 레지스터인지 단일 큐빗인지는 후속 선언 검사에서 정해집니다.</td></tr>
-      <tr><td class="k">선언·대입의 <code>theta / 2</code></td><td><code>QText("theta / 2")</code></td><td>호출 인자에서는 <code>QTextArg</code>, <code>for</code> 경계에서는 <code>From</code>/<code>To</code> 문자열로 저장합니다.</td></tr>
-      <tr><td class="k"><code>var r: bit = M(q[0]);</code></td><td><code>QMeasure(q[0])</code></td><td>대문자 <code>M</code>의 단독 호출만 측정식입니다.</td></tr>
-      <tr><td class="k"><code>var x = M(q[0]) + 1;</code></td><td><code>QText(..., HasCall=true)</code></td><td>측정 부분만 잘라내지 않고 전체 식을 남깁니다.</td></tr>
-      <tr><td class="k"><code>if (!r) { ... }</code></td><td><code>QCond("! ( r )")</code></td><td>부정이 뒤의 식 전체에 적용되도록 괄호를 보강합니다.</td></tr>
-      <tr><td class="k"><code>if (M(q[0]) == 1) { ... }</code></td><td><code>QCond(..., HasCall=true)</code></td><td>조건 속 측정은 여기서 <code>QMeasure</code>가 되지 않으며 이후 <code>MeasureConditionLowering</code>이 처리합니다.</td></tr>
-    </table>
+  <div class="cards">
+    <div class="card">
+      <b><code>QQubitArg(Reg, Index)</code></b>
+      <p>호출 인자 전체가 <code>q[i + 1]</code> 같은 index access이면 base 이름과 완전한 index <code>QNode</code>를 분리합니다.<br>후속 검증이 qubit인지 classical array element인지 판정합니다.</p>
+    </div>
+    <div class="card">
+      <b><code>QTextArg(Tree)</code></b>
+      <p>전체 이름 <code>q</code>, 각도 식 <code>pi / 2</code>, 함수 호출 같은 나머지 인자를 트리로 보존합니다.<br><code>HasCall</code>은 저장 boolean이 아니라 tree에서 파생됩니다.</p>
+    </div>
+    <div class="card">
+      <b><code>QText(Tree)</code></b>
+      <p>선언·대입·return의 일반 오른쪽 값을 보존합니다.<br>유효한 함수 호출은 <code>QCallNode</code>로 남아 이후 resolver와 validator가 정확한 callable을 연결하고 검사합니다.</p>
+    </div>
+    <div class="card">
+      <b><code>QCond(Tree)</code></b>
+      <p>비교·논리 연산과 중첩 호출을 같은 트리 체계로 보존합니다.<br><code>MeasureConditionLowering</code>도 문자열을 다시 파싱하지 않고 이 트리를 직접 재작성합니다.</p>
+    </div>
   </div>
 
-  <div class="call warn">
-    <span class="h">정상 문법 밖의 방어 경로</span>
-    <p>
-      현재 문법이 만들지 않는 알 수 없는 문장 태그가 들어오면 방어 경로는 그 태그 이름을 가진 빈 인자의 <code>QGate</code>를 만듭니다.<br>
-      이는 의미상 안전한 no-op이 아니며, 정상적인 파서 출력에서는 사용되지 않습니다.<br>
-      또한 후속 단계에 도달하면 알 수 없는 호출 이름으로 판정될 수 있습니다.
-    </p>
-  </div>
-
-  <h3>다음 패스에 넘기는 계약</h3>
-  <div class="panel">
-    <table class="spec">
-      <tr><th>전달 항목</th><th><code>QoraLowering</code>이 보장하는 상태</th><th>후속 단계의 작업</th></tr>
-      <tr><td class="k"><code>Operations</code></td><td>현재 파일의 연산, 파라미터, 중첩 본문이 모두 Qora IR 타입으로 변환된 상태</td><td><code>ModuleLoader</code>가 import 파일의 연산을 병합합니다.</td></tr>
-      <tr><td class="k"><code>Imports</code></td><td>따옴표만 제거한 원문 경로 문자열이며, 진입 문서는 보통 Span이 있고 import 문서는 Span이 없습니다.</td><td>경로 기준이 있으면 <code>ModuleLoader</code>가 경로 정규화와 재귀 로드를 수행하고, <code>loaded.Add(full) = false</code>인 순환 back-edge와 중복 경로를 오류 없이 생략한 뒤 루트 <code>Imports</code>를 <code>null</code>로 소비합니다.<br>반면에 기준이 없으면 <code>QSEM020</code>을 기록하고 원래 <code>Imports</code>를 유지합니다.</td></tr>
-      <tr><td class="k"><code>Opens</code></td><td>namespace별 <code>open</code> 목록이며 대상의 존재 여부는 확인하지 않은 상태</td><td>파일 병합 뒤 <code>Resolver</code>가 이름 해소에 사용합니다.</td></tr>
-      <tr><td class="k">호출 이름</td><td>소스에 적힌 단순 이름 또는 점으로 연결된 이름</td><td><code>Resolver</code>가 내장 게이트와 사용자 연산 후보를 구분합니다.<br>사용자 연산 참조는 완전 수식 이름으로 바꾸고 <code>CalleeOpId</code>를 연결하지만, 내장 게이트는 표준 짧은 이름을 유지합니다.</td></tr>
-      <tr><td class="k">식과 조건</td><td>필요한 큐빗·측정 구조와 나머지 텍스트, <code>HasCall</code> 표시</td><td>import 오류가 없으면 <code>MeasureConditionLowering</code>이 조건 속 측정을 먼저 재작성하고, 이어서 <code>Resolver</code>가 이름을 해소합니다.<br>Resolver 오류도 없을 때 <code>QoraValidator</code>가 호출식의 표현 가능성과 타입을 검사합니다.</td></tr>
-    </table>
-  </div>
-
-  <div class="snapshot">
-<pre><code>ModuleLoader
-  → 오류 없음: MeasureConditionLowering
-  → Resolver
-  → 오류 없음: QoraValidator</code></pre>
-  </div>
+  <h3>단독 측정 분류</h3>
 
   <p>
-    정리하면 이 패스의 완료 조건은 프로그램 전체가 의미적으로 올바르다는 것이 아니라, 이후 단계가 Janglim 없이도 원래 소스의 구조와 값을 읽을 수 있다는 것입니다.<br>
-    따라서 파일 읽기, 완전 수식 이름 결정, 타입·크기·인덱스 검증은 필요한 정보가 준비되는 다음 단계에 남겨 둡니다.
+    선언이나 대입의 오른쪽 전체가 정확히 <code>M(reference)</code> 한 호출이고 reference가 단일 큐빗 이름 또는 register element이면 <code>QMeasure</code>를 만듭니다.<br>
+    따라서 <code>M(a)</code>는 <code>QMeasure(QNameRef("a"))</code>가 되고, <code>M(q[i])</code>는 <code>QMeasure(QIndexNode(QNameRef("q"), QNameRef("i")))</code>가 됩니다.<br>
+    반면에 <code>M(q[i]) + 1</code>, 다른 함수 호출, 산술식 target처럼 이 형태에 맞지 않는 값은 호출을 삭제하지 않고 일반 <code>QNode</code> 트리로 남겨 후속 단계가 진단하거나 해소합니다.
   </p>
+
+  <div class="panel">
+    <table class="spec">
+      <tr><th>소스</th><th>lowering 결과</th><th>후속 처리</th></tr>
+      <tr><td class="k"><code>Apply(q[i + 1])</code></td><td><code>QQubitArg("q", QBinOp("+", QNameRef("i"), QNumLit(1)))</code></td><td>symbol·type·bounds 검증</td></tr>
+      <tr><td class="k"><code>Apply(pi / 2)</code></td><td><code>QTextArg(QBinOp("/", QNameRef("pi"), QNumLit(2)))</code></td><td>인자 타입 검증</td></tr>
+      <tr><td class="k"><code>var x = f(1) + 2;</code></td><td><code>QText(QBinOp("+", QCallNode("f", ...), QNumLit(2)))</code></td><td>함수 이름·signature·return type 해소</td></tr>
+      <tr><td class="k"><code>if (M(q[0]) == 1)</code></td><td><code>QCond</code> 안의 measurement <code>QCallNode</code></td><td><code>MeasureConditionLowering</code>이 선행 측정 문장과 bit 조건으로 분리</td></tr>
+      <tr><td class="k"><code>for i in 0..values.Count - 1</code></td><td><code>From = QNumLit(0)</code>, <code>To = QBinOp("-", QMember(...), QNumLit(1))</code></td><td>bounds·MIR lowering에서 동일 tree 소비</td></tr>
+    </table>
+  </div>
+
+  <div class="callout good">
+    <span class="h">단일 source of truth</span>
+    <code>QText</code>와 <code>QCond</code>이라는 이름은 남아 있지만 권위 데이터는 문자열이 아니라 <code>Tree</code>입니다.<br>
+    printer와 backend가 필요한 spelling은 tree에서 만들기 때문에, bounds proof·resolver·emitter가 같은 식을 서로 다르게 재해석할 수 없습니다.
+  </div>
+
+  <h2 id="spans">4. node identity와 SourceSpan</h2>
+
+  <p>
+    <code>QProgram</code>, callable, parameter, statement에는 안정적인 node Id가 있으며, 복사 패스는 필요한 경우 derivation을 별도로 기록합니다.<br>
+    source location이 있는 callable·parameter·statement·import·open에는 현재 문서의 <code>SourceDocumentRef</code>가 포함된 <code>SourceSpan</code>을 붙입니다.<br>
+    import 문서도 별도 document identity로 lowering되므로 위치를 null로 버리거나 entry 문서 offset으로 가장하지 않습니다.
+  </p>
+
+  <div class="panel">
+    <table class="spec">
+      <tr><th>노드</th><th>Id</th><th>SourceSpan 범위</th></tr>
+      <tr><td class="k"><code>QProgram</code></td><td>있음</td><td>별도 span 필드 없음</td></tr>
+      <tr><td class="k"><code>QOperation</code></td><td>있음</td><td>callable 이름 token</td></tr>
+      <tr><td class="k"><code>QParam</code></td><td>있음</td><td>parameter 이름 token</td></tr>
+      <tr><td class="k"><code>QStmt</code></td><td>있음</td><td>문장 전체 반열림 범위</td></tr>
+      <tr><td class="k"><code>QImport</code> / <code>QOpen</code></td><td>없음</td><td>지시문 전체 반열림 범위</td></tr>
+      <tr><td class="k"><code>QNode</code></td><td>없음</td><td>부모 statement의 span을 진단 문맥으로 사용</td></tr>
+    </table>
+  </div>
+
+  <h2 id="handoff">5. 다음 경계</h2>
+
+  <p>
+    <code>SourceGraphLoader</code>는 문서별 lowering 결과와 <code>ImportGraph</code>를 내부 <code>LoadedSourceGraph</code>로 묶습니다.<br>
+    이때 공개 <code>SyntaxSnapshot</code>에는 이미 만들어 둔 불변 구문 투영만 저장하며, <code>SyntaxParseProduct.LoweringAst</code>는 문서별 <code>QProgram</code>을 만든 뒤 더 이상 유지하지 않습니다.<br>
+    <code>ModuleLoader</code>는 이 prepared graph를 순수 병합해 통합 <code>QProgram</code>을 반환하고, <code>QoraCompiler</code>가 그 결과를 <code>ImportsExpanded</code> HIR milestone으로 발행합니다.<br>
+    이후 <code>MeasureConditionLowering</code>과 <code>Resolver</code>가 구조 재작성과 이름 해소를 수행합니다.<br>
+    type·signature·ownership·index 유효성, effect analysis, MIR, target 정책은 각각 자신의 입력이 준비된 후속 단계가 소유합니다.
+  </p>
+
+<pre><code>SourceGraphLoader
+  ├─ parse: SyntaxParseProduct(SyntaxSnapshot, LoweringAst)
+  ├─ publish: immutable SyntaxSnapshot only
+  ├─ lower immediately: QoraLowering.Lower(LoweringAst, documentRef)
+  ├─ discard parser-owned LoweringAst
+  └─ ImportGraph + LoweredDocuments
+       └─ ModuleLoader.Expand(loaded)
+            └─ MeasureConditionLowering
+                 └─ Resolver
+                      └─ validation semantic artifact
+                           └─ HirValidationOutcome(Accepted | Rejected)</code></pre>
 
   <nav class="doc-links" aria-label="IR 패스 데이터시트 내비게이션">
-    <a class="doc-link" href="datasheet.html#s2">패스 목차</a>
-    <a class="doc-link" href="ir-pass-02-module-loader.html">2. ModuleLoader — import 그래프를 한 프로그램으로 →</a>
+    <a class="doc-link" href="datasheet.html#passes">패스 목차</a>
+    <a class="doc-link" href="ir-pass-02-module-loader.html">2. SourceGraphLoader / ModuleLoader →</a>
   </nav>
 
   <footer>
-    IR 패스 데이터시트 · 1장 · <a href="datasheet.html#s2">패스 목차</a> ·
+    IR 패스 데이터시트 · 1장 · <code>QoraLowering</code> ·
     <a href="datasheet.html">컴파일러 데이터시트</a>
   </footer>
 </div>

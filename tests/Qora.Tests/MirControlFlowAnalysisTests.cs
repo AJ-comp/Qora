@@ -15,7 +15,9 @@ public sealed class MirControlFlowAnalysisTests
 
         Assert.Equal(new[] { B(1), B(2) }, cfg.SuccessorsOf(B(0)));
         Assert.Equal(new[] { B(1), B(2) }, cfg.PredecessorsOf(B(3)));
-        Assert.Equal(new[] { B(0), B(1), B(2), B(3) }, cfg.ReachableBlocks);
+        Assert.Equal(
+            new[] { BR(program, 0), BR(program, 1), BR(program, 2), BR(program, 3) },
+            cfg.ReachableBlocks);
         Assert.False(cfg.IsReachable(B(4)));
 
         Assert.True(cfg.Dominates(B(0), B(3)));
@@ -24,7 +26,7 @@ public sealed class MirControlFlowAnalysisTests
         Assert.True(cfg.PostDominates(B(3), B(1)));
         Assert.False(cfg.PostDominates(B(1), B(0)));
 
-        Assert.Equal(new[] { B(3) }, cfg.ExitBlocks);
+        Assert.Equal(new[] { BR(program, 3) }, cfg.ExitBlocks);
         Assert.True(cfg.CanReachExit(B(0)));
         Assert.False(cfg.CanReachExit(B(4)));
     }
@@ -53,19 +55,20 @@ public sealed class MirControlFlowAnalysisTests
     [Fact]
     public void ParameterIsCallableWideEvenInAnUnreachableBlock()
     {
-        var source = S();
+        var context = MirTestContext.Create(mirRevision: 3);
+        var source = context.Origin();
         var parameter = new MirClassicalParameter(
             "input",
-            SourceSymbolId: null,
+            source,
             V(0),
             MirType.Scalar(QType.Int));
         var value = new MirValue(
             V(0),
             MirType.Scalar(QType.Int),
-            MirValueDefinition.ParameterAt(0));
+            MirValueDefinition.ParameterAt(0),
+            source);
         var callable = new MirCallable(
             C(0),
-            SourceOperationId: 1,
             "ParameterScope",
             MirCallableKind.Operation,
             ReturnType: null,
@@ -82,7 +85,7 @@ public sealed class MirControlFlowAnalysisTests
             Storages: Array.Empty<MirArrayStorage>(),
             Qubits: Array.Empty<MirQubitResource>(),
             source);
-        var program = new MirProgram(3, new[] { callable });
+        var program = context.Program(new[] { callable });
         var cfg = MirControlFlowAnalysis.Analyze(program, callable.Id);
 
         Assert.False(cfg.IsReachable(B(1)));
@@ -92,7 +95,8 @@ public sealed class MirControlFlowAnalysisTests
     [Fact]
     public void MultipleExitsAndANonTerminatingLoopDoNotCreateFalsePostDominance()
     {
-        var source = S();
+        var context = MirTestContext.Create(mirRevision: 5);
+        var source = context.Origin();
         var condition = new MirConstant(
             I(0),
             V(0),
@@ -100,7 +104,6 @@ public sealed class MirControlFlowAnalysisTests
             source);
         var callable = new MirCallable(
             C(0),
-            SourceOperationId: 1,
             "MixedExits",
             MirCallableKind.Operation,
             ReturnType: null,
@@ -124,15 +127,16 @@ public sealed class MirControlFlowAnalysisTests
             Values: new[]
             {
                 new MirValue(V(0), MirType.Scalar(QType.Bit),
-                    MirValueDefinition.InstructionResultAt(B(0), I(0))),
+                    MirValueDefinition.InstructionResultAt(B(0), I(0)),
+                    source),
             },
             Storages: Array.Empty<MirArrayStorage>(),
             Qubits: Array.Empty<MirQubitResource>(),
             source);
-        var program = new MirProgram(5, new[] { callable });
+        var program = context.Program(new[] { callable });
         var cfg = MirControlFlowAnalysis.Analyze(program, callable.Id);
 
-        Assert.Equal(new[] { B(1), B(3) }, cfg.ExitBlocks);
+        Assert.Equal(new[] { BR(program, 1), BR(program, 3) }, cfg.ExitBlocks);
         Assert.False(cfg.CanReachExit(B(4)));
         Assert.True(cfg.PostDominates(B(4), B(4)));
         Assert.False(cfg.PostDominates(B(1), B(0)));
@@ -143,7 +147,8 @@ public sealed class MirControlFlowAnalysisTests
     [Fact]
     public void LoopFixedPointFindsBackedgeDominanceAndExitPostDominance()
     {
-        var source = S();
+        var context = MirTestContext.Create(mirRevision: 9);
+        var source = context.Origin();
         var condition = new MirConstant(
             I(0),
             V(0),
@@ -151,7 +156,6 @@ public sealed class MirControlFlowAnalysisTests
             source);
         var callable = new MirCallable(
             C(0),
-            SourceOperationId: 1,
             "Loop",
             MirCallableKind.Operation,
             ReturnType: null,
@@ -172,12 +176,13 @@ public sealed class MirControlFlowAnalysisTests
             Values: new[]
             {
                 new MirValue(V(0), MirType.Scalar(QType.Bit),
-                    MirValueDefinition.InstructionResultAt(B(0), I(0))),
+                    MirValueDefinition.InstructionResultAt(B(0), I(0)),
+                    source),
             },
             Storages: Array.Empty<MirArrayStorage>(),
             Qubits: Array.Empty<MirQubitResource>(),
             source);
-        var program = new MirProgram(9, new[] { callable });
+        var program = context.Program(new[] { callable });
         var cfg = MirControlFlowAnalysis.Analyze(program, callable.Id);
 
         Assert.True(cfg.Dominates(B(1), B(2)));
@@ -198,7 +203,10 @@ public sealed class MirControlFlowAnalysisTests
         Assert.True(first.IsFor(program, callable.Id));
         first.EnsureFor(program, callable.Id);
 
-        var copy = program with { Callables = program.Callables.ToArray() };
+        var copy = new MirProgram(
+            program.SnapshotId,
+            program.Origins,
+            program.Callables.ToArray());
         Assert.False(first.IsFor(copy, callable.Id));
         Assert.Throws<InvalidOperationException>(() => first.EnsureFor(copy, callable.Id));
         Assert.Throws<InvalidOperationException>(
@@ -207,7 +215,8 @@ public sealed class MirControlFlowAnalysisTests
 
     private static MirProgram DiamondProgram()
     {
-        var source = S();
+        var context = MirTestContext.Create(mirRevision: 7);
+        var source = context.Origin();
         var condition = new MirConstant(
             I(0),
             V(0),
@@ -231,7 +240,6 @@ public sealed class MirControlFlowAnalysisTests
 
         var callable = new MirCallable(
             C(0),
-            SourceOperationId: 1,
             "Diamond",
             MirCallableKind.Operation,
             ReturnType: null,
@@ -257,23 +265,30 @@ public sealed class MirControlFlowAnalysisTests
             Values: new[]
             {
                 new MirValue(V(0), MirType.Scalar(QType.Bit),
-                    MirValueDefinition.InstructionResultAt(B(0), I(0))),
+                    MirValueDefinition.InstructionResultAt(B(0), I(0)),
+                    source),
                 new MirValue(V(1), MirType.Scalar(QType.Int),
-                    MirValueDefinition.InstructionResultAt(B(1), I(1))),
+                    MirValueDefinition.InstructionResultAt(B(1), I(1)),
+                    source),
                 new MirValue(V(2), MirType.Scalar(QType.Int),
-                    MirValueDefinition.InstructionResultAt(B(2), I(2))),
+                    MirValueDefinition.InstructionResultAt(B(2), I(2)),
+                    source),
                 new MirValue(V(3), MirType.Scalar(QType.Int),
-                    MirValueDefinition.BlockArgumentAt(B(3), 0)),
+                    MirValueDefinition.BlockArgumentAt(B(3), 0),
+                    source),
                 new MirValue(V(4), MirType.Scalar(QType.Int),
-                    MirValueDefinition.InstructionResultAt(B(4), I(3))),
+                    MirValueDefinition.InstructionResultAt(B(4), I(3)),
+                    source),
             },
             Storages: Array.Empty<MirArrayStorage>(),
             Qubits: Array.Empty<MirQubitResource>(),
             source);
-        return new MirProgram(7, new[] { callable });
+        return context.Program(new[] { callable });
     }
 
-    private static MirSource S() => MirSource.Synthetic(1);
+    private static MirBlockRef BR(MirProgram program, int value) =>
+        new(program.SnapshotId, C(0), B(value));
+
     private static MirCallableId C(int value) => new(value);
     private static MirBlockId B(int value) => new(value);
     private static MirInstructionId I(int value) => new(value);

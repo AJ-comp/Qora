@@ -32,9 +32,9 @@ public class ConstTests
         // OpenQASM `const` requires a compile-time constant, but Qora `const` accepts a runtime value — so it
         // must be emitted as a plain declaration (never reassigned, so still effectively immutable), NOT `const`.
         var r = Compiler.Compile("operation Main(){ use q=Qubit[1]; var x: int=5; const c: int = x; Rx(c, q[0]); }");
-        Assert.True(r.Success, string.Join(" | ", r.Errors.Select(e => $"{e.Code}: {e.Message}")));
-        Assert.Contains("int c =", r.Qasm);
-        Assert.DoesNotContain("const int c", r.Qasm);   // the const keyword was correctly dropped
+        Assert.True(r.Succeeded, string.Join(" | ", r.Diagnostics.Select(diagnostic => diagnostic.Error).ToList().Select(e => $"{e.Code}: {e.Message}")));
+        Assert.Contains("int c =", r.Targets.OpenQasm!.Text);
+        Assert.DoesNotContain("const int c", r.Targets.OpenQasm!.Text);   // the const keyword was correctly dropped
     }
 
     [Theory]

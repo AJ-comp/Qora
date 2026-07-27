@@ -11,6 +11,59 @@ emitted as **OpenQASM 3.0**.
 > **Note:** Qora was renamed from **Ket** on 2026-07-01 (a "Ket" extension already existed). Versions
 > 0.1–0.7 below were authored under the old name.
 
+## 0.31 — 2026-07-27
+
+### Changed
+- **Compilation is now one immutable, revision-bound aggregate.** `QoraCompiler.Compile` and
+  `QoraCompiler.Recompile` publish exact source, HIR, semantic, MIR, cross-stage-link, target, and
+  diagnostic snapshots under a `CompilationSession`. Branching recompilations receive unique revisions
+  while retaining their real parent revision. `CompilationOutputPlan` states the exact HIR goal, MIR
+  requirement, and backend set instead of letting consumers infer which artifacts should exist.
+- **The parser and whole compiler have separate public boundaries.** `QoraParser.Parse` returns only a
+  Qora-owned immutable `SyntaxSnapshot`; the mutable Janglim AST is an internal transient lowering input
+  and is discarded per document. Whole-program clients use `QoraCompiler` rather than attaching semantic,
+  MIR, or target state to a parser result.
+- **HIR name lookup uses one typed, ID-based scope graph.** Namespace/member ownership, lexical parents,
+  future base-type edges, declarations, and imports are represented by `HirScopeGraph`. Semantic facts
+  live in exact-snapshot `HirSemanticArtifact` values instead of a mutable global bag.
+- **`var` is now the only mutable-borrow spelling.** The temporary `inout` compatibility alias from v0.30
+  has been removed. The four operation-resource contracts remain read-only borrow (`values`), mutable
+  borrow (`var values`), read-only transfer (`move values`), and mutable transfer (`move var values`).
+
+### Added
+- **Every HIR generation has verified total provenance.** Identity-preserving derivations,
+  compiler-synthesized nodes, and imported source declarations are distinct typed relations. A node may
+  not silently appear, change kind or owner under the same ID, or point outside its exact compilation
+  history.
+- **Validation and effect analysis are explicit immutable outcomes.** An accepted validation owns no
+  diagnostics; a rejected validation owns the exact diagnostics that caused rejection. Effect analysis
+  can consume only the exact accepted canonical validation artifact and must publish summaries, event
+  streams, qubit graphs, and completion proof for every operation before it can be sealed.
+- **MIR cross-stage links are total rather than best-effort.** Every semantic symbol records a lowering
+  disposition, including explicit non-lowering reasons, and every MIR value, storage object, and qubit
+  resource records either its exact source symbol or compiler-temporary origin. SSA/CFG analyses remain
+  revision-bound and ready for the next automatic-uncomputation scheduling stage.
+- **Target artifacts retain their exact input identity.** OpenQASM consumes one canonical analyzed HIR
+  context, freezes a typed `OpenQasmTargetProgram`, and derives emitted text from that model. Target text
+  can no longer be supplied as a second, potentially inconsistent source of truth.
+
+### Fixed
+- **Detached or stale stage data can no longer masquerade as a valid compilation result.** Compilation
+  construction independently verifies canonical HIR milestone order, semantic acceptance, diagnostic
+  projection, MIR origins, target provenance, and the exact effect-analysis basis used by MIR and
+  OpenQASM.
+- **Multi-document locations and lowered-node lineage remain exact through rewrites.** Imported source
+  spans are document-qualified, measurement-condition lowering records every synthesized relationship,
+  and copied IDs cannot silently change node kind or owning operation.
+- **Array bounds and target lowering no longer share guessed facts.** Common validation preserves
+  unresolved proofs as semantic data keyed by stable symbol identity, while OpenQASM alone performs
+  fixed-width `.Count` substitution and rejects accesses it cannot safely emit.
+
+### Removed
+- The legacy public `ProgramSymbolGraph`, mutable `SemanticModel`, parser-engine AST/parse-tree UI nodes,
+  and duplicate target-output pathways. Their responsibilities now belong to the exact HIR scope,
+  semantic-artifact, immutable syntax, and typed target models above.
+
 ## 0.30 — 2026-07-26
 
 ### Changed

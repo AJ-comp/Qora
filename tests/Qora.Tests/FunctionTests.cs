@@ -202,10 +202,10 @@ public class FunctionTests
         var prefix = $"function twice(p: int): int {{ return p + p; }}\noperation Main(){{ use q=Qubit[1]; {setup} ";
         var asValue = Compiler.Compile(prefix + $"var n: int = twice({argument}); }}");
         var asStatement = Compiler.Compile(prefix + $"twice({argument}); }}");
-        Assert.False(asValue.Success);
-        Assert.False(asStatement.Success);
-        Assert.Equal(asStatement.Errors.Single(e => e.Code == "QSEM006").Message,
-                     asValue.Errors.Single(e => e.Code == "QSEM006").Message);
+        Assert.False(asValue.Succeeded);
+        Assert.False(asStatement.Succeeded);
+        Assert.Equal(asStatement.Diagnostics.Select(diagnostic => diagnostic.Error).ToList().Single(e => e.Code == "QSEM006").Message,
+                     asValue.Diagnostics.Select(diagnostic => diagnostic.Error).ToList().Single(e => e.Code == "QSEM006").Message);
     }
 
     [Fact]
@@ -215,8 +215,8 @@ public class FunctionTests
         // reference). Every call site must supply it — including the expression-position one, which is the
         // only way a function is ever called. Missing it emitted a def/call arity mismatch under success:true.
         var r = Compiler.Compile("function f(): int { var xs: int[] = [4, 5, 6]; return xs.Count; }\noperation Main(){ use q=Qubit[1]; var n: int = f(); if (n == 3) { X(q[0]); } }");
-        Assert.True(r.Success, string.Join("; ", r.Errors.Select(e => e.Code + " " + e.Message)));
-        Assert.Contains("int n = f(f_xs);", r.Qasm);
+        Assert.True(r.Succeeded, string.Join("; ", r.Diagnostics.Select(diagnostic => diagnostic.Error).ToList().Select(e => e.Code + " " + e.Message)));
+        Assert.Contains("int n = f(f_xs);", r.Targets.OpenQasm!.Text);
     }
 
     [Fact]
@@ -234,9 +234,9 @@ public class FunctionTests
             }
             operation Main() { use q = Qubit[1]; var n: int = f(); if (n == 4) { X(q[0]); } }
             """);
-        Assert.True(r.Success, string.Join("; ", r.Errors.Select(e => e.Code + " " + e.Message)));
-        Assert.Contains("ret = uint[3](b_);", r.Qasm);   // the OUTER bit[3], which the returned expression names
-        Assert.DoesNotContain("uint[2](", r.Qasm);       // never the inner bit[2] that shadowed it
+        Assert.True(r.Succeeded, string.Join("; ", r.Diagnostics.Select(diagnostic => diagnostic.Error).ToList().Select(e => e.Code + " " + e.Message)));
+        Assert.Contains("ret = uint[3](b_);", r.Targets.OpenQasm!.Text);   // the OUTER bit[3], which the returned expression names
+        Assert.DoesNotContain("uint[2](", r.Targets.OpenQasm!.Text);       // never the inner bit[2] that shadowed it
     }
 
     // --- `return` may stand anywhere; the target's one-return-at-the-end shape is produced by a pass ---
@@ -265,8 +265,8 @@ public class FunctionTests
     public void EveryEmittedDefTakesExactlyOneReturnAtItsEnd(string fn, string name)
     {
         var r = Compiler.Compile($"{fn}\noperation Main(){{ use q=Qubit[1]; var k: int = {name}(1); }}");
-        Assert.True(r.Success, string.Join("; ", r.Errors.Select(e => e.Code + " " + e.Message)));
-        var def = r.Qasm.Split($"def {name}(")[1].Split("\n}")[0];
+        Assert.True(r.Succeeded, string.Join("; ", r.Diagnostics.Select(diagnostic => diagnostic.Error).ToList().Select(e => e.Code + " " + e.Message)));
+        var def = r.Targets.OpenQasm!.Text.Split($"def {name}(")[1].Split("\n}")[0];
         Assert.Equal(1, def.Split("return ").Length - 1);            // exactly one return…
         Assert.EndsWith("return ret;", def.TrimEnd());               // …and it is the def's last statement
     }
@@ -277,9 +277,9 @@ public class FunctionTests
         // The path that did NOT return is exactly the one that should still run the rest, so the structure
         // already carries the answer — no "have we returned?" flag is minted for straight-line code.
         var r = Compiler.Compile("function sign(x: int): int { if (x == 0) { return 7; } return 4; }\noperation Main(){ use q=Qubit[1]; var k: int = sign(0); }");
-        Assert.True(r.Success, string.Join("; ", r.Errors.Select(e => e.Code + " " + e.Message)));
-        Assert.Contains("else {", r.Qasm);
-        Assert.DoesNotContain("done", r.Qasm);
+        Assert.True(r.Succeeded, string.Join("; ", r.Diagnostics.Select(diagnostic => diagnostic.Error).ToList().Select(e => e.Code + " " + e.Message)));
+        Assert.Contains("else {", r.Targets.OpenQasm!.Text);
+        Assert.DoesNotContain("done", r.Targets.OpenQasm!.Text);
     }
 
     [Fact]
@@ -288,10 +288,10 @@ public class FunctionTests
         // A loop's tail cannot be re-nested into a branch, so this one shape needs the flag: later iterations
         // stop doing work, and the statements after the loop only run if no return happened.
         var r = Compiler.Compile("function find(n: int): int { for i in 0..4 { if (i == n) { return i; } } return 9; }\noperation Main(){ use q=Qubit[1]; var k: int = find(2); }");
-        Assert.True(r.Success, string.Join("; ", r.Errors.Select(e => e.Code + " " + e.Message)));
-        Assert.Contains("break;", r.Qasm);            // leaving the loop is what makes the FIRST return win
-        Assert.Contains("if (done == 0)", r.Qasm);    // …and the flag is what skips the statements after it
-        Assert.DoesNotContain("if (done == 0) {\n      if (", r.Qasm);   // the body itself is not wrapped
+        Assert.True(r.Succeeded, string.Join("; ", r.Diagnostics.Select(diagnostic => diagnostic.Error).ToList().Select(e => e.Code + " " + e.Message)));
+        Assert.Contains("break;", r.Targets.OpenQasm!.Text);            // leaving the loop is what makes the FIRST return win
+        Assert.Contains("if (done == 0)", r.Targets.OpenQasm!.Text);    // …and the flag is what skips the statements after it
+        Assert.DoesNotContain("if (done == 0) {\n      if (", r.Targets.OpenQasm!.Text);   // the body itself is not wrapped
     }
 
     [Fact]
@@ -309,8 +309,8 @@ public class FunctionTests
             }
             operation Main() { use q = Qubit[1]; var k: int = f(2); }
             """);
-        Assert.True(r.Success, string.Join("; ", r.Errors.Select(e => e.Code + " " + e.Message)));
-        var def = r.Qasm.Split("def f(")[1].Split("\n}")[0];
+        Assert.True(r.Succeeded, string.Join("; ", r.Diagnostics.Select(diagnostic => diagnostic.Error).ToList().Select(e => e.Code + " " + e.Message)));
+        var def = r.Targets.OpenQasm!.Text.Split("def f(")[1].Split("\n}")[0];
         Assert.Contains("if (done == 0)", def);   // acc = acc + 5 / return acc are guarded, not unconditional
     }
 
@@ -327,9 +327,9 @@ public class FunctionTests
             }
             operation Main() { use q = Qubit[1]; var k: int = grid(1); }
             """);
-        Assert.True(r.Success, string.Join("; ", r.Errors.Select(e => e.Code + " " + e.Message)));
-        Assert.Contains("if (done == 1) {", r.Qasm);                     // the outer loop is left too
-        Assert.Equal(2, r.Qasm.Split("break;").Length - 1);              // one break per loop level
+        Assert.True(r.Succeeded, string.Join("; ", r.Diagnostics.Select(diagnostic => diagnostic.Error).ToList().Select(e => e.Code + " " + e.Message)));
+        Assert.Contains("if (done == 1) {", r.Targets.OpenQasm!.Text);                     // the outer loop is left too
+        Assert.Equal(2, r.Targets.OpenQasm!.Text.Split("break;").Length - 1);              // one break per loop level
     }
 
     [Theory]
@@ -345,5 +345,5 @@ public class FunctionTests
     public void TheIrViewShowsReturns() =>
         // the `--stages` IR view dropped every `return`, rendering function bodies as incomplete
         Assert.Contains("QReturn", Qora.Ir.IrPrinter.Print(
-            Compiler.Compile("function two(): int { return 2; }\noperation Main(){ use q=Qubit[1]; var k: int = two(); }").Ir));
+            Compiler.Compile("function two(): int { return 2; }\noperation Main(){ use q=Qubit[1]; var k: int = two(); }").Hir.Resolved!.Program));
 }

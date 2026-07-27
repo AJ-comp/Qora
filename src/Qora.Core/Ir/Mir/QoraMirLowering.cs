@@ -1,3 +1,4 @@
+using Qora.Compiler;
 using Qora.Ir.Passes;
 
 namespace Qora.Ir.Mir;
@@ -6,28 +7,37 @@ namespace Qora.Ir.Mir;
 /// Lowers the validated, source-shaped Qora HIR into typed SSA/CFG MIR.
 ///
 /// Name lookup is deliberately confined to this boundary. The lowering environment resolves each HIR
-/// spelling to the declaration's <see cref="SymbolId"/> while walking lexical scopes; every emitted MIR
-/// reference is then an ID, never a string. Classical assignments create immutable SSA states, block
-/// arguments represent Phi values, arrays retain both storage identity and state versions, and qubits use
-/// a separate linear resource space.
+/// spelling to the declaration's <see cref="SymbolId"/> while walking lexical scopes. Symbols remain in
+/// <see cref="MirCrossStageLinks"/> rather than being copied into MIR entities; every emitted MIR
+/// reference is then a dense MIR ID, never a string. Classical assignments create immutable SSA states,
+/// block arguments represent Phi values, arrays retain both storage identity and state versions, and
+/// qubits use a separate linear resource space.
 /// </summary>
-public static class QoraMirLowering
+internal static class QoraMirLowering
 {
-    public static MirProgram Lower(QProgram hir, SemanticModel semantics, int revision = 0)
+    public static MirLoweringResult Lower(
+        HirSemanticContext semantics,
+        int revision = 0)
     {
-        ArgumentNullException.ThrowIfNull(hir);
         ArgumentNullException.ThrowIfNull(semantics);
         if (revision < 0) throw new ArgumentOutOfRangeException(nameof(revision));
 
+        var hir = semantics.Current.Program;
+        var snapshotId = new MirSnapshotId(
+            semantics.Current.Id.CompilationId,
+            semantics.Current.Id.CompilationRevision,
+            revision);
+        var origins = new MirOriginTableBuilder(
+            snapshotId,
+            semantics.Current);
+        var links = new MirCrossStageLinksBuilder(
+            snapshotId,
+            semantics.Current,
+            semantics.SemanticBasis);
         var callableIds = hir.Operations
             .Select((operation, index) => (SourceId: operation.Id, MirId: new MirCallableId(index)))
             .ToDictionary(item => item.SourceId, item => item.MirId);
         var operationsById = hir.Operations.ToDictionary(operation => operation.Id);
-        var operationsByName = hir.Operations
-            .GroupBy(operation => operation.Name)
-            .Where(group => group.Count() == 1)
-            .ToDictionary(group => group.Key, group => group.Single(), StringComparer.Ordinal);
-
         var callables = hir.Operations
             .Select(operation => new CallableLowerer(
                 operation,
@@ -35,20 +45,25 @@ public static class QoraMirLowering
                 semantics,
                 callableIds,
                 operationsById,
-                operationsByName).Lower())
+                origins,
+                links).Lower())
             .ToList();
 
-        return new MirProgram(revision, callables);
+        var originTable = origins.Build();
+        return new MirLoweringResult(
+            new MirProgram(snapshotId, originTable, callables),
+            links.Build(originTable));
     }
 
     private sealed class CallableLowerer
     {
         private readonly QOperation _operation;
         private readonly MirCallableId _callableId;
-        private readonly SemanticModel _semantics;
+        private readonly IHirSemanticContext _semantics;
         private readonly IReadOnlyDictionary<int, MirCallableId> _callableIds;
         private readonly IReadOnlyDictionary<int, QOperation> _operationsById;
-        private readonly IReadOnlyDictionary<string, QOperation> _operationsByName;
+        private readonly MirOriginTableBuilder _origins;
+        private readonly MirCrossStageLinksBuilder _links;
 
         private readonly List<BlockBuilder> _blocks = new();
         private readonly List<MirValue> _values = new();
@@ -63,28 +78,40 @@ public static class QoraMirLowering
         private int _nextQubit;
         private BlockBuilder? _current;
         private FlowState _state = new();
-        private readonly MirSource _operationSource;
+        private readonly MirOriginRef _operationOrigin;
 
         public CallableLowerer(
             QOperation operation,
             MirCallableId callableId,
-            SemanticModel semantics,
+            IHirSemanticContext semantics,
             IReadOnlyDictionary<int, MirCallableId> callableIds,
             IReadOnlyDictionary<int, QOperation> operationsById,
-            IReadOnlyDictionary<string, QOperation> operationsByName)
+            MirOriginTableBuilder origins,
+            MirCrossStageLinksBuilder links)
         {
             _operation = operation;
             _callableId = callableId;
             _semantics = semantics;
             _callableIds = callableIds;
             _operationsById = operationsById;
-            _operationsByName = operationsByName;
-            _operationSource = MirSource.Synthetic(operation.Id);
+            _origins = origins;
+            _links = links;
+            _operationOrigin = _origins.Hir(
+                operation.Id,
+                operation.Id);
         }
 
         public MirCallable Lower()
         {
-            var entry = NewBlock(_operationSource);
+            var operationSymbol = RequireSymbol(
+                _operation.Id,
+                $"callable `{_operation.Name}`");
+            _links.LinkCallable(
+                _operation.Id,
+                operationSymbol.Id,
+                _callableId);
+
+            var entry = NewBlock(_operationOrigin);
             _current = entry;
 
             LowerParameters();
@@ -94,14 +121,20 @@ public static class QoraMirLowering
             if (_current is not null)
             {
                 Terminate(_operation.IsFunction
-                    ? new MirUnreachable(_operationSource)
-                    : new MirReturn(null, _operationSource));
+                    ? new MirUnreachable(
+                        _origins.Synthesized(
+                            _operationOrigin,
+                            "missing validated function return"))
+                    : new MirReturn(
+                        null,
+                        _origins.Synthesized(
+                            _operationOrigin,
+                            "implicit operation return")));
             }
 
             var blocks = _blocks.Select(block => block.Build()).ToList();
             return new MirCallable(
                 _callableId,
-                _operation.Id,
                 _operation.Name,
                 _operation.IsFunction ? MirCallableKind.Function : MirCallableKind.Operation,
                 _operation.ReturnType is { } returns ? MirType.Scalar(returns) : null,
@@ -111,7 +144,7 @@ public static class QoraMirLowering
                 _values,
                 _storages,
                 _qubits,
-                _operationSource);
+                _operationOrigin);
         }
 
         private void LowerParameters()
@@ -120,6 +153,9 @@ public static class QoraMirLowering
             {
                 var parameter = _operation.Params[index];
                 var symbol = RequireSymbol(parameter.Id, $"parameter `{parameter.Name}`");
+                var parameterOrigin = _origins.Hir(
+                    _operation.Id,
+                    parameter.Id);
                 _state.Declare(parameter.Name, symbol.Id);
 
                 if (parameter.Type == QType.Qubit)
@@ -132,14 +168,14 @@ public static class QoraMirLowering
                         MirQubitResourceKind.Parameter,
                         isArray,
                         isArray ? parameter.RegisterSize : null,
-                        symbol.Id,
                         AllocationInstruction: null,
-                        new MirSource(_operation.Id, parameter.Id, parameter.Span));
+                        parameterOrigin);
                     _qubits.Add(resource);
+                    _links.LinkQubit(symbol.Id, _callableId, resourceId);
                     _state.Qubits[symbol.Id] = resourceId;
                     _parameters.Add(new MirQubitParameter(
                         parameter.Name,
-                        symbol.Id,
+                        parameterOrigin,
                         resourceId,
                         isArray,
                         isArray ? parameter.RegisterSize : null,
@@ -150,12 +186,11 @@ public static class QoraMirLowering
                 var type = parameter.IsArray
                     ? MirType.Array(parameter.Type, parameter.RegisterSize)
                     : MirType.Scalar(parameter.Type);
-                var source = new MirSource(_operation.Id, parameter.Id, parameter.Span);
                 var value = AddValue(
                     type,
                     MirValueDefinition.ParameterAt(index),
                     symbol.Id,
-                    source);
+                    parameterOrigin);
                 MirStorageId? storageId = null;
                 if (parameter.IsArray)
                 {
@@ -169,16 +204,19 @@ public static class QoraMirLowering
                                 ? MirStorageAliasMode.SharedParameter
                                 : MirStorageAliasMode.ExclusiveParameter,
                         type,
-                        symbol.Id,
                         index,
                         AllocationInstruction: null,
-                        source));
+                        parameterOrigin));
+                    _links.LinkStorage(
+                        symbol.Id,
+                        _callableId,
+                        storageId.Value);
                     _state.Storages[symbol.Id] = storageId.Value;
                 }
                 _state.Values[symbol.Id] = value;
                 _parameters.Add(new MirClassicalParameter(
                     parameter.Name,
-                    symbol.Id,
+                    parameterOrigin,
                     value,
                     type,
                     storageId,
@@ -202,9 +240,12 @@ public static class QoraMirLowering
                     MirQubitResourceKind.Local,
                     IsArray: true,
                     use.Size,
-                    symbol.Id,
                     instructionId,
                     source));
+                _links.LinkQubit(
+                    symbol.Id,
+                    _callableId,
+                    resourceId);
                 Emit(new MirQubitAllocate(instructionId, resourceId, source));
                 _state.Qubits[symbol.Id] = resourceId;
             }
@@ -212,10 +253,49 @@ public static class QoraMirLowering
 
         private void LowerStatements(IReadOnlyList<QStmt> statements)
         {
-            foreach (var statement in statements)
+            for (var index = 0; index < statements.Count; index++)
             {
-                if (_current is null) return;
-                LowerStatement(statement);
+                if (_current is null)
+                {
+                    for (; index < statements.Count; index++)
+                        MarkUnreachableDeclarations(statements[index]);
+                    return;
+                }
+                LowerStatement(statements[index]);
+            }
+        }
+
+        private void MarkUnreachableDeclarations(QStmt statement)
+        {
+            if (_semantics.FindSymbol(statement.Id) is { } symbol)
+                _links.MarkUnreachable(symbol.Id);
+
+            switch (statement)
+            {
+                case QIf conditional:
+                    foreach (var nested in conditional.Then)
+                        MarkUnreachableDeclarations(nested);
+                    foreach (var nested in conditional.Else)
+                        MarkUnreachableDeclarations(nested);
+                    break;
+                case QFor loop:
+                    foreach (var nested in loop.Body)
+                        MarkUnreachableDeclarations(nested);
+                    break;
+                case QWhile loop:
+                    foreach (var nested in loop.Body)
+                        MarkUnreachableDeclarations(nested);
+                    break;
+                case QRepeat loop:
+                    foreach (var nested in loop.Body)
+                        MarkUnreachableDeclarations(nested);
+                    break;
+                case QConjugate conjugate:
+                    foreach (var nested in conjugate.Within)
+                        MarkUnreachableDeclarations(nested);
+                    foreach (var nested in conjugate.Apply)
+                        MarkUnreachableDeclarations(nested);
+                    break;
             }
         }
 
@@ -305,10 +385,13 @@ public static class QoraMirLowering
                     MirArrayStorageKind.Local,
                     MirStorageAliasMode.UniqueLocal,
                     resultType,
-                    symbol.Id,
                     ParameterIndex: null,
                     instructionId,
                     source));
+                _links.LinkStorage(
+                    symbol.Id,
+                    _callableId,
+                    storageId);
                 Emit(new MirArrayCreate(
                     instructionId,
                     result,
@@ -375,7 +458,7 @@ public static class QoraMirLowering
         private void LowerStatementCall(QGate gate)
         {
             var source = SourceOf(gate);
-            var callee = ResolveUserCallable(gate.CalleeOpId, gate.Name);
+            var callee = ResolveUserCallable(gate.CalleeOpId);
             if (callee is { IsFunction: true })
             {
                 LowerPureCall(
@@ -430,7 +513,7 @@ public static class QoraMirLowering
                 source));
         }
 
-        private void LowerOperationCall(QGate gate, QOperation callee, MirSource source)
+        private void LowerOperationCall(QGate gate, QOperation callee, MirOriginRef source)
         {
             var instructionId = NextInstruction();
             var operands = new List<MirCallOperand>(gate.Args.Count);
@@ -466,11 +549,11 @@ public static class QoraMirLowering
                     var result = AddInstructionResult(
                         instructionId,
                         actualType,
-                        SourceSymbolOfWholeArgument(argument),
+                        SymbolOfWholeArgument(argument),
                         source,
                         mutableResults.Count);
                     mutableResults.Add(new MirMutableArrayResult(index, result));
-                    var symbolId = SourceSymbolOfWholeArgument(argument)
+                    var symbolId = SymbolOfWholeArgument(argument)
                         ?? throw Internal($"mutable array argument {index} of `{callee.Name}` is not a binding");
                     mutableBindings.Add((symbolId, result));
                 }
@@ -491,7 +574,7 @@ public static class QoraMirLowering
             MirCallTarget target,
             QOperation? callee,
             IReadOnlyList<QNode> arguments,
-            MirSource source)
+            MirOriginRef source)
         {
             IReadOnlyList<QParam>? parameters = callee?.Params;
             var operands = new List<MirCallOperand>(arguments.Count);
@@ -808,7 +891,7 @@ public static class QoraMirLowering
             Terminate(new MirReturn(value, source));
         }
 
-        private MirValueId LowerExpression(QExpr expression, MirSource source) => expression switch
+        private MirValueId LowerExpression(QExpr expression, MirOriginRef source) => expression switch
         {
             QText text => LowerNode(
                 text.Tree ?? throw Internal("validated text expression has no tree"),
@@ -819,7 +902,7 @@ public static class QoraMirLowering
             _ => throw Internal($"unsupported HIR expression {expression.GetType().Name}"),
         };
 
-        private MirValueId LowerMeasurement(QMeasure measurement, MirSource source)
+        private MirValueId LowerMeasurement(QMeasure measurement, MirOriginRef source)
         {
             var place = LowerQubitPlace(measurement.Target, source);
             var instructionId = NextInstruction();
@@ -832,7 +915,7 @@ public static class QoraMirLowering
             return result;
         }
 
-        private MirValueId LowerNode(QNode node, MirSource source)
+        private MirValueId LowerNode(QNode node, MirOriginRef source)
         {
             switch (node)
             {
@@ -916,15 +999,44 @@ public static class QoraMirLowering
 
                 case QMember { Base: { } owner, Member: "Count" }:
                 {
+                    if (owner is QNameRef name)
+                    {
+                        var symbol = _state.Resolve(name.Name)
+                            ?? throw Internal(
+                                $"Count receiver `{name.Name}` is not active");
+                        if (_state.Qubits.TryGetValue(symbol, out var qubitId))
+                        {
+                            var qubit = _qubits.FirstOrDefault(
+                                resource => resource.Id == qubitId)
+                                ?? throw Internal(
+                                    $"qubit resource {qubitId} is missing");
+                            if (!qubit.IsArray)
+                                throw Internal(
+                                    $"Count receiver `{name.Name}` is a scalar qubit");
+                            if (qubit.Length is not int knownLength)
+                            {
+                                throw Internal(
+                                    $"specialized qubit array `{name.Name}` has no known length");
+                            }
+
+                            return EmitConstant(
+                                QType.Int,
+                                knownLength.ToString(
+                                    System.Globalization.CultureInfo.InvariantCulture),
+                                source);
+                        }
+
+                        if (!_state.Values.TryGetValue(symbol, out var classicalArray))
+                        {
+                            throw Internal(
+                                $"Count receiver `{name.Name}` is neither a classical array nor a qubit resource");
+                        }
+
+                        return EmitArrayLength(classicalArray, name.Name, source);
+                    }
+
                     var array = LowerNode(owner, source);
-                    var instructionId = NextInstruction();
-                    var result = AddInstructionResult(
-                        instructionId,
-                        MirType.Scalar(QType.Int),
-                        null,
-                        source);
-                    Emit(new MirArrayLength(instructionId, result, array, source));
-                    return result;
+                    return EmitArrayLength(array, QNodes.Render(owner), source);
                 }
 
                 case QMember member:
@@ -958,7 +1070,7 @@ public static class QoraMirLowering
                             callee: null,
                             call.Args,
                             source);
-                    var callee = ResolveUserCallable(call.CalleeOpId, call.Name)
+                    var callee = ResolveUserCallable(call.CalleeOpId)
                         ?? throw Internal($"resolved function `{call.Name}` has no callable");
                     if (!callee.IsFunction)
                         throw Internal($"expression call `{call.Name}` targets an operation");
@@ -980,7 +1092,7 @@ public static class QoraMirLowering
         /// expression: the short-circuit edge supplies the already-known left value, while the other
         /// edge supplies the evaluated right value.
         /// </summary>
-        private MirValueId LowerShortCircuit(QBinOp binary, MirSource source)
+        private MirValueId LowerShortCircuit(QBinOp binary, MirOriginRef source)
         {
             var left = EnsureType(
                 LowerNode(binary.Left, source),
@@ -1030,7 +1142,7 @@ public static class QoraMirLowering
             return result;
         }
 
-        private MirQubitPlace LowerQubitPlace(QArg argument, MirSource source) => argument switch
+        private MirQubitPlace LowerQubitPlace(QArg argument, MirOriginRef source) => argument switch
         {
             QQubitArg indexed => LowerQubitPlace(
                 new QIndexNode(new QNameRef(indexed.Reg), indexed.Index),
@@ -1039,7 +1151,7 @@ public static class QoraMirLowering
             _ => throw Internal("validated qubit argument has no reference"),
         };
 
-        private MirQubitPlace LowerQubitPlace(QNode node, MirSource source)
+        private MirQubitPlace LowerQubitPlace(QNode node, MirOriginRef source)
         {
             switch (node)
             {
@@ -1068,7 +1180,7 @@ public static class QoraMirLowering
             }
         }
 
-        private MirValueId EmitConstant(QType type, string text, MirSource source)
+        private MirValueId EmitConstant(QType type, string text, MirOriginRef source)
         {
             var instructionId = NextInstruction();
             var result = AddInstructionResult(
@@ -1084,11 +1196,34 @@ public static class QoraMirLowering
             return result;
         }
 
+        private MirValueId EmitArrayLength(
+            MirValueId array,
+            string receiver,
+            MirOriginRef source)
+        {
+            if (!TypeOf(array).IsArray)
+                throw Internal(
+                    $"Count receiver `{receiver}` is not a classical array");
+
+            var instructionId = NextInstruction();
+            var result = AddInstructionResult(
+                instructionId,
+                MirType.Scalar(QType.Int),
+                symbol: null,
+                source);
+            Emit(new MirArrayLength(
+                instructionId,
+                result,
+                array,
+                source));
+            return result;
+        }
+
         private MirValueId EmitUnary(
             MirUnaryOperator op,
             MirValueId operand,
             MirType resultType,
-            MirSource source)
+            MirOriginRef source)
         {
             var instructionId = NextInstruction();
             var result = AddInstructionResult(instructionId, resultType, null, source);
@@ -1101,7 +1236,7 @@ public static class QoraMirLowering
             MirValueId left,
             MirValueId right,
             MirType resultType,
-            MirSource source)
+            MirOriginRef source)
         {
             var instructionId = NextInstruction();
             var result = AddInstructionResult(instructionId, resultType, null, source);
@@ -1112,7 +1247,7 @@ public static class QoraMirLowering
         private MirValueId EnsureCallType(
             MirValueId value,
             MirType expected,
-            MirSource source)
+            MirOriginRef source)
         {
             var actual = TypeOf(value);
             if (actual == expected) return value;
@@ -1126,7 +1261,7 @@ public static class QoraMirLowering
         private MirValueId EnsureType(
             MirValueId value,
             MirType expected,
-            MirSource source)
+            MirOriginRef source)
         {
             var actual = TypeOf(value);
             if (actual == expected) return value;
@@ -1142,7 +1277,7 @@ public static class QoraMirLowering
             MirInstructionId instruction,
             MirType type,
             SymbolId? symbol,
-            MirSource source,
+            MirOriginRef source,
             int resultIndex = 0) =>
             AddValue(
                 type,
@@ -1157,7 +1292,7 @@ public static class QoraMirLowering
             BlockBuilder block,
             MirType type,
             SymbolId? symbol,
-            MirSource source)
+            MirOriginRef source)
         {
             var index = block.Arguments.Count;
             var value = AddValue(
@@ -1165,7 +1300,7 @@ public static class QoraMirLowering
                 MirValueDefinition.BlockArgumentAt(block.Id, index),
                 symbol,
                 source);
-            block.Arguments.Add(new MirBlockArgument(value, type, symbol));
+            block.Arguments.Add(new MirBlockArgument(value, type));
             return value;
         }
 
@@ -1173,21 +1308,19 @@ public static class QoraMirLowering
             MirType type,
             MirValueDefinition definition,
             SymbolId? symbol,
-            MirSource source)
+            MirOriginRef source)
         {
             var id = new MirValueId(_values.Count);
             _valueIndexes[id] = _values.Count;
-            _values.Add(new MirValue(id, type, definition, symbol, source));
+            _values.Add(new MirValue(id, type, definition, source));
+            _links.RegisterTemporaryValue(_callableId, id);
+            if (symbol is SymbolId sourceSymbol)
+                _links.LinkValue(sourceSymbol, _callableId, id);
             return id;
         }
 
-        private void AttachSymbol(MirValueId value, SymbolId symbol)
-        {
-            var index = _valueIndexes[value];
-            var existing = _values[index];
-            if (existing.SourceSymbolId is null)
-                _values[index] = existing with { SourceSymbolId = symbol };
-        }
+        private void AttachSymbol(MirValueId value, SymbolId symbol) =>
+            _links.LinkValue(symbol, _callableId, value);
 
         private MirType TypeOf(MirValueId value) => _values[_valueIndexes[value]].Type;
 
@@ -1206,7 +1339,7 @@ public static class QoraMirLowering
         private BlockBuilder RequireCurrent() =>
             _current ?? throw Internal("attempted to emit into a terminated control-flow path");
 
-        private BlockBuilder NewBlock(MirSource source)
+        private BlockBuilder NewBlock(MirOriginRef source)
         {
             var block = new BlockBuilder(new MirBlockId(_blocks.Count), source);
             _blocks.Add(block);
@@ -1222,14 +1355,14 @@ public static class QoraMirLowering
             _semantics.FindSymbol(declarationId)
             ?? throw Internal($"{role} has no semantic symbol");
 
-        private QOperation? ResolveUserCallable(int? sourceOperationId, string name)
+        private QOperation? ResolveUserCallable(int? sourceOperationId)
         {
             if (sourceOperationId is int id && _operationsById.TryGetValue(id, out var byId))
                 return byId;
-            return _operationsByName.TryGetValue(name, out var byName) ? byName : null;
+            return null;
         }
 
-        private SymbolId? SourceSymbolOfWholeArgument(QArg argument)
+        private SymbolId? SymbolOfWholeArgument(QArg argument)
         {
             if (argument is not QTextArg { Tree: QNameRef name }) return null;
             return _state.Resolve(name.Name);
@@ -1298,8 +1431,10 @@ public static class QoraMirLowering
                     ? QType.Float
                     : QType.Int;
 
-        private MirSource SourceOf(QStmt statement) =>
-            new(_operation.Id, statement.Id, statement.Span);
+        private MirOriginRef SourceOf(QStmt statement) =>
+            _origins.Hir(
+                _operation.Id,
+                statement.Id);
 
         private InvalidOperationException Internal(string message) =>
             new($"QINTERNAL: MIR lowering of `{_operation.Name}` failed: {message}");
@@ -1310,20 +1445,20 @@ public static class QoraMirLowering
             public List<MirBlockArgument> Arguments { get; } = new();
             public List<MirInstruction> Instructions { get; } = new();
             public MirTerminator? Terminator { get; set; }
-            public MirSource Source { get; }
+            public MirOriginRef Origin { get; }
 
-            public BlockBuilder(MirBlockId id, MirSource source)
+            public BlockBuilder(MirBlockId id, MirOriginRef origin)
             {
                 Id = id;
-                Source = source;
+                Origin = origin;
             }
 
             public MirBlock Build() => new(
                 Id,
                 Arguments,
                 Instructions,
-                Terminator ?? new MirUnreachable(Source),
-                Source);
+                Terminator ?? new MirUnreachable(Origin),
+                Origin);
         }
 
         private sealed class FlowState

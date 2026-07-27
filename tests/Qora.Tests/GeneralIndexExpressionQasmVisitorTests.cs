@@ -13,7 +13,7 @@ public class GeneralIndexExpressionQasmVisitorTests
     [Fact]
     public void NameManglerRecursesThroughAssignmentAndQubitArgumentIndexes()
     {
-        var index = new QCallNode("pick", new QNode[]
+        var index = new QCallNode(QoraGates.BitsAsInt, new QNode[]
         {
             new QBinOp("+", new QNameRef("x"), new QNumLit(1)),
         });
@@ -23,9 +23,11 @@ public class GeneralIndexExpressionQasmVisitorTests
             new QAssign("xs", new QText(new QNumLit(1))) { Index = index },
             new QGate(Array.Empty<string>(), "H", new QArg[] { new QQubitArg("q", index) }));
 
-        var mangled = NameMangler.Mangle(program, model: null).Program;
+        var mangling = NameMangler.Mangle(program);
+        var mangled = mangling.Program;
         var body = mangled.Operations.Single().Body;
         Assert.Equal("x_", Assert.IsType<QDecl>(body[1]).Name);
+        Assert.Equal("x_", mangling.Symbols.GetEmittedName(program.Operations.Single().Body[1].Id));
 
         var assignment = Assert.IsType<QAssign>(body[2]);
         AssertRenamedCallArgument(assignment.Index);
@@ -48,7 +50,7 @@ public class GeneralIndexExpressionQasmVisitorTests
         };
         var target = new QIndexNode(
             new QNameRef("q"),
-            new QCallNode("pick", new QNode[]
+            new QCallNode(QoraGates.BitsAsInt, new QNode[]
             {
                 new QIndexNode(new QNameRef("indexes"), new QNumLit(0)),
             }));
@@ -66,7 +68,10 @@ public class GeneralIndexExpressionQasmVisitorTests
             new QStmt[]
             {
                 new QUse("q", 1),
-                new QGate(Array.Empty<string>(), "Worker", new QArg[] { new QQubitArg("q", "0") }),
+                new QGate(Array.Empty<string>(), "Worker", new QArg[] { new QQubitArg("q", "0") })
+                {
+                    CalleeOpId = worker.Id,
+                },
             });
 
         var hoisted = ArrayLocalHoisting.Run(new QProgram(new[] { worker, main })).Program;
@@ -93,15 +98,21 @@ public class GeneralIndexExpressionQasmVisitorTests
             new QDecl(false, QType.Bit, "flags", new QArrayNew(QType.Bit, 2)) { IsArray = true },
             new QDecl(false, QType.Bit, "measured", new QMeasure(target)));
 
-        var lowered = OpenQasmLowering.Run(program);
+        var errors = QoraValidator.Validate(program, out var semantics);
+        Assert.Empty(errors);
+
+        var lowered = OpenQasmLowering.Run(
+            program,
+            new ExactHirSemanticContext(
+                Assert.IsType<HirSemanticModel>(semantics)));
         var declaration = lowered.Operations.Single().Body.OfType<QDecl>()
             .Single(item => item.Name == "measured");
         var measurement = Assert.IsType<QMeasure>(declaration.Value);
         var measuredElement = Assert.IsType<QIndexNode>(measurement.Target);
-        var cast = Assert.IsType<QCallNode>(measuredElement.Index);
+        var cast = Assert.IsType<OpenQasmUnsignedCastNode>(measuredElement.Index);
 
-        Assert.Equal("uint[2]", cast.Name);
-        Assert.Equal("flags", Assert.IsType<QNameRef>(Assert.Single(cast.Args)).Name);
+        Assert.Equal(2, cast.Width);
+        Assert.Equal("flags", Assert.IsType<QNameRef>(cast.Operand).Name);
     }
 
     private static QProgram Program(params QStmt[] body) =>

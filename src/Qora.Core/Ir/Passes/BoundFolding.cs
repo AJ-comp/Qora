@@ -102,8 +102,8 @@ internal static class BoundFolder
                                && System.Numerics.BigInteger.Max(first, last) <= long.MaxValue;
 
             // A cancelled symbolic dependency may become a number only if its complete evaluation was
-            // overflow-free. Otherwise retain the originating SymbolId so monomorphization can substitute
-            // the real length and re-run the ordinary checked fold.
+            // overflow-free. Otherwise retain the originating SymbolId so post-specialization validation
+            // can read the concrete length from the specialized parameter symbol and repeat the checked fold.
             return coeff == 0 && overflowFree
                 ? new BoundNum(offset)
                 : new ArrayLengthBound(arraySymbolId, coeff, offset, overflowFree);

@@ -147,7 +147,8 @@ public sealed class MirWitnessAvailabilityAnalysisTests
         var main = Callable(program, "Main");
         var effect = Assert.Single(
             effects.Effects,
-            candidate => candidate.Site.Callable == main.Id
+            candidate => candidate.Site.Callable
+                    == new MirCallableRef(program.SnapshotId, main.Id)
                 && candidate.Target?.DisplayName == "X");
         var analysis = MirWitnessAvailabilityAnalysis.Analyze(
             program,
@@ -193,18 +194,18 @@ public sealed class MirWitnessAvailabilityAnalysisTests
             instruction =>
                 main.Blocks.SelectMany(block => block.Instructions)
                     .OfType<MirArrayLoad>()
-                    .Any(load => load.Id == instruction));
+                    .Any(load => load.Id == instruction.Instruction));
     }
 
     private static (MirProgram Program, MirEffectSnapshot Effects) Compile(string source)
     {
         var result = Compiler.Compile(source);
         Assert.True(
-            result.Success,
-            string.Join(" | ", result.Errors.Select(error => $"{error.Code}: {error.Message}")));
+            result.Succeeded,
+            string.Join(" | ", result.Diagnostics.Select(diagnostic => diagnostic.Error).ToList().Select(error => $"{error.Code}: {error.Message}")));
         return (
-            Assert.IsType<MirProgram>(result.Mir),
-            Assert.IsType<MirEffectSnapshot>(result.MirEffects));
+            Assert.IsType<MirProgram>(result.Mir?.Program),
+            Assert.IsType<MirEffectSnapshot>(result.Mir!.Analyses.Effects));
     }
 
     private static MirCallable Callable(MirProgram program, string name) =>
@@ -215,7 +216,8 @@ public sealed class MirWitnessAvailabilityAnalysisTests
         MirCallable callable) =>
         Assert.Single(
             effects.Effects,
-            effect => effect.Site.Callable == callable.Id);
+            effect => effect.Site.Callable
+                == new MirCallableRef(effects.SnapshotId, callable.Id));
 
     private static MirBlock ExitBlock(MirCallable callable) =>
         Assert.Single(

@@ -23,7 +23,7 @@ public class ExprTreeTests
                 if ({{condition}}) { H(q[0]); }
             }
             """);
-        var iff = r.Ir!.Operations[0].Body.OfType<QIf>().Single();
+        var iff = r.Hir.Resolved!.Program!.Operations[0].Body.OfType<QIf>().Single();
         Assert.NotNull(iff.Cond.Tree);
         return iff.Cond.Tree!;
     }
@@ -81,9 +81,9 @@ public class ExprTreeTests
                 H(q[0]);
             }
             """);
-        Assert.False(r.Success);
-        Assert.Contains(r.Errors, e => e.Code == "QSEM031");
-        Assert.Null(r.Ir);   // unrenderable IR stays unexposed (the stages view must not recurse it)
+        Assert.False(r.Succeeded);
+        Assert.Contains(r.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(), e => e.Code == "QSEM031");
+        Assert.Null(r.Hir.Resolved);   // unrenderable HIR stays unexposed (the stages view must not recurse it)
     }
 
     /// <summary>The depth guard covers an ARRAY LITERAL's element trees too — a deep expression hiding
@@ -100,9 +100,9 @@ public class ExprTreeTests
                 H(q[0]);
             }
             """);
-        Assert.False(r.Success);
-        Assert.Contains(r.Errors, e => e.Code == "QSEM031");
-        Assert.Null(r.Ir);
+        Assert.False(r.Succeeded);
+        Assert.Contains(r.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(), e => e.Code == "QSEM031");
+        Assert.Null(r.Hir.Resolved);
     }
 
     [Fact]
@@ -138,9 +138,9 @@ public class ExprTreeTests
     {
         var expr = string.Concat(Enumerable.Repeat("- ", 6000)) + "1";
         var r = Compiler.Compile($"operation Main() {{ use q = Qubit[1]; var x: int = {expr}; H(q[0]); }}");
-        Assert.False(r.Success);
-        Assert.Contains(r.Errors, e => e.Code == "QSEM031");
-        Assert.Null(r.Ir);
+        Assert.False(r.Succeeded);
+        Assert.Contains(r.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(), e => e.Code == "QSEM031");
+        Assert.Null(r.Hir.Resolved);
     }
 
     /// <summary>Deep-but-legal statement NESTING (inside the QSEM031 limit) must simply compile — the
@@ -155,6 +155,6 @@ public class ExprTreeTests
         sb.Append(new string('}', 300));
         sb.Append("\n}");
         var r = Compiler.Compile(sb.ToString());
-        Assert.True(r.Success, string.Join(" | ", r.Errors.Select(e => e.Code)));
+        Assert.True(r.Succeeded, string.Join(" | ", r.Diagnostics.Select(diagnostic => diagnostic.Error).ToList().Select(e => e.Code)));
     }
 }

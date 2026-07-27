@@ -5,23 +5,58 @@ using Qora.Ir.Passes;
 namespace Qora.Tests;
 
 /// <summary>
-/// A dotted namespace is a path through the program symbol graph, not one flat scope whose name happens
-/// to contain dots. These tests pin the resulting lexical lookup order and keep <c>open</c> as a separate,
-/// direct, non-transitive source of candidates.
+/// A dotted namespace is a path through the unified HIR scope graph, not one flat scope whose name happens
+/// to contain dots. These tests pin the containment chain and lexical lookup order while keeping
+/// <c>open</c> as a separate, direct, non-transitive source of candidates.
 /// </summary>
 public class NestedNamespaceSymbolGraphTests
 {
-    private static QoraParseResult Compile(string source)
+    [Fact]
+    public void ScopeGraphRejectsMismatchedDeclaringSymbolsAndCallableIds()
+    {
+        var graph = new HirScopeGraph();
+        var namespaceSymbol = new Symbol(
+            graph.RootScope.Id,
+            "N",
+            SymbolKind.Namespace);
+        graph.RegisterDeclaredMember(namespaceSymbol);
+
+        Assert.Throws<InvalidOperationException>(() =>
+            graph.CreateScope(
+                HirScopeKind.Callable,
+                graph.RootScope.Id,
+                namespaceSymbol.Id));
+
+        var callableSymbol = new Symbol(
+            graph.RootScope.Id,
+            "Work",
+            SymbolKind.Operation,
+            declarationNodeId: 42);
+        graph.RegisterDeclaredMember(callableSymbol);
+        var callableScope = graph.CreateScope(
+            HirScopeKind.Callable,
+            graph.RootScope.Id,
+            callableSymbol.Id);
+
+        Assert.Throws<InvalidOperationException>(() =>
+            graph.RegisterCallableScope(43, callableScope));
+    }
+
+    private static Compilation Compile(string source)
     {
         var result = Compiler.Compile(source);
-        Assert.True(result.Success,
-            string.Join(" | ", result.Errors.Select(error => $"{error.Code}: {error.Message}")));
+        Assert.True(
+            result.Succeeded,
+            string.Join(
+                " | ",
+                result.Diagnostics.Select(diagnostic =>
+                    $"{diagnostic.Error.Code}: {diagnostic.Error.Message}")));
         return result;
     }
 
-    private static QCallNode SoleExpressionCall(QoraParseResult result, string operationName)
+    private static QCallNode SoleExpressionCall(Compilation result, string operationName)
     {
-        var operation = result.Ir!.Operations.Single(item => item.Name == operationName);
+        var operation = result.Hir.Resolved!.Program!.Operations.Single(item => item.Name == operationName);
         return operation.Body
             .SelectMany(QNodes.ExpressionSites)
             .SelectMany(QNodes.CallsIn)
@@ -39,20 +74,25 @@ public class NestedNamespaceSymbolGraphTests
             operation Main() { A.B.Work(); }
             """);
 
-        var symbols = Assert.IsType<ProgramSymbolGraph>(result.Semantics!.ProgramSymbols);
-        var rootSymbol = symbols.RootSymbol;
-        var namespaceA = Assert.IsType<Symbol>(symbols.FindNamespace("A"));
-        var namespaceAB = Assert.IsType<Symbol>(symbols.FindNamespace("A.B"));
-        var work = result.MonoIr!.Operations.Single(operation => operation.Name == "A.B.Work");
-        var workSymbol = Assert.IsType<Symbol>(symbols.FindDeclaration(work.Id));
-        var workScope = Assert.IsType<Scope>(result.Semantics.FindRootScope(work.Id));
+        var graph = Assert.IsType<HirScopeGraph>(result.Hir.SpecializedValidation!.Model.ScopeGraph);
+        var namespaceAScope = Assert.IsType<Scope>(graph.FindNamespaceScope("A"));
+        var namespaceABScope = Assert.IsType<Scope>(graph.FindNamespaceScope("A.B"));
+        var namespaceA = Assert.IsType<Symbol>(graph.FindNamespaceSymbol("A"));
+        var namespaceAB = Assert.IsType<Symbol>(graph.FindNamespaceSymbol("A.B"));
+        var work = result.Hir.Specialized!.Program!.Operations.Single(operation => operation.Name == "A.B.Work");
+        var workSymbol = Assert.IsType<Symbol>(graph.FindDeclaration(work.Id));
+        var workScope = Assert.IsType<Scope>(result.Hir.SpecializedValidation!.Model.FindRootScope(work.Id));
 
+        Assert.Equal(HirScopeKind.Program, graph.RootScope.Kind);
         Assert.Equal(SymbolKind.Namespace, namespaceA.Kind);
         Assert.Equal(SymbolKind.Namespace, namespaceAB.Kind);
-        Assert.Equal(rootSymbol.Id, namespaceA.OwnerSymbolId);
-        Assert.Equal(namespaceA.Id, namespaceAB.OwnerSymbolId);
-        Assert.Equal(namespaceAB.Id, workSymbol.OwnerSymbolId);
-        Assert.Null(workScope.ParentScopeId);
+        Assert.Equal(graph.RootScope.Id, namespaceA.DeclaringScopeId);
+        Assert.Equal(graph.RootScope.Id, namespaceAScope.ParentScopeId);
+        Assert.Equal(namespaceAScope.Id, namespaceAB.DeclaringScopeId);
+        Assert.Equal(namespaceAScope.Id, namespaceABScope.ParentScopeId);
+        Assert.Equal(namespaceABScope.Id, workSymbol.DeclaringScopeId);
+        Assert.Equal(namespaceABScope.Id, workScope.ParentScopeId);
+        Assert.Equal(HirScopeKind.Callable, workScope.Kind);
     }
 
     [Fact]
@@ -70,7 +110,7 @@ public class NestedNamespaceSymbolGraphTests
             operation Main() { A.B.Work(); }
             """);
 
-        var function = result.Ir!.Operations.Single(operation => operation.Name == "A.B.f");
+        var function = result.Hir.Resolved!.Program!.Operations.Single(operation => operation.Name == "A.B.f");
         var call = SoleExpressionCall(result, "A.B.Work");
 
         Assert.Equal("A.B.f", call.Name);
@@ -91,7 +131,7 @@ public class NestedNamespaceSymbolGraphTests
             operation Main() { A.B.Work(); }
             """);
 
-        var function = result.Ir!.Operations.Single(operation => operation.Name == "A.f");
+        var function = result.Hir.Resolved!.Program!.Operations.Single(operation => operation.Name == "A.f");
         var call = SoleExpressionCall(result, "A.B.Work");
 
         Assert.Equal("A.f", call.Name);
@@ -109,7 +149,7 @@ public class NestedNamespaceSymbolGraphTests
             operation Main() { A.B.Work(); }
             """);
 
-        var function = result.Ir!.Operations.Single(operation => operation.Name == "f");
+        var function = result.Hir.Resolved!.Program!.Operations.Single(operation => operation.Name == "f");
         var call = SoleExpressionCall(result, "A.B.Work");
 
         Assert.Equal("f", call.Name);
@@ -132,7 +172,7 @@ public class NestedNamespaceSymbolGraphTests
             operation Main() { var n: int = A.B.f(); }
             """);
 
-        var function = result.Ir!.Operations.Single(operation => operation.Name == "A.B.f");
+        var function = result.Hir.Resolved!.Program!.Operations.Single(operation => operation.Name == "A.B.f");
         var call = SoleExpressionCall(result, "Main");
 
         Assert.Equal("A.B.f", call.Name);
@@ -152,9 +192,9 @@ public class NestedNamespaceSymbolGraphTests
             operation Main() { var n: int = A.X.f(); }
             """);
 
-        Assert.False(result.Success);
-        Assert.Contains(result.Errors, error => error.Code == "QSEM019");
-        Assert.DoesNotContain(result.Errors, error => error.Code == "QSEM007");
+        Assert.False(result.Succeeded);
+        Assert.Contains(result.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(), error => error.Code == "QSEM019");
+        Assert.DoesNotContain(result.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(), error => error.Code == "QSEM007");
     }
 
     [Fact]
@@ -170,22 +210,24 @@ public class NestedNamespaceSymbolGraphTests
             operation Main() { A.B.Work(); }
             """);
 
-        var symbols = Assert.IsType<ProgramSymbolGraph>(result.Semantics!.ProgramSymbols);
-        var namespaceA = Assert.IsType<Symbol>(symbols.FindNamespace("A"));
-        var namespaceAB = Assert.IsType<Symbol>(symbols.FindNamespace("A.B"));
-        var function = result.MonoIr!.Operations.Single(operation => operation.Name == "A.B.f");
-        var work = result.MonoIr.Operations.Single(operation => operation.Name == "A.B.Work");
-        var functionSymbol = Assert.IsType<Symbol>(symbols.FindDeclaration(function.Id));
-        var workSymbol = Assert.IsType<Symbol>(symbols.FindDeclaration(work.Id));
+        var graph = Assert.IsType<HirScopeGraph>(result.Hir.SpecializedValidation!.Model.ScopeGraph);
+        var namespaceAScope = Assert.IsType<Scope>(graph.FindNamespaceScope("A"));
+        var namespaceABScope = Assert.IsType<Scope>(graph.FindNamespaceScope("A.B"));
+        var namespaceAB = Assert.IsType<Symbol>(graph.FindNamespaceSymbol("A.B"));
+        var function = result.Hir.Specialized!.Program!.Operations.Single(operation => operation.Name == "A.B.f");
+        var work = result.Hir.Specialized!.Program.Operations.Single(operation => operation.Name == "A.B.Work");
+        var functionSymbol = Assert.IsType<Symbol>(graph.FindDeclaration(function.Id));
+        var workSymbol = Assert.IsType<Symbol>(graph.FindDeclaration(work.Id));
 
-        Assert.Same(namespaceAB, symbols.FindNamespace("A.B"));
-        Assert.Equal(namespaceA.Id, namespaceAB.OwnerSymbolId);
-        Assert.Equal(namespaceAB.Id, functionSymbol.OwnerSymbolId);
-        Assert.Equal(namespaceAB.Id, workSymbol.OwnerSymbolId);
+        Assert.Same(namespaceABScope, graph.FindNamespaceScope("A.B"));
+        Assert.Equal(namespaceAScope.Id, namespaceAB.DeclaringScopeId);
+        Assert.Equal(namespaceAScope.Id, namespaceABScope.ParentScopeId);
+        Assert.Equal(namespaceABScope.Id, functionSymbol.DeclaringScopeId);
+        Assert.Equal(namespaceABScope.Id, workSymbol.DeclaringScopeId);
         Assert.Same(functionSymbol,
-            symbols.LookupMember(namespaceAB.Id, "f", SymbolKind.Operation));
+            graph.LookupMember(namespaceABScope.Id, "f", SymbolKind.Operation));
         Assert.Same(workSymbol,
-            symbols.LookupMember(namespaceAB.Id, "Work", SymbolKind.Operation));
+            graph.LookupMember(namespaceABScope.Id, "Work", SymbolKind.Operation));
     }
 
     [Fact]
@@ -202,25 +244,26 @@ public class NestedNamespaceSymbolGraphTests
             }
             """);
 
-        var callableA = result.Ir!.Operations.Single(operation => operation.Name == "A");
-        var nestedFunction = result.Ir.Operations.Single(operation => operation.Name == "A.B.f");
-        var calls = result.Ir.Operations.Single(operation => operation.Name == "Main").Body
+        var callableA = result.Hir.Resolved!.Program!.Operations.Single(operation => operation.Name == "A");
+        var nestedFunction = result.Hir.Resolved!.Program.Operations.Single(operation => operation.Name == "A.B.f");
+        var calls = result.Hir.Resolved!.Program.Operations.Single(operation => operation.Name == "Main").Body
             .SelectMany(QNodes.ExpressionSites)
             .SelectMany(QNodes.CallsIn)
             .ToList();
-        var symbols = Assert.IsType<ProgramSymbolGraph>(result.Semantics!.ProgramSymbols);
-        var namespaceA = Assert.IsType<Symbol>(symbols.FindNamespace("A"));
-        var callableSymbol = Assert.IsType<Symbol>(symbols.FindDeclaration(callableA.Id));
+        var graph = Assert.IsType<HirScopeGraph>(result.Hir.SpecializedValidation!.Model.ScopeGraph);
+        var namespaceA = Assert.IsType<Symbol>(graph.FindNamespaceSymbol("A"));
+        var callableSymbol = Assert.IsType<Symbol>(graph.FindDeclaration(callableA.Id));
 
         Assert.Equal(callableA.Id, calls.Single(call => call.Name == "A").CalleeOpId);
         Assert.Equal(nestedFunction.Id, calls.Single(call => call.Name == "A.B.f").CalleeOpId);
         Assert.NotEqual(namespaceA.Id, callableSymbol.Id);
-        Assert.Equal(symbols.RootSymbol.Id, namespaceA.OwnerSymbolId);
-        Assert.Equal(symbols.RootSymbol.Id, callableSymbol.OwnerSymbolId);
+        Assert.Equal(graph.RootScope.Id, namespaceA.DeclaringScopeId);
+        Assert.Equal(graph.RootScope.Id, callableSymbol.DeclaringScopeId);
         Assert.Same(namespaceA,
-            symbols.LookupMember(symbols.RootSymbol.Id, "A", SymbolKind.Namespace));
+            graph.LookupMember(graph.RootScope.Id, "A", SymbolKind.Namespace));
         Assert.Same(callableSymbol,
-            symbols.LookupMember(symbols.RootSymbol.Id, "A", SymbolKind.Operation));
+            graph.LookupMember(graph.RootScope.Id, "A", SymbolKind.Operation));
+        Assert.Null(graph.RootScope.Lookup("A"));
     }
 
     [Fact]
@@ -239,26 +282,27 @@ public class NestedNamespaceSymbolGraphTests
             }
             """);
 
-        var callableB = result.Ir!.Operations.Single(operation => operation.Name == "A.B");
-        var nestedFunction = result.Ir.Operations.Single(operation => operation.Name == "A.B.f");
-        var calls = result.Ir.Operations.Single(operation => operation.Name == "Main").Body
+        var callableB = result.Hir.Resolved!.Program!.Operations.Single(operation => operation.Name == "A.B");
+        var nestedFunction = result.Hir.Resolved!.Program.Operations.Single(operation => operation.Name == "A.B.f");
+        var calls = result.Hir.Resolved!.Program.Operations.Single(operation => operation.Name == "Main").Body
             .SelectMany(QNodes.ExpressionSites)
             .SelectMany(QNodes.CallsIn)
             .ToList();
-        var symbols = Assert.IsType<ProgramSymbolGraph>(result.Semantics!.ProgramSymbols);
-        var namespaceA = Assert.IsType<Symbol>(symbols.FindNamespace("A"));
-        var namespaceAB = Assert.IsType<Symbol>(symbols.FindNamespace("A.B"));
-        var callableSymbol = Assert.IsType<Symbol>(symbols.FindDeclaration(callableB.Id));
+        var graph = Assert.IsType<HirScopeGraph>(result.Hir.SpecializedValidation!.Model.ScopeGraph);
+        var namespaceAScope = Assert.IsType<Scope>(graph.FindNamespaceScope("A"));
+        var namespaceAB = Assert.IsType<Symbol>(graph.FindNamespaceSymbol("A.B"));
+        var callableSymbol = Assert.IsType<Symbol>(graph.FindDeclaration(callableB.Id));
 
         Assert.Equal(callableB.Id, calls.Single(call => call.Name == "A.B").CalleeOpId);
         Assert.Equal(nestedFunction.Id, calls.Single(call => call.Name == "A.B.f").CalleeOpId);
         Assert.NotEqual(namespaceAB.Id, callableSymbol.Id);
-        Assert.Equal(namespaceA.Id, namespaceAB.OwnerSymbolId);
-        Assert.Equal(namespaceA.Id, callableSymbol.OwnerSymbolId);
+        Assert.Equal(namespaceAScope.Id, namespaceAB.DeclaringScopeId);
+        Assert.Equal(namespaceAScope.Id, callableSymbol.DeclaringScopeId);
         Assert.Same(namespaceAB,
-            symbols.LookupMember(namespaceA.Id, "B", SymbolKind.Namespace));
+            graph.LookupMember(namespaceAScope.Id, "B", SymbolKind.Namespace));
         Assert.Same(callableSymbol,
-            symbols.LookupMember(namespaceA.Id, "B", SymbolKind.Operation));
+            graph.LookupMember(namespaceAScope.Id, "B", SymbolKind.Operation));
+        Assert.Null(namespaceAScope.Lookup("B"));
     }
 
     [Fact]
@@ -275,7 +319,7 @@ public class NestedNamespaceSymbolGraphTests
             operation Main() { App.Work(); }
             """);
 
-        var function = result.Ir!.Operations.Single(operation => operation.Name == "A.B.f");
+        var function = result.Hir.Resolved!.Program!.Operations.Single(operation => operation.Name == "A.B.f");
         var call = SoleExpressionCall(result, "App.Work");
 
         Assert.Equal("A.B.f", call.Name);
@@ -296,9 +340,9 @@ public class NestedNamespaceSymbolGraphTests
             operation Main() { App.Work(); }
             """);
 
-        Assert.False(result.Success);
-        Assert.Contains(result.Errors, error => error.Code == "QSEM007");
-        Assert.DoesNotContain(result.Errors, error => error.Code == "QSEM019");
+        Assert.False(result.Succeeded);
+        Assert.Contains(result.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(), error => error.Code == "QSEM007");
+        Assert.DoesNotContain(result.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(), error => error.Code == "QSEM019");
     }
 
     [Fact]
@@ -319,9 +363,9 @@ public class NestedNamespaceSymbolGraphTests
             operation Main() { App.Work(); }
             """);
 
-        Assert.False(result.Success);
-        Assert.Contains(result.Errors, error => error.Code == "QSEM007");
-        Assert.DoesNotContain(result.Errors, error => error.Code is "QSEM018" or "QSEM019");
+        Assert.False(result.Succeeded);
+        Assert.Contains(result.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(), error => error.Code == "QSEM007");
+        Assert.DoesNotContain(result.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(), error => error.Code is "QSEM018" or "QSEM019");
     }
 
     [Fact]
@@ -341,9 +385,9 @@ public class NestedNamespaceSymbolGraphTests
             operation Main() { A.B.Work(); }
             """);
 
-        Assert.False(result.Success);
-        Assert.Contains(result.Errors, error => error.Code == "QSEM007");
-        Assert.DoesNotContain(result.Errors, error => error.Code is "QSEM018" or "QSEM019");
+        Assert.False(result.Succeeded);
+        Assert.Contains(result.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(), error => error.Code == "QSEM007");
+        Assert.DoesNotContain(result.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(), error => error.Code is "QSEM018" or "QSEM019");
     }
 
     [Fact]
@@ -357,8 +401,8 @@ public class NestedNamespaceSymbolGraphTests
             operation Main() { App.Work(); }
             """);
 
-        Assert.False(result.Success);
-        Assert.Contains(result.Errors, error => error.Code == "QSEM019");
+        Assert.False(result.Succeeded);
+        Assert.Contains(result.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(), error => error.Code == "QSEM019");
     }
 
     [Fact]
@@ -374,7 +418,7 @@ public class NestedNamespaceSymbolGraphTests
     }
 
     [Fact]
-    public void LexicalScopesUseIdsAndRemainSeparateFromNamespaceOwnership()
+    public void ProgramNamespaceCallableAndBlockScopesShareOneParentChain()
     {
         var result = Compile("""
             namespace A.B {
@@ -388,34 +432,46 @@ public class NestedNamespaceSymbolGraphTests
             operation Main() { A.B.Work(); }
             """);
 
-        var model = result.Semantics!;
-        var work = result.MonoIr!.Operations.Single(operation => operation.Name == "A.B.Work");
-        var workSymbol = Assert.IsType<Symbol>(model.ProgramSymbols!.FindDeclaration(work.Id));
-        var root = Assert.IsType<Scope>(model.FindRootScope(work.Id));
+        var model = result.Hir.SpecializedValidation!.Model;
+        var graph = Assert.IsType<HirScopeGraph>(model.ScopeGraph);
+        var work = result.Hir.Specialized!.Program!.Operations.Single(operation => operation.Name == "A.B.Work");
+        var workSymbol = Assert.IsType<Symbol>(graph.FindDeclaration(work.Id));
+        var namespaceAScope = Assert.IsType<Scope>(graph.FindNamespaceScope("A"));
+        var namespaceABScope = Assert.IsType<Scope>(graph.FindNamespaceScope("A.B"));
+        var callableScope = Assert.IsType<Scope>(model.FindRootScope(work.Id));
         var outer = Assert.IsType<QDecl>(work.Body[0]);
         var branch = Assert.IsType<QIf>(work.Body[1]);
         var inner = Assert.IsType<QDecl>(branch.Then[0]);
-        var pending = new Stack<ScopeId>(root.ChildScopeIds);
-        var descendants = new List<Scope>();
-        while (pending.Count > 0)
-        {
-            var scope = Assert.IsType<Scope>(model.FindScope(pending.Pop()));
-            descendants.Add(scope);
-            foreach (var childId in scope.ChildScopeIds)
-                pending.Push(childId);
-        }
-        var innerScope = descendants.Single(scope => scope.LookupLocal("inner") is not null);
+        var callableSite = new HirScopeSite(work.Id, HirScopeSiteRole.CallableBody);
+        var conditionSite = new HirScopeSite(branch.Id, HirScopeSiteRole.IfCondition);
+        var thenSite = new HirScopeSite(branch.Id, HirScopeSiteRole.IfThen);
+        var elseSite = new HirScopeSite(branch.Id, HirScopeSiteRole.IfElse);
+        var conditionScope = Assert.IsType<Scope>(model.FindScope(conditionSite));
+        var thenScope = Assert.IsType<Scope>(model.FindScope(thenSite));
+        var elseScope = Assert.IsType<Scope>(model.FindScope(elseSite));
 
-        Assert.Null(root.ParentScopeId);
-        Assert.NotNull(innerScope.ParentScopeId);
-        Assert.Same(innerScope, model.FindScope(innerScope.Id));
-        Assert.Same(innerScope, model.Scopes[innerScope.Id]);
-        Assert.Same(workSymbol, model.ProgramSymbols.Symbols[workSymbol.Id]);
-        var ancestor = innerScope;
-        while (ancestor.ParentScopeId is { } parentId)
-            ancestor = Assert.IsType<Scope>(model.FindScope(parentId));
-        Assert.Same(root, ancestor);
-        Assert.Equal(workSymbol.Id, model.FindSymbol(outer.Id)!.OwnerSymbolId);
-        Assert.Equal(workSymbol.Id, model.FindSymbol(inner.Id)!.OwnerSymbolId);
+        Assert.Equal(HirScopeKind.Program, graph.RootScope.Kind);
+        Assert.Null(graph.RootScope.ParentScopeId);
+        Assert.Equal(graph.RootScope.Id, namespaceAScope.ParentScopeId);
+        Assert.Equal(namespaceAScope.Id, namespaceABScope.ParentScopeId);
+        Assert.Equal(namespaceABScope.Id, callableScope.ParentScopeId);
+        Assert.Equal(callableScope.Id, conditionScope.ParentScopeId);
+        Assert.Equal(conditionScope.Id, thenScope.ParentScopeId);
+        Assert.Equal(conditionScope.Id, elseScope.ParentScopeId);
+        Assert.Equal(HirScopeKind.Callable, callableScope.Kind);
+        Assert.Equal(HirScopeKind.Condition, conditionScope.Kind);
+        Assert.Equal(HirScopeKind.Block, thenScope.Kind);
+        Assert.Equal(HirScopeKind.Block, elseScope.Kind);
+
+        Assert.Same(callableScope, model.FindScope(callableSite));
+        Assert.Same(callableScope, graph.FindScope(callableSite));
+        Assert.Same(thenScope, graph.FindScope(thenSite));
+        Assert.NotEqual(thenScope.Id, elseScope.Id);
+        Assert.Same(thenScope, model.FindScope(thenScope.Id));
+        Assert.Same(thenScope, model.Scopes[thenScope.Id]);
+        Assert.Same(workSymbol, graph.Symbols[workSymbol.Id]);
+        Assert.Same(model.FindSymbol(inner.Id), thenScope.LookupLocal("inner"));
+        Assert.Equal(callableScope.Id, model.FindSymbol(outer.Id)!.DeclaringScopeId);
+        Assert.Equal(thenScope.Id, model.FindSymbol(inner.Id)!.DeclaringScopeId);
     }
 }

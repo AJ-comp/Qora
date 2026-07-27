@@ -1,39 +1,39 @@
 namespace Qora.Ir.Passes;
 
 /// <summary>
-/// Gives source-level <c>Qubit[]</c>/<c>bit[]</c> callables the concrete register widths required by OpenQASM.
+/// Specializes source-level <c>Qubit[]</c>/<c>bit[]</c> callables by concrete call-site widths.
 /// The length stays out of the source type: each distinct tuple of call-site lengths produces one hidden
-/// specialization, and <c>q.Count</c> becomes the matching integer literal inside that copy — a
-/// structural substitution on the expression trees (<see cref="QMember"/> → <see cref="QNumLit"/>).
+/// specialization, while unreachable unsized callables disappear with the rest of the generic source
+/// definitions.
 ///
 /// Statement calls (<see cref="QGate"/>) and function calls inside expressions
 /// (<see cref="QCallNode"/>) share one specialization cache and worklist.
 ///
-/// A COMMON pass, though OpenQASM motivated it: the bounds prover's architecture is
-/// <c>validate(symbolic) → monomorphize → validate(concrete)</c>, and the second validation is where
-/// every "defer to mono" bounds/aliasing fact gets its precise re-check — so the prover owns this pass
-/// as much as any emitter does, and static-width hardware backends (Base-profile QIR fixes its qubit
-/// count too) would want the same specialization.
+/// This common pass owns only callable cloning, call retargeting, and dead-generic elimination.
+/// It deliberately preserves every <c>.Count</c> expression so later HIR validation and non-OpenQASM
+/// consumers continue to observe the source-level read. A target that requires literal widths performs
+/// that rewrite in its own lowering boundary.
 /// </summary>
-public static class Monomorphizer
+internal static class Monomorphizer
 {
-    /// <param name="preserveKnownCountsForValidation">
-    /// Keep structurally visible <c>.Count</c> nodes while still stamping every concrete specialization.
-    /// The post-specialization validator uses this form so ownership analysis can see a binding read even
-    /// when its length is already known. Calling <see cref="Run(QProgram, bool)"/> again with the default
-    /// value performs the final literal substitution required by <c>bit[]</c> emission.
-    /// </param>
-    public static QProgram Run(QProgram program, bool preserveKnownCountsForValidation = false)
+    public sealed record Result(
+        QProgram Program,
+        IReadOnlyList<NodeDerivation> Derivations);
+
+    public static Result Run(QProgram program)
     {
+        var derivations = new List<NodeDerivation>();
+        void Record(int sourceId, int derivedId) =>
+            derivations.Add(new NodeDerivation(sourceId, derivedId));
+
         // The specialization trigger IS QParam.NeedsMonoSizing — the one definition every consumer of
         // "monomorphization supplies this length" shares (validator generic test, prover deferral gates).
         static bool IsUnsizedArray(QParam p) => p.NeedsMonoSizing;
         static bool NeedsSpecialization(QOperation o) => o.Params.Any(IsUnsizedArray);
 
         var genericById = program.Operations.Where(NeedsSpecialization).ToDictionary(o => o.Id);
-        var genericByName = program.Operations.Where(NeedsSpecialization).ToDictionary(o => o.Name);
-        if (genericById.Count == 0 && !HasCount(program)) return program;
-        var programSymbols = SymbolTableBuilder.BuildProgramSymbols(program);
+        if (genericById.Count == 0)
+            return new Result(program, Array.Empty<NodeDerivation>());
 
         var concrete = program.Operations.Where(o => !NeedsSpecialization(o)).ToList();
         var allNames = new HashSet<string>(program.Operations.Select(o => o.Name));
@@ -43,7 +43,7 @@ public static class Monomorphizer
         QOperation? GenericCallee(QGate gate)
         {
             if (gate.CalleeOpId is int id && genericById.TryGetValue(id, out var byId)) return byId;
-            return genericByName.GetValueOrDefault(gate.Name); // hand-built IR fallback
+            return null;
         }
 
         QOperation? GenericExpressionCallee(QCallNode call)
@@ -51,11 +51,7 @@ public static class Monomorphizer
             if (call.CalleeOpId is int boundId
                 && genericById.TryGetValue(boundId, out var bound))
                 return bound;
-            if (programSymbols.LookupCallable(call.Name) is
-                { Kind: SymbolKind.Operation, DeclarationNodeId: int operationId }
-                && genericById.TryGetValue(operationId, out var byId))
-                return byId;
-            return genericByName.GetValueOrDefault(call.Name); // hand-built IR fallback
+            return null;
         }
 
         Dictionary<string, int> ConcreteRegisters(QOperation op)
@@ -63,7 +59,7 @@ public static class Monomorphizer
             var regs = new Dictionary<string, int>();
             foreach (var p in op.Params)
                 if ((p.IsQubitArray || p is { Type: QType.Bit, IsArray: true }) && p.RegisterSize is int n)
-                    regs[p.Name] = n;   // sized Qubit[]/bit[] params: their .Count folds, and they can size a callee's slot
+                    regs[p.Name] = n;   // sized Qubit[]/bit[] params can size a nested generic callee's slot
 
             // `use` declarations are semantically hoisted. Seed every allocation before rewriting so a
             // legal call/Count that textually precedes its `use` still resolves.
@@ -88,15 +84,12 @@ public static class Monomorphizer
             return regs;
         }
 
-        // `q.Count` with a known size becomes the literal, structurally: QMember(reg, Count) → QNumLit.
-        // Full index expressions are rewritten by the same recursive node visitor, so `.Count` and calls
-        // nested inside an index follow the normal specialization path.
+        // Walk every expression position because a generic function call can be nested inside another
+        // call, an index, a condition, or an arithmetic expression. Count nodes are ordinary preserved
+        // members here; only the OpenQASM target is allowed to replace a known Count with a literal.
         QNode? RewriteNode(QNode? node, IReadOnlyDictionary<string, int> regs) => node switch
         {
             null => null,
-            QMember { Base: QNameRef r, Member: "Count" } member
-                when regs.TryGetValue(r.Name, out var size) =>
-                preserveKnownCountsForValidation ? member : new QNumLit(size),
             QMember m => m with { Base = RewriteNode(m.Base, regs)! },
             QBinOp b => b with { Left = RewriteNode(b.Left, regs)!, Right = RewriteNode(b.Right, regs)! },
             QUnary u => u with { Operand = RewriteNode(u.Operand, regs)! },
@@ -140,17 +133,14 @@ public static class Monomorphizer
         };
 
         /// <summary>A `bit[]` declaration binds its literal length HERE, at its own site: the initializer is
-        /// folded first (it is evaluated before the name is bound), then the length enters the CURRENT block
-        /// map, in effect for the rest of this block and any block nested inside it.</summary>
+        /// specialized first (it is evaluated before the name is bound), then the length enters the CURRENT
+        /// block map so later generic calls can bind an unsized <c>bit[]</c> parameter.</summary>
         QStmt ResolveDecl(QDecl d, Dictionary<string, int> regs)
         {
             var rewritten = d with { Value = ResolveExpr(d.Value, regs) };
-            // A declaration SHADOWS any enclosing binding of the same name — that is what a scope chain
-            // means. A `bit[]` binds its own literal length: it lowers to OpenQASM's dedicated `bit[N]`
-            // register (bit is not a legal array base type) and `sizeof` is not defined on a bit register,
-            // so its `.Count` must fold. EVERY OTHER declaration removes the inherited entry instead, so a
-            // `.Count` on it can never fold to an enclosing `use` register's size (it keeps the general
-            // `array[T, N]` form, where `sizeof` IS defined and the emitter renders it).
+            // A declaration shadows any enclosing size binding. A bit[] binds its own literal length for
+            // subsequent specialization; every other declaration removes the inherited entry so a call
+            // cannot accidentally borrow the width of a different same-named qubit/bit register.
             if (d is { IsArray: true, Type: QType.Bit } && BitArrayLength(d) is int len) regs[d.Name] = len;
             else regs.Remove(d.Name);
             return rewritten;
@@ -181,9 +171,8 @@ public static class Monomorphizer
         List<QStmt> Rewrite(IReadOnlyList<QStmt> body, Dictionary<string, int> outer,
             Dictionary<string, int>? finalRegs = null)
         {
-            // A BLOCK gets its OWN length map, seeded from the enclosing one — the ordinary scope chain,
-            // the same shape the mangler's rename map and ArrayLocalHoisting's active map use. Params and
-            // `use` registers arrive already seeded at op level (they are hoisted / forward-referenceable).
+            // A block gets its own specialization-size map, seeded from the enclosing one. Parameters and
+            // `use` registers arrive already seeded at operation level (they are forward-referenceable).
             var regs = new Dictionary<string, int>(outer);
             var output = new List<QStmt>(body.Count);
             foreach (var stmt in body)
@@ -293,6 +282,7 @@ public static class Monomorphizer
             var parameters = source.Params.Select(p =>
             {
                 var fresh = p with { Id = QNodeIds.Next() };
+                Record(p.Id, fresh.Id);
                 return IsUnsizedArray(p)
                     ? fresh with { RegisterSize = bindings[p.Id], IsArray = true }
                     : fresh;
@@ -305,9 +295,10 @@ public static class Monomorphizer
                 IsFunction = source.IsFunction,
                 ReturnType = source.ReturnType,
             };
+            Record(source.Id, shell.Id);
             var regs = ConcreteRegisters(shell);
             var rewrittenBody = Rewrite(source.Body, regs);
-            return shell with { Body = ReId.Run(rewrittenBody) };
+            return shell with { Body = ReId.Run(rewrittenBody, Record) };
         }
 
         var outputOps = new List<QOperation>();
@@ -316,14 +307,13 @@ public static class Monomorphizer
         outputOps.AddRange(specs.Values);
 
         var result = program with { Operations = outputOps };
-        if (HasGenericCall(result, genericById.Keys.ToHashSet(), genericByName.Keys.ToHashSet()))
+        if (HasGenericCall(result, genericById.Keys.ToHashSet()))
             throw new InvalidOperationException(
                 "QINTERNAL: monomorphization removed a generic callable while a call still points to it");
-        if (result.Operations.SelectMany(o => o.Params).Any(IsUnsizedArray)
-            || !preserveKnownCountsForValidation && HasUnresolvedQubitCount(result))
+        if (result.Operations.SelectMany(o => o.Params).Any(IsUnsizedArray))
             throw new InvalidOperationException(
-                "QINTERNAL: monomorphization left an unresolved Qubit[]/bit[] size or qubit-array `.Count` in the emitted program");
-        return result;
+                "QINTERNAL: monomorphization left an unresolved Qubit[]/bit[] parameter in the specialized HIR");
+        return new Result(result, derivations.AsReadOnly());
     }
 
     /// <summary>The declared length of a <c>bit[]</c>, which QSEM016/QSEM029 guarantee is a literal.</summary>
@@ -334,112 +324,34 @@ public static class Monomorphizer
         _ => null,
     };
 
-    private static bool HasCount(QProgram program) => program.Operations.Any(op => HasCount(op.Body));
+    private static bool HasGenericCall(QProgram program, IReadOnlySet<int> genericIds) =>
+        program.Operations.Any(op => HasGenericCall(op.Body, genericIds));
 
-    private static bool HasGenericCall(QProgram program, IReadOnlySet<int> genericIds,
-        IReadOnlySet<string> genericNames) =>
-        program.Operations.Any(op => HasGenericCall(op.Body, genericIds, genericNames));
-
-    private static bool HasGenericCall(IReadOnlyList<QStmt> body, IReadOnlySet<int> genericIds,
-        IReadOnlySet<string> genericNames)
+    private static bool HasGenericCall(IReadOnlyList<QStmt> body, IReadOnlySet<int> genericIds)
     {
         foreach (var statement in body)
         {
             if (statement is QGate gate
-                && (gate.CalleeOpId is int id && genericIds.Contains(id) || genericNames.Contains(gate.Name)))
+                && gate.CalleeOpId is int id
+                && genericIds.Contains(id))
                 return true;
             if (QNodes.ExpressionSites(statement)
                 .SelectMany(QNodes.CallsIn)
-                .Any(call => call.CalleeOpId is int id && genericIds.Contains(id)
-                             || genericNames.Contains(call.Name)))
+                .Any(call => call.CalleeOpId is int id && genericIds.Contains(id)))
                 return true;
 
             var nested = statement switch
             {
-                QIf branch => HasGenericCall(branch.Then, genericIds, genericNames)
-                              || HasGenericCall(branch.Else, genericIds, genericNames),
-                QFor loop => HasGenericCall(loop.Body, genericIds, genericNames),
-                QWhile loop => HasGenericCall(loop.Body, genericIds, genericNames),
-                QRepeat loop => HasGenericCall(loop.Body, genericIds, genericNames),
-                QConjugate conjugate => HasGenericCall(conjugate.Within, genericIds, genericNames)
-                                        || HasGenericCall(conjugate.Apply, genericIds, genericNames),
+                QIf branch => HasGenericCall(branch.Then, genericIds)
+                              || HasGenericCall(branch.Else, genericIds),
+                QFor loop => HasGenericCall(loop.Body, genericIds),
+                QWhile loop => HasGenericCall(loop.Body, genericIds),
+                QRepeat loop => HasGenericCall(loop.Body, genericIds),
+                QConjugate conjugate => HasGenericCall(conjugate.Within, genericIds)
+                                        || HasGenericCall(conjugate.Apply, genericIds),
                 _ => false,
             };
             if (nested) return true;
-        }
-        return false;
-    }
-
-    /// <summary>Does any expression tree mention a <c>.Count</c>? <paramref name="owners"/> null = any
-    /// base name counts; otherwise only members whose base is one of the given (qubit-array) names.
-    /// Full index and step expression trees are visited recursively.</summary>
-    private static bool MentionsCount(QNode? node, IReadOnlySet<string>? owners) => node switch
-    {
-        null => false,
-        QMember { Base: QNameRef r, Member: "Count" } => owners is null || owners.Contains(r.Name),
-        QMember m => MentionsCount(m.Base, owners),
-        QBinOp b => MentionsCount(b.Left, owners) || MentionsCount(b.Right, owners),
-        QUnary u => MentionsCount(u.Operand, owners),
-        QIndexNode i => MentionsCount(i.Base, owners) || MentionsCount(i.Index, owners),
-        QCallNode c => c.Args.Any(a => MentionsCount(a, owners)),
-        _ => false,
-    };
-
-    /// <summary>The owner set with one name SHADOWED (null keeps the "any base name" meaning).</summary>
-    private static IReadOnlySet<string>? Shadowed(IReadOnlySet<string>? owners, string name)
-    {
-        if (owners is null) return null;
-        var inner = new HashSet<string>(owners);
-        inner.Remove(name);
-        return inner;
-    }
-
-    /// <summary>Does a body still mention a <c>.Count</c> owned by <paramref name="owners"/>? The set
-    /// NARROWS as the block declares names: a declaration shadows the outer meaning, so a <c>.Count</c>
-    /// written after it belongs to the inner variable, not to the enclosing qubit array. This mirrors the
-    /// scope chain <c>Rewrite</c> folds with — a name-only test would flag a legitimately unfolded
-    /// <c>sizeof</c> on a shadowing classical array as an unresolved qubit count.</summary>
-    private static bool HasCount(IReadOnlyList<QStmt> body, IReadOnlySet<string>? owners = null)
-    {
-        var live = owners;
-        foreach (var stmt in body)
-        {
-            if (QNodes.ExpressionSites(stmt).Any(n => MentionsCount(n, live))) return true;   // canonical positions
-            var nested = stmt switch                                                          // plus nested bodies
-            {
-                QIf i => HasCount(i.Then, live) || HasCount(i.Else, live),
-                QFor f => HasCount(f.Body, Shadowed(live, f.Var)),
-                QWhile w => HasCount(w.Body, live),
-                QRepeat r => HasCount(r.Body, live),
-                QConjugate c => HasCount(c.Within, live) || HasCount(c.Apply, live),
-                _ => false,
-            };
-            if (nested) return true;
-            if (stmt is QDecl d) live = Shadowed(live, d.Name);   // in effect for the REST of this block
-        }
-        return false;
-    }
-
-    private static bool HasUnresolvedQubitCount(QProgram program)
-    {
-        foreach (var op in program.Operations)
-        {
-            var qubitArrays = op.Params.Where(p => p.IsQubitArray).Select(p => p.Name).ToHashSet();
-            void CollectUses(IReadOnlyList<QStmt> body)
-            {
-                foreach (var statement in body)
-                    switch (statement)
-                    {
-                        case QUse use: qubitArrays.Add(use.Name); break;
-                        case QIf branch: CollectUses(branch.Then); CollectUses(branch.Else); break;
-                        case QFor loop: CollectUses(loop.Body); break;
-                        case QWhile loop: CollectUses(loop.Body); break;
-                        case QRepeat loop: CollectUses(loop.Body); break;
-                        case QConjugate conjugate: CollectUses(conjugate.Within); CollectUses(conjugate.Apply); break;
-                    }
-            }
-            CollectUses(op.Body);
-            if (HasCount(op.Body, qubitArrays)) return true;
         }
         return false;
     }

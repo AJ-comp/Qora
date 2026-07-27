@@ -116,8 +116,8 @@ code {
 
 /* ============================================================
    Parse-tree diagram — top-down tree drawn with pure CSS (no JS).
-   Ported from the Janglim Playground. The recursive ParseTreeNode
-   component emits nested <ul>/<li>; the connectors below are drawn
+   The recursive SyntaxTreeNodeView component emits nested <ul>/<li>;
+   the connectors below are drawn
    with ::before / ::after pseudo-elements.
    ============================================================ */
 .tree-wrap {

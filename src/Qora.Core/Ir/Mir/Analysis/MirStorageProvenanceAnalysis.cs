@@ -22,40 +22,58 @@ public sealed class MirStorageProvenanceSnapshot
     {
         _sourceProgram = sourceProgram;
         _sourceCallable = sourceCallable;
-        ProgramRevision = sourceProgram.Revision;
-        Callable = sourceCallable.Id;
+        SnapshotId = sourceProgram.SnapshotId;
+        Callable = new MirCallableRef(SnapshotId, sourceCallable.Id);
         _provenance = provenance.ToFrozenDictionary();
     }
 
-    public int ProgramRevision { get; }
-    public MirCallableId Callable { get; }
+    public MirSnapshotId SnapshotId { get; }
+    public MirCallableRef Callable { get; }
 
-    public bool IsFor(MirProgram program, MirCallableId callable) =>
+    internal bool IsFor(MirProgram program, MirCallableId callable) =>
         ReferenceEquals(_sourceProgram, program)
         && ReferenceEquals(_sourceCallable, program.FindCallable(callable))
-        && ProgramRevision == program.Revision
-        && Callable == callable;
+        && SnapshotId == program.SnapshotId
+        && Callable.Callable == callable;
 
-    public void EnsureFor(MirProgram program, MirCallableId callable)
+    internal void EnsureFor(MirProgram program, MirCallableId callable)
     {
         if (!IsFor(program, callable))
             throw new InvalidOperationException(
-                $"MIR storage-provenance snapshot belongs to {Callable} in revision {ProgramRevision} " +
-                $"of a different program instance; reanalyze {callable} in revision {program.Revision}");
+                $"MIR storage-provenance snapshot belongs to {Callable} in snapshot {SnapshotId}; " +
+                $"reanalyze {callable} in snapshot {program.SnapshotId}");
     }
 
-    public MirStorageProvenance ProvenanceOf(MirValueId value) =>
+    public MirStorageProvenance ProvenanceOf(MirValueRef value)
+    {
+        Require(value);
+        return ProvenanceOf(value.Value);
+    }
+
+    internal MirStorageProvenance ProvenanceOf(MirValueId value) =>
         _provenance.TryGetValue(value, out var provenance)
             ? provenance
             : throw new ArgumentOutOfRangeException(
                 nameof(value),
                 value,
                 $"value {value} is not an array state in callable {Callable}");
+
+    private void Require(MirValueRef value)
+    {
+        MirReferenceValidation.RequireSnapshot(
+            SnapshotId,
+            value.Snapshot,
+            nameof(value));
+        if (value.Callable != Callable.Callable)
+            throw new ArgumentException(
+                $"MIR value belongs to callable {value.Callable}; expected {Callable}",
+                nameof(value));
+    }
 }
 
-public static class MirStorageProvenanceAnalysis
+internal static class MirStorageProvenanceAnalysis
 {
-    public static MirStorageProvenanceSnapshot Analyze(
+    internal static MirStorageProvenanceSnapshot Analyze(
         MirProgram program,
         MirCallableId callableId)
     {
@@ -78,7 +96,7 @@ public static class MirStorageProvenanceAnalysis
         MirProgram program,
         MirCallable callable)
     {
-        var resolver = new Resolver(callable);
+        var resolver = new Resolver(program.SnapshotId, callable);
         var provenance = callable.Values
             .Where(value => value.Type.IsArray)
             .ToDictionary(value => value.Id, value => resolver.Resolve(value.Id));
@@ -91,18 +109,22 @@ public static class MirStorageProvenanceAnalysis
     private sealed class Resolver
     {
         private readonly MirCallable _callable;
+        private readonly MirSnapshotId _snapshotId;
         private readonly Dictionary<MirValueId, MirStorageId> _seeds = new();
         private readonly Dictionary<MirValueId, List<MirValueId>> _dependencies = new();
         private readonly HashSet<MirValueId> _unknownRoots = new();
         private readonly Dictionary<MirValueId, MirStorageProvenance> _cache = new();
 
-        public Resolver(MirCallable callable)
+        public Resolver(
+            MirSnapshotId snapshotId,
+            MirCallable callable)
         {
+            _snapshotId = snapshotId;
             _callable = callable;
             Build();
         }
 
-        public MirStorageProvenance Resolve(MirValueId value)
+        internal MirStorageProvenance Resolve(MirValueId value)
         {
             if (_cache.TryGetValue(value, out var cached))
                 return cached;
@@ -133,8 +155,14 @@ public static class MirStorageProvenanceAnalysis
             Walk(value);
             if (storages.Count == 0) complete = false;
             var result = new MirStorageProvenance(
-                new ReadOnlyCollection<MirStorageId>(
-                    storages.OrderBy(storage => storage.Value).ToArray()),
+                new ReadOnlyCollection<MirStorageRef>(
+                    storages
+                        .OrderBy(storage => storage.Value)
+                        .Select(storage => new MirStorageRef(
+                            _snapshotId,
+                            _callable.Id,
+                            storage))
+                        .ToArray()),
                 complete);
             _cache.Add(value, result);
             return result;

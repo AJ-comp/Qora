@@ -4,16 +4,16 @@ namespace Qora.Ir;
 
 /// <summary>
 /// OpenQASM's disposition for the target-independent failed bounds proofs recorded in
-/// <see cref="SemanticModel.UnprovenIndexes"/>. OpenQASM 3 has no portable runtime trap/abort path for an
+/// <see cref="HirSemanticModel.UnprovenIndexes"/>. OpenQASM 3 has no portable runtime trap/abort path for an
 /// indexed access, so an access the common validator could neither prove safe nor prove wrong cannot be
 /// emitted. A future runtime-capable backend can use the category when it also supplies stable access-site
 /// identity, checked-access lowering, and any required dynamic-alias policy; this diagnostic fact alone is
 /// not yet a rewrite work list.
 /// </summary>
-public static class OpenQasmBoundsValidation
+internal static class OpenQasmBoundsValidation
 {
     /// <summary>Turn final unresolved bounds facts into source-distinct QSEM030 diagnostics.</summary>
-    public static IReadOnlyList<QoraError> Run(SemanticModel semantics)
+    public static IReadOnlyList<QoraError> Run(HirSemanticModel semantics)
     {
         if (semantics.UnprovenIndexes.Count == 0)
             return Array.Empty<QoraError>();
@@ -33,7 +33,6 @@ public static class OpenQasmBoundsValidation
         return new QoraError(
             message,
             "QSEM030",
-            unresolved.Span?.Start ?? -1,
-            unresolved.Span?.End ?? -1);
+            unresolved.Span);
     }
 }

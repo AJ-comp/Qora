@@ -31,7 +31,7 @@ public static class MirPrinter
 
         public string Print()
         {
-            _text.AppendLine($"mir revision {_program.Revision}");
+            _text.AppendLine($"mir snapshot {_program.SnapshotId}");
             foreach (var callable in _program.Callables.OrderBy(callable => callable.Id.Value))
             {
                 _text.AppendLine();
@@ -49,7 +49,7 @@ public static class MirPrinter
             var kind = callable.Kind == MirCallableKind.Function ? "function" : "operation";
             var returns = callable.ReturnType is { } returnType ? $" -> {returnType}" : string.Empty;
             _text.AppendLine(
-                $"{kind} @{callable.Id} {callable.Name}({string.Join(", ", callable.Parameters.Select(Parameter))}){returns} {Origin(callable.Source)}");
+                $"{kind} @{callable.Id} {callable.Name}({string.Join(", ", callable.Parameters.Select(Parameter))}){returns} {Origin(callable.Origin)}");
             _text.AppendLine($"  entry {Block(callable.EntryBlock)}");
 
             foreach (var storage in callable.Storages.OrderBy(storage => storage.Id.Value))
@@ -58,7 +58,7 @@ public static class MirPrinter
                     ? $"parameter {storage.ParameterIndex}"
                     : $"allocate %{storage.AllocationInstruction}";
                 _text.AppendLine(
-                    $"  storage ${storage.Id} {storage.Name}: {storage.Type} [{storage.Kind.ToString().ToLowerInvariant()}, {storage.AliasMode.ToString().ToLowerInvariant()}, {definition}] {Origin(storage.Source)}");
+                    $"  storage ${storage.Id} {storage.Name}: {storage.Type} [{storage.Kind.ToString().ToLowerInvariant()}, {storage.AliasMode.ToString().ToLowerInvariant()}, {definition}] {Origin(storage.Origin)}");
             }
 
             foreach (var resource in callable.Qubits.OrderBy(resource => resource.Id.Value))
@@ -70,7 +70,7 @@ public static class MirPrinter
                     ? "parameter"
                     : $"allocate %{resource.AllocationInstruction}";
                 _text.AppendLine(
-                    $"  resource &{resource.Id} {resource.Name}: {shape} [{resource.Kind.ToString().ToLowerInvariant()}, {definition}] {Origin(resource.Source)}");
+                    $"  resource &{resource.Id} {resource.Name}: {shape} [{resource.Kind.ToString().ToLowerInvariant()}, {definition}] {Origin(resource.Origin)}");
             }
 
             foreach (var block in callable.Blocks.OrderBy(block => block.Id.Value))
@@ -81,10 +81,10 @@ public static class MirPrinter
         {
             var arguments = string.Join(", ", block.Arguments.Select(argument =>
                 $"{Value(argument.Value)}: {argument.Type}"));
-            _text.AppendLine($"  {Block(block.Id)}({arguments}): {Origin(block.Source)}");
+            _text.AppendLine($"  {Block(block.Id)}({arguments}): {Origin(block.Origin)}");
             foreach (var instruction in block.Instructions)
-                _text.AppendLine($"    {Instruction(instruction)} {Origin(instruction.Source)}");
-            _text.AppendLine($"    {Terminator(block.Terminator)} {Origin(block.Terminator.Source)}");
+                _text.AppendLine($"    {Instruction(instruction)} {Origin(instruction.Origin)}");
+            _text.AppendLine($"    {Terminator(block.Terminator)} {Origin(block.Terminator.Origin)}");
         }
 
         private string Instruction(MirInstruction instruction) => instruction switch
@@ -253,13 +253,18 @@ public static class MirPrinter
                 _ => string.Empty,
             };
 
-        private static string Origin(MirSource source)
+        private string Origin(MirOriginRef id)
         {
-            var statement = source.SourceStatementId is int id ? $",stmt={id}" : string.Empty;
-            var span = source.Span is QSpan location
-                ? $",span={location.Start}..{location.End}"
+            var origin = _program.Origins.Require(id);
+            var hir = _program.Origins.ResolveHir(id);
+            var node = hir.HirNodeId is int nodeId ? $",node={nodeId}" : string.Empty;
+            var span = hir.Span is SourceSpan location
+                ? $",span={location}"
                 : string.Empty;
-            return $"@hir(op={source.SourceOperationId}{statement}{span})";
+            var synthesized = origin.Kind == MirOriginKind.Synthesized
+                ? $",synth={origin.SynthesisReason}"
+                : string.Empty;
+            return $"@{id}:hir(op={hir.HirOperationId}{node}{span}{synthesized})";
         }
     }
 }

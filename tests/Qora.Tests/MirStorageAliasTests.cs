@@ -42,8 +42,8 @@ public sealed class MirStorageAliasTests
         var rightActual = Assert.IsType<MirClassicalCallOperand>(call.Operands[1]).Value;
         Assert.Equal(leftActual, rightActual);
 
-        var left = Complete(formalStorages[0].Id);
-        var right = Complete(formalStorages[1].Id);
+        var left = Complete(program, observe, formalStorages[0].Id);
+        var right = Complete(program, observe, formalStorages[1].Id);
         Assert.True(MirStorageAliasAnalysis.MayAlias(observe, left, right));
     }
 
@@ -81,16 +81,16 @@ public sealed class MirStorageAliasTests
 
         Assert.False(MirStorageAliasAnalysis.MayAlias(
             contracts,
-            Complete(writable.Id),
-            Complete(consumed.Id)));
+            Complete(program, contracts, writable.Id),
+            Complete(program, contracts, consumed.Id)));
         Assert.False(MirStorageAliasAnalysis.MayAlias(
             contracts,
-            Complete(writable.Id),
-            Complete(shared.Id)));
+            Complete(program, contracts, writable.Id),
+            Complete(program, contracts, shared.Id)));
         Assert.False(MirStorageAliasAnalysis.MayAlias(
             contracts,
-            Complete(local.Id),
-            Complete(shared.Id)));
+            Complete(program, contracts, local.Id),
+            Complete(program, contracts, shared.Id)));
     }
 
     [Fact]
@@ -108,12 +108,12 @@ public sealed class MirStorageAliasTests
 
         Assert.True(MirStorageAliasAnalysis.MayAlias(
             main,
-            new MirStorageProvenance(Array.Empty<MirStorageId>(), IsComplete: false),
-            Complete(storages[1].Id)));
+            new MirStorageProvenance(Array.Empty<MirStorageRef>(), IsComplete: false),
+            Complete(program, main, storages[1].Id)));
         Assert.True(MirStorageAliasAnalysis.MayAlias(
             main,
-            Complete(new MirStorageId(int.MaxValue)),
-            Complete(storages[1].Id)));
+            Complete(program, main, new MirStorageId(int.MaxValue)),
+            Complete(program, main, storages[1].Id)));
     }
 
     [Fact]
@@ -131,13 +131,12 @@ public sealed class MirStorageAliasTests
         var storage = Assert.Single(inspect.Storages);
         var malformedStorage = storage with { AliasMode = MirStorageAliasMode.ExclusiveParameter };
         var malformedCallable = inspect with { Storages = new[] { malformedStorage } };
-        var malformedProgram = program with
-        {
-            Revision = program.Revision + 1,
-            Callables = program.Callables
+        var malformedProgram = new MirProgram(
+            program.SnapshotId,
+            program.Origins,
+            program.Callables
                 .Select(callable => callable.Id == inspect.Id ? malformedCallable : callable)
-                .ToArray(),
-        };
+                .ToArray());
 
         Assert.Contains(
             QoraMirVerifier.Verify(malformedProgram),
@@ -178,15 +177,14 @@ public sealed class MirStorageAliasTests
                 .ToArray(),
         };
         var malformedMain = ReplaceInstruction(main, aliasedCall);
-        var malformedProgram = program with
-        {
-            Revision = program.Revision + 1,
-            Callables = program.Callables
+        var malformedProgram = new MirProgram(
+            program.SnapshotId,
+            program.Origins,
+            program.Callables
                 .Select(callable => callable.Id == main.Id
                     ? malformedMain
                     : callable)
-                .ToArray(),
-        };
+                .ToArray());
 
         var error = Assert.Single(
             QoraMirVerifier.Verify(malformedProgram),
@@ -194,8 +192,13 @@ public sealed class MirStorageAliasTests
         Assert.Contains("operands 0 and 1", error.Message);
     }
 
-    private static MirStorageProvenance Complete(MirStorageId storage) =>
-        new(new[] { storage }, IsComplete: true);
+    private static MirStorageProvenance Complete(
+        MirProgram program,
+        MirCallable callable,
+        MirStorageId storage) =>
+        new(
+            new[] { new MirStorageRef(program.SnapshotId, callable.Id, storage) },
+            IsComplete: true);
 
     private static MirArrayStorage StorageAt(MirCallable callable, int parameterIndex) =>
         Assert.Single(
@@ -206,9 +209,9 @@ public sealed class MirStorageAliasTests
     {
         var result = Compiler.Compile(source);
         Assert.True(
-            result.Success,
-            string.Join(" | ", result.Errors.Select(error => $"{error.Code}: {error.Message}")));
-        return Assert.IsType<MirProgram>(result.Mir);
+            result.Succeeded,
+            string.Join(" | ", result.Diagnostics.Select(diagnostic => diagnostic.Error).ToList().Select(error => $"{error.Code}: {error.Message}")));
+        return Assert.IsType<MirProgram>(result.Mir?.Program);
     }
 
     private static MirCallable Callable(MirProgram program, string name) =>

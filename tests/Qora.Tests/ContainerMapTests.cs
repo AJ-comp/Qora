@@ -14,9 +14,9 @@ public class ContainerMapTests
 {
     private static QOperation CompileMain(string src)
     {
-        var r = QoraParser.Parse(src);
-        Assert.True(r.Success, string.Join(" | ", r.Errors));
-        return r.Ir!.Operations.Single(o => o.Name == "Main");
+        var r = QoraCompiler.Compile(src);
+        Assert.True(r.Succeeded, string.Join(" | ", r.Diagnostics.Select(diagnostic => diagnostic.Error).ToList()));
+        return r.Hir.Resolved!.Program.Operations.Single(o => o.Name == "Main");
     }
 
     // --- 1. nesting chains: top-level = empty; in-if = [if]; nested = [outer, inner] outermost first;

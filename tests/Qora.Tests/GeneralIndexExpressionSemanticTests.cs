@@ -23,17 +23,31 @@ public class GeneralIndexExpressionSemanticTests
             }
             """);
 
-        Assert.False(compiled.Success);
-        Assert.Empty(compiled.Qasm);
-        Assert.Single(compiled.Errors, error => error.Code == "QSEM030");
-        Assert.DoesNotContain(compiled.Errors, error => error.Code is "CE0001" or "QSEM005" or "QSEM007");
+        Assert.False(compiled.Succeeded);
+        Assert.Null(compiled.Targets.OpenQasm);
+        var targetDiagnostic = Assert.Single(
+            compiled.Diagnostics,
+            diagnostic =>
+                diagnostic.Stage == CompilationStage.OpenQasm
+                && diagnostic.Error.Code == "QSEM030");
+        var targetOrigin = Assert.IsType<DiagnosticOrigin.Target>(
+            targetDiagnostic.Origin);
+        Assert.Equal(TargetBackend.OpenQasm, targetOrigin.Backend);
+        Assert.Equal(
+            compiled.Hir.AdjointMaterialized!.Id,
+            Assert.IsType<TargetDiagnosticInput.Hir>(targetOrigin.Input).Snapshot);
+        Assert.DoesNotContain(compiled.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(), error => error.Code is "CE0001" or "QSEM005" or "QSEM007");
 
-        var commonErrors = QoraValidator.Validate(Assert.IsType<QProgram>(compiled.Ir), out var commonModel);
-        Assert.DoesNotContain(commonErrors, error => error.Code == "QSEM030");
-        var fact = Assert.Single(Assert.IsType<SemanticModel>(commonModel).UnprovenIndexes);
+        Assert.DoesNotContain(
+            compiled.Diagnostics,
+            diagnostic =>
+                diagnostic.Stage == CompilationStage.HirValidation
+                && diagnostic.Error.Code == "QSEM030");
+        var commonModel = compiled.Hir.ResolvedValidation!.Model;
+        var fact = Assert.Single(commonModel.UnprovenIndexes);
         Assert.Equal(("Main", "xs", "idx()"), (fact.Op, fact.Array, fact.Index));
 
-        var targetError = Assert.Single(OpenQasmBoundsValidation.Run(commonModel!));
+        var targetError = Assert.Single(OpenQasmBoundsValidation.Run(commonModel));
         Assert.Equal("QSEM030", targetError.Code);
         Assert.Contains("var i: int = idx();", targetError.Message);
         Assert.True(fact.Span.HasValue);
@@ -54,11 +68,11 @@ public class GeneralIndexExpressionSemanticTests
             }
             """);
 
-        Assert.False(compiled.Success);
-        Assert.Contains(compiled.Errors,
+        Assert.False(compiled.Succeeded);
+        Assert.Contains(compiled.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(),
             error => error.Code == "QSEM016" && error.Message.Contains("classical integer index"));
-        Assert.DoesNotContain(compiled.Errors, error => error.Code == "QSEM030");
-        Assert.Empty(compiled.Semantics!.UnprovenIndexes);
+        Assert.DoesNotContain(compiled.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(), error => error.Code == "QSEM030");
+        Assert.Empty(compiled.Hir.ResolvedValidation!.Model.UnprovenIndexes);
     }
 
     [Fact]
@@ -74,8 +88,8 @@ public class GeneralIndexExpressionSemanticTests
                 H(q[idx()]);
             }
             """);
-        Assert.Contains(badArity.Errors, error => error.Code == "QSEM006");
-        Assert.DoesNotContain(badArity.Errors, error => error.Code == "QSEM030");
+        Assert.Contains(badArity.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(), error => error.Code == "QSEM006");
+        Assert.DoesNotContain(badArity.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(), error => error.Code == "QSEM030");
 
         var voidCall = Compiler.Compile("""
             operation pick() {
@@ -86,8 +100,8 @@ public class GeneralIndexExpressionSemanticTests
                 H(q[pick()]);
             }
             """);
-        Assert.Contains(voidCall.Errors, error => error.Code == "QSEM005");
-        Assert.DoesNotContain(voidCall.Errors, error => error.Code == "QSEM030");
+        Assert.Contains(voidCall.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(), error => error.Code == "QSEM005");
+        Assert.DoesNotContain(voidCall.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(), error => error.Code == "QSEM030");
     }
 
     [Fact]
@@ -104,9 +118,9 @@ public class GeneralIndexExpressionSemanticTests
             }
             """);
 
-        Assert.False(compiled.Success);
-        Assert.Single(compiled.Errors, error => error.Code == "QSEM030");
-        Assert.DoesNotContain(compiled.Errors, error => error.Code == "QSEM005");
+        Assert.False(compiled.Succeeded);
+        Assert.Single(compiled.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(), error => error.Code == "QSEM030");
+        Assert.DoesNotContain(compiled.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(), error => error.Code == "QSEM005");
     }
 
     [Fact]
@@ -124,7 +138,7 @@ public class GeneralIndexExpressionSemanticTests
             }
             """);
 
-        Assert.Contains(compiled.Errors,
+        Assert.Contains(compiled.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(),
             error => error.Code == "QSEM016" && error.Message.Contains("ys[99]"));
     }
 
@@ -143,7 +157,7 @@ public class GeneralIndexExpressionSemanticTests
             }
             """);
 
-        Assert.Contains(compiled.Errors,
+        Assert.Contains(compiled.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(),
             error => error.Code == "QSEM016" && error.Message.Contains("ys[99]"));
     }
 
@@ -157,12 +171,12 @@ public class GeneralIndexExpressionSemanticTests
             }
             """);
 
-        Assert.Contains(compiled.Errors, error => error.Code == "QSEM010");
-        Assert.Contains(compiled.Errors, error => error.Code == "QSEM030");
+        Assert.Contains(compiled.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(), error => error.Code == "QSEM010");
+        Assert.Contains(compiled.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(), error => error.Code == "QSEM030");
     }
 
     [Fact]
-    public void AppliesTheQasmPolicyBeforeAnUncalledGenericCanBeDropped()
+    public void OpenQasmPolicyReadsTheFinalSpecializedProgramAfterDeadGenericsAreDropped()
     {
         var compiled = Compiler.Compile("""
             operation Dead(q: Qubit[], n: int) {
@@ -175,9 +189,15 @@ public class GeneralIndexExpressionSemanticTests
             }
             """);
 
-        Assert.False(compiled.Success);
-        Assert.Contains(compiled.Errors, error => error.Code == "QSEM030");
-        Assert.Contains(compiled.Semantics!.UnprovenIndexes, fact => fact.Op == "Dead");
+        Assert.True(compiled.Succeeded);
+        Assert.DoesNotContain(
+            compiled.Diagnostics,
+            diagnostic => diagnostic.Error.Code == "QSEM030");
+        Assert.Contains(compiled.Hir.ResolvedValidation!.Model.UnprovenIndexes, fact => fact.Op == "Dead");
+        Assert.DoesNotContain(
+            compiled.Hir.Specialized!.Program.Operations,
+            operation => operation.Name == "Dead");
+        Assert.NotNull(compiled.Targets.OpenQasm);
     }
 
     [Fact]
@@ -194,12 +214,12 @@ public class GeneralIndexExpressionSemanticTests
                 var value: int = xs[CountBits(flags)];
             }
             """);
-        Assert.Contains(compiled.Errors, error => error.Code == "QSEM030");
+        Assert.Contains(compiled.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(), error => error.Code == "QSEM030");
 
-        var mono = Monomorphizer.Run(Assert.IsType<QProgram>(compiled.Ir));
-        var specialization = Assert.Single(mono.Operations,
+        var mono = Monomorphizer.Run(Assert.IsType<QProgram>(compiled.Hir.Resolved!.Program));
+        var specialization = Assert.Single(mono.Program.Operations,
             operation => operation.DisplayName == "CountBits" && operation.Params[0].RegisterSize == 2);
-        var main = Assert.Single(mono.Operations, operation => operation.Name == "Main");
+        var main = Assert.Single(mono.Program.Operations, operation => operation.Name == "Main");
         var value = Assert.Single(main.Body.OfType<QDecl>(), declaration => declaration.Name == "value");
         var indexedRead = Assert.IsType<QIndexNode>(Assert.IsType<QText>(value.Value).Tree);
         var call = Assert.IsType<QCallNode>(indexedRead.Index);
@@ -209,22 +229,18 @@ public class GeneralIndexExpressionSemanticTests
     }
 
     [Fact]
-    public void RefusesToRunTheQasmBackendWithoutASemanticModel()
+    public void QasmBackendRequiresAnExplicitSemanticContext()
     {
-        var backend = QasmBackend.Run(
-            new QProgram(Array.Empty<QOperation>()),
-            Array.Empty<string>(),
-            semantics: null);
-
-        var error = Assert.Single(backend.Errors);
-        Assert.Equal("QINTERNAL", error.Code);
-        Assert.Empty(backend.Qasm);
+        Assert.Throws<ArgumentNullException>(() =>
+            QasmBackend.Run(
+                semantics: null!,
+                Array.Empty<string>()));
     }
 
     [Fact]
     public void ConvertsASpanlessFactToASpanlessQasmDiagnostic()
     {
-        var model = new SemanticModel();
+        var model = new HirSemanticModel();
         model.AddUnprovenIndex(new UnprovenIndex("Imported", "xs", "idx()", null, null));
 
         var error = Assert.Single(OpenQasmBoundsValidation.Run(model));

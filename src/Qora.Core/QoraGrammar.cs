@@ -6,7 +6,7 @@ using Janglim.FrontEnd.RegularGrammar;
 namespace Qora;
 
 /// <summary>
-/// Qora v0.30 — a Q#/C#-flavored quantum language on the Janglim engine.
+/// Qora v0.31 — a Q#/C#-flavored quantum language on the Janglim engine.
 ///
 ///   operation Bell(q: Qubit[]) {        // a subroutine, with trailing-type parameters (name: T)
 ///       H(q[0]);
@@ -125,7 +125,7 @@ namespace Qora;
 /// The OpenQASM policy pass — not the common bounds walk — turns that final fact into QSEM030.
 /// Callable parameters are read-only borrows by default. An operation spells mutable borrowing as
 /// <c>var values: int[]</c> / <c>Update(var values)</c>, ownership transfer as <c>move values</c>, and both
-/// axes as <c>move var values</c>; legacy <c>inout</c> remains a compatibility alias for <c>var</c>.
+/// axes as <c>move var values</c>.
 /// Mutable access is limited to reference-capable classical arrays, while read-only ownership transfer also
 /// accepts whole bit/qubit arrays and whole qubit bindings. Functions stay borrowed and read-only.
 /// User function and operation calls now validate scalar arguments against each declared parameter type.
@@ -147,9 +147,6 @@ public class QoraGrammar : Grammar
     public Terminal Move { get; } = new Terminal(TokenType.Keyword, "move", false);
     public Terminal Function { get; } = new Terminal(TokenType.Keyword, "function", false);
     public Terminal Return { get; } = new Terminal(TokenType.Keyword, "return", false);
-    // Legacy spelling retained as a parser-compatible alias for `var` mutable borrowing. Meaning=true
-    // lets lowering distinguish old source while the canonical IR printer emits only the new spelling.
-    public Terminal InOut { get; } = new Terminal(TokenType.Keyword, "inout", "inout", true, false);
     public Terminal If { get; } = new Terminal(TokenType.Keyword, "if", false);
     public Terminal For { get; } = new Terminal(TokenType.Keyword, "for", false);
     public Terminal In { get; } = new Terminal(TokenType.Keyword, "in", false);
@@ -279,7 +276,6 @@ public class QoraGrammar : Grammar
     public static MeaningUnit ArrayNewM { get; } = new MeaningUnit("ArrayNew");
     public static MeaningUnit UseM { get; } = new MeaningUnit("Use");
     public static MeaningUnit GateM { get; } = new MeaningUnit("Gate");
-    public static MeaningUnit InOutArgM { get; } = new MeaningUnit("InOutArg");
     public static MeaningUnit MutableArgM { get; } = new MeaningUnit("MutableArg");
     public static MeaningUnit MovedArgM { get; } = new MeaningUnit("MovedArg");
     public static MeaningUnit MovedMutableArgM { get; } = new MeaningUnit("MovedMutableArg");
@@ -332,10 +328,6 @@ public class QoraGrammar : Grammar
         param.AddItem(Ident + Colon + qubitArrayType, ParamM);   // q: Qubit[]
         param.AddItem(Ident + Colon + typeName, ParamM);         // n: int
         param.AddItem(Ident + Colon + arrayType, ParamM);        // a: int[]
-        param.AddItem(InOut + Ident + Colon + Qubit, ParamM);            // inout q: Qubit (semantic error)
-        param.AddItem(InOut + Ident + Colon + qubitArrayType, ParamM);   // inout q: Qubit[] (semantic error)
-        param.AddItem(InOut + Ident + Colon + typeName, ParamM);         // inout n: int (semantic error)
-        param.AddItem(InOut + Ident + Colon + arrayType, ParamM);        // inout a: int[]
         param.AddItem(Var + Ident + Colon + Qubit, MutableParamM);            // var q: Qubit (semantic error)
         param.AddItem(Var + Ident + Colon + qubitArrayType, MutableParamM);   // var q: Qubit[] (semantic error)
         param.AddItem(Var + Ident + Colon + typeName, MutableParamM);         // var n: int (semantic error)
@@ -372,7 +364,6 @@ public class QoraGrammar : Grammar
         // Every argument is an expression. Lowering still preserves a lone indexed reference as a
         // structured argument, allowing validation to decide whether its base is a qubit or T[].
         arg.AddItem(expr);
-        arg.AddItem(InOut + expr, InOutArgM);
         arg.AddItem(Var + expr, MutableArgM);
         arg.AddItem(Move + expr, MovedArgM);
         arg.AddItem(Move + Var + expr, MovedMutableArgM);

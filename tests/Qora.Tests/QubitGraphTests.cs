@@ -14,14 +14,17 @@ namespace Qora.Tests;
 /// </summary>
 public class QubitGraphTests
 {
-    private static (QoraParseResult R, SemanticModel M) Compile(string src)
+    private static (Compilation R, HirSemanticModel M) Compile(string src)
     {
-        var r = QoraParser.Parse(src);
-        Assert.True(r.Success, string.Join(" | ", r.Errors));
-        return (r, r.Semantics!);
+        var r = QoraCompiler.Compile(src);
+        Assert.True(
+            r.Succeeded,
+            string.Join(" | ", r.Diagnostics.Select(diagnostic => diagnostic.Error)));
+        return (r, r.Hir.EffectAnalysis!.Model);
     }
 
-    private static QOperation Op(QoraParseResult r, string name) => r.Ir!.Operations.Single(o => o.Name == name);
+    private static QOperation Op(Compilation r, string name) =>
+        r.Hir.EffectAnalysis!.Program.Operations.Single(o => o.Name == name);
     private static QubitRef At(string reg, int i) => new(reg, i);
     private static QubitRef Whole(string reg) => new(reg, null);
 
@@ -94,7 +97,7 @@ public class QubitGraphTests
                 Within: new List<QStmt> { w },
                 Apply: new List<QStmt> { G("CNOT", new QQubitArg("a", "0"), new QQubitArg("d", "0")) }),
         });
-        var m = new SemanticModel();
+        var m = new HirSemanticModel();
         EffectAnalysis.Run(new QProgram(new List<QOperation> { op }), m);
         var g = m.Graph(op.Id)!;
         var events = m.QubitEvents(op.Id);
@@ -114,15 +117,15 @@ public class QubitGraphTests
     public void SameStatementDoubleWriteThenBlanketRefCompiles()
     {
         var (r1, _) = Compile("operation Main(){ use q=Qubit[2]; SWAP(q[0], q[1]); X(q); }");
-        Assert.True(r1.Success);
+        Assert.True(r1.Succeeded);
 
         var (r2, _) = Compile(
             "operation Two(a: Qubit, b: Qubit){ X(a); X(b); }\n" +
             "operation Main(){ use q=Qubit[2]; Two(q[0], q[1]); X(q); }");
-        Assert.True(r2.Success);
+        Assert.True(r2.Succeeded);
 
         var (r3, _) = Compile("operation Main(){ use q=Qubit[2]; SWAP(q[0], q[1]); for i in 0..1 { X(q[i]); } }");
-        Assert.True(r3.Success);
+        Assert.True(r3.Succeeded);
     }
 
     // --- 4b. register declarations are HOISTED (like the emitter's declaration hoisting): a gate may
@@ -132,7 +135,7 @@ public class QubitGraphTests
     public void GateBeforeItsUseWritesOntoTheHoistedBirth()
     {
         var (r, m) = Compile("operation Main(){ X(q[0]); use q=Qubit[1]; }");
-        Assert.True(r.Success);
+        Assert.True(r.Succeeded);
         var main = Op(r, "Main");
         var g = m.Graph(main.Id)!;
         var events = m.QubitEvents(main.Id);

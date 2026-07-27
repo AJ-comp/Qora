@@ -15,7 +15,7 @@ internal static class OwnershipValidation
     public static void Validate(
         QOperation op,
         Scope root,
-        IReadOnlyDictionary<IReadOnlyList<QStmt>, Scope> scopeOf,
+        HirScopeGraph scopeGraph,
         IReadOnlyDictionary<int, IReadOnlyList<Symbol>> validMoves,
         List<QoraError> errors,
         bool deferUnknownControlFlow = false)
@@ -60,9 +60,9 @@ internal static class OwnershipValidation
 
                     case QIf conditional:
                     {
-                        var conditionScope = scopeOf.TryGetValue(conditional.Then, out var thenScope)
-                            ? thenScope.ParentScope ?? root
-                            : root;
+                        var conditionScope = scopeGraph.RequireScope(new HirScopeSite(
+                            conditional.Id,
+                            HirScopeSiteRole.IfCondition));
                         var condition = ConditionValue(conditional.Cond.Tree, conditionScope);
                         if (deferUnknownControlFlow && condition is null)
                             break;
@@ -143,12 +143,40 @@ internal static class OwnershipValidation
             QStmt owner,
             bool conditionAfterBody)
         {
-            var enclosingScope = scopeOf.TryGetValue(body, out var bodyScope)
-                ? bodyScope.ParentScope?.ParentScope ?? bodyScope.ParentScope ?? root
-                : root;
-            var conditionScope = owner is QRepeat && bodyScope is not null
-                ? bodyScope
-                : bodyScope?.ParentScope ?? root;
+            var bodyRole = owner switch
+            {
+                QFor => HirScopeSiteRole.ForBody,
+                QWhile => HirScopeSiteRole.WhileBody,
+                QRepeat => HirScopeSiteRole.RepeatBody,
+                _ => throw new InvalidOperationException(
+                    $"QINTERNAL: `{owner.GetType().Name}` is not a loop scope owner"),
+            };
+            var bodyScope = scopeGraph.RequireScope(new HirScopeSite(owner.Id, bodyRole));
+            Scope ParentOf(Scope child) =>
+                child.ParentScope
+                ?? throw new InvalidOperationException(
+                    $"QINTERNAL: HIR scope {child.Id} has no containment parent");
+            var enclosingScope = owner switch
+            {
+                QFor => ParentOf(scopeGraph.RequireScope(new HirScopeSite(
+                    owner.Id,
+                    HirScopeSiteRole.ForBinder))),
+                QWhile => ParentOf(scopeGraph.RequireScope(new HirScopeSite(
+                    owner.Id,
+                    HirScopeSiteRole.WhileCondition))),
+                QRepeat => ParentOf(bodyScope),
+                _ => root,
+            };
+            var conditionScope = owner switch
+            {
+                QWhile => scopeGraph.RequireScope(new HirScopeSite(
+                    owner.Id,
+                    HirScopeSiteRole.WhileCondition)),
+                QRepeat => scopeGraph.RequireScope(new HirScopeSite(
+                    owner.Id,
+                    HirScopeSiteRole.RepeatCondition)),
+                _ => enclosingScope,
+            };
             var condition = owner switch
             {
                 QWhile loop => ConditionValue(loop.Cond.Tree, conditionScope),
@@ -257,10 +285,20 @@ internal static class OwnershipValidation
 
         HashSet<SymbolId> LoopLocalIds(IReadOnlyList<QStmt> body, QStmt owner)
         {
-            if (!scopeOf.TryGetValue(body, out var bodyScope)) return new HashSet<SymbolId>();
+            var bodyRole = owner switch
+            {
+                QFor => HirScopeSiteRole.ForBody,
+                QWhile => HirScopeSiteRole.WhileBody,
+                QRepeat => HirScopeSiteRole.RepeatBody,
+                _ => throw new InvalidOperationException(
+                    $"QINTERNAL: `{owner.GetType().Name}` is not a loop scope owner"),
+            };
+            var bodyScope = scopeGraph.RequireScope(new HirScopeSite(owner.Id, bodyRole));
             var ids = bodyScope.AllSymbols().Select(symbol => symbol.Id).ToHashSet();
             if (owner is QFor
-                && bodyScope.ParentScope is { } loopScope)
+                && scopeGraph.RequireScope(new HirScopeSite(
+                    owner.Id,
+                    HirScopeSiteRole.ForBinder)) is { } loopScope)
                 foreach (var symbol in loopScope.LocalSymbols)
                     if (symbol.DeclarationNodeId == owner.Id)
                         ids.Add(symbol.Id);
@@ -321,6 +359,6 @@ internal static class OwnershipValidation
     /// <summary>Return a definite compile-time condition, or null when both paths remain possible.</summary>
     private static bool? ConditionValue(QNode? node, Scope scope) => BooleanFolder.Fold(node, scope);
 
-    private static void Add(List<QoraError> errors, string code, string message, QSpan? span) =>
-        errors.Add(new QoraError(message, code, span?.Start ?? -1, span?.End ?? -1));
+    private static void Add(List<QoraError> errors, string code, string message, SourceSpan? span) =>
+        errors.Add(new QoraError(message, code, span));
 }
