@@ -14,9 +14,9 @@ internal interface IHirSemanticContext
     /// <summary>The immutable semantic facts produced for the validated ancestor HIR snapshot.</summary>
     HirSemanticModel SourceModel { get; }
 
-    Symbol? FindSymbol(int nodeId);
+    Symbol? FindSymbol(HirNodeId nodeId);
 
-    Scope? FindRootScope(int operationId);
+    Scope? FindRootScope(HirNodeId callableId);
 
     Scope? FindScope(HirScopeSite site);
 }

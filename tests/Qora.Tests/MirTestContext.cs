@@ -1,4 +1,5 @@
 using Qora.Compiler;
+using Qora.Ir;
 using Qora.Ir.Mir;
 
 namespace Qora.Tests;
@@ -30,24 +31,29 @@ internal sealed class MirTestContext
         new(SnapshotId, index);
 
     public MirOriginTable Origins(
-        params (int OperationId, int NodeId)[] hirOrigins)
+        params (HirNodeId CallableId, HirNodeId NodeId)[] hirOrigins)
     {
         var sources = hirOrigins.Length == 0
-            ? new[] { (OperationId: 1, NodeId: 1) }
+            ? new[]
+            {
+                (
+                    CallableId: new HirNodeId(1),
+                    NodeId: new HirNodeId(1)),
+            }
             : hirOrigins;
         return new MirOriginTable(
             SnapshotId,
             sources.Select(
                 (source, index) => MirOrigin.FromHir(
                     Origin(index),
-                    source.OperationId,
+                    source.CallableId,
                     source.NodeId)));
     }
 
     public MirProgram Program(
         MirCallableId entryPoint,
         IEnumerable<MirCallable> callables,
-        params (int OperationId, int NodeId)[] hirOrigins) =>
+        params (HirNodeId CallableId, HirNodeId NodeId)[] hirOrigins) =>
         new(
             SnapshotId,
             Origins(hirOrigins),
@@ -71,8 +77,8 @@ internal sealed class MirTestContext
     public MirStorageRef Storage(MirCallableId callable, MirStorageId storage) =>
         new(SnapshotId, callable, storage);
 
-    public MirQubitResourceRef Qubit(
+    public MirQubitRef Qubit(
         MirCallableId callable,
-        MirQubitResourceId resource) =>
-        new(SnapshotId, callable, resource);
+        MirQubit qubit) =>
+        new(SnapshotId, callable, qubit.Key);
 }

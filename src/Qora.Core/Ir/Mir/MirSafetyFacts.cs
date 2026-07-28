@@ -115,7 +115,7 @@ public sealed class MirSafetyFacts
     internal static MirSafetyFacts FromHir(
         MirSnapshotId snapshotId,
         HirSemanticModel semantics,
-        IReadOnlyDictionary<HirIndexAccessId, MirIndexedAccessRef> loweredSites)
+        IReadOnlyDictionary<HirNodeId, MirIndexedAccessRef> loweredSites)
     {
         ArgumentNullException.ThrowIfNull(semantics);
         ArgumentNullException.ThrowIfNull(loweredSites);

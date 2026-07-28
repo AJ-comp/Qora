@@ -2,10 +2,11 @@ namespace Qora.Ir.Passes;
 
 /// <summary>
 /// Stable identity of one semantic symbol inside a <see cref="HirScopeGraph"/> snapshot. This is
-/// deliberately distinct from a QIR declaration node Id: a namespace can merge declarations from several
-/// files and synthetic/built-in symbols have no declaring QNode at all. Compiler stages may rebuild the
+/// deliberately distinct from a HIR declaration node Id: a namespace can merge declarations from several
+/// files and synthetic/built-in symbols have no declaring HIR node at all. Compiler stages may rebuild the
 /// graph after structural rewrites; cross-stage references therefore use the preserved declaration node Id
-/// (<see cref="Symbol.DeclarationNodeId"/> / <see cref="QCallNode.CalleeOpId"/>), not a graph-local SymbolId.
+/// (<see cref="Symbol.DeclarationNodeId"/> / <see cref="HirCallExpression.CalleeId"/>), not a graph-local
+/// SymbolId.
 /// </summary>
 public readonly record struct SymbolId(int Value)
 {
@@ -16,18 +17,6 @@ public readonly record struct SymbolId(int Value)
 public readonly record struct ScopeId(int Value)
 {
     public override string ToString() => Value.ToString();
-}
-
-internal static class SemanticIds
-{
-    private static int _nextSymbol;
-    private static int _nextScope;
-
-    internal static SymbolId NextSymbol() =>
-        new(System.Threading.Interlocked.Increment(ref _nextSymbol));
-
-    internal static ScopeId NextScope() =>
-        new(System.Threading.Interlocked.Increment(ref _nextScope));
 }
 
 /// <summary>Where a semantic symbol came from.</summary>
@@ -93,7 +82,7 @@ public enum HirScopeSiteRole
 }
 
 /// <summary>A stable HIR node-and-role key for the scope introduced at that source site.</summary>
-public readonly record struct HirScopeSite(int OwnerNodeId, HirScopeSiteRole Role);
+public readonly record struct HirScopeSite(HirNodeId OwnerNodeId, HirScopeSiteRole Role);
 
 /// <summary>
 /// One name-resolution environment in the unified HIR scope graph.
@@ -114,7 +103,7 @@ public sealed class Scope
         new(StringComparer.Ordinal);
     private readonly HirScopeGraph _graph;
 
-    public ScopeId Id { get; } = SemanticIds.NextScope();
+    public ScopeId Id { get; }
     public HirScopeKind Kind { get; }
     public ScopeId? ParentScopeId { get; }
     public SymbolId? DeclaringSymbolId { get; }
@@ -122,11 +111,13 @@ public sealed class Scope
 
     internal Scope(
         HirScopeGraph graph,
+        ScopeId id,
         HirScopeKind kind,
         ScopeId? parentScopeId,
         SymbolId? declaringSymbolId)
     {
         _graph = graph;
+        Id = id;
         Kind = kind;
         ParentScopeId = parentScopeId;
         DeclaringSymbolId = declaringSymbolId;
@@ -232,25 +223,32 @@ public sealed class HirScopeGraph
 {
     private readonly Dictionary<SymbolId, Symbol> _symbols = new();
     private readonly Dictionary<ScopeId, Scope> _scopes = new();
-    private readonly Dictionary<int, SymbolId> _symbolByDeclaration = new();
+    private readonly Dictionary<HirNodeId, SymbolId> _symbolByDeclaration = new();
     private readonly Dictionary<ScopeId, List<ScopeId>> _childrenByParent = new();
     private readonly Dictionary<(SymbolId Symbol, HirScopeKind Kind), ScopeId> _ownedScopes = new();
     private readonly Dictionary<string, ScopeId> _namespaceByPath =
         new(StringComparer.Ordinal);
     private readonly Dictionary<HirScopeSite, ScopeId> _scopeBySite = new();
     private readonly Dictionary<ScopeId, List<HirScopeEdge>> _lookupEdges = new();
-    private readonly Dictionary<int, Scope> _callableScopeByDeclaration = new();
+    private readonly Dictionary<HirNodeId, Scope> _callableScopeByDeclaration = new();
     private IReadOnlyDictionary<SymbolId, Symbol>? _symbolsView;
     private IReadOnlyDictionary<ScopeId, Scope>? _scopesView;
-    private IReadOnlyDictionary<int, Scope>? _callableScopesView;
+    private IReadOnlyDictionary<HirNodeId, Scope>? _callableScopesView;
     private bool _isSealed;
+    private int _nextSymbolId;
+    private int _nextScopeId;
 
     public Scope RootScope { get; }
     public bool IsSealed => _isSealed;
 
     internal HirScopeGraph()
     {
-        RootScope = new Scope(this, HirScopeKind.Program, null, null);
+        RootScope = new Scope(
+            this,
+            NextScopeId(),
+            HirScopeKind.Program,
+            null,
+            null);
         _scopes.Add(RootScope.Id, RootScope);
         _namespaceByPath[string.Empty] = RootScope.Id;
     }
@@ -279,7 +277,7 @@ public sealed class HirScopeGraph
     }
 
     /// <summary>Every callable body scope keyed by its declaration node Id.</summary>
-    public IReadOnlyDictionary<int, Scope> CallableScopes
+    public IReadOnlyDictionary<HirNodeId, Scope> CallableScopes
     {
         get
         {
@@ -294,7 +292,7 @@ public sealed class HirScopeGraph
     public Scope? FindScope(ScopeId id) =>
         _scopes.TryGetValue(id, out var scope) ? scope : null;
 
-    public Symbol? FindDeclaration(int declarationNodeId) =>
+    public Symbol? FindDeclaration(HirNodeId declarationNodeId) =>
         _symbolByDeclaration.TryGetValue(declarationNodeId, out var id)
             ? FindSymbol(id)
             : null;
@@ -307,7 +305,7 @@ public sealed class HirScopeGraph
         ?? throw new InvalidOperationException(
             $"QINTERNAL: HIR scope graph has no scope for site {site}");
 
-    public Scope? FindCallableScope(int declarationNodeId) =>
+    public Scope? FindCallableScope(HirNodeId declarationNodeId) =>
         _callableScopeByDeclaration.TryGetValue(declarationNodeId, out var scope)
             ? scope
             : null;
@@ -365,7 +363,7 @@ public sealed class HirScopeGraph
             owner = next;
         }
 
-        return LookupMember(owner.Id, segments[^1], SymbolKind.Operation);
+        return LookupMember(owner.Id, segments[^1], SymbolKind.Callable);
     }
 
     /// <summary>
@@ -380,7 +378,7 @@ public sealed class HirScopeGraph
         {
             if (scope.Kind is not (HirScopeKind.Namespace or HirScopeKind.Program))
                 continue;
-            if (LookupMember(scope.Id, name, SymbolKind.Operation) is { } callable)
+            if (LookupMember(scope.Id, name, SymbolKind.Callable) is { } callable)
                 return callable;
         }
         return null;
@@ -476,7 +474,7 @@ public sealed class HirScopeGraph
                 continue;
             }
 
-            var created = new Symbol(
+            var created = CreateSymbol(
                 owner.Id,
                 segment,
                 SymbolKind.Namespace,
@@ -496,6 +494,28 @@ public sealed class HirScopeGraph
         RequireOpen();
         RegisterSymbol(symbol);
         _scopes[symbol.DeclaringScopeId].Bind(symbol);
+    }
+
+    /// <summary>
+    /// Bind one concrete HIR declaration node to its semantic symbol. This relationship is graph-owned
+    /// because it is not one-to-one: repeated namespace blocks have distinct declaration node Ids while
+    /// all naming the same merged namespace symbol.
+    /// </summary>
+    internal void BindDeclaration(HirNodeId declarationNodeId, SymbolId symbolId)
+    {
+        RequireOpen();
+        if (!_symbols.ContainsKey(symbolId))
+            throw new InvalidOperationException(
+                $"QINTERNAL: declaration node {declarationNodeId} names unknown semantic symbol {symbolId}");
+
+        if (_symbolByDeclaration.TryGetValue(declarationNodeId, out var existing))
+        {
+            if (existing == symbolId) return;
+            throw new InvalidOperationException(
+                $"QINTERNAL: declaration node {declarationNodeId} is already bound to semantic symbol {existing}");
+        }
+
+        _symbolByDeclaration.Add(declarationNodeId, symbolId);
     }
 
     internal Scope CreateScope(
@@ -523,7 +543,7 @@ public sealed class HirScopeGraph
             var expectedDeclarationKind = kind switch
             {
                 HirScopeKind.Namespace => SymbolKind.Namespace,
-                HirScopeKind.Callable => SymbolKind.Operation,
+                HirScopeKind.Callable => SymbolKind.Callable,
                 _ => (SymbolKind?)null,
             };
             if (expectedDeclarationKind is { } expected
@@ -532,7 +552,12 @@ public sealed class HirScopeGraph
                     $"QINTERNAL: a {kind} scope must be introduced by a {expected} symbol, but {declarationId} is {declaration.Kind}");
         }
 
-        var scope = new Scope(this, kind, parentScopeId, declaringSymbolId);
+        var scope = new Scope(
+            this,
+            NextScopeId(),
+            kind,
+            parentScopeId,
+            declaringSymbolId);
         _scopes.Add(scope.Id, scope);
         if (!_childrenByParent.TryGetValue(parentScopeId, out var children))
             _childrenByParent[parentScopeId] = children = new List<ScopeId>();
@@ -557,14 +582,14 @@ public sealed class HirScopeGraph
         _scopeBySite.Add(site, scope.Id);
     }
 
-    internal void RegisterCallableScope(int declarationNodeId, Scope scope)
+    internal void RegisterCallableScope(HirNodeId declarationNodeId, Scope scope)
     {
         RequireOpen();
         if (scope.Kind != HirScopeKind.Callable)
             throw new InvalidOperationException(
                 $"QINTERNAL: declaration {declarationNodeId} was bound to non-callable scope {scope.Id}");
         if (scope.DeclaringSymbolId is not { } declaringSymbolId
-            || FindSymbol(declaringSymbolId) is not { Kind: SymbolKind.Operation } declaration
+            || FindSymbol(declaringSymbolId) is not { Kind: SymbolKind.Callable } declaration
             || declaration.DeclarationNodeId != declarationNodeId)
             throw new InvalidOperationException(
                 $"QINTERNAL: callable scope {scope.Id} is not introduced by operation declaration {declarationNodeId}");
@@ -608,6 +633,48 @@ public sealed class HirScopeGraph
         or SymbolKind.Const
         or SymbolKind.LoopVar;
 
+    /// <summary>
+    /// Mint one immutable symbol through this graph's private identity authority. Callers describe the
+    /// declaration; they never choose or coordinate SymbolIds themselves.
+    /// </summary>
+    internal Symbol CreateSymbol(
+        ScopeId declaringScopeId,
+        string name,
+        SymbolKind kind,
+        QType? type = null,
+        bool isConst = false,
+        string? constValue = null,
+        SourceSpan? declSpan = null,
+        int? registerSize = null,
+        bool isArray = false,
+        int? arrayLength = null,
+        HirNodeId? declarationNodeId = null,
+        SymbolOrigin origin = SymbolOrigin.Source,
+        QOwnershipMode parameterOwnership = QOwnershipMode.Borrowed,
+        QAccessMode parameterAccess = QAccessMode.ReadOnly,
+        Bound? foldedBound = null,
+        bool? foldedBoolean = null,
+        bool monoSized = false) =>
+        new(
+            NextSymbolId(),
+            declaringScopeId,
+            name,
+            kind,
+            type,
+            isConst,
+            constValue,
+            declSpan,
+            registerSize,
+            isArray,
+            arrayLength,
+            declarationNodeId,
+            origin,
+            parameterOwnership,
+            parameterAccess,
+            foldedBound,
+            foldedBoolean,
+            monoSized);
+
     private void RegisterSymbol(Symbol symbol)
     {
         if (!_scopes.ContainsKey(symbol.DeclaringScopeId))
@@ -617,10 +684,8 @@ public sealed class HirScopeGraph
             throw new InvalidOperationException(
                 $"QINTERNAL: duplicate semantic SymbolId {symbol.Id}");
 
-        if (symbol.DeclarationNodeId is int declarationId
-            && !_symbolByDeclaration.TryAdd(declarationId, symbol.Id))
-            throw new InvalidOperationException(
-                $"QINTERNAL: declaration node {declarationId} has more than one semantic symbol");
+        if (symbol.DeclarationNodeId is HirNodeId declarationId)
+            BindDeclaration(declarationId, symbol.Id);
     }
 
     /// <summary>
@@ -669,4 +734,8 @@ public sealed class HirScopeGraph
             ? Array.Empty<string>()
             : segments;
     }
+
+    private SymbolId NextSymbolId() => new(checked(_nextSymbolId++));
+
+    private ScopeId NextScopeId() => new(checked(_nextScopeId++));
 }

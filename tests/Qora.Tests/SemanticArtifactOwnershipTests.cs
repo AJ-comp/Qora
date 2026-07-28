@@ -93,24 +93,18 @@ public sealed class SemanticArtifactOwnershipTests
     [Fact]
     public void HirLoweringContextRejectsAnOlderRegisteredEffectArtifact()
     {
-        var builder = new HirPipelineBuilder(
-            CompilationId.New(),
-            new CompilationRevision(0));
-        var program = new QProgram(
-            new[]
-            {
-                new QOperation(
-                    "Main",
-                    Array.Empty<QParam>(),
-                    Array.Empty<QStmt>()),
-            });
-
-        var resolved = builder.Advance(HirStage.Resolved, program);
+        var hir = new HirTestFactory();
+        var program = hir.PublishProgram(
+            new[] { hir.Callable("Main") });
+        var builder = hir.CreatePipelineBuilder();
+        var resolved = builder.PublishLowered(program);
+        builder.Alias(HirStage.Resolved, resolved);
         var resolvedValidation = builder.ValidateSnapshot(resolved);
         var oldEffect = builder.AnalyzeEffects(resolvedValidation);
+        var specialization = hir.RewriteProgramRoot(resolved);
         var specialized = builder.Advance(
             HirStage.Specialized,
-            program with { Operations = program.Operations });
+            specialization);
         var specializedValidation = builder.ValidateSnapshot(specialized);
         _ = builder.AnalyzeEffects(specializedValidation);
         var owner = builder.Build();
@@ -127,22 +121,15 @@ public sealed class SemanticArtifactOwnershipTests
     [Fact]
     public void CanonicalHirMilestonesCannotRunBackward()
     {
-        var builder = new HirPipelineBuilder(
-            CompilationId.New(),
-            new CompilationRevision(0));
-        var program = new QProgram(
-            new[]
-            {
-                new QOperation(
-                    "Main",
-                    Array.Empty<QParam>(),
-                    Array.Empty<QStmt>()),
-            });
-
-        _ = builder.Advance(HirStage.Resolved, program);
+        var hir = new HirTestFactory();
+        var program = hir.PublishProgram(
+            new[] { hir.Callable("Main") });
+        var builder = hir.CreatePipelineBuilder();
+        var lowered = builder.PublishLowered(program);
+        builder.Alias(HirStage.Resolved, lowered);
         _ = builder.Advance(
-            HirStage.Lowered,
-            program with { Operations = program.Operations });
+            HirStage.ImportsExpanded,
+            hir.RewriteProgramRoot(lowered));
 
         var error = Assert.Throws<ArgumentException>(() => builder.Build());
 
@@ -188,12 +175,11 @@ public sealed class SemanticArtifactOwnershipTests
     [Fact]
     public void RejectedValidationCannotStartEffectAnalysis()
     {
-        var builder = new HirPipelineBuilder(
-            CompilationId.New(),
-            new CompilationRevision(0));
-        var snapshot = builder.Advance(
-            HirStage.Resolved,
-            InvalidMainWithParameter());
+        var hir = new HirTestFactory();
+        var invalid = InvalidMainWithParameter(hir);
+        var builder = hir.CreatePipelineBuilder();
+        var snapshot = builder.PublishLowered(invalid);
+        builder.Alias(HirStage.Resolved, snapshot);
         var rejected = builder.ValidateSnapshot(snapshot);
 
         Assert.False(rejected.IsAccepted);
@@ -215,12 +201,11 @@ public sealed class SemanticArtifactOwnershipTests
             new CompilationOptions(outputPlan: CompilationOutputPlan.HirOnly));
         Assert.True(shell.Succeeded);
 
-        var builder = new HirPipelineBuilder(shell.Id, shell.Revision);
-        var snapshot = builder.Advance(
-            HirStage.Lowered,
-            InvalidMainWithParameter());
+        var hirFactory = new HirTestFactory(shell.Sources.Entry);
+        var invalid = InvalidMainWithParameter(hirFactory);
+        var builder = hirFactory.CreatePipelineBuilder();
+        var snapshot = builder.PublishLowered(invalid);
         builder.Alias(HirStage.ImportsExpanded, snapshot);
-        builder.Alias(HirStage.MeasurementLowered, snapshot);
         builder.Alias(HirStage.Resolved, snapshot);
         var rejected = builder.ValidateSnapshot(snapshot);
         builder.Alias(HirStage.Specialized, snapshot);
@@ -257,12 +242,11 @@ public sealed class SemanticArtifactOwnershipTests
             new CompilationOptions(outputPlan: CompilationOutputPlan.HirOnly));
         Assert.True(shell.Succeeded);
 
-        var builder = new HirPipelineBuilder(shell.Id, shell.Revision);
-        var snapshot = builder.Advance(
-            HirStage.Lowered,
-            InvalidMainWithParameter());
+        var hirFactory = new HirTestFactory(shell.Sources.Entry);
+        var invalid = InvalidMainWithParameter(hirFactory);
+        var builder = hirFactory.CreatePipelineBuilder();
+        var snapshot = builder.PublishLowered(invalid);
         builder.Alias(HirStage.ImportsExpanded, snapshot);
-        builder.Alias(HirStage.MeasurementLowered, snapshot);
         builder.Alias(HirStage.Resolved, snapshot);
         _ = builder.ValidateSnapshot(snapshot);
         builder.Alias(HirStage.Specialized, snapshot);
@@ -285,13 +269,16 @@ public sealed class SemanticArtifactOwnershipTests
         Assert.Contains("rejected resolved-HIR validation", error.Message);
     }
 
-    private static QProgram InvalidMainWithParameter() =>
-        new(
+    private static HirProgram InvalidMainWithParameter(
+        HirTestFactory hir) =>
+        hir.PublishProgram(
             new[]
             {
-                new QOperation(
+                hir.Callable(
                     "Main",
-                    new[] { new QParam("value", QType.Int, null) },
-                    Array.Empty<QStmt>()),
+                    parameters: new[]
+                    {
+                        hir.Parameter("value", QType.Int),
+                    }),
             });
 }

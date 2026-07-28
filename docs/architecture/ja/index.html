@@ -306,24 +306,27 @@ operation Main() {
 
   <h2 id="s3"><span class="n">3</span>Lower — AST からソース形 HIR へ（境界を越える）</h2>
 
-  <p class="stagehead">in: エンジン AST &nbsp;·&nbsp; out: <code>QProgram</code> (source-shaped HIR) &nbsp;·&nbsp; パス: <code>QoraLowering</code></p>
+  <p class="stagehead">in: エンジン AST + revision-bound session &nbsp;·&nbsp; out: <code>HirProgram</code> (source-shaped HIR) &nbsp;·&nbsp; パス: <code>AstToHirLowering</code></p>
 
   <p>
-    ローワリングはエンジンの木を<strong>一度</strong>走査し、Qora 自身の IR として組み直します — 強く型付けされた
-    レコードの階層です（<code>QOperation</code>、<code>QGate</code>、<code>QFor</code>、<code>QIf</code>、
-    <code>QDecl</code>、<code>QUse</code>、<code>QMeasure</code> …）。文字列トークンは
-    <strong>型のあるノード</strong>になり、文法が支援するソース修飾子は構造化されたデータになります。
+    ローワリングはエンジンの木を<strong>一度</strong>走査し、Qora が所有する不変 IR として組み直します。
+    <code>HirProgram.Declarations</code> が唯一の宣言所有ツリーです。
+    <code>HirNamespaceDeclaration</code> は下位宣言と <code>open</code> を所有し、
+    <code>HirCallable</code> はパラメータと <code>HirBlock</code> を所有します。
+    すべての文と式は、現在の revision の lowering session が発行した identity を持つ typed node になります。
     例の IR:
   </p>
 
-<pre><code>QOperation Prep.Fanout(Qubit q)
-  QFor(i in 0..n - 1)
-    QGate(functors=[], name=H, args=[q[i]])
+<pre><code>HirProgram
+  Declarations[0] = HirNamespaceDeclaration("Prep")
+    Declarations[0] = HirCallable("Fanout", Qubit q)
+      HirForStatement(i, 0, n - 1)
+        HirCallStatement(H, q[i])
 
-QOperation Main()
-  QUse(name=reg, size=3)
-  QGate(functors=[],        name=Prep.Fanout, args=[reg])
-  QDecl(const=False, type=Bit, name=r, value=QMeasure(reg[0]))</code></pre>
+  Declarations[1] = HirCallable("Main")
+    HirQubitDeclarationStatement(reg, 3)
+    HirCallStatement(Prep.Fanout, reg)
+    HirVariableDeclarationStatement(bit r, HirMeasurementExpression(reg[0]))</code></pre>
 
   <div class="call why">
     <span class="h">なぜ木を型のあるデータとして組み直すのか?</span>
@@ -338,30 +341,43 @@ QOperation Main()
 
   <p>
     <strong>Expand</strong> はモジュールローダです。ファイルに <code>import "lib/prep.qor"</code> があったなら、
-    このパスがそのファイルをパース・ローワリングし、その演算群を 1 つの <code>QProgram</code> に統合して、以降の
-    すべてが単一の平坦なプログラムを見るようにします。（例は何もインポートしないのでここでは何もしません。
+    このパスがそのファイルをパース・ローワリングし、最上位の宣言 subtree を 1 つの
+    <code>HirProgram</code> に追加します。以降のすべては単一のプログラムを見ますが、
+    namespace の所有関係は名前文字列へ平坦化されず、宣言ツリーに残ります。
+    （例は何もインポートしないのでここでは何もしません。
     ファイルが見つからない場合は <code>QSEM020</code> になります。一方、循環する back-edge は
     <code>loaded</code> に登録済みのパスとしてエラーなしでスキップされます。<code>QSEM021</code> は
     廃止済みの予約コードとしてのみ残り、現在は出力されません。）
   </p>
 
   <p>
-    Expand と Resolve のあいだで、小さな脱糖（desugaring）が 1 つ走ります — <strong>MeasureConditionLowering</strong>
-    です。OpenQASM には条件<em>の中</em>での測定がないので、<code>if (M(q[0]) == 1)</code> は OpenQASM が必要とする
-    2 段階の形へ書き換えられます: 測定は巻き上げられた <code>bit</code> へ引き出され、条件はそれを検査します。
-    <code>while</code> は各反復の末尾で、<code>repeat … until</code> は本体の末尾で再測定します。以降のすべては、
-    こうして素朴なビット条件だけを見ることになります:
+    測定式は Expand と Resolve のあいだで target 形式の HIR へ書き換えません。
+    <code>if (M(q[0]) == 1)</code> は、条件内の canonical な <code>HirMeasurementExpression</code> のまま残ります。
+    その後、<code>QoraMirLowering</code> が測定を正確な評価位置へ配置し、short-circuit の制御フローを CFG で明示します。
+    最後に OpenQASM target lowering が構造化制御フローを復元し、必要な測定用 <code>bit</code> を出力します:
   </p>
 
 <pre><code>operation Main() {
     use q = Qubit[2];
     <span class="hl">if (M(q[0]) == 1)</span> { X(q[1]); }
 }
-                       <span class="cm">↓ MeasureConditionLowering</span>
+                       <span class="cm">↓ MIR lowering + OpenQASM target lowering</span>
 qubit[2] q;
-<span class="add">bit __m0;</span>
-<span class="add">__m0 = measure q[0];</span>          <span class="cm">← 条件の外へ巻き上げられた測定</span>
-<span class="add">if (__m0 == true)</span> { x q[1]; }
+int v0;
+<span class="add">bit v1;</span>
+int v2;
+int v3;
+bit v4;
+int v5;
+v0 = 0;
+<span class="add">v1 = measure q[v0];</span>            <span class="cm">← 測定結果は SSA に対応する target value になる</span>
+v2 = 1;
+v3 = int(v1);
+v4 = v3 == v2;
+<span class="add">if (v4)</span> {
+    v5 = 1;
+    x q[v5];
+}
 </code></pre>
 
   <p>
@@ -508,13 +524,12 @@ MirQuantumApply(Target = __qora_inverse_..., Functors = [])</code></pre>
     <table class="amp">
       <tr><th>ステージ</th><th>パス</th><th>何を何に</th></tr>
       <tr><td>Parse</td><td><em>Janglim エンジン</em></td><td>ソーステキスト → 構文木（まだ意味なし）</td></tr>
-      <tr><td>Lower HIR</td><td><code>QoraLowering</code></td><td>エンジンの木 → ソース形 typed HIR</td></tr>
-      <tr><td>Expand</td><td><code>ModuleLoader</code></td><td>インポート → 1 つに統合されたプログラム</td></tr>
-      <tr><td>Desugar measure</td><td><code>MeasureConditionLowering</code></td><td>条件の中の測定 → 巻き上げた <code>bit</code>、代入してから検査</td></tr>
+      <tr><td>Lower HIR</td><td><code>AstToHirLowering</code></td><td>エンジンの木 + lowering session → 不変 <code>HirProgram</code> 宣言ツリー</td></tr>
+      <tr><td>Expand</td><td><code>ModuleLoader</code></td><td>文書ごとの宣言 subtree → 1 つの <code>HirProgram</code></td></tr>
       <tr><td>Resolve</td><td><code>Resolver</code></td><td>演算呼び出し先 → 完全修飾名(FQN)</td></tr>
       <tr><td>Validate</td><td><code>QoraValidator</code> + <code>SymbolTableBuilder</code></td><td>IR → シンボルテーブル + すべての意味エラー（出力を止める固いゲート）</td></tr>
       <tr><td>Monomorphize</td><td><code>Monomorphizer</code></td><td><code>Qubit[]</code> の呼び出し → 呼び出しサイズごとの内部コピー、変化した場合に再検証</td></tr>
-      <tr><td>Lower MIR</td><td><code>QoraMirLowering</code></td><td>検証済み HIR + 意味情報 → typed SSA/CFG <code>MirSnapshot</code></td></tr>
+      <tr><td>Lower MIR</td><td><code>QoraMirLowering</code></td><td>検証済み HIR + 意味情報 → 測定を評価位置で lower した typed SSA/CFG <code>MirSnapshot</code></td></tr>
       <tr><td>Analyze MIR</td><td><code>MirAnalysisStore</code></td><td>exact MIR revision → control-flow、effect、alias、memory、path facts</td></tr>
       <tr><td>Materialize</td><td><code>MirAdjointMaterializer</code></td><td>MIR-only inverse request → 合成された inverse MIR callable</td></tr>
       <tr><td>Target-lower</td><td><code>MirOpenQasmLowering</code></td><td>materialized MIR → typed <code>MirOpenQasmTargetProgram</code></td></tr>
@@ -544,8 +559,8 @@ MirQuantumApply(Target = __qora_inverse_..., Functors = [])</code></pre>
     Source・AST・HIR・OpenQASM listing は実際の Qora コンパイラ
     （<code>qora --json --stages</code>）から得ており、短い MIR listing は実際の MIR type を使った説明用 sketch です。<br>
     ソース、パイプライン順: <code>QoraGrammar.cs</code>（文法） ·
-    <code>Ir/QoraLowering.cs</code>（AST→IR） ·
-    <code>Ir/Passes/ModuleLoader.cs</code> · <code>MeasureConditionLowering.cs</code> · <code>Resolver.cs</code> · <code>SymbolTable.cs</code> · <code>QoraValidator.cs</code> ·
+    <code>Ir/AstToHirLowering.cs</code> + <code>Ir/AstExpressionLowering.cs</code>（AST→HIR） ·
+    <code>Ir/Passes/ModuleLoader.cs</code> · <code>Resolver.cs</code> · <code>SymbolTable.cs</code> · <code>QoraValidator.cs</code> ·
     <code>Monomorphizer.cs</code> · <code>Ir/Mir/QoraMirLowering.cs</code> ·
     <code>Ir/Mir/MirAdjointMaterializer.cs</code> · <code>Ir/Qasm/MirOpenQasmLowering.cs</code> ·
     <code>Ir/Qasm/MirQasmEmitter.cs</code>（typed target model→OpenQASM）。

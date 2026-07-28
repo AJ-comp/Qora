@@ -11,44 +11,48 @@ namespace Qora.Tests;
 /// </summary>
 public class NodeIdentityTests
 {
-    private static QQubitArg Q(string register, int index) =>
-        new(register, index.ToString());
-
-    private static QGate Gate(string name, params QArg[] arguments) =>
-        new(Array.Empty<QGateModifier>(), name, arguments);
-
     [Fact]
-    public void WithCopyKeepsIdAndNewNodeGetsFreshId()
+    public void EqualShapeOccurrencesReceiveDistinctIdsAndPublishingSealsConstruction()
     {
-        var gate = Gate("X", Q("q", 0));
-        var renamed = gate with { Name = "Y" };
-        var other = Gate("X", Q("q", 0));
+        var hir = new HirTestFactory();
+        var first = hir.Apply("X", hir.Index("q", 0));
+        var second = hir.Apply("X", hir.Index("q", 0));
+        var main = hir.Callable(
+            "Main",
+            body: new HirStatement[] { first, second });
+        var program = hir.PublishProgram(new[] { main });
+        var builder = hir.CreatePipelineBuilder();
+        var snapshot = builder.PublishLowered(program);
 
-        Assert.Equal(gate.Id, renamed.Id);
-        Assert.NotEqual(gate.Id, other.Id);
+        Assert.NotEqual(first.Id, second.Id);
+        Assert.Equal(
+            snapshot.Structure.NodeIds.Count,
+            snapshot.Structure.NodeIds.Distinct().Count());
+        Assert.Throws<InvalidOperationException>(
+            () => hir.Integer(1));
     }
 
     [Fact]
-    public void ReIdMintsFreshIdsRecursivelyAndRecordsLineage()
+    public void SnapshotRejectsOneOccurrenceAttachedToTwoParents()
     {
-        var inner = Gate("X", Q("q", 0));
-        var loop = new QFor(
-            "i",
-            new QNumLit(0),
-            new QNumLit(1),
-            new QStmt[] { inner });
-        var lineage = new Dictionary<int, int>();
+        var hir = new HirTestFactory();
+        var shared = hir.Variable(
+            "value",
+            hir.Integer(1),
+            QType.Int);
+        var branch = hir.If(
+            hir.Name("true"),
+            new HirStatement[] { shared },
+            new HirStatement[] { shared });
+        var main = hir.Callable(
+            "Main",
+            body: new HirStatement[] { branch });
+        var program = hir.PublishProgram(new[] { main });
+        var builder = hir.CreatePipelineBuilder();
 
-        var fresh = ReId.Run(
-            new QStmt[] { loop },
-            (source, derived) => lineage[derived] = source);
-
-        var freshLoop = Assert.IsType<QFor>(Assert.Single(fresh));
-        var freshInner = Assert.IsType<QGate>(Assert.Single(freshLoop.Body));
-        Assert.NotEqual(loop.Id, freshLoop.Id);
-        Assert.NotEqual(inner.Id, freshInner.Id);
-        Assert.Equal(loop.Id, lineage[freshLoop.Id]);
-        Assert.Equal(inner.Id, lineage[freshInner.Id]);
+        var error = Assert.Throws<ArgumentException>(
+            () => builder.PublishLowered(program));
+        Assert.Contains("more than once", error.Message);
     }
 
     [Fact]
@@ -73,9 +77,9 @@ public class NodeIdentityTests
 
         var analyzed = Assert.IsType<HirSemanticArtifact>(
             compilation.Hir.EffectAnalysis);
-        var declaration = analyzed.Program.Operations
+        var declaration = analyzed.Program.Callables
             .SelectMany(operation => operation.Body)
-            .OfType<QDecl>()
+            .OfType<HirVariableDeclarationStatement>()
             .Single(item => item.Name == "x");
         var symbol = analyzed.Model.FindSymbol(declaration.Id);
 
@@ -98,7 +102,7 @@ public class NodeIdentityTests
             analyzed.Program,
             analyzed.Model);
 
-        Assert.Contains("Main: operation", formatted);
+        Assert.Contains("Main: callable", formatted);
         Assert.Contains("x: const int = 1", formatted);
     }
 
@@ -111,9 +115,9 @@ public class NodeIdentityTests
 
         var analyzed = Assert.IsType<HirSemanticArtifact>(
             compilation.Hir.EffectAnalysis);
-        var declaration = analyzed.Program.Operations
+        var declaration = analyzed.Program.Callables
             .SelectMany(operation => operation.Body)
-            .OfType<QDecl>()
+            .OfType<HirVariableDeclarationStatement>()
             .Single(item => item.Name == "x");
         var artifact = Assert.IsType<OpenQasmArtifact>(
             compilation.Targets.OpenQasm);
@@ -157,8 +161,8 @@ public class NodeIdentityTests
 
         var analyzed = Assert.IsType<HirSemanticArtifact>(
             compilation.Hir.EffectAnalysis);
-        var loops = analyzed.Program.Operations.Single().Body
-            .OfType<QFor>()
+        var loops = analyzed.Program.Callables.Single().Body
+            .OfType<HirForStatement>()
             .ToArray();
         var mir = Assert.IsType<MirSnapshot>(compilation.Mir);
         var loweredValues = loops
@@ -286,14 +290,14 @@ public class NodeIdentityTests
 
         var analyzed = Assert.IsType<HirSemanticArtifact>(
             compilation.Hir.EffectAnalysis);
-        var foo = analyzed.Program.Operations.Single(
+        var foo = analyzed.Program.Callables.Single(
             operation => operation.DisplayName == "Foo");
-        var main = analyzed.Program.Operations.Single(
+        var main = analyzed.Program.Callables.Single(
             operation => operation.Name == "Main");
         var fooSymbol = analyzed.Model.FindSymbol(foo.Id);
 
         Assert.NotNull(fooSymbol);
-        Assert.Equal(SymbolKind.Operation, fooSymbol!.Kind);
+        Assert.Equal(SymbolKind.Callable, fooSymbol!.Kind);
         Assert.Equal(foo.Name, fooSymbol.SourceName);
         Assert.Equal(2, fooSymbol.Uses.Count);
         Assert.Empty(analyzed.Model.FindSymbol(main.Id)!.Uses);

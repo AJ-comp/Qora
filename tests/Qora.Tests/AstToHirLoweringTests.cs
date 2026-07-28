@@ -3,7 +3,7 @@ using Qora.Ir;
 
 namespace Qora.Tests;
 
-public class QoraLoweringTests
+public class AstToHirLoweringTests
 {
     private const string Source = """
         operation Probe(q: Qubit, work: Qubit[], counts: int[], weight: float) { }
@@ -40,21 +40,23 @@ public class QoraLoweringTests
     public void RetainedQubitTypeTokenLowersToTheSameIrShape()
     {
         var parseProduct = QoraParser.ParseProduct(Source);
-        var program = Assert.IsType<QProgram>(
-            QoraLowering.Lower(
-                parseProduct.LoweringAst,
-                parseProduct.Snapshot.Document.Ref));
-        var probe = Assert.Single(program.Operations, o => o.Name == "Probe");
-        var main = Assert.Single(program.Operations, o => o.Name == "Main");
+        var ast = Assert.IsAssignableFrom<AstSymbol>(
+            parseProduct.LoweringAst);
+        var program = new HirTestFactory(
+                parseProduct.Snapshot.Document.Ref)
+            .Lower(ast);
+        var probe = Assert.Single(program.Callables, o => o.Name == "Probe");
+        var main = Assert.Single(program.Callables, o => o.Name == "Main");
 
         Assert.Collection(
-            probe.Params,
+            probe.Parameters,
             p => AssertParam(p, "q", QType.Qubit, isArray: false),
             p => AssertParam(p, "work", QType.Qubit, isArray: true),
             p => AssertParam(p, "counts", QType.Int, isArray: true),
             p => AssertParam(p, "weight", QType.Float, isArray: false));
 
-        var use = Assert.IsType<QUse>(Assert.Single(main.Body));
+        var use = Assert.IsType<HirQubitDeclarationStatement>(
+            Assert.Single(main.Body));
         Assert.Equal("work", use.Name);
         Assert.Equal(3, use.Size);
     }
@@ -82,22 +84,110 @@ public class QoraLoweringTests
         Assert.DoesNotContain(nodes, n => n.Name == "Qubit");
         Assert.Contains(Descendants(ast).OfType<AstTerminal>(), t => t.ToString() == "Qubit");
 
-        var program = Assert.IsType<QProgram>(
-            QoraLowering.Lower(
-                ast,
-                parseProduct.Snapshot.Document.Ref));
-        var main = Assert.Single(program.Operations);
-        var assignment = Assert.IsType<QAssign>(main.Body[2]);
-        var measurement = Assert.IsType<QMeasure>(assignment.Value);
+        var program = new HirTestFactory(
+                parseProduct.Snapshot.Document.Ref)
+            .Lower(ast);
+        var main = Assert.Single(program.Callables);
+        var assignment = Assert.IsType<HirAssignmentStatement>(
+            main.Body[2]);
+        var writeTarget = Assert.IsType<HirIndexExpression>(
+            assignment.Target);
+        var measurement = Assert.IsType<HirMeasurementExpression>(
+            assignment.Value);
 
-        Assert.Equal("results", assignment.Name);
-        Assert.Equal(new QNumLit(0), assignment.Index);   // the index atom is settled at lowering
-        // the measure target is the IR's canonical reference form (QIndexNode for a register element)
-        Assert.Equal("q", QNodes.RegOf(measurement.Target));
-        Assert.Equal(new QNumLit(0), QNodes.IndexOf(measurement.Target));
+        Assert.Equal(
+            "results",
+            Assert.IsType<HirNameExpression>(
+                writeTarget.Receiver).Name);
+        Assert.Equal(
+            0,
+            Assert.IsType<HirIntegerLiteralExpression>(
+                writeTarget.Index).Value);
+        var measuredTarget = Assert.IsType<HirIndexExpression>(
+            measurement.Target);
+        Assert.Equal(
+            "q",
+            Assert.IsType<HirNameExpression>(
+                measuredTarget.Receiver).Name);
+        Assert.Equal(
+            0,
+            Assert.IsType<HirIntegerLiteralExpression>(
+                measuredTarget.Index).Value);
     }
 
-    private static void AssertParam(QParam param, string name, QType type, bool isArray)
+    [Fact]
+    public void DottedNamespaceLowersToAnAuthoritativeDeclarationTree()
+    {
+        const string source = """
+            namespace A.B {
+                open C;
+
+                function f(): int {
+                    return 1;
+                }
+
+                operation Work() {
+                }
+            }
+
+            operation Main() {
+            }
+            """;
+
+        var parseProduct = QoraParser.ParseProduct(source);
+        var ast = Assert.IsAssignableFrom<AstSymbol>(
+            parseProduct.LoweringAst);
+        var program = new HirTestFactory(
+                parseProduct.Snapshot.Document.Ref)
+            .Lower(ast);
+
+        var a = Assert.Single(
+            program.Declarations.OfType<HirNamespaceDeclaration>());
+        Assert.Equal("A", a.Name);
+        var b = Assert.Single(
+            a.Declarations.OfType<HirNamespaceDeclaration>());
+        Assert.Equal("B", b.Name);
+        var open = Assert.Single(b.OpenDirectives);
+        Assert.Equal("C", open.Target);
+
+        Assert.Collection(
+            b.Declarations.OfType<HirCallable>(),
+            function =>
+            {
+                Assert.Equal("f", function.Name);
+                Assert.True(function.IsFunction);
+            },
+            operation =>
+            {
+                Assert.Equal("Work", operation.Name);
+                Assert.False(operation.IsFunction);
+            });
+
+        var function = Assert.Single(
+            program.Callables,
+            callable => callable.Name == "f");
+        var operation = Assert.Single(
+            program.Callables,
+            callable => callable.Name == "Work");
+        Assert.Same(
+            b.Declarations[0],
+            function);
+        Assert.Same(
+            b.Declarations[1],
+            operation);
+        Assert.Equal("A.B", program.NamespaceOf(function));
+        Assert.Equal("A.B", program.NamespaceOf(operation));
+        Assert.Same(
+            open,
+            Assert.Single(
+                program.OpenDirectivesByNamespace["A.B"]));
+    }
+
+    private static void AssertParam(
+        HirParameter param,
+        string name,
+        QType type,
+        bool isArray)
     {
         Assert.Equal(name, param.Name);
         Assert.Equal(type, param.Type);

@@ -24,11 +24,29 @@ public class NamespaceFunctionTests
         return result;
     }
 
-    private static QCallNode SoleExpressionCall(QOperation operation) =>
+    private static HirCallExpression SoleExpressionCall(
+        HirCallable operation) =>
         operation.Body
-            .SelectMany(QNodes.ExpressionSites)
-            .SelectMany(QNodes.CallsIn)
+            .SelectMany(HirExpressions.DirectExpressionSites)
+            .SelectMany(HirExpressions.CallsIn)
             .Single();
+
+    private static HirCallable Callable(
+        HirProgram program,
+        string qualifiedName) =>
+        program.Callables.Single(
+            callable =>
+                QualifiedName(program, callable) == qualifiedName);
+
+    private static string QualifiedName(
+        HirProgram program,
+        HirCallable callable)
+    {
+        var @namespace = program.NamespaceOf(callable);
+        return @namespace.Length == 0
+            ? callable.Name
+            : $"{@namespace}.{callable.Name}";
+    }
 
     [Fact]
     public void SameNamespaceFunctionCallBindsItsCanonicalNameAndCalleeId()
@@ -41,12 +59,13 @@ public class NamespaceFunctionTests
             operation Main() { L.Work(); }
             """);
 
-        var function = result.Hir.Resolved!.Program!.Operations.Single(operation => operation.Name == "L.two");
-        var work = result.Hir.Resolved!.Program.Operations.Single(operation => operation.Name == "L.Work");
+        var program = result.Hir.Resolved!.Program!;
+        var function = Callable(program, "L.two");
+        var work = Callable(program, "L.Work");
         var call = SoleExpressionCall(work);
 
-        Assert.Equal("L.two", call.Name);
-        Assert.Equal(function.Id, call.CalleeOpId);
+        Assert.Equal("L.two", HirExpressions.QualifiedNameOf(call.Callee));
+        Assert.Equal(function.Id, call.CalleeId);
     }
 
     [Fact]
@@ -59,12 +78,13 @@ public class NamespaceFunctionTests
             operation Main() { var n: int = L.two(); }
             """);
 
-        var function = result.Hir.Resolved!.Program!.Operations.Single(operation => operation.Name == "L.two");
-        var main = result.Hir.Resolved!.Program.Operations.Single(operation => operation.Name == "Main");
+        var program = result.Hir.Resolved!.Program!;
+        var function = Callable(program, "L.two");
+        var main = Callable(program, "Main");
         var call = SoleExpressionCall(main);
 
-        Assert.Equal("L.two", call.Name);
-        Assert.Equal(function.Id, call.CalleeOpId);
+        Assert.Equal("L.two", HirExpressions.QualifiedNameOf(call.Callee));
+        Assert.Equal(function.Id, call.CalleeId);
         var target = result.Targets.OpenQasm!.Program;
         var targetCall = Assert.Single(
             target.Expressions()
@@ -95,12 +115,13 @@ public class NamespaceFunctionTests
             operation Main() { App.Work(); }
             """);
 
-        var function = result.Hir.Resolved!.Program!.Operations.Single(operation => operation.Name == "L.two");
-        var work = result.Hir.Resolved!.Program.Operations.Single(operation => operation.Name == "App.Work");
+        var program = result.Hir.Resolved!.Program!;
+        var function = Callable(program, "L.two");
+        var work = Callable(program, "App.Work");
         var call = SoleExpressionCall(work);
 
-        Assert.Equal("L.two", call.Name);
-        Assert.Equal(function.Id, call.CalleeOpId);
+        Assert.Equal("L.two", HirExpressions.QualifiedNameOf(call.Callee));
+        Assert.Equal(function.Id, call.CalleeId);
     }
 
     [Fact]
@@ -165,8 +186,9 @@ public class NamespaceFunctionTests
             operation Main() { L.Work(); }
             """);
 
-        var work = result.Hir.Specialized!.Program!.Operations.Single(operation => operation.Name == "L.Work");
-        var function = result.Hir.Specialized!.Program.Operations.Single(operation => operation.Name == "L.two");
+        var program = result.Hir.Specialized!.Program!;
+        var work = Callable(program, "L.Work");
+        var function = Callable(program, "L.two");
         var graph = Assert.IsType<HirScopeGraph>(result.Hir.SpecializedValidation!.Model.ScopeGraph);
         var namespaceScope = Assert.IsType<Scope>(graph.FindNamespaceScope("L"));
         var namespaceSymbol = Assert.IsType<Symbol>(graph.FindNamespaceSymbol("L"));
@@ -181,9 +203,9 @@ public class NamespaceFunctionTests
         Assert.Equal(namespaceScope.Id, workSymbol.DeclaringScopeId);
         Assert.Equal(namespaceScope.Id, functionSymbol.DeclaringScopeId);
         Assert.Same(functionSymbol,
-            graph.LookupMember(namespaceScope.Id, "two", SymbolKind.Operation));
+            graph.LookupMember(namespaceScope.Id, "two", SymbolKind.Callable));
         Assert.Same(workSymbol,
-            graph.LookupMember(namespaceScope.Id, "Work", SymbolKind.Operation));
+            graph.LookupMember(namespaceScope.Id, "Work", SymbolKind.Callable));
         Assert.Equal(namespaceScope.Id, operationScope.ParentScopeId);
         Assert.Equal(HirScopeKind.Callable, operationScope.Kind);
         Assert.Equal(workSymbol.Id, operationScope.DeclaringSymbolId);
@@ -202,21 +224,25 @@ public class NamespaceFunctionTests
             }
             """);
 
-        var generic = result.Hir.Resolved!.Program!.Operations.Single(operation => operation.Name == "L.count");
+        var resolved = result.Hir.Resolved!.Program!;
+        var generic = Callable(resolved, "L.count");
         var sourceCall = SoleExpressionCall(
-            result.Hir.Resolved!.Program.Operations.Single(operation => operation.Name == "Main"));
-        Assert.Equal(generic.Id, sourceCall.CalleeOpId);
+            Callable(resolved, "Main"));
+        Assert.Equal(generic.Id, sourceCall.CalleeId);
 
         var analyzed = result.Hir.EffectAnalysis!.Program!;
-        var specialization = analyzed.Operations.Single(operation =>
+        var specialization = analyzed.Callables.Single(operation =>
             operation.IsFunction
-            && operation.Name.StartsWith("L.count__sz", StringComparison.Ordinal));
+            && QualifiedName(analyzed, operation)
+                .StartsWith("L.count__sz", StringComparison.Ordinal));
         var specializedCall = SoleExpressionCall(
-            analyzed.Operations.Single(operation => operation.Name == "Main"));
+            Callable(analyzed, "Main"));
 
-        Assert.Equal(specialization.Name, specializedCall.Name);
-        Assert.Equal(specialization.Id, specializedCall.CalleeOpId);
-        Assert.DoesNotContain(analyzed.Operations, operation => operation.Id == generic.Id);
+        Assert.Equal(
+            QualifiedName(analyzed, specialization),
+            HirExpressions.QualifiedNameOf(specializedCall.Callee));
+        Assert.Equal(specialization.Id, specializedCall.CalleeId);
+        Assert.DoesNotContain(analyzed.Callables, operation => operation.Id == generic.Id);
 
         var graph = Assert.IsType<HirScopeGraph>(result.Hir.SpecializedValidation!.Model.ScopeGraph);
         var namespaceScope = Assert.IsType<Scope>(graph.FindNamespaceScope("L"));

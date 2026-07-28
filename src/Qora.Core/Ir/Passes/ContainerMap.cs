@@ -1,61 +1,81 @@
 namespace Qora.Ir.Passes;
 
 /// <summary>
-/// The statement → enclosing-container map: for every statement in one operation, WHICH container statements
-/// (<c>if</c> / <c>for</c> / <c>while</c> / <c>repeat</c>) enclose it, outermost first. The qubit-event stream is a flat
-/// timeline (containers emit no events, and time order says nothing about nesting), so structure questions —
-/// "is this ancilla's compute inside an if, and which one?" — are answered HERE, from the IR tree, which is
-/// the one place nesting is a fact. DERIVED, nothing stored: built by ONE recursive walk of the body (the
-/// same walk <see cref="EffectAnalysis"/> already does to emit events — this one writes the position down),
-/// then every event's <see cref="QubitEvent.StmtId"/> is a plain dictionary lookup.
+/// Derives each statement's enclosing control-flow containers from the HIR tree. The map is computed and
+/// never stored as a second mutable nesting ledger.
 /// </summary>
 internal static class ContainerMap
 {
-    /// <summary>Build the map for one operation: every statement Id (containers included, at any depth) →
-    /// its enclosing container chain, OUTERMOST first. An empty chain means top-level straight-line code; a
-    /// container's own chain does not include itself. An absent key means the Id is not a statement of this
-    /// operation. One walk, O(1) lookups afterwards.</summary>
-    public static IReadOnlyDictionary<int, IReadOnlyList<QStmt>> Build(QOperation op)
+    /// <summary>
+    /// Builds a statement-identity to outermost-first container chain map for one callable.
+    /// </summary>
+    public static IReadOnlyDictionary<
+        HirNodeId,
+        IReadOnlyList<HirStatement>> Build(
+        HirCallable callable)
     {
-        var map = new Dictionary<int, IReadOnlyList<QStmt>>();
-        Visit(op, (stmt, chain) => map[stmt.Id] = chain.ToArray()); // snapshot the chain enclosing THIS statement
+        var map =
+            new Dictionary<
+                HirNodeId,
+                IReadOnlyList<HirStatement>>();
+
+        Visit(
+            callable,
+            (statement, chain) =>
+                map[statement.Id] = chain.ToArray());
+
         return map;
     }
 
-    /// <summary>The ONE recursive walk of an operation body: invoke <paramref name="visit"/> exactly once per
-    /// statement (containers included, at any depth) with its enclosing container chain, outermost first. The
-    /// chain handed in is the live stack — snapshot it (<c>.ToArray()</c>) if you need to keep it past the
-    /// call. A new container statement type must be taught to this walk; the exhaustiveness guard in
-    /// ContainerMapTests fails until a new body-bearing type is added here.</summary>
-    public static void Visit(QOperation op, Action<QStmt, IReadOnlyList<QStmt>> visit)
-        => Walk(op.Body, new List<QStmt>(), visit);
+    /// <summary>
+    /// Visits each statement exactly once with its live outermost-first container stack. Consumers that
+    /// retain the chain must snapshot it.
+    /// </summary>
+    public static void Visit(
+        HirCallable callable,
+        Action<
+            HirStatement,
+            IReadOnlyList<HirStatement>> visit) =>
+        Walk(
+            callable.Body,
+            new List<HirStatement>(),
+            visit);
 
-    private static void Walk(IReadOnlyList<QStmt> body, List<QStmt> stack, Action<QStmt, IReadOnlyList<QStmt>> visit)
+    private static void Walk(
+        IReadOnlyList<HirStatement> body,
+        List<HirStatement> stack,
+        Action<
+            HirStatement,
+            IReadOnlyList<HirStatement>> visit)
     {
-        foreach (var stmt in body)
+        foreach (var statement in body)
         {
-            visit(stmt, stack);
-            switch (stmt)
+            visit(statement, stack);
+
+            switch (statement)
             {
-                case QIf i:
-                    stack.Add(i);
-                    Walk(i.Then, stack, visit);
-                    Walk(i.Else, stack, visit);
+                case HirIfStatement @if:
+                    stack.Add(@if);
+                    Walk(@if.Then, stack, visit);
+                    Walk(@if.Else, stack, visit);
                     stack.RemoveAt(stack.Count - 1);
                     break;
-                case QFor f:
-                    stack.Add(f);
-                    Walk(f.Body, stack, visit);
+
+                case HirForStatement @for:
+                    stack.Add(@for);
+                    Walk(@for.Body, stack, visit);
                     stack.RemoveAt(stack.Count - 1);
                     break;
-                case QWhile w:
-                    stack.Add(w);
-                    Walk(w.Body, stack, visit);
+
+                case HirWhileStatement @while:
+                    stack.Add(@while);
+                    Walk(@while.Body, stack, visit);
                     stack.RemoveAt(stack.Count - 1);
                     break;
-                case QRepeat r:
-                    stack.Add(r);
-                    Walk(r.Body, stack, visit);
+
+                case HirRepeatStatement repeat:
+                    stack.Add(repeat);
+                    Walk(repeat.Body, stack, visit);
                     stack.RemoveAt(stack.Count - 1);
                     break;
             }

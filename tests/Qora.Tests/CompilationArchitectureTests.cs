@@ -33,8 +33,9 @@ public sealed class CompilationArchitectureTests
         Assert.Null(compilation.Mir);
         Assert.Empty(compilation.Targets.Artifacts);
 
+        var hir = new HirTestFactory();
         var validation = QoraValidator.Validate(
-            new QProgram(Array.Empty<QOperation>()),
+            hir.PublishProgram(Array.Empty<HirCallable>()),
             out var model);
         Assert.Equal("QSEM040", Assert.Single(validation).Code);
         Assert.Null(model);
@@ -109,21 +110,19 @@ public sealed class CompilationArchitectureTests
         Assert.Equal(specialized.Id, analyzed.SourceId);
         Assert.NotSame(validated.Model, analyzed.Model);
 
-        var main = specialized.Program.Operations.Single(operation => operation.Name == "Main");
+        var main = specialized.Program.Callables.Single(operation => operation.Name == "Main");
         Assert.False(validated.Model.WasEffectAnalyzed(main.Id));
         Assert.True(analyzed.Model.WasEffectAnalyzed(main.Id));
 
         Assert.Throws<InvalidOperationException>(
             () => validated.Model.AddUnprovenIndex(
                 new UnprovenIndex(
-                    new HirIndexAccessId(0),
+                    main.Id,
                     main.Name,
                     "xs",
                     "i",
                     LoopBound: null,
-                    Span: null),
-                main.Id,
-                new object()));
+                    Span: null)));
         Assert.Throws<InvalidOperationException>(
             () => EffectAnalysis.Run(analyzed.Program, analyzed.Model));
     }
@@ -131,19 +130,16 @@ public sealed class CompilationArchitectureTests
     [Fact]
     public void SemanticOperationsRequireExactBuilderOwnedArtifacts()
     {
-        var program = new QProgram(
-            new[]
-            {
-                new QOperation(
-                    "Main",
-                    Array.Empty<QParam>(),
-                    Array.Empty<QStmt>()),
-            });
-        var revision = new CompilationRevision(0);
-        var first = new HirPipelineBuilder(CompilationId.New(), revision);
-        var second = new HirPipelineBuilder(CompilationId.New(), revision);
-        var firstSnapshot = first.Advance(HirStage.Resolved, program);
-        var secondSnapshot = second.Advance(HirStage.Resolved, program);
+        var firstHir = new HirTestFactory();
+        var firstProgram = firstHir.PublishProgram(
+            new[] { firstHir.Callable("Main") });
+        var secondHir = new HirTestFactory();
+        var secondProgram = secondHir.PublishProgram(
+            new[] { secondHir.Callable("Main") });
+        var first = firstHir.CreatePipelineBuilder();
+        var second = secondHir.CreatePipelineBuilder();
+        var firstSnapshot = first.PublishLowered(firstProgram);
+        var secondSnapshot = second.PublishLowered(secondProgram);
 
         Assert.Throws<ArgumentException>(
             () => first.ValidateSnapshot(secondSnapshot));
@@ -252,91 +248,165 @@ public sealed class CompilationArchitectureTests
     }
 
     [Fact]
-    public void ImplicitSameIdLineageRejectsAChangedNodeKind()
+    public void ConstructionAuthorityNeverIssuesOneIdentityToDifferentNodeKinds()
     {
-        var sharedId = QNodeIds.Next();
-        var parentProgram = new QProgram(
-            new[]
-            {
-                new QOperation(
-                    "Before",
-                    Array.Empty<QParam>(),
-                    Array.Empty<QStmt>())
-                {
-                    Id = sharedId,
-                },
-            });
-        var targetOperation = new QOperation(
-            "After",
-            Array.Empty<QParam>(),
-            new QStmt[]
-            {
-                new QGate(
-                    Array.Empty<QGateModifier>(),
-                    "X",
-                    Array.Empty<QArg>())
-                {
-                    Id = sharedId,
-                },
-            });
-        var targetProgram = new QProgram(
-            new[] { targetOperation })
-        {
-            Id = parentProgram.Id,
-        };
-        var builder = new HirPipelineBuilder(
-            CompilationId.New(),
-            new CompilationRevision(0));
-        var parent = builder.Advance(HirStage.Lowered, parentProgram);
-        var target = builder.Advance(
-            HirStage.MeasurementLowered,
-            targetProgram,
-            derivations: new[]
-            {
-                new NodeDerivation(sharedId, targetOperation.Id),
-            });
-        Assert.Null(parent.Structure.OwningOperationOf(parentProgram.Id));
-        Assert.Throws<ArgumentOutOfRangeException>(
-            () => parent.Structure.RequireOwningOperation(parentProgram.Id));
+        var hir = new HirTestFactory();
+        var call = hir.Apply("X");
+        var callable = hir.Callable(
+            "Main",
+            body: new HirStatement[] { call });
+        var program = hir.PublishProgram(new[] { callable });
+        var builder = hir.CreatePipelineBuilder();
+        var snapshot = builder.PublishLowered(program);
 
-        var error = Assert.Throws<ArgumentException>(() => builder.Build());
-        Assert.Contains("changes kind", error.Message);
+        Assert.NotEqual(program.Id, callable.Id);
+        Assert.NotEqual(callable.Id, call.Id);
+        Assert.NotEqual(program.Id, call.Id);
+        Assert.Null(snapshot.Structure.OwningCallableOf(program.Id));
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => snapshot.Structure.RequireOwningCallable(program.Id));
+        Assert.Equal(
+            callable.Id,
+            snapshot.Structure.RequireOwningCallable(call.Id));
     }
 
     [Fact]
-    public void ImplicitSameIdLineageRejectsAChangedOwningOperation()
+    public void ImplicitSameIdLineageRejectsAChangedOwningCallable()
     {
-        var statement = new QDecl(
-            false,
-            QType.Int,
+        var hir = new HirTestFactory();
+        var statement = hir.Variable(
             "value",
-            new QText(new QNumLit(1)));
-        var first = new QOperation(
-            "First",
-            Array.Empty<QParam>(),
-            new QStmt[] { statement });
-        var second = new QOperation(
-            "Second",
-            Array.Empty<QParam>(),
-            Array.Empty<QStmt>());
-        var parentProgram = new QProgram(new[] { first, second });
-        var movedProgram = parentProgram with
-        {
-            Operations = new[]
+            hir.Integer(1),
+            QType.Int);
+        var parentProgram = hir.PublishProgram(
+            new[]
             {
-                first with { Body = Array.Empty<QStmt>() },
-                second with { Body = new QStmt[] { statement } },
-            },
-        };
-        var builder = new HirPipelineBuilder(
-            CompilationId.New(),
-            new CompilationRevision(0));
-        _ = builder.Advance(HirStage.Lowered, parentProgram);
-        _ = builder.Advance(HirStage.MeasurementLowered, movedProgram);
+                hir.Callable(
+                    "First",
+                    body: new HirStatement[] { statement }),
+                hir.Callable("Second"),
+            });
+        var builder = hir.CreatePipelineBuilder();
+        var parent = builder.PublishLowered(parentProgram);
+        var moved = hir.MoveFirstStatementToSecondCallable(parent);
+        _ = builder.Advance(
+            HirStage.ImportsExpanded,
+            moved);
 
         var error = Assert.Throws<ArgumentException>(() => builder.Build());
 
-        Assert.Contains("owning operation", error.Message);
+        Assert.Contains("owning callable", error.Message);
+    }
+
+    [Fact]
+    public void ImplicitSameIdLineageRejectsAChangedStructuralParent()
+    {
+        var hir = new HirTestFactory();
+        var statement = hir.Variable(
+            "value",
+            hir.Integer(1),
+            QType.Int);
+        var branch = hir.If(
+            hir.Literal("true"),
+            Array.Empty<HirStatement>());
+        var program = hir.PublishProgram(
+            new[]
+            {
+                hir.Callable(
+                    "Main",
+                    body: new HirStatement[]
+                    {
+                        statement,
+                        branch,
+                    }),
+            });
+        var builder = hir.CreatePipelineBuilder();
+        var parent = builder.PublishLowered(program);
+        var moved = hir.MoveFirstStatementIntoFollowingIf(parent);
+        _ = builder.Advance(
+            HirStage.ImportsExpanded,
+            moved);
+
+        var error = Assert.Throws<ArgumentException>(() => builder.Build());
+
+        Assert.Contains("structural parent", error.Message);
+    }
+
+    [Fact]
+    public void ImplicitSameIdLineageRejectsAChangedSourceSpan()
+    {
+        var hir = new HirTestFactory();
+        var declaration = hir.Variable(
+            "value",
+            hir.Integer(1, spanStart: 0, spanEnd: 1),
+            QType.Int);
+        var program = hir.PublishProgram(
+            new[]
+            {
+                hir.Callable(
+                    "Main",
+                    body: new HirStatement[] { declaration }),
+            });
+        var builder = hir.CreatePipelineBuilder();
+        var parent = builder.PublishLowered(program);
+        var changed = hir.ChangeFirstIntegerSourceSpan(
+            parent,
+            spanStart: 2,
+            spanEnd: 3);
+        _ = builder.Advance(
+            HirStage.ImportsExpanded,
+            changed);
+
+        var error = Assert.Throws<ArgumentException>(() => builder.Build());
+
+        Assert.Contains("source span", error.Message);
+    }
+
+    [Fact]
+    public void PipelineRejectsARewriteQualifiedByAStaleSnapshot()
+    {
+        var hir = new HirTestFactory();
+        var program = hir.PublishProgram(
+            new[] { hir.Callable("Main") });
+        var builder = hir.CreatePipelineBuilder();
+        var lowered = builder.PublishLowered(program);
+        var staleRewrite = hir.RewriteProgramRoot(lowered);
+        var current = builder.Advance(
+            HirStage.ImportsExpanded,
+            hir.RewriteProgramRoot(lowered));
+
+        var error = Assert.Throws<ArgumentException>(
+            () => builder.Advance(
+                HirStage.Resolved,
+                staleRewrite));
+
+        Assert.Contains(staleRewrite.Source.ToString(), error.Message);
+        Assert.Contains(current.Id.ToString(), error.Message);
+    }
+
+    [Fact]
+    public void PipelineRejectsAliasingAStageToAnOlderExactSnapshot()
+    {
+        var hir = new HirTestFactory();
+        var program = hir.PublishProgram(
+            new[] { hir.Callable("Main") });
+        var builder = hir.CreatePipelineBuilder();
+        var lowered = builder.PublishLowered(program);
+        var current = builder.Advance(
+            HirStage.ImportsExpanded,
+            hir.RewriteProgramRoot(lowered));
+
+        var error = Assert.Throws<ArgumentException>(
+            () => builder.Alias(
+                HirStage.Resolved,
+                lowered));
+
+        Assert.Contains("latest exact snapshot", error.Message);
+        Assert.Same(
+            current,
+            builder.Alias(
+                HirStage.Resolved,
+                current));
     }
 
     [Fact]
@@ -370,8 +440,8 @@ public sealed class CompilationArchitectureTests
 
         var analyzed = Assert.IsType<HirSemanticArtifact>(compilation.Hir.EffectAnalysis);
         var model = analyzed.Model;
-        var declarations = Assert.Single(analyzed.Program.Operations).Body
-            .OfType<QDecl>()
+        var declarations = Assert.Single(analyzed.Program.Callables).Body
+            .OfType<HirVariableDeclarationStatement>()
             .ToDictionary(declaration => declaration.Name);
         var x = model.FindSymbol(declarations["x"].Id)!;
         var y = model.FindSymbol(declarations["y"].Id)!;

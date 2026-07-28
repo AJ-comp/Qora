@@ -14,7 +14,7 @@ public enum SymbolKind
     Var,
     Const,
     LoopVar,
-    Operation,
+    Callable,
     BuiltinGate,
     BuiltinFunction,
 }
@@ -22,8 +22,8 @@ public enum SymbolKind
 /// <summary>One place a name is used (a gate operand, a measurement target, an angle argument, …).
 /// <see cref="Order"/> is a pre-order index over the operation's statements — monotonic in program order,
 /// so the LAST use of a register is its liveness "death point" in straight-line code. <see cref="NodeId"/>
-/// is the using statement's stable <see cref="QStmt.Id"/>, tying the use back to the exact IR node.</summary>
-public sealed record UseSite(int Order, string Detail, int NodeId);
+/// is the using statement's stable <see cref="HirNode.Id"/>, tying the use back to the exact HIR node.</summary>
+public sealed record UseSite(int Order, string Detail, HirNodeId NodeId);
 
 /// <summary>One declared name and everything the compiler knows about it. <see cref="Uses"/> accumulates as
 /// the table is built. This is the single per-symbol record every semantic pass reads — duplicate/shadow
@@ -34,8 +34,8 @@ public sealed class Symbol
     private IReadOnlyList<UseSite>? _sealedUses;
     private bool _isSealed;
 
-    /// <summary>Semantic identity inside one HIR-scope-graph snapshot, distinct from a QNode Id.</summary>
-    public SymbolId Id { get; } = SemanticIds.NextSymbol();
+    /// <summary>Semantic identity inside one HIR-scope-graph snapshot, distinct from a HIR node Id.</summary>
+    public SymbolId Id { get; }
 
     /// <summary>
     /// The one authoritative membership edge: the exact HIR scope in which this symbol is declared.
@@ -69,14 +69,14 @@ public sealed class Symbol
     /// separately from <see cref="FoldedBound"/> because a bit-valued comparison is not an integer bound,
     /// while control-flow analysis still needs to know that an impossible branch cannot consume ownership.</summary>
     internal bool? FoldedBoolean { get; init; }
-    /// <summary>The <see cref="QParam.NeedsMonoSizing"/> answer, stamped ONCE at declaration — true only
+    /// <summary>The <see cref="HirParameter.NeedsMonoSizing"/> answer, stamped ONCE at declaration — true only
     /// for a parameter whose length monomorphization will supply (unsized <c>Qubit[]</c> / <c>bit[]</c>).
     /// The bounds prover's deferral gates read this stamp instead of re-deriving the set, so they can
     /// never drift from the monomorphizer's own trigger.</summary>
     internal bool MonoSized { get; init; }
     public SourceSpan? DeclSpan { get; }
-    /// <summary>The declaring QNode Id, or null for merged/synthetic/built-in symbols.</summary>
-    public int? DeclarationNodeId { get; }
+    /// <summary>The declaring HIR node Id, or null for merged/synthetic/built-in symbols.</summary>
+    public HirNodeId? DeclarationNodeId { get; }
 
     public int? RegisterSize { get; }           // concrete qubit count: `use q = Qubit[N]` or a specialized Qubit[] param
     public bool IsArray { get; }                 // source T[] shape, independent of the element type
@@ -104,14 +104,18 @@ public sealed class Symbol
         _isSealed = true;
     }
 
-    public Symbol(ScopeId declaringScopeId, string name, SymbolKind kind, QType? type = null,
+    internal Symbol(SymbolId id, ScopeId declaringScopeId, string name, SymbolKind kind, QType? type = null,
         bool isConst = false, string? constValue = null,
         SourceSpan? declSpan = null, int? registerSize = null, bool isArray = false,
-        int? arrayLength = null, int? declarationNodeId = null,
+        int? arrayLength = null, HirNodeId? declarationNodeId = null,
         SymbolOrigin origin = SymbolOrigin.Source,
         QOwnershipMode parameterOwnership = QOwnershipMode.Borrowed,
-        QAccessMode parameterAccess = QAccessMode.ReadOnly)
+        QAccessMode parameterAccess = QAccessMode.ReadOnly,
+        Bound? foldedBound = null,
+        bool? foldedBoolean = null,
+        bool monoSized = false)
     {
+        Id = id;
         DeclaringScopeId = declaringScopeId;
         SourceName = name;
         Kind = kind;
@@ -127,6 +131,9 @@ public sealed class Symbol
         IsQubitArray = type == QType.Qubit && IsArray;
         ArrayLength = type == QType.Qubit ? null : arrayLength;
         DeclarationNodeId = declarationNodeId;
+        FoldedBound = foldedBound;
+        FoldedBoolean = foldedBoolean;
+        MonoSized = monoSized;
     }
 }
 
@@ -154,90 +161,146 @@ internal static class SymbolTableBuilder
     /// members of <c>Qora.Intrinsic</c>. <see cref="Build"/> later fills the already-created callable scopes
     /// with parameters, locals, and lexical descendants.
     /// </summary>
-    public static HirScopeGraph BuildHirScopeGraph(QProgram program)
+    public static HirScopeGraph BuildHirScopeGraph(HirProgram program)
     {
         var graph = new HirScopeGraph();
-        var namespacePaths = program.Operations
-            .Select(operation => operation.Namespace)
-            .Where(path => path.Length > 0)
-            .ToHashSet(StringComparer.Ordinal);
-
-        if (program.Opens is not null)
-            foreach (var namespacePath in program.Opens.Keys)
-                if (namespacePath.Length > 0)
-                    namespacePaths.Add(namespacePath);
-
-        foreach (var namespacePath in namespacePaths
+        foreach (var namespacePath in program.NamespacePaths
                      .OrderBy(path => path.Count(character => character == '.'))
                      .ThenBy(path => path, StringComparer.Ordinal))
             graph.GetOrAddNamespace(namespacePath);
 
-        foreach (var op in program.Operations)
+        foreach (var declaration in program.Declarations)
+            BindNamespaceDeclarations(
+                graph,
+                declaration,
+                parentNamespacePath: string.Empty);
+
+        foreach (var callable in program.Callables)
+            RegisterCallableDeclaration(
+                graph,
+                callable,
+                program.NamespaceOf(callable));
+
+        RegisterIntrinsics(graph);
+
+        // `open` is a lookup route from the exact declaring namespace, not containment and not a
+        // transitive import. Unknown targets remain absent here and are diagnosed by Resolver.
+        foreach (var (ownerPath, opens) in
+                 program.OpenDirectivesByNamespace)
         {
-            var owner = op.Namespace.Length == 0
-                ? graph.RootScope
-                : graph.GetOrAddNamespace(op.Namespace);
-            var callable = new Symbol(
-                owner.Id,
-                LocalCallableName(op),
-                SymbolKind.Operation,
-                declSpan: op.Span,
-                declarationNodeId: op.Id);
-            graph.RegisterDeclaredMember(callable);
-            var callableScope = graph.CreateScope(
-                HirScopeKind.Callable,
-                owner.Id,
-                callable.Id,
-                new HirScopeSite(op.Id, HirScopeSiteRole.CallableBody));
-            graph.RegisterCallableScope(op.Id, callableScope);
+            var owner = graph.FindNamespaceScope(ownerPath);
+            if (owner is null) continue;
+            foreach (var open in opens)
+                if (graph.FindNamespaceScope(open.Target) is { } target)
+                    graph.AddLookupEdge(
+                        owner.Id,
+                        target.Id,
+                        HirScopeEdgeKind.Import);
         }
 
+        return graph;
+    }
+
+    private static void BindNamespaceDeclarations(
+        HirScopeGraph graph,
+        HirDeclaration declaration,
+        string parentNamespacePath)
+    {
+        switch (declaration)
+        {
+            case HirCallable:
+                return;
+
+            case HirNamespaceDeclaration namespaceDeclaration:
+            {
+                var namespacePath = parentNamespacePath.Length == 0
+                    ? namespaceDeclaration.Name
+                    : $"{parentNamespacePath}.{namespaceDeclaration.Name}";
+                var namespaceSymbol = graph.FindNamespaceSymbol(namespacePath)
+                    ?? throw new InvalidOperationException(
+                        $"QINTERNAL: namespace declaration `{namespacePath}` has no semantic symbol");
+                graph.BindDeclaration(namespaceDeclaration.Id, namespaceSymbol.Id);
+
+                foreach (var member in namespaceDeclaration.Declarations)
+                    BindNamespaceDeclarations(graph, member, namespacePath);
+                return;
+            }
+
+            default:
+                throw new InvalidOperationException(
+                    $"QINTERNAL: unsupported HIR declaration `{declaration.GetType().Name}`");
+        }
+    }
+
+    private static HirScopeGraph BuildStandaloneScopeGraph(HirCallable callable)
+    {
+        var graph = new HirScopeGraph();
+        RegisterCallableDeclaration(
+            graph,
+            callable,
+            namespacePath: string.Empty);
+        RegisterIntrinsics(graph);
+        return graph;
+    }
+
+    private static void RegisterCallableDeclaration(
+        HirScopeGraph graph,
+        HirCallable callable,
+        string namespacePath)
+    {
+        var owner = namespacePath.Length == 0
+            ? graph.RootScope
+            : graph.GetOrAddNamespace(namespacePath);
+        var symbol = graph.CreateSymbol(
+            owner.Id,
+            callable.Name,
+            SymbolKind.Callable,
+            declSpan: callable.Span,
+            declarationNodeId: callable.Id);
+        graph.RegisterDeclaredMember(symbol);
+        var callableScope = graph.CreateScope(
+            HirScopeKind.Callable,
+            owner.Id,
+            symbol.Id,
+            new HirScopeSite(callable.Id, HirScopeSiteRole.CallableBody));
+        graph.RegisterCallableScope(callable.Id, callableScope);
+    }
+
+    private static void RegisterIntrinsics(HirScopeGraph graph)
+    {
         var intrinsic = graph.GetOrAddNamespace(
             QoraGates.IntrinsicNamespace,
             SymbolOrigin.Builtin);
         foreach (var name in QoraGates.Names.Keys)
-            graph.RegisterDeclaredMember(new Symbol(
+            graph.RegisterDeclaredMember(graph.CreateSymbol(
                 intrinsic.Id,
                 name,
                 SymbolKind.BuiltinGate,
                 origin: SymbolOrigin.Builtin));
         foreach (var name in QoraGates.Functions.Keys)
-            graph.RegisterDeclaredMember(new Symbol(
+            graph.RegisterDeclaredMember(graph.CreateSymbol(
                 intrinsic.Id,
                 name,
                 SymbolKind.BuiltinFunction,
                 origin: SymbolOrigin.Builtin));
-
-        // `open` is a lookup route from the exact declaring namespace, not containment and not a
-        // transitive import. Unknown targets remain absent here and are diagnosed by Resolver.
-        if (program.Opens is not null)
-            foreach (var (ownerPath, opens) in program.Opens)
-            {
-                var owner = graph.FindNamespaceScope(ownerPath);
-                if (owner is null) continue;
-                foreach (var open in opens)
-                    if (graph.FindNamespaceScope(open.Target) is { } target)
-                        graph.AddLookupEdge(owner.Id, target.Id, HirScopeEdgeKind.Import);
-            }
-
-        return graph;
     }
 
-    public static Scope Build(QOperation op, List<QoraError> errors,
+    public static Scope Build(HirCallable op, List<QoraError> errors,
         HirScopeGraph? scopeGraph = null,
-        IReadOnlyDictionary<int, QOperation>? opById = null,
-        Action<int, QoraError>? typeMismatchCandidate = null,
-        Action<int, QoraError>? statementError = null)
+        IReadOnlyDictionary<HirNodeId, HirCallable>? opById = null,
+        Action<HirNodeId, QoraError>? typeMismatchCandidate = null,
+        Action<HirNodeId, QoraError>? statementError = null)
     {
-        var opName = op.DisplayName ?? op.Name;
-        scopeGraph ??= BuildHirScopeGraph(new QProgram(new[] { op }));
-        opById ??= new Dictionary<int, QOperation>
+        scopeGraph ??= BuildStandaloneScopeGraph(op);
+        opById ??= new Dictionary<HirNodeId, HirCallable>
         {
             [op.Id] = op,
         };
         var callable = scopeGraph.FindDeclaration(op.Id)
             ?? throw new InvalidOperationException(
-                $"QINTERNAL: operation `{opName}` has no HIR symbol");
+                $"QINTERNAL: callable `{op.Name}` has no HIR symbol");
+        var opName =
+            op.DisplayName ?? scopeGraph.QualifiedName(callable);
         var root = scopeGraph.FindCallableScope(op.Id)
             ?? throw new InvalidOperationException(
                 $"QINTERNAL: operation `{opName}` has no callable scope");
@@ -246,15 +309,15 @@ internal static class SymbolTableBuilder
         var order = 0;
         var reported026 = new HashSet<SourceSpan?>();   // one diagnostic per document-qualified statement span
 
-        bool ContainsFunctionCall(QExpr value) =>
-            QNodes.TreesOf(value).SelectMany(QNodes.CallsIn).Any(call =>
+        bool ContainsFunctionCall(HirExpression value) =>
+            HirExpressions.CallsIn(value).Any(call =>
                 QoraGates.Functions.ContainsKey(call.Name)
                 || ExpressionTypes.TryGetFunction(call, opById, out _));
 
         // QSEM037 belongs to the contracts introduced by functions: every return value, and a declared or
         // assigned scalar that consumes a function result. Ordinary scalar declarations keep Qora's
         // historical loose model. Shape is never loose: a whole T[] cannot silently become one T value.
-        void CheckAssignable(int statementId, QValueShape target, QExpr value, Scope valueScope, SourceSpan? span,
+        void CheckAssignable(HirNodeId statementId, QValueShape target, HirExpression value, Scope valueScope, SourceSpan? span,
             string targetDescription, bool isReturn = false)
         {
             if (ExpressionTypes.TypeOf(value, valueScope, opById) is not { } source)
@@ -300,8 +363,8 @@ internal static class SymbolTableBuilder
         // — BEFORE the walk, so a register may be forward-referenced. Routing them through Declare means a
         // duplicate among them (two `use q`, or `use q` colliding with a param) is caught as QSEM015 instead
         // of silently overwriting. Measure bits are NOT here — they are block-scoped (declared in the walk).
-        foreach (var p in op.Params)
-            Declare(root, new Symbol(root.Id, p.Name, SymbolKind.Parameter, p.Type, declSpan: p.Span,
+        foreach (var p in op.Parameters)
+            Declare(root, scopeGraph.CreateSymbol(root.Id, p.Name, SymbolKind.Parameter, p.Type, declSpan: p.Span,
                 registerSize: p.Type == QType.Qubit ? p.RegisterSize : null,
                 isArray: p.IsArray,
                 // a CLASSICAL array parameter's RegisterSize is its specialized length (bit[] gets one from
@@ -310,23 +373,40 @@ internal static class SymbolTableBuilder
                 arrayLength: p.Type != QType.Qubit ? p.RegisterSize : null,
                 declarationNodeId: p.Id,
                 parameterOwnership: p.Ownership,
-                parameterAccess: p.Access)
-            {
-                MonoSized = p.NeedsMonoSizing,   // the ONE answer, stamped for the deferral gates
-            });
+                parameterAccess: p.Access,
+                monoSized: p.NeedsMonoSizing));
 
-        void SeedRegisters(IReadOnlyList<QStmt> stmts)
+        void SeedRegisters(IReadOnlyList<HirStatement> statements)
         {
-            foreach (var s in stmts)
-                switch (s)
+            foreach (var statement in statements)
+                switch (statement)
                 {
-                    case QUse u: Declare(root, new Symbol(root.Id, u.Name, SymbolKind.Register, QType.Qubit,
-                        declSpan: u.Span, registerSize: u.Size, isArray: true,
-                        declarationNodeId: u.Id)); break;
-                    case QIf i: SeedRegisters(i.Then); SeedRegisters(i.Else); break;
-                    case QFor f: SeedRegisters(f.Body); break;
-                    case QWhile w: SeedRegisters(w.Body); break;
-                    case QRepeat r: SeedRegisters(r.Body); break;
+                    case HirQubitDeclarationStatement declaration:
+                        Declare(
+                            root,
+                            scopeGraph.CreateSymbol(
+                                root.Id,
+                                declaration.Name,
+                                SymbolKind.Register,
+                                QType.Qubit,
+                                declSpan: declaration.Span,
+                                registerSize: declaration.Size,
+                                isArray: true,
+                                declarationNodeId: declaration.Id));
+                        break;
+                    case HirIfStatement conditional:
+                        SeedRegisters(conditional.Then);
+                        SeedRegisters(conditional.Else);
+                        break;
+                    case HirForStatement loop:
+                        SeedRegisters(loop.Body);
+                        break;
+                    case HirWhileStatement loop:
+                        SeedRegisters(loop.Body);
+                        break;
+                    case HirRepeatStatement repeat:
+                        SeedRegisters(repeat.Body);
+                        break;
                 }
         }
         SeedRegisters(op.Body);
@@ -335,21 +415,25 @@ internal static class SymbolTableBuilder
         // found → it is neither a hoisted name (registers/measure bits seed the root) nor an in-scope
         // classical, so it is an unknown name OR a classical used before its declaration: QSEM025.
         // Expression literals (pi/tau/euler/true/false) are legitimate non-symbols and never error.
-        var currentStmtId = 0;   // set by Walk to the statement being visited, so uses carry their node Id
+        HirNodeId? currentStatementId = null;   // set by Walk to the statement being visited
         var measureBits = new List<(string Name, SourceSpan? Span)>();   // every measure bit, for the post-walk top-level collision check
         var reported036 = new HashSet<SourceSpan?>();   // one diagnostic per document-qualified statement span
         void AddStatementError(string code, string message, SourceSpan? span)
         {
             var error = new QoraError(message, code, span);
             errors.Add(error);
-            if (currentStmtId != 0) statementError?.Invoke(currentStmtId, error);
+            if (currentStatementId is { } statementId)
+                statementError?.Invoke(statementId, error);
         }
 
         // A WHOLE `bit[]` register, if that is what this node denotes. The discriminator is IsArray, NOT Type:
         // a scalar measure bit and a bit register are both QType.Bit, and the scalar one is untouched by the
         // register rule (OpenQASM makes scalar `bit` interchangeable with `bool`, so it IS a value).
-        Symbol? WholeBitRegister(Scope scope, QNode? node) =>
-            node is QNameRef r && scope.Lookup(r.Name) is { Type: QType.Bit, IsArray: true } sym ? sym : null;
+        Symbol? WholeBitRegister(Scope scope, HirExpression? expression) =>
+            expression is HirNameExpression name
+            && scope.Lookup(name.Name) is { Type: QType.Bit, IsArray: true } symbol
+                ? symbol
+                : null;
         void Record(Scope scope, string name, string detail, SourceSpan? span)
         {
             // pi/tau/euler/true/false mean something in an expression but are never declared, so they are
@@ -359,11 +443,17 @@ internal static class SymbolTableBuilder
             var callableValue = sym is null
                 ? scopeGraph.LookupCallableOutward(callableNamespace.Id, name)
                 : null;
-            // An operation resolves up the scope chain but is NOT a value: it can only be called (the QGate
+            // An operation resolves up the scope chain but is NOT a value: it can only be called (the HIR call
             // path records those uses), never referenced in an expression or used as an assignment target.
-            if (callableValue is { Kind: SymbolKind.Operation })
+            if (callableValue is { Kind: SymbolKind.Callable })
                 AddStatementError("QSEM028", $"in `{opName}`: `{name}` is an operation, not a value — it can only be called (`{name}(…)`)", span);
-            else if (sym is not null) sym.AddUse(new UseSite(order, detail, currentStmtId));
+            else if (sym is not null)
+                sym.AddUse(new UseSite(
+                    order,
+                    detail,
+                    currentStatementId
+                    ?? throw new InvalidOperationException(
+                        "QINTERNAL: a HIR name use was recorded outside a statement")));
             else
                 AddStatementError("QSEM025", $"in `{opName}`: `{name}` is not declared in scope here — an unknown name, or a name used before its declaration", span);
         }
@@ -377,45 +467,52 @@ internal static class SymbolTableBuilder
         // free identifiers: `q.Count` records q as used, while Count is a member (QSEM029 when it is not
         // `.Count` on an array), never a standalone name — the structure says so, no after-dot heuristic.
         // Numeric/verbatim literals aren't names; pi/tau/euler/true/false are exempt (inside Record).
-        void RecordExpr(Scope scope, QNode? node, string detail, SourceSpan? span, bool classicalOnly = false,
+        void RecordExpr(Scope scope, HirExpression? expression, string detail, SourceSpan? span, bool classicalOnly = false,
             bool registerOk = false)
         {
-            switch (node)
+            switch (expression)
             {
-                case null or QNumLit or QLit:
+                case null
+                    or HirMissingExpression
+                    or HirIntegerLiteralExpression
+                    or HirLiteralExpression:
                     return;
-                case QNameRef r:
-                    Record(scope, r.Name, detail, span);
+                case HirNameExpression name:
+                    Record(scope, name.Name, detail, span);
                     // QSEM026 at most once per statement span: `reported026.Add` is false on a repeat, so
                     // `if (q == q)` and a `for`'s `q..q` (From/To share the span) each report one diagnostic.
-                    if (classicalOnly && scope.Lookup(r.Name) is { Type: QType.Qubit }
+                    if (classicalOnly && scope.Lookup(name.Name) is { Type: QType.Qubit }
                         && reported026.Add(span))
-                        AddStatementError("QSEM026", $"in `{opName}`: `{r.Name}` is a qubit and cannot be used as a classical value here — a qubit has no numeric value to compare, index, or compute with", span);
+                        AddStatementError("QSEM026", $"in `{opName}`: `{name.Name}` is a qubit and cannot be used as a classical value here — a qubit has no numeric value to compare, index, or compute with", span);
                     // QSEM036 — a WHOLE bit register is a container of bits, not a number. It reached a
                     // position that reads a VALUE, and no position hands it a meaning: `registerOk` is set by
                     // the PARENT for the four places a whole register legitimately appears (index base,
                     // `.Count` base, an argument, and `==`/`!=` against another register). Everywhere else the
                     // register would have to be read as a number, and a bit pattern carries no sign — the same
                     // bits read 2 unsigned and −2 in two's complement — so the language refuses to choose.
-                    if (!registerOk && WholeBitRegister(scope, r) is not null
+                    if (!registerOk && WholeBitRegister(scope, name) is not null
                         && reported036.Add(span))
-                        AddStatementError("QSEM036", $"in `{opName}`: `{r.Name}` is a whole `bit[]` register, not a number — a bit pattern has no sign, so it has no numeric value on its own; write `{QoraGates.BitsAsInt}({r.Name})` to read it as an unsigned integer, or index a single bit (`{r.Name}[i]`)", span);
+                        AddStatementError("QSEM036", $"in `{opName}`: `{name.Name}` is a whole `bit[]` register, not a number — a bit pattern has no sign, so it has no numeric value on its own; write `{QoraGates.BitsAsInt}({name.Name})` to read it as an unsigned integer, or index a single bit (`{name.Name}[i]`)", span);
                     return;
-                case QMember { Base: QNameRef b } m:
-                    Record(scope, b.Name, detail, span);
-                    if (scope.Lookup(b.Name) is not { } owner) return; // Record already produced QSEM025
-                    if (m.Member != "Count")
-                        AddStatementError("QSEM029", $"in `{opName}`: `{b.Name}.{m.Member}` is not a supported member; arrays expose `.Count`", span);
+                case HirMemberAccessExpression
+                {
+                    Receiver: HirNameExpression receiver,
+                } member:
+                    Record(scope, receiver.Name, detail, span);
+                    if (scope.Lookup(receiver.Name) is not { } owner)
+                        return; // Record already produced QSEM025
+                    if (member.MemberName != "Count")
+                        AddStatementError("QSEM029", $"in `{opName}`: `{receiver.Name}.{member.MemberName}` is not a supported member; arrays expose `.Count`", span);
                     else if (!owner.IsArray)
-                        AddStatementError("QSEM029", $"in `{opName}`: `{b.Name}.Count` is invalid because `{b.Name}` is not an array", span);
+                        AddStatementError("QSEM029", $"in `{opName}`: `{receiver.Name}.Count` is invalid because `{receiver.Name}` is not an array", span);
                     return;
-                case QMember m:   // non-name base — grammar-unreachable; still resolve what is resolvable
-                    RecordExpr(scope, m.Base, detail, span, classicalOnly);
+                case HirMemberAccessExpression member:
+                    RecordExpr(scope, member.Receiver, detail, span, classicalOnly);
                     return;
-                case QUnary u:
-                    RecordExpr(scope, u.Operand, detail, span, classicalOnly);
+                case HirUnaryExpression unary:
+                    RecordExpr(scope, unary.Operand, detail, span, classicalOnly);
                     return;
-                case QBinOp b2:
+                case HirBinaryExpression binary:
                     // Register-to-register comparison is the ONE whole-register operation that needs no
                     // numeric reading: it matches bit patterns. OpenQASM defines it only for equal widths —
                     // `bit[2] "10"` and `bit[3] "010"` are NOT equal there even though both read as 2 — so
@@ -423,33 +520,39 @@ internal static class SymbolTableBuilder
                     // (`<`/`>`) is deliberately excluded: the target compares those NUMERICALLY, ignoring
                     // width, so `f == g` and `f < g` would disagree about the same pair. Ordering is a
                     // numeric question and must be asked with an explicit conversion on both sides.
-                    if (WholeBitRegister(scope, b2.Left) is { } lhs && WholeBitRegister(scope, b2.Right) is { } rhs
-                        && b2.Op is "==" or "!=")
+                    if (WholeBitRegister(scope, binary.Left) is { } lhs
+                        && WholeBitRegister(scope, binary.Right) is { } rhs
+                        && binary.Operator is HirBinaryOperator.Equal or HirBinaryOperator.NotEqual)
                     {
                         if (lhs.ArrayLength is int ln && rhs.ArrayLength is int rn && ln != rn
                             && reported036.Add(span))
-                            AddStatementError("QSEM036", $"in `{opName}`: `{QNodes.Render(b2.Left)}` is `bit[{ln}]` and `{QNodes.Render(b2.Right)}` is `bit[{rn}]` — registers of different widths are never equal, whatever bits they hold; compare equal-width registers, or compare their values with `{QoraGates.BitsAsInt}(…)` on both sides", span);
-                        RecordExpr(scope, b2.Left, detail, span, classicalOnly, registerOk: true);
-                        RecordExpr(scope, b2.Right, detail, span, classicalOnly, registerOk: true);
+                            AddStatementError("QSEM036", $"in `{opName}`: `{HirExpressions.Render(binary.Left)}` is `bit[{ln}]` and `{HirExpressions.Render(binary.Right)}` is `bit[{rn}]` — registers of different widths are never equal, whatever bits they hold; compare equal-width registers, or compare their values with `{QoraGates.BitsAsInt}(…)` on both sides", span);
+                        RecordExpr(scope, binary.Left, detail, span, classicalOnly, registerOk: true);
+                        RecordExpr(scope, binary.Right, detail, span, classicalOnly, registerOk: true);
                         return;
                     }
-                    RecordExpr(scope, b2.Left, detail, span, classicalOnly);
-                    RecordExpr(scope, b2.Right, detail, span, classicalOnly);
+                    RecordExpr(scope, binary.Left, detail, span, classicalOnly);
+                    RecordExpr(scope, binary.Right, detail, span, classicalOnly);
                     return;
-                case QIndexNode i:
+                case HirIndexExpression index:
                     // `f[0]` READS one bit out of the register — the register itself is addressed, not valued.
-                    RecordExpr(scope, i.Base, detail, span, classicalOnly, registerOk: true);
-                    RecordExpr(scope, i.Index, detail, span, classicalOnly);
+                    RecordExpr(scope, index.Receiver, detail, span, classicalOnly, registerOk: true);
+                    RecordExpr(scope, index.Index, detail, span, classicalOnly);
                     return;
-                case QCallNode c:
+                case HirCallExpression call:
                     // Resolver is the only name-binding authority. Downstream semantic passes consume its
                     // declaration ID and must never guess a user callable from spelling. Built-ins are the
                     // sole calls without a program declaration.
-                    if (c.CalleeOpId is int expressionCalleeId)
+                    if (call.CalleeId is HirNodeId expressionCalleeId)
                     {
                         var callable = scopeGraph.FindDeclaration(expressionCalleeId);
-                        if (callable is { Kind: SymbolKind.Operation })
-                            callable.AddUse(new UseSite(order, $"call @ {c.Name}", currentStmtId));
+                        if (callable is { Kind: SymbolKind.Callable })
+                            callable.AddUse(new UseSite(
+                                order,
+                                $"call @ {call.Name}",
+                                currentStatementId
+                                ?? throw new InvalidOperationException(
+                                    "QINTERNAL: a HIR call use was recorded outside a statement")));
                     }
                     // Missing/dangling user IDs deliberately produce no guessed edge here. QoraValidator
                     // owns the QINTERNAL diagnostic, and a rejected validation artifact cannot reach later
@@ -458,9 +561,43 @@ internal static class SymbolTableBuilder
                     // Arguments are ordinary expressions, except that a whole register IS a legal ARGUMENT:
                     // the callee's signature decides what it may consume (QSEM006). The allowance covers the
                     // argument itself only — `AsInt(f + 1)` still reports because that register is nested.
-                    foreach (var a in c.Args) RecordExpr(scope, a, detail, span, classicalOnly, registerOk: true);
+                    foreach (var argument in call.Arguments)
+                        RecordExpr(
+                            scope,
+                            argument.Expression,
+                            detail,
+                            span,
+                            classicalOnly,
+                            registerOk: true);
+                    return;
+                case HirMeasurementExpression measurement:
+                    RecordMeasurementTarget(scope, measurement.Target, span);
                     return;
             }
+
+            // Future expression forms automatically participate in use collection through the one HIR
+            // child relation. Forms with special value semantics above remain explicit.
+            foreach (var child in expression.Children())
+                switch (child)
+                {
+                    case HirExpression childExpression:
+                        RecordExpr(
+                            scope,
+                            childExpression,
+                            detail,
+                            span,
+                            classicalOnly);
+                        break;
+                    case HirArgument argument:
+                        RecordExpr(
+                            scope,
+                            argument.Expression,
+                            detail,
+                            span,
+                            classicalOnly,
+                            registerOk: true);
+                        break;
+                }
         }
 
 
@@ -472,7 +609,7 @@ internal static class SymbolTableBuilder
         // value, or a duplicate qubit missed). Point-of-declaration scoping (which the emitted OpenQASM
         // follows) means a name may not be used before its declaration in its own scope: reject it here.
         IReadOnlyList<UseSite> UsesBeforeShadow(Scope scope, string name, int scopeStart) =>
-            scope.Lookup(name) is { Kind: not SymbolKind.Operation } outer
+            scope.Lookup(name) is { Kind: not SymbolKind.Callable } outer
                 ? outer.Uses.Where(use => use.Order > scopeStart && use.Order < order).ToList()
                 : Array.Empty<UseSite>();
 
@@ -492,55 +629,72 @@ internal static class SymbolTableBuilder
             // invalid too: after the scope is complete, call checking sees the inner symbol and must not
             // commit an ownership move for a reference rejected by point-of-declaration scoping.
             foreach (var use in earlierUses)
-                if (use.NodeId != 0)
-                    statementError?.Invoke(use.NodeId, error);
+                statementError?.Invoke(use.NodeId, error);
         }
 
-        void Walk(IReadOnlyList<QStmt> stmts, Scope scope)
+        void RecordMeasurementTarget(
+            Scope targetScope,
+            HirExpression target,
+            SourceSpan? span)
+        {
+            var rendered = HirExpressions.Render(target);
+            var registerName = HirExpressions.RegisterNameOf(target);
+            if (registerName.Length == 0)
+            {
+                RecordExpr(targetScope, target, $"measure @ {rendered}", span);
+                return;
+            }
+
+            Record(targetScope, registerName, $"measure @ {rendered}", span);
+            RecordExpr(
+                targetScope,
+                HirExpressions.IndexOf(target),
+                $"measure index @ {rendered}",
+                span);
+        }
+
+        void Walk(IReadOnlyList<HirStatement> statements, Scope scope)
         {
             var scopeStart = order;             // program order just before this block's first statement (for UsedBeforeShadow)
-            foreach (var s in stmts)
+            foreach (var statement in statements)
             {
                 order++;
-                currentStmtId = s.Id;
-                switch (s)
+                currentStatementId = statement.Id;
+                switch (statement)
                 {
-                    case QGate g:
+                    case HirCallStatement callStatement:
                         // an operation CALL (not a built-in gate) records a use on the callee's operation
                         // symbol — its "used-where", accumulated across every caller. A user call must carry
                         // Resolver's stable declaration ID; only a built-in gate legitimately has no ID.
-                        if (g.CalleeOpId is int gateCalleeId)
+                        if (callStatement.Call.CalleeId is HirNodeId calleeId)
                         {
-                            var callee = scopeGraph.FindDeclaration(gateCalleeId);
-                            if (callee is { Kind: SymbolKind.Operation })
-                                callee.AddUse(new UseSite(order, $"call @ {g.Name}", g.Id));
+                            var callee = scopeGraph.FindDeclaration(calleeId);
+                            if (callee is { Kind: SymbolKind.Callable })
+                                callee.AddUse(new UseSite(
+                                    order,
+                                    $"call @ {callStatement.Name}",
+                                    callStatement.Id));
                         }
                         // Missing/dangling user IDs deliberately produce no guessed edge here. Validation
                         // reports the broken reference before this model can feed downstream analysis.
-                        foreach (var a in g.Args)
-                            switch (a)
-                            {
-                                case QQubitArg q:
-                                    Record(scope, q.Reg, $"{g.Name} @ {q.Reg}[{QNodes.Render(q.Index)}]", g.Span);  // the register itself
-                                    RecordExpr(scope, q.Index, $"{g.Name} index @ {q.Reg}[{QNodes.Render(q.Index)}]", g.Span); // vars inside [ i ]
-                                    break;
-                                // whole register OR angle expr (theta, a*pi, …). A bare whole `bit[]` here is an
-                                // ARGUMENT, so the callee's signature judges it (QSEM006) — but a register
-                                // buried in an angle expression (`Rx(f * pi, q)`) is being read as a number and
-                                // still reports, because registerOk covers only the argument node itself.
-                                case QTextArg t:
-                                    RecordExpr(scope, t.Tree, $"{g.Name} @ {QNodes.Render(t.Tree)}", g.Span, registerOk: true);
-                                    break;
-                            }
+                        foreach (var argument in callStatement.Call.Arguments)
+                            RecordExpr(
+                                scope,
+                                argument.Expression,
+                                $"{callStatement.Name} @ {HirExpressions.Render(argument.Expression)}",
+                                callStatement.Span,
+                                registerOk: true);
                         break;
-                    case QDecl { Value: QMeasure } md:
+                    case HirVariableDeclarationStatement
+                    {
+                        Value: HirMeasurementExpression measurement,
+                    } declaration:
                         // Record the measured target FIRST — before the bit is in scope — so `var r: bit = M(r[0])`
                         // resolves the target `r` to the register (chain lookup), not the bit declared here.
-                        if (md.Value is QMeasure { Target: { } mt })
-                        {
-                            Record(scope, QNodes.RegOf(mt), $"measure @ {QNodes.Render(mt)}", md.Span);       // the measured qubit COLLAPSES here
-                            RecordExpr(scope, QNodes.IndexOf(mt), $"measure index @ {QNodes.Render(mt)}", md.Span);
-                        }
+                        RecordMeasurementTarget(
+                            scope,
+                            measurement.Target,
+                            declaration.Span);
                         // The measure bit is BLOCK-SCOPED like var/const for VISIBILITY: declared into the
                         // CURRENT scope in program order, so referencing it before this line is QSEM025.
                         // But its DECLARATION is HOISTED at emission to one flat top-level `bit r;` (OpenQASM
@@ -549,128 +703,317 @@ internal static class SymbolTableBuilder
                         // name of an ENCLOSING register / parameter / measure bit — those flatten to the same
                         // emitted scope and would collide. (Same-scope dups: Declare. Disjoint sibling blocks
                         // may reuse a name — they dedup into one emitted bit and never coexist.)
-                        if (scope.ParentScope?.Lookup(md.Name) is { Kind: SymbolKind.Register or SymbolKind.Parameter or SymbolKind.MeasureBit } encl)
-                            Add(errors, "QSEM015", $"in `{opName}`: measure bit `{md.Name}` reuses the name of an enclosing {KindLabel(encl.Kind)}; a measured result is emitted as one top-level `bit {md.Name};`, so its name must be unique across the operation's registers, parameters and measure bits — rename one", md.Span);
-                        ReportUsesBeforeShadow(scope, md.Name, scopeStart, md.Span);
-                        measureBits.Add((md.Name, md.Span));   // checked against the completed root scope after the walk (top-level collision)
-                        Declare(scope, new Symbol(scope.Id, md.Name, SymbolKind.MeasureBit, QType.Bit,
-                            isConst: md.IsConst, declSpan: md.Span, declarationNodeId: md.Id));
+                        if (scope.ParentScope?.Lookup(declaration.Name) is
+                            {
+                                Kind: SymbolKind.Register
+                                    or SymbolKind.Parameter
+                                    or SymbolKind.MeasureBit,
+                            } enclosing)
+                            Add(
+                                errors,
+                                "QSEM015",
+                                $"in `{opName}`: measure bit `{declaration.Name}` reuses the name of an enclosing {KindLabel(enclosing.Kind)}; a measured result is emitted as one top-level `bit {declaration.Name};`, so its name must be unique across the operation's registers, parameters and measure bits — rename one",
+                                declaration.Span);
+                        ReportUsesBeforeShadow(
+                            scope,
+                            declaration.Name,
+                            scopeStart,
+                            declaration.Span);
+                        measureBits.Add((declaration.Name, declaration.Span));
+                        Declare(
+                            scope,
+                            scopeGraph.CreateSymbol(
+                                scope.Id,
+                                declaration.Name,
+                                SymbolKind.MeasureBit,
+                                QType.Bit,
+                                isConst: declaration.IsConst,
+                                declSpan: declaration.Span,
+                                declarationNodeId: declaration.Id));
                         break;
-                    case QDecl d:
-                        RecordValue(scope, d.Value, $"init {d.Name}", d.Span, targetIsArray: d.IsArray);
-                        var inferred = ExpressionTypes.TypeOf(d.Value, scope, opById);
+                    case HirVariableDeclarationStatement declaration:
+                        RecordValue(
+                            scope,
+                            declaration.Value,
+                            $"init {declaration.Name}",
+                            declaration.Span,
+                            targetIsArray: declaration.IsArray);
+                        var inferred = ExpressionTypes.TypeOf(
+                            declaration.Value,
+                            scope,
+                            opById);
                         // Aggregate initializers and array declarations already have the more precise QSEM029
                         // owner. This shared check handles a bare array used as a scalar and every expression
                         // that consumes a declared function result.
-                        if (!(d.Value is QArrayLiteral or QArrayNew) && !d.IsArray)
+                        if (declaration.Value is not (
+                                HirArrayLiteralExpression
+                                or HirArrayCreationExpression)
+                            && !declaration.IsArray)
                         {
-                            if (d.Type is { } declaredType)
-                                CheckAssignable(d.Id, new QValueShape(declaredType, IsArray: false), d.Value, scope,
-                                    d.Span, $"declaration `{d.Name}`");
+                            if (declaration.Type is { } declaredType)
+                                CheckAssignable(
+                                    declaration.Id,
+                                    new QValueShape(
+                                        declaredType,
+                                        IsArray: false),
+                                    declaration.Value,
+                                    scope,
+                                    declaration.Span,
+                                    $"declaration `{declaration.Name}`");
                             else if (inferred is { IsArray: true } inferredArray)
-                                CheckAssignable(d.Id, new QValueShape(inferredArray.Type, IsArray: false), d.Value,
-                                    scope, d.Span, $"declaration `{d.Name}`");
+                                CheckAssignable(
+                                    declaration.Id,
+                                    new QValueShape(
+                                        inferredArray.Type,
+                                        IsArray: false),
+                                    declaration.Value,
+                                    scope,
+                                    declaration.Span,
+                                    $"declaration `{declaration.Name}`");
                         }
                         // Point-of-declaration scoping: this name may not have been used earlier in its own
                         // block (that use would bind to the outer value, which this local shadows). The
                         // initializer's own use of the name (order == this statement) is exempt, so a const
                         // chain reading the outer — `const n: int = n + 1` — is still fine.
-                        ReportUsesBeforeShadow(scope, d.Name, scopeStart, d.Span);
+                        ReportUsesBeforeShadow(
+                            scope,
+                            declaration.Name,
+                            scopeStart,
+                            declaration.Span);
                         // A const's initializer folds HERE — the owner's site, the owner's scope (earlier
                         // consts are already in scope, so chains like `const m: int = k + 1` settle too).
                         // From now on the value is DATA on the symbol; no consumer re-reads the text.
-                        Declare(scope, new Symbol(scope.Id, d.Name,
-                            d.IsConst ? SymbolKind.Const : SymbolKind.Var,
-                            d.Type ?? inferred?.Type,
-                            d.IsConst, d.IsConst && d.Value is QText qt ? QNodes.Render(qt.Tree) : null, d.Span,
-                            isArray: d.IsArray, arrayLength: ArrayLengthOf(d), declarationNodeId: d.Id)
-                        {
-                            FoldedBound = d is { IsConst: true, IsArray: false, Value: QText ct }
-                                ? BoundFolder.Fold(ct.Tree, scope) : null,
-                            FoldedBoolean = d is { IsConst: true, IsArray: false, Value: QText boolConst }
-                                ? BooleanFolder.Fold(boolConst.Tree, scope) : null,
-                        });
+                        Declare(scope, scopeGraph.CreateSymbol(
+                            scope.Id,
+                            declaration.Name,
+                            declaration.IsConst
+                                ? SymbolKind.Const
+                                : SymbolKind.Var,
+                            declaration.Type ?? inferred?.Type,
+                            declaration.IsConst,
+                            declaration.IsConst
+                                ? HirExpressions.Render(declaration.Value)
+                                : null,
+                            declaration.Span,
+                            isArray: declaration.IsArray,
+                            arrayLength: ArrayLengthOf(declaration),
+                            declarationNodeId: declaration.Id,
+                            foldedBound:
+                                declaration.IsConst
+                                && !declaration.IsArray
+                                    ? BoundFolder.Fold(
+                                        declaration.Value,
+                                        scope)
+                                    : null,
+                            foldedBoolean:
+                                declaration.IsConst
+                                && !declaration.IsArray
+                                    ? BooleanFolder.Fold(
+                                        declaration.Value,
+                                        scope)
+                                    : null));
                         break;
-                    case QAssign { Value: QMeasure { Target: { } at } } ma:
-                        Record(scope, ma.Name, $"assign {ma.Name}", ma.Span);
-                        RecordExpr(scope, ma.Index, $"assign index {ma.Name}[{QNodes.Render(ma.Index)}]", ma.Span, classicalOnly: true);
-                        Record(scope, QNodes.RegOf(at), $"measure @ {QNodes.Render(at)}", ma.Span);
-                        RecordExpr(scope, QNodes.IndexOf(at), $"measure index @ {QNodes.Render(at)}", ma.Span);
+                    case HirAssignmentStatement
+                    {
+                        Value: HirMeasurementExpression measurement,
+                    } assignment:
+                    {
+                        var assignedName =
+                            HirExpressions.AssignmentNameOf(assignment.Target)
+                            ?? throw new InvalidOperationException(
+                                "QINTERNAL: semantic binding received an unsupported assignment target");
+                        var assignedIndex =
+                            HirExpressions.AssignmentIndexOf(assignment.Target);
+                        Record(
+                            scope,
+                            assignedName,
+                            $"assign {assignedName}",
+                            assignment.Span);
+                        RecordExpr(
+                            scope,
+                            assignedIndex,
+                            $"assign index {assignedName}[{HirExpressions.Render(assignedIndex)}]",
+                            assignment.Span,
+                            classicalOnly: true);
+                        RecordMeasurementTarget(
+                            scope,
+                            measurement.Target,
+                            assignment.Span);
                         break;
-                    case QAssign a:
-                        Record(scope, a.Name, $"assign {a.Name}", a.Span);                                          // the target is referenced (written)
-                        RecordExpr(scope, a.Index, $"assign index {a.Name}[{QNodes.Render(a.Index)}]", a.Span, classicalOnly: true);
-                        RecordValue(scope, a.Value, $"assign {a.Name}", a.Span,
-                            targetIsArray: a.Index is null && scope.Lookup(a.Name) is { IsArray: true });
-                        if (scope.Lookup(a.Name) is { Type: { } assignedType } assigned
-                            && !(assigned.IsArray && a.Index is null))
-                            CheckAssignable(a.Id, new QValueShape(assignedType, IsArray: false), a.Value, scope,
-                                a.Span, $"assignment to `{a.Name}`");
+                    }
+                    case HirAssignmentStatement assignment:
+                    {
+                        var assignedName =
+                            HirExpressions.AssignmentNameOf(assignment.Target)
+                            ?? throw new InvalidOperationException(
+                                "QINTERNAL: semantic binding received an unsupported assignment target");
+                        var assignedIndex =
+                            HirExpressions.AssignmentIndexOf(assignment.Target);
+                        Record(
+                            scope,
+                            assignedName,
+                            $"assign {assignedName}",
+                            assignment.Span);
+                        RecordExpr(
+                            scope,
+                            assignedIndex,
+                            $"assign index {assignedName}[{HirExpressions.Render(assignedIndex)}]",
+                            assignment.Span,
+                            classicalOnly: true);
+                        RecordValue(
+                            scope,
+                            assignment.Value,
+                            $"assign {assignedName}",
+                            assignment.Span,
+                            targetIsArray:
+                                assignedIndex is null
+                                && scope.Lookup(assignedName) is
+                                {
+                                    IsArray: true,
+                                });
+                        if (scope.Lookup(assignedName) is
+                            {
+                                Type: { } assignedType,
+                            } assigned
+                            && !(assigned.IsArray
+                                 && assignedIndex is null))
+                            CheckAssignable(
+                                assignment.Id,
+                                new QValueShape(
+                                    assignedType,
+                                    IsArray: false),
+                                assignment.Value,
+                                scope,
+                                assignment.Span,
+                                $"assignment to `{assignedName}`");
                         break;
-                    case QReturn ret:
+                    }
+                    case HirReturnStatement returnStatement:
                         // A `return` value is an ordinary value position. Without this case it was walked by
                         // nothing here, so QSEM025 (unknown name), QSEM026 (qubit as a value), QSEM028
                         // (operation as a value) and QSEM036 all silently skipped every returned expression.
-                        RecordValue(scope, ret.Value, "return", ret.Span);
+                        RecordValue(
+                            scope,
+                            returnStatement.Value,
+                            "return",
+                            returnStatement.Span);
                         if (op.IsFunction && op.ReturnType is { } returnType)
-                            CheckAssignable(ret.Id, new QValueShape(returnType, IsArray: false), ret.Value, scope,
-                                ret.Span, "function return", isReturn: true);
+                            CheckAssignable(
+                                returnStatement.Id,
+                                new QValueShape(
+                                    returnType,
+                                    IsArray: false),
+                                returnStatement.Value,
+                                scope,
+                                returnStatement.Span,
+                                "function return",
+                                isReturn: true);
                         break;
-                    case QFor f:
-                        RecordExpr(scope, f.From, $"for bound {QNodes.Render(f.From)}", f.Span, classicalOnly: true);   // range bounds are classical (read in the ENCLOSING scope)…
-                        RecordExpr(scope, f.To, $"for bound {QNodes.Render(f.To)}", f.Span, classicalOnly: true);
+                    case HirForStatement loopStatement:
+                        RecordExpr(
+                            scope,
+                            loopStatement.From,
+                            $"for bound {HirExpressions.Render(loopStatement.From)}",
+                            loopStatement.Span,
+                            classicalOnly: true);
+                        RecordExpr(
+                            scope,
+                            loopStatement.To,
+                            $"for bound {HirExpressions.Render(loopStatement.To)}",
+                            loopStatement.Span,
+                            classicalOnly: true);
                         var loop = scopeGraph.CreateScope(
                             HirScopeKind.Loop,
                             scope.Id,
-                            site: new HirScopeSite(f.Id, HirScopeSiteRole.ForBinder));
-                        Declare(loop, new Symbol(loop.Id, f.Var, SymbolKind.LoopVar, QType.Int,
-                            declSpan: f.Span, declarationNodeId: f.Id));
+                            site: new HirScopeSite(
+                                loopStatement.Id,
+                                HirScopeSiteRole.ForBinder));
+                        Declare(
+                            loop,
+                            scopeGraph.CreateSymbol(
+                                loop.Id,
+                                loopStatement.Variable,
+                                SymbolKind.LoopVar,
+                                QType.Int,
+                                declSpan: loopStatement.Span,
+                                declarationNodeId: loopStatement.Id));
                         var forBody = scopeGraph.CreateScope(
                             HirScopeKind.Block,
                             loop.Id,
-                            site: new HirScopeSite(f.Id, HirScopeSiteRole.ForBody));
-                        Walk(f.Body, forBody);
+                            site: new HirScopeSite(
+                                loopStatement.Id,
+                                HirScopeSiteRole.ForBody));
+                        Walk(loopStatement.Body, forBody);
                         break;
-                    case QIf i:
+                    case HirIfStatement conditional:
                         var ifCond = scopeGraph.CreateScope(
                             HirScopeKind.Condition,
                             scope.Id,
-                            site: new HirScopeSite(i.Id, HirScopeSiteRole.IfCondition));
-                        RecordExpr(ifCond, i.Cond.Tree, $"if ({QNodes.Render(i.Cond.Tree)})", i.Span, classicalOnly: true);  // a condition is classical (a bit/bool)
+                            site: new HirScopeSite(
+                                conditional.Id,
+                                HirScopeSiteRole.IfCondition));
+                        RecordExpr(
+                            ifCond,
+                            conditional.Condition,
+                            $"if ({HirExpressions.Render(conditional.Condition)})",
+                            conditional.Span,
+                            classicalOnly: true);
                         var thenScope = scopeGraph.CreateScope(
                             HirScopeKind.Block,
                             ifCond.Id,
-                            site: new HirScopeSite(i.Id, HirScopeSiteRole.IfThen));
+                            site: new HirScopeSite(
+                                conditional.Id,
+                                HirScopeSiteRole.IfThen));
                         var elseScope = scopeGraph.CreateScope(
                             HirScopeKind.Block,
                             ifCond.Id,
-                            site: new HirScopeSite(i.Id, HirScopeSiteRole.IfElse));
-                        Walk(i.Then, thenScope);
-                        Walk(i.Else, elseScope);
+                            site: new HirScopeSite(
+                                conditional.Id,
+                                HirScopeSiteRole.IfElse));
+                        Walk(conditional.Then, thenScope);
+                        Walk(conditional.Else, elseScope);
                         break;
-                    case QWhile w:
+                    case HirWhileStatement whileStatement:
                         var whileCond = scopeGraph.CreateScope(
                             HirScopeKind.Condition,
                             scope.Id,
-                            site: new HirScopeSite(w.Id, HirScopeSiteRole.WhileCondition));
-                        RecordExpr(whileCond, w.Cond.Tree, $"while ({QNodes.Render(w.Cond.Tree)})", w.Span, classicalOnly: true);
+                            site: new HirScopeSite(
+                                whileStatement.Id,
+                                HirScopeSiteRole.WhileCondition));
+                        RecordExpr(
+                            whileCond,
+                            whileStatement.Condition,
+                            $"while ({HirExpressions.Render(whileStatement.Condition)})",
+                            whileStatement.Span,
+                            classicalOnly: true);
                         var whileBody = scopeGraph.CreateScope(
                             HirScopeKind.Block,
                             whileCond.Id,
-                            site: new HirScopeSite(w.Id, HirScopeSiteRole.WhileBody));
-                        Walk(w.Body, whileBody);
+                            site: new HirScopeSite(
+                                whileStatement.Id,
+                                HirScopeSiteRole.WhileBody));
+                        Walk(whileStatement.Body, whileBody);
                         break;
-                    case QRepeat r:
+                    case HirRepeatStatement repeat:
                         var repeatBody = scopeGraph.CreateScope(
                             HirScopeKind.Block,
                             scope.Id,
-                            site: new HirScopeSite(r.Id, HirScopeSiteRole.RepeatBody));
+                            site: new HirScopeSite(
+                                repeat.Id,
+                                HirScopeSiteRole.RepeatBody));
                         scopeGraph.BindScopeSite(
-                            new HirScopeSite(r.Id, HirScopeSiteRole.RepeatCondition),
+                            new HirScopeSite(
+                                repeat.Id,
+                                HirScopeSiteRole.RepeatCondition),
                             repeatBody);
-                        Walk(r.Body, repeatBody);
-                        currentStmtId = r.Id;   // the nested Walk moved it; the until belongs to the repeat itself
-                        RecordExpr(repeatBody, r.Until.Tree, $"until ({QNodes.Render(r.Until.Tree)})", r.Span, classicalOnly: true);  // until runs AFTER the body, so it sees body-local names
+                        Walk(repeat.Body, repeatBody);
+                        currentStatementId = repeat.Id;
+                        RecordExpr(
+                            repeatBody,
+                            repeat.Until,
+                            $"until ({HirExpressions.Render(repeat.Until)})",
+                            repeat.Span,
+                            classicalOnly: true);
                         break;
                 }
             }
@@ -700,44 +1043,42 @@ internal static class SymbolTableBuilder
         // an ARRAY target (`var g: bit[] = f;`, `g = f;`). Those are already rejected, more precisely, as
         // QSEM029 ("an array must be initialized with an array literal or `new T[N]`") — the register there is
         // not being read as a number, so QSEM036's advice to write `AsInt(f)` would be wrong guidance.
-        void RecordValue(Scope valueScope, QExpr value, string detail, SourceSpan? span, bool targetIsArray = false)
+        void RecordValue(
+            Scope valueScope,
+            HirExpression value,
+            string detail,
+            SourceSpan? span,
+            bool targetIsArray = false)
         {
             switch (value)
             {
-                case QText text:
-                    RecordExpr(valueScope, text.Tree, detail, span, classicalOnly: true, registerOk: targetIsArray);
+                case HirMeasurementExpression measurement:
+                    RecordMeasurementTarget(
+                        valueScope,
+                        measurement.Target,
+                        span);
                     break;
-                case QMeasure { Target: { } target }:
-                    Record(valueScope, QNodes.RegOf(target), $"measure @ {QNodes.Render(target)}", span);
-                    RecordExpr(valueScope, QNodes.IndexOf(target), $"measure index @ {QNodes.Render(target)}", span);
-                    break;
-                case QArrayLiteral literal:
-                    foreach (var element in literal.Elements)
-                        RecordValue(valueScope, element, detail, span);
+                default:
+                    RecordExpr(
+                        valueScope,
+                        value,
+                        detail,
+                        span,
+                        classicalOnly: true,
+                        registerOk: targetIsArray);
                     break;
             }
         }
 
-        static int? ArrayLengthOf(QDecl declaration) => declaration.Value switch
+        static int? ArrayLengthOf(
+            HirVariableDeclarationStatement declaration) =>
+            declaration.Value switch
         {
-            QArrayLiteral literal => literal.Elements.Count,
-            QArrayNew allocation when allocation.Length >= 0 => allocation.Length,
+            HirArrayLiteralExpression literal => literal.Elements.Count,
+            HirArrayCreationExpression allocation when allocation.Length >= 0 =>
+                allocation.Length,
             _ => null,
         };
-    }
-
-    /// <summary>
-    /// The name stored inside its declaring namespace scope. Before resolution this is already simple;
-    /// after resolution it is the FQN suffix. A later emitted/mangled tree does not carry the namespace
-    /// prefix anymore, so its current spelling remains the local symbol spelling for fallback builds.
-    /// </summary>
-    internal static string LocalCallableName(QOperation operation)
-    {
-        if (operation.Namespace.Length == 0) return operation.Name;
-        var prefix = operation.Namespace + ".";
-        return operation.Name.StartsWith(prefix, StringComparison.Ordinal)
-            ? operation.Name[prefix.Length..]
-            : operation.Name;
     }
 
     private static void Add(List<QoraError> errors, string code, string message, SourceSpan? span) =>
@@ -757,32 +1098,34 @@ internal static class SymbolTableBuilder
         SymbolKind.MeasureBit => "measure bit",
         SymbolKind.Const => "const",
         SymbolKind.LoopVar => "loop variable",
-        SymbolKind.Operation => "operation",
+        SymbolKind.Callable => "callable",
         _ => "variable",
     };
 
     // --- debug rendering (the --stages view) ---
 
     /// <summary>Render the symbol table of every operation as text (for the <c>--stages</c> debug view).
-    /// Each op is shown as its own <see cref="SymbolKind.Operation"/> symbol line, then its scope tree
+    /// Each callable is shown as its own <see cref="SymbolKind.Callable"/> symbol line, then its scope tree
     /// indented beneath. The program and model must be the exact pair owned by one HIR snapshot; a missing
     /// operation is a stage mismatch, not a reason to rebuild a different symbol graph.</summary>
-    public static string Format(QProgram program, HirSemanticModel model)
+    public static string Format(HirProgram program, HirSemanticModel model)
     {
         ArgumentNullException.ThrowIfNull(program);
         ArgumentNullException.ThrowIfNull(model);
-        if (program.Operations.Count == 0) return string.Empty;
+        if (program.Callables.Count == 0) return string.Empty;
         var sb = new StringBuilder();
         var scopeGraph = model.ScopeGraph
             ?? throw new InvalidOperationException(
                 "QINTERNAL: the HIR semantic model has no scope graph");
-        foreach (var op in program.Operations)
+        foreach (var op in program.Callables)
         {
-            var kind = (scopeGraph.FindDeclaration(op.Id)?.Kind
-                    ?? throw new InvalidOperationException(
-                        $"QINTERNAL: operation {op.Id} is absent from the supplied HIR semantic model"))
+            var callable = scopeGraph.FindDeclaration(op.Id)
+                ?? throw new InvalidOperationException(
+                    $"QINTERNAL: callable {op.Id} is absent from the supplied HIR semantic model");
+            var kind = callable.Kind
                 .ToString().ToLowerInvariant();
-            sb.AppendLine($"{op.DisplayName ?? op.Name}: {kind}");
+            sb.AppendLine(
+                $"{op.DisplayName ?? scopeGraph.QualifiedName(callable)}: {kind}");
             var root = model.FindRootScope(op.Id)
                 ?? throw new InvalidOperationException(
                     $"QINTERNAL: operation {op.Id} has no scope in the supplied HIR semantic model");

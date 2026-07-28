@@ -30,8 +30,8 @@ public class QubitArrayTests
             }
             """);
 
-        var specs = result.Hir.EffectAnalysis!.Program!.Operations.Where(o => o.DisplayName == "Visit").ToList();
-        Assert.Equal(new[] { 2, 3 }, specs.Select(o => o.Params.Single().RegisterSize!.Value).Order().ToArray());
+        var specs = result.Hir.EffectAnalysis!.Program!.Callables.Where(o => o.DisplayName == "Visit").ToList();
+        Assert.Equal(new[] { 2, 3 }, specs.Select(o => o.Parameters.Single().RegisterSize!.Value).Order().ToArray());
 
         var targetSpecializations = result.Targets.OpenQasm!.Program.Definitions
             .Where(
@@ -73,8 +73,8 @@ public class QubitArrayTests
             }
             """);
 
-        var pair = result.Hir.EffectAnalysis!.Program!.Operations.Single(o => o.DisplayName == "Pair");
-        Assert.Equal(new[] { 2, 3 }, pair.Params.Select(p => p.RegisterSize!.Value).ToArray());
+        var pair = result.Hir.EffectAnalysis!.Program!.Callables.Single(o => o.DisplayName == "Pair");
+        Assert.Equal(new[] { 2, 3 }, pair.Parameters.Select(p => p.RegisterSize!.Value).ToArray());
         Assert.Contains("Pair__sz2_3", pair.Name);
     }
 
@@ -92,12 +92,12 @@ public class QubitArrayTests
             }
             """);
 
-        var inner = result.Hir.EffectAnalysis!.Program!.Operations.Single(o => o.DisplayName == "Inner");
-        var outer = result.Hir.EffectAnalysis!.Program.Operations.Single(o => o.DisplayName == "Outer");
-        Assert.Equal(4, inner.Params.Single().RegisterSize);
-        Assert.Equal(4, outer.Params.Single().RegisterSize);
-        var nestedCall = outer.Body.OfType<QGate>().Single();
-        Assert.Equal(inner.Id, nestedCall.CalleeOpId);
+        var inner = result.Hir.EffectAnalysis!.Program!.Callables.Single(o => o.DisplayName == "Inner");
+        var outer = result.Hir.EffectAnalysis!.Program.Callables.Single(o => o.DisplayName == "Outer");
+        Assert.Equal(4, inner.Parameters.Single().RegisterSize);
+        Assert.Equal(4, outer.Parameters.Single().RegisterSize);
+        var nestedCall = outer.Body.OfType<HirCallStatement>().Single();
+        Assert.Equal(inner.Id, nestedCall.Call.CalleeId);
     }
 
     [Fact]

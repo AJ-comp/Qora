@@ -1,13 +1,14 @@
 namespace Qora.Ir.Passes;
 
-/// <summary>What an integer expression folds to. <see cref="BoundNum"/>: every leaf resolved (integer
-/// literals, <c>const</c> names, <c>.Count</c> of a known-length array) — the value is definite.
-/// <see cref="ArrayLengthBound"/>: a linear form <c>Coeff·Array.Count + Offset</c> over exactly ONE array whose
-/// length is not yet known — still judgeable symbolically (e.g. <c>a.Count-1</c> is in range for ANY length
-/// of <c>a</c>). Anything else — a runtime variable, two unknown lengths, division by a symbol — does not
-/// settle, and <see cref="BoundFolder.Fold"/> returns null: no value, no proof.</summary>
+/// <summary>
+/// What an integer expression folds to. <see cref="BoundNum"/> means every leaf resolved and the value is
+/// definite. <see cref="ArrayLengthBound"/> retains a linear form over one array whose concrete length is
+/// not known yet. A null result means that the expression cannot be proved at compile time.
+/// </summary>
 internal abstract record Bound;
+
 internal sealed record BoundNum(long Value) : Bound;
+
 internal sealed record ArrayLengthBound(
     SymbolId ArraySymbolId,
     long Coeff,
@@ -15,172 +16,286 @@ internal sealed record ArrayLengthBound(
     bool IsOverflowFree = true) : Bound;
 
 /// <summary>
-/// THE one calculator for compile-time integer expressions — <c>+ - * /</c>, integer literals, <c>const</c>
-/// names, <c>&lt;array&gt;.Count</c> — over the parsed <see cref="QNode"/> tree (built once at lowering, see
-/// <see cref="ExprTree"/>): <see cref="SymbolTableBuilder"/> folds each <c>const</c>'s initializer at its
-/// DECLARATION (the value is then <see cref="Symbol.FoldedBound"/> data), and <see cref="QoraValidator"/>
-/// folds loop bounds and index expressions. Reading one tree — never re-parsing text — means no two
-/// readings of one expression can disagree. The criterion is "does the computation settle?", never a
-/// syntactic pattern: <c>a.Count*2 - k - 3</c> folds to a number when <c>a</c>'s length and <c>k</c> are
-/// known, to an <see cref="ArrayLengthBound"/> when only the length is missing, and to null past that.
+/// The canonical compile-time integer folder over the unified HIR expression tree. Names resolve through
+/// the lexical scope, so const values and symbolic array lengths retain their declaration identity.
 /// </summary>
 internal static class BoundFolder
 {
-    /// <summary>Fold an expression tree to a <see cref="Bound"/> (or null if it does not settle). Names
-    /// resolve through <paramref name="scope"/> at fold time, so a shadowed name is the nearest binding and
-    /// a const carries its own already-folded value (possibly symbolic — a <c>.Count</c>).</summary>
-    internal static Bound? Fold(QNode? node, Scope scope) => node switch
-    {
-        QNumLit n => new BoundNum(n.Value),
-        // `<array>.Count`: a known length is a number; an unknown one (a parameter) stays symbolic.
-        QMember { Base: QNameRef arr, Member: "Count" } =>
-            scope.Lookup(arr.Name) is { IsArray: true } a
-                ? (a.Type == QType.Qubit ? a.RegisterSize : a.ArrayLength) is int len
-                    ? new BoundNum(len) : new ArrayLengthBound(a.Id, 1, 0)
-                : null,
-        // A const reads the value its DECLARATION already folded (owner's site) — no re-derivation, and it
-        // may be symbolic, so `const hi = q.Count; 0..hi` carries the same ArrayLengthBound the direct form does.
-        QNameRef r => scope.Lookup(r.Name) is { IsConst: true, FoldedBound: { } fb } ? fb : null,
-        QUnary { Op: "-", Operand: { } op } => Apply(new BoundNum(0), "-", Fold(op, scope)),
-        QBinOp b when b.Op is "+" or "-" or "*" or "/" => Apply(Fold(b.Left, scope), b.Op, Fold(b.Right, scope)),
-        _ => null,   // a float literal, an index/call, a comparison/boolean op, a runtime variable: no value
-    };
+    internal static Bound? Fold(
+        HirExpression? expression,
+        Scope scope) =>
+        expression switch
+        {
+            HirIntegerLiteralExpression integer =>
+                new BoundNum(integer.Value),
 
-    private static Bound? Apply(Bound? l, string op, Bound? r)
+            // `<array>.Count`: a concrete array length is a number; an unsized parameter stays symbolic.
+            HirMemberAccessExpression
+            {
+                Receiver: HirNameExpression array,
+                MemberName: "Count",
+            } =>
+                scope.Lookup(array.Name) is { IsArray: true } symbol
+                    ? (symbol.Type == QType.Qubit
+                        ? symbol.RegisterSize
+                        : symbol.ArrayLength) is int length
+                        ? new BoundNum(length)
+                        : new ArrayLengthBound(symbol.Id, 1, 0)
+                    : null,
+
+            // A const reads the value folded at its declaration. It may itself retain a symbolic Count.
+            HirNameExpression name =>
+                scope.Lookup(name.Name) is
+                    {
+                        IsConst: true,
+                        FoldedBound: { } folded,
+                    }
+                    ? folded
+                    : null,
+
+            HirUnaryExpression
+            {
+                Operator: HirUnaryOperator.Negate,
+            } unary =>
+                Apply(
+                    new BoundNum(0),
+                    HirBinaryOperator.Subtract,
+                    Fold(unary.Operand, scope)),
+
+            HirBinaryExpression binary
+                when binary.Operator is
+                    HirBinaryOperator.Add
+                    or HirBinaryOperator.Subtract
+                    or HirBinaryOperator.Multiply
+                    or HirBinaryOperator.Divide =>
+                Apply(
+                    Fold(binary.Left, scope),
+                    binary.Operator,
+                    Fold(binary.Right, scope)),
+
+            _ => null,
+        };
+
+    private static Bound? Apply(
+        Bound? left,
+        HirBinaryOperator @operator,
+        Bound? right)
     {
-        if (l is null || r is null) return null;
-        // 64-bit CHECKED arithmetic: a computation that wraps around is not a value, and treating it as one
-        // turned a four-billion-iteration loop into a "provably empty" one. Overflow past long simply does
-        // not settle (null) — no proof, rejected, never silently wrong.
+        if (left is null || right is null)
+            return null;
+
+        // Overflow does not produce a folded value. Returning null keeps validation conservative.
         try
         {
             checked
             {
-                return (l, r, op) switch
+                return (left, right, @operator) switch
                 {
-                    (BoundNum a, BoundNum b, "+") => new BoundNum(a.Value + b.Value),
-                    (BoundNum a, BoundNum b, "-") => new BoundNum(a.Value - b.Value),
-                    (BoundNum a, BoundNum b, "*") => new BoundNum(a.Value * b.Value),
-                    (BoundNum a, BoundNum { Value: not 0 } b, "/") => new BoundNum(a.Value / b.Value),
-                    (ArrayLengthBound c, BoundNum b, "+") =>
-                        Norm(c.ArraySymbolId, c.Coeff, c.Offset + b.Value, c.IsOverflowFree),
-                    (BoundNum a, ArrayLengthBound c, "+") =>
-                        Norm(c.ArraySymbolId, c.Coeff, a.Value + c.Offset, c.IsOverflowFree),
-                    (ArrayLengthBound c, BoundNum b, "-") =>
-                        Norm(c.ArraySymbolId, c.Coeff, c.Offset - b.Value, c.IsOverflowFree),
-                    (BoundNum a, ArrayLengthBound c, "-") =>
-                        Norm(c.ArraySymbolId, -c.Coeff, a.Value - c.Offset, c.IsOverflowFree),
-                    (ArrayLengthBound c, BoundNum b, "*") =>
-                        Norm(c.ArraySymbolId, c.Coeff * b.Value, c.Offset * b.Value, c.IsOverflowFree),
-                    (BoundNum a, ArrayLengthBound c, "*") =>
-                        Norm(c.ArraySymbolId, a.Value * c.Coeff, a.Value * c.Offset, c.IsOverflowFree),
-                    (ArrayLengthBound a, ArrayLengthBound b, "+") when a.ArraySymbolId == b.ArraySymbolId =>
-                        Norm(a.ArraySymbolId, a.Coeff + b.Coeff, a.Offset + b.Offset,
+                    (BoundNum a, BoundNum b, HirBinaryOperator.Add) =>
+                        new BoundNum(a.Value + b.Value),
+                    (BoundNum a, BoundNum b, HirBinaryOperator.Subtract) =>
+                        new BoundNum(a.Value - b.Value),
+                    (BoundNum a, BoundNum b, HirBinaryOperator.Multiply) =>
+                        new BoundNum(a.Value * b.Value),
+                    (BoundNum a, BoundNum { Value: not 0 } b, HirBinaryOperator.Divide) =>
+                        new BoundNum(a.Value / b.Value),
+
+                    (ArrayLengthBound a, BoundNum b, HirBinaryOperator.Add) =>
+                        Normalize(
+                            a.ArraySymbolId,
+                            a.Coeff,
+                            a.Offset + b.Value,
+                            a.IsOverflowFree),
+                    (BoundNum a, ArrayLengthBound b, HirBinaryOperator.Add) =>
+                        Normalize(
+                            b.ArraySymbolId,
+                            b.Coeff,
+                            a.Value + b.Offset,
+                            b.IsOverflowFree),
+                    (ArrayLengthBound a, BoundNum b, HirBinaryOperator.Subtract) =>
+                        Normalize(
+                            a.ArraySymbolId,
+                            a.Coeff,
+                            a.Offset - b.Value,
+                            a.IsOverflowFree),
+                    (BoundNum a, ArrayLengthBound b, HirBinaryOperator.Subtract) =>
+                        Normalize(
+                            b.ArraySymbolId,
+                            -b.Coeff,
+                            a.Value - b.Offset,
+                            b.IsOverflowFree),
+                    (ArrayLengthBound a, BoundNum b, HirBinaryOperator.Multiply) =>
+                        Normalize(
+                            a.ArraySymbolId,
+                            a.Coeff * b.Value,
+                            a.Offset * b.Value,
+                            a.IsOverflowFree),
+                    (BoundNum a, ArrayLengthBound b, HirBinaryOperator.Multiply) =>
+                        Normalize(
+                            b.ArraySymbolId,
+                            a.Value * b.Coeff,
+                            a.Value * b.Offset,
+                            b.IsOverflowFree),
+
+                    (ArrayLengthBound a, ArrayLengthBound b, HirBinaryOperator.Add)
+                        when a.ArraySymbolId == b.ArraySymbolId =>
+                        Normalize(
+                            a.ArraySymbolId,
+                            a.Coeff + b.Coeff,
+                            a.Offset + b.Offset,
                             a.IsOverflowFree && b.IsOverflowFree),
-                    (ArrayLengthBound a, ArrayLengthBound b, "-") when a.ArraySymbolId == b.ArraySymbolId =>
-                        Norm(a.ArraySymbolId, a.Coeff - b.Coeff, a.Offset - b.Offset,
+                    (ArrayLengthBound a, ArrayLengthBound b, HirBinaryOperator.Subtract)
+                        when a.ArraySymbolId == b.ArraySymbolId =>
+                        Normalize(
+                            a.ArraySymbolId,
+                            a.Coeff - b.Coeff,
+                            a.Offset - b.Offset,
                             a.IsOverflowFree && b.IsOverflowFree),
-                    _ => null,   // Count·Count, mixed arrays, division by/of a symbol: does not settle
+
+                    _ => null,
                 };
             }
         }
-        catch (System.OverflowException)
+        catch (OverflowException)
         {
             return null;
         }
-
-        static Bound Norm(SymbolId arraySymbolId, long coeff, long offset, bool operandsOverflowFree)
-        {
-            // Algebraic cancellation must not erase an overflow that occurs earlier in source evaluation.
-            // Example: `Count + long.MaxValue - long.MaxValue - 1` looks like `Count-1` only AFTER the
-            // first addition has already overflowed for every positive Count. Track whether every
-            // intermediate is representable for the full legal length domain; once false it stays false.
-            var first = new System.Numerics.BigInteger(coeff) + offset;
-            var last = new System.Numerics.BigInteger(coeff) * int.MaxValue + offset;
-            var overflowFree = operandsOverflowFree
-                               && System.Numerics.BigInteger.Min(first, last) >= long.MinValue
-                               && System.Numerics.BigInteger.Max(first, last) <= long.MaxValue;
-
-            // A cancelled symbolic dependency may become a number only if its complete evaluation was
-            // overflow-free. Otherwise retain the originating SymbolId so post-specialization validation
-            // can read the concrete length from the specialized parameter symbol and repeat the checked fold.
-            return coeff == 0 && overflowFree
-                ? new BoundNum(offset)
-                : new ArrayLengthBound(arraySymbolId, coeff, offset, overflowFree);
-        }
     }
 
-    /// <summary>True when a folded bound is <c>k·p.Count + c</c> over a parameter whose length ONLY
-    /// monomorphization can supply — the cases a loop-bound access defers to the post-monomorphization
-    /// pass, where the size is concrete. The judgement is the <see cref="Symbol.MonoSized"/> STAMP, which
-    /// the symbol table copies once from <see cref="QParam.NeedsMonoSizing"/> — the same single answer
-    /// the monomorphizer's trigger reads, so this gate can never drift from what actually specializes.
-    /// Reading the folded bound instead of a text regex sees through a const: <c>const hi = q.Count</c>
-    /// used as a bound defers exactly as the direct <c>q.Count</c> does.</summary>
-    internal static bool DefersToUnsizedQubit(Bound? b, Scope scope) =>
-        b is ArrayLengthBound c && scope.GetSymbol(c.ArraySymbolId).MonoSized;
+    private static Bound Normalize(
+        SymbolId arraySymbolId,
+        long coefficient,
+        long offset,
+        bool operandsOverflowFree)
+    {
+        // Algebraic cancellation must not hide an overflow that occurs earlier in source evaluation.
+        var first = new System.Numerics.BigInteger(coefficient) + offset;
+        var last =
+            new System.Numerics.BigInteger(coefficient) * int.MaxValue
+            + offset;
+        var overflowFree =
+            operandsOverflowFree
+            && System.Numerics.BigInteger.Min(first, last) >= long.MinValue
+            && System.Numerics.BigInteger.Max(first, last) <= long.MaxValue;
+
+        return coefficient == 0 && overflowFree
+            ? new BoundNum(offset)
+            : new ArrayLengthBound(
+                arraySymbolId,
+                coefficient,
+                offset,
+                overflowFree);
+    }
+
+    /// <summary>
+    /// True when monomorphization is the stage that can supply the missing qubit-register length.
+    /// </summary>
+    internal static bool DefersToUnsizedQubit(
+        Bound? bound,
+        Scope scope) =>
+        bound is ArrayLengthBound array
+        && scope.GetSymbol(array.ArraySymbolId).MonoSized;
 }
 
 /// <summary>
-/// The one compile-time boolean folder used by control-flow analyses. Like <see cref="BoundFolder"/>,
-/// it reads an expression tree and already-folded const data instead of reparsing source text. A null
-/// result means that the condition depends on runtime state and both control-flow paths remain possible.
+/// The canonical compile-time boolean folder. A null result means that runtime state may determine the
+/// condition, so control-flow analyses must keep both paths.
 /// </summary>
 internal static class BooleanFolder
 {
-    internal static bool? Fold(QNode? node, Scope scope)
+    internal static bool? Fold(
+        HirExpression? expression,
+        Scope scope)
     {
-        switch (node)
+        switch (expression)
         {
-            case QLit { Text: "true" }:
+            case HirLiteralExpression { Text: "true" }:
+            case HirNameExpression { Name: "true" }:
                 return true;
-            case QLit { Text: "false" }:
+
+            case HirLiteralExpression { Text: "false" }:
+            case HirNameExpression { Name: "false" }:
                 return false;
-            // Surface boolean literals currently lower through the identifier-shaped node used by the
-            // expression parser. They are reserved values, not lexical names.
-            case QNameRef { Name: "true" }:
-                return true;
-            case QNameRef { Name: "false" }:
-                return false;
-            case QNameRef name when scope.Lookup(name.Name) is
-                     { IsConst: true, FoldedBoolean: { } constValue }:
-                return constValue;
-            case QUnary { Op: "!", Operand: { } operand }:
-                return Fold(operand, scope) is { } operandValue ? !operandValue : null;
-            case QBinOp { Op: "&&" } and:
+
+            case HirNameExpression name
+                when scope.Lookup(name.Name) is
+                {
+                    IsConst: true,
+                    FoldedBoolean: { } constant,
+                }:
+                return constant;
+
+            case HirUnaryExpression
+            {
+                Operator: HirUnaryOperator.LogicalNot,
+            } unary:
+                return Fold(unary.Operand, scope) is { } operand
+                    ? !operand
+                    : null;
+
+            case HirBinaryExpression
+            {
+                Operator: HirBinaryOperator.LogicalAnd,
+            } and:
             {
                 var left = Fold(and.Left, scope);
                 var right = Fold(and.Right, scope);
-                if (left == false || right == false) return false;
-                return left == true && right == true ? true : null;
+                if (left == false || right == false)
+                    return false;
+                return left == true && right == true
+                    ? true
+                    : null;
             }
-            case QBinOp { Op: "||" } or:
+
+            case HirBinaryExpression
+            {
+                Operator: HirBinaryOperator.LogicalOr,
+            } or:
             {
                 var left = Fold(or.Left, scope);
                 var right = Fold(or.Right, scope);
-                if (left == true || right == true) return true;
-                return left == false && right == false ? false : null;
+                if (left == true || right == true)
+                    return true;
+                return left == false && right == false
+                    ? false
+                    : null;
             }
-            case QBinOp comparison when comparison.Op is "==" or "!=" or "<" or "<=" or ">" or ">="
-                                              && BoundFolder.Fold(comparison.Left, scope) is BoundNum left
-                                              && BoundFolder.Fold(comparison.Right, scope) is BoundNum right:
-                return comparison.Op switch
+
+            case HirBinaryExpression comparison
+                when comparison.Operator is
+                    HirBinaryOperator.Equal
+                    or HirBinaryOperator.NotEqual
+                    or HirBinaryOperator.LessThan
+                    or HirBinaryOperator.LessThanOrEqual
+                    or HirBinaryOperator.GreaterThan
+                    or HirBinaryOperator.GreaterThanOrEqual
+                && BoundFolder.Fold(comparison.Left, scope) is BoundNum left
+                && BoundFolder.Fold(comparison.Right, scope) is BoundNum right:
+                return comparison.Operator switch
                 {
-                    "==" => left.Value == right.Value,
-                    "!=" => left.Value != right.Value,
-                    "<" => left.Value < right.Value,
-                    "<=" => left.Value <= right.Value,
-                    ">" => left.Value > right.Value,
-                    ">=" => left.Value >= right.Value,
+                    HirBinaryOperator.Equal => left.Value == right.Value,
+                    HirBinaryOperator.NotEqual => left.Value != right.Value,
+                    HirBinaryOperator.LessThan => left.Value < right.Value,
+                    HirBinaryOperator.LessThanOrEqual => left.Value <= right.Value,
+                    HirBinaryOperator.GreaterThan => left.Value > right.Value,
+                    HirBinaryOperator.GreaterThanOrEqual => left.Value >= right.Value,
                     _ => null,
                 };
-            case QBinOp comparison when comparison.Op is "==" or "!=":
+
+            case HirBinaryExpression comparison
+                when comparison.Operator is
+                    HirBinaryOperator.Equal
+                    or HirBinaryOperator.NotEqual:
             {
                 var left = Fold(comparison.Left, scope);
                 var right = Fold(comparison.Right, scope);
-                if (left is null || right is null) return null;
-                return comparison.Op == "==" ? left == right : left != right;
+                if (left is null || right is null)
+                    return null;
+                return comparison.Operator == HirBinaryOperator.Equal
+                    ? left == right
+                    : left != right;
             }
+
             default:
                 return null;
         }

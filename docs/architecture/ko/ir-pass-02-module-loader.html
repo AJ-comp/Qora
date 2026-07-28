@@ -97,20 +97,19 @@
 
 <div class="wrap">
   <nav class="doc-links" aria-label="IR 패스 데이터시트 내비게이션">
-    <a class="doc-link" href="ir-pass-01-qora-lowering.html">← 1. QoraLowering</a>
+    <a class="doc-link" href="ir-pass-01-ast-to-hir-lowering.html">← 1. AstToHirLowering</a>
     <a class="doc-link" href="datasheet.html#passes">패스 목차</a>
-    <a class="doc-link" href="ir-pass-03-measure-condition-lowering.html">3. MeasureConditionLowering →</a>
   </nav>
 
   <p class="lead">
     import 확장은 두 단계로 나뉩니다.<br>
     먼저 <code>SourceGraphLoader</code>가 파일 I/O와 문서별 구문 분석·lowering을 한 번씩 수행하고, 불변 <code>SourceSetSnapshot</code>과 내부 <code>LoadedSourceGraph</code>를 준비합니다.<br>
     구문 분석 중 만들어진 Janglim AST는 내부 <code>SyntaxParseProduct</code>에서 즉시 lowering할 때만 사용하며, 공개 소스 스냅샷에는 Qora 소유의 불변 구문 투영만 남습니다.<br>
-    그 뒤 <code>ModuleLoader</code>는 준비된 문서 그래프만 읽어 하나의 <code>QProgram</code>과 imported-node introduction 목록을 만들며, 파일을 열거나 텍스트를 다시 파싱하지 않습니다.
+    그 뒤 <code>ModuleLoader</code>는 준비된 문서 그래프와 exact lowered snapshot에서 연 <code>HirRewriteSession</code>만 읽어 하나의 <code>HirProgram</code> 선언 트리와 imported-node introduction 목록을 만들며, 파일을 열거나 텍스트를 다시 파싱하지 않습니다.
   </p>
 
   <section class="meta" aria-label="ModuleLoader 핵심 사양">
-    <div class="meta-title"><span>PASS SPECIFICATION</span><span>ModuleLoader.Expand(LoadedSourceGraph)</span></div>
+    <div class="meta-title"><span>PASS SPECIFICATION</span><span>ModuleLoader.Expand(LoadedSourceGraph, HirRewriteSession)</span></div>
     <div class="meta-body">
       <div class="panel">
         <table class="spec">
@@ -118,8 +117,8 @@
           <tr><td class="k">파일 I/O</td><td><code>SourceGraphLoader</code></td><td>경로 해석, 문서 읽기, canonical path 중복 제거</td></tr>
           <tr><td class="k">문서 구문</td><td><code>SourceSetSnapshot</code></td><td>문서마다 정확히 하나의 <code>SourceDocumentSnapshot</code>과 parser-engine 참조가 없는 불변 <code>SyntaxSnapshot</code></td></tr>
           <tr><td class="k">문서 간 관계</td><td><code>ImportGraph</code></td><td><code>SourceDocumentRef</code>로 연결된 순서 있는 import 간선</td></tr>
-          <tr><td class="k">문서별 HIR</td><td><code>LoadedSourceGraph.LoweredDocuments</code></td><td>구문 분석에 성공한 문서의 <code>SourceDocumentRef → QProgram</code> 맵</td></tr>
-          <tr><td class="k">통합 HIR</td><td><code>ModuleLoader.Result</code></td><td>연산과 <code>open</code>을 병합한 <code>Program</code>과 각 imported node를 문서에 연결하는 <code>Introductions</code></td></tr>
+          <tr><td class="k">문서별 HIR</td><td><code>LoadedSourceGraph.LoweredDocuments</code></td><td>구문 분석에 성공한 문서의 <code>SourceDocumentRef → HirProgram</code> 맵</td></tr>
+          <tr><td class="k">통합 HIR</td><td><code>ModuleLoader.Result.Rewrite</code></td><td>문서별 <code>Declarations</code> subtree를 결합한 <code>HirProgram</code>과 각 imported node를 문서에 연결하는 <code>HirNodeIntroduction</code></td></tr>
         </table>
       </div>
     </div>
@@ -129,7 +128,7 @@
     <div class="diagram-scroll" tabindex="0">
       <svg viewBox="0 0 1000 500" role="img" aria-labelledby="boundary-title boundary-desc">
         <title id="boundary-title">SourceGraphLoader와 ModuleLoader의 책임 경계</title>
-        <desc id="boundary-desc">소스 문서와 경로 문맥이 SourceGraphLoader로 들어가 문서 스냅샷, 불변 구문 스냅샷, 문서별 QProgram, ImportGraph가 만들어집니다. ModuleLoader는 이 준비된 그래프만 받아 통합 QProgram과 imported-node introduction을 반환합니다.</desc>
+        <desc id="boundary-desc">소스 문서와 경로 문맥이 SourceGraphLoader로 들어가 문서 스냅샷, 불변 구문 스냅샷, 문서별 HirProgram, ImportGraph가 만들어집니다. ModuleLoader는 이 준비된 그래프와 exact rewrite session을 받아 통합 HirProgram declaration tree와 imported-node introduction을 반환합니다.</desc>
         <defs>
           <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
             <path d="M0 0 L10 5 L0 10 Z" fill="#64748b"/>
@@ -147,7 +146,7 @@
         <rect x="300" y="34" width="285" height="154" rx="12" fill="#edf5ff" stroke="#6a9ed8" stroke-width="2"/>
         <text class="svg-ui" x="442" y="64" text-anchor="middle" fill="#174f8a" font-size="16" font-weight="850">SourceGraphLoader</text>
         <text class="svg-ui" x="322" y="94" fill="#334155" font-size="13">• 경로 정규화와 문서 I/O</text>
-        <text class="svg-ui" x="322" y="119" fill="#334155" font-size="13">• 문서별 parse + QoraLowering</text>
+        <text class="svg-ui" x="322" y="119" fill="#334155" font-size="13">• 문서별 parse + AstToHirLowering</text>
         <text class="svg-ui" x="322" y="144" fill="#334155" font-size="13">• import 간선·진단 수집</text>
         <text class="svg-ui" x="322" y="169" fill="#334155" font-size="13">• 동일 문서 재사용</text>
 
@@ -163,7 +162,7 @@
         <text class="svg-code" x="442" y="336" text-anchor="middle" fill="#64748b" font-size="10.5">ordered edges</text>
         <rect x="538" y="294" width="145" height="52" rx="8" fill="#fff" stroke="#9bcbb8"/>
         <text class="svg-code" x="610" y="317" text-anchor="middle" fill="#334155" font-size="12">LoweredDocuments</text>
-        <text class="svg-code" x="610" y="336" text-anchor="middle" fill="#64748b" font-size="10.5">document → QProgram</text>
+        <text class="svg-code" x="610" y="336" text-anchor="middle" fill="#64748b" font-size="10.5">document → HirProgram</text>
 
         <path d="M705 308 H767" fill="none" stroke="#64748b" stroke-width="3" marker-end="url(#arrow)"/>
 
@@ -202,7 +201,7 @@
     </div>
     <div class="step">
       <b>3. 문서별 lowering</b>
-      <p>구문 분석에 성공하고 임시 AST가 있으면 <code>QoraLowering.Lower(parseProduct.LoweringAst, documentRef)</code>를 즉시 호출합니다.<br>생성된 모든 위치는 해당 문서를 가리키는 <code>SourceSpan</code>이며, lowering 뒤에는 parser-owned AST를 장기 아티팩트로 보관하지 않습니다.</p>
+      <p>구문 분석에 성공하고 임시 AST가 있으면 먼저 <code>HirConstructionCore.BeginLowering(documentRef)</code>으로 exact 문서 session을 열고 <code>AstToHirLowering.Lower(parseProduct.LoweringAst, session)</code>을 즉시 호출합니다.<br>생성된 모든 node identity와 <code>SourceSpan</code>은 해당 compilation revision·문서에 결박되며, lowering 뒤에는 parser-owned AST를 장기 아티팩트로 보관하지 않습니다.</p>
     </div>
     <div class="step">
       <b>4. import 그래프 고정</b>
@@ -227,12 +226,11 @@
   <h2 id="merge">2. ModuleLoader의 순수 병합</h2>
 
   <p>
-    <code>ModuleLoader.Expand</code>의 유일한 입력은 <code>LoadedSourceGraph</code>입니다.<br>
-    진입 문서의 <code>QProgram</code>이 없으면 병합할 구조 자체가 없으므로 호출 계약 위반으로 처리하며, 정상 입력에서는 아래 순서로 병합합니다.
+    <code>ModuleLoader.Expand</code>는 <code>LoadedSourceGraph</code>와 lowered entry snapshot에서 연 <code>HirRewriteSession</code>을 입력받습니다.<br>
+    진입 문서의 <code>HirProgram</code>이 없거나 rewrite session이 exact entry program을 가리키지 않으면 호출 계약 위반으로 처리하며, 정상 입력에서는 아래 순서로 병합합니다.
   </p>
 
-<pre><code>operations = entry.Operations
-opens      = entry.Opens
+<pre><code>declarations = entry.Declarations
 visited    = { Sources.Entry }
 
 MergeImports(importer):
@@ -243,38 +241,36 @@ MergeImports(importer):
     MergeImports(imported)
     if imported is not in LoweredDocuments:
       continue
-    operations += LoweredDocuments[imported].Operations
-    introductions += every imported HIR node except its QProgram root
-    merge opens by namespace
+    for declaration in LoweredDocuments[imported].Declarations:
+      rewrite.AdoptImportedSubtree(declaration, imported)
+      declarations += declaration
 
-return ModuleLoader.Result(
-  Program = entry with {
-    Operations = operations,
-    Opens = distinct open targets per namespace,
-    Imports = null
-  },
-  Introductions = introductions
-)</code></pre>
+expanded = rewrite.RewriteProgram(
+  source = entry,
+  declarations,
+  imports = [])
+
+return ModuleLoader.Result(rewrite.Publish(expanded))</code></pre>
 
   <p>
-    연산 순서는 진입 문서가 항상 먼저이며, import 하위 트리는 깊이 우선 후위 순서로 이어집니다.<br>
-    예를 들어 <code>main → A → C</code>와 <code>main → B → C</code>인 diamond에서는 <code>main</code>의 연산 뒤에 <code>C</code>, <code>A</code>, <code>B</code>의 연산이 한 번씩 추가됩니다.<br>
+    최상위 declaration 순서는 진입 문서가 항상 먼저이며, import 하위 트리는 깊이 우선 후위 순서로 이어집니다.<br>
+    예를 들어 <code>main → A → C</code>와 <code>main → B → C</code>인 diamond에서는 <code>main</code>의 declaration 뒤에 <code>C</code>, <code>A</code>, <code>B</code>의 declaration subtree가 한 번씩 추가됩니다.<br>
     이 순서는 <code>ImportGraph.Outgoing</code>의 소스 순서와 <code>SourceDocumentRef</code> 기반 방문 집합으로 결정됩니다.
   </p>
 
   <p>
-    병합하면서 처음 들어온 imported HIR node는 부모 HIR의 복사본이 아니므로 <code>NodeDerivation</code>으로 기록하지 않습니다.<br>
-    대신 <code>HirNodeIntroduction(IntroducedNodeId, Document, ImportedDocument)</code>으로 분류하고, <code>HirPipelineBuilder</code>가 <code>Lowered → ImportsExpanded</code> 전이에 함께 전달합니다.<br>
+    병합하면서 처음 들어온 imported HIR declaration subtree는 부모 HIR의 복사본이 아니므로 <code>NodeDerivation</code>으로 기록하지 않습니다.<br>
+    대신 <code>AdoptImportedSubtree</code>가 subtree의 모든 reachable node를 <code>HirNodeIntroduction(IntroducedNodeId, Document, ImportedDocument)</code>으로 분류하고, <code>HirPipelineBuilder</code>가 <code>Lowered → ImportsExpanded</code> 전이에 함께 전달합니다.<br>
     따라서 <code>HirLineage</code>는 새 node를 identity copy, compiler synthesis, source introduction 가운데 정확히 하나로 설명할 수 있습니다.
   </p>
 
   <div class="panel">
     <table class="spec">
       <tr><th>출력 필드</th><th>병합 규칙</th><th>하지 않는 일</th></tr>
-      <tr><td class="k"><code>Operations</code></td><td>진입 연산 뒤에 방문한 import 문서 연산을 결정적 순서로 추가</td><td>이름 해소, 타입 검사, 본문 재작성</td></tr>
-      <tr><td class="k"><code>Opens</code></td><td>namespace별 목록을 합친 뒤 같은 <code>QOpen.Target</code>을 처음 항목 기준으로 중복 제거</td><td>대상 namespace의 존재 여부 판정</td></tr>
-      <tr><td class="k"><code>Imports</code></td><td>그래프 소비 완료를 나타내는 <code>null</code></td><td>경로 재해석 또는 파일 재탐색</td></tr>
-      <tr><td class="k"><code>Introductions</code></td><td>import 문서에서 새로 들어온 각 HIR node를 exact <code>SourceDocumentRef</code>에 연결</td><td>semantic identity 복제 또는 compiler synthesis로 가장</td></tr>
+      <tr><td class="k"><code>Declarations</code></td><td>진입 declaration 뒤에 방문한 import 문서의 top-level declaration subtree를 결정적 순서로 추가</td><td>namespace를 문자열로 평탄화, 이름 해소, 타입 검사, 본문 재작성</td></tr>
+      <tr><td class="k"><code>HirNamespaceDeclaration</code></td><td>자신의 <code>OpenDirectives</code>와 중첩 <code>Declarations</code>를 그대로 소유</td><td><code>open</code> 중복 제거 또는 대상 namespace 존재 여부 판정</td></tr>
+      <tr><td class="k"><code>Imports</code></td><td>그래프 소비 완료를 나타내는 빈 불변 목록</td><td>경로 재해석 또는 파일 재탐색</td></tr>
+      <tr><td class="k"><code>HirRewriteResult.Introductions</code></td><td>import 문서에서 새로 들어온 각 reachable HIR node를 exact <code>SourceDocumentRef</code>에 연결</td><td>semantic identity 복제 또는 compiler synthesis로 가장</td></tr>
       <tr><td class="k">진단</td><td>새 진단을 만들지 않음</td><td>구문 오류와 import I/O 오류 수집</td></tr>
     </table>
   </div>
@@ -307,16 +303,16 @@ return ModuleLoader.Result(
 
   <p>
     진입 문서의 구문 분석이 실패하면 문서별 <code>SyntaxSnapshot</code>만 남고 HIR은 시작되지 않습니다.<br>
-    구문 진단은 없지만 entry <code>QProgram</code>이 만들어지지 않은 빈 소스도 <code>HirPreflight</code>의 <code>QSEM040</code>으로 중단하며, 이때 <code>ModuleLoader</code>는 호출되지 않습니다.<br>
+    구문 진단은 없지만 entry <code>HirProgram</code>이 만들어지지 않은 빈 소스도 <code>HirPreflight</code>의 <code>QSEM040</code>으로 중단하며, 이때 <code>ModuleLoader</code>는 호출되지 않습니다.<br>
     반면에 진입 문서가 lowering되었지만 import 문서의 구문 분석이나 경로 해석이 실패하면, 컴파일러는 <code>Lowered</code>와 <code>ImportsExpanded</code> HIR milestone을 보존한 뒤 중단합니다.<br>
-    이후 <code>MeasureConditionLowering</code>·이름 해소·검증·MIR·대상 backend는 실행하지 않습니다.
+    이후 이름 해소·검증·MIR·대상 backend는 실행하지 않습니다.
   </p>
 
   <div class="panel">
     <table class="spec">
       <tr><th>실패 종류</th><th><code>CompilationStage</code></th><th><code>DiagnosticOrigin</code></th></tr>
       <tr><td class="k">문서 구문 오류</td><td><code>Syntax</code></td><td>정확한 <code>SourceDocumentRef</code></td></tr>
-      <tr><td class="k">entry <code>QProgram</code> 없음</td><td><code>HirPreflight</code> · <code>QSEM040</code></td><td>entry <code>SourceDocumentRef</code></td></tr>
+      <tr><td class="k">entry <code>HirProgram</code> 없음</td><td><code>HirPreflight</code> · <code>QSEM040</code></td><td>entry <code>SourceDocumentRef</code></td></tr>
       <tr><td class="k">경로 문맥 없음·파일 없음·읽기 실패</td><td><code>ImportExpansion</code></td><td>import 지시문이 속한 소스 문서</td></tr>
       <tr><td class="k">순환 또는 diamond 재방문</td><td>진단 없음</td><td>기존 문서 identity를 가리키는 정상 간선</td></tr>
     </table>
@@ -328,8 +324,8 @@ return ModuleLoader.Result(
     <table class="spec">
       <tr><th>타입 또는 API</th><th>현재 역할</th></tr>
       <tr><td class="k"><code>SourceGraphLoader.Load(...)</code></td><td>import 그래프 전체의 문서·구문·문서별 HIR·import 진단 준비</td></tr>
-      <tr><td class="k"><code>LoadedSourceGraph</code></td><td><code>SourceSetSnapshot</code>, 문서별 <code>QProgram</code> 맵, import 진단을 묶는 내부 hand-off</td></tr>
-      <tr><td class="k"><code>ModuleLoader.Expand(LoadedSourceGraph)</code></td><td>prepared graph를 하나의 source-shaped HIR로 순수 병합하고 imported-node introduction을 함께 반환</td></tr>
+      <tr><td class="k"><code>LoadedSourceGraph</code></td><td><code>SourceSetSnapshot</code>, 문서별 <code>HirProgram</code> 맵, import 진단, revision-bound <code>HirConstructionCore</code>를 묶는 내부 hand-off</td></tr>
+      <tr><td class="k"><code>ModuleLoader.Expand(LoadedSourceGraph, HirRewriteSession)</code></td><td>prepared graph의 declaration subtree를 exact source snapshot에 순수 병합하고 source-qualified <code>HirRewriteResult</code>를 반환</td></tr>
       <tr><td class="k"><code>SourceSetSnapshot</code></td><td>한 컴파일 revision의 모든 문서·구문 스냅샷·<code>ImportGraph</code>를 공개하는 불변 소스 모델</td></tr>
     </table>
   </div>
@@ -341,9 +337,8 @@ return ModuleLoader.Result(
   </p>
 
   <nav class="doc-links" aria-label="IR 패스 데이터시트 내비게이션">
-    <a class="doc-link" href="ir-pass-01-qora-lowering.html">← 1. QoraLowering</a>
+    <a class="doc-link" href="ir-pass-01-ast-to-hir-lowering.html">← 1. AstToHirLowering</a>
     <a class="doc-link" href="datasheet.html#passes">패스 목차</a>
-    <a class="doc-link" href="ir-pass-03-measure-condition-lowering.html">3. MeasureConditionLowering →</a>
   </nav>
 
   <footer>

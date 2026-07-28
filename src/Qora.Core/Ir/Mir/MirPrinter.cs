@@ -62,16 +62,12 @@ public static class MirPrinter
                     $"  storage ${storage.Id} {storage.Name}: {storage.Type} [{storage.Kind.ToString().ToLowerInvariant()}, {storage.AliasMode.ToString().ToLowerInvariant()}, {definition}] {Origin(storage.Origin)}");
             }
 
-            foreach (var resource in callable.Qubits.OrderBy(resource => resource.Id.Value))
+            foreach (var qubit in callable.Qubits
+                         .OrderBy(qubit => qubit.Id.Value)
+                         .ThenBy(qubit => qubit.Version.Value))
             {
-                var shape = resource.IsArray
-                    ? resource.Length is int length ? $"qubit[{length}]" : "qubit[]"
-                    : "qubit";
-                var definition = resource.Kind == MirQubitResourceKind.Parameter
-                    ? "parameter"
-                    : $"allocate %{resource.AllocationInstruction}";
                 _text.AppendLine(
-                    $"  resource &{resource.Id} {resource.Name}: {shape} [{resource.Kind.ToString().ToLowerInvariant()}, {definition}] {Origin(resource.Origin)}");
+                    $"  qubit {Qubit(qubit.Key)} {QubitDefinition(qubit)} {Origin(qubit.Origin)}");
             }
 
             foreach (var block in callable.Blocks.OrderBy(block => block.Id.Value))
@@ -121,7 +117,7 @@ public static class MirPrinter
                 $"{Result(call.Result)} = call {Target(call.Target)}({string.Join(", ", call.Operands.Select(Operand))})",
 
             MirQubitAllocate allocation =>
-                $"qubit.allocate &{allocation.Resource}",
+                $"qubit.allocate {Qubit(allocation.Result.Key)}",
 
             MirQuantumApply apply =>
                 $"{ApplyResults(apply)}apply {Functors(apply.Functors)}{Target(apply.Target)}"
@@ -129,7 +125,8 @@ public static class MirPrinter
                 + MutableResults(apply.MutableArrayResults),
 
             MirMeasure measure =>
-                $"{Result(measure.Result)} = measure {Place(measure.Place)}",
+                $"({Result(measure.Result)}, {Qubit(measure.QubitResult.Key)})"
+                + $" = measure {Access(measure.Qubit)}",
 
             _ => $"<{instruction.GetType().Name}>",
         };
@@ -156,14 +153,14 @@ public static class MirPrinter
             _ => $"<{terminator.GetType().Name}>",
         };
 
-        private string Parameter(MirParameter parameter) => parameter switch
+        private string Parameter(IMirParameter parameter) => parameter switch
         {
             MirClassicalParameter classical =>
                 $"{Mode(classical.Ownership, classical.Access)}{Value(classical.Value)} {classical.Name}: {classical.Type}"
                 + (classical.Storage is MirStorageId storage ? $" storage ${storage}" : string.Empty),
 
             MirQubitParameter qubit =>
-                $"{Mode(qubit.Ownership, QAccessMode.ReadOnly)}&{qubit.Resource} {qubit.Name}: "
+                $"{Mode(qubit.Ownership, QAccessMode.ReadOnly)}{Qubit(qubit.Key)} {qubit.Name}: "
                 + (qubit.IsArray
                     ? qubit.Length is int length ? $"qubit[{length}]" : "qubit[]"
                     : "qubit"),
@@ -176,7 +173,7 @@ public static class MirPrinter
             MirClassicalCallOperand classical =>
                 $"{Mode(classical.Ownership, classical.Access)}{Value(classical.Value)}",
             MirQubitCallOperand qubit =>
-                $"{Mode(qubit.Ownership, qubit.Access)}{Place(qubit.Place)}",
+                $"{Mode(qubit.Ownership, qubit.Access)}{Access(qubit.Qubit)}",
             _ => $"<{operand.GetType().Name}>",
         };
 
@@ -200,16 +197,45 @@ public static class MirPrinter
 
         private static string Value(MirValueId id) => $"%{id}";
         private static string Block(MirBlockId id) => $"^{id}";
+        private static string Qubit(MirQubitKey key) => $"&{key}";
 
-        private static string Place(MirQubitPlace place) =>
-            place.Index is MirValueId index
-                ? $"&{place.Resource}[{Value(index)}]"
-                : $"&{place.Resource}";
+        private static string Access(MirQubitAccess access) =>
+            access.Index is MirValueId index
+                ? $"{Qubit(access.Qubit)}[{Value(index)}]"
+                : Qubit(access.Qubit);
 
-        private static string ApplyResults(MirQuantumApply apply) =>
-            apply.MutableArrayResults.Count == 0
+        private static string ApplyResults(MirQuantumApply apply)
+        {
+            var results = apply.QubitResults
+                .Select(result => Qubit(result.Key))
+                .Concat(apply.MutableArrayResults.Select(result => ResultName(result.Result)))
+                .ToArray();
+            return results.Length == 0
                 ? string.Empty
-                : $"({string.Join(", ", apply.MutableArrayResults.Select(result => ResultName(result.Result)))}) = ";
+                : $"({string.Join(", ", results)}) = ";
+        }
+
+        private static string QubitDefinition(MirQubit qubit) => qubit switch
+        {
+            MirQubitParameter parameter =>
+                $"{parameter.Name}: {QubitShape(parameter.IsArray, parameter.Length)} [parameter]",
+            MirQubitFromUse local =>
+                $"{local.Name}: {QubitShape(local.IsArray, local.Length)} [use]",
+            MirQubitAfterInstruction =>
+                "[instruction-result]",
+            MirQubitPhi phi =>
+                $"[phi {Block(phi.Block)}"
+                + (phi.Inputs.Count == 0
+                    ? "]"
+                    : $" <- {string.Join(", ", phi.Inputs.Select(input =>
+                        $"{Block(input.Edge.Source)}#{input.Edge.SuccessorOrdinal}:{Qubit(input.Qubit)}"))}]"),
+            _ => $"[unknown {qubit.GetType().Name}]",
+        };
+
+        private static string QubitShape(bool isArray, int? length) =>
+            isArray
+                ? length is int count ? $"qubit[{count}]" : "qubit[]"
+                : "qubit";
 
         private static string ResultName(MirValueId id) => $"%{id}";
 
@@ -258,14 +284,16 @@ public static class MirPrinter
         {
             var origin = _program.Origins.Require(id);
             var hir = _program.Origins.ResolveHir(id);
-            var node = hir.HirNodeId is int nodeId ? $",node={nodeId}" : string.Empty;
+            var node = hir.HirNodeId is HirNodeId nodeId
+                ? $",node={nodeId}"
+                : string.Empty;
             var span = hir.Span is SourceSpan location
                 ? $",span={location}"
                 : string.Empty;
             var synthesized = origin.Kind == MirOriginKind.Synthesized
                 ? $",synth={origin.SynthesisReason}"
                 : string.Empty;
-            return $"@{id}:hir(op={hir.HirOperationId}{node}{span}{synthesized})";
+            return $"@{id}:hir(callable={hir.HirCallableId}{node}{span}{synthesized})";
         }
     }
 }

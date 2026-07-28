@@ -4,15 +4,15 @@ using Qora.Ir;
 namespace Qora.Tests;
 
 /// <summary>
-/// The expression parser (<see cref="ExprTree"/>) recovers a precedence-correct tree from the engine's flat
+/// AST expression lowering recovers a precedence-correct HIR tree from the engine's flat
 /// token run — the ONE parse every downstream reader will consume instead of re-parsing text. These pin the
 /// tree shape: operator precedence (<c>* /</c> above <c>+ -</c>; comparisons above <c>&amp;&amp;</c> above
 /// <c>||</c>), member access, and index access.
 /// </summary>
-public class ExprTreeTests
+public class AstExpressionLoweringTests
 {
     /// <summary>Compile a program with a single top-level <c>if</c> and return its condition tree.</summary>
-    private static QNode CondTree(string condition)
+    private static HirExpression ConditionTree(string condition)
     {
         var r = Compiler.Compile($$"""
             operation Main() {
@@ -23,45 +23,64 @@ public class ExprTreeTests
                 if ({{condition}}) { H(q[0]); }
             }
             """);
-        var iff = r.Hir.Resolved!.Program!.Operations[0].Body.OfType<QIf>().Single();
-        Assert.NotNull(iff.Cond.Tree);
-        return iff.Cond.Tree!;
+        var branch = r.Hir.Resolved!.Program.Callables[0].Body
+            .OfType<HirIfStatement>()
+            .Single();
+        return branch.Condition;
     }
 
     [Fact]
     public void ParsesAGuardConjunctionWithComparisonsAboveAnd()
     {
         // 0 <= n && n < a.Count  ==  (0 <= n) && (n < a.Count)
-        var tree = CondTree("0 <= n && n < a.Count");
-        var and = Assert.IsType<QBinOp>(tree);
-        Assert.Equal("&&", and.Op);
+        var tree = ConditionTree("0 <= n && n < a.Count");
+        var and = Assert.IsType<HirBinaryExpression>(tree);
+        Assert.Equal(HirBinaryOperator.LogicalAnd, and.Operator);
 
-        var le = Assert.IsType<QBinOp>(and.Left);
-        Assert.Equal("<=", le.Op);
-        Assert.Equal(0L, Assert.IsType<QNumLit>(le.Left).Value);
-        Assert.Equal("n", Assert.IsType<QNameRef>(le.Right).Name);
+        var le = Assert.IsType<HirBinaryExpression>(and.Left);
+        Assert.Equal(HirBinaryOperator.LessThanOrEqual, le.Operator);
+        Assert.Equal(
+            0L,
+            Assert.IsType<HirIntegerLiteralExpression>(le.Left).Value);
+        Assert.Equal(
+            "n",
+            Assert.IsType<HirNameExpression>(le.Right).Name);
 
-        var lt = Assert.IsType<QBinOp>(and.Right);
-        Assert.Equal("<", lt.Op);
-        Assert.Equal("n", Assert.IsType<QNameRef>(lt.Left).Name);
-        var member = Assert.IsType<QMember>(lt.Right);
-        Assert.Equal("Count", member.Member);
-        Assert.Equal("a", Assert.IsType<QNameRef>(member.Base).Name);
+        var lt = Assert.IsType<HirBinaryExpression>(and.Right);
+        Assert.Equal(HirBinaryOperator.LessThan, lt.Operator);
+        Assert.Equal(
+            "n",
+            Assert.IsType<HirNameExpression>(lt.Left).Name);
+        var member = Assert.IsType<HirMemberAccessExpression>(lt.Right);
+        Assert.Equal("Count", member.MemberName);
+        Assert.Equal(
+            "a",
+            Assert.IsType<HirNameExpression>(
+                member.Receiver).Name);
     }
 
     [Fact]
     public void ParsesArithmeticWithMultiplyAbovePlus()
     {
         // n * 2 + 1  ==  (n * 2) + 1
-        var eq = Assert.IsType<QBinOp>(CondTree("n * 2 + 1 == 5"));
-        Assert.Equal("==", eq.Op);
-        var plus = Assert.IsType<QBinOp>(eq.Left);
-        Assert.Equal("+", plus.Op);
-        var times = Assert.IsType<QBinOp>(plus.Left);
-        Assert.Equal("*", times.Op);
-        Assert.Equal("n", Assert.IsType<QNameRef>(times.Left).Name);
-        Assert.Equal(2L, Assert.IsType<QNumLit>(times.Right).Value);
-        Assert.Equal(1L, Assert.IsType<QNumLit>(plus.Right).Value);
+        var eq = Assert.IsType<HirBinaryExpression>(
+            ConditionTree("n * 2 + 1 == 5"));
+        Assert.Equal(HirBinaryOperator.Equal, eq.Operator);
+        var plus = Assert.IsType<HirBinaryExpression>(eq.Left);
+        Assert.Equal(HirBinaryOperator.Add, plus.Operator);
+        var times = Assert.IsType<HirBinaryExpression>(plus.Left);
+        Assert.Equal(HirBinaryOperator.Multiply, times.Operator);
+        Assert.Equal(
+            "n",
+            Assert.IsType<HirNameExpression>(times.Left).Name);
+        Assert.Equal(
+            2L,
+            Assert.IsType<HirIntegerLiteralExpression>(
+                times.Right).Value);
+        Assert.Equal(
+            1L,
+            Assert.IsType<HirIntegerLiteralExpression>(
+                plus.Right).Value);
     }
 
     /// <summary>A pathologically deep expression (only ever machine-generated) is rejected with a clean
@@ -109,10 +128,17 @@ public class ExprTreeTests
     public void ParsesOrBelowAnd()
     {
         // a == 1 && b == 0 || n == 2  ==  ((a==1) && (b==0)) || (n==2)
-        var or = Assert.IsType<QBinOp>(CondTree("b == 1 && n == 0 || n == 2"));
-        Assert.Equal("||", or.Op);
-        Assert.Equal("&&", Assert.IsType<QBinOp>(or.Left).Op);
-        Assert.Equal("==", Assert.IsType<QBinOp>(or.Right).Op);
+        var or = Assert.IsType<HirBinaryExpression>(
+            ConditionTree("b == 1 && n == 0 || n == 2"));
+        Assert.Equal(HirBinaryOperator.LogicalOr, or.Operator);
+        Assert.Equal(
+            HirBinaryOperator.LogicalAnd,
+            Assert.IsType<HirBinaryExpression>(
+                or.Left).Operator);
+        Assert.Equal(
+            HirBinaryOperator.Equal,
+            Assert.IsType<HirBinaryExpression>(
+                or.Right).Operator);
     }
 
     [Fact]
@@ -121,16 +147,25 @@ public class ExprTreeTests
         // n == 1 < 2  ==  n == (1 < 2) — the SAME C-style ladder OpenQASM applies when it re-parses the
         // emitted tokens; folding both comparison families at one level once made the tree claim
         // (n == 1) < 2 while the executed QASM computed the other grouping.
-        var eq = Assert.IsType<QBinOp>(CondTree("n == 1 < 2"));
-        Assert.Equal("==", eq.Op);
-        Assert.Equal("n", Assert.IsType<QNameRef>(eq.Left).Name);
-        var lt = Assert.IsType<QBinOp>(eq.Right);
-        Assert.Equal("<", lt.Op);
-        Assert.Equal(1L, Assert.IsType<QNumLit>(lt.Left).Value);
-        Assert.Equal(2L, Assert.IsType<QNumLit>(lt.Right).Value);
+        var eq = Assert.IsType<HirBinaryExpression>(
+            ConditionTree("n == 1 < 2"));
+        Assert.Equal(HirBinaryOperator.Equal, eq.Operator);
+        Assert.Equal(
+            "n",
+            Assert.IsType<HirNameExpression>(eq.Left).Name);
+        var lt = Assert.IsType<HirBinaryExpression>(eq.Right);
+        Assert.Equal(HirBinaryOperator.LessThan, lt.Operator);
+        Assert.Equal(
+            1L,
+            Assert.IsType<HirIntegerLiteralExpression>(
+                lt.Left).Value);
+        Assert.Equal(
+            2L,
+            Assert.IsType<HirIntegerLiteralExpression>(
+                lt.Right).Value);
     }
 
-    /// <summary>A deep UNARY chain recurses in the engine's parse-stack teardown and in ExprTree itself —
+    /// <summary>A deep unary chain recurses in the engine's parse-stack teardown and expression lowering —
     /// depths the token cap admits must reach the QSEM031 guard as a clean reply, never kill the process
     /// (the compilation runs on a wide-stack worker thread precisely so the guard is always reachable).</summary>
     [Fact]

@@ -65,8 +65,9 @@ declared at `Main` top level and lowers to OpenQASM general arrays. (clean)
 - **Return values + typed returns** — ✅ SHIPPED in v0.30: functions declare one scalar
   `int` / `bit` / `float` / `angle` return type and use `return expr;`, while operations remain void.
   Return paths and result types are validated before MIR and target lowering.
-- **Calls used as expressions** — ✅ SHIPPED in v0.30: `QCallNode` preserves nested function calls in
-  values, conditions, arguments, and returns. Resolver binds each call to `CalleeOpId`; validation,
+- **Calls used as expressions** — ✅ SHIPPED in v0.30 and unified in v0.33: `HirCallExpression`
+  preserves nested function calls in values, conditions, arguments, and returns. Resolver binds each
+  call to its typed `CalleeId`; validation,
   monomorphization, MIR lowering, and OpenQASM emission consume that identity.
 - **`bool` classical type** — `float` and `angle` have shipped, while a Boolean type distinct from the
   measurement-oriented `bit` remains. It maps directly to OpenQASM 3 `bool`. (clean)
@@ -184,9 +185,10 @@ The rung-③ analysis (events + qubit graph + ContainerMap) answers the injector
   exact instance and OpenQASM emitted names live only in
   `OpenQasmSymbolMap`. Source names remain lookup/diagnostic data at the edge; they are never analysis
   identity.
-- **#19 — bind calls to their callee by node reference, not by name — ✅ SHIPPED (2026-07-14, working tree).**
-  Statement calls (`QGate`) and expression calls (`QCallNode`) carry `int? CalleeOpId`. Resolver binds a
-  user call to its callee's stable node Id once, and monomorphization re-points the reference to the selected
+- **#19 — bind calls to their callee by node reference, not by name — ✅ SHIPPED (2026-07-14; unified
+  HIR in v0.33).** Statement and value calls share `HirCallExpression`, which carries
+  `HirNodeId? CalleeId`. Resolver binds a user call to its callee's stable node Id once, and
+  monomorphization re-points the reference to the selected
   specialization. HIR→MIR lowering replaces that HIR reference with `MirUserCallableTarget(MirCallableId)`.
   `MirAdjointMaterializer` synthesizes a fresh MIR callable ID and rewrites the internal request to that
   typed target; built-ins remain `MirBuiltinGateTarget`. Validation, effect analysis, MIR lowering, target
@@ -206,7 +208,8 @@ The rung-③ analysis (events + qubit graph + ContainerMap) answers the injector
   `SourceSpan`. Mutable Janglim AST exists only in a transient internal `SyntaxParseProduct` and is
   discarded immediately after lowering. `ModuleLoader` performs only the deterministic merge of that
   prepared graph and returns a `HirNodeIntroduction` for every imported HIR node.
-  A `HirSnapshot` owns structural `QProgram` state, while validation and effect facts are separate
+  A `HirSnapshot` owns one immutable structural `HirProgram` declaration/expression tree, while
+  validation and effect facts are separate
   snapshot-qualified semantic results. A validation artifact owns one authoritative
   `HirValidationOutcome` with accepted/rejected status and immutable diagnostics; effect analysis can
   consume only the exact accepted validation artifact for the same snapshot and records that

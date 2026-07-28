@@ -17,21 +17,21 @@ public enum MirOriginKind
 public sealed record MirOrigin(
     MirOriginRef Id,
     MirOriginKind Kind,
-    int? HirOperationId,
-    int? HirNodeId,
+    Qora.Ir.HirNodeId? HirCallableId,
+    Qora.Ir.HirNodeId? HirNodeId,
     SourceSpan? Span,
     MirOriginRef? Parent,
     string? SynthesisReason)
 {
     internal static MirOrigin FromHir(
         MirOriginRef id,
-        int operationId,
-        int nodeId,
+        Qora.Ir.HirNodeId callableId,
+        Qora.Ir.HirNodeId nodeId,
         SourceSpan? span = null) =>
         new(
             id,
             MirOriginKind.HirNode,
-            operationId,
+            callableId,
             nodeId,
             span,
             Parent: null,
@@ -44,7 +44,7 @@ public sealed record MirOrigin(
         new(
             id,
             MirOriginKind.Synthesized,
-            HirOperationId: null,
+            HirCallableId: null,
             HirNodeId: null,
             Span: null,
             parent,
@@ -86,9 +86,9 @@ public sealed class MirOriginTable
             switch (origin.Kind)
             {
                 case MirOriginKind.HirNode:
-                    if (origin.HirOperationId is null || origin.HirNodeId is null)
+                    if (origin.HirCallableId is null || origin.HirNodeId is null)
                         throw new ArgumentException(
-                            $"HIR origin {origin.Id} has no operation/node identity",
+                            $"HIR origin {origin.Id} has no callable/node identity",
                             nameof(origins));
                     if (origin.Parent is not null || origin.SynthesisReason is not null)
                         throw new ArgumentException(
@@ -103,7 +103,7 @@ public sealed class MirOriginTable
                         throw new ArgumentException(
                             $"synthesized origin {origin.Id} must name an earlier parent",
                             nameof(origins));
-                    if (origin.HirOperationId is not null
+                    if (origin.HirCallableId is not null
                         || origin.HirNodeId is not null
                         || origin.Span is not null)
                     {
@@ -185,24 +185,24 @@ internal sealed class MirOriginTableBuilder
     }
 
     public MirOriginRef Hir(
-        int operationId,
-        int nodeId)
+        HirNodeId callableId,
+        HirNodeId nodeId)
     {
-        if (_source.Structure.RequireKind(operationId) != HirNodeKind.Operation)
+        if (_source.Structure.RequireKind(callableId) != HirNodeKind.Callable)
             throw new ArgumentException(
-                $"HIR origin owner {operationId} is not an operation.",
-                nameof(operationId));
-        if (_source.Structure.RequireOwningOperation(nodeId) != operationId)
+                $"HIR origin owner {callableId} is not a callable.",
+                nameof(callableId));
+        if (_source.Structure.RequireOwningCallable(nodeId) != callableId)
             throw new ArgumentException(
-                $"HIR node {nodeId} does not belong to operation {operationId}.",
+                $"HIR node {nodeId} does not belong to callable {callableId}.",
                 nameof(nodeId));
 
         var span = _source.SourceMap.Find(nodeId);
-        var key = new HirOriginKey(operationId, nodeId, span);
+        var key = new HirOriginKey(callableId, nodeId, span);
         if (_hirOrigins.TryGetValue(key, out var existing)) return existing;
 
         var id = new MirOriginRef(_snapshotId, _origins.Count);
-        _origins.Add(MirOrigin.FromHir(id, operationId, nodeId, span));
+        _origins.Add(MirOrigin.FromHir(id, callableId, nodeId, span));
         _hirOrigins.Add(key, id);
         return id;
     }
@@ -237,8 +237,8 @@ internal sealed class MirOriginTableBuilder
     public MirOriginTable Build() => new(_snapshotId, _origins);
 
     private readonly record struct HirOriginKey(
-        int OperationId,
-        int NodeId,
+        HirNodeId CallableId,
+        HirNodeId NodeId,
         SourceSpan? Span);
 
     private readonly record struct SynthesizedOriginKey(

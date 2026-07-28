@@ -15,6 +15,44 @@ emitted as **OpenQASM 3.0**.
 > named there may have been retired by a later release; the newest release notes and current architecture
 > documents define the present pipeline.
 
+## 0.33 — 2026-07-28
+
+### Changed
+- **AST-to-HIR lowering now publishes one authoritative immutable tree.** The Janglim AST remains a
+  transient parser detail, while `AstToHirLoweringSession` owns typed node identities and lowers each
+  source document exactly once. Subsequent passes use explicit `HirRewriteSession` instances tied to the
+  source snapshot and revision they are rewriting; there is no ambient builder or caller-supplied ID path.
+- **Declarations, namespaces, calls, and expressions retain their real structure.** Dotted namespaces
+  become nested one-segment declarations, callable names stay local to their owner, and qualified calls
+  remain name/member expression trees. Scope bindings, namespace paths, callable indexes, and structural
+  parents are derived from that single declaration tree rather than maintained as duplicate mutable facts.
+- **HIR-to-MIR provenance is exact down to each expression term.** Constants, array loads, pure calls,
+  measurements, and qubit accesses carry the ID of the precise HIR expression that produced them. Published
+  HIR nodes are immutable, and construction APIs hide identity allocation behind revision-bound sessions.
+- **Measurements remain ordinary HIR expressions until MIR lowering reaches their actual evaluation
+  point.** MIR CFG lowering now owns measurement placement, including short-circuit branches and loop
+  conditions, instead of rewriting source-level conditions into eagerly executed HIR statements.
+
+### Fixed
+- **Short-circuit measurement preserves quantum state on every path.** For `left && M(q)` and
+  `left || M(q)`, MIR measures only on the edge that evaluates the right operand and joins the measured
+  and skipped qubit versions with `MirQubitPhi`. `while` conditions likewise carry the condition's qubit
+  state into the body, back edge, and exit.
+- **Effect analysis observes condition measurements in execution order.** Each measurement is a distinct
+  irreversible event, and operations containing one cannot be misclassified as automatic-cleanup
+  candidates.
+- **Nested-expression validation no longer loses or duplicates diagnostics.** Unsupported measurement
+  placement and function purity checks inspect complete expression trees, while an invalid inner index
+  suppresses only the derivative outer bounds-proof error and preserves independent call, base, and type
+  errors.
+
+### Removed
+- The legacy `QoraIr`/`QNode` object model, `QoraLowering`, `ExprTree`, `ReId`, and `IrPrinter`, together
+  with their duplicate tests and construction paths. Their surviving responsibilities now belong to the
+  typed HIR node hierarchy, explicit construction sessions, and `HirPrinter`.
+- The HIR `MeasureConditionLowering` stage and its synthesized temporary/lineage machinery. Measurement
+  evaluation is now represented once in HIR and lowered at the semantically correct MIR CFG location.
+
 ## 0.32 — 2026-07-27
 
 ### Changed

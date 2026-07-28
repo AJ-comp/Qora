@@ -11,6 +11,7 @@ internal sealed class HirPipelineBuilder
 {
     private readonly CompilationId _compilationId;
     private readonly CompilationRevision _compilationRevision;
+    private readonly HirConstructionCore _constructionCore;
     private readonly List<HirSnapshot> _snapshots = new();
     private readonly Dictionary<HirStage, HirSnapshotId> _milestones = new();
     private readonly Dictionary<HirSemanticArtifactId, HirSemanticArtifact> _semantics = new();
@@ -23,53 +24,106 @@ internal sealed class HirPipelineBuilder
 
     public HirPipelineBuilder(
         CompilationId compilationId,
-        CompilationRevision compilationRevision)
+        CompilationRevision compilationRevision,
+        HirConstructionCore constructionCore)
     {
         _compilationId = compilationId;
         _compilationRevision = compilationRevision;
+        _constructionCore = constructionCore
+            ?? throw new ArgumentNullException(nameof(constructionCore));
+        if (constructionCore.CompilationId != compilationId
+            || constructionCore.CompilationRevision != compilationRevision)
+        {
+            throw new ArgumentException(
+                "The HIR pipeline and construction authority belong to different compilation revisions.",
+                nameof(constructionCore));
+        }
     }
 
     public HirSnapshot? Latest =>
         _snapshots.Count == 0 ? null : _snapshots[^1];
 
+    public HirRewriteSession BeginRewrite(
+        HirSnapshot source,
+        string passName)
+    {
+        RequireOwned(source, nameof(source));
+        if (!ReferenceEquals(Latest, source))
+        {
+            throw new ArgumentException(
+                "A linear HIR pipeline can rewrite only its latest exact snapshot.",
+                nameof(source));
+        }
+        return _constructionCore.BeginRewrite(source, passName);
+    }
+
     /// <summary>
-    /// Record a structural stage. A pass which returned the exact input tree and no copy facts aliases the
-    /// existing generation; every real tree result receives the next dense HIR revision.
+    /// Publish the one source-lowered root which starts this HIR history. Every later structural stage
+    /// must arrive as a source-qualified <see cref="HirRewriteResult"/>.
     /// </summary>
-    public HirSnapshot Advance(
-        HirStage stage,
-        QProgram program,
-        IEnumerable<NodeDerivation>? derivations = null,
-        IEnumerable<NodeSynthesis>? syntheses = null,
-        IEnumerable<HirNodeIntroduction>? introductions = null)
+    public HirSnapshot PublishLowered(HirProgram program)
     {
         ArgumentNullException.ThrowIfNull(program);
-        var copyFacts = derivations?.ToArray() ?? Array.Empty<NodeDerivation>();
-        var synthesisFacts = syntheses?.ToArray() ?? Array.Empty<NodeSynthesis>();
-        var introductionFacts = introductions?.ToArray() ?? Array.Empty<HirNodeIntroduction>();
-        return Latest is { } latest
-               && ReferenceEquals(latest.Program, program)
-               && copyFacts.Length == 0
-               && synthesisFacts.Length == 0
-               && introductionFacts.Length == 0
+        if (!ReferenceEquals(program.Core, _constructionCore))
+        {
+            throw new ArgumentException(
+                "The lowered HIR root does not belong to this pipeline's construction authority.",
+                nameof(program));
+        }
+        if (Latest is not null || _milestones.Count != 0)
+            throw new InvalidOperationException(
+                "The source-lowered HIR root was already published.");
+        return Add(
+            HirStage.Lowered,
+            program,
+            Array.Empty<NodeDerivation>(),
+            Array.Empty<NodeSynthesis>(),
+            Array.Empty<HirNodeIntroduction>());
+    }
+
+    public HirSnapshot Advance(
+        HirStage stage,
+        HirRewriteResult rewrite)
+    {
+        ArgumentNullException.ThrowIfNull(rewrite);
+        var latest = Latest
+            ?? throw new InvalidOperationException(
+                "A HIR rewrite cannot be published before the lowered root.");
+        if (rewrite.Source != latest.Id)
+        {
+            throw new ArgumentException(
+                $"HIR rewrite input {rewrite.Source} is not the latest snapshot {latest.Id}.",
+                nameof(rewrite));
+        }
+
+        return ReferenceEquals(latest.Program, rewrite.Root)
+               && rewrite.Derivations.Count == 0
+               && rewrite.Syntheses.Count == 0
+               && rewrite.Introductions.Count == 0
             ? Alias(stage, latest)
             : Add(
                 stage,
-                program,
-                copyFacts,
-                synthesisFacts,
-                introductionFacts);
+                rewrite.Root,
+                rewrite.Derivations,
+                rewrite.Syntheses,
+                rewrite.Introductions);
     }
 
     /// <summary>Create a real HIR generation and mark the structural stage which produced it.</summary>
     private HirSnapshot Add(
         HirStage stage,
-        QProgram program,
+        HirProgram program,
         IEnumerable<NodeDerivation>? derivations = null,
         IEnumerable<NodeSynthesis>? syntheses = null,
         IEnumerable<HirNodeIntroduction>? introductions = null)
     {
         ArgumentNullException.ThrowIfNull(program);
+        if (!ReferenceEquals(program.Core, _constructionCore))
+        {
+            throw new ArgumentException(
+                "A HIR stage root does not belong to this pipeline's construction authority.",
+                nameof(program));
+        }
         if (_milestones.ContainsKey(stage))
             throw new InvalidOperationException(
                 $"HIR stage {stage} was already recorded.");
@@ -111,9 +165,9 @@ internal sealed class HirPipelineBuilder
     public HirSnapshot Alias(HirStage stage, HirSnapshot snapshot)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
-        if (!_snapshots.Contains(snapshot))
+        if (!ReferenceEquals(Latest, snapshot))
             throw new ArgumentException(
-                "A HIR stage alias must name a snapshot from this builder.",
+                "A linear HIR pipeline can alias only its latest exact snapshot.",
                 nameof(snapshot));
         if (!_milestones.TryAdd(stage, snapshot.Id))
             throw new InvalidOperationException(

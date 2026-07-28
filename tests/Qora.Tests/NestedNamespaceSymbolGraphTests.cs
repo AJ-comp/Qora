@@ -14,8 +14,13 @@ public class NestedNamespaceSymbolGraphTests
     [Fact]
     public void ScopeGraphRejectsMismatchedDeclaringSymbolsAndCallableIds()
     {
+        var hir = new HirTestFactory();
+        var declaredCallable = hir.Callable("Work");
+        var otherCallable = hir.Callable("Other");
+        hir.PublishProgram(new[] { declaredCallable, otherCallable });
+
         var graph = new HirScopeGraph();
-        var namespaceSymbol = new Symbol(
+        var namespaceSymbol = graph.CreateSymbol(
             graph.RootScope.Id,
             "N",
             SymbolKind.Namespace);
@@ -27,11 +32,11 @@ public class NestedNamespaceSymbolGraphTests
                 graph.RootScope.Id,
                 namespaceSymbol.Id));
 
-        var callableSymbol = new Symbol(
+        var callableSymbol = graph.CreateSymbol(
             graph.RootScope.Id,
             "Work",
-            SymbolKind.Operation,
-            declarationNodeId: 42);
+            SymbolKind.Callable,
+            declarationNodeId: declaredCallable.Id);
         graph.RegisterDeclaredMember(callableSymbol);
         var callableScope = graph.CreateScope(
             HirScopeKind.Callable,
@@ -39,7 +44,7 @@ public class NestedNamespaceSymbolGraphTests
             callableSymbol.Id);
 
         Assert.Throws<InvalidOperationException>(() =>
-            graph.RegisterCallableScope(43, callableScope));
+            graph.RegisterCallableScope(otherCallable.Id, callableScope));
     }
 
     private static Compilation Compile(string source)
@@ -54,14 +59,40 @@ public class NestedNamespaceSymbolGraphTests
         return result;
     }
 
-    private static QCallNode SoleExpressionCall(Compilation result, string operationName)
+    private static HirCallExpression SoleExpressionCall(
+        Compilation result,
+        string operationName)
     {
-        var operation = result.Hir.Resolved!.Program!.Operations.Single(item => item.Name == operationName);
+        var operation = Callable(
+            result.Hir.Resolved!.Program!,
+            operationName);
         return operation.Body
-            .SelectMany(QNodes.ExpressionSites)
-            .SelectMany(QNodes.CallsIn)
+            .SelectMany(HirExpressions.DirectExpressionSites)
+            .SelectMany(HirExpressions.CallsIn)
             .Single();
     }
+
+    private static HirCallable Callable(
+        HirProgram program,
+        string qualifiedName) =>
+        program.Callables.Single(
+            callable =>
+                QualifiedName(program, callable) == qualifiedName);
+
+    private static string QualifiedName(
+        HirProgram program,
+        HirCallable callable)
+    {
+        var @namespace = program.NamespaceOf(callable);
+        return @namespace.Length == 0
+            ? callable.Name
+            : $"{@namespace}.{callable.Name}";
+    }
+
+    private static string CallName(HirCallExpression call) =>
+        HirExpressions.QualifiedNameOf(call.Callee)
+        ?? throw new InvalidOperationException(
+            "Expected the call target to be a qualified HIR name.");
 
     [Fact]
     public void DottedNamespaceCreatesOneScopePerSegment()
@@ -79,7 +110,9 @@ public class NestedNamespaceSymbolGraphTests
         var namespaceABScope = Assert.IsType<Scope>(graph.FindNamespaceScope("A.B"));
         var namespaceA = Assert.IsType<Symbol>(graph.FindNamespaceSymbol("A"));
         var namespaceAB = Assert.IsType<Symbol>(graph.FindNamespaceSymbol("A.B"));
-        var work = result.Hir.Specialized!.Program!.Operations.Single(operation => operation.Name == "A.B.Work");
+        var work = Callable(
+            result.Hir.Specialized!.Program!,
+            "A.B.Work");
         var workSymbol = Assert.IsType<Symbol>(graph.FindDeclaration(work.Id));
         var workScope = Assert.IsType<Scope>(result.Hir.SpecializedValidation!.Model.FindRootScope(work.Id));
 
@@ -110,11 +143,13 @@ public class NestedNamespaceSymbolGraphTests
             operation Main() { A.B.Work(); }
             """);
 
-        var function = result.Hir.Resolved!.Program!.Operations.Single(operation => operation.Name == "A.B.f");
+        var function = Callable(
+            result.Hir.Resolved!.Program!,
+            "A.B.f");
         var call = SoleExpressionCall(result, "A.B.Work");
 
-        Assert.Equal("A.B.f", call.Name);
-        Assert.Equal(function.Id, call.CalleeOpId);
+        Assert.Equal("A.B.f", CallName(call));
+        Assert.Equal(function.Id, call.CalleeId);
     }
 
     [Fact]
@@ -131,11 +166,13 @@ public class NestedNamespaceSymbolGraphTests
             operation Main() { A.B.Work(); }
             """);
 
-        var function = result.Hir.Resolved!.Program!.Operations.Single(operation => operation.Name == "A.f");
+        var function = Callable(
+            result.Hir.Resolved!.Program!,
+            "A.f");
         var call = SoleExpressionCall(result, "A.B.Work");
 
-        Assert.Equal("A.f", call.Name);
-        Assert.Equal(function.Id, call.CalleeOpId);
+        Assert.Equal("A.f", CallName(call));
+        Assert.Equal(function.Id, call.CalleeId);
     }
 
     [Fact]
@@ -149,11 +186,13 @@ public class NestedNamespaceSymbolGraphTests
             operation Main() { A.B.Work(); }
             """);
 
-        var function = result.Hir.Resolved!.Program!.Operations.Single(operation => operation.Name == "f");
+        var function = Callable(
+            result.Hir.Resolved!.Program!,
+            "f");
         var call = SoleExpressionCall(result, "A.B.Work");
 
-        Assert.Equal("f", call.Name);
-        Assert.Equal(function.Id, call.CalleeOpId);
+        Assert.Equal("f", CallName(call));
+        Assert.Equal(function.Id, call.CalleeId);
     }
 
     [Fact]
@@ -172,11 +211,24 @@ public class NestedNamespaceSymbolGraphTests
             operation Main() { var n: int = A.B.f(); }
             """);
 
-        var function = result.Hir.Resolved!.Program!.Operations.Single(operation => operation.Name == "A.B.f");
+        var function = Callable(
+            result.Hir.Resolved!.Program!,
+            "A.B.f");
         var call = SoleExpressionCall(result, "Main");
+        var callableMember =
+            Assert.IsType<HirMemberAccessExpression>(call.Callee);
+        var namespaceMember =
+            Assert.IsType<HirMemberAccessExpression>(
+                callableMember.Receiver);
+        var namespaceRoot =
+            Assert.IsType<HirNameExpression>(
+                namespaceMember.Receiver);
 
-        Assert.Equal("A.B.f", call.Name);
-        Assert.Equal(function.Id, call.CalleeOpId);
+        Assert.Equal("A.B.f", CallName(call));
+        Assert.Equal("f", callableMember.MemberName);
+        Assert.Equal("B", namespaceMember.MemberName);
+        Assert.Equal("A", namespaceRoot.Name);
+        Assert.Equal(function.Id, call.CalleeId);
     }
 
     [Fact]
@@ -213,21 +265,51 @@ public class NestedNamespaceSymbolGraphTests
         var graph = Assert.IsType<HirScopeGraph>(result.Hir.SpecializedValidation!.Model.ScopeGraph);
         var namespaceAScope = Assert.IsType<Scope>(graph.FindNamespaceScope("A"));
         var namespaceABScope = Assert.IsType<Scope>(graph.FindNamespaceScope("A.B"));
+        var namespaceA = Assert.IsType<Symbol>(graph.FindNamespaceSymbol("A"));
         var namespaceAB = Assert.IsType<Symbol>(graph.FindNamespaceSymbol("A.B"));
-        var function = result.Hir.Specialized!.Program!.Operations.Single(operation => operation.Name == "A.B.f");
-        var work = result.Hir.Specialized!.Program.Operations.Single(operation => operation.Name == "A.B.Work");
+        var program = result.Hir.Specialized!.Program!;
+        var namespaceAOccurrences = program.Declarations
+            .OfType<HirNamespaceDeclaration>()
+            .Where(declaration => declaration.Name == "A")
+            .ToArray();
+        var namespaceABOccurrences = namespaceAOccurrences
+            .SelectMany(declaration =>
+                declaration.Declarations
+                    .OfType<HirNamespaceDeclaration>())
+            .Where(declaration => declaration.Name == "B")
+            .ToArray();
+        var function = Callable(program, "A.B.f");
+        var work = Callable(program, "A.B.Work");
         var functionSymbol = Assert.IsType<Symbol>(graph.FindDeclaration(function.Id));
         var workSymbol = Assert.IsType<Symbol>(graph.FindDeclaration(work.Id));
+        var namespaceAOccurrenceSymbols = namespaceAOccurrences
+            .Select(declaration =>
+                Assert.IsType<Symbol>(
+                    graph.FindDeclaration(declaration.Id)))
+            .ToArray();
+        var namespaceABOccurrenceSymbols = namespaceABOccurrences
+            .Select(declaration =>
+                Assert.IsType<Symbol>(
+                    graph.FindDeclaration(declaration.Id)))
+            .ToArray();
 
+        Assert.Equal(2, namespaceAOccurrences.Length);
+        Assert.Equal(2, namespaceABOccurrences.Length);
+        Assert.All(
+            namespaceAOccurrenceSymbols,
+            symbol => Assert.Equal(namespaceA.Id, symbol.Id));
+        Assert.All(
+            namespaceABOccurrenceSymbols,
+            symbol => Assert.Equal(namespaceAB.Id, symbol.Id));
         Assert.Same(namespaceABScope, graph.FindNamespaceScope("A.B"));
         Assert.Equal(namespaceAScope.Id, namespaceAB.DeclaringScopeId);
         Assert.Equal(namespaceAScope.Id, namespaceABScope.ParentScopeId);
         Assert.Equal(namespaceABScope.Id, functionSymbol.DeclaringScopeId);
         Assert.Equal(namespaceABScope.Id, workSymbol.DeclaringScopeId);
         Assert.Same(functionSymbol,
-            graph.LookupMember(namespaceABScope.Id, "f", SymbolKind.Operation));
+            graph.LookupMember(namespaceABScope.Id, "f", SymbolKind.Callable));
         Assert.Same(workSymbol,
-            graph.LookupMember(namespaceABScope.Id, "Work", SymbolKind.Operation));
+            graph.LookupMember(namespaceABScope.Id, "Work", SymbolKind.Callable));
     }
 
     [Fact]
@@ -244,25 +326,26 @@ public class NestedNamespaceSymbolGraphTests
             }
             """);
 
-        var callableA = result.Hir.Resolved!.Program!.Operations.Single(operation => operation.Name == "A");
-        var nestedFunction = result.Hir.Resolved!.Program.Operations.Single(operation => operation.Name == "A.B.f");
-        var calls = result.Hir.Resolved!.Program.Operations.Single(operation => operation.Name == "Main").Body
-            .SelectMany(QNodes.ExpressionSites)
-            .SelectMany(QNodes.CallsIn)
+        var program = result.Hir.Resolved!.Program!;
+        var callableA = Callable(program, "A");
+        var nestedFunction = Callable(program, "A.B.f");
+        var calls = Callable(program, "Main").Body
+            .SelectMany(HirExpressions.DirectExpressionSites)
+            .SelectMany(HirExpressions.CallsIn)
             .ToList();
         var graph = Assert.IsType<HirScopeGraph>(result.Hir.SpecializedValidation!.Model.ScopeGraph);
         var namespaceA = Assert.IsType<Symbol>(graph.FindNamespaceSymbol("A"));
         var callableSymbol = Assert.IsType<Symbol>(graph.FindDeclaration(callableA.Id));
 
-        Assert.Equal(callableA.Id, calls.Single(call => call.Name == "A").CalleeOpId);
-        Assert.Equal(nestedFunction.Id, calls.Single(call => call.Name == "A.B.f").CalleeOpId);
+        Assert.Equal(callableA.Id, calls.Single(call => CallName(call) == "A").CalleeId);
+        Assert.Equal(nestedFunction.Id, calls.Single(call => CallName(call) == "A.B.f").CalleeId);
         Assert.NotEqual(namespaceA.Id, callableSymbol.Id);
         Assert.Equal(graph.RootScope.Id, namespaceA.DeclaringScopeId);
         Assert.Equal(graph.RootScope.Id, callableSymbol.DeclaringScopeId);
         Assert.Same(namespaceA,
             graph.LookupMember(graph.RootScope.Id, "A", SymbolKind.Namespace));
         Assert.Same(callableSymbol,
-            graph.LookupMember(graph.RootScope.Id, "A", SymbolKind.Operation));
+            graph.LookupMember(graph.RootScope.Id, "A", SymbolKind.Callable));
         Assert.Null(graph.RootScope.Lookup("A"));
     }
 
@@ -282,26 +365,27 @@ public class NestedNamespaceSymbolGraphTests
             }
             """);
 
-        var callableB = result.Hir.Resolved!.Program!.Operations.Single(operation => operation.Name == "A.B");
-        var nestedFunction = result.Hir.Resolved!.Program.Operations.Single(operation => operation.Name == "A.B.f");
-        var calls = result.Hir.Resolved!.Program.Operations.Single(operation => operation.Name == "Main").Body
-            .SelectMany(QNodes.ExpressionSites)
-            .SelectMany(QNodes.CallsIn)
+        var program = result.Hir.Resolved!.Program!;
+        var callableB = Callable(program, "A.B");
+        var nestedFunction = Callable(program, "A.B.f");
+        var calls = Callable(program, "Main").Body
+            .SelectMany(HirExpressions.DirectExpressionSites)
+            .SelectMany(HirExpressions.CallsIn)
             .ToList();
         var graph = Assert.IsType<HirScopeGraph>(result.Hir.SpecializedValidation!.Model.ScopeGraph);
         var namespaceAScope = Assert.IsType<Scope>(graph.FindNamespaceScope("A"));
         var namespaceAB = Assert.IsType<Symbol>(graph.FindNamespaceSymbol("A.B"));
         var callableSymbol = Assert.IsType<Symbol>(graph.FindDeclaration(callableB.Id));
 
-        Assert.Equal(callableB.Id, calls.Single(call => call.Name == "A.B").CalleeOpId);
-        Assert.Equal(nestedFunction.Id, calls.Single(call => call.Name == "A.B.f").CalleeOpId);
+        Assert.Equal(callableB.Id, calls.Single(call => CallName(call) == "A.B").CalleeId);
+        Assert.Equal(nestedFunction.Id, calls.Single(call => CallName(call) == "A.B.f").CalleeId);
         Assert.NotEqual(namespaceAB.Id, callableSymbol.Id);
         Assert.Equal(namespaceAScope.Id, namespaceAB.DeclaringScopeId);
         Assert.Equal(namespaceAScope.Id, callableSymbol.DeclaringScopeId);
         Assert.Same(namespaceAB,
             graph.LookupMember(namespaceAScope.Id, "B", SymbolKind.Namespace));
         Assert.Same(callableSymbol,
-            graph.LookupMember(namespaceAScope.Id, "B", SymbolKind.Operation));
+            graph.LookupMember(namespaceAScope.Id, "B", SymbolKind.Callable));
         Assert.Null(namespaceAScope.Lookup("B"));
     }
 
@@ -319,11 +403,13 @@ public class NestedNamespaceSymbolGraphTests
             operation Main() { App.Work(); }
             """);
 
-        var function = result.Hir.Resolved!.Program!.Operations.Single(operation => operation.Name == "A.B.f");
+        var function = Callable(
+            result.Hir.Resolved!.Program!,
+            "A.B.f");
         var call = SoleExpressionCall(result, "App.Work");
 
-        Assert.Equal("A.B.f", call.Name);
-        Assert.Equal(function.Id, call.CalleeOpId);
+        Assert.Equal("A.B.f", CallName(call));
+        Assert.Equal(function.Id, call.CalleeId);
     }
 
     [Fact]
@@ -434,14 +520,18 @@ public class NestedNamespaceSymbolGraphTests
 
         var model = result.Hir.SpecializedValidation!.Model;
         var graph = Assert.IsType<HirScopeGraph>(model.ScopeGraph);
-        var work = result.Hir.Specialized!.Program!.Operations.Single(operation => operation.Name == "A.B.Work");
+        var work = Callable(
+            result.Hir.Specialized!.Program!,
+            "A.B.Work");
         var workSymbol = Assert.IsType<Symbol>(graph.FindDeclaration(work.Id));
         var namespaceAScope = Assert.IsType<Scope>(graph.FindNamespaceScope("A"));
         var namespaceABScope = Assert.IsType<Scope>(graph.FindNamespaceScope("A.B"));
         var callableScope = Assert.IsType<Scope>(model.FindRootScope(work.Id));
-        var outer = Assert.IsType<QDecl>(work.Body[0]);
-        var branch = Assert.IsType<QIf>(work.Body[1]);
-        var inner = Assert.IsType<QDecl>(branch.Then[0]);
+        var outer = Assert.IsType<HirVariableDeclarationStatement>(
+            work.Body[0]);
+        var branch = Assert.IsType<HirIfStatement>(work.Body[1]);
+        var inner = Assert.IsType<HirVariableDeclarationStatement>(
+            branch.Then[0]);
         var callableSite = new HirScopeSite(work.Id, HirScopeSiteRole.CallableBody);
         var conditionSite = new HirScopeSite(branch.Id, HirScopeSiteRole.IfCondition);
         var thenSite = new HirScopeSite(branch.Id, HirScopeSiteRole.IfThen);

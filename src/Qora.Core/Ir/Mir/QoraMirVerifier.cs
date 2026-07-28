@@ -26,7 +26,7 @@ internal sealed record MirVerificationError(
 /// <summary>
 /// Always-on structural verification for Qora MIR. It verifies identity uniqueness, SSA definition/use
 /// integrity, CFG edge contracts, dominance, instruction typing, call contracts, and classical-array /
-/// qubit resource references. A failed verification is a compiler defect, not a source-language error.
+/// versioned-qubit references. A failed verification is a compiler defect, not a source-language error.
 /// </summary>
 internal static class QoraMirVerifier
 {
@@ -98,7 +98,58 @@ internal static class QoraMirVerifier
             foreach (var callable in _callables.Values.OrderBy(callable => callable.Id.Value))
                 VerifyCallable(callable);
 
+            // Interprocedural qubit write contracts are checked only after every callable has passed
+            // local structure, arity, typing, CFG, and SSA verification. The shared effect query does
+            // not read QubitResults, so the declarations are compared against an independent semantic
+            // source of truth rather than validating themselves.
+            if (_errors.Count == 0)
+                VerifyQubitWriteContracts();
+
             return _errors;
+        }
+
+        private void VerifyQubitWriteContracts()
+        {
+            MirFormalQubitEffectQuery effects;
+            try
+            {
+                effects =
+                    MirEffectAnalysis.CreateFormalQubitEffectQueryUnchecked(_program);
+                effects.SummarizeAll();
+            }
+            catch (InvalidOperationException failure)
+            {
+                Add(
+                    "MIR148",
+                    $"qubit effect contracts could not be resolved: {failure.Message}");
+                return;
+            }
+
+            foreach (var caller in _callables.Values.OrderBy(callable => callable.Id.Value))
+            {
+                foreach (var block in caller.Blocks)
+                {
+                    foreach (var apply in block.Instructions.OfType<MirQuantumApply>())
+                    {
+                        var expected = effects.ClassifyApply(caller, apply).WrittenQubits;
+                        var actual = apply.QubitResults
+                            .Select(result => result.Id)
+                            .ToHashSet();
+                        if (expected.SetEquals(actual))
+                            continue;
+
+                        Add(
+                            "MIR142",
+                            $"quantum apply results "
+                            + $"[{string.Join(", ", actual.OrderBy(id => id.Value))}] "
+                            + $"do not match semantic write set "
+                            + $"[{string.Join(", ", expected.OrderBy(id => id.Value))}]",
+                            caller,
+                            block,
+                            apply);
+                    }
+                }
+            }
         }
 
         private void VerifyEntryPoint()
@@ -154,9 +205,9 @@ internal static class QoraMirVerifier
                 callable);
             var qubits = Unique(
                 callable.Qubits,
-                qubit => qubit.Id,
+                qubit => qubit.Key,
                 "MIR013",
-                "qubit resource",
+                "qubit version",
                 callable);
 
             foreach (var parameter in callable.Parameters)
@@ -167,7 +218,7 @@ internal static class QoraMirVerifier
             foreach (var storage in storages.Values)
                 CheckOrigin(storage.Origin, $"array storage {storage.Id}", callable);
             foreach (var qubit in qubits.Values)
-                CheckOrigin(qubit.Origin, $"qubit resource {qubit.Id}", callable);
+                CheckOrigin(qubit.Origin, $"qubit {qubit.Key}", callable);
             foreach (var block in blocks.Values)
             {
                 CheckOrigin(block.Origin, $"block {block.Id}", callable, block);
@@ -231,6 +282,12 @@ internal static class QoraMirVerifier
 
             var predecessors = VerifyControlFlow(callable, blocks, values);
             var dominators = ComputeDominators(callable.EntryBlock, blocks, predecessors);
+            VerifyQubitFlow(
+                callable,
+                blocks,
+                qubits,
+                instructionLocations,
+                dominators);
 
             foreach (var block in blocks.Values)
             {
@@ -266,6 +323,7 @@ internal static class QoraMirVerifier
             var provenance = MirStorageProvenanceAnalysis.AnalyzeUnchecked(_program, callable);
             VerifyExclusiveCallOperands(callable, values, provenance);
             VerifyCurrentArrayStates(callable, blocks, values, cfg);
+            VerifyCurrentQubitStates(callable, blocks, cfg);
         }
 
         /// <summary>
@@ -425,11 +483,327 @@ internal static class QoraMirVerifier
             }
         }
 
+        /// <summary>
+        /// Validates the current-version contract for versioned qubits. Dominance only proves that
+        /// an older version still has a definition; unlike an immutable scalar, that historical state is
+        /// no longer physically available after the same qubit identity advances. A quantum instruction
+        /// may access several elements of one register, but every such access must therefore name the same
+        /// incoming register version. Phi inputs must likewise name the state current on their exact edge.
+        /// </summary>
+        private void VerifyCurrentQubitStates(
+            MirCallable callable,
+            IReadOnlyDictionary<MirBlockId, MirBlock> blocks,
+            MirControlFlowSnapshot cfg)
+        {
+            var parameterQubits = callable.Parameters
+                .OfType<MirQubitParameter>()
+                .Select(parameter => parameter.Id)
+                .ToHashSet();
+            var localSeedBlocks = callable.Blocks
+                .SelectMany(block => block.Instructions
+                    .OfType<MirQubitAllocate>()
+                    .Select(allocation => (allocation.Result.Id, Block: block.Id)))
+                .ToDictionary(item => item.Id, item => item.Block);
+            var entryStates =
+                new Dictionary<MirBlockId, Dictionary<MirQubitId, MirQubitKey?>>();
+            var exitStates =
+                new Dictionary<MirBlockId, Dictionary<MirQubitId, MirQubitKey?>>();
+            var pending = new Queue<MirBlockId>();
+            var queued = new HashSet<MirBlockId>();
+
+            Enqueue(callable.EntryBlock);
+            while (pending.Count > 0)
+            {
+                var blockId = pending.Dequeue();
+                queued.Remove(blockId);
+                if (!blocks.TryGetValue(blockId, out var block)
+                    || !cfg.IsReachable(blockId))
+                {
+                    continue;
+                }
+
+                Dictionary<MirQubitId, MirQubitKey?> entry;
+                if (blockId == callable.EntryBlock)
+                {
+                    entry = callable.Parameters
+                        .OfType<MirQubitParameter>()
+                        .ToDictionary(
+                            parameter => parameter.Id,
+                            parameter => (MirQubitKey?)parameter.Key);
+                }
+                else
+                {
+                    var predecessorStates = cfg.PredecessorsOf(blockId)
+                        .Where(exitStates.ContainsKey)
+                        .Select(predecessor => exitStates[predecessor])
+                        .ToArray();
+                    if (predecessorStates.Length == 0)
+                        continue;
+                    entry = Merge(predecessorStates);
+                }
+
+                foreach (var group in block.QubitPhis.GroupBy(phi => phi.Id))
+                {
+                    entry[group.Key] = group.Count() == 1
+                        ? group.Single().Key
+                        : null;
+                }
+
+                entryStates[blockId] = entry;
+                var exit = Transfer(entry, block.Instructions);
+                if (exitStates.TryGetValue(blockId, out var previous)
+                    && SameState(previous, exit))
+                {
+                    continue;
+                }
+
+                exitStates[blockId] = exit;
+                foreach (var successor in cfg.SuccessorsOf(blockId))
+                    Enqueue(successor);
+            }
+
+            foreach (var block in callable.Blocks)
+            {
+                if (!cfg.IsReachable(block.Id)
+                    || !entryStates.TryGetValue(block.Id, out var blockEntry))
+                {
+                    continue;
+                }
+
+                var predecessorStates = cfg.PredecessorsOf(block.Id)
+                    .Where(exitStates.ContainsKey)
+                    .Select(predecessor => exitStates[predecessor])
+                    .ToArray();
+                if (predecessorStates.Length > 1)
+                {
+                    var unnormalized = Merge(predecessorStates)
+                        .Where(pair => pair.Value is null)
+                        .Select(pair => pair.Key)
+                        .ToArray();
+                    var uniquePhis = block.QubitPhis
+                        .GroupBy(phi => phi.Id)
+                        .Where(group => group.Count() == 1)
+                        .Select(group => group.Key)
+                        .ToHashSet();
+                    foreach (var id in unnormalized)
+                    {
+                        if (uniquePhis.Contains(id)
+                            || !RequiresCurrentStateAtEntry(id, block.Id))
+                        {
+                            continue;
+                        }
+
+                        Add(
+                            "MIR146",
+                            $"reachable join {block.Id} has no unique current version of qubit {id}; "
+                            + "predecessor states must agree or be normalized by exactly one Phi",
+                            callable,
+                            block);
+                    }
+                }
+
+                foreach (var group in block.QubitPhis.GroupBy(phi => phi.Id))
+                {
+                    if (group.Count() > 1)
+                    {
+                        Add(
+                            "MIR146",
+                            $"block {block.Id} defines more than one current-state Phi for qubit {group.Key}",
+                            callable,
+                            block);
+                    }
+                }
+
+                foreach (var phi in block.QubitPhis)
+                {
+                    foreach (var input in phi.Inputs)
+                    {
+                        if (!cfg.IsReachable(input.Edge.Source)
+                            || !exitStates.TryGetValue(
+                                input.Edge.Source,
+                                out var predecessorState))
+                        {
+                            continue;
+                        }
+
+                        VerifyCurrent(
+                            predecessorState,
+                            input.Qubit,
+                            $"qubit Phi {phi.Key} input on edge "
+                            + $"{input.Edge.Source}:{input.Edge.SuccessorOrdinal} -> "
+                            + $"{input.Edge.Target}",
+                            block,
+                            instruction: null,
+                            phi.Origin);
+                    }
+                }
+
+                var current =
+                    new Dictionary<MirQubitId, MirQubitKey?>(blockEntry);
+                foreach (var instruction in block.Instructions)
+                {
+                    foreach (var group in instruction.QubitAccesses
+                                 .GroupBy(access => access.Qubit.Id))
+                    {
+                        var versions = group
+                            .Select(access => access.Qubit)
+                            .Distinct()
+                            .ToArray();
+                        if (versions.Length != 1)
+                        {
+                            Add(
+                                "MIR146",
+                                $"instruction {instruction.Id} accesses qubit {group.Key} "
+                                + "through multiple input versions "
+                                + $"[{string.Join(", ", versions)}]",
+                                callable,
+                                block,
+                                instruction);
+                            continue;
+                        }
+
+                        VerifyCurrent(
+                            current,
+                            versions[0],
+                            $"instruction {instruction.Id}",
+                            block,
+                            instruction,
+                            instruction.Origin);
+                    }
+
+                    current = Transfer(current, new[] { instruction });
+                }
+            }
+
+            bool RequiresCurrentStateAtEntry(
+                MirQubitId id,
+                MirBlockId block)
+            {
+                if (parameterQubits.Contains(id))
+                    return true;
+                return localSeedBlocks.TryGetValue(id, out var seedBlock)
+                    && seedBlock != block
+                    && cfg.Dominates(seedBlock, block);
+            }
+
+            void VerifyCurrent(
+                IReadOnlyDictionary<MirQubitId, MirQubitKey?> state,
+                MirQubitKey actual,
+                string role,
+                MirBlock block,
+                MirInstruction? instruction,
+                MirOriginRef origin)
+            {
+                if (!state.TryGetValue(actual.Id, out var expected))
+                {
+                    Add(
+                        "MIR146",
+                        $"{role} accesses {actual}, but qubit {actual.Id} has no current state on this path",
+                        callable,
+                        block,
+                        instruction,
+                        origin);
+                    return;
+                }
+                if (expected is not MirQubitKey current)
+                {
+                    Add(
+                        "MIR146",
+                        $"{role} accesses {actual}, but incoming paths have no unique current "
+                        + $"version of qubit {actual.Id}",
+                        callable,
+                        block,
+                        instruction,
+                        origin);
+                    return;
+                }
+                if (current != actual)
+                {
+                    Add(
+                        "MIR146",
+                        $"{role} accesses stale version {actual}; current version is {current}",
+                        callable,
+                        block,
+                        instruction,
+                        origin);
+                }
+            }
+
+            void Enqueue(MirBlockId block)
+            {
+                if (queued.Add(block))
+                    pending.Enqueue(block);
+            }
+
+            static Dictionary<MirQubitId, MirQubitKey?> Merge(
+                IReadOnlyList<Dictionary<MirQubitId, MirQubitKey?>> states)
+            {
+                var merged = new Dictionary<MirQubitId, MirQubitKey?>();
+                foreach (var id in states.SelectMany(state => state.Keys).Distinct())
+                {
+                    MirQubitKey? candidate = null;
+                    var conflict = false;
+                    foreach (var state in states)
+                    {
+                        if (!state.TryGetValue(id, out var incoming)
+                            || incoming is not MirQubitKey key)
+                        {
+                            conflict = true;
+                            break;
+                        }
+                        if (candidate is MirQubitKey existing && existing != key)
+                        {
+                            conflict = true;
+                            break;
+                        }
+                        candidate = key;
+                    }
+                    merged[id] = conflict ? null : candidate;
+                }
+                return merged;
+            }
+
+            static Dictionary<MirQubitId, MirQubitKey?> Transfer(
+                IReadOnlyDictionary<MirQubitId, MirQubitKey?> entry,
+                IReadOnlyList<MirInstruction> instructions)
+            {
+                var state = new Dictionary<MirQubitId, MirQubitKey?>(entry);
+                foreach (var instruction in instructions)
+                {
+                    foreach (var result in QubitResultsOf(instruction))
+                        state[result.Id] = result.Key;
+                }
+                return state;
+            }
+
+            static IEnumerable<MirQubit> QubitResultsOf(
+                MirInstruction instruction) =>
+                instruction switch
+                {
+                    MirQubitAllocate allocation =>
+                        new MirQubit[] { allocation.Result },
+                    MirQuantumApply apply =>
+                        apply.QubitResults,
+                    MirMeasure measure =>
+                        new MirQubit[] { measure.QubitResult },
+                    _ =>
+                        Array.Empty<MirQubit>(),
+                };
+
+            static bool SameState(
+                IReadOnlyDictionary<MirQubitId, MirQubitKey?> left,
+                IReadOnlyDictionary<MirQubitId, MirQubitKey?> right) =>
+                left.Count == right.Count
+                && left.All(pair =>
+                    right.TryGetValue(pair.Key, out var value)
+                    && value == pair.Value);
+        }
+
         private void VerifyParameters(
             MirCallable callable,
             IReadOnlyDictionary<MirValueId, MirValue> values,
             IReadOnlyDictionary<MirStorageId, MirArrayStorage> storages,
-            IReadOnlyDictionary<MirQubitResourceId, MirQubitResource> qubits)
+            IReadOnlyDictionary<MirQubitKey, MirQubit> qubits)
         {
             if (callable.Parameters is null)
             {
@@ -498,16 +872,17 @@ internal static class QoraMirVerifier
                     {
                         if (callable.Kind == MirCallableKind.Function)
                             Add("MIR029", $"function has qubit parameter `{qubit.Name}`", callable);
-                        if (!qubits.TryGetValue(qubit.Resource, out var resource))
+                        if (!qubits.TryGetValue(qubit.Key, out var definition))
                             Add("MIR030",
-                                $"qubit parameter `{qubit.Name}` references missing resource {qubit.Resource}",
+                                $"qubit parameter `{qubit.Name}` references missing version {qubit.Key}",
                                 callable);
-                        else if (resource.Kind != MirQubitResourceKind.Parameter
-                                 || resource.IsArray != qubit.IsArray
-                                 || resource.Length != qubit.Length
-                                 || resource.AllocationInstruction is not null)
+                        else if (!ReferenceEquals(definition, qubit))
                             Add("MIR031",
-                                $"resource {qubit.Resource} does not match qubit parameter `{qubit.Name}`",
+                                $"qubit definition {qubit.Key} does not match parameter `{qubit.Name}`",
+                                callable);
+                        if (qubit.Version.Value != 0)
+                            Add("MIR031",
+                                $"qubit parameter `{qubit.Name}` must define version zero, not {qubit.Version}",
                                 callable);
                         if (!qubit.IsArray && qubit.Length is not null)
                             Add("MIR032", $"single-qubit parameter `{qubit.Name}` carries an array length", callable);
@@ -703,34 +1078,125 @@ internal static class QoraMirVerifier
 
         private void VerifyQubitDefinitions(
             MirCallable callable,
-            IReadOnlyDictionary<MirQubitResourceId, MirQubitResource> qubits,
+            IReadOnlyDictionary<MirQubitKey, MirQubit> qubits,
             IReadOnlyDictionary<MirInstructionId, (MirBlock Block, int Index, MirInstruction Instruction)> instructions)
         {
+            var instructionDefinitions = new Dictionary<MirQubitKey, int>();
+            foreach (var location in instructions.Values)
+            {
+                IEnumerable<MirQubit> defined = location.Instruction switch
+                {
+                    MirQubitAllocate allocation => new MirQubit[] { allocation.Result },
+                    MirQuantumApply apply => apply.QubitResults,
+                    MirMeasure measure => new MirQubit[] { measure.QubitResult },
+                    _ => Array.Empty<MirQubit>(),
+                };
+                foreach (var definition in defined)
+                    instructionDefinitions[definition.Key] =
+                        instructionDefinitions.GetValueOrDefault(definition.Key) + 1;
+            }
+
+            var phiDefinitions = callable.Blocks
+                .SelectMany(block => block.QubitPhis)
+                .GroupBy(phi => phi.Key)
+                .ToDictionary(group => group.Key, group => group.Count());
+
             foreach (var qubit in qubits.Values)
             {
                 if (qubit.Id.Value < 0)
-                    Add("MIR057", $"qubit resource has negative identity {qubit.Id}", callable);
-                if (!qubit.IsArray && qubit.Length is not null)
-                    Add("MIR058", $"single-qubit resource {qubit.Id} carries an array length", callable);
-                if (qubit.Length is < 1)
-                    Add("MIR059", $"qubit resource {qubit.Id} has invalid length {qubit.Length}", callable);
+                    Add("MIR057", $"qubit has negative identity {qubit.Id}", callable);
+                if (qubit.Version.Value < 0)
+                    Add("MIR057", $"qubit {qubit.Id} has negative version {qubit.Version}", callable);
 
-                if (qubit.Kind == MirQubitResourceKind.Parameter)
+                switch (qubit)
                 {
-                    if (qubit.AllocationInstruction is not null)
-                        Add("MIR060", $"qubit parameter resource {qubit.Id} has an allocation instruction", callable);
-                    if (callable.Parameters.Count(parameter =>
-                            parameter is MirQubitParameter qubitParameter
-                            && qubitParameter.Resource == qubit.Id) != 1)
-                        Add("MIR060",
-                            $"qubit parameter resource {qubit.Id} is not owned by exactly one parameter slot",
+                    case MirQubitParameter parameter:
+                        if (parameter.Version.Value != 0)
+                            Add("MIR060",
+                                $"qubit parameter {parameter.Id} must define version zero",
+                                callable);
+                        if (callable.Parameters.Count(candidate =>
+                                ReferenceEquals(candidate, parameter)) != 1)
+                            Add("MIR060",
+                                $"qubit parameter {parameter.Id} is not owned by exactly one parameter slot",
+                                callable);
+                        if (instructionDefinitions.ContainsKey(parameter.Key)
+                            || phiDefinitions.ContainsKey(parameter.Key))
+                            Add("MIR060",
+                                $"qubit parameter {parameter.Key} is also defined by a block or instruction",
+                                callable);
+                        break;
+
+                    case MirQubitFromUse local:
+                        if (local.Version.Value != 0)
+                            Add("MIR061",
+                                $"local qubit {local.Id} must define version zero",
+                                callable);
+                        if (instructionDefinitions.GetValueOrDefault(local.Key) != 1)
+                            Add("MIR061",
+                                $"local qubit {local.Key} has no unique use-allocation definition",
+                                callable);
+                        if (local.Length < 1)
+                            Add("MIR059",
+                                $"local qubit {local.Id} has invalid length {local.Length}",
+                                callable);
+                        break;
+
+                    case MirQubitAfterInstruction result:
+                        if (result.Version.Value == 0)
+                            Add("MIR061",
+                                $"instruction result {result.Key} cannot define version zero",
+                                callable);
+                        if (instructionDefinitions.GetValueOrDefault(result.Key) != 1)
+                            Add("MIR061",
+                                $"qubit {result.Key} has no unique quantum-instruction definition",
+                                callable);
+                        if (phiDefinitions.ContainsKey(result.Key))
+                            Add("MIR061",
+                                $"qubit {result.Key} is also defined by a block Phi",
+                                callable);
+                        break;
+
+                    case MirQubitPhi phi:
+                        if (phi.Version.Value == 0)
+                            Add("MIR061",
+                                $"qubit Phi {phi.Key} cannot define version zero",
+                                callable);
+                        if (phiDefinitions.GetValueOrDefault(phi.Key) != 1)
+                            Add("MIR061",
+                                $"qubit Phi {phi.Key} has no unique block definition",
+                                callable);
+                        if (instructionDefinitions.ContainsKey(phi.Key))
+                            Add("MIR061",
+                                $"qubit Phi {phi.Key} is also defined by an instruction",
+                                callable);
+                        break;
+
+                    default:
+                        Add("MIR061",
+                            $"qubit {qubit.Key} has unknown definition kind {qubit.GetType().Name}",
                             callable);
+                        break;
                 }
-                else if (qubit.AllocationInstruction is not MirInstructionId instructionId
-                         || !instructions.TryGetValue(instructionId, out var location)
-                         || location.Instruction is not MirQubitAllocate allocate
-                         || allocate.Resource != qubit.Id)
-                    Add("MIR061", $"local qubit resource {qubit.Id} has no matching allocation instruction", callable);
+            }
+
+            foreach (var group in callable.Qubits.GroupBy(qubit => qubit.Id))
+            {
+                var seeds = group.Where(qubit => qubit.Version.Value == 0).ToArray();
+                if (seeds.Length != 1)
+                    Add("MIR060",
+                        $"qubit {group.Key} has {seeds.Length} initial definitions; expected exactly one",
+                        callable);
+                else if (seeds[0] is not (MirQubitParameter or MirQubitFromUse))
+                    Add("MIR060",
+                        $"qubit {group.Key} has invalid initial definition {seeds[0].GetType().Name}",
+                        callable);
+
+                foreach (var version in group.Where(qubit => qubit.Version.Value > 0))
+                    if (version is not (MirQubitAfterInstruction or MirQubitPhi))
+                        Add("MIR061",
+                            $"qubit {version.Key} has invalid noninitial definition {version.GetType().Name}",
+                            callable);
             }
         }
 
@@ -767,6 +1233,19 @@ internal static class QoraMirVerifier
                         break;
                 }
             }
+
+            if (predecessors.TryGetValue(callable.EntryBlock, out var entryPredecessors)
+                && entryPredecessors.Count != 0)
+            {
+                Add(
+                    "MIR147",
+                    $"entry block {callable.EntryBlock} has predecessor(s) "
+                    + $"[{string.Join(", ", entryPredecessors.OrderBy(id => id.Value))}]; "
+                    + "a callable entry block must be a unique CFG root",
+                    callable,
+                    blocks[callable.EntryBlock]);
+            }
+
             return predecessors;
         }
 
@@ -907,18 +1386,170 @@ internal static class QoraMirVerifier
             }
         }
 
+        private void VerifyQubitFlow(
+            MirCallable callable,
+            IReadOnlyDictionary<MirBlockId, MirBlock> blocks,
+            IReadOnlyDictionary<MirQubitKey, MirQubit> qubits,
+            IReadOnlyDictionary<MirInstructionId, (MirBlock Block, int Index, MirInstruction Instruction)> instructions,
+            IReadOnlyDictionary<MirBlockId, HashSet<MirBlockId>> dominators)
+        {
+            var definitions =
+                new Dictionary<MirQubitKey, (MirBlockId? Block, int? InstructionIndex)>();
+            foreach (var parameter in callable.Parameters.OfType<MirQubitParameter>())
+                definitions.TryAdd(parameter.Key, (null, null));
+            foreach (var block in blocks.Values)
+            {
+                foreach (var phi in block.QubitPhis)
+                {
+                    definitions.TryAdd(phi.Key, (block.Id, null));
+                    if (phi.Block != block.Id)
+                        Add("MIR143",
+                            $"qubit Phi {phi.Key} names block {phi.Block}, but is stored in {block.Id}",
+                            callable, block);
+                }
+            }
+            foreach (var location in instructions.Values)
+            {
+                IEnumerable<MirQubit> results = location.Instruction switch
+                {
+                    MirQubitAllocate allocation => new MirQubit[] { allocation.Result },
+                    MirQuantumApply apply => apply.QubitResults,
+                    MirMeasure measure => new MirQubit[] { measure.QubitResult },
+                    _ => Array.Empty<MirQubit>(),
+                };
+                foreach (var result in results)
+                    definitions.TryAdd(
+                        result.Key,
+                        (location.Block.Id, location.Index));
+            }
+
+            var incomingEdges = blocks.Keys.ToDictionary(
+                block => block,
+                _ => new HashSet<MirControlFlowEdge>());
+            foreach (var source in blocks.Values)
+            {
+                foreach (var edge in OutgoingQubitEdges(source))
+                    if (incomingEdges.TryGetValue(edge.Target, out var incoming))
+                        incoming.Add(edge);
+            }
+
+            foreach (var block in blocks.Values)
+            {
+                foreach (var phi in block.QubitPhis)
+                {
+                    var seenEdges = new HashSet<MirControlFlowEdge>();
+                    foreach (var input in phi.Inputs)
+                    {
+                        if (!seenEdges.Add(input.Edge))
+                            Add("MIR144",
+                                $"qubit Phi {phi.Key} contains duplicate input edge {input.Edge}",
+                                callable, block);
+                        if (input.Edge.Target != block.Id
+                            || !incomingEdges[block.Id].Contains(input.Edge))
+                            Add("MIR144",
+                                $"qubit Phi {phi.Key} references a nonincoming edge {input.Edge}",
+                                callable, block);
+                        if (input.Qubit.Id != phi.Id)
+                            Add("MIR144",
+                                $"qubit Phi {phi.Key} receives different identity {input.Qubit}",
+                                callable, block);
+                        if (!qubits.ContainsKey(input.Qubit))
+                        {
+                            Add("MIR144",
+                                $"qubit Phi {phi.Key} receives missing version {input.Qubit}",
+                                callable, block);
+                            continue;
+                        }
+                        if (blocks.TryGetValue(input.Edge.Source, out var source))
+                        {
+                            CheckAvailable(
+                                input.Qubit,
+                                source,
+                                source.Instructions.Count,
+                                phi.Origin,
+                                $"Phi {phi.Key} input");
+                        }
+                    }
+
+                    if (!seenEdges.SetEquals(incomingEdges[block.Id]))
+                        Add("MIR144",
+                            $"qubit Phi {phi.Key} covers [{string.Join(", ", seenEdges)}], expected every incoming edge [{string.Join(", ", incomingEdges[block.Id])}]",
+                            callable, block);
+                }
+
+                for (var index = 0; index < block.Instructions.Count; index++)
+                {
+                    var instruction = block.Instructions[index];
+                    foreach (var access in instruction.QubitAccesses)
+                        if (qubits.ContainsKey(access.Qubit))
+                            CheckAvailable(
+                                access.Qubit,
+                                block,
+                                index,
+                                instruction.Origin,
+                                $"instruction {instruction.Id}");
+                }
+            }
+
+            void CheckAvailable(
+                MirQubitKey qubit,
+                MirBlock useBlock,
+                int useIndex,
+                MirOriginRef source,
+                string role)
+            {
+                if (!definitions.TryGetValue(qubit, out var definition))
+                {
+                    Add("MIR145",
+                        $"{role} references qubit {qubit} without a definition",
+                        callable, useBlock, source: source);
+                    return;
+                }
+                if (definition.Block is not MirBlockId definitionBlock)
+                    return; // Parameter versions are available at callable entry.
+                if (definitionBlock == useBlock.Id)
+                {
+                    if (definition.InstructionIndex is int definitionIndex
+                        && definitionIndex >= useIndex)
+                        Add("MIR145",
+                            $"{role} uses qubit {qubit} before its defining instruction",
+                            callable, useBlock, source: source);
+                    return;
+                }
+                if (!dominators.TryGetValue(useBlock.Id, out var set)
+                    || !set.Contains(definitionBlock))
+                    Add("MIR145",
+                        $"qubit {qubit}, defined in {definitionBlock}, does not dominate {role} in {useBlock.Id}",
+                        callable, useBlock, source: source);
+            }
+
+            static IEnumerable<MirControlFlowEdge> OutgoingQubitEdges(MirBlock block)
+            {
+                switch (block.Terminator)
+                {
+                    case MirJump jump:
+                        yield return new MirControlFlowEdge(block.Id, 0, jump.Target);
+                        break;
+                    case MirBranch branch:
+                        yield return new MirControlFlowEdge(block.Id, 0, branch.TrueTarget);
+                        yield return new MirControlFlowEdge(block.Id, 1, branch.FalseTarget);
+                        break;
+                }
+            }
+        }
+
         private void VerifyInstruction(
             MirCallable callable,
             MirBlock block,
             MirInstruction instruction,
             IReadOnlyDictionary<MirValueId, MirValue> values,
             IReadOnlyDictionary<MirStorageId, MirArrayStorage> storages,
-            IReadOnlyDictionary<MirQubitResourceId, MirQubitResource> qubits)
+            IReadOnlyDictionary<MirQubitKey, MirQubit> qubits)
         {
             MirType? TypeOf(MirValueId id) => values.TryGetValue(id, out var value) ? value.Type : null;
 
-            foreach (var place in instruction.QubitPlaces)
-                VerifyQubitPlace(callable, block, instruction, place, values, qubits);
+            foreach (var access in instruction.QubitAccesses)
+                VerifyQubitAccess(callable, block, instruction, access, values, qubits);
 
             switch (instruction)
             {
@@ -1091,11 +1722,10 @@ internal static class QoraMirVerifier
                             callable, block, call);
                     break;
                 case MirQubitAllocate allocation:
-                    if (!qubits.TryGetValue(allocation.Resource, out var allocated)
-                        || allocated.Kind != MirQubitResourceKind.Local
-                        || allocated.AllocationInstruction != allocation.Id)
+                    if (!qubits.TryGetValue(allocation.Result.Key, out var allocated)
+                        || !ReferenceEquals(allocated, allocation.Result))
                         Add("MIR097",
-                            $"qubit allocation does not match local resource {allocation.Resource}",
+                            $"qubit allocation does not match local definition {allocation.Result.Key}",
                             callable, block, allocation);
                     break;
                 case MirQuantumApply apply:
@@ -1126,11 +1756,16 @@ internal static class QoraMirVerifier
                     VerifyCall(callable, block, apply, apply.Target, apply.Operands, values, qubits,
                         expectFunction: false);
                     VerifyMutableResults(callable, block, apply, values);
+                    VerifyQubitResults(callable, block, apply, qubits);
                     break;
                 case MirMeasure measure:
                     if (TypeOf(measure.Result) is { } measureType
                         && measureType != MirType.Scalar(QType.Bit))
                         Add("MIR098", $"measurement result is {measureType}, expected bit",
+                            callable, block, measure);
+                    if (measure.QubitResult.Id != measure.Qubit.Qubit.Id)
+                        Add("MIR098",
+                            $"measurement reads {measure.Qubit.Qubit} but produces {measure.QubitResult.Key}",
                             callable, block, measure);
                     break;
                 default:
@@ -1147,7 +1782,7 @@ internal static class QoraMirVerifier
             MirCallTarget target,
             IReadOnlyList<MirCallOperand> operands,
             IReadOnlyDictionary<MirValueId, MirValue> values,
-            IReadOnlyDictionary<MirQubitResourceId, MirQubitResource> qubits,
+            IReadOnlyDictionary<MirQubitKey, MirQubit> qubits,
             bool expectFunction)
         {
             switch (target)
@@ -1220,16 +1855,16 @@ internal static class QoraMirVerifier
                             caller, block, instruction);
                         return;
                     }
-                    if (operands.Count != signature.Params.Count)
+                    if (operands.Count != signature.Parameters.Count)
                     {
                         Add("MIR107",
-                            $"built-in gate `{builtin.Name}` has {operands.Count} operand(s), expected {signature.Params.Count}",
+                            $"built-in gate `{builtin.Name}` has {operands.Count} operand(s), expected {signature.Parameters.Count}",
                             caller, block, instruction);
                         return;
                     }
                     for (var index = 0; index < operands.Count; index++)
                     {
-                        var expected = signature.Params[index];
+                        var expected = signature.Parameters[index];
                         if (expected.Type == QType.Qubit)
                         {
                             if (operands[index] is not MirQubitCallOperand)
@@ -1263,9 +1898,9 @@ internal static class QoraMirVerifier
             MirInstruction instruction,
             int index,
             MirCallOperand actual,
-            MirParameter expected,
+            IMirParameter expected,
             IReadOnlyDictionary<MirValueId, MirValue> values,
-            IReadOnlyDictionary<MirQubitResourceId, MirQubitResource> qubits)
+            IReadOnlyDictionary<MirQubitKey, MirQubit> qubits)
         {
             switch (actual, expected)
             {
@@ -1281,18 +1916,19 @@ internal static class QoraMirVerifier
                             caller, block, instruction);
                     break;
                 case (MirQubitCallOperand qubit, MirQubitParameter parameter):
-                    if (qubits.TryGetValue(qubit.Place.Resource, out var resource))
+                    if (QubitSeed(qubits, qubit.Qubit.Qubit.Id) is { } seed)
                     {
-                        var passesWholeArray = qubit.Place.Index is null && resource.IsArray;
+                        var (isArray, length) = QubitShape(seed);
+                        var passesWholeArray = qubit.Qubit.Index is null && isArray;
                         if (parameter.IsArray != passesWholeArray)
                             Add("MIR113",
                                 $"qubit operand {index} shape does not match parameter `{parameter.Name}`",
                                 caller, block, instruction);
                         else if (parameter.IsArray
                                  && parameter.Length is int expectedLength
-                                 && resource.Length != expectedLength)
+                                 && length != expectedLength)
                             Add("MIR113",
-                                $"qubit operand {index} has length {resource.Length?.ToString() ?? "unknown"}, expected {expectedLength}",
+                                $"qubit operand {index} has length {length?.ToString() ?? "unknown"}, expected {expectedLength}",
                                 caller, block, instruction);
                     }
                     if (qubit.Ownership != parameter.Ownership)
@@ -1380,24 +2016,61 @@ internal static class QoraMirVerifier
                     caller, block, apply);
         }
 
-        private void VerifyQubitPlace(
+        private void VerifyQubitResults(
+            MirCallable caller,
+            MirBlock block,
+            MirQuantumApply apply,
+            IReadOnlyDictionary<MirQubitKey, MirQubit> qubits)
+        {
+            var seenKeys = new HashSet<MirQubitKey>();
+            var seenIds = new HashSet<MirQubitId>();
+            var inputIds = apply.Operands
+                .OfType<MirQubitCallOperand>()
+                .Select(operand => operand.Qubit.Qubit.Id)
+                .ToHashSet();
+
+            foreach (var result in apply.QubitResults)
+            {
+                if (!seenKeys.Add(result.Key))
+                    Add("MIR142",
+                        $"quantum apply produces qubit {result.Key} more than once",
+                        caller, block, apply);
+                if (!seenIds.Add(result.Id))
+                    Add("MIR142",
+                        $"quantum apply writes qubit {result.Id} through more than one result",
+                        caller, block, apply);
+                if (!inputIds.Contains(result.Id))
+                    Add("MIR142",
+                        $"quantum apply produces {result.Key} without reading the same qubit identity",
+                        caller, block, apply);
+                if (!qubits.TryGetValue(result.Key, out var definition)
+                    || !ReferenceEquals(definition, result))
+                    Add("MIR142",
+                        $"quantum apply result {result.Key} is not its callable definition",
+                        caller, block, apply);
+            }
+
+        }
+
+        private void VerifyQubitAccess(
             MirCallable callable,
             MirBlock block,
             MirInstruction instruction,
-            MirQubitPlace place,
+            MirQubitAccess access,
             IReadOnlyDictionary<MirValueId, MirValue> values,
-            IReadOnlyDictionary<MirQubitResourceId, MirQubitResource> qubits)
+            IReadOnlyDictionary<MirQubitKey, MirQubit> qubits)
         {
-            if (!qubits.TryGetValue(place.Resource, out var resource))
+            if (!qubits.ContainsKey(access.Qubit))
             {
-                Add("MIR121", $"qubit place references missing resource {place.Resource}",
+                Add("MIR121", $"qubit access references missing version {access.Qubit}",
                     callable, block, instruction);
                 return;
             }
-            if (place.Index is MirValueId index)
+            if (access.Index is MirValueId index)
             {
-                if (!resource.IsArray)
-                    Add("MIR122", $"single-qubit resource {place.Resource} is indexed",
+                var seed = QubitSeed(qubits, access.Qubit.Id);
+                if (seed is not null && !QubitShape(seed).IsArray)
+                    Add("MIR122", $"single qubit {access.Qubit.Id} is indexed",
                         callable, block, instruction);
                 if (values.TryGetValue(index, out var value)
                     && value.Type != MirType.Scalar(QType.Int))
@@ -1405,6 +2078,20 @@ internal static class QoraMirVerifier
                         callable, block, instruction);
             }
         }
+
+        private static MirQubit? QubitSeed(
+            IReadOnlyDictionary<MirQubitKey, MirQubit> qubits,
+            MirQubitId id) =>
+            qubits.Values.FirstOrDefault(
+                qubit => qubit.Id == id && qubit.Version.Value == 0);
+
+        private static (bool IsArray, int? Length) QubitShape(MirQubit seed) =>
+            seed switch
+            {
+                MirQubitParameter parameter => (parameter.IsArray, parameter.Length),
+                MirQubitFromUse local => (local.IsArray, local.Length),
+                _ => (false, null),
+            };
 
         private void VerifyTerminator(
             MirCallable callable,

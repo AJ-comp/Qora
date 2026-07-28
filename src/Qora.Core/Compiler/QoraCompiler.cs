@@ -79,7 +79,10 @@ public static class QoraCompiler
             compilationRevision);
         var sources = loadedSources.Sources;
         var syntax = sources.EntrySyntax;
-        var hirBuilder = new HirPipelineBuilder(compilationId, compilationRevision);
+        var hirBuilder = new HirPipelineBuilder(
+            compilationId,
+            compilationRevision,
+            loadedSources.ConstructionCore);
         var diagnostics = new List<CompilationDiagnostic>();
         MirSnapshot? mir = null;
         var targetArtifacts = new List<ITargetArtifact>();
@@ -162,7 +165,35 @@ public static class QoraCompiler
             return Finish();
         }
 
-        var expansion = ModuleLoader.Expand(loadedSources);
+        // A document tree is checked before it can become a published HIR snapshot. Import expansion only
+        // joins top-level declarations, so it cannot create a deeper expression/block nesting than one of
+        // these exact document roots already contains.
+        foreach (var documentProgram in loadedSources.LoweredDocuments.Values)
+        {
+            if (!QoraValidator.ExceedsDepthLimit(documentProgram, out var deepDocumentCallable))
+                continue;
+            AddSourceDiagnostics(
+                CompilationStage.HirPreflight,
+                new[]
+                {
+                    new QoraError(
+                        $"in `{deepDocumentCallable}`: an expression or nested-block structure is too deep for the compiler; simplify or split it",
+                        "QSEM031"),
+                },
+                sources.Entry);
+            return Finish();
+        }
+
+        var lowered = hirBuilder.PublishLowered(loweredProgram);
+        var moduleRewrite = hirBuilder.BeginRewrite(
+            lowered,
+            nameof(ModuleLoader));
+        var expansion = ModuleLoader.Expand(
+            loadedSources,
+            moduleRewrite);
+        var expanded = hirBuilder.Advance(
+            HirStage.ImportsExpanded,
+            expansion.Rewrite);
         var expandedProgram = expansion.Program;
 
         var importedSyntaxFailed = sources.SyntaxByDocument.Values
@@ -172,11 +203,6 @@ public static class QoraCompiler
         if (importedSyntaxFailed.Length > 0
             || loadedSources.ImportDiagnostics.Count > 0)
         {
-            _ = hirBuilder.Advance(HirStage.Lowered, loweredProgram);
-            var expanded = hirBuilder.Advance(
-                HirStage.ImportsExpanded,
-                expandedProgram,
-                introductions: expansion.Introductions);
             foreach (var tree in importedSyntaxFailed)
             {
                 AddSourceDiagnostics(
@@ -191,45 +217,26 @@ public static class QoraCompiler
             return Finish();
         }
 
-        // Do not expose a recursively unrenderable HIR generation. The depth guard exists before every
-        // recursive compiler pass and before a consumer can obtain that tree from Compilation.
-        if (QoraValidator.ExceedsDepthLimit(expandedProgram, out var deepOperation))
-        {
-            AddSourceDiagnostics(
-                CompilationStage.HirPreflight,
-                new[]
-                {
-                    new QoraError(
-                        $"in `{deepOperation}`: an expression or nested-block structure is too deep for the compiler; simplify or split it",
-                        "QSEM031"),
-                },
-                sources.Entry);
-            return Finish();
-        }
-
-        _ = hirBuilder.Advance(HirStage.Lowered, loweredProgram);
-        _ = hirBuilder.Advance(
-            HirStage.ImportsExpanded,
+        var resolverRewrite = hirBuilder.BeginRewrite(
+            expanded,
+            nameof(Resolver));
+        var resolution = Resolver.Resolve(
             expandedProgram,
-            introductions: expansion.Introductions);
-
-        var measurementLowering = MeasureConditionLowering.Run(expandedProgram);
-        _ = hirBuilder.Advance(
-            HirStage.MeasurementLowered,
-            measurementLowering.Program,
-            syntheses: measurementLowering.Syntheses);
-
-        var (resolvedProgram, resolutionErrors) = Resolver.Resolve(measurementLowering.Program);
+            resolverRewrite);
+        var resolvedProgram = resolution.Program;
+        var resolutionErrors = resolution.Errors;
         if (resolutionErrors.Count > 0)
         {
-            var rejected = hirBuilder.Advance(HirStage.Resolved, resolvedProgram);
+            var rejected = hirBuilder.Advance(
+                HirStage.Resolved,
+                resolution.Rewrite);
             AddHirDiagnostics(CompilationStage.HirResolution, resolutionErrors, rejected);
             return Finish();
         }
 
         var resolved = hirBuilder.Advance(
             HirStage.Resolved,
-            resolvedProgram);
+            resolution.Rewrite);
         var resolvedValidation = hirBuilder.ValidateSnapshot(resolved);
         if (!resolvedValidation.IsAccepted)
         {
@@ -239,14 +246,18 @@ public static class QoraCompiler
 
         // Common specialization always preserves .Count reads. Literal Count substitution is an
         // OpenQASM-only rewrite and therefore belongs exclusively to that backend.
-        var specialization = Monomorphizer.Run(resolved.Program);
+        var specializationRewrite = hirBuilder.BeginRewrite(
+            resolved,
+            nameof(Monomorphizer));
+        var specialization = Monomorphizer.Run(
+            resolved.Program,
+            specializationRewrite);
         var specializedProgram = specialization.Program;
         HirSemanticArtifact specializedValidation;
 
         var specialized = hirBuilder.Advance(
             HirStage.Specialized,
-            specializedProgram,
-            specialization.Derivations);
+            specialization.Rewrite);
         if (ReferenceEquals(specialized, resolved))
         {
             specializedValidation = resolvedValidation;

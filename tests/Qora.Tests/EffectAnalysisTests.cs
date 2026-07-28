@@ -26,25 +26,21 @@ public class EffectAnalysisTests
         return (r, model);
     }
 
-    private static HirSemanticModel AnalyzeInternal(params QOperation[] operations)
-    {
-        var model = new HirSemanticModel();
-        EffectAnalysis.Run(new QProgram(operations), model);
-        return model;
-    }
-
-    private static QOperation Op(Compilation r, string name)
+    private static HirCallable Op(Compilation r, string name)
     {
         var analyzed = r.Hir.EffectAnalysis!.Program;
-        return analyzed.Operations.FirstOrDefault(o => o.Name == name)
-               ?? analyzed.Operations.Single(o => o.DisplayName == name);
+        return analyzed.Callables.FirstOrDefault(o => o.Name == name)
+               ?? analyzed.Callables.Single(o => o.DisplayName == name);
     }
 
     private static QubitRef At(string reg, int i) => new(reg, i);
     private static QubitRef Whole(string reg) => new(reg, null);
 
     /// <summary>The events one leaf statement emitted (empty for a container or a classical statement).</summary>
-    private static List<QubitEvent> EventsOf(HirSemanticModel m, QOperation op, QStmt stmt) =>
+    private static List<QubitEvent> EventsOf(
+        HirSemanticModel m,
+        HirCallable op,
+        HirStatement stmt) =>
         m.QubitEvents(op.Id).Where(e => e.StmtId == stmt.Id).ToList();
 
     /// <summary>Reconstruct the old per-statement views from a statement's events: TOUCHED is every qubit it
@@ -169,6 +165,63 @@ public class EffectAnalysisTests
         Assert.Empty(summary.ParamTouched);                  // entry op has no formal params
     }
 
+    [Fact]
+    public void ConditionMeasurementsFollowControlFlowExecutionOrder()
+    {
+        var (r, m) = Compile(
+            "operation Main(){ use q=Qubit[3]; " +
+            "if (M(q[0]) == 1) { X(q[0]); } " +
+            "while (M(q[1]) == 1) { X(q[1]); } " +
+            "repeat { X(q[2]); } until (M(q[2]) == 1); }");
+        var main = Op(r, "Main");
+        var @if = main.Body.OfType<HirIfStatement>().Single();
+        var @while = main.Body.OfType<HirWhileStatement>().Single();
+        var repeat = main.Body.OfType<HirRepeatStatement>().Single();
+
+        var ifMeasurement = Assert.Single(EventsOf(m, main, @if));
+        var ifBodyWrite = Assert.Single(EventsOf(m, main, @if.Then[0]));
+        Assert.Equal(QubitEventKind.Measure, ifMeasurement.Kind);
+        Assert.Equal(At("q", 0), ifMeasurement.Qubit);
+        Assert.True(ifMeasurement.Order < ifBodyWrite.Order);
+
+        var whileMeasurement = Assert.Single(EventsOf(m, main, @while));
+        var whileBodyWrite = Assert.Single(EventsOf(m, main, @while.Body[0]));
+        Assert.Equal(QubitEventKind.Measure, whileMeasurement.Kind);
+        Assert.Equal(At("q", 1), whileMeasurement.Qubit);
+        Assert.True(whileMeasurement.Order < whileBodyWrite.Order);
+
+        var repeatBodyWrite = Assert.Single(EventsOf(m, main, repeat.Body[0]));
+        var repeatMeasurement = Assert.Single(EventsOf(m, main, repeat));
+        Assert.Equal(QubitEventKind.Measure, repeatMeasurement.Kind);
+        Assert.Equal(At("q", 2), repeatMeasurement.Qubit);
+        Assert.True(repeatBodyWrite.Order < repeatMeasurement.Order);
+
+        Assert.True(m.FindOpEffects(main.Id)!.Irreversible);
+        Assert.False(m.IsCleanupCandidate(main.Id, At("q", 0)));
+        Assert.False(m.IsCleanupCandidate(main.Id, At("q", 1)));
+        Assert.False(m.IsCleanupCandidate(main.Id, At("q", 2)));
+    }
+
+    [Fact]
+    public void MultipleMeasurementsInOneConditionRemainDistinctOrderedEvents()
+    {
+        var (r, m) = Compile(
+            "operation Main(){ use q=Qubit[2]; " +
+            "if (M(q[0]) == 1 && M(q[1]) == 0) { X(q[0]); } }");
+        var main = Op(r, "Main");
+        var @if = main.Body.OfType<HirIfStatement>().Single();
+        var conditionEvents = EventsOf(m, main, @if);
+
+        Assert.Equal(2, conditionEvents.Count);
+        Assert.All(
+            conditionEvents,
+            @event => Assert.Equal(QubitEventKind.Measure, @event.Kind));
+        Assert.Equal(At("q", 0), conditionEvents[0].Qubit);
+        Assert.Equal(At("q", 1), conditionEvents[1].Qubit);
+        Assert.True(conditionEvents[0].Order < conditionEvents[1].Order);
+        Assert.NotEqual(conditionEvents[0].NodeId, conditionEvents[1].NodeId);
+    }
+
     // --- 7. reset-like built-ins: targets are Writes, op irreversible; ResetAll blankets the register ---
 
     [Fact]
@@ -203,13 +256,13 @@ public class EffectAnalysisTests
         var main = Op(r, "Main");
         var body = main.Body;
 
-        var loop = Assert.IsType<QFor>(body[1]);
+        var loop = Assert.IsType<HirForStatement>(body[1]);
         Assert.Empty(EventsOf(m, main, loop));                               // the container holds no events itself
         AssertRefs(Modified(EventsOf(m, main, loop.Body[0])), Whole("q"));   // inner X(q[i]) — loop var blankets
         AssertRefs(Modified(EventsOf(m, main, body[2])), At("q", 0));        // H(q[0]) — literal stays precise
     }
 
-    // --- 10. a QIf emits no events; both branch leaves appear in the stream (conservative: either may run) ---
+    // --- 10. an if container emits no events; both branch leaves appear in the stream (either may run) ---
 
     [Fact]
     public void IfBranchLeavesBothAppearContainerHasNone()
@@ -217,7 +270,7 @@ public class EffectAnalysisTests
         var (r, m) = Compile(
             "operation Main(){ use q=Qubit[2]; var r: bit = M(q[0]); if (r == 1) { X(q[0]); } else { H(q[1]); } }");
         var main = Op(r, "Main");
-        var iff = Assert.IsType<QIf>(main.Body[2]);
+        var iff = Assert.IsType<HirIfStatement>(main.Body[2]);
 
         Assert.Empty(EventsOf(m, main, iff));                                // the if itself holds no events
         AssertRefs(Modified(EventsOf(m, main, iff.Then[0])), At("q", 0));    // then-branch X(q[0])
@@ -259,7 +312,7 @@ public class EffectAnalysisTests
         var body = main.Body;
 
         AssertRefs(Modified(EventsOf(m, main, body[1])), At("q", 1));
-        var loop = Assert.IsType<QFor>(body[2]);
+        var loop = Assert.IsType<HirForStatement>(body[2]);
         AssertRefs(Modified(EventsOf(m, main, loop.Body[0])), Whole("q"));
     }
 
@@ -316,7 +369,11 @@ public class EffectAnalysisTests
         foreach (var stmt in main.Body.SelectMany(Flatten))
         {
             var evs = EventsOf(m, main, stmt);
-            var isContainer = stmt is QFor or QIf or QWhile or QRepeat;
+            var isContainer = stmt is
+                HirForStatement
+                or HirIfStatement
+                or HirWhileStatement
+                or HirRepeatStatement;
             if (isContainer) Assert.Empty(evs);      // containers emit none of their own
             else Assert.NotEmpty(evs);               // every leaf (use / gate / measure) emits
         }
@@ -417,7 +474,10 @@ public class EffectAnalysisTests
             "operation Main(){ use q=Qubit[2]; H(q[0]); X(q[0]); Rx(pi/2, q[1]); CNOT(q[0], q[1]); Y(q[0]); CZ(q[0], q[1]); Reset(q[0]); }");
         var main = Op(r, "Main");
         var body = main.Body;
-        bool NonQ(QStmt s, QubitRef q) => EventsOf(m, main, s).Single(e => e.Qubit.Equals(q)).NonQfree;
+        bool NonQ(HirStatement s, QubitRef q) =>
+            EventsOf(m, main, s)
+                .Single(e => e.Qubit.Equals(q))
+                .NonQfree;
 
         Assert.All(EventsOf(m, main, body[0]), e => Assert.False(e.NonQfree));  // use birth = |0…0⟩
         Assert.True(NonQ(body[1], At("q", 0)));                                             // H — superposition
@@ -590,9 +650,10 @@ public class EffectAnalysisTests
     [Fact]
     public void UnanalyzedOpAnswersNotAnalyzedNotSafe()
     {
-        var (r, m) = Compile("operation Main(){ use q=Qubit[1]; H(q[0]); }");
-        // an op the analysis never saw (fresh Id — no stream was ever recorded for it)
-        var ghost = new QOperation("Ghost", new List<QParam>(), new List<QStmt>());
+        var hir = new HirTestFactory();
+        var ghost = hir.Callable("Ghost");
+        hir.PublishProgram(new[] { ghost });
+        var m = new HirSemanticModel();
 
         var v = m.UncomputeSafety(ghost, Whole("q"));
         Assert.Equal(UncomputeBlocker.NotAnalyzed, v.Blocker);
@@ -701,7 +762,7 @@ public class EffectAnalysisTests
             "operation Main(){ use a=Qubit[1]; use s=Qubit[1]; use o=Qubit[1]; use x=Qubit[1]; " +
             "var r: bit = M(x[0]); if (r == 1) { CNOT(s[0], a[0]); } CNOT(a[0], o[0]); }");
         var main1 = Op(r1, "Main");
-        var iff1 = Assert.IsType<QIf>(main1.Body[5]);
+        var iff1 = Assert.IsType<HirIfStatement>(main1.Body[5]);
         var v1 = m1.UncomputeSafety(main1, Whole("a"));
         Assert.Equal(UncomputeBlocker.ContainedWrite, v1.Blocker);
         Assert.Equal(iff1.Then[0].Id, v1.Culprit!.StmtId);          // the CNOT inside the if
@@ -747,17 +808,12 @@ public class EffectAnalysisTests
     public void ForeignTreeWithSameOpIdFailsLoud()
     {
         var (r, m) = Compile("operation Main(){ use q=Qubit[1]; X(q[0]); }");
-        var analyzed = Op(r, "Main");
-        var foreign = analyzed with
-        {
-            Body = new List<QStmt>
-            {
-                new QGate(
-                    Array.Empty<QGateModifier>(),
-                    "X",
-                    new List<QArg> { new QQubitArg("q", "0") }),
-            },
-        };
+        var source = Assert.IsType<HirSemanticArtifact>(
+            r.Hir.EffectAnalysis).Source;
+        var foreign = HirTestFactory.DeriveCallableBody(
+            source,
+            "Main");
+
         Assert.Throws<System.InvalidOperationException>(() => m.UncomputeSafety(foreign, Whole("q")));
     }
 
@@ -807,8 +863,8 @@ public class EffectAnalysisTests
             "operation Main(){ use a=Qubit[1]; use b=Qubit[1]; use x=Qubit[1]; var r: bit = M(x[0]); " +
             "while (r == 0) { X(a[0]); } repeat { X(b[0]); } until (r == 1); }");
         var main = Op(r, "Main");
-        var wh = Assert.IsType<QWhile>(main.Body[4]);
-        var rp = Assert.IsType<QRepeat>(main.Body[5]);
+        var wh = Assert.IsType<HirWhileStatement>(main.Body[4]);
+        var rp = Assert.IsType<HirRepeatStatement>(main.Body[5]);
 
         var va = m.UncomputeSafety(main, Whole("a"));
         Assert.Equal(UncomputeBlocker.ContainedWrite, va.Blocker);
@@ -928,21 +984,27 @@ public class EffectAnalysisTests
     [Fact]
     public void WriteBeforeBirthFailsLoud()
     {
-        // QUse("n") nested inside an if; a top-level X(n[0]) then writes n with no hoisted birth and no seed
-        var op = new QOperation("Main", new List<QParam>(), new List<QStmt>
-        {
-            new QIf(new QCond(new QNameRef("true")),
-                Then: new List<QStmt> { new QUse("n", 1) },
-                Else: new List<QStmt>()),
-            new QGate(
-                Array.Empty<QGateModifier>(),
-                "X",
-                new List<QArg> { new QQubitArg("n", "0") }),
-        });
+        // A nested declaration is not part of the top-level hoisted-birth set. The later write therefore
+        // reaches effect analysis without a birth or parameter seed.
+        var hir = new HirTestFactory();
+        var op = hir.Callable(
+            "Main",
+            body: new HirStatement[]
+            {
+                hir.If(
+                    hir.Name("true"),
+                    new HirStatement[]
+                    {
+                        hir.QubitDeclaration("n", 1),
+                    }),
+                hir.Apply("X", hir.Index("n", 0)),
+            });
+        var program = hir.PublishProgram(new[] { op });
         var ex = Assert.Throws<System.InvalidOperationException>(
-            () => EffectAnalysis.Run(new QProgram(new List<QOperation> { op }), new HirSemanticModel()));
+            () => EffectAnalysis.Run(
+                program,
+                new HirSemanticModel()));
         Assert.Contains("before any birth", ex.Message);
-        Assert.Contains("only a `use` may create", ex.Message);
     }
 
     // --- 49a. round-5: the gate-before-use (hoisting) VERDICT family, end-to-end. A gate textually preceding
@@ -1019,16 +1081,16 @@ public class EffectAnalysisTests
         Assert.Equal(UncomputeBlocker.NonQfreeWrite, m2.UncomputeSafety(main2, Whole("a")).Blocker);
     }
 
-    private static IEnumerable<QStmt> Flatten(QStmt stmt)
+    private static IEnumerable<HirStatement> Flatten(HirStatement stmt)
     {
         yield return stmt;
         var children = stmt switch
         {
-            QIf i => i.Then.Concat(i.Else),
-            QFor f => f.Body,
-            QWhile w => w.Body,
-            QRepeat rp => rp.Body,
-            _ => Enumerable.Empty<QStmt>(),
+            HirIfStatement i => i.Then.Concat(i.Else),
+            HirForStatement f => f.Body,
+            HirWhileStatement w => w.Body,
+            HirRepeatStatement rp => rp.Body,
+            _ => Enumerable.Empty<HirStatement>(),
         };
         foreach (var child in children.SelectMany(Flatten)) yield return child;
     }

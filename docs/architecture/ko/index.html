@@ -307,24 +307,26 @@ operation Main() {
 
   <h2 id="s3"><span class="n">3</span>Lower — AST에서 소스 모양 HIR로 (경계를 넘다)</h2>
 
-  <p class="stagehead">in: 엔진 AST &nbsp;·&nbsp; out: <code>QProgram</code> (source-shaped HIR) &nbsp;·&nbsp; 패스: <code>QoraLowering</code></p>
+  <p class="stagehead">in: 엔진 AST + revision-bound session &nbsp;·&nbsp; out: <code>HirProgram</code> (source-shaped HIR) &nbsp;·&nbsp; 패스: <code>AstToHirLowering</code></p>
 
   <p>
-    로워링은 엔진의 트리를 <strong>한 번</strong> 순회하며 Qora 자신의 IR로 다시 세웁니다 — 강타입 레코드의
-    계층입니다(<code>QOperation</code>, <code>QGate</code>, <code>QFor</code>, <code>QIf</code>,
-    <code>QDecl</code>, <code>QUse</code>, <code>QMeasure</code>, …). 문자열 토큰은
-    <strong>타입이 있는 노드</strong>가 되고, 문법이 지원하는 소스 수식자는 노드의 구조화된 데이터가 됩니다.
-    예제의 IR:
+    로워링은 엔진의 트리를 <strong>한 번</strong> 순회하며 Qora가 소유하는 불변 IR로 다시 세워요.<br>
+    <code>HirProgram.Declarations</code>가 유일한 선언 소유 트리이며, <code>HirNamespaceDeclaration</code>은
+    하위 선언과 <code>open</code>을 소유하고 <code>HirCallable</code>은 매개변수와 <code>HirBlock</code>을 소유해요.<br>
+    그리고 모든 문장과 표현식은 현재 revision의 lowering session이 발급한 identity를 가진 typed node가 돼요.
+    예제의 IR은 다음과 같아요.
   </p>
 
-<pre><code>QOperation Prep.Fanout(Qubit q)
-  QFor(i in 0..n - 1)
-    QGate(functors=[], name=H, args=[q[i]])
+<pre><code>HirProgram
+  Declarations[0] = HirNamespaceDeclaration("Prep")
+    Declarations[0] = HirCallable("Fanout", Qubit q)
+      HirForStatement(i, 0, n - 1)
+        HirCallStatement(H, q[i])
 
-QOperation Main()
-  QUse(name=reg, size=3)
-  QGate(functors=[],        name=Prep.Fanout, args=[reg])
-  QDecl(const=False, type=Bit, name=r, value=QMeasure(reg[0]))</code></pre>
+  Declarations[1] = HirCallable("Main")
+    HirQubitDeclarationStatement(reg, 3)
+    HirCallStatement(Prep.Fanout, reg)
+    HirVariableDeclarationStatement(bit r, HirMeasurementExpression(reg[0]))</code></pre>
 
   <div class="call why">
     <span class="h">왜 트리를 타입 있는 데이터로 다시 만드나?</span>
@@ -339,29 +341,41 @@ QOperation Main()
 
   <p>
     <strong>Expand</strong>는 모듈 로더입니다. 파일에 <code>import "lib/prep.qor"</code>가 있었다면, 이
-    패스가 그 파일을 파싱·로워링하고 그 연산들을 하나의 <code>QProgram</code>으로 병합하여, 이후 모든 단계가
-    하나의 평탄한 프로그램을 보게 합니다. (예제는 아무것도 임포트하지 않으므로 여기서는 아무 일도 하지 않아요.<br>
+    패스가 그 파일을 파싱·로워링하고 최상위 선언 subtree를 하나의 <code>HirProgram</code>에 이어 붙여요.<br>
+    이후 모든 단계는 하나의 프로그램을 보지만, namespace 소유 관계는 이름 문자열로 평탄화되지 않고 선언 트리에 그대로 남아요.
+    (예제는 아무것도 임포트하지 않으므로 여기서는 아무 일도 하지 않아요.<br>
     파일이 없으면 <code>QSEM020</code>이 됩니다. 반면에 순환 back-edge는 <code>loaded</code>에 이미 등록된 경로로 보아 오류 없이 생략해요.<br>
     <code>QSEM021</code>은 폐기된 예약 코드로만 남아 더 이상 생성하지 않아요.)
   </p>
 
   <p>
-    이 둘 사이에서 작은 디슈가링(desugaring) 하나가 돕니다 — <strong>MeasureConditionLowering</strong>.
-    OpenQASM에는 조건 <em>안의</em> 측정이 없으므로, <code>if (M(q[0]) == 1)</code>은 OpenQASM이 필요로 하는
-    두 단계 형태로 다시 쓰입니다: 측정이 끌어올려진 <code>bit</code>으로 빠져나오고, 그 뒤 조건이 그 비트를
-    검사합니다. <code>while</code>은 매 반복 끝마다 다시 측정하고, <code>repeat … until</code>은 몸통 끝에서
-    다시 측정합니다. 그러면 이후 모든 단계는 평범한 비트 조건만 보게 됩니다:
+    측정식은 Expand와 Resolve 사이에서 target 모양의 HIR로 바꾸지 않아요.
+    <code>if (M(q[0]) == 1)</code>은 조건 안의 canonical <code>HirMeasurementExpression</code>으로 그대로 남아요.
+    이후 <code>QoraMirLowering</code>이 측정을 정확한 평가 위치에 놓고, short-circuit 제어 흐름을 CFG로 분명하게 표현해요.
+    마지막으로 OpenQASM target lowering이 구조화된 제어 흐름을 복원하면서 필요한 측정용 <code>bit</code>을 방출해요:
   </p>
 
 <pre><code>operation Main() {
     use q = Qubit[2];
     <span class="hl">if (M(q[0]) == 1)</span> { X(q[1]); }
 }
-                       <span class="cm">↓ MeasureConditionLowering</span>
+                       <span class="cm">↓ MIR lowering + OpenQASM target lowering</span>
 qubit[2] q;
-<span class="add">bit __m0;</span>
-<span class="add">__m0 = measure q[0];</span>          <span class="cm">← 조건에서 끌어올려진 측정</span>
-<span class="add">if (__m0 == true)</span> { x q[1]; }
+int v0;
+<span class="add">bit v1;</span>
+int v2;
+int v3;
+bit v4;
+int v5;
+v0 = 0;
+<span class="add">v1 = measure q[v0];</span>            <span class="cm">← 측정 결과가 SSA에 대응하는 target value가 돼요</span>
+v2 = 1;
+v3 = int(v1);
+v4 = v3 == v2;
+<span class="add">if (v4)</span> {
+    v5 = 1;
+    x q[v5];
+}
 </code></pre>
 
   <p>
@@ -500,13 +514,12 @@ MirQuantumApply(Target = __qora_inverse_..., Functors = [])</code></pre>
     <table class="amp">
       <tr><th>단계</th><th>패스</th><th>무엇을 무엇으로</th></tr>
       <tr><td>Parse</td><td><em>Janglim 엔진</em></td><td>소스 텍스트 → 구문 트리 (아직 의미 없음)</td></tr>
-      <tr><td>Lower HIR</td><td><code>QoraLowering</code></td><td>엔진 트리 → 소스 모양의 typed HIR</td></tr>
-      <tr><td>Expand</td><td><code>ModuleLoader</code></td><td>임포트 → 하나로 병합된 프로그램</td></tr>
-      <tr><td>Desugar measure</td><td><code>MeasureConditionLowering</code></td><td>조건 안의 측정 → 끌어올린 <code>bit</code>, 대입 후 검사</td></tr>
+      <tr><td>Lower HIR</td><td><code>AstToHirLowering</code></td><td>엔진 트리 + lowering session → 불변 <code>HirProgram</code> 선언 트리</td></tr>
+      <tr><td>Expand</td><td><code>ModuleLoader</code></td><td>문서별 선언 subtree → 하나로 병합된 <code>HirProgram</code></td></tr>
       <tr><td>Resolve</td><td><code>Resolver</code></td><td>연산 호출 대상 → 정규화된 이름(FQN)</td></tr>
       <tr><td>Validate</td><td><code>QoraValidator</code> + <code>SymbolTableBuilder</code></td><td>IR → 심볼 테이블 + 모든 의미 오류 (방출을 막는 단단한 게이트)</td></tr>
       <tr><td>Monomorphize</td><td><code>Monomorphizer</code></td><td><code>Qubit[]</code> 호출 → 호출 크기별 내부 복사본, 바뀐 경우 재검증</td></tr>
-      <tr><td>Lower MIR</td><td><code>QoraMirLowering</code></td><td>검증된 HIR + 의미 정보 → typed SSA/CFG <code>MirSnapshot</code></td></tr>
+      <tr><td>Lower MIR</td><td><code>QoraMirLowering</code></td><td>검증된 HIR + 의미 정보 → 측정을 평가 위치에서 lower한 typed SSA/CFG <code>MirSnapshot</code></td></tr>
       <tr><td>Analyze MIR</td><td><code>MirAnalysisStore</code></td><td>exact MIR revision → 제어 흐름·효과·별칭·메모리·경로 정보</td></tr>
       <tr><td>Materialize</td><td><code>MirAdjointMaterializer</code></td><td>MIR-only inverse request → 합성된 inverse MIR callable</td></tr>
       <tr><td>Target-lower</td><td><code>MirOpenQasmLowering</code></td><td>materialized MIR → typed <code>MirOpenQasmTargetProgram</code></td></tr>
@@ -535,8 +548,8 @@ MirQuantumApply(Target = __qora_inverse_..., Functors = [])</code></pre>
   <p style="color:var(--muted); font-size:.92rem;">
     소스·AST·HIR·OpenQASM 리스팅은 실제 Qora 컴파일러(<code>qora --json --stages</code>)에서 얻었고, 짧은 MIR 리스팅은 실제 MIR type을 사용한 설명용 도식이에요.<br>
     소스, 파이프라인 순서대로: <code>QoraGrammar.cs</code> (문법) ·
-    <code>Ir/QoraLowering.cs</code> (AST→IR) ·
-    <code>Ir/Passes/ModuleLoader.cs</code> · <code>MeasureConditionLowering.cs</code> · <code>Resolver.cs</code> · <code>SymbolTable.cs</code> · <code>QoraValidator.cs</code> ·
+    <code>Ir/AstToHirLowering.cs</code> + <code>Ir/AstExpressionLowering.cs</code> (AST→HIR) ·
+    <code>Ir/Passes/ModuleLoader.cs</code> · <code>Resolver.cs</code> · <code>SymbolTable.cs</code> · <code>QoraValidator.cs</code> ·
     <code>Monomorphizer.cs</code> · <code>Ir/Mir/QoraMirLowering.cs</code> ·
     <code>Ir/Mir/MirAdjointMaterializer.cs</code> · <code>Ir/Qasm/MirOpenQasmLowering.cs</code> ·
     <code>Ir/Qasm/MirQasmEmitter.cs</code> (typed target model→OpenQASM).

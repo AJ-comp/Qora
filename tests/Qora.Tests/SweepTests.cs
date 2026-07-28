@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using Qora.Ir;
 using Qora.Ir.Passes;
 
 namespace Qora.Tests;
@@ -15,8 +16,20 @@ public class SweepTests
     private static QubitRef At(string reg, int i) => new(reg, i);
     private static QubitRef Whole(string reg) => new(reg, null);
 
-    private static QubitEvent Ev(QubitRef q, QubitEventKind kind, int order, int stmtId, int nodeId) =>
-        new(q, kind, order, stmtId, false, false, nodeId);
+    private static QubitEvent Ev(
+        QubitRef q,
+        QubitEventKind kind,
+        int order,
+        int statementId,
+        int nodeId) =>
+        new(
+            q,
+            kind,
+            order,
+            new HirNodeId(statementId),
+            false,
+            false,
+            nodeId);
 
     /// <summary>The minimal VALID pair: `use q` birth (hoisted) then X(q[0]).</summary>
     private static (List<QubitEvent> Events, QubitGraph Graph) ValidPair()
@@ -99,7 +112,9 @@ public class SweepTests
             Ev(Whole("r"), QubitEventKind.Write, 1, 2, 1),          // ← earlier Order after a later one
         };
         var ex = Assert.Throws<System.InvalidOperationException>(() => Sweep(events, g));
-        Assert.Contains("not program-ordered", ex.Message);
+        Assert.Contains(
+            "event stream is not program ordered at index 1",
+            ex.Message);
     }
 
     [Fact]
@@ -222,16 +237,20 @@ public class SweepTests
         var summary = new OpEffectSummary(
             new HashSet<QubitRef>(), new HashSet<QubitRef>(), new HashSet<QubitRef>(), new HashSet<QubitRef>(), false);
 
-        m.AddQubitEvents(7, events);
+        var callableId = new HirNodeId(7);
+        m.AddQubitEvents(callableId, events);
         Assert.Contains("already has an event stream",
-            Assert.Throws<System.InvalidOperationException>(() => m.AddQubitEvents(7, events)).Message);
+            Assert.Throws<System.InvalidOperationException>(
+                () => m.AddQubitEvents(callableId, events)).Message);
 
-        m.AddQubitGraph(7, g);
+        m.AddQubitGraph(callableId, g);
         Assert.Contains("already has a qubit graph",
-            Assert.Throws<System.InvalidOperationException>(() => m.AddQubitGraph(7, g)).Message);
+            Assert.Throws<System.InvalidOperationException>(
+                () => m.AddQubitGraph(callableId, g)).Message);
 
-        m.AddOpEffects(7, summary);
+        m.AddOpEffects(callableId, summary);
         Assert.Contains("already has an effect summary",
-            Assert.Throws<System.InvalidOperationException>(() => m.AddOpEffects(7, summary)).Message);
+            Assert.Throws<System.InvalidOperationException>(
+                () => m.AddOpEffects(callableId, summary)).Message);
     }
 }

@@ -14,8 +14,8 @@ namespace Qora.Ir.Passes;
 ///   <item><b>QSEM003</b> — a functor on <c>Reset</c>/<c>ResetAll</c> (reset is a statement, not a gate).</item>
 ///   <item><b>QSEM004</b> — a bare measurement statement (only assignment forms exist).</item>
 ///   <item><b>QSEM005</b> — a call inside an expression (arithmetic, argument, non-measure value, or a
-///         non-measurement call in a condition). A MEASUREMENT in a condition is NOT rejected — it is
-///         lowered to a bit by <see cref="MeasureConditionLowering"/> before this pass runs.</item>
+///         non-measurement call in a condition). A measurement in a condition remains a canonical
+///         expression and is lowered at its exact MIR control-flow position.</item>
 ///   <item><b>QSEM006</b> — wrong arguments for a callee: count for built-ins (+1 under <c>Controlled</c>)
 ///         and user operations, argument KIND per slot (a qubit where an angle belongs and vice versa,
 ///         a number/classical where a qubit belongs), and qubit shape/size against user-op signatures.</item>
@@ -115,12 +115,15 @@ namespace Qora.Ir.Passes;
 /// </summary>
 internal static class QoraValidator
 {
-    public static List<QoraError> Validate(QProgram? program) => Validate(program, out _);
+    public static List<QoraError> Validate(HirProgram? program) =>
+        Validate(program, out _);
 
     /// <summary>Validate AND keep what validation proved: the scope trees built per operation are collected
     /// into a <see cref="HirSemanticModel"/> (Id-keyed side table) instead of being discarded, so later stages
     /// consume the validation-time facts rather than re-deriving them.</summary>
-    public static List<QoraError> Validate(QProgram? program, out HirSemanticModel? model) =>
+    public static List<QoraError> Validate(
+        HirProgram? program,
+        out HirSemanticModel? model) =>
         ValidateCore(program, sourceSnapshot: null, out model);
 
     /// <summary>
@@ -146,17 +149,17 @@ internal static class QoraValidator
     }
 
     private static List<QoraError> ValidateCore(
-        QProgram? program,
+        HirProgram? program,
         HirSnapshot? sourceSnapshot,
         out HirSemanticModel? model)
     {
         model = null;
         var errors = new List<QoraError>();
-        var unproven = new List<UnprovenIndexWork>();   // rung B′ data: accesses whose bounds proof never settled
+        var unproven = new List<UnprovenIndex>();   // rung B′ data: accesses whose bounds proof never settled
         var deferred = new List<DeferredSizeCheck>();   // rung B′ data: verdicts postponed to the post-mono re-check
         if (program is null) return errors;
 
-        if (program.Operations.Count == 0)
+        if (program.Callables.Count == 0)
         {
             Add(
                 errors,
@@ -174,46 +177,68 @@ internal static class QoraValidator
             ? new HirSemanticModel()
             : new HirSemanticModel(sourceSnapshot);
 
-        var ops = program.Operations.Select(o => o.Name).ToHashSet();
-        var opById = program.Operations.ToDictionary(o => o.Id);
+        string QualifiedCallableName(HirCallable callable)
+        {
+            var namespacePath = program.NamespaceOf(callable);
+            return namespacePath.Length == 0
+                ? callable.Name
+                : $"{namespacePath}.{callable.Name}";
+        }
+
+        var ops = program.Callables
+            .Select(QualifiedCallableName)
+            .ToHashSet(StringComparer.Ordinal);
+        var opById = program.Callables
+            .ToDictionary(callable => callable.Id);
 
         // Rung B'/P4 working data. The walk RECORDS two kinds of facts instead of computing floors in a
         // separate pass: each classical-array parameter's minimum required length (produced by
         // CheckIndexedAccess from the SAME folded bound its verdict used — one calculator, so the floor can
         // never disagree with the prover) and every call's array arguments (produced by CheckCall). The
         // floor check is DERIVED from both after the walk — same discipline as UnprovenIndexes.
-        var needsByOp = new Dictionary<int, Dictionary<string, long>>();
+        var needsByOp =
+            new Dictionary<HirNodeId, Dictionary<string, long>>();
         var calls = new List<ArrayCallFact>();
         var ownershipWork = new List<OwnershipWork>();
 
-        var entry = program.EntryOperation;
+        var entry = program.EntryCallable;
         if (entry is null)
             Add(
                 errors,
                 "QSEM040",
                 "the program contains functions but no operation; a function cannot be the program entry point",
-                program.Operations[0].Span);
+                program.Callables[0].Span);
 
         // QSEM008 / QSEM022 — duplicate definitions (everything downstream keys ops by name). Names are
         // FQNs after resolution, so the check is naturally per-namespace: the same simple name in two
         // different namespaces is NOT a duplicate. Inside one namespace the code is QSEM022 (design doc).
-        foreach (var dup in program.Operations.GroupBy(o => o.Name).Where(g => g.Count() > 1))
+        foreach (var dup in program.Callables
+                     .GroupBy(callable => (
+                         NamespacePath: program.NamespaceOf(callable),
+                         callable.Name))
+                     .Where(group => group.Count() > 1))
+        {
+            var namespacePath = dup.Key.NamespacePath;
             Add(errors,
-                dup.Key.Contains('.') ? "QSEM022" : "QSEM008",
-                dup.Key.Contains('.')
-                    ? $"operation `{Simple(dup.Key)}` is defined {dup.Count()} times in namespace `{dup.Key[..dup.Key.LastIndexOf('.')]}`; each operation needs a unique name within its namespace"
-                    : $"operation `{dup.Key}` is defined {dup.Count()} times; each operation needs a unique name",
+                namespacePath.Length > 0 ? "QSEM022" : "QSEM008",
+                namespacePath.Length > 0
+                    ? $"operation `{dup.Key.Name}` is defined {dup.Count()} times in namespace `{namespacePath}`; each operation needs a unique name within its namespace"
+                    : $"operation `{dup.Key.Name}` is defined {dup.Count()} times; each operation needs a unique name",
                 dup.Skip(1).First().Span ?? dup.First().Span);   // point at the SECOND definition
+        }
 
         // QSEM010 — the entry op has no caller, so parameters can never be supplied.
-        if (entry is { Params.Count: > 0 })
+        if (entry is { Parameters.Count: > 0 })
             Add(errors, "QSEM010", $"the entry operation `{entry.Name}` cannot take parameters; allocate qubits with `use` inside it instead",
-                entry.Params[0].Span ?? entry.Span);
+                entry.Parameters[0].Span ?? entry.Span);
 
         // QSEM011 — recursive call cycles (any functor counts as a reference).
         foreach (var cycle in FindCycles(program, opById))
         {
-            var cycleNames = cycle.Select(operationId => opById[operationId].Name).ToList();
+            var cycleNames = cycle
+                .Select(operationId =>
+                    QualifiedCallableName(opById[operationId]))
+                .ToList();
             Add(errors, "QSEM011", cycle.Count == 1
                     ? $"operation `{cycleNames[0]}` calls itself; OpenQASM defs cannot recurse"
                     : $"operations {string.Join(" -> ", cycleNames)} -> {cycleNames[0]} call each other recursively; OpenQASM defs cannot recurse",
@@ -236,59 +261,74 @@ internal static class QoraValidator
         // is rewritten in turn, propagating onward) — a generic whose call sites all live inside OTHER
         // dropped generics is itself dropped, however many "callers" it has. So the predicate must be
         // the same transitive closure the Monomorphizer computes, not a flat has-any-caller set.
-        // The Monomorphizer's own trigger, by construction — both read QParam.NeedsMonoSizing, the one
+        // The Monomorphizer's own trigger, by construction — both read HirParameter.NeedsMonoSizing, the one
         // definition of "specializes per call-site length", so this test can never drift from what the
         // monomorphizer actually does.
-        static bool IsGenericOp(QOperation o) => o.Params.Any(p => p.NeedsMonoSizing);
+        static bool IsGenericOp(HirCallable callable) =>
+            callable.Parameters.Any(parameter => parameter.NeedsMonoSizing);
 
-        void CollectCallTargets(IReadOnlyList<QStmt> body, HashSet<int> ids)
+        void CollectCallTargets(
+            IReadOnlyList<HirStatement> body,
+            HashSet<HirNodeId> ids)
         {
-            foreach (var s in body)
+            foreach (var statement in body)
             {
-                // Function calls in expressions (value/condition/argument/return) are call edges too.
-                foreach (var tree in QNodes.ExpressionSites(s))
-                    foreach (var call in QNodes.CallsIn(tree))
-                        if (call.CalleeOpId is int expressionCalleeId) ids.Add(expressionCalleeId);
-                switch (s)
+                // Statement and value calls share HirCallExpression, so every edge follows one traversal.
+                foreach (var call in CallsInStatement(statement))
+                    if (call.CalleeId is { } calleeId)
+                        ids.Add(calleeId);
+                switch (statement)
                 {
-                    case QGate g:
-                        if (g.CalleeOpId is int cid) ids.Add(cid);
+                    case HirIfStatement conditional:
+                        CollectCallTargets(conditional.Then, ids);
+                        CollectCallTargets(conditional.Else, ids);
                         break;
-                    case QIf i: CollectCallTargets(i.Then, ids); CollectCallTargets(i.Else, ids); break;
-                    case QFor f: CollectCallTargets(f.Body, ids); break;
-                    case QWhile w: CollectCallTargets(w.Body, ids); break;
-                    case QRepeat r: CollectCallTargets(r.Body, ids); break;
+                    case HirForStatement loop:
+                        CollectCallTargets(loop.Body, ids);
+                        break;
+                    case HirWhileStatement loop:
+                        CollectCallTargets(loop.Body, ids);
+                        break;
+                    case HirRepeatStatement repeat:
+                        CollectCallTargets(repeat.Body, ids);
+                        break;
                 }
             }
         }
 
         // worklist closure: seed with every CONCRETE op's call targets, then follow reached generics.
-        var reachedIds = new HashSet<int>();
-        var frontier = new Queue<QOperation>(program.Operations.Where(o => !IsGenericOp(o)));
-        var enqueued = new HashSet<int>(frontier.Select(o => o.Id));
+        var reachedIds = new HashSet<HirNodeId>();
+        var frontier = new Queue<HirCallable>(
+            program.Callables.Where(callable => !IsGenericOp(callable)));
+        var enqueued =
+            new HashSet<HirNodeId>(frontier.Select(callable => callable.Id));
         while (frontier.Count > 0)
         {
             var caller = frontier.Dequeue();
-            var ids = new HashSet<int>();
+            var ids = new HashSet<HirNodeId>();
             CollectCallTargets(caller.Body, ids);
             reachedIds.UnionWith(ids);
-            foreach (var callee in program.Operations)
+            foreach (var callee in program.Callables)
                 if (IsGenericOp(callee) && ids.Contains(callee.Id) && enqueued.Add(callee.Id))
                     frontier.Enqueue(callee);
         }
 
-        foreach (var op in program.Operations)
+        foreach (var op in program.Callables)
         {
+            var opDisplayName =
+                op.DisplayName ?? QualifiedCallableName(op);
+
             // QSEM013 — names whose MEANING cannot be disambiguated stay reserved: the measurement
             // family and pi/tau/euler (expression-position tokens the resolver never sees), and
             // built-in GATE names in the GLOBAL namespace only — a global op has no qualifier, so a
             // gate-named one could never be referenced. Inside a namespace a gate name is legal
             // (Q#-style): the resolver makes any ambiguous USE an explicit QSEM018, never a silent pick.
-            var simpleName = Simple(op.Name);
+            var simpleName = op.Name;
             if (QoraGates.MeasureLike.Contains(simpleName) || QoraGates.Functions.ContainsKey(simpleName)
                 || SymbolTableBuilder.IsReservedName(simpleName))
                 Add(errors, "QSEM013", $"operation name `{simpleName}` shadows the built-in `{simpleName}`; choose another name", op.Span);
-            else if (!op.Name.Contains('.') && QoraGates.Names.ContainsKey(simpleName))
+            else if (program.NamespaceOf(op).Length == 0
+                     && QoraGates.Names.ContainsKey(simpleName))
                 Add(errors, "QSEM013", $"global operation `{simpleName}` shadows the built-in gate `{simpleName}` (the global namespace shares one scope with the built-ins, so it has no qualifier to disambiguate with); move it into a namespace or rename it", op.Span);
 
             // QSEM016 — an internally specialized Qubit[] parameter must have a positive concrete size.
@@ -296,29 +336,29 @@ internal static class QoraValidator
             // mutable access is supported by reference-capable classical arrays; ownership transfer accepts
             // whole arrays and whole qubit bindings. Classical scalars are Copy values and therefore never
             // need `move`; qubit state changes keep their existing gate semantics, so `var` does not apply.
-            foreach (var p in op.Params)
+            foreach (var p in op.Parameters)
             {
                 if (p.Type == QType.Qubit && p.RegisterSize is int rs && rs < 1)
-                    Add(errors, "QSEM016", $"in `{op.DisplayName ?? op.Name}`: parameter `{p.Name}` has an invalid register size; it must be a whole number from 1 to {int.MaxValue}", p.Span);
+                    Add(errors, "QSEM016", $"in `{opDisplayName}`: parameter `{p.Name}` has an invalid register size; it must be a whole number from 1 to {int.MaxValue}", p.Span);
                 if (p is { Ownership: QOwnershipMode.Borrowed, Access: QAccessMode.ReadOnly }) continue;
 
                 var contract = ContractSyntax(p.Ownership, p.Access);
                 if (op.IsFunction)
                 {
-                    Add(errors, "QSEM038", $"in function `{op.DisplayName ?? op.Name}`: parameter `{p.Name}` cannot use `{contract}`; functions borrow every argument read-only and cannot mutate or consume caller-owned storage", p.Span);
+                    Add(errors, "QSEM038", $"in function `{opDisplayName}`: parameter `{p.Name}` cannot use `{contract}`; functions borrow every argument read-only and cannot mutate or consume caller-owned storage", p.Span);
                     continue;
                 }
 
                 if (p.Access == QAccessMode.Mutable
                     && (!p.IsArray || p.Type is not (QType.Int or QType.Float or QType.Angle)))
                 {
-                    Add(errors, "QSEM038", $"in `{op.DisplayName ?? op.Name}`: parameter `{p.Name}` cannot use `{contract}`; mutable parameter access is supported only for whole `int[]`, `float[]`, and `angle[]` operation parameters", p.Span);
+                    Add(errors, "QSEM038", $"in `{opDisplayName}`: parameter `{p.Name}` cannot use `{contract}`; mutable parameter access is supported only for whole `int[]`, `float[]`, and `angle[]` operation parameters", p.Span);
                     continue;
                 }
 
                 if (p.Ownership == QOwnershipMode.Moved
                     && !p.IsArray && p.Type != QType.Qubit)
-                    Add(errors, "QSEM038", $"in `{op.DisplayName ?? op.Name}`: parameter `{p.Name}` cannot use `move`; `{TypeName(p.Type)}` is a Copy scalar, so passing it already copies the value without consuming the caller's binding", p.Span);
+                    Add(errors, "QSEM038", $"in `{opDisplayName}`: parameter `{p.Name}` cannot use `move`; `{TypeName(p.Type)}` is a Copy scalar, so passing it already copies the value without consuming the caller's binding", p.Span);
             }
 
             // The unified symbol table IS the scope model: a nested scope tree in which every name carries
@@ -327,8 +367,9 @@ internal static class QoraValidator
             // registers at the root, block-scoped measure bits / vars / consts / loop vars in their block
             // alike, so there are no parallel duplicate-name checks out here. Stable node-and-role sites in
             // the graph let the walk below recover each nested scope without depending on list identity.
-            var typeMismatchCandidates = new Dictionary<int, QoraError>();
-            var invalidOwnershipStatements = new HashSet<int>();
+            var typeMismatchCandidates =
+                new Dictionary<HirNodeId, QoraError>();
+            var invalidOwnershipStatements = new HashSet<HirNodeId>();
             var root = SymbolTableBuilder.Build(op, errors, scopeGraph, opById,
                 (statementId, error) => typeMismatchCandidates.TryAdd(statementId, error),
                 (statementId, _) => invalidOwnershipStatements.Add(statementId));
@@ -341,11 +382,26 @@ internal static class QoraValidator
             // generic does not make the callee live).
             var willBeRechecked = !IsGenericOp(op) || reachedIds.Contains(op.Id);
             model.SetWillBeRechecked(op.Id, willBeRechecked);   // the verdict is model DATA, not a discarded local — see the model doc
-            var validMoves = new Dictionary<int, IReadOnlyList<Symbol>>();
-            var ctx = new Ctx(op, entry?.Id, entry?.Name, ops, opById, scopeGraph, errors, unproven,
-                deferred, opNeeds, new ArrayFloorSink(op.Id, calls), typeMismatchCandidates,
-                new Dictionary<QCallNode, bool>(ReferenceEqualityComparer.Instance), validMoves,
-                invalidOwnershipStatements, willBeRechecked);
+            var validMoves =
+                new Dictionary<HirNodeId, IReadOnlyList<Symbol>>();
+            var ctx = new Ctx(
+                op,
+                opDisplayName,
+                entry?.Id,
+                entry is null ? null : QualifiedCallableName(entry),
+                ops,
+                opById,
+                scopeGraph,
+                errors,
+                unproven,
+                deferred,
+                opNeeds,
+                new ArrayFloorSink(op.Id, calls),
+                typeMismatchCandidates,
+                new Dictionary<HirNodeId, bool>(),
+                validMoves,
+                invalidOwnershipStatements,
+                willBeRechecked);
             Walk(op.Body, root, ctx, inControlFlow: false);
             ownershipWork.Add(new OwnershipWork(
                 op,
@@ -368,9 +424,9 @@ internal static class QoraValidator
             foreach (var c in calls)
             {
                 if (c.CallerParam is null
-                    || !needsByOp.TryGetValue(c.CalleeOpId, out var calleeNeeds)
+                    || !needsByOp.TryGetValue(c.CalleeCallableId, out var calleeNeeds)
                     || !calleeNeeds.TryGetValue(c.CalleeParam, out var need)) continue;
-                var mine = needsByOp[c.CallerOpId];
+                var mine = needsByOp[c.CallerCallableId];
                 if (need > mine.GetValueOrDefault(c.CallerParam))
                 {
                     mine[c.CallerParam] = need;
@@ -378,15 +434,15 @@ internal static class QoraValidator
                 }
             }
         }
-        var ownershipByOperation = ownershipWork.ToDictionary(work => work.Operation.Id);
+        var ownershipByCallable = ownershipWork.ToDictionary(work => work.Callable.Id);
         foreach (var c in calls)
             if (c.ArgLength is int have
-                && needsByOp.TryGetValue(c.CalleeOpId, out var calleeNeeds)
+                && needsByOp.TryGetValue(c.CalleeCallableId, out var calleeNeeds)
                 && calleeNeeds.TryGetValue(c.CalleeParam, out var need) && have < need)
             {
                 Add(errors, "QSEM016", $"in `{c.CallerOpName}`: `{c.ArgName}` has {have} element(s), but `{c.CalleeName}` indexes `{c.CalleeParam}[{need - 1}]` — it needs at least {need}", c.Span);
-                if (c.CallStatementId is int statementId
-                    && ownershipByOperation.TryGetValue(c.CallerOpId, out var work))
+                if (c.CallSiteId is HirNodeId statementId
+                    && ownershipByCallable.TryGetValue(c.CallerCallableId, out var work))
                     work.InvalidStatements.Add(statementId);
             }
 
@@ -402,7 +458,7 @@ internal static class QoraValidator
             foreach (var statementId in work.InvalidStatements)
                 work.ValidMoves.Remove(statementId);
             OwnershipValidation.Validate(
-                work.Operation,
+                work.Callable,
                 work.Root,
                 work.ScopeGraph,
                 work.ValidMoves,
@@ -425,11 +481,8 @@ internal static class QoraValidator
         // from one source span (for example the pre-loop and back-edge copies of a measured while condition);
         // collapsing them here would discard backend work. OpenQASM de-duplicates only the user-facing
         // diagnostics it derives.
-        foreach (var u in unproven)
-            model.AddUnprovenIndex(
-                u.Fact,
-                u.OwningStatementId,
-                u.ExactSite);
+        foreach (var access in unproven)
+            model.AddUnprovenIndex(access);
 
         // The deferral ledger — recorded during the walk, model DATA afterwards. No diagnostic is derived
         // here: a deferral is a promise, not a failure. On today's pipeline the post-monomorphization
@@ -461,12 +514,19 @@ internal static class QoraValidator
     /// <see cref="DepthLimit"/>. Measured ITERATIVELY (an explicit stack, never our own recursion), so the
     /// guard itself cannot overflow — run BEFORE the recursive passes, it turns pathological depth into a
     /// clean diagnostic instead of a process crash.</summary>
-    internal static bool ExceedsDepthLimit(QProgram program, out string opName)
+    internal static bool ExceedsDepthLimit(
+        HirProgram program,
+        out string opName)
     {
-        foreach (var op in program.Operations)
+        foreach (var op in program.Callables)
         {
-            opName = op.DisplayName ?? op.Name;
-            var stack = new Stack<(IReadOnlyList<QStmt> Body, int Depth)>();
+            var namespacePath = program.NamespaceOf(op);
+            opName = op.DisplayName
+                     ?? (namespacePath.Length == 0
+                         ? op.Name
+                         : $"{namespacePath}.{op.Name}");
+            var stack =
+                new Stack<(IReadOnlyList<HirStatement> Body, int Depth)>();
             stack.Push((op.Body, 1));
             while (stack.Count > 0)
             {
@@ -477,10 +537,19 @@ internal static class QoraValidator
                     if (StmtExprTooDeep(s)) return true;
                     switch (s)
                     {
-                        case QIf i: stack.Push((i.Then, depth + 1)); stack.Push((i.Else, depth + 1)); break;
-                        case QFor f: stack.Push((f.Body, depth + 1)); break;
-                        case QWhile w: stack.Push((w.Body, depth + 1)); break;
-                        case QRepeat r: stack.Push((r.Body, depth + 1)); break;
+                        case HirIfStatement conditional:
+                            stack.Push((conditional.Then, depth + 1));
+                            stack.Push((conditional.Else, depth + 1));
+                            break;
+                        case HirForStatement loop:
+                            stack.Push((loop.Body, depth + 1));
+                            break;
+                        case HirWhileStatement loop:
+                            stack.Push((loop.Body, depth + 1));
+                            break;
+                        case HirRepeatStatement repeat:
+                            stack.Push((repeat.Body, depth + 1));
+                            break;
                     }
                 }
             }
@@ -492,25 +561,24 @@ internal static class QoraValidator
     // Every expression position, from the ONE canonical enumeration — a hand-rolled list here once
     // missed array-literal elements, and a missed position is an uncatchable stack overflow in the
     // recursive walkers instead of a clean QSEM031.
-    private static bool StmtExprTooDeep(QStmt s) => QNodes.ExpressionSites(s).Any(NodeTooDeep);
+    private static bool StmtExprTooDeep(HirStatement statement) =>
+        statement.Children()
+            .OfType<HirExpression>()
+            .Any(NodeTooDeep);
 
-    private static bool NodeTooDeep(QNode? node)
+    private static bool NodeTooDeep(HirExpression? expression)
     {
-        if (node is null) return false;
-        var stack = new Stack<(QNode Node, int Depth)>();
-        stack.Push((node, 1));
+        if (expression is null) return false;
+        var stack = new Stack<(HirNode Node, int Depth)>();
+        stack.Push((expression, 1));
         while (stack.Count > 0)
         {
-            var (n, d) = stack.Pop();
-            if (d > DepthLimit) return true;
-            switch (n)
-            {
-                case QBinOp b: stack.Push((b.Left, d + 1)); stack.Push((b.Right, d + 1)); break;
-                case QUnary u: stack.Push((u.Operand, d + 1)); break;
-                case QMember m: stack.Push((m.Base, d + 1)); break;
-                case QIndexNode ix: stack.Push((ix.Base, d + 1)); stack.Push((ix.Index, d + 1)); break;
-                case QCallNode c: foreach (var a in c.Args) stack.Push((a, d + 1)); break;
-            }
+            var (node, depth) = stack.Pop();
+            if (depth > DepthLimit) return true;
+            foreach (var child in node.Children())
+                stack.Push((
+                    child,
+                    child is HirArgument ? depth : depth + 1));
         }
         return false;
     }
@@ -520,17 +588,22 @@ internal static class QoraValidator
     /// supplies declaration lookup and stable node-and-role scope lookup for branch and loop recursion.
     /// </summary>
     private sealed record Ctx(
-        QOperation Op, int? EntryOpId, string? EntryName, HashSet<string> OpNames,
-        Dictionary<int, QOperation> OpById, HirScopeGraph ScopeGraph,
+        HirCallable Op,
+        string CallableDisplayName,
+        HirNodeId? EntryOpId,
+        string? EntryName,
+        HashSet<string> OpNames,
+        IReadOnlyDictionary<HirNodeId, HirCallable> OpById,
+        HirScopeGraph ScopeGraph,
         List<QoraError> Errors,
-        List<UnprovenIndexWork> Unproven,
+        List<UnprovenIndex> Unproven,
         List<DeferredSizeCheck> Deferred,
         Dictionary<string, long> ParamNeeds,
         ArrayFloorSink Floors,
-        Dictionary<int, QoraError> TypeMismatchCandidates,
-        Dictionary<QCallNode, bool> CallValidity,
-        Dictionary<int, IReadOnlyList<Symbol>> ValidMoves,
-        HashSet<int> InvalidOwnershipStatements,
+        Dictionary<HirNodeId, QoraError> TypeMismatchCandidates,
+        Dictionary<HirNodeId, bool> CallValidity,
+        Dictionary<HirNodeId, IReadOnlyList<Symbol>> ValidMoves,
+        HashSet<HirNodeId> InvalidOwnershipStatements,
         // "Will this op's postponed judgements get their post-mono re-validation?" — a PREDICTION made
         // before monomorphization runs, from the same reachability the Monomorphizer acts on. False for
         // a generic op nothing calls: monomorphization will DROP it, so no re-check ever runs — every
@@ -539,22 +612,12 @@ internal static class QoraValidator
         bool WillBeRechecked);
 
     private sealed record OwnershipWork(
-        QOperation Operation,
+        HirCallable Callable,
         Scope Root,
         HirScopeGraph ScopeGraph,
-        Dictionary<int, IReadOnlyList<Symbol>> ValidMoves,
-        HashSet<int> InvalidStatements,
+        Dictionary<HirNodeId, IReadOnlyList<Symbol>> ValidMoves,
+        HashSet<HirNodeId> InvalidStatements,
         bool DeferUnknownControlFlow);
-
-    /// <summary>
-    /// Validation-local bridge between a typed semantic access identity and the exact immutable HIR object
-    /// which owns it. Publication moves the object-keyed relation into the snapshot-bound semantic model;
-    /// MIR lowering then consumes it once and emits an exact instruction reference.
-    /// </summary>
-    private sealed record UnprovenIndexWork(
-        UnprovenIndex Fact,
-        int OwningStatementId,
-        object ExactSite);
 
     /// <summary>One call's classical-array argument, recorded as DATA during the walk (rung B'/P4).
     /// <see cref="ArgLength"/> is the argument's known length (a local/literal array) — a CHECK fact,
@@ -563,14 +626,20 @@ internal static class QoraValidator
     /// a PROPAGATION fact: the callee's requirement becomes the caller's, so the check fires at the
     /// outermost call where a concrete array actually enters.</summary>
     private sealed record ArrayCallFact(
-        int CallerOpId, string CallerOpName, int CalleeOpId, string CalleeName,
+        HirNodeId CallerCallableId,
+        string CallerOpName,
+        HirNodeId CalleeCallableId,
+        string CalleeName,
         string CalleeParam, string ArgName, int? ArgLength, string? CallerParam,
-        int? CallStatementId, SourceSpan? Span);
+        HirNodeId? CallSiteId,
+        SourceSpan? Span);
 
     /// <summary>Where <see cref="CheckCall"/> deposits <see cref="ArrayCallFact"/>s: the calling op's Id plus
     /// the per-run shared list. Null when the callee is not a user operation (built-in gates take no
     /// classical arrays).</summary>
-    private sealed record ArrayFloorSink(int CallerOpId, List<ArrayCallFact> Calls);
+    private sealed record ArrayFloorSink(
+        HirNodeId CallerCallableId,
+        List<ArrayCallFact> Calls);
 
     /// <summary>
     /// The bounds facts at one point of the walk, used to PROVE a non-literal index in range (rung B').
@@ -667,11 +736,11 @@ internal static class QoraValidator
             || GuardConsts?.ContainsKey(name) == true;
     }
 
-    private static void Walk(IReadOnlyList<QStmt> stmts, Scope scope, Ctx ctx, bool inControlFlow,
+    private static void Walk(IReadOnlyList<HirStatement> stmts, Scope scope, Ctx ctx, bool inControlFlow,
         BoundsCtx bounds = default)
     {
-        var opName = ctx.Op.DisplayName ?? ctx.Op.Name;
-        Scope At(QStmt owner, HirScopeSiteRole role) =>
+        var opName = ctx.CallableDisplayName;
+        Scope At(HirStatement owner, HirScopeSiteRole role) =>
             ctx.ScopeGraph.RequireScope(new HirScopeSite(owner.Id, role));
 
         // `flow` is the running bounds context: it starts from the enclosing level and SHRINKS as
@@ -681,23 +750,23 @@ internal static class QoraValidator
         {
             switch (stmt)
             {
-                case QGate g:
-                    CheckGate(g, scope, ctx, flow);
+                case HirCallStatement call:
+                    CheckCallStatement(call, scope, ctx, flow);
                     break;
 
                 // QSEM012 — `use` only at the top level of the entry op. A duplicate register name is
                 // QSEM015, but that is caught by the symbol table's `Declare` door (registers seed the root),
                 // so it is not re-checked here.
-                case QUse u:
+                case HirQubitDeclarationStatement u:
                     if (u.Size < 1)   // 0, or -1 from a size that overflowed a 32-bit int (`Qubit[99999999999]`)
                         Add(ctx.Errors, "QSEM016", $"in `{opName}`: `use {u.Name} = Qubit[…];` has an invalid register size; it must be a whole number from 1 to {int.MaxValue}", u.Span);
-                    if (ctx.EntryOpId is int entryOperationId && ctx.Op.Id != entryOperationId)
+                    if (ctx.EntryOpId is HirNodeId entryOperationId && ctx.Op.Id != entryOperationId)
                         Add(ctx.Errors, "QSEM012", $"in `{opName}`: `use {u.Name} = Qubit[{u.Size}];` is not supported inside an operation; allocate in `{ctx.EntryName}` and pass the qubits as a parameter", u.Span);
                     else if (inControlFlow)
                         Add(ctx.Errors, "QSEM012", $"in `{opName}`: `use {u.Name} = ...` inside a loop or branch is not supported; allocate once at the top level", u.Span);
                     break;
 
-                case QDecl d:
+                case HirVariableDeclarationStatement d:
                     var declarationCallsAreValid = true;
                     if (d.IsArray)
                     {
@@ -708,11 +777,17 @@ internal static class QoraValidator
                         // the QSEM012 arm that once rejected them here was that target rule leaking out.
                         if (d.Type is null)
                             Add(ctx.Errors, "QSEM029", $"in `{opName}`: array `{d.Name}` needs an explicit element type such as `int[]`", d.Span);
-                        if (d.Value is not (QArrayLiteral or QArrayNew))
+                        if (d.Value is not (
+                                HirArrayLiteralExpression
+                                or HirArrayCreationExpression))
                             Add(ctx.Errors, "QSEM029", $"in `{opName}`: array `{d.Name}` must be initialized with an array literal or `new T[N]`", d.Span);
-                        if (d.Value is QArrayLiteral { Elements.Count: 0 })
+                        if (d.Value is
+                            HirArrayLiteralExpression
+                            {
+                                Elements.Count: 0,
+                            })
                             Add(ctx.Errors, "QSEM029", $"in `{opName}`: array `{d.Name}` cannot use an empty initializer", d.Span);
-                        if (d.Value is QArrayNew allocation)
+                        if (d.Value is HirArrayCreationExpression allocation)
                         {
                             if (allocation.Length < 1)
                                 Add(ctx.Errors, "QSEM016", $"in `{opName}`: `new {TypeName(allocation.ElementType)}[{allocation.Length}]` needs a positive literal length", d.Span);
@@ -720,26 +795,41 @@ internal static class QoraValidator
                                 Add(ctx.Errors, "QSEM029", $"in `{opName}`: `{d.Name}` is `{TypeName(declared)}[]` but its initializer creates `{TypeName(allocation.ElementType)}[]`", d.Span);
                         }
                     }
-                    else if (d.Value is QArrayLiteral or QArrayNew)
+                    else if (d.Value is
+                             HirArrayLiteralExpression
+                             or HirArrayCreationExpression)
                         Add(ctx.Errors, "QSEM029", $"in `{opName}`: scalar `{d.Name}` cannot be initialized with an array value; declare it as `T[]`", d.Span);
 
                     // A FUNCTION call is a legal scalar value (`var k: int = two();`), checked by CheckExprCalls.
                     // A measurement or operation call is not; nor is a call inside an array-literal ELEMENT
                     // (`var b: int[] = [f(x), 2]` would ship a call inside a `{…}` initializer — invalid
                     // OpenQASM), which stays QSEM005 via the TreesOf enumeration.
-                    if (d.Value is QText { Tree: { } declTree })
-                        declarationCallsAreValid = CheckExprCalls(declTree, scope, ctx, opName, d.Span);
-                    else if (ContainsCallOutsideMeasurementIndex(d.Value))
+                    var declarationHasMisplacedMeasurement =
+                        ContainsMisplacedMeasurement(d.Value);
+                    if (declarationHasMisplacedMeasurement)
+                    {
+                        Add(ctx.Errors, "QSEM005", $"in `{opName}`: the initializer of `{d.Name}` uses a measurement inside another expression; use `M(...)` as the whole bit value or as a direct element of a bit-array literal", d.Span);
+                        declarationCallsAreValid = false;
+                    }
+                    else if (d.Value is HirArrayLiteralExpression
+                             && ContainsCallOutsideMeasurementIndex(d.Value))
                     {
                         Add(ctx.Errors, "QSEM005", $"in `{opName}`: the initializer of `{d.Name}` contains a call; only the lone form `var r: bit = M(q[i]);` or a `function` call is supported here", d.Span);
                         declarationCallsAreValid = false;
                     }
-                    // CheckExprIndexes bounds-checks every index in the value, INCLUDING a measurement target
+                    else if (d.Value is not HirMeasurementExpression)
+                        declarationCallsAreValid = CheckExprCalls(
+                            d.Value,
+                            scope,
+                            ctx,
+                            opName,
+                            d.Span,
+                            d.Id);
+                    // CheckExpressionIndexes bounds-checks every index in the value, INCLUDING a measurement target
                     // (direct or nested in an array literal) — the single measure-index check, so no dedicated
                     // CheckQubitIndex is repeated here (that duplicated the diagnostic).
-                    CheckExprIndexes(
+                    CheckExpressionIndexes(
                         d.Value,
-                        d.Id,
                         scope,
                         opName,
                         ctx,
@@ -750,21 +840,25 @@ internal static class QoraValidator
                     // array literal (`var a: int[] = [M(q)]`, which would otherwise emit `measure` inside a `{…}`
                     // initializer — invalid OpenQASM).
                     if (d.Type is not null && d.Type != QType.Bit
-                        && (d.Value is QMeasure || d.Value is QArrayLiteral { Elements: { } els } && els.Any(e => e is QMeasure)))
+                        && ContainsDirectMeasurementValue(d.Value))
                         Add(ctx.Errors, "QSEM017", $"in `{opName}`: `{d.Name}` is declared `{d.Type.ToString()!.ToLowerInvariant()}` but a measurement result is a `bit`", d.Span);
                     CommitTypeMismatch(d.Id, declarationCallsAreValid, ctx);
                     break;
 
-                case QAssign a:
+                case HirAssignmentStatement a:
                     var assignmentCallsAreValid = true;
+                    var targetName =
+                        HirExpressions.AssignmentNameOf(a.Target);
                     // The assignment TARGET's kind, resolved once. `a.Name` is also recorded as a use by the
                     // symbol table, so an unknown target is QSEM025 there.
-                    var target = scope.Lookup(a.Name);
+                    var target = targetName is null
+                        ? null
+                        : scope.Lookup(targetName);
                     // QSEM032 — a bit[] PARAMETER is read-only: its QASM form is a by-value `bit[N]`
                     // register (references exist only for array-typed parameters, which bit cannot be), so
                     // a write inside the operation would silently never reach the caller.
                     if (target is { Kind: SymbolKind.Parameter, Type: QType.Bit, IsArray: true })
-                        Add(ctx.Errors, "QSEM032", $"in `{opName}`: parameter `{a.Name}` is a `bit[]`, which is read-only inside an operation (OpenQASM passes bit registers by value, so the write would silently stay local); measure into a local bit[] instead, or pass `int[]` if the caller must see updates", a.Span);
+                        Add(ctx.Errors, "QSEM032", $"in `{opName}`: parameter `{targetName}` is a `bit[]`, which is read-only inside an operation (OpenQASM passes bit registers by value, so the write would silently stay local); measure into a local bit[] instead, or pass `int[]` if the caller must see updates", a.Span);
                     // QSEM038 — every parameter binding is read-only unless its independent access axis is
                     // `Mutable`. Ownership does not imply write permission: `move xs` consumes the caller's
                     // binding but still presents a read-only binding inside the callee.
@@ -780,51 +874,69 @@ internal static class QoraValidator
                             ? "move var"
                             : "var";
                         Add(ctx.Errors, "QSEM038", target.IsArray
-                                ? $"in `{opName}`: parameter `{a.Name}` is read-only; declare it as `{mutableContract} {a.Name}: {TypeName(parameterType)}[]` and mark matching call arguments with `{mutableContract}` if mutation is intended"
-                                : $"in `{opName}`: parameter `{a.Name}` is read-only and cannot be reassigned; copy it into a local `var` before changing the value",
+                                ? $"in `{opName}`: parameter `{targetName}` is read-only; declare it as `{mutableContract} {targetName}: {TypeName(parameterType)}[]` and mark matching call arguments with `{mutableContract}` if mutation is intended"
+                                : $"in `{opName}`: parameter `{targetName}` is read-only and cannot be reassigned; copy it into a local `var` before changing the value",
                             a.Span);
                     }
-                    if (target is { IsArray: true } && a.Index is null)
-                        Add(ctx.Errors, "QSEM029", $"in `{opName}`: whole-array assignment to `{a.Name}` is not supported; assign one element with `{a.Name}[i] = value`", a.Span);
-                    if (a.Index is not null)
-                        CheckIndexedAccess(
-                            a.Name,
-                            a.Index,
-                            a,
+                    if (target is { IsArray: true }
+                        && a.Target is HirNameExpression)
+                        Add(ctx.Errors, "QSEM029", $"in `{opName}`: whole-array assignment to `{targetName}` is not supported; assign one element with `{targetName}[i] = value`", a.Span);
+                    if (a.Target is
+                        HirIndexExpression
+                        {
+                            Receiver: HirNameExpression,
+                        } indexedTarget)
+                        CheckExpressionIndexes(
+                            indexedTarget,
                             scope,
                             opName,
                             ctx,
                             a.Span,
                             flow,
-                            a.Id);
+                            qubitValueAllowed: true);
                     // QSEM024 — `const` is an IMMUTABLE BINDING (JS/Q#-let style): it may hold any value,
                     // including a measurement result, but can never be assigned again. The symbol table
                     // resolves `a.Name` to its nearest binding, so a local `var` shadowing an outer `const`
                     // is correctly mutable here.
                     if (target?.IsConst == true)
-                        Add(ctx.Errors, "QSEM024", a.Value is QMeasure
-                            ? $"in `{opName}`: `{a.Name}` is `const` and cannot be measured into again; declare it as `bit {a.Name} = ...` if it should be re-measured"
-                            : $"in `{opName}`: `{a.Name}` is `const` and cannot be reassigned; declare it with `var` if it needs to change", a.Span);
+                        Add(ctx.Errors, "QSEM024", a.Value is HirMeasurementExpression
+                            ? $"in `{opName}`: `{targetName}` is `const` and cannot be measured into again; declare it as `bit {targetName} = ...` if it should be re-measured"
+                            : $"in `{opName}`: `{targetName}` is `const` and cannot be reassigned; declare it with `var` if it needs to change", a.Span);
                     // QSEM026 — a qubit register is not an assignable classical variable; assigning to it
                     // (`q = 5;`) would emit invalid QASM. A qubit's state changes only through gates/measurement.
                     else if (target is { Type: QType.Qubit })
-                        Add(ctx.Errors, "QSEM026", $"in `{opName}`: `{a.Name}` is a qubit and cannot be assigned to — a qubit is not a classical variable; change its state with a gate or measurement", a.Span);
+                        Add(ctx.Errors, "QSEM026", $"in `{opName}`: `{targetName}` is a qubit and cannot be assigned to — a qubit is not a classical variable; change its state with a gate or measurement", a.Span);
                     // QSEM017 — a measurement result is a `bit`; assigning it to a non-bit classical is the
                     // same type error as declaring `var r: int = M(...)`.
-                    else if (a.Value is QMeasure && target is { Type: { } tt } && tt != QType.Bit)
-                        Add(ctx.Errors, "QSEM017", $"in `{opName}`: `{a.Name}` is `{tt.ToString()!.ToLowerInvariant()}` but a measurement result is a `bit`", a.Span);
-                    if (a.Value is QText { Tree: { } assignTree })
-                        assignmentCallsAreValid = CheckExprCalls(assignTree, scope, ctx, opName, a.Span);
-                    else if (ContainsCallOutsideMeasurementIndex(a.Value))
+                    else if (a.Value is HirMeasurementExpression
+                             && target is { Type: { } tt }
+                             && tt != QType.Bit)
+                        Add(ctx.Errors, "QSEM017", $"in `{opName}`: `{targetName}` is `{TypeName(tt)}` but a measurement result is a `bit`", a.Span);
+                    var assignmentHasMisplacedMeasurement =
+                        ContainsMisplacedMeasurement(a.Value);
+                    if (assignmentHasMisplacedMeasurement)
                     {
-                        Add(ctx.Errors, "QSEM005", $"in `{opName}`: the value assigned to `{a.Name}` contains a call; only the lone form `{a.Name} = M(q[i]);` or a `function` call is supported here", a.Span);
+                        Add(ctx.Errors, "QSEM005", $"in `{opName}`: the value assigned to `{targetName}` uses a measurement inside another expression; use `M(...)` as the whole bit value or as a direct element of a bit-array literal", a.Span);
                         assignmentCallsAreValid = false;
                     }
-                    // CheckExprIndexes bounds-checks the measure target too (via its QMeasure case) — the
+                    else if (a.Value is HirArrayLiteralExpression
+                             && ContainsCallOutsideMeasurementIndex(a.Value))
+                    {
+                        Add(ctx.Errors, "QSEM005", $"in `{opName}`: the value assigned to `{targetName}` contains a call; only the lone form `{targetName} = M(q[i]);` or a `function` call is supported here", a.Span);
+                        assignmentCallsAreValid = false;
+                    }
+                    else if (a.Value is not HirMeasurementExpression)
+                        assignmentCallsAreValid = CheckExprCalls(
+                            a.Value,
+                            scope,
+                            ctx,
+                            opName,
+                            a.Span,
+                            a.Id);
+                    // CheckExpressionIndexes bounds-checks the measurement target too — the
                     // single measure-index check, so no dedicated CheckQubitIndex is repeated (it duplicated).
-                    CheckExprIndexes(
+                    CheckExpressionIndexes(
                         a.Value,
-                        a.Id,
                         scope,
                         opName,
                         ctx,
@@ -833,48 +945,48 @@ internal static class QoraValidator
                     CommitTypeMismatch(a.Id, assignmentCallsAreValid, ctx);
                     break;
 
-                case QIf i:
-                    CheckCondition(i.Cond, scope, ctx, opName, i.Span);
-                    CheckTextIndexes(
-                        i.Cond.Tree,
+                case HirIfStatement i:
+                    CheckCondition(i.Condition, scope, ctx, opName, i.Span);
+                    CheckExpressionIndexes(
+                        i.Condition,
                         scope,
                         opName,
                         ctx,
                         i.Span,
-                        flow,
-                        i.Id);
+                        flow);
                     // P5 — the then-branch runs only when the guard held, so a guarded index is proven there.
                     // The guard's names resolve HERE, at the if's own scope: the facts are about these
                     // variables, and a shadowing binder inside gets a different Symbol — no leak either way.
                     Walk(i.Then, At(i, HirScopeSiteRole.IfThen), ctx, inControlFlow: true,
-                        flow.WithGuards(ParseGuards(i.Cond.Tree, scope)));
+                        flow.WithGuards(ParseGuards(i.Condition, scope)));
                     Walk(i.Else, At(i, HirScopeSiteRole.IfElse), ctx, inControlFlow: true, flow);
                     break;
-                case QFor f:
+                case HirForStatement f:
                     // A `for` bound is a plain expression; a call/measurement there has no OpenQASM lowering.
                     // Judged structurally (a call is a NODE, QSEM005). The bounds ARE trees now — the old
                     // dropped-tree desync is unrepresentable, so no tree-presence guard exists to need.
                     // A `for` bound must be statically foldable (the bounds prover ranges the loop variable
                     // over it), so it stays call-free — a measurement OR a function call is rejected; compute
                     // the bound into a variable first and use that.
-                    if (QNodes.ContainsCall(f.From) || QNodes.ContainsCall(f.To))
+                    if (HirExpressions.ContainsCall(f.From)
+                        || HirExpressions.ContainsCall(f.To)
+                        || ContainsMeasurement(f.From)
+                        || ContainsMeasurement(f.To))
                         Add(ctx.Errors, "QSEM005", $"in `{opName}`: a `for` bound cannot contain a call or measurement; compute it into a variable first and use a numeric or variable bound", f.Span);
-                    CheckTextIndexes(
+                    CheckExpressionIndexes(
                         f.From,
                         scope,
                         opName,
                         ctx,
                         f.Span,
-                        flow,
-                        f.Id);
-                    CheckTextIndexes(
+                        flow);
+                    CheckExpressionIndexes(
                         f.To,
                         scope,
                         opName,
                         ctx,
                         f.Span,
-                        flow,
-                        f.Id);
+                        flow);
                     // P2/P3 — the loop variable ranges over From..To inside the body. The bounds are FOLDED
                     // HERE, in the header's scope — the scope the emitted QASM evaluates them in — so a
                     // shadowing `const` inside the body cannot resolve a bound name to a different value than
@@ -890,7 +1002,7 @@ internal static class QoraValidator
                     // The loop variable lives in ITS OWN scope — the body's PARENT (the body may shadow it).
                     // Resolve it there, never through the body: a body-local shadowing declaration must not
                     // become the key holding the loop's range.
-                    if (forBody.ParentScope?.LookupLocal(f.Var) is { Kind: SymbolKind.LoopVar } loopSym)
+                    if (forBody.ParentScope?.LookupLocal(f.Variable) is { Kind: SymbolKind.LoopVar } loopSym)
                     {
                         // Fold the bound trees (built once at lowering) in the header's scope. A bound over an
                         // unsized Qubit[] .Count — directly or through a const — folds to an ArrayLengthBound and
@@ -898,36 +1010,35 @@ internal static class QoraValidator
                         // are rendered HERE, once, from the same trees the verdicts fold.
                         var fromB = BoundFolder.Fold(f.From, scope);
                         var toB = BoundFolder.Fold(f.To, scope);
-                        forFlow = forFlow.WithLoop(loopSym, new LoopFact(QNodes.Render(f.From), QNodes.Render(f.To), fromB, toB,
+                        forFlow = forFlow.WithLoop(loopSym, new LoopFact(HirExpressions.Render(f.From), HirExpressions.Render(f.To), fromB, toB,
                             BoundFolder.DefersToUnsizedQubit(fromB, scope) || BoundFolder.DefersToUnsizedQubit(toB, scope)));
                     }
                     Walk(f.Body, forBody, ctx, inControlFlow: true, forFlow);
                     break;
-                case QWhile w:
+                case HirWhileStatement w:
                     // The condition re-evaluates after EVERY pass through the body, so it too must hold with
                     // the body's reassignments invalidated — not just on the pre-loop first evaluation.
-                    CheckCondition(w.Cond, scope, ctx, opName, w.Span);
+                    CheckCondition(w.Condition, scope, ctx, opName, w.Span);
                     // Back-edge: pre-loop facts about a name the body reassigns cannot survive into the body.
                     var whileBody = At(w, HirScopeSiteRole.WhileBody);
                     var whileWiped = WithoutBodyAssigned(flow, w.Body, whileBody, ctx.ScopeGraph);
                     // The condition's own indexes are checked under those wiped facts (not its own guard).
-                    CheckTextIndexes(
-                        w.Cond.Tree,
+                    CheckExpressionIndexes(
+                        w.Condition,
                         scope,
                         opName,
                         ctx,
                         w.Span,
-                        whileWiped,
-                        w.Id);
+                        whileWiped);
                     // A `while` condition holds at the TOP of every iteration and is RE-checked each time, so
                     // its guard narrows the body exactly as an `if` narrows its then-branch — applied AFTER the
                     // back-edge wipe (the condition re-establishes it every iteration, so a reassignment does
                     // not erase it across iterations; within one iteration, per-statement invalidation still
                     // drops it once the name is reassigned, so an access after the reassignment is unguarded).
                     Walk(w.Body, whileBody, ctx, inControlFlow: true,
-                        whileWiped.WithGuards(ParseGuards(w.Cond.Tree, scope)));
+                        whileWiped.WithGuards(ParseGuards(w.Condition, scope)));
                     break;
-                case QRepeat r:
+                case HirRepeatStatement r:
                     // Same back-edge rule; the until-condition ALWAYS runs after the body, so even its first
                     // evaluation sees the body's reassignments — `repeat { n = n + 9; } until (a[n] == 1)`
                     // reads the mutated n on the very first pass.
@@ -935,32 +1046,38 @@ internal static class QoraValidator
                     var repeatFlow = WithoutBodyAssigned(flow, r.Body, repeatBody, ctx.ScopeGraph);
                     Walk(r.Body, repeatBody, ctx, inControlFlow: true, repeatFlow);
                     // …and it therefore RESOLVES in the body's scope too: an `until` may read a name the body
-                    // declared, exactly as the symbol table records it (and as CheckTextIndexes below already
+                    // declared, exactly as the symbol table records it (and as CheckExpressionIndexes already
                     // did). Checking it against the enclosing scope made a legal body-local argument look like
                     // an undeclared one.
                     CheckCondition(r.Until, repeatBody, ctx, opName, r.Span);
-                    CheckTextIndexes(
-                        r.Until.Tree,
+                    CheckExpressionIndexes(
+                        r.Until,
                         repeatBody,
                         opName,
                         ctx,
                         r.Span,
-                        repeatFlow,
-                        r.Id);
+                        repeatFlow);
                     break;
-                case QReturn ret:
-                    var returnCallsAreValid = true;
+                case HirReturnStatement ret:
                     // QSEM035 — `return` is only meaningful inside a function (an operation is void).
                     if (!ctx.Op.IsFunction)
                         Add(ctx.Errors, "QSEM035", $"in `{opName}`: `return` is only allowed inside a function; an operation is void", ret.Span);
                     // The returned value is an ordinary classical expression: a function call is a legal value,
                     // a measurement/operation call is not. (A `return M(q)` is caught as impure by
                     // ValidateFunctionShape too — this covers a return nested in a returned sub-expression.)
-                    if (ret.Value is QText { Tree: { } retTree })
-                        returnCallsAreValid = CheckExprCalls(retTree, scope, ctx, opName, ret.Span);
-                    CheckExprIndexes(
+                    var returnCallsAreValid = true;
+                    if (ContainsMeasurement(ret.Value))
+                    {
+                        Add(ctx.Errors, "QSEM005", $"in `{opName}`: a returned expression cannot contain a measurement; measure in an operation and pass the classical result to a function", ret.Span);
+                        returnCallsAreValid = false;
+                    }
+                    else
+                    {
+                        returnCallsAreValid =
+                            CheckExprCalls(ret.Value, scope, ctx, opName, ret.Span, ret.Id);
+                    }
+                    CheckExpressionIndexes(
                         ret.Value,
-                        ret.Id,
                         scope,
                         opName,
                         ctx,
@@ -987,7 +1104,7 @@ internal static class QoraValidator
     /// iteration, exactly like the re-executed runtime check it models.</summary>
     private static BoundsCtx WithoutBodyAssigned(
         BoundsCtx flow,
-        IReadOnlyList<QStmt> body,
+        IReadOnlyList<HirStatement> body,
         Scope bodyScope,
         HirScopeGraph scopeGraph)
     {
@@ -999,11 +1116,11 @@ internal static class QoraValidator
 
     /// <summary>The SYMBOLS a statement reassigns, transitively through nested loops/branches — each
     /// assignment's name resolved in ITS OWN scope, so mutating a shadowed inner variable invalidates that
-    /// inner symbol and leaves the outer one's facts standing (and vice versa). Only <c>QAssign</c> mutates
-    /// an existing binding; a nested <c>QDecl</c> introduces a NEW symbol, which identity-keyed facts
+    /// inner symbol and leaves the outer one's facts standing (and vice versa). Only an assignment mutates
+    /// an existing binding; a nested declaration introduces a NEW symbol, which identity-keyed facts
     /// already keep separate — nothing to collect.</summary>
     private static HashSet<Symbol> AssignedSymbols(
-        QStmt stmt,
+        HirStatement stmt,
         Scope scope,
         HirScopeGraph scopeGraph)
     {
@@ -1011,24 +1128,28 @@ internal static class QoraValidator
         Collect(stmt, scope);
         return symbols;
 
-        void Collect(QStmt s, Scope sc)
+        void Collect(HirStatement s, Scope sc)
         {
-            Scope At(QStmt owner, HirScopeSiteRole role) =>
+            Scope At(HirStatement owner, HirScopeSiteRole role) =>
                 scopeGraph.RequireScope(new HirScopeSite(owner.Id, role));
             switch (s)
             {
-                case QAssign a: if (sc.Lookup(a.Name) is { } sym) symbols.Add(sym); break;
-                case QIf i:
+                case HirAssignmentStatement assignment:
+                    if (HirExpressions.AssignmentNameOf(assignment.Target) is { } name
+                        && sc.Lookup(name) is { } symbol)
+                        symbols.Add(symbol);
+                    break;
+                case HirIfStatement i:
                     foreach (var t in i.Then) Collect(t, At(i, HirScopeSiteRole.IfThen));
                     foreach (var e in i.Else) Collect(e, At(i, HirScopeSiteRole.IfElse));
                     break;
-                case QFor f:
+                case HirForStatement f:
                     foreach (var b in f.Body) Collect(b, At(f, HirScopeSiteRole.ForBody));
                     break;
-                case QWhile w:
+                case HirWhileStatement w:
                     foreach (var b in w.Body) Collect(b, At(w, HirScopeSiteRole.WhileBody));
                     break;
-                case QRepeat r:
+                case HirRepeatStatement r:
                     foreach (var b in r.Body) Collect(b, At(r, HirScopeSiteRole.RepeatBody));
                     break;
             }
@@ -1036,7 +1157,7 @@ internal static class QoraValidator
     }
 
     /// <summary>
-    /// P5 — read a guard condition TREE (see <see cref="QNode"/>) for what it proves. Recognizes
+    /// P5 — read a guard condition expression for what it proves. Recognizes
     /// <c>0 &lt;= n</c> / <c>n &gt;= 0</c> (a lower bound) conjoined with <c>n &lt; a.Count</c> (bounded by an
     /// array's Count) or <c>n &lt; K</c> (bounded by a constant/const-folded value). Both a lower AND an upper
     /// conjunct are needed for the same index. Names resolve to Symbols HERE, at the guard's site, so the
@@ -1044,7 +1165,7 @@ internal static class QoraValidator
     /// <c>||</c>/<c>!</c>. A fixed closed set of shapes — no general evaluator — matching the Wuffs/eBPF
     /// philosophy: prove the common guard, not an arbitrary predicate.
     /// </summary>
-    private static GuardFacts ParseGuards(QNode? tree, Scope scope)
+    private static GuardFacts ParseGuards(HirExpression? tree, Scope scope)
     {
         var byArray = new HashSet<(Symbol, Symbol)>();
         var byConst = new Dictionary<Symbol, int>();
@@ -1055,16 +1176,33 @@ internal static class QoraValidator
         var upperConst = new List<(Symbol Idx, int K)>();       // (index, K)    with a proven `< K`
         foreach (var atom in Conjuncts(tree))
         {
-            if (atom is not QBinOp cmp) continue;
+            if (atom is not HirBinaryExpression cmp) continue;
             // lower bound: `0 <= idx` or `idx >= 0`
-            if (cmp is { Op: "<=", Left: QNumLit { Value: 0 }, Right: QNameRef lo } && scope.Lookup(lo.Name) is { } ls)
+            if (cmp is
+                {
+                    Operator: HirBinaryOperator.LessThanOrEqual,
+                    Left: HirIntegerLiteralExpression { Value: 0 },
+                    Right: HirNameExpression lo,
+                }
+                && scope.Lookup(lo.Name) is { } ls)
                 lowered.Add(ls);
-            else if (cmp is { Op: ">=", Left: QNameRef lo2, Right: QNumLit { Value: 0 } } && scope.Lookup(lo2.Name) is { } ls2)
+            else if (cmp is
+                     {
+                         Operator: HirBinaryOperator.GreaterThanOrEqual,
+                         Left: HirNameExpression lo2,
+                         Right: HirIntegerLiteralExpression { Value: 0 },
+                     }
+                     && scope.Lookup(lo2.Name) is { } ls2)
                 lowered.Add(ls2);
             // upper bound: `idx < a.Count` or `idx < K`. Fold the RHS through the ONE calculator, so a direct
             // `a.Count`, a const `k = a.Count`, and `a.Count - 1` are read identically — the const indirection
             // is transparent, exactly as it is for a loop bound.
-            else if (cmp is { Op: "<", Left: QNameRef up } && scope.Lookup(up.Name) is { } us)
+            else if (cmp is
+                     {
+                         Operator: HirBinaryOperator.LessThan,
+                         Left: HirNameExpression up,
+                     }
+                     && scope.Lookup(up.Name) is { } us)
             {
                 var rhs = BoundFolder.Fold(cmp.Right, scope);
                 // `idx < k*arr.Count + c` with k=1, c<=0 implies idx < arr.Count for ANY length — a ByArray
@@ -1086,44 +1224,89 @@ internal static class QoraValidator
     /// <summary>A guard with any <c>||</c> or <c>!</c> proves nothing usable (the then-branch may run without
     /// the narrowing conjunct holding) — detected on the tree, so no textual false positive (a name
     /// containing "or" never trips it).</summary>
-    private static bool ContainsOrOrNot(QNode n) => n switch
+    private static bool ContainsOrOrNot(HirExpression expression) =>
+        expression switch
     {
-        QUnary { Op: "!" } => true,
-        QBinOp { Op: "||" } => true,
-        QBinOp b => ContainsOrOrNot(b.Left) || ContainsOrOrNot(b.Right),
-        QUnary u => ContainsOrOrNot(u.Operand),
+        HirUnaryExpression { Operator: HirUnaryOperator.LogicalNot } => true,
+        HirBinaryExpression { Operator: HirBinaryOperator.LogicalOr } => true,
+        HirBinaryExpression binary =>
+            ContainsOrOrNot(binary.Left) || ContainsOrOrNot(binary.Right),
+        HirUnaryExpression unary => ContainsOrOrNot(unary.Operand),
         _ => false,
     };
 
     /// <summary>Flatten a top-level <c>&amp;&amp;</c> conjunction into its atoms (a non-<c>&amp;&amp;</c> node is
     /// one atom).</summary>
-    private static IEnumerable<QNode> Conjuncts(QNode n)
+    private static IEnumerable<HirExpression> Conjuncts(HirExpression expression)
     {
-        if (n is QBinOp { Op: "&&" } a)
+        if (expression is HirBinaryExpression
+            {
+                Operator: HirBinaryOperator.LogicalAnd,
+            } conjunction)
         {
-            foreach (var c in Conjuncts(a.Left)) yield return c;
-            foreach (var c in Conjuncts(a.Right)) yield return c;
+            foreach (var conjunct in Conjuncts(conjunction.Left))
+                yield return conjunct;
+            foreach (var conjunct in Conjuncts(conjunction.Right))
+                yield return conjunct;
         }
-        else yield return n;
+        else
+        {
+            yield return expression;
+        }
     }
 
     /// <summary>The simple (last) segment of a possibly fully-qualified name.</summary>
     private static string Simple(string name) => name.Contains('.') ? name[(name.LastIndexOf('.') + 1)..] : name;
 
     /// <summary>
-    /// True when a non-<see cref="QText"/> value contains a call in a value-producing position. A call in
+    /// True when a value contains a call in a value-producing position. A call in
     /// a measurement target's INDEX is deliberately excluded: <c>M(q[idx()])</c> is still one whole
     /// measurement assignment, and <c>idx()</c> is an ordinary function-valued index checked by
     /// <see cref="CheckIndexedAccess"/>. Calls in array-literal value elements retain the existing QSEM005
     /// rule because that initializer shape has no supported call lowering.
     /// </summary>
-    private static bool ContainsCallOutsideMeasurementIndex(QExpr value) => value switch
+    private static bool ContainsCallOutsideMeasurementIndex(HirExpression value) =>
+        value switch
+        {
+            HirMeasurementExpression => false,
+            HirArrayLiteralExpression literal =>
+                literal.Elements.Any(ContainsCallOutsideMeasurementIndex),
+            _ => HirExpressions.ContainsCall(value),
+        };
+
+    private static IEnumerable<HirCallExpression> CallsInStatement(
+        HirStatement statement)
     {
-        QText text => QNodes.ContainsCall(text.Tree),
-        QMeasure => false,
-        QArrayLiteral literal => literal.Elements.Any(ContainsCallOutsideMeasurementIndex),
-        _ => false,
-    };
+        foreach (var expression in HirExpressions.DirectExpressionSites(statement))
+            foreach (var call in HirExpressions.CallsIn(expression))
+                yield return call;
+    }
+
+    private static bool ContainsMeasurement(HirExpression expression) =>
+        HirExpressions.DescendantsAndSelf(expression)
+            .Any(node => node is HirMeasurementExpression);
+
+    /// <summary>
+    /// A measurement is a value-producing boundary, not an ordinary composable expression. It is legal
+    /// when it is the complete scalar value, and in the existing bit-register initializer form where each
+    /// measured result is a direct array element. A measurement below any other expression node is misplaced.
+    /// </summary>
+    private static bool ContainsMisplacedMeasurement(HirExpression expression) =>
+        expression switch
+        {
+            HirMeasurementExpression => false,
+            HirArrayLiteralExpression literal =>
+                literal.Elements.Any(element =>
+                    element is not HirMeasurementExpression
+                    && ContainsMeasurement(element)),
+            _ => ContainsMeasurement(expression),
+        };
+
+    /// <summary>True when the value directly carries one or more measurement results whose type is bit.</summary>
+    private static bool ContainsDirectMeasurementValue(HirExpression expression) =>
+        expression is HirMeasurementExpression
+        || expression is HirArrayLiteralExpression literal
+        && literal.Elements.Any(element => element is HirMeasurementExpression);
 
     /// <summary>
     /// Validate every call inside an expression that sits in a VALUE position (a decl/assign RHS, a
@@ -1135,37 +1318,37 @@ internal static class QoraValidator
     /// <see cref="ExpressionTypes"/> uses for its return type.
     /// </summary>
     private static bool CheckExprCalls(
-        QNode? tree,
+        HirExpression? expression,
         Scope scope,
         Ctx ctx,
         string opName,
         SourceSpan? span,
-        int? owningStatementId = null)
+        HirNodeId? owningStatementId = null)
     {
         var allValid = true;
-        foreach (var c in QNodes.CallsIn(tree))
+        foreach (var c in HirExpressions.CallsIn(expression))
         {
             // The same call node can be reached once by the owning value-expression check and again while
             // validating an index nested inside that expression. Its contract has one owner and therefore
             // one diagnostic. Cache by NODE identity (not structural equality), while retaining the verdict
             // so every later consumer still learns that an already-diagnosed call was invalid.
-            if (ctx.CallValidity.TryGetValue(c, out var cached))
+            if (ctx.CallValidity.TryGetValue(c.Id, out var cached))
             {
                 allValid &= cached;
                 continue;
             }
 
             var errorCount = ctx.Errors.Count;
-            if (c.CalleeOpId is int operationId)
+            if (c.CalleeId is { } operationId)
             {
                 if (!ctx.OpById.TryGetValue(operationId, out var callee))
                     Add(ctx.Errors, "QINTERNAL",
-                        $"in `{opName}`: `{c.Name}` carries dangling CalleeOpId {operationId}; name resolution produced an invalid semantic reference",
+                        $"in `{opName}`: `{c.Name}` carries dangling CalleeId {operationId}; name resolution produced an invalid semantic reference",
                         span);
                 else if (!callee.IsFunction)
                     Add(ctx.Errors, "QSEM005", $"in `{opName}`: `{Simple(c.Name)}` is an operation (void) — only a `function` returns a value that an expression can use", span);
                 else
-                    CheckCall(callee, c.Args.Select(a => (QArg)new QTextArg(a)).ToList(), "",
+                    CheckCall(callee, c.Arguments, "",
                         scope, opName, ctx.Errors, span, ctx, ctx.Floors,
                         statementId: owningStatementId);
             }
@@ -1177,13 +1360,13 @@ internal static class QoraValidator
                 Add(ctx.Errors, "QSEM005", $"in `{opName}`: `{c.Name}` is a gate (void) — only a `function` returns a value that an expression can use", span);
             else if (ctx.OpNames.Contains(c.Name))
                 Add(ctx.Errors, "QINTERNAL",
-                    $"in `{opName}`: user callable `{c.Name}` reached expression validation without CalleeOpId",
+                    $"in `{opName}`: user callable `{c.Name}` reached expression validation without CalleeId",
                     span);
             else
                 Add(ctx.Errors, "QSEM007", $"in `{opName}`: `{Simple(c.Name)}` is not a known function", span);
 
             var valid = ctx.Errors.Count == errorCount;
-            ctx.CallValidity.Add(c, valid);
+            ctx.CallValidity.Add(c.Id, valid);
             allValid &= valid;
         }
         return allValid;
@@ -1195,7 +1378,10 @@ internal static class QoraValidator
     /// specific argument diagnostic) explains why the expression is invalid, so a return-type consequence
     /// is withheld until that call is fixed.
     /// </summary>
-    private static void CommitTypeMismatch(int statementId, bool callsAreValid, Ctx ctx)
+    private static void CommitTypeMismatch(
+        HirNodeId statementId,
+        bool callsAreValid,
+        Ctx ctx)
     {
         if (!ctx.TypeMismatchCandidates.Remove(statementId, out var candidate) || !callsAreValid) return;
         ctx.Errors.Add(candidate);
@@ -1208,16 +1394,25 @@ internal static class QoraValidator
     /// could describe it. Passing anything else leaves the target lowering with no width to emit, so it is
     /// rejected here, at the source, rather than becoming a QINTERNAL later.
     /// </summary>
-    private static void CheckBuiltinCall(QCallNode c, BuiltinFunction fn, Scope scope, Ctx ctx, string opName, SourceSpan? span)
+    private static void CheckBuiltinCall(
+        HirCallExpression c,
+        BuiltinFunction fn,
+        Scope scope,
+        Ctx ctx,
+        string opName,
+        SourceSpan? span)
     {
-        if (c.Args.Count != 1)
+        if (c.Arguments.Count != 1)
         {
-            Add(ctx.Errors, "QSEM006", $"in `{opName}`: `{c.Name}` expects 1 argument but got {c.Args.Count}", span);
+            Add(ctx.Errors, "QSEM006", $"in `{opName}`: `{c.Name}` expects 1 argument but got {c.Arguments.Count}", span);
             return;
         }
         if (!fn.TakesBitRegister) return;
-        if (c.Args[0] is QNameRef r && scope.Lookup(r.Name) is { Type: QType.Bit, IsArray: true }) return;
-        Add(ctx.Errors, "QSEM006", $"in `{opName}`: `{c.Name}` reads a whole `bit[]` register, but `{QNodes.Render(c.Args[0])}` is not one — pass the register itself (`{c.Name}(results)`); a single bit `results[i]` is already a value and needs no conversion", span);
+        var argument = c.Arguments[0].Expression;
+        if (argument is HirNameExpression name
+            && scope.Lookup(name.Name) is { Type: QType.Bit, IsArray: true })
+            return;
+        Add(ctx.Errors, "QSEM006", $"in `{opName}`: `{c.Name}` reads a whole `bit[]` register, but `{HirExpressions.Render(argument)}` is not one — pass the register itself (`{c.Name}(results)`); a single bit `results[i]` is already a value and needs no conversion", span);
     }
 
     /// <summary>
@@ -1226,9 +1421,9 @@ internal static class QoraValidator
     /// other functions) — and it returns a value (QSEM035). Purity is what makes a function call a safe
     /// expression value: with no quantum side effect, its position in an expression carries no ordering.
     /// </summary>
-    private static void ValidateFunctionShape(QOperation fn, Ctx ctx)
+    private static void ValidateFunctionShape(HirCallable fn, Ctx ctx)
     {
-        foreach (var p in fn.Params)
+        foreach (var p in fn.Parameters)
             if (p.Type == QType.Qubit)
                 Add(ctx.Errors, "QSEM034", $"in function `{Simple(fn.Name)}`: parameter `{p.Name}` cannot be a qubit; a function is classical (its parameters and return are `int`/`bit`/`float`/`angle`)", p.Span ?? fn.Span);
 
@@ -1240,37 +1435,55 @@ internal static class QoraValidator
     /// <summary>Recursively flag any QUANTUM statement in a function body (QSEM033). A statement-form call
     /// to ANOTHER function is allowed (it discards the return); a gate, a functor, an operation call, a
     /// <c>use</c>, or a measurement is not.</summary>
-    private static void CheckFunctionPurity(IReadOnlyList<QStmt> body, QOperation fn, Ctx ctx)
+    private static void CheckFunctionPurity(
+        IReadOnlyList<HirStatement> body,
+        HirCallable fn,
+        Ctx ctx)
     {
         var name = Simple(fn.Name);
         foreach (var s in body)
+        {
+            var measurement =
+                HirExpressions
+                    .DirectExpressionSites(s)
+                    .SelectMany(HirExpressions.DescendantsAndSelf)
+                    .OfType<HirMeasurementExpression>()
+                    .FirstOrDefault();
+            if (measurement is not null)
+            {
+                Add(ctx.Errors, "QSEM033",
+                    $"in function `{name}`: a measurement `M(...)` is not allowed in any expression; a function is classical",
+                    measurement.Span ?? s.Span ?? fn.Span);
+            }
+
             switch (s)
             {
-                case QUse u:
+                case HirQubitDeclarationStatement u:
                     Add(ctx.Errors, "QSEM033", $"in function `{name}`: `use {u.Name} = ...` is not allowed; a function is classical and cannot allocate qubits", u.Span ?? fn.Span);
                     break;
-                case QGate g when g.Modifiers.Count == 0
-                                      && g.CalleeOpId is int operationId
+                case HirCallStatement g when g.Modifiers.Count == 0
+                                      && g.Call.CalleeId is { } operationId
                                       && ctx.OpById.TryGetValue(operationId, out var callee)
                                       && callee.IsFunction:
                     break;   // fn -> fn statement call (discards the return) is fine
-                case QGate g:
-                    Add(ctx.Errors, "QSEM033", $"in function `{name}`: `{Simple(g.Name)}` applies a gate or calls an operation; a function is classical — no gates, no `use`, no measurement, and it may only call other functions", g.Span ?? fn.Span);
+                case HirCallStatement g:
+                    Add(ctx.Errors, "QSEM033", $"in function `{name}`: `{Simple(g.Call.Name)}` applies a gate or calls an operation; a function is classical — no gates, no `use`, no measurement, and it may only call other functions", g.Span ?? fn.Span);
                     break;
-                case QDecl { Value: QMeasure } d:
-                    Add(ctx.Errors, "QSEM033", $"in function `{name}`: a measurement `M(...)` is not allowed; a function is classical", d.Span ?? fn.Span);
+                case HirIfStatement i:
+                    CheckFunctionPurity(i.Then, fn, ctx);
+                    CheckFunctionPurity(i.Else, fn, ctx);
                     break;
-                case QAssign { Value: QMeasure } a:
-                    Add(ctx.Errors, "QSEM033", $"in function `{name}`: a measurement `M(...)` is not allowed; a function is classical", a.Span ?? fn.Span);
+                case HirForStatement f:
+                    CheckFunctionPurity(f.Body, fn, ctx);
                     break;
-                case QReturn { Value: QMeasure } r:
-                    Add(ctx.Errors, "QSEM033", $"in function `{name}`: a measurement `M(...)` is not allowed; a function is classical", r.Span ?? fn.Span);
+                case HirWhileStatement w:
+                    CheckFunctionPurity(w.Body, fn, ctx);
                     break;
-                case QIf i: CheckFunctionPurity(i.Then, fn, ctx); CheckFunctionPurity(i.Else, fn, ctx); break;
-                case QFor f: CheckFunctionPurity(f.Body, fn, ctx); break;
-                case QWhile w: CheckFunctionPurity(w.Body, fn, ctx); break;
-                case QRepeat rp: CheckFunctionPurity(rp.Body, fn, ctx); break;
+                case HirRepeatStatement repeat:
+                    CheckFunctionPurity(repeat.Body, fn, ctx);
+                    break;
             }
+        }
     }
 
     /// <summary>
@@ -1282,81 +1495,100 @@ internal static class QoraValidator
     /// This predicate belongs to the language layer. MIR lowering consumes the accepted control flow, and
     /// each target decides how to serialize the already-valid return paths without changing this rule.
     /// </summary>
-    internal static bool AlwaysReturns(IReadOnlyList<QStmt> body) =>
+    internal static bool AlwaysReturns(IReadOnlyList<HirStatement> body) =>
         body.Any(s => s switch
         {
-            QReturn => true,
-            QIf i when i.Else.Count > 0 => AlwaysReturns(i.Then) && AlwaysReturns(i.Else),
+            HirReturnStatement => true,
+            HirIfStatement i when i.Else.Count > 0 =>
+                AlwaysReturns(i.Then) && AlwaysReturns(i.Else),
             _ => false,
         });
 
-    private static bool ReturnTerminal(IReadOnlyList<QStmt> body, QOperation fn, Ctx ctx) => AlwaysReturns(body);
+    private static bool ReturnTerminal(
+        IReadOnlyList<HirStatement> body,
+        HirCallable fn,
+        Ctx ctx) =>
+        AlwaysReturns(body);
 
-    // QSEM005 — a measurement in a condition IS allowed (MeasureConditionLowering hoists it to a bit before
-    // validation), so a call still here is either a FUNCTION call (a legal value) or a non-measurement
-    // operation call (rejected). CheckExprCalls sorts them out.
-    private static void CheckCondition(QCond cond, Scope scope, Ctx ctx, string opName, SourceSpan? span)
+    // QSEM005 — a measurement in a condition is a canonical effectful expression. MIR lowers it at its
+    // exact evaluation point (including short-circuit RHS blocks), so a call here is either a FUNCTION call
+    // (a legal value) or a non-measurement operation call (rejected). CheckExprCalls sorts them out.
+    private static void CheckCondition(
+        HirExpression condition,
+        Scope scope,
+        Ctx ctx,
+        string opName,
+        SourceSpan? span)
     {
-        if (cond.HasCall) CheckExprCalls(cond.Tree, scope, ctx, opName, span);
+        if (HirExpressions.ContainsCall(condition))
+            CheckExprCalls(condition, scope, ctx, opName, span);
     }
 
-    private static void CheckGate(QGate g, Scope scope, Ctx ctx, BoundsCtx bounds = default)
+    private static void CheckCallStatement(
+        HirCallStatement g,
+        Scope scope,
+        Ctx ctx,
+        BoundsCtx bounds = default)
     {
-        var opName = ctx.Op.DisplayName ?? ctx.Op.Name;
+        var opName = ctx.CallableDisplayName;
         var errors = ctx.Errors;
         // Capture before argument-expression and bounds checks. A move/floor fact belongs only to a call
         // whose entire argument list is valid, not merely to one that added no further error in CheckCall.
         var callErrorCountBeforeChecks = errors.Count;
 
-        QOperation? userCallee = null;
-        if (g.CalleeOpId is int operationId)
+        HirCallable? userCallee = null;
+        if (g.Call.CalleeId is { } operationId)
         {
             if (!ctx.OpById.TryGetValue(operationId, out userCallee))
             {
                 Add(errors, "QINTERNAL",
-                    $"in `{opName}`: `{g.Name}` carries dangling CalleeOpId {operationId}; name resolution produced an invalid semantic reference",
+                    $"in `{opName}`: `{g.Call.Name}` carries dangling CalleeId {operationId}; name resolution produced an invalid semantic reference",
                     g.Span);
                 return;
             }
         }
-        else if (ctx.OpNames.Contains(g.Name))
+        else if (ctx.OpNames.Contains(g.Call.Name))
         {
             Add(errors, "QINTERNAL",
-                $"in `{opName}`: user callable `{g.Name}` reached statement validation without CalleeOpId",
+                $"in `{opName}`: user callable `{g.Call.Name}` reached statement validation without CalleeId",
                 g.Span);
             return;
         }
 
         // A gate argument may contain a FUNCTION call (`Rx(angleOf(k), q[0])` — a classical value); a
         // measurement or operation call there has no OpenQASM form. CheckExprCalls sorts them out.
-        foreach (var arg in g.Args)
-            if (arg is QTextArg { Tree: { } argTree, HasCall: true })
-                CheckExprCalls(argTree, scope, ctx, opName, g.Span, g.Id);
+        if (g.Call.Arguments.Any(argument =>
+                ContainsMeasurement(argument.Expression)))
+        {
+            Add(
+                errors,
+                "QSEM005",
+                $"in `{opName}`: an argument to `{g.Call.Name}` cannot contain a measurement; assign `M(...)` to a bit first",
+                g.Span);
+        }
+
+        foreach (var argument in g.Call.Arguments)
+            if (HirExpressions.ContainsCall(argument.Expression))
+                CheckExprCalls(
+                    argument.Expression,
+                    scope,
+                    ctx,
+                    opName,
+                    g.Span,
+                    g.Id);
 
         // A proven bad index is QSEM016 here; an otherwise valid but unproven index is only recorded for
         // target policy (OpenQASM later turns that ledger entry into QSEM030). The latter does not invalidate
         // the language-level call or cancel an ownership transfer: a checked-access backend may execute it.
-        foreach (var arg in g.Args)
-            if (arg is QQubitArg qa)
-                CheckIndexedAccess(
-                    qa.Reg,
-                    qa.Index,
-                    qa,
-                    scope,
-                    opName,
-                    ctx,
-                    g.Span,
-                    bounds,
-                    owningStatementId: g.Id);
-            else if (arg is QTextArg text)
-                CheckTextIndexes(
-                    text.Tree,
-                    scope,
-                    opName,
-                    ctx,
-                    g.Span,
-                    bounds,
-                    owningStatementId: g.Id);
+        foreach (var argument in g.Call.Arguments)
+            CheckExpressionIndexes(
+                argument.Expression,
+                scope,
+                opName,
+                ctx,
+                g.Span,
+                bounds,
+                qubitValueAllowed: IsQubitLike(argument, scope));
 
         // QSEM014 — the same qubit twice in one gate. Whole registers count: `CNOT(q, q)` broadcasts to
         // duplicate operands, and `CNOT(q, q[0])` overlaps the register with its own element. Indexes are
@@ -1368,8 +1600,13 @@ internal static class QoraValidator
         // unresolved index covers everything / itself. Two operands on one register alias when their domains
         // overlap — so `CNOT(q[i], q[2])` both under `for i in 2..2` (singleton) and under `for i in 0..2`
         // (i reaches 2) is caught, not just literal duplicates — and at most one QSEM014 is reported per gate.
-        var refs = g.Args.Select(a => QubitRefOf(a, scope)).Where(r => r is not null)
-            .Select(r => (r!.Value.Reg, r.Value.Index,
+        var refs = g.Call.Arguments
+            .Select(argument => QubitRefOf(argument, scope))
+            .Where(reference => reference is not null)
+            .Select(r => (
+                r!.Value.SymbolId,
+                r.Value.DisplayName,
+                r.Value.Index,
                 Domain: r.Value.Index is { } idx ? IndexDomain(idx, scope, bounds, ctx.WillBeRechecked) : null))
             .ToList();
         // An empty loop makes runtime aliasing impossible, but it does not make malformed source valid:
@@ -1379,28 +1616,30 @@ internal static class QoraValidator
             for (var ai = 0; ai < refs.Count; ai++)
                 for (var bi = ai + 1; bi < refs.Count; bi++)
                 {
-                    var (aReg, aIdx, aDom) = refs[ai];
-                    var (bReg, bIdx, bDom) = refs[bi];
-                    if (aReg != bReg) continue;
+                    var (aSymbolId, aReg, aIdx, aDom) = refs[ai];
+                    var (bSymbolId, _, bIdx, bDom) = refs[bi];
+                    if (aSymbolId != bSymbolId) continue;
                     if (aIdx is null || bIdx is null)   // a whole register overlaps anything on it (or another whole)
                         Add(errors, "QSEM014", aIdx is null && bIdx is null
-                            ? $"in `{opName}`: `{g.Name}` receives the qubit `{aReg}` more than once; gate operands must be distinct"
-                            : $"in `{opName}`: `{g.Name}` receives the register `{aReg}` and one of its own qubits; operands must not overlap", g.Span);
-                    else if (aDom is { } da && bDom is { } db ? da.Lo <= db.Hi && db.Lo <= da.Hi : aIdx == bIdx)
-                        Add(errors, "QSEM014", $"in `{opName}`: `{g.Name}` receives the qubit `{Show(aReg, aIdx)}` more than once; gate operands must be distinct", g.Span);
+                            ? $"in `{opName}`: `{g.Call.Name}` receives the qubit `{aReg}` more than once; gate operands must be distinct"
+                            : $"in `{opName}`: `{g.Call.Name}` receives the register `{aReg}` and one of its own qubits; operands must not overlap", g.Span);
+                    else if (aDom is { } da && bDom is { } db
+                                 ? da.Lo <= db.Hi && db.Lo <= da.Hi
+                                 : HirExpressions.Render(aIdx) == HirExpressions.Render(bIdx))
+                        Add(errors, "QSEM014", $"in `{opName}`: `{g.Call.Name}` receives the qubit `{Show(aReg, aIdx)}` more than once; gate operands must be distinct", g.Span);
                     else continue;
                     return;   // one aliasing pair is enough — one diagnostic per gate
                 }
 
         // QSEM009 — the entry op is emitted as the QASM top level, not as a def: nothing can call it.
-        if (ctx.EntryOpId is int entryOperationId && userCallee?.Id == entryOperationId)
+        if (ctx.EntryOpId is { } entryOperationId && userCallee?.Id == entryOperationId)
         {
             Add(errors, "QSEM009", $"in `{opName}`: the entry operation `{ctx.EntryName}` cannot be called (its body is the program's top level, not a def)", g.Span);
             return;
         }
 
         // QSEM004 — measurement only exists in the assignment forms.
-        if (userCallee is null && QoraGates.MeasureLike.Contains(g.Name))
+        if (userCallee is null && QoraGates.MeasureLike.Contains(g.Call.Name))
         {
             Add(errors, "QSEM004", $"in `{opName}`: a bare measurement statement is not supported: assign the result instead: `var r: bit = {QoraGates.Measurement}(q[i]);`", g.Span);
             return;
@@ -1411,29 +1650,29 @@ internal static class QoraValidator
             // QSEM002 — OpenQASM gate modifiers apply to gates only, never to def subroutine calls.
             if (g.Modifiers.Contains(QGateModifier.Controlled))
             {
-                Add(errors, "QSEM002", $"in `{opName}`: `Controlled {g.Name}` is not supported: OpenQASM cannot apply ctrl @ to a def", g.Span);
+                Add(errors, "QSEM002", $"in `{opName}`: `Controlled {g.Call.Name}` is not supported: OpenQASM cannot apply ctrl @ to a def", g.Span);
                 return;
             }
 
             // QSEM006 — the callee declaration is the identity bound by Resolver; its spelling is
             // diagnostic data only.
-            CheckCall(userCallee, g.Args, "", scope, opName, errors, g.Span, ctx, ctx.Floors, g.Id,
+            CheckCall(userCallee, g.Call.Arguments, "", scope, opName, errors, g.Span, ctx, ctx.Floors, g.Id,
                 callErrorCountBeforeChecks);
             return;
         }
 
         // QSEM007 — not a user op and not a known built-in: a typo would otherwise emit an undefined gate.
-        if (!QoraGates.Names.ContainsKey(g.Name))
+        if (!QoraGates.Names.ContainsKey(g.Call.Name))
         {
-            var hint = QoraGates.Names.Keys.Concat(ctx.OpNames).FirstOrDefault(k => string.Equals(k, g.Name, StringComparison.OrdinalIgnoreCase));
-            Add(errors, "QSEM007", $"in `{opName}`: `{g.Name}` is not a known gate or operation" + (hint is null ? string.Empty : $" (did you mean `{hint}`?)"), g.Span);
+            var hint = QoraGates.Names.Keys.Concat(ctx.OpNames).FirstOrDefault(k => string.Equals(k, g.Call.Name, StringComparison.OrdinalIgnoreCase));
+            Add(errors, "QSEM007", $"in `{opName}`: `{g.Call.Name}` is not a known gate or operation" + (hint is null ? string.Empty : $" (did you mean `{hint}`?)"), g.Span);
             return;
         }
 
         // QSEM003 — reset is a statement, not a gate: no inv @ / ctrl @ on it.
-        if (QoraGates.NonUnitary.Contains(g.Name) && g.Modifiers.Count > 0)
+        if (QoraGates.NonUnitary.Contains(g.Call.Name) && g.Modifiers.Count > 0)
         {
-            Add(errors, "QSEM003", $"in `{opName}`: `{string.Join(" ", g.Modifiers)} {g.Name}` is not supported: reset is not a gate and takes no modifiers", g.Span);
+            Add(errors, "QSEM003", $"in `{opName}`: `{string.Join(" ", g.Modifiers)} {g.Call.Name}` is not supported: reset is not a gate and takes no modifiers", g.Span);
             return;
         }
 
@@ -1441,10 +1680,10 @@ internal static class QoraValidator
         // (a rotation exposes a leading angle value slot; every qubit slot broadcasts), and a Controlled
         // functor adds one leading qubit slot. So the SAME CheckCall validates count + per-slot kind.
         var gateSig = QoraGates.SigOf(
-            g.Name,
+            g.Call.Name,
             g.Modifiers.Contains(QGateModifier.Controlled) ? 1 : 0);
         if (gateSig is not null)
-            CheckCall(gateSig, g.Args, g.Modifiers.Count > 0 ? string.Join(" ", g.Modifiers) + " " : "",
+            CheckCall(gateSig, g.Call.Arguments, g.Modifiers.Count > 0 ? string.Join(" ", g.Modifiers) + " " : "",
                 scope, opName, errors, g.Span, ctx, statementId: g.Id,
                 initialErrorCount: callErrorCountBeforeChecks);
     }
@@ -1459,15 +1698,27 @@ internal static class QoraValidator
     /// element-wise), so they only require "is a qubit".
     /// Identifiers the caller's scope does not resolve are left alone (treated as not-provably-wrong).
     /// </summary>
-    private static void CheckCall(ICallableSig sig, IReadOnlyList<QArg> args, string functorPrefix,
+    private static void CheckCall(
+        ICallableSig sig,
+        IReadOnlyList<HirArgument> arguments,
+        string functorPrefix,
         Scope scope, string opName, List<QoraError> errors, SourceSpan? span,
-        Ctx ctx, ArrayFloorSink? floors = null, int? statementId = null, int? initialErrorCount = null)
+        Ctx ctx,
+        ArrayFloorSink? floors = null,
+        HirNodeId? statementId = null,
+        int? initialErrorCount = null)
     {
         var calleeName = sig.CalleeName;
-        var calleeContractValid = sig is not QOperation declared
-                                  || declared.Params.All(parameter => ParameterContractSupported(declared, parameter));
+        var calleeContractValid = sig is not HirCallable declared
+                                  || declared.Parameters.All(
+                                      parameter =>
+                                          ParameterContractSupported(
+                                              declared,
+                                              parameter));
 
-        void CheckScalarType(IParamSpec parameter, QText value)
+        void CheckScalarType(
+            IParamSpec parameter,
+            HirExpression value)
         {
             // Built-in gates deliberately keep their established angle-value rules. A USER callable's
             // declared scalar parameter is a language contract, so it shares the same conversion table as
@@ -1487,13 +1738,13 @@ internal static class QoraValidator
 
             Add(errors, "QSEM006",
                 $"in `{opName}`: parameter `{parameter.Name}` of `{calleeName}` expects `{expected}`, " +
-                $"but argument `{QNodes.Render(value.Tree)}` is `{actual}`; `{actual}` cannot be implicitly converted to `{expected}`",
+                $"but argument `{HirExpressions.Render(value)}` is `{actual}`; `{actual}` cannot be implicitly converted to `{expected}`",
                 span);
         }
 
-        if (args.Count != sig.Params.Count)
+        if (arguments.Count != sig.Parameters.Count)
         {
-            Add(errors, "QSEM006", $"in `{opName}`: `{functorPrefix}{calleeName}` expects {sig.Params.Count} argument(s) but got {args.Count}", span);
+            Add(errors, "QSEM006", $"in `{opName}`: `{functorPrefix}{calleeName}` expects {sig.Parameters.Count} argument(s) but got {arguments.Count}", span);
             return;
         }
 
@@ -1503,16 +1754,18 @@ internal static class QoraValidator
         var validStorageAccesses = new List<(IParamSpec Parameter, Symbol Symbol)>();
         var movedCandidates = new List<Symbol>();
         var pendingFloorFacts = new List<ArrayCallFact>();
-        void RecordStorageViews(IParamSpec parameter, QArg argument)
+        void RecordStorageViews(
+            IParamSpec parameter,
+            HirArgument argument)
         {
             foreach (var symbol in ArgumentStorageSymbols(argument, scope))
                 validStorageAccesses.Add((parameter, symbol));
         }
 
-        for (var i = 0; i < sig.Params.Count; i++)
+        for (var i = 0; i < sig.Parameters.Count; i++)
         {
-            var p = sig.Params[i];
-            var arg = args[i];
+            var p = sig.Parameters[i];
+            var arg = arguments[i];
             var argSym = WholeArgumentSymbol(arg, scope);
             var contractMatches = p.Ownership == arg.Ownership && p.Access == arg.Access;
 
@@ -1571,8 +1824,8 @@ internal static class QoraValidator
             {
                 if (p.IsArray)
                 {
-                    if (arg is not QTextArg || argSym is not { IsArray: true, Type: { } actualType }
-                                             || actualType == QType.Qubit)
+                    if (argSym is not { IsArray: true, Type: { } actualType }
+                        || actualType == QType.Qubit)
                         Add(errors, "QSEM006", $"in `{opName}`: parameter `{p.Name}` of `{calleeName}` expects `{TypeName(p.Type)}[]`, but the argument is not a classical array", span);
                     else if (actualType != p.Type)
                         Add(errors, "QSEM006", $"in `{opName}`: parameter `{p.Name}` of `{calleeName}` expects `{TypeName(p.Type)}[]`, but `{argSym.SourceName}` is `{TypeName(actualType)}[]`", span);
@@ -1589,10 +1842,10 @@ internal static class QoraValidator
                     {
                         RecordStorageViews(p, arg);
                         if (p.Ownership == QOwnershipMode.Moved) movedCandidates.Add(argSym);
-                        if (floors is not null && sig is QOperation calleeOp)
+                        if (floors is not null && sig is HirCallable callee)
                             pendingFloorFacts.Add(argSym.ArrayLength is int have
-                                ? new ArrayCallFact(floors.CallerOpId, opName, calleeOp.Id, calleeName, p.Name, argSym.SourceName, have, null, statementId, span)
-                                : new ArrayCallFact(floors.CallerOpId, opName, calleeOp.Id, calleeName, p.Name, argSym.SourceName, null, argSym.SourceName, statementId, span));
+                                ? new ArrayCallFact(floors.CallerCallableId, opName, callee.Id, calleeName, p.Name, argSym.SourceName, have, null, statementId, span)
+                                : new ArrayCallFact(floors.CallerCallableId, opName, callee.Id, calleeName, p.Name, argSym.SourceName, null, argSym.SourceName, statementId, span));
                     }
                     continue;
                 }
@@ -1603,29 +1856,18 @@ internal static class QoraValidator
                     continue;
                 }
 
-                if (arg is QQubitArg indexed
-                    && scope.Lookup(indexed.Reg) is { IsArray: true, Type: not QType.Qubit })
-                {
-                    var typeErrorCount = errors.Count;
-                    CheckScalarType(
-                        p,
-                        new QText(new QIndexNode(new QNameRef(indexed.Reg), indexed.Index)));
-                    if (permissionValid && errors.Count == typeErrorCount)
-                        RecordStorageViews(p, arg);
-                    continue;
-                }
                 // VALUE slot (rotation angle, or classical param): a qubit here is wrong. A classical array
                 // element was accepted above; a whole qubit or indexed qubit is QSEM006, while a qubit buried
                 // inside a classical expression such as `pi / q` is QSEM026.
                 var scalarTypeErrorCount = errors.Count;
-                if (IsQubitLike(arg, scope) || arg is QQubitArg)
+                if (IsQubitLike(arg, scope))
                     Add(errors, "QSEM006", sig.IsBuiltin
                         ? $"in `{opName}`: the first argument of `{calleeName}` is the rotation angle, but a qubit was passed (write `{calleeName}(angle, qubit)`)"
                         : $"in `{opName}`: parameter `{p.Name}` of `{calleeName}` is `{p.Type.ToString()!.ToLowerInvariant()}`, but a qubit was passed", span);
-                else if (arg is QTextArg vt && FirstQubitIn(vt.Tree, scope) is { } qn)
-                    Add(errors, "QSEM026", $"in `{opName}`: `{qn}` is a qubit, but `{QNodes.Render(vt.Tree)}` is used as a classical value ({(sig.IsBuiltin ? "the rotation angle" : $"the `{p.Name}` argument")} of `{calleeName}`) — a qubit has no numeric value", span);
-                else if (arg is QTextArg scalar)
-                    CheckScalarType(p, new QText(scalar.Tree));
+                else if (FirstQubitIn(arg.Expression, scope) is { } qn)
+                    Add(errors, "QSEM026", $"in `{opName}`: `{qn}` is a qubit, but `{HirExpressions.Render(arg.Expression)}` is used as a classical value ({(sig.IsBuiltin ? "the rotation angle" : $"the `{p.Name}` argument")} of `{calleeName}`) — a qubit has no numeric value", span);
+                else
+                    CheckScalarType(p, arg.Expression);
                 if (permissionValid && errors.Count == scalarTypeErrorCount)
                     RecordStorageViews(p, arg);
             }
@@ -1638,10 +1880,14 @@ internal static class QoraValidator
             else if (p.IsQubitArray)
             {
                 var typeErrorCount = errors.Count;
-                if (arg is QQubitArg qa)
-                    Add(errors, "QSEM006", $"in `{opName}`: parameter `{p.Name}` of `{calleeName}` is a qubit array, but `{qa.Reg}[{QNodes.Render(qa.Index)}]` is a single qubit", span);
-                else if (arg is QTextArg tb && !IsQubitArray(argSym))
-                    Add(errors, "QSEM006", $"in `{opName}`: parameter `{p.Name}` of `{calleeName}` is a qubit register, but `{QNodes.Render(tb.Tree)}` is not one", span);
+                if (arg.Expression is HirIndexExpression
+                    {
+                        Receiver: HirNameExpression indexedName,
+                    } indexed
+                    && IsQubit(scope.Lookup(indexedName.Name)))
+                    Add(errors, "QSEM006", $"in `{opName}`: parameter `{p.Name}` of `{calleeName}` is a qubit array, but `{HirExpressions.Render(indexed)}` is a single qubit", span);
+                else if (!IsQubitArray(argSym))
+                    Add(errors, "QSEM006", $"in `{opName}`: parameter `{p.Name}` of `{calleeName}` is a qubit register, but `{HirExpressions.Render(arg.Expression)}` is not one", span);
                 else if (p.RegisterSize is int need && IsSizedRegister(argSym, out var have) && have != need)
                     Add(errors, "QSEM006", $"in `{opName}`: internal specialization `{calleeName}` expects {need} qubit(s) for `{p.Name}`, but the argument has {have}", span);
                 if (permissionValid && errors.Count == typeErrorCount)
@@ -1655,12 +1901,17 @@ internal static class QoraValidator
             {
                 var typeErrorCount = errors.Count;
                 // single-qubit slot (user op)
-                if (arg is QQubitArg indexed && !IsQubit(scope.Lookup(indexed.Reg)))
-                    Add(errors, "QSEM006", $"in `{opName}`: parameter `{p.Name}` of `{calleeName}` is a qubit, but `{indexed.Reg}[{QNodes.Render(indexed.Index)}]` is a classical array element", span);
-                else if (arg is QTextArg ta && (IsQubitArray(argSym) || (ta.Tree is { } tt && IsClassicalNode(tt, scope))))
+                if (arg.Expression is HirIndexExpression
+                    {
+                        Receiver: HirNameExpression indexedName,
+                    } indexed
+                    && !IsQubit(scope.Lookup(indexedName.Name)))
+                    Add(errors, "QSEM006", $"in `{opName}`: parameter `{p.Name}` of `{calleeName}` is a qubit, but `{HirExpressions.Render(indexed)}` is a classical array element", span);
+                else if (IsQubitArray(argSym)
+                         || IsClassicalNode(arg.Expression, scope))
                     Add(errors, "QSEM006", IsQubitArray(argSym)
-                        ? $"in `{opName}`: parameter `{p.Name}` of `{calleeName}` is a single qubit, but `{QNodes.Render(ta.Tree)}` is a whole register (pass `{QNodes.Render(ta.Tree)}[i]`)"
-                        : $"in `{opName}`: parameter `{p.Name}` of `{calleeName}` is a qubit, but `{QNodes.Render(ta.Tree)}` is not one", span);
+                        ? $"in `{opName}`: parameter `{p.Name}` of `{calleeName}` is a single qubit, but `{HirExpressions.Render(arg.Expression)}` is a whole register (pass `{HirExpressions.Render(arg.Expression)}[i]`)"
+                        : $"in `{opName}`: parameter `{p.Name}` of `{calleeName}` is a qubit, but `{HirExpressions.Render(arg.Expression)}` is not one", span);
                 if (permissionValid && errors.Count == typeErrorCount)
                 {
                     RecordStorageViews(p, arg);
@@ -1676,7 +1927,7 @@ internal static class QoraValidator
         // statement ledger, while late array-floor failures invalidate the committed facts afterwards.
         var otherwiseValid = errors.Count == callErrorCount
                              && calleeContractValid
-                             && (statementId is not int checkedStatement
+                             && (statementId is not HirNodeId checkedStatement
                                  || !ctx.InvalidOwnershipStatements.Contains(checkedStatement));
         if (!otherwiseValid) return;
 
@@ -1697,7 +1948,7 @@ internal static class QoraValidator
         // including exclusivity, is valid.
         if (floors is not null && pendingFloorFacts.Count > 0)
             floors.Calls.AddRange(pendingFloorFacts);
-        if (statementId is int id && movedCandidates.Count > 0)
+        if (statementId is HirNodeId id && movedCandidates.Count > 0)
             ctx.ValidMoves[id] = movedCandidates
                 .GroupBy(symbol => symbol.Id)
                 .Select(group => group.First())
@@ -1713,7 +1964,9 @@ internal static class QoraValidator
             _ => "plain name",
         };
 
-    private static bool ParameterContractSupported(QOperation operation, QParam parameter)
+    private static bool ParameterContractSupported(
+        HirCallable operation,
+        HirParameter parameter)
     {
         if (parameter is { Ownership: QOwnershipMode.Borrowed, Access: QAccessMode.ReadOnly })
             return true;
@@ -1744,51 +1997,95 @@ internal static class QoraValidator
     private static bool IsQubitArray(Symbol? s) => s is { Type: QType.Qubit, IsQubitArray: true };
     private static bool IsSingleQubit(Symbol? s) => s is { Type: QType.Qubit, IsQubitArray: false };
 
-    private static bool IsQubitLike(QArg arg, Scope scope) => arg switch
-    {
-        QQubitArg q => IsQubit(scope.Lookup(q.Reg)),
-        QTextArg t => IsQubit(scope.Lookup(BareName(t) ?? string.Empty)),
-        _ => false,
-    };
+    private static bool IsQubitLike(HirArgument argument, Scope scope) =>
+        IsQubitLike(argument.Expression, scope);
 
-    /// <summary>The bare name an expression argument denotes — a <see cref="QNameRef"/> tree — or null for
+    private static bool IsQubitLike(HirExpression expression, Scope scope) =>
+        expression switch
+        {
+            HirNameExpression name =>
+                IsQubit(scope.Lookup(name.Name)),
+            HirIndexExpression
+            {
+                Receiver: HirNameExpression name,
+            } =>
+                IsQubit(scope.Lookup(name.Name)),
+            _ => false,
+        };
+
+    /// <summary>The bare name an expression argument denotes, or null for
     /// a compound expression (which names no single symbol).</summary>
-    private static string? BareName(QTextArg arg) => arg.Tree is QNameRef r ? r.Name : null;
+    private static string? BareName(HirArgument argument) =>
+        BareName(argument.Expression);
+
+    private static string? BareName(HirExpression expression) =>
+        expression is HirNameExpression name ? name.Name : null;
 
     /// <summary>The first name inside a value expression that resolves to a qubit, or null — finds a qubit
     /// smuggled into a classical position (<c>pi / q</c>) that the whole-argument <see cref="IsQubitLike"/>
     /// check misses. A member's base is excluded (<c>q.Count</c> reads classical shape metadata), exactly
     /// as the symbol table's QSEM026 walk excludes it.</summary>
-    private static string? FirstQubitIn(QNode? node, Scope scope) => node switch
-    {
-        QNameRef r when IsQubit(scope.Lookup(r.Name)) => r.Name,
-        QUnary u => FirstQubitIn(u.Operand, scope),
-        QBinOp b => FirstQubitIn(b.Left, scope) ?? FirstQubitIn(b.Right, scope),
-        QIndexNode i => FirstQubitIn(i.Base, scope) ?? FirstQubitIn(i.Index, scope),
-        QCallNode c => c.Args.Select(a => FirstQubitIn(a, scope)).FirstOrDefault(x => x is not null),
-        _ => null,   // literals; QMember (classical shape metadata)
-    };
+    private static string? FirstQubitIn(
+        HirExpression? expression,
+        Scope scope) =>
+        expression switch
+        {
+            HirNameExpression name when IsQubit(scope.Lookup(name.Name)) =>
+                name.Name,
+            HirUnaryExpression unary =>
+                FirstQubitIn(unary.Operand, scope),
+            HirBinaryExpression binary =>
+                FirstQubitIn(binary.Left, scope)
+                ?? FirstQubitIn(binary.Right, scope),
+            HirIndexExpression index =>
+                FirstQubitIn(index.Receiver, scope)
+                ?? FirstQubitIn(index.Index, scope),
+            HirCallExpression call =>
+                call.Arguments
+                    .Select(argument =>
+                        FirstQubitIn(argument.Expression, scope))
+                    .FirstOrDefault(name => name is not null),
+            HirArrayLiteralExpression literal =>
+                literal.Elements
+                    .Select(element => FirstQubitIn(element, scope))
+                    .FirstOrDefault(name => name is not null),
+            _ => null,
+        };
 
     /// <summary>True only when the argument provably cannot denote a qubit: a number/expression, or a name
     /// that resolves to a known non-qubit (a classical value, or a register hidden by a local of the same name).</summary>
-    private static bool IsDefinitelyNotQubit(QArg arg, Scope scope) => arg switch
-    {
-        QQubitArg q => scope.Lookup(q.Reg) is { Type: { } t } && t != QType.Qubit,   // `a[0]` where a resolves to an int
-        QTextArg { Tree: { } tree } => IsClassicalNode(tree, scope),
-        _ => false,
-    };
+    private static bool IsDefinitelyNotQubit(
+        HirArgument argument,
+        Scope scope) =>
+        IsClassicalNode(argument.Expression, scope);
 
-    private static bool IsClassicalNode(QNode node, Scope scope) => node switch
-    {
-        QNumLit or QLit => true,                                        // numeric/verbatim literal
-        QNameRef r => r.Name is "pi" or "tau" or "euler"
-            || (scope.Lookup(r.Name) is { Type: { } t } && t != QType.Qubit),
-        QCallNode => false,                                             // a call's value is not classifiable here
-        _ => true,                                                      // any operator/member/index computation
-    };
+    private static bool IsClassicalNode(
+        HirExpression expression,
+        Scope scope) =>
+        expression switch
+        {
+            HirIntegerLiteralExpression or HirLiteralExpression =>
+                true,
+            HirNameExpression name =>
+                name.Name is "pi" or "tau" or "euler" or "true" or "false"
+                || scope.Lookup(name.Name) is { Type: { } type }
+                   && type != QType.Qubit,
+            HirIndexExpression
+            {
+                Receiver: HirNameExpression name,
+            } =>
+                scope.Lookup(name.Name) is { Type: { } type }
+                && type != QType.Qubit,
+            HirCallExpression =>
+                false,
+            _ =>
+                true,
+        };
 
-    private static Symbol? WholeArgumentSymbol(QArg arg, Scope scope) =>
-        arg is QTextArg text && BareName(text) is { } name ? scope.Lookup(name) : null;
+    private static Symbol? WholeArgumentSymbol(
+        HirArgument argument,
+        Scope scope) =>
+        BareName(argument) is { } name ? scope.Lookup(name) : null;
 
     /// <summary>
     /// Every storage binding an argument observes, reduced to stable identity. This is broader than
@@ -1796,7 +2093,9 @@ internal static class QoraValidator
     /// still view <c>xs</c>. A same-call <c>move xs</c> or <c>var xs</c> must therefore conflict with those
     /// views even though only the exclusive slot names the whole binding.
     /// </summary>
-    private static IReadOnlyList<Symbol> ArgumentStorageSymbols(QArg arg, Scope scope)
+    private static IReadOnlyList<Symbol> ArgumentStorageSymbols(
+        HirArgument argument,
+        Scope scope)
     {
         var found = new Dictionary<SymbolId, Symbol>();
 
@@ -1807,101 +2106,117 @@ internal static class QoraValidator
                 found.TryAdd(symbol.Id, symbol);
         }
 
-        void Walk(QNode? node)
+        void Walk(HirExpression? expression)
         {
-            switch (node)
+            switch (expression)
             {
-                case null or QNumLit or QLit:
+                case null
+                    or HirMissingExpression
+                    or HirIntegerLiteralExpression
+                    or HirLiteralExpression:
                     break;
-                case QNameRef name:
+                case HirNameExpression name:
                     AddName(name.Name);
                     break;
-                case QUnary unary:
-                    Walk(unary.Operand);
+                case HirCallExpression call:
+                    foreach (var callArgument in call.Arguments)
+                        Walk(callArgument.Expression);
                     break;
-                case QBinOp binary:
-                    Walk(binary.Left);
-                    Walk(binary.Right);
-                    break;
-                case QMember member:
-                    Walk(member.Base);
-                    break;
-                case QIndexNode index:
-                    Walk(index.Base);
-                    Walk(index.Index);
-                    break;
-                case QCallNode call:
-                    foreach (var argument in call.Args) Walk(argument);
+                default:
+                    foreach (var child in expression.Children())
+                    {
+                        if (child is HirExpression childExpression)
+                            Walk(childExpression);
+                        else if (child is HirArgument childArgument)
+                            Walk(childArgument.Expression);
+                    }
                     break;
             }
         }
 
-        switch (arg)
-        {
-            case QQubitArg indexed:
-                AddName(indexed.Reg);
-                Walk(indexed.Index);
-                break;
-            case QTextArg text:
-                Walk(text.Tree);
-                break;
-        }
+        Walk(argument.Expression);
 
         return found.Values.ToList();
     }
 
-    private static void CheckExprIndexes(
-        QExpr expr,
-        int owningStatementId,
+    private static IndexCheckResult CheckExpressionIndexes(
+        HirExpression? expression,
         Scope scope,
         string opName,
         Ctx ctx,
         SourceSpan? span,
-        BoundsCtx bounds = default)
+        BoundsCtx bounds = default,
+        bool qubitValueAllowed = false)
     {
-        switch (expr)
+        switch (expression)
         {
-            case QText text:
-                CheckTextIndexes(
-                    text.Tree,
+            case null:
+                return IndexCheckResult.Proven;
+            case HirIndexExpression
+                {
+                    Receiver: HirNameExpression receiver,
+                } access:
+                var nested = CheckExpressionIndexes(
+                    access.Index,
+                    scope,
+                    opName,
+                    ctx,
+                    span,
+                    bounds);
+                var indexed = CheckIndexedAccess(
+                    receiver.Name,
+                    access.Index,
+                    access,
                     scope,
                     opName,
                     ctx,
                     span,
                     bounds,
-                    owningStatementId);
-                break;
-            case QArrayLiteral literal:
-                foreach (var element in literal.Elements)
-                    CheckExprIndexes(
-                        element,
-                        owningStatementId,
+                    nested);
+                var result = MergeIndexResults(nested, indexed);
+                if (!qubitValueAllowed
+                    && scope.Lookup(receiver.Name) is { Type: QType.Qubit })
+                {
+                    Add(ctx.Errors, "QSEM026", $"in `{opName}`: `{HirExpressions.Render(access)}` is a qubit and cannot be used as a classical value", span);
+                    return IndexCheckResult.Invalid;
+                }
+                return result;
+            // A measurement's target index must be bounds-checked here too — a measurement NESTED in an
+            // array-literal initializer (`var r: bit[] = [M(q[3])]`) reaches this recursion, whereas the declaration
+            // handler's measurement branch only fires for a DIRECT `M(...)` value.
+            // An ELEMENT measurement (`M(q[i])`) must have a provably in-range index.
+            case HirMeasurementExpression
+                {
+                    Target: HirIndexExpression
+                    {
+                        Receiver: HirNameExpression,
+                    } measured,
+                }:
+                var measuredNested = CheckExpressionIndexes(
+                    measured.Index,
+                    scope,
+                    opName,
+                    ctx,
+                    span,
+                    bounds);
+                return MergeIndexResults(
+                    measuredNested,
+                    CheckQubitIndex(
+                        measured,
                         scope,
                         opName,
                         ctx,
                         span,
-                        bounds);
-                break;
-            // A measurement's target index must be bounds-checked here too — a measurement NESTED in an
-            // array-literal initializer (`var r: bit[] = [M(q[3])]`) reaches this recursion, whereas the QDecl
-            // handler's measurement branch only fires for a DIRECT `M(...)` value.
-            // An ELEMENT measurement (`M(q[i])`) must have a provably in-range index.
-            case QMeasure m when QNodes.IndexOf(m.Target) is { } measuredIndex:
-                CheckQubitIndex(
-                    new QQubitArg(QNodes.RegOf(m.Target), measuredIndex),
-                    m.Target,
-                    scope,
-                    opName,
-                    ctx,
-                    span,
-                    bounds,
-                    owningStatementId);
-                break;
+                        bounds,
+                        measuredNested));
             // A WHOLE-reference measurement (`M(a)`) is legal for exactly one shape: a SINGLE qubit. A whole
             // REGISTER would collapse many qubits into one bit, and a classical is not measurable at all —
             // both are QSEM006 (wrong argument for the `M` call), not a silently emitted `measure q;`.
-            case QMeasure m:
-                var measuredName = QNodes.RegOf(m.Target);
+            case HirMeasurementExpression
+                {
+                    Target: HirNameExpression measuredNameExpression,
+                }:
+                var measuredName = measuredNameExpression.Name;
                 if (scope.Lookup(measuredName) is { } measuredSym)
                 {
                     if (measuredSym.Type != QType.Qubit)
@@ -1909,7 +2224,48 @@ internal static class QoraValidator
                     else if (measuredSym.IsArray)
                         Add(ctx.Errors, "QSEM006", $"in `{opName}`: `M({measuredName})` measures a whole qubit register into one `bit`; measure a single qubit instead (`M({measuredName}[i])`)", span);
                 }
-                break;
+                return IndexCheckResult.Proven;
+            case HirCallExpression call:
+                return call.Arguments
+                    .Select(argument =>
+                        CheckExpressionIndexes(
+                            argument.Expression,
+                            scope,
+                            opName,
+                            ctx,
+                            span,
+                            bounds,
+                            IsQubitLike(argument, scope)))
+                    .Aggregate(
+                        IndexCheckResult.Proven,
+                        MergeIndexResults);
+            default:
+                var aggregate = IndexCheckResult.Proven;
+                foreach (var child in expression.Children())
+                {
+                    if (child is HirExpression childExpression)
+                        aggregate = MergeIndexResults(
+                            aggregate,
+                            CheckExpressionIndexes(
+                                childExpression,
+                                scope,
+                                opName,
+                                ctx,
+                                span,
+                                bounds));
+                    else if (child is HirArgument argument)
+                        aggregate = MergeIndexResults(
+                            aggregate,
+                            CheckExpressionIndexes(
+                                argument.Expression,
+                                scope,
+                                opName,
+                                ctx,
+                                span,
+                                bounds,
+                                IsQubitLike(argument, scope)));
+                }
+                return aggregate;
         }
     }
 
@@ -1996,92 +2352,9 @@ internal static class QoraValidator
             -FloorDiv(-numerator, positiveDenominator);
     }
 
-    /// <summary>Bounds-check every indexed access in an expression TREE (see <see cref="QNode"/>). Walking
+    /// <summary>Bounds-check every indexed access in an expression tree. Walking
     /// the tree — not a text regex — finds each <c>base[index]</c> structurally, wherever it is nested, and
     /// returns the combined disposition so an enclosing index can stop after a proven-invalid child.</summary>
-    private static IndexCheckResult CheckTextIndexes(
-        QNode? tree,
-        Scope scope,
-        string opName,
-        Ctx ctx,
-        SourceSpan? span,
-        BoundsCtx bounds = default,
-        int? owningStatementId = null)
-    {
-        switch (tree)
-        {
-            case QIndexNode { Base: QNameRef b } acc:
-                var indexed = CheckIndexedAccess(
-                    b.Name,
-                    acc.Index,
-                    acc,
-                    scope,
-                    opName,
-                    ctx,
-                    span,
-                    bounds,
-                    owningStatementId);
-                if (scope.Lookup(b.Name) is { Type: QType.Qubit })
-                {
-                    Add(ctx.Errors, "QSEM026", $"in `{opName}`: `{b.Name}[{QNodes.Render(acc.Index)}]` is a qubit and cannot be used as a classical value", span);
-                    return IndexCheckResult.Invalid;
-                }
-                return indexed;
-            case QBinOp bin:
-                var left = CheckTextIndexes(
-                    bin.Left,
-                    scope,
-                    opName,
-                    ctx,
-                    span,
-                    bounds,
-                    owningStatementId);
-                var right = CheckTextIndexes(
-                    bin.Right,
-                    scope,
-                    opName,
-                    ctx,
-                    span,
-                    bounds,
-                    owningStatementId);
-                return MergeIndexResults(left, right);
-            case QUnary u:
-                return CheckTextIndexes(
-                    u.Operand,
-                    scope,
-                    opName,
-                    ctx,
-                    span,
-                    bounds,
-                    owningStatementId);
-            case QMember m:
-                return CheckTextIndexes(
-                    m.Base,
-                    scope,
-                    opName,
-                    ctx,
-                    span,
-                    bounds,
-                    owningStatementId);
-            case QCallNode c:
-                var calls = IndexCheckResult.Proven;
-                foreach (var callArg in c.Args)
-                    calls = MergeIndexResults(
-                        calls,
-                        CheckTextIndexes(
-                            callArg,
-                            scope,
-                            opName,
-                            ctx,
-                            span,
-                            bounds,
-                            owningStatementId));
-                return calls;
-            default:
-                return IndexCheckResult.Proven;
-        }
-    }
-
     /// <summary>
     /// An array/register index must be PROVABLY in bounds (rung B'). Proof paths: P1 a literal within a
     /// known length; P2 a loop variable ranging <c>0..a.Count-1</c>; P3 a loop variable with a constant
@@ -2096,20 +2369,20 @@ internal static class QoraValidator
     /// </summary>
     private static IndexCheckResult CheckIndexedAccess(
         string name,
-        QNode indexNode,
-        object exactSite,
+        HirExpression indexExpression,
+        HirIndexExpression exactSite,
         Scope scope,
         string opName,
         Ctx ctx,
         SourceSpan? span,
         BoundsCtx bounds = default,
-        int? owningStatementId = null)
+        IndexCheckResult nestedResult = IndexCheckResult.Proven)
     {
         var errors = ctx.Errors;
         var unproven = ctx.Unproven;
         var deferred = ctx.Deferred;
         var paramNeeds = ctx.ParamNeeds;
-        var index = QNodes.Render(indexNode);   // the diagnostic spelling, rendered once from the node
+        var index = HirExpressions.Render(indexExpression);
         var errorStart = errors.Count;
         var unprovenStart = unproven.Count;
 
@@ -2118,22 +2391,13 @@ internal static class QoraValidator
         // the outer base's array shape, and the whole index's scalar-int type. A malformed child makes only
         // the OUTER bounds question meaningless; it must not hide a sibling call error or a scalar-base/type
         // error that remains true after the child is fixed.
-        var nestedResult = CheckTextIndexes(
-            indexNode,
-            scope,
-            opName,
-            ctx,
-            span,
-            bounds,
-            owningStatementId);
-        var callsValid = !QNodes.ContainsCall(indexNode)
+        var callsValid = !HirExpressions.ContainsCall(indexExpression)
                          || CheckExprCalls(
-                             indexNode,
+                             indexExpression,
                              scope,
                              ctx,
                              opName,
-                             span,
-                             owningStatementId);
+                             span);
 
         var symbol = scope.Lookup(name);
         if (symbol is { IsArray: false })
@@ -2142,7 +2406,8 @@ internal static class QoraValidator
         // An index must produce one scalar int. This checks the WHOLE expression, so a function returning
         // float/bit/angle or an indexed array value receives the same common type error as a bare variable
         // of that type. An unresolved expression already owns a QSEM005/007/025; do not cascade QSEM030.
-        var indexType = ExpressionTypes.TypeOf(indexNode, scope, ctx.OpById);
+        var indexType =
+            ExpressionTypes.TypeOf(indexExpression, scope, ctx.OpById);
         var indexTypeValid = indexType is { Type: QType.Int, IsArray: false };
         if (indexType is not null && !indexTypeValid)
         {
@@ -2174,7 +2439,9 @@ internal static class QoraValidator
         // The index name resolved ONCE, through the scope chain, to the variable it actually denotes HERE.
         // Every fact lookup below keys on this symbol — a same-named variable elsewhere is a different key.
         // (A numeric-literal index names nothing to resolve.)
-        var idxSym = indexNode is QNameRef idxName ? scope.Lookup(idxName.Name) : null;
+        var idxSym = indexExpression is HirNameExpression idxName
+            ? scope.Lookup(idxName.Name)
+            : null;
 
         var length = symbol.Type == QType.Qubit ? symbol.RegisterSize : symbol.ArrayLength;
 
@@ -2199,8 +2466,8 @@ internal static class QoraValidator
 
         // P1 — a literal index. Known length: bounds-check now. Unknown length: a Qubit[] parameter defers to
         // the post-mono re-validation (its size becomes concrete); a classical parameter records its P4 floor.
-        // (A digit run too large for long lowers to a verbatim QLit — a fortiori past any length.)
-        if (indexNode is QNumLit numLit)
+        // (A digit run too large for long lowers to a verbatim literal — a fortiori past any length.)
+        if (indexExpression is HirIntegerLiteralExpression numLit)
         {
             if (length is int lit && numLit.Value >= lit)
                 Add(errors, "QSEM016", $"in `{opName}`: index `{name}[{index}]` is out of range; `{name}` has {lit} element(s) (valid: 0..{lit - 1})", span);
@@ -2212,7 +2479,7 @@ internal static class QoraValidator
                 ? IndexCheckResult.Unproven
                 : IndexCheckResult.Proven);
         }
-        if (indexNode is QLit)
+        if (indexExpression is HirLiteralExpression)
         {
             if (length is int lit)
                 Add(errors, "QSEM016", $"in `{opName}`: index `{name}[{index}]` is out of range; `{name}` has {lit} element(s) (valid: 0..{lit - 1})", span);
@@ -2235,7 +2502,7 @@ internal static class QoraValidator
         if (bounds.Guarded(idxSym, symbol, length)) return Result();
 
         // A ByConst guard `index < K` on a MONO-SIZED parameter (the Symbol.MonoSized stamp — the
-        // monomorphizer's own trigger, copied once from QParam.NeedsMonoSizing) can't be confirmed
+        // monomorphizer's own trigger, copied once from HirParameter.NeedsMonoSizing) can't be confirmed
         // against the (unknown) length yet, but post-monomorphization the size is concrete, so defer,
         // exactly as a literal index does (a guard proving a strict subset of a deferred access must not
         // be rejected where the literal is accepted). The `index < q.Count` form is length-independent
@@ -2249,7 +2516,7 @@ internal static class QoraValidator
         // P1 extended — a non-literal index that FOLDS to a definite value (a const name) IS the literal
         // access at that value: same calculator, same verdicts. Sits after P5 because an enclosing guard
         // would keep an out-of-range access from ever executing.
-        var foldedIndex = BoundFolder.Fold(indexNode, scope);
+        var foldedIndex = BoundFolder.Fold(indexExpression, scope);
         if (foldedIndex is BoundNum idxVal)
         {
             if (idxVal.Value < 0)
@@ -2294,7 +2561,7 @@ internal static class QoraValidator
             return Result(IndexCheckResult.Unproven);
         }
 
-        // The index is a LOOP VARIABLE: judge it by the loop's bounds — folded AT THE HEADER (see the QFor
+        // The index is a LOOP VARIABLE: judge it by the loop's bounds — folded AT THE HEADER (see the for
         // case in Walk), so the verdict reads the same values the emitted loop runs with. The rule is "does
         // the computation settle?", not "does a pattern match": the verdict follows what folding yielded.
         var inLoop = bounds.LoopRange(idxSym, out var fact);
@@ -2370,50 +2637,47 @@ internal static class QoraValidator
         // access lowering and runtime-failure semantics.
         // Blame the bound that actually failed to settle: when From never folded, naming To would accuse
         // the wrong bound (and the fix hint would send the user to the wrong place).
-        var site = new HirIndexAccessId(unproven.Count);
-        var statementId = owningStatementId
-            ?? throw new InvalidOperationException(
-                "QINTERNAL: an unproven indexed access has no owning HIR statement");
         unproven.Add(
-            new UnprovenIndexWork(
-                new UnprovenIndex(
-                    site,
-                    opName,
-                    name,
-                    index,
-                    !inLoop ? null : fact.FromB is null ? from : to,
-                    span),
-                statementId,
-                exactSite));
+            new UnprovenIndex(
+                exactSite.Id,
+                opName,
+                name,
+                index,
+                !inLoop ? null : fact.FromB is null ? from : to,
+                span));
         return Result(IndexCheckResult.Unproven);
     }
 
     /// <summary>Validate and bounds-check the full index expression of one measurement target.</summary>
-    private static void CheckQubitIndex(
-        QQubitArg q,
-        object exactSite,
+    private static IndexCheckResult CheckQubitIndex(
+        HirIndexExpression access,
         Scope scope,
         string opName,
         Ctx ctx,
         SourceSpan? span,
         BoundsCtx bounds = default,
-        int? owningStatementId = null)
+        IndexCheckResult nestedResult = IndexCheckResult.Proven)
     {
-        if (scope.Lookup(q.Reg) is not { } resolved)
-            return; // the symbol-table walk already owns the unknown-name diagnostic
+        if (access.Receiver is not HirNameExpression receiver
+            || scope.Lookup(receiver.Name) is not { } resolved)
+            return IndexCheckResult.Invalid;
 
-        CheckIndexedAccess(
-            q.Reg,
-            q.Index,
-            exactSite,
+        var result = CheckIndexedAccess(
+            receiver.Name,
+            access.Index,
+            access,
             scope,
             opName,
             ctx,
             span,
             bounds,
-            owningStatementId);
+            nestedResult);
         if (resolved.Type != QType.Qubit)
-            Add(ctx.Errors, "QSEM006", $"in `{opName}`: measurement target `{q.Reg}[{QNodes.Render(q.Index)}]` is not a qubit", span);
+        {
+            Add(ctx.Errors, "QSEM006", $"in `{opName}`: measurement target `{HirExpressions.Render(access)}` is not a qubit", span);
+            return IndexCheckResult.Invalid;
+        }
+        return result;
     }
 
     private static string TypeName(QType type) => type.ToString().ToLowerInvariant();
@@ -2427,18 +2691,32 @@ internal static class QoraValidator
     /// re-runs then with the real range — over-approximating it to <c>[From..MaxValue]</c> pre-mono would
     /// falsely alias a fixed operand (the fan-in idiom <c>for i in 0..q.Count-2 { CNOT(q[i], q[last]) }</c>).
     /// Used for QSEM014 operand-aliasing: two operands collide when their ranges intersect.</summary>
-    private static (long Lo, long Hi)? IndexDomain(QNode idx, Scope scope, BoundsCtx bounds, bool willBeRechecked)
+    private static (long Lo, long Hi)? IndexDomain(
+        HirExpression index,
+        Scope scope,
+        BoundsCtx bounds,
+        bool willBeRechecked)
     {
-        if (BoundFolder.Fold(idx, scope) is BoundNum v) return (v.Value, v.Value);
-        if (idx is QNameRef nr && scope.Lookup(nr.Name) is { } sym && bounds.LoopRange(sym, out var f) && f.FromB is BoundNum a)
+        if (BoundFolder.Fold(index, scope) is BoundNum value)
+            return (value.Value, value.Value);
+        if (index is HirNameExpression name
+            && scope.Lookup(name.Name) is { } symbol
+            && bounds.LoopRange(symbol, out var fact)
+            && fact.FromB is BoundNum from)
         {
-            if (f.ToB is BoundNum b) return a.Value <= b.Value ? (a.Value, b.Value) : null;  // settled range (empty -> GateNeverRuns)
+            if (fact.ToB is BoundNum to)
+                return from.Value <= to.Value
+                    ? (from.Value, to.Value)
+                    : null;
             // A symbolic Qubit[].Count upper bound: defer aliasing to the precise post-mono re-check —
             // but ONLY when that re-check will actually run (the op has a call site). An uncalled generic
             // op is dropped by monomorphization, so its deferral would be a silent skip: judge it now with
             // the conservative over-approximation instead.
-            if (f.DefersToMono) return willBeRechecked ? null : (a.Value, long.MaxValue);
-            return (a.Value, long.MaxValue);                        // genuinely runtime upper: reachable set is at least [From, ...]
+            if (fact.DefersToMono)
+                return willBeRechecked
+                    ? null
+                    : (from.Value, long.MaxValue);
+            return (from.Value, long.MaxValue);
         }
         return null;
     }
@@ -2447,45 +2725,79 @@ internal static class QoraValidator
     /// (From &gt; To, both settled): the loop body never runs, so the gate is never emitted and no operand
     /// aliasing is possible — QSEM014 must skip it entirely (not fall to a spelling comparison that would
     /// reject a never-executed <c>CNOT(q[i], q[i])</c> while accepting the equally-dead <c>CNOT(q[i], q[2])</c>).</summary>
-    private static bool GateNeverRuns(IEnumerable<(string Reg, QNode? Index, (long, long)? Domain)> refs, Scope scope, BoundsCtx bounds) =>
-        refs.Any(r => r.Index is QNameRef idx && scope.Lookup(idx.Name) is { } sym && bounds.LoopRange(sym, out var f)
-            && f.FromB is BoundNum a && f.ToB is BoundNum b && a.Value > b.Value);
+    private static bool GateNeverRuns(
+        IEnumerable<(
+            SymbolId SymbolId,
+            string DisplayName,
+            HirExpression? Index,
+            (long, long)? Domain)> references,
+        Scope scope,
+        BoundsCtx bounds) =>
+        references.Any(reference =>
+            reference.Index is HirNameExpression index
+            && scope.Lookup(index.Name) is { } symbol
+            && bounds.LoopRange(symbol, out var fact)
+            && fact.FromB is BoundNum from
+            && fact.ToB is BoundNum to
+            && from.Value > to.Value);
 
-    private static (string Reg, QNode? Index)? QubitRefOf(QArg arg, Scope scope) => arg switch
+    private static (
+        SymbolId SymbolId,
+        string DisplayName,
+        HirExpression? Index)? QubitRefOf(
+        HirArgument argument,
+        Scope scope) =>
+        argument.Expression switch
     {
         // Only a QUBIT-based reference is a gate operand for aliasing purposes. `x[0]` where `x` is a
         // classical array parses to the same (reg, index) shape but is a classical value — passing it twice
         // is fine, so it must not count as a duplicate qubit operand (QSEM014).
-        QQubitArg q when IsQubit(scope.Lookup(q.Reg)) => (q.Reg, q.Index),
-        QTextArg t when BareName(t) is { } name && IsQubit(scope.Lookup(name)) => (name, (QNode?)null),
+        HirIndexExpression
+        {
+            Receiver: HirNameExpression name,
+        } index when scope.Lookup(name.Name) is
+        {
+            Type: QType.Qubit,
+        } symbol =>
+            (symbol.Id, name.Name, index.Index),
+        HirNameExpression name when scope.Lookup(name.Name) is
+        {
+            Type: QType.Qubit,
+        } symbol =>
+            (symbol.Id, name.Name, null),
         _ => null,
     };
 
-    private static string Show(string reg, QNode? index) => index is null ? reg : $"{reg}[{QNodes.Render(index)}]";
+    private static string Show(
+        string register,
+        HirExpression? index) =>
+        index is null
+            ? register
+            : $"{register}[{HirExpressions.Render(index)}]";
 
     // --- call-cycle detection (Tarjan's strongly connected components) ---
 
     /// <summary>Cycles in the op-call graph: every SCC larger than one op, plus direct self-calls.</summary>
-    private static List<List<int>> FindCycles(
-        QProgram program,
-        IReadOnlyDictionary<int, QOperation> opById)
+    private static List<List<HirNodeId>> FindCycles(
+        HirProgram program,
+        IReadOnlyDictionary<HirNodeId, HirCallable> opById)
     {
-        var adj = new Dictionary<int, List<int>>();
-        foreach (var op in program.Operations)
+        var adj = new Dictionary<HirNodeId, List<HirNodeId>>();
+        foreach (var op in program.Callables)
         {
-            var refs = new HashSet<int>();
+            var refs = new HashSet<HirNodeId>();
             CollectOpRefs(op.Body, opById, refs);
             adj[op.Id] = refs.ToList();
         }
 
-        var index = new Dictionary<int, int>();
-        var low = new Dictionary<int, int>();
-        var onStack = new HashSet<int>();
-        var stack = new Stack<int>();
-        var cycles = new List<List<int>>();
+        var index = new Dictionary<HirNodeId, int>();
+        var low = new Dictionary<HirNodeId, int>();
+        var onStack = new HashSet<HirNodeId>();
+        var stack = new Stack<HirNodeId>();
+        var cycles = new List<List<HirNodeId>>();
         var counter = 0;
 
-        void Strongconnect(int v)
+        void Strongconnect(HirNodeId v)
         {
             index[v] = low[v] = counter++;
             stack.Push(v);
@@ -2507,8 +2819,8 @@ internal static class QoraValidator
 
             if (low[v] == index[v])
             {
-                var scc = new List<int>();
-                int w;
+                var scc = new List<HirNodeId>();
+                HirNodeId w;
                 do { w = stack.Pop(); onStack.Remove(w); scc.Add(w); } while (w != v);
                 if (scc.Count > 1 || adj[v].Contains(v)) { scc.Reverse(); cycles.Add(scc); }
             }
@@ -2522,36 +2834,33 @@ internal static class QoraValidator
 
     /// <summary>All resolved user-operation identities referenced by a body's call sites.</summary>
     private static void CollectOpRefs(
-        IReadOnlyList<QStmt> stmts,
-        IReadOnlyDictionary<int, QOperation> opById,
-        HashSet<int> into)
+        IReadOnlyList<HirStatement> statements,
+        IReadOnlyDictionary<HirNodeId, HirCallable> opById,
+        HashSet<HirNodeId> into)
     {
-        foreach (var stmt in stmts)
+        foreach (var statement in statements)
         {
-            // A FUNCTION call lives in an expression (a value/condition/argument/return), not a QGate — so a
+            // A FUNCTION call lives in an expression (a value/condition/argument/return), not a separate call node — so a
             // recursive function (`function f(x) { return f(x); }`) has its edge only here. Every call node
             // in every direct expression site is a call edge for the cycle check.
-            foreach (var tree in QNodes.ExpressionSites(stmt))
-                foreach (var call in QNodes.CallsIn(tree))
-                    if (call.CalleeOpId is int callTargetId && opById.ContainsKey(callTargetId))
-                        into.Add(callTargetId);
+            foreach (var call in CallsInStatement(statement))
+                if (call.CalleeId is { } callTargetId
+                    && opById.ContainsKey(callTargetId))
+                    into.Add(callTargetId);
 
-            switch (stmt)
+            switch (statement)
             {
-                case QGate g when g.CalleeOpId is int gateTargetId && opById.ContainsKey(gateTargetId):
-                    into.Add(gateTargetId);
-                    break;
-                case QIf i:
+                case HirIfStatement i:
                     CollectOpRefs(i.Then, opById, into);
                     CollectOpRefs(i.Else, opById, into);
                     break;
-                case QFor f:
+                case HirForStatement f:
                     CollectOpRefs(f.Body, opById, into);
                     break;
-                case QWhile w:
+                case HirWhileStatement w:
                     CollectOpRefs(w.Body, opById, into);
                     break;
-                case QRepeat r:
+                case HirRepeatStatement r:
                     CollectOpRefs(r.Body, opById, into);
                     break;
             }

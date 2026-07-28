@@ -75,7 +75,7 @@ public sealed class MirStructuralIndex
     private readonly FrozenDictionary<MirInstructionRef, MirInstructionLocation> _instructionLocations;
     private readonly FrozenDictionary<MirValueRef, MirValue> _values;
     private readonly FrozenDictionary<MirStorageRef, MirArrayStorage> _storages;
-    private readonly FrozenDictionary<MirQubitResourceRef, MirQubitResource> _qubits;
+    private readonly FrozenDictionary<MirQubitRef, MirQubit> _qubits;
 
     internal MirStructuralIndex(
         MirSnapshotId snapshotId,
@@ -96,7 +96,7 @@ public sealed class MirStructuralIndex
             new Dictionary<MirInstructionRef, MirInstructionLocation>();
         var values = new Dictionary<MirValueRef, MirValue>();
         var storages = new Dictionary<MirStorageRef, MirArrayStorage>();
-        var qubits = new Dictionary<MirQubitResourceRef, MirQubitResource>();
+        var qubits = new Dictionary<MirQubitRef, MirQubit>();
 
         foreach (var callable in program.Callables)
         {
@@ -122,7 +122,7 @@ public sealed class MirStructuralIndex
             foreach (var storage in callable.Storages)
                 storages.Add(new MirStorageRef(snapshotId, callable.Id, storage.Id), storage);
             foreach (var qubit in callable.Qubits)
-                qubits.Add(new MirQubitResourceRef(snapshotId, callable.Id, qubit.Id), qubit);
+                qubits.Add(new MirQubitRef(snapshotId, callable.Id, qubit.Key), qubit);
         }
 
         _blocks = blocks.ToFrozenDictionary();
@@ -140,7 +140,7 @@ public sealed class MirStructuralIndex
     public IReadOnlyCollection<MirInstructionRef> Instructions => _instructions.Keys;
     public IReadOnlyCollection<MirValueRef> Values => _values.Keys;
     public IReadOnlyCollection<MirStorageRef> Storages => _storages.Keys;
-    public IReadOnlyCollection<MirQubitResourceRef> Qubits => _qubits.Keys;
+    public IReadOnlyCollection<MirQubitRef> Qubits => _qubits.Keys;
 
     public MirCallable RequireCallable(MirCallableRef reference)
     {
@@ -195,7 +195,7 @@ public sealed class MirStructuralIndex
             : throw Missing(nameof(reference), reference);
     }
 
-    public MirQubitResource RequireQubit(MirQubitResourceRef reference)
+    public MirQubit RequireQubit(MirQubitRef reference)
     {
         RequireSnapshot(reference.Snapshot, nameof(reference));
         return _qubits.TryGetValue(reference, out var qubit)
@@ -329,14 +329,14 @@ public sealed class MirSnapshot
                 site.Ordinal == 0,
             (MirIndexedAccessKind.Measurement, MirMeasure
             {
-                Place.Index: not null,
+                Qubit.Index: not null,
             }) =>
                 site.Ordinal == 0,
             (MirIndexedAccessKind.QubitOperand, MirQuantumApply apply)
                 when site.Ordinal < apply.Operands.Count =>
                 apply.Operands[site.Ordinal] is MirQubitCallOperand
                 {
-                    Place.Index: not null,
+                    Qubit.Index: not null,
                 },
             _ => false,
         };

@@ -71,19 +71,18 @@ public sealed class MirControlFlowAnalysisTests
             C(0),
             "ParameterScope",
             MirCallableKind.Operation,
-            ReturnType: null,
-            Parameters: new MirParameter[] { parameter },
-            EntryBlock: B(0),
-            Blocks: new[]
+            returnType: null,
+            parameters: new IMirParameter[] { parameter },
+            entryBlock: B(0),
+            blocks: new[]
             {
                 new MirBlock(B(0), Array.Empty<MirBlockArgument>(), Array.Empty<MirInstruction>(),
                     new MirReturn(null, source), source),
                 new MirBlock(B(1), Array.Empty<MirBlockArgument>(), Array.Empty<MirInstruction>(),
                     new MirReturn(null, source), source),
             },
-            Values: new[] { value },
-            Storages: Array.Empty<MirArrayStorage>(),
-            Qubits: Array.Empty<MirQubitResource>(),
+            values: new[] { value },
+            storages: Array.Empty<MirArrayStorage>(),
             source);
         var entryPoint = EmptyEntry(C(1), source);
         var program = context.Program(
@@ -109,10 +108,10 @@ public sealed class MirControlFlowAnalysisTests
             C(0),
             "MixedExits",
             MirCallableKind.Operation,
-            ReturnType: null,
-            Parameters: Array.Empty<MirParameter>(),
-            EntryBlock: B(0),
-            Blocks: new[]
+            returnType: null,
+            parameters: Array.Empty<IMirParameter>(),
+            entryBlock: B(0),
+            blocks: new[]
             {
                 new MirBlock(B(0), Array.Empty<MirBlockArgument>(), new MirInstruction[] { condition },
                     new MirBranch(V(0), B(1), Array.Empty<MirValueId>(),
@@ -127,14 +126,13 @@ public sealed class MirControlFlowAnalysisTests
                 new MirBlock(B(4), Array.Empty<MirBlockArgument>(), Array.Empty<MirInstruction>(),
                     new MirJump(B(4), Array.Empty<MirValueId>(), source), source),
             },
-            Values: new[]
+            values: new[]
             {
                 new MirValue(V(0), MirType.Scalar(QType.Bit),
                     MirValueDefinition.InstructionResultAt(B(0), I(0)),
                     source),
             },
-            Storages: Array.Empty<MirArrayStorage>(),
-            Qubits: Array.Empty<MirQubitResource>(),
+            storages: Array.Empty<MirArrayStorage>(),
             source);
         var program = context.Program(callable.Id, new[] { callable });
         var cfg = MirControlFlowAnalysis.Analyze(program, callable.Id);
@@ -161,10 +159,10 @@ public sealed class MirControlFlowAnalysisTests
             C(0),
             "Loop",
             MirCallableKind.Operation,
-            ReturnType: null,
-            Parameters: Array.Empty<MirParameter>(),
-            EntryBlock: B(0),
-            Blocks: new[]
+            returnType: null,
+            parameters: Array.Empty<IMirParameter>(),
+            entryBlock: B(0),
+            blocks: new[]
             {
                 new MirBlock(B(0), Array.Empty<MirBlockArgument>(), new MirInstruction[] { condition },
                     new MirJump(B(1), Array.Empty<MirValueId>(), source), source),
@@ -176,14 +174,13 @@ public sealed class MirControlFlowAnalysisTests
                 new MirBlock(B(3), Array.Empty<MirBlockArgument>(), Array.Empty<MirInstruction>(),
                     new MirReturn(null, source), source),
             },
-            Values: new[]
+            values: new[]
             {
                 new MirValue(V(0), MirType.Scalar(QType.Bit),
                     MirValueDefinition.InstructionResultAt(B(0), I(0)),
                     source),
             },
-            Storages: Array.Empty<MirArrayStorage>(),
-            Qubits: Array.Empty<MirQubitResource>(),
+            storages: Array.Empty<MirArrayStorage>(),
             source);
         var program = context.Program(callable.Id, new[] { callable });
         var cfg = MirControlFlowAnalysis.Analyze(program, callable.Id);
@@ -246,10 +243,10 @@ public sealed class MirControlFlowAnalysisTests
             C(0),
             "Diamond",
             MirCallableKind.Operation,
-            ReturnType: null,
-            Parameters: Array.Empty<MirParameter>(),
-            EntryBlock: B(0),
-            Blocks: new[]
+            returnType: null,
+            parameters: Array.Empty<IMirParameter>(),
+            entryBlock: B(0),
+            blocks: new[]
             {
                 new MirBlock(B(0), Array.Empty<MirBlockArgument>(), new MirInstruction[] { condition },
                     new MirBranch(V(0), B(1), Array.Empty<MirValueId>(),
@@ -266,7 +263,7 @@ public sealed class MirControlFlowAnalysisTests
                 new MirBlock(B(4), Array.Empty<MirBlockArgument>(), new MirInstruction[] { disconnected },
                     new MirReturn(null, source), source),
             },
-            Values: new[]
+            values: new[]
             {
                 new MirValue(V(0), MirType.Scalar(QType.Bit),
                     MirValueDefinition.InstructionResultAt(B(0), I(0)),
@@ -284,8 +281,7 @@ public sealed class MirControlFlowAnalysisTests
                     MirValueDefinition.InstructionResultAt(B(4), I(3)),
                     source),
             },
-            Storages: Array.Empty<MirArrayStorage>(),
-            Qubits: Array.Empty<MirQubitResource>(),
+            storages: Array.Empty<MirArrayStorage>(),
             source);
         return context.Program(callable.Id, new[] { callable });
     }
@@ -297,10 +293,10 @@ public sealed class MirControlFlowAnalysisTests
             id,
             "Main",
             MirCallableKind.Operation,
-            ReturnType: null,
-            Parameters: Array.Empty<MirParameter>(),
-            EntryBlock: entryBlock,
-            Blocks: new[]
+            returnType: null,
+            parameters: Array.Empty<IMirParameter>(),
+            entryBlock: entryBlock,
+            blocks: new[]
             {
                 new MirBlock(
                     entryBlock,
@@ -309,9 +305,8 @@ public sealed class MirControlFlowAnalysisTests
                     new MirReturn(null, source),
                     source),
             },
-            Values: Array.Empty<MirValue>(),
-            Storages: Array.Empty<MirArrayStorage>(),
-            Qubits: Array.Empty<MirQubitResource>(),
+            values: Array.Empty<MirValue>(),
+            storages: Array.Empty<MirArrayStorage>(),
             source);
     }
 

@@ -1,572 +1,1055 @@
 namespace Qora.Ir.Passes;
 
 /// <summary>
-/// Effect analysis — rung ① of the auto-uncompute ladder (① use/def → ② liveness → ③ qfree → ④ inject).
-/// For every LEAF statement (gate, measurement, <c>use</c>) it emits one <see cref="QubitEvent"/> per qubit
-/// operand — <see cref="QubitEventKind.Read"/> (a control or diagonal-gate target: value preserved),
-/// <see cref="QubitEventKind.Write"/> (a target / reset / register birth: value may change), or
-/// <see cref="QubitEventKind.Measure"/> — building each operation's program-ordered use/def stream, plus a
-/// per-operation summary over its formal qubit parameters. PURE analysis: the IR is never changed and no
-/// diagnostics are raised; the event stream and summary are stored on the <see cref="HirSemanticModel"/> keyed
-/// by <c>op.Id</c>. The per-qubit stream (liveness's timeline) and per-statement grouping (entanglement
-/// edges) rung ②/③ need are both READ OFF this one stream.
-///
-/// Runs on VALIDATED, monomorphized IR, which is what makes the classification signature-driven:
-/// argument counts/kinds are already checked (QSEM006), every name in a qubit slot resolves to a declared
-/// register or parameter (QSEM007/QSEM015) — so a text argument in a qubit slot IS a register name
-/// regardless of WHERE the register was allocated — and the call graph is a DAG (QSEM011) so memoized
-/// recursion terminates.
-///
-/// Register births are HOISTED, mirroring the emitter's declaration hoisting: <c>Summarize</c> pre-walks the
-/// op body's TOP LEVEL for every <c>use</c> and records its |0…0⟩ birth first, so a gate may textually precede
-/// its register's <c>use</c> (legal, pinned by ScopeTests) and still write onto the hoisted birth. This
-/// pre-walk therefore DOES lean on <c>use</c> being entry-top-level-only (QSEM012): if that gate is ever lifted
-/// by an allocation-lowering pass, the pre-walk must recurse into container bodies (or the lowering pass must
-/// hoist births before analysis) — until then a nested <c>use</c> fails QINTERNAL-loud at its register's first
-/// touch (the Stamp write-before-birth guard), never silently. Hoisting semantics are depth-independent, so
-/// making the pre-walk recursive is the additive fix when the gate lifts.
+/// Computes each callable's qubit use/definition stream, effect summary, and qubit-version graph from
+/// validated HIR. This pass is read-only with respect to HIR; all derived facts are stored in the
+/// revision-bound semantic model under the callable's <see cref="HirNodeId"/>.
 /// </summary>
 internal static class EffectAnalysis
 {
-    public static void Run(QProgram program, HirSemanticModel model) => new Analyzer(program, model).RunAll();
+    public static void Run(
+        HirProgram program,
+        HirSemanticModel model) =>
+        new Analyzer(program, model).RunAll();
 
-    /// <summary>TEST SEAM (InternalsVisibleTo) for the coherence sweep: lets tests feed a hand-corrupted
-    /// (events, graph) pair to the SAME always-on verifier the pipeline runs — without it the sweep is
-    /// mutation-blind (adversarially confirmed: neutering every Fail path kept the whole suite green).</summary>
-    internal static void VerifySweep(string opName, IReadOnlyCollection<string> qubitParamRegs,
-        List<QubitEvent> events, QubitGraph graph)
-        => Analyzer.VerifyGraphCoherence(opName, qubitParamRegs, events, graph);
+    /// <summary>
+    /// Test seam for feeding a deliberately corrupted event/graph pair through the same invariant verifier
+    /// used by the pipeline.
+    /// </summary>
+    internal static void VerifySweep(
+        string callableName,
+        IReadOnlyCollection<string> qubitParameterRegisters,
+        List<QubitEvent> events,
+        QubitGraph graph) =>
+        Analyzer.VerifyGraphCoherence(
+            callableName,
+            qubitParameterRegisters,
+            events,
+            graph);
 
     private sealed class Analyzer
     {
         private readonly HirSemanticModel _model;
-        private readonly IReadOnlyList<QOperation> _operations;
-        private readonly Dictionary<int, QOperation> _opById;   // for CALL → callee resolution by reference (CalleeOpId)
-        private readonly Dictionary<int, OpEffectSummary> _summaries = new();
+        private readonly IReadOnlyList<HirCallable> _callables;
+        private readonly Dictionary<HirNodeId, HirCallable> _callableById;
+        private readonly Dictionary<HirNodeId, OpEffectSummary> _summaries = new();
 
-        public Analyzer(QProgram program, HirSemanticModel model)
+        public Analyzer(
+            HirProgram program,
+            HirSemanticModel model)
         {
             _model = model;
-            _operations = program.Operations;
-            _opById = program.Operations.ToDictionary(o => o.Id);
+            _callables = program.Callables;
+            _callableById =
+                program.Callables.ToDictionary(callable => callable.Id);
         }
 
         public void RunAll()
         {
-            foreach (var op in _operations) Summarize(op.Id);
+            foreach (var callable in _callables)
+                Summarize(callable.Id);
         }
 
-        private OpEffectSummary Summarize(int operationId)
+        private OpEffectSummary Summarize(HirNodeId callableId)
         {
-            if (_summaries.TryGetValue(operationId, out var cached)) return cached;
-            if (!_opById.TryGetValue(operationId, out var op))
+            if (_summaries.TryGetValue(callableId, out var cached))
+                return cached;
+
+            if (!_callableById.TryGetValue(callableId, out var callable))
+            {
                 throw new InvalidOperationException(
-                    $"effect analysis: dangling operation identity {operationId}");
-            // THIS op's own stream + graph (a callee's are separate); param seeds give first uses an origin
-            var log = new OpEventLog(op.Params.Where(p => p.Type == QType.Qubit).Select(p => p.Name));
-            // Registers are HOISTED, exactly like the emitter's declaration hoisting: every `use` allocates
-            // at op start, so its |0…0⟩ birth is recorded BEFORE any gate — a gate may textually precede its
-            // register's `use` (legal, pinned by ScopeTests) and still write onto the hoisted birth. Each
-            // birth keeps its `use` statement's Id; only its Order moves to the front.
-            foreach (var stmt in op.Body)
-                if (stmt is QUse u)
-                {
-                    var born = new QubitRef(u.Name, null);
-                    log.Record(u.Id, new HashSet<QubitRef> { born }, new HashSet<QubitRef> { born },
-                        new HashSet<QubitRef>(), new HashSet<QubitRef>(), irreversible: false, birth: true);
-                }
-            var (touched, modified, nonQfreeWrites, measured, irreversible) = AnalyzeBlock(op.Body, log);
-            // Only effects on FORMAL qubit parameters escape the op; locals from `use` are op-private
-            // (they are the ancilla candidates the liveness rung will hunt for).
-            var paramNames = op.Params.Where(p => p.Type == QType.Qubit).Select(p => p.Name).ToHashSet();
-            var summary = new OpEffectSummary(
-                touched.Where(r => paramNames.Contains(r.Reg)).ToHashSet(),
-                modified.Where(r => paramNames.Contains(r.Reg)).ToHashSet(),
-                nonQfreeWrites.Where(r => paramNames.Contains(r.Reg)).ToHashSet(),
-                measured.Where(r => paramNames.Contains(r.Reg)).ToHashSet(),
-                irreversible);
-            _summaries[operationId] = summary;
-            VerifyGraphCoherence(op.Name, paramNames, log.Events, log.Graph);   // fail-loud BEFORE anything lands on the model
-            _model.AddOpEffects(op.Id, summary);
-            _model.AddQubitEvents(op.Id, log.Events);
-            _model.AddQubitGraph(op.Id, log.Graph);
+                    $"effect analysis: dangling callable identity {callableId}");
+            }
+
+            var qubitParameters =
+                callable.Parameters
+                    .Where(parameter => parameter.Type == QType.Qubit)
+                    .ToArray();
+            var log =
+                new CallableEventLog(
+                    qubitParameters.Select(parameter => parameter.Name));
+
+            // Local qubit declarations are hoisted by the current language contract. Record their births
+            // before the source-ordered walk, while retaining the declaration statement's identity.
+            foreach (var statement in callable.Body)
+            {
+                if (statement is not HirQubitDeclarationStatement declaration)
+                    continue;
+
+                var born = new QubitRef(declaration.Name, null);
+                log.Record(
+                    declaration.Id,
+                    new HashSet<QubitRef> { born },
+                    new HashSet<QubitRef> { born },
+                    new HashSet<QubitRef>(),
+                    new HashSet<QubitRef>(),
+                    irreversible: false,
+                    birth: true);
+            }
+
+            var (
+                touched,
+                modified,
+                nonQfreeWrites,
+                measured,
+                irreversible) =
+                AnalyzeBlock(callable.Body, log);
+
+            var parameterNames =
+                qubitParameters
+                    .Select(parameter => parameter.Name)
+                    .ToHashSet();
+            var summary =
+                new OpEffectSummary(
+                    touched
+                        .Where(reference => parameterNames.Contains(reference.Reg))
+                        .ToHashSet(),
+                    modified
+                        .Where(reference => parameterNames.Contains(reference.Reg))
+                        .ToHashSet(),
+                    nonQfreeWrites
+                        .Where(reference => parameterNames.Contains(reference.Reg))
+                        .ToHashSet(),
+                    measured
+                        .Where(reference => parameterNames.Contains(reference.Reg))
+                        .ToHashSet(),
+                    irreversible);
+
+            _summaries[callableId] = summary;
+
+            VerifyGraphCoherence(
+                callable.Name,
+                parameterNames,
+                log.Events,
+                log.Graph);
+
+            _model.AddOpEffects(callable.Id, summary);
+            _model.AddQubitEvents(callable.Id, log.Events);
+            _model.AddQubitGraph(callable.Id, log.Graph);
             return summary;
         }
 
-        // AnalyzeBlock/AnalyzeStmt do double duty: they RETURN the aggregated (touched, modified, nonQfreeWrites,
-        // measured, irr) their caller unions for the operation summary, AND emit each LEAF statement's per-qubit
-        // events into `log` (containers emit none of their own — their children carry the precise per-gate detail).
-        private (HashSet<QubitRef> Touched, HashSet<QubitRef> Modified, HashSet<QubitRef> NonQfreeWrites, HashSet<QubitRef> Measured, bool Irreversible)
-            AnalyzeBlock(IReadOnlyList<QStmt> body, OpEventLog log)
+        private (
+            HashSet<QubitRef> Touched,
+            HashSet<QubitRef> Modified,
+            HashSet<QubitRef> NonQfreeWrites,
+            HashSet<QubitRef> Measured,
+            bool Irreversible) AnalyzeBlock(
+                IReadOnlyList<HirStatement> body,
+                CallableEventLog log)
         {
             var touched = new HashSet<QubitRef>();
             var modified = new HashSet<QubitRef>();
             var nonQfreeWrites = new HashSet<QubitRef>();
             var measured = new HashSet<QubitRef>();
             var irreversible = false;
-            foreach (var stmt in body)
+
+            foreach (var statement in body)
             {
-                var (t, m, s, me, irr) = AnalyzeStmt(stmt, log);
-                touched.UnionWith(t);
-                modified.UnionWith(m);
-                nonQfreeWrites.UnionWith(s);
-                measured.UnionWith(me);
-                irreversible |= irr;
+                var (
+                    statementTouched,
+                    statementModified,
+                    statementNonQfreeWrites,
+                    statementMeasured,
+                    statementIrreversible) =
+                    AnalyzeStatement(statement, log);
+
+                touched.UnionWith(statementTouched);
+                modified.UnionWith(statementModified);
+                nonQfreeWrites.UnionWith(statementNonQfreeWrites);
+                measured.UnionWith(statementMeasured);
+                irreversible |= statementIrreversible;
             }
-            return (touched, modified, nonQfreeWrites, measured, irreversible);
+
+            return (
+                touched,
+                modified,
+                nonQfreeWrites,
+                measured,
+                irreversible);
         }
 
-        private (HashSet<QubitRef> Touched, HashSet<QubitRef> Modified, HashSet<QubitRef> NonQfreeWrites, HashSet<QubitRef> Measured, bool Irreversible)
-            AnalyzeStmt(QStmt stmt, OpEventLog log)
+        private (
+            HashSet<QubitRef> Touched,
+            HashSet<QubitRef> Modified,
+            HashSet<QubitRef> NonQfreeWrites,
+            HashSet<QubitRef> Measured,
+            bool Irreversible) AnalyzeStatement(
+                HirStatement statement,
+                CallableEventLog log)
         {
-            HashSet<QubitRef> touched = new(), modified = new(), nonQfreeWrites = new(), measured = new();
-            var irreversible = false;
-            var leaf = false;      // directly contacts qubits ⇒ emits its own events; containers do not
-
-            switch (stmt)
-            {
-                case QUse:
-                    // the birth was already recorded HOISTED at op start (see Summarize) — the textual
-                    // statement itself contributes nothing further to the stream or the summaries
-                    break;
-
-                case QGate g:
-                    (touched, modified, nonQfreeWrites, measured, irreversible) = AnalyzeGate(g);
-                    leaf = true;
-                    break;
-
-                case QDecl { Value: QMeasure m }:
-                    ApplyMeasure(m, touched, modified, measured);
-                    irreversible = true;
-                    leaf = true;
-                    break;
-
-                case QAssign { Value: QMeasure m }:
-                    ApplyMeasure(m, touched, modified, measured);
-                    irreversible = true;
-                    leaf = true;
-                    break;
-
-                // A measurement may also sit inside an ARRAY LITERAL element (`var r: bit[] = [M(q[1]), 0]`)
-                // — the same collapse as the direct form, and it must land in the same summaries, or the
-                // measured (possibly entangled) qubit would be judged a safe cleanup candidate and the
-                // uncompute ladder would plan around wrong facts.
-                case QDecl { Value: QArrayLiteral dl } when dl.Elements.Any(e => e is QMeasure):
-                    foreach (var element in dl.Elements.OfType<QMeasure>())
-                        ApplyMeasure(element, touched, modified, measured);
-                    irreversible = true;
-                    leaf = true;
-                    break;
-
-                case QAssign { Value: QArrayLiteral al } when al.Elements.Any(e => e is QMeasure):
-                    foreach (var element in al.Elements.OfType<QMeasure>())
-                        ApplyMeasure(element, touched, modified, measured);
-                    irreversible = true;
-                    leaf = true;
-                    break;
-
-                // containers aggregate their children conservatively (union over all paths)
-                case QIf i:
-                    var (tt, tm, ts, tme, ti) = AnalyzeBlock(i.Then, log);
-                    var (et, em, es, eme, ei) = AnalyzeBlock(i.Else, log);
-                    touched.UnionWith(tt); touched.UnionWith(et);
-                    modified.UnionWith(tm); modified.UnionWith(em);
-                    nonQfreeWrites.UnionWith(ts); nonQfreeWrites.UnionWith(es);
-                    measured.UnionWith(tme); measured.UnionWith(eme);
-                    irreversible = ti || ei;
-                    break;
-
-                case QFor f:
-                    (touched, modified, nonQfreeWrites, measured, irreversible) = AnalyzeBlock(f.Body, log);
-                    break;
-
-                case QWhile w:
-                    (touched, modified, nonQfreeWrites, measured, irreversible) = AnalyzeBlock(w.Body, log);
-                    break;
-
-                case QRepeat r:
-                    (touched, modified, nonQfreeWrites, measured, irreversible) = AnalyzeBlock(r.Body, log);
-                    break;
-
-                // purely classical QDecl/QAssign: no qubit contact. The measurement-bit → later-if
-                // dataflow edge is already recorded by Symbol.Uses — not duplicated here.
-                default:
-                    break;
-            }
-
-            if (leaf) log.Record(stmt.Id, touched, modified, nonQfreeWrites, measured, irreversible);
-            return (touched, modified, nonQfreeWrites, measured, irreversible);
-        }
-
-        private (HashSet<QubitRef> Touched, HashSet<QubitRef> Modified, HashSet<QubitRef> NonQfreeWrites, HashSet<QubitRef> Measured, bool Irreversible)
-            AnalyzeGate(QGate g)
-        {
-            // Controlled on a user op is impossible here because QSEM002 rejected it. A call is bound to its
-            // callee by REFERENCE (CalleeOpId, set at name resolution):
-            // `CalleeOpId is int` means user-op call, and we follow the reference rather than re-matching a
-            // name that shifts across mono/mangle domains.
-            if (g.CalleeOpId is int calleeId)
-            {
-                // The reference must resolve within THIS analyzed program; a dangling Id is an internal
-                // inconsistency (a rewrite dropped the callee or forgot to re-point), never a valid input.
-                if (!_opById.TryGetValue(calleeId, out var callee))
-                    throw new System.InvalidOperationException(
-                        $"effect analysis: call `{g.Name}` binds CalleeOpId {calleeId}, but no such operation exists — a stale/dangling callee reference");
-                // A source modifier on a user call would change its positional signature. Validation rejects
-                // that form, so seeing it here is an internal pipeline inconsistency.
-                if (g.Modifiers.Count > 0)
-                    throw new System.InvalidOperationException(
-                        $"effect analysis: user-op call `{g.Name}` carries unsupported source modifiers [{string.Join(", ", g.Modifiers)}]; QSEM002 should have rejected it before analysis");
-                var summary = Summarize(callee.Id);
-                return (Project(summary.ParamTouched, callee, g.Args),
-                        Project(summary.ParamModified, callee, g.Args),
-                        Project(summary.ParamModifiedNonQfree, callee, g.Args),
-                        Project(summary.ParamMeasured, callee, g.Args),
-                        summary.Irreversible);
-            }
-
             var touched = new HashSet<QubitRef>();
             var modified = new HashSet<QubitRef>();
-            // INVARIANT: a name that is neither a user op nor a built-in gate is exactly QSEM007's rejection
-            // predicate, so it can never reach here on clean IR. Returning empty effects would be a silent
-            // under-approximation (the statement would look like it touches nothing); fail loud instead.
-            if (!QoraGates.Gates.TryGetValue(g.Name, out var info))
-                throw new System.InvalidOperationException(
-                    $"effect analysis: `{g.Name}` is neither a user operation nor a built-in gate; QSEM007 should have rejected it before analysis");
+            var nonQfreeWrites = new HashSet<QubitRef>();
+            var measured = new HashSet<QubitRef>();
+            var irreversible = false;
+            var isLeaf = false;
 
-            var qubitArgs = info.AngleFirst ? g.Args.Skip(1).ToList() : g.Args.ToList();
-
-            if (!info.Unitary)
+            switch (statement)
             {
-                // reset-like: every operand is re-prepared to |0⟩ — modified, and the transition is lossy
-                // (but NOT a superposition write: reset forces a basis state, it does not superpose)
-                foreach (var arg in qubitArgs)
+                case HirQubitDeclarationStatement:
+                    // Its hoisted birth was already recorded by Summarize.
+                    break;
+
+                case HirCallStatement call:
+                    (
+                        touched,
+                        modified,
+                        nonQfreeWrites,
+                        measured,
+                        irreversible) =
+                        AnalyzeCall(call);
+                    isLeaf = true;
+                    break;
+
+                case HirVariableDeclarationStatement declaration:
+                    isLeaf =
+                        ApplyMeasurements(
+                            declaration.Value,
+                            touched,
+                            modified,
+                            measured);
+                    irreversible = isLeaf;
+                    break;
+
+                case HirAssignmentStatement assignment:
+                    isLeaf =
+                        ApplyMeasurements(
+                            assignment.Value,
+                            touched,
+                            modified,
+                            measured);
+                    irreversible = isLeaf;
+                    break;
+
+                case HirIfStatement @if:
                 {
-                    var r = RefOf(arg);
-                    touched.Add(r);
-                    modified.Add(r);
+                    // The guard runs before either branch. Record every measurement occurrence separately
+                    // so two M(...) nodes in one condition remain two ordered qubit versions instead of one
+                    // co-written event group.
+                    var conditionIrreversible =
+                        ApplyConditionMeasurements(
+                            @if.Condition,
+                            @if.Id,
+                            log,
+                            touched,
+                            modified,
+                            measured);
+                    var (
+                        thenTouched,
+                        thenModified,
+                        thenNonQfreeWrites,
+                        thenMeasured,
+                        thenIrreversible) =
+                        AnalyzeBlock(@if.Then, log);
+                    var (
+                        elseTouched,
+                        elseModified,
+                        elseNonQfreeWrites,
+                        elseMeasured,
+                        elseIrreversible) =
+                        AnalyzeBlock(@if.Else, log);
+
+                    touched.UnionWith(thenTouched);
+                    touched.UnionWith(elseTouched);
+                    modified.UnionWith(thenModified);
+                    modified.UnionWith(elseModified);
+                    nonQfreeWrites.UnionWith(thenNonQfreeWrites);
+                    nonQfreeWrites.UnionWith(elseNonQfreeWrites);
+                    measured.UnionWith(thenMeasured);
+                    measured.UnionWith(elseMeasured);
+                    irreversible =
+                        conditionIrreversible
+                        || thenIrreversible
+                        || elseIrreversible;
+                    break;
                 }
-                return (touched, modified, new HashSet<QubitRef>(), new HashSet<QubitRef>(), true);
+
+                case HirForStatement @for:
+                    (
+                        touched,
+                        modified,
+                        nonQfreeWrites,
+                        measured,
+                        irreversible) =
+                        AnalyzeBlock(@for.Body, log);
+                    break;
+
+                case HirWhileStatement @while:
+                {
+                    // A while guard is evaluated before its body. The event stream is a conservative
+                    // one-pass timeline, so it records that source order once while the summary still
+                    // denotes effects that may happen on any iteration.
+                    var conditionIrreversible =
+                        ApplyConditionMeasurements(
+                            @while.Condition,
+                            @while.Id,
+                            log,
+                            touched,
+                            modified,
+                            measured);
+                    var (
+                        bodyTouched,
+                        bodyModified,
+                        bodyNonQfreeWrites,
+                        bodyMeasured,
+                        bodyIrreversible) =
+                        AnalyzeBlock(@while.Body, log);
+
+                    touched.UnionWith(bodyTouched);
+                    modified.UnionWith(bodyModified);
+                    nonQfreeWrites.UnionWith(bodyNonQfreeWrites);
+                    measured.UnionWith(bodyMeasured);
+                    irreversible =
+                        conditionIrreversible
+                        || bodyIrreversible;
+                    break;
+                }
+
+                case HirRepeatStatement repeat:
+                {
+                    // A repeat body executes before its until guard, so analyze and record the body first.
+                    (
+                        touched,
+                        modified,
+                        nonQfreeWrites,
+                        measured,
+                        irreversible) =
+                        AnalyzeBlock(repeat.Body, log);
+                    irreversible |=
+                        ApplyConditionMeasurements(
+                            repeat.Until,
+                            repeat.Id,
+                            log,
+                            touched,
+                            modified,
+                            measured);
+                    break;
+                }
             }
 
-            // leading slots are controls (gate's own + one per Controlled functor): steering only,
-            // their basis value is preserved. Diagonal gates preserve every target's basis value too
-            // (phase kickback is the gate table's Diagonal flag's problem, not Modified's).
-            var controls = info.Controls
-                + g.Modifiers.Count(modifier => modifier == QGateModifier.Controlled);
-            for (var i = 0; i < qubitArgs.Count; i++)
+            if (isLeaf)
             {
-                var r = RefOf(qubitArgs[i]);
-                touched.Add(r);
-                if (i >= controls && !info.Diagonal) modified.Add(r);
+                log.Record(
+                    statement.Id,
+                    touched,
+                    modified,
+                    nonQfreeWrites,
+                    measured,
+                    irreversible);
             }
-            // A non-qfree gate (H/Rx/Ry superposition, OR Y/CY phase-permutation) makes every value it WRITES
-            // un-uncomputable; controls and diagonal targets are Reads (not modified), so they never carry it.
-            var nonQfreeWrites = info.NonQfree ? new HashSet<QubitRef>(modified) : new HashSet<QubitRef>();
-            return (touched, modified, nonQfreeWrites, new HashSet<QubitRef>(), false);
+
+            return (
+                touched,
+                modified,
+                nonQfreeWrites,
+                measured,
+                irreversible);
         }
 
-        /// <summary>Rewrite a callee summary's formal-parameter refs into the caller's actual registers.</summary>
-        private static HashSet<QubitRef> Project(
-            IReadOnlySet<QubitRef> refs, QOperation callee, IReadOnlyList<QArg> args)
+        /// <summary>
+        /// Adds condition-measurement effects to a compound statement's aggregate and records each source
+        /// measurement as its own event transaction. Keeping occurrences separate preserves their source
+        /// evaluation order and prevents independent measurements in one condition from being represented
+        /// as one artificial co-write in the qubit graph.
+        /// </summary>
+        private static bool ApplyConditionMeasurements(
+            HirExpression condition,
+            HirNodeId ownerStatementId,
+            CallableEventLog log,
+            HashSet<QubitRef> aggregateTouched,
+            HashSet<QubitRef> aggregateModified,
+            HashSet<QubitRef> aggregateMeasured)
         {
-            var result = new HashSet<QubitRef>();
-            // INVARIANT: QSEM006 guarantees arg count == param count for every user-op call, so the loop
-            // visits every qubit param. If they ever diverged, trailing params would silently vanish from
-            // the caller's effect set (a silent under-approximation); fail loud rather than under-report.
-            if (args.Count != callee.Params.Count)
-                throw new System.InvalidOperationException(
-                    $"effect analysis: call to `{callee.Name}` has {args.Count} argument(s) for {callee.Params.Count} parameter(s); QSEM006 should have caught the mismatch before analysis");
-            for (var i = 0; i < callee.Params.Count && i < args.Count; i++)
+            var found = false;
+
+            foreach (var measurement in
+                     HirExpressions
+                         .DescendantsAndSelf(condition)
+                         .OfType<HirMeasurementExpression>())
             {
-                var param = callee.Params[i];
-                if (param.Type != QType.Qubit) continue;
-                switch (args[i])
+                var occurrenceTouched = new HashSet<QubitRef>();
+                var occurrenceModified = new HashSet<QubitRef>();
+                var occurrenceMeasured = new HashSet<QubitRef>();
+                _ = ApplyMeasurements(
+                    measurement,
+                    occurrenceTouched,
+                    occurrenceModified,
+                    occurrenceMeasured);
+
+                aggregateTouched.UnionWith(occurrenceTouched);
+                aggregateModified.UnionWith(occurrenceModified);
+                aggregateMeasured.UnionWith(occurrenceMeasured);
+                log.Record(
+                    ownerStatementId,
+                    occurrenceTouched,
+                    occurrenceModified,
+                    new HashSet<QubitRef>(),
+                    occurrenceMeasured,
+                    irreversible: true);
+                found = true;
+            }
+
+            return found;
+        }
+
+        private (
+            HashSet<QubitRef> Touched,
+            HashSet<QubitRef> Modified,
+            HashSet<QubitRef> NonQfreeWrites,
+            HashSet<QubitRef> Measured,
+            bool Irreversible) AnalyzeCall(
+                HirCallStatement statement)
+        {
+            var call = statement.Call;
+
+            if (call.CalleeId is HirNodeId calleeId)
+            {
+                if (!_callableById.TryGetValue(calleeId, out var callee))
                 {
-                    case QTextArg whole: // whole register actual: indices carry over 1:1
-                        // a bare register argument is a QNameRef since lowering (QSEM006 rejects anything
-                        // else in a qubit slot); render covers malformed hand-built IR without crashing.
-                        var wholeName = whole.Tree is QNameRef nr ? nr.Name : QNodes.Render(whole.Tree);
-                        foreach (var r in refs)
-                            if (r.Reg == param.Name) result.Add(r with { Reg = wholeName });
+                    throw new InvalidOperationException(
+                        $"effect analysis: call `{call.Name}` binds CalleeId {calleeId}, "
+                        + "but no such callable exists");
+                }
+
+                if (statement.Modifiers.Count > 0)
+                {
+                    throw new InvalidOperationException(
+                        $"effect analysis: user-call `{call.Name}` carries unsupported "
+                        + $"source modifiers [{string.Join(", ", statement.Modifiers)}]");
+                }
+
+                var summary = Summarize(callee.Id);
+                return (
+                    Project(
+                        summary.ParamTouched,
+                        callee,
+                        call.Arguments),
+                    Project(
+                        summary.ParamModified,
+                        callee,
+                        call.Arguments),
+                    Project(
+                        summary.ParamModifiedNonQfree,
+                        callee,
+                        call.Arguments),
+                    Project(
+                        summary.ParamMeasured,
+                        callee,
+                        call.Arguments),
+                    summary.Irreversible);
+            }
+
+            if (!QoraGates.Gates.TryGetValue(call.Name, out var gate))
+            {
+                throw new InvalidOperationException(
+                    $"effect analysis: `{call.Name}` is neither a resolved user callable "
+                    + "nor a built-in gate");
+            }
+
+            var qubitArguments =
+                gate.AngleFirst
+                    ? call.Arguments.Skip(1).ToArray()
+                    : call.Arguments.ToArray();
+            var touched = new HashSet<QubitRef>();
+            var modified = new HashSet<QubitRef>();
+
+            if (!gate.Unitary)
+            {
+                foreach (var argument in qubitArguments)
+                {
+                    var reference = RefOf(argument);
+                    touched.Add(reference);
+                    modified.Add(reference);
+                }
+
+                return (
+                    touched,
+                    modified,
+                    new HashSet<QubitRef>(),
+                    new HashSet<QubitRef>(),
+                    Irreversible: true);
+            }
+
+            var controls =
+                gate.Controls
+                + statement.Modifiers.Count(
+                    modifier => modifier == QGateModifier.Controlled);
+
+            for (var index = 0; index < qubitArguments.Length; index++)
+            {
+                var reference = RefOf(qubitArguments[index]);
+                touched.Add(reference);
+                if (index >= controls && !gate.Diagonal)
+                    modified.Add(reference);
+            }
+
+            var nonQfreeWrites =
+                gate.NonQfree
+                    ? new HashSet<QubitRef>(modified)
+                    : new HashSet<QubitRef>();
+
+            return (
+                touched,
+                modified,
+                nonQfreeWrites,
+                new HashSet<QubitRef>(),
+                Irreversible: false);
+        }
+
+        /// <summary>
+        /// Rewrites a callee summary's formal qubit references into the caller's actual HIR operands.
+        /// </summary>
+        private static HashSet<QubitRef> Project(
+            IReadOnlySet<QubitRef> references,
+            HirCallable callee,
+            IReadOnlyList<HirArgument> arguments)
+        {
+            if (arguments.Count != callee.Parameters.Count)
+            {
+                throw new InvalidOperationException(
+                    $"effect analysis: call to `{callee.Name}` has {arguments.Count} "
+                    + $"argument(s) for {callee.Parameters.Count} parameter(s)");
+            }
+
+            var result = new HashSet<QubitRef>();
+
+            for (var index = 0; index < callee.Parameters.Count; index++)
+            {
+                var parameter = callee.Parameters[index];
+                if (parameter.Type != QType.Qubit)
+                    continue;
+
+                switch (arguments[index].Expression)
+                {
+                    case HirNameExpression whole:
+                        foreach (var reference in references)
+                        {
+                            if (reference.Reg == parameter.Name)
+                                result.Add(reference with { Reg = whole.Name });
+                        }
                         break;
-                    case QQubitArg single: // single-qubit binding: everything done to the param lands here
-                        // INVARIANT: a QQubitArg actual binds only to a SINGLE-qubit param (QSEM006), whose
-                        // refs are all whole-register (Index=null) — a single qubit cannot be indexed
-                        // (QSEM016). So collapsing every ref onto `target` loses no index. A ref carrying a
-                        // concrete index here would mean an indexed effect leaked into a single-qubit param;
-                        // collapsing it would silently retarget the wrong qubit — fail loud instead.
-                        var target = RefOf(single);
-                        foreach (var r in refs)
-                            if (r.Reg == param.Name)
+
+                    case HirIndexExpression element:
+                    {
+                        var target = RefOf(element);
+                        foreach (var reference in references)
+                        {
+                            if (reference.Reg != parameter.Name)
+                                continue;
+                            if (reference.Index is not null)
                             {
-                                if (r.Index is not null)
-                                    throw new System.InvalidOperationException(
-                                        $"effect analysis: single-qubit binding of `{param.Name}` carries an indexed effect `{r}`; QSEM016 should have rejected indexing a single qubit");
-                                result.Add(target);
+                                throw new InvalidOperationException(
+                                    "effect analysis: a single-qubit actual received an "
+                                    + $"indexed effect `{reference}` from `{parameter.Name}`");
                             }
+
+                            result.Add(target);
+                        }
                         break;
+                    }
+
+                    default:
+                        throw new InvalidOperationException(
+                            "effect analysis: a validated qubit argument is neither a "
+                            + "register name nor an indexed register element");
                 }
             }
+
             return result;
         }
 
-        private static void ApplyMeasure(QMeasure m, HashSet<QubitRef> touched, HashSet<QubitRef> modified,
+        private static bool ApplyMeasurements(
+            HirExpression expression,
+            HashSet<QubitRef> touched,
+            HashSet<QubitRef> modified,
             HashSet<QubitRef> measured)
         {
-            var r = RefOfTarget(m.Target);
-            touched.Add(r);
-            modified.Add(r);
-            measured.Add(r);
+            var found = false;
+
+            foreach (var measurement in
+                     HirExpressions
+                         .DescendantsAndSelf(expression)
+                         .OfType<HirMeasurementExpression>())
+            {
+                var reference = RefOf(measurement.Target);
+                touched.Add(reference);
+                modified.Add(reference);
+                measured.Add(reference);
+                found = true;
+            }
+
+            return found;
         }
 
-        /// <summary>A literal index stays precise; every non-literal expression is conservatively blanketed
-        /// to the whole register. The expression was parsed once at lowering and is inspected structurally;
-        /// effect analysis deliberately does not try to re-evaluate it.</summary>
-        /// <summary>A measurement target (QNameRef for a whole single qubit, QIndexNode for an element)
-        /// reduced to a QubitRef with the SAME literal-vs-blanket split <see cref="RefOf"/> makes.</summary>
-        private static QubitRef RefOfTarget(QNode target) => QNodes.IndexOf(target) switch
-        {
-            QNumLit { Value: >= int.MinValue and <= int.MaxValue } n => new QubitRef(QNodes.RegOf(target), (int)n.Value),
-            _ => new QubitRef(QNodes.RegOf(target), null),
-        };
+        /// <summary>
+        /// Preserves a literal element index and conservatively blankets every dynamic index to its whole
+        /// register. Validation guarantees that the receiver is a direct register name.
+        /// </summary>
+        private static QubitRef RefOf(HirArgument argument) =>
+            RefOf(argument.Expression);
 
-        private static QubitRef RefOf(QArg arg) => arg switch
-        {
-            QQubitArg { Index: QNumLit { Value: >= int.MinValue and <= int.MaxValue } n } q =>
-                new QubitRef(q.Reg, (int)n.Value),
-            QQubitArg q => new QubitRef(q.Reg, null),
-            QTextArg { Tree: QNameRef nr } => new QubitRef(nr.Name, null),
-            QTextArg t => new QubitRef(QNodes.Render(t.Tree), null),   // malformed hand-built IR, rendered
-            _ => throw new System.InvalidOperationException($"unexpected argument kind: {arg}"),
-        };
+        private static QubitRef RefOf(HirExpression expression) =>
+            expression switch
+            {
+                HirNameExpression name =>
+                    new QubitRef(name.Name, null),
 
-        /// <summary>One operation's growing event stream AND its qubit graph, written by the SAME hand in the
-        /// same pass: each leaf statement's events are stamped with the value-version node they touch
-        /// (Write/Measure → the node born here, 1:1; Read → the source's then-current node), and each new
-        /// node's parent edges are recorded at the same moment — relations are written down when the analyzer
-        /// KNOWS them, never re-derived by consumers from the flat timeline (the re-derivation is where three
-        /// adversarially-confirmed soundness holes lived). A fresh log is made per <see cref="Summarize"/> so
-        /// a callee's stream never interleaves with its caller's.</summary>
-        private sealed class OpEventLog
+                HirIndexExpression
+                {
+                    Receiver: HirNameExpression register,
+                    Index: HirIntegerLiteralExpression
+                    {
+                        Value: >= int.MinValue and <= int.MaxValue,
+                    } index,
+                } =>
+                    new QubitRef(register.Name, (int)index.Value),
+
+                HirIndexExpression
+                {
+                    Receiver: HirNameExpression register,
+                } =>
+                    new QubitRef(register.Name, null),
+
+                _ =>
+                    throw new InvalidOperationException(
+                        $"effect analysis: unsupported qubit operand `{HirExpressions.Render(expression)}`"),
+            };
+
+        /// <summary>
+        /// One callable's growing event stream and qubit graph. Each write event creates its version node
+        /// in the same transaction, while a read event links to the then-current version.
+        /// </summary>
+        private sealed class CallableEventLog
         {
             public readonly List<QubitEvent> Events = new();
             public readonly QubitGraph Graph = new();
+
             private int _order;
 
-            /// <summary>A qubit parameter's initial value comes from OUTSIDE the op — seed a v0 node per
-            /// param register so its first use has a recorded origin.</summary>
-            public OpEventLog(IEnumerable<string> qubitParamRegs)
+            public CallableEventLog(
+                IEnumerable<string> qubitParameterRegisters)
             {
-                foreach (var reg in qubitParamRegs) Graph.AddSeed(reg);
+                foreach (var register in qubitParameterRegisters)
+                    Graph.AddSeed(register);
             }
 
-            /// <summary>Record one leaf statement — one event per qubit it touched, its Kind decided by the
-            /// per-qubit sets: a qubit in <paramref name="measured"/> is a <see cref="QubitEventKind.Measure"/>
-            /// (whether measured directly by <c>M</c> or transitively through a call), a modified
-            /// (value-changing) qubit is <see cref="QubitEventKind.Write"/>, anything else touched is
-            /// <see cref="QubitEventKind.Read"/> (a control or diagonal-gate target). <paramref name="irreversible"/>
-            /// is the statement's irreversibility (a reset, or a call that transitively measures/resets); it
-            /// stamps NON-measured WRITES only — reversing a write during future MIR cleanup requires a
-            /// reversible statement, while a read through an irreversible statement is harmless and a
-            /// measured qubit carries its irreversibility in its Kind. <paramref name="nonQfreeWrites"/> stamp
-            /// <c>NonQfree</c> on the matching Writes. Graph nodes/edges for the statement are
-            /// created in the same call (see <see cref="Stamp"/>).</summary>
-            public void Record(int stmtId, HashSet<QubitRef> touched, HashSet<QubitRef> modified,
-                HashSet<QubitRef> nonQfreeWrites, HashSet<QubitRef> measured, bool irreversible, bool birth = false)
-            {
-                var refs = new List<(QubitRef R, QubitEventKind Kind, bool Irr, bool NonQfree)>();
-                foreach (var r in touched)
-                {
-                    var isMeasured = measured.Contains(r);
-                    var isModified = modified.Contains(r);
-                    var kind = isMeasured ? QubitEventKind.Measure
-                             : isModified ? QubitEventKind.Write
-                             : QubitEventKind.Read;
-                    refs.Add((r, kind, irreversible && isModified && !isMeasured, nonQfreeWrites.Contains(r)));
-                }
-                Stamp(stmtId, refs, birth);
-            }
-
-            /// <summary>The core recorder: one statement's refs → graph nodes + linked events, all resolved
-            /// against the PRE-statement state. Parent edges of each new version: the qubit's own previous
-            /// version, every read source, and every co-written partner's previous version (gate-level
-            /// analysis cannot tell which co-written operand a value flowed from — all are parents,
-            /// conservatively). Each edge carries the ACCESS ref (<see cref="QubitEdge.Via"/>) so a blanketed
-            /// read keeps its conservative breadth even when it resolves to a narrower version node.</summary>
-            private void Stamp(int stmtId, List<(QubitRef R, QubitEventKind Kind, bool Irr, bool NonQfree)> refs,
+            public void Record(
+                HirNodeId statementId,
+                HashSet<QubitRef> touched,
+                HashSet<QubitRef> modified,
+                HashSet<QubitRef> nonQfreeWrites,
+                HashSet<QubitRef> measured,
+                bool irreversible,
                 bool birth = false)
             {
-                // 1) the PRE-statement current version of every touched ref
-                var current = new Dictionary<QubitRef, int?>();
-                foreach (var (r, _, _, _) in refs) current[r] = CurrentNode(r);
+                var references =
+                    new List<(
+                        QubitRef Reference,
+                        QubitEventKind Kind,
+                        bool Irreversible,
+                        bool NonQfree)>();
 
-                // 2) new version nodes for the written refs
-                var born = new Dictionary<QubitRef, int>();
-                foreach (var (r, kind, _, _) in refs)
+                foreach (var reference in touched)
                 {
-                    if (kind == QubitEventKind.Read) continue;
-                    // INVARIANT the verdict's birth exemption stands on: "a parentless write node ⟺ the
-                    // register's `use` birth". A non-birth write with no prior version and no seed would
-                    // mint a parentless impostor the exemption would wave through — fail loud instead
-                    // (mirrors the read-before-birth guard below).
-                    if (!birth && current[r] is null && Graph.ParamSeed(r.Reg) is null)
-                        throw new System.InvalidOperationException(
-                            $"QINTERNAL: effect analysis wrote `{r}` before any birth — only a `use` may create a register's first version");
-                    var parents = new List<QubitEdge>();
-                    void Add(int? id, QubitRef via)
+                    var isMeasured = measured.Contains(reference);
+                    var isModified = modified.Contains(reference);
+                    var kind =
+                        isMeasured
+                            ? QubitEventKind.Measure
+                            : isModified
+                                ? QubitEventKind.Write
+                                : QubitEventKind.Read;
+
+                    references.Add(
+                        (
+                            reference,
+                            kind,
+                            irreversible && isModified && !isMeasured,
+                            nonQfreeWrites.Contains(reference)));
+                }
+
+                Stamp(statementId, references, birth);
+            }
+
+            private void Stamp(
+                HirNodeId statementId,
+                List<(
+                    QubitRef Reference,
+                    QubitEventKind Kind,
+                    bool Irreversible,
+                    bool NonQfree)> references,
+                bool birth)
+            {
+                var current =
+                    new Dictionary<QubitRef, int?>();
+
+                foreach (var (reference, _, _, _) in references)
+                    current[reference] = CurrentNode(reference);
+
+                var born =
+                    new Dictionary<QubitRef, int>();
+
+                foreach (var (reference, kind, _, _) in references)
+                {
+                    if (kind == QubitEventKind.Read)
+                        continue;
+
+                    if (!birth
+                        && current[reference] is null
+                        && Graph.ParamSeed(reference.Reg) is null)
                     {
-                        if (id is int i && !parents.Any(p => p.NodeId == i && p.Via == via))
-                            parents.Add(new QubitEdge(i, via));
+                        throw new InvalidOperationException(
+                            $"QINTERNAL: effect analysis wrote `{reference}` before any birth");
                     }
-                    Add(current[r], r);                                          // own previous version
-                    foreach (var (o, _, _, _) in refs)
-                        if (!o.Equals(r)) Add(current[o], o);                    // read sources + co-write prevs
-                    born[r] = Graph.AddNode(r, parents);
+
+                    var parents = new List<QubitEdge>();
+
+                    void AddParent(
+                        int? nodeId,
+                        QubitRef via)
+                    {
+                        if (nodeId is int id
+                            && !parents.Any(
+                                parent =>
+                                    parent.NodeId == id
+                                    && parent.Via == via))
+                        {
+                            parents.Add(new QubitEdge(id, via));
+                        }
+                    }
+
+                    AddParent(current[reference], reference);
+
+                    foreach (var (other, _, _, _) in references)
+                    {
+                        if (other != reference)
+                            AddParent(current[other], other);
+                    }
+
+                    born[reference] =
+                        Graph.AddNode(reference, parents);
                 }
 
-                // 3) the events, each linked to its node
-                foreach (var (r, kind, irr, nonQfree) in refs)
+                foreach (var (
+                             reference,
+                             kind,
+                             eventIrreversible,
+                             nonQfree) in references)
                 {
-                    var nodeId = kind == QubitEventKind.Read
-                        ? current[r] ?? throw new System.InvalidOperationException(
-                            $"QINTERNAL: effect analysis read `{r}` before any birth — validated IR declares before use")
-                        : born[r];
-                    Events.Add(new QubitEvent(r, kind, _order, stmtId, irr, nonQfree, nodeId));
+                    var nodeId =
+                        kind == QubitEventKind.Read
+                            ? current[reference]
+                              ?? throw new InvalidOperationException(
+                                  $"QINTERNAL: effect analysis read `{reference}` before any birth")
+                            : born[reference];
+
+                    Events.Add(
+                        new QubitEvent(
+                            reference,
+                            kind,
+                            _order,
+                            statementId,
+                            eventIrreversible,
+                            nonQfree,
+                            nodeId));
                 }
+
                 _order++;
             }
 
-            /// <summary>The then-current version of <paramref name="r"/>: the newest Write/Measure event
-            /// overlapping it (register/element subsumption lives HERE, in one place), else the register's
-            /// parameter seed, else null (not yet born).</summary>
-            private int? CurrentNode(QubitRef r)
+            private int? CurrentNode(QubitRef reference)
             {
-                for (var i = Events.Count - 1; i >= 0; i--)
+                for (var index = Events.Count - 1; index >= 0; index--)
                 {
-                    var e = Events[i];
-                    if (e.Kind != QubitEventKind.Read && e.Qubit.Overlaps(r)) return e.NodeId;
+                    var @event = Events[index];
+                    if (@event.Kind != QubitEventKind.Read
+                        && @event.Qubit.Overlaps(reference))
+                    {
+                        return @event.NodeId;
+                    }
                 }
-                return Graph.ParamSeed(r.Reg);
+
+                return Graph.ParamSeed(reference.Reg);
             }
         }
 
-        /// <summary>PIPELINE INVARIANT (an independent verifier safety net): the event stream
-        /// and the qubit graph are written by the same hand, but a bug in that hand must fail LOUD at compile
-        /// time — silent divergence between the two must never reach a consumer. Re-derives everything the
-        /// graph claims with its OWN independent state (shares the spec, not the construction's code paths):
-        /// node bounds, Write/Measure↔node 1:1 with matching ref, seed↔param 1:1, per-register Version
-        /// sequence, parents strictly older than their children, every Read link re-computed as the
-        /// then-current version, and every write node's parent SET re-computed edge-for-edge. Pass 3 also first
-        /// asserts its OWN precondition — the stream is program-ordered (non-decreasing Order at each statement
-        /// group boundary) — so a reordered stream fails loud before any re-derivation trusts it. ONE forward
-        /// walk (O(events × distinct refs)) — this runs on every compile, including the extension's
-        /// per-keystroke path, so it must stay linear-ish (adversarially flagged at Θ(E²) before).</summary>
-        public static void VerifyGraphCoherence(   // public-in-private-class: reachable only via the outer seam
-            string opName, IReadOnlyCollection<string> qubitParamRegs, List<QubitEvent> events, QubitGraph graph)
+        /// <summary>
+        /// Independently re-derives the event/graph relationship and fails loudly on any divergence.
+        /// </summary>
+        public static void VerifyGraphCoherence(
+            string callableName,
+            IReadOnlyCollection<string> qubitParameterRegisters,
+            List<QubitEvent> events,
+            QubitGraph graph)
         {
-            void Fail(string what) => throw new System.InvalidOperationException(
-                $"QINTERNAL: qubit graph incoherent with the event stream in `{opName}` — {what}");
+            void Fail(string detail) =>
+                throw new InvalidOperationException(
+                    $"QINTERNAL: qubit graph incoherent with the event stream "
+                    + $"in `{callableName}`: {detail}");
 
-            // pass 1 — links, roles, 1:1
-            var creatorOrder = new Dictionary<int, int>();   // nodeId → creating event's Order
-            foreach (var e in events)
+            // Pass 1: every event points to an existing node with a role-compatible qubit reference.
+            var creatorOrder = new Dictionary<int, int>();
+
+            foreach (var @event in events)
             {
-                if (e.NodeId < 0 || e.NodeId >= graph.Nodes.Count)
-                    Fail($"event at order {e.Order} points at missing node {e.NodeId}");
-                var n = graph.Node(e.NodeId);
-                if (e.Kind == QubitEventKind.Read)
+                if (@event.NodeId < 0
+                    || @event.NodeId >= graph.Nodes.Count)
                 {
-                    if (!n.Qubit.Overlaps(e.Qubit))
-                        Fail($"read of {e.Qubit} at order {e.Order} is linked to unrelated node {n.Qubit}");
+                    Fail(
+                        $"event at order {@event.Order} points at missing "
+                        + $"node {@event.NodeId}");
+                }
+
+                var node = graph.Node(@event.NodeId);
+
+                if (@event.Kind == QubitEventKind.Read)
+                {
+                    if (!node.Qubit.Overlaps(@event.Qubit))
+                    {
+                        Fail(
+                            $"read of {@event.Qubit} at order {@event.Order} "
+                            + $"is linked to unrelated node {node.Qubit}");
+                    }
                 }
                 else
                 {
-                    if (n.IsParamSeed) Fail($"write at order {e.Order} is linked to a parameter seed node");
-                    if (n.Qubit != e.Qubit) Fail($"write of {e.Qubit} at order {e.Order} is linked to a node of {n.Qubit}");
-                    if (!creatorOrder.TryAdd(e.NodeId, e.Order)) Fail($"node {e.NodeId} has two creating events");
-                }
-            }
-
-            // seeds ↔ qubit params, exactly (a dropped or spurious seed mis-roots every later lineage)
-            var seedRegs = graph.Nodes.Where(n => n.IsParamSeed).Select(n => n.Qubit.Reg).ToHashSet();
-            if (seedRegs.Count != graph.Nodes.Count(n => n.IsParamSeed)) Fail("duplicate parameter seed nodes");
-            if (!seedRegs.SetEquals(qubitParamRegs))
-                Fail($"seed registers [{string.Join(", ", seedRegs)}] do not match the op's qubit params [{string.Join(", ", qubitParamRegs)}]");
-            foreach (var reg in seedRegs)
-                if (graph.ParamSeed(reg) is not int sid || !graph.Node(sid).IsParamSeed)
-                    Fail($"ParamSeed(`{reg}`) does not resolve to a seed node");
-
-            // pass 2 — per-node facts: creator existence, parent bounds/age, seed shape, Version sequence
-            var versionCounter = new Dictionary<string, int>();
-            foreach (var n in graph.Nodes)
-            {
-                if (n.IsParamSeed && (n.Parents.Count != 0 || n.Qubit.Index is not null))
-                    Fail($"seed node {n.Id} is malformed ({n.Qubit}, {n.Parents.Count} parents)");
-                if (!n.IsParamSeed && !creatorOrder.ContainsKey(n.Id))
-                    Fail($"node {n.Id} ({n.Qubit} v{n.Version}) has no creating event");
-                foreach (var p in n.Parents)
-                {
-                    if (p.NodeId < 0 || p.NodeId >= graph.Nodes.Count) Fail($"node {n.Id} has missing parent {p.NodeId}");
-                    var pOrder = graph.Node(p.NodeId).IsParamSeed ? -1 : creatorOrder[p.NodeId];
-                    if (pOrder >= creatorOrder[n.Id])
-                        Fail($"node {n.Id} has a parent ({p.NodeId}) not older than itself");
-                }
-                versionCounter.TryGetValue(n.Qubit.Reg, out var v);
-                if (n.Version != v) Fail($"node {n.Id} ({n.Qubit}) has version {n.Version}; the sequence says {v}");
-                versionCounter[n.Qubit.Reg] = v + 1;
-            }
-
-            // pass 3 — ONE forward walk with independent running state: every Read link and every write
-            // node's parent set re-derived against the pre-statement versions. The running state keys by
-            // EVENT INDEX, not Order: a statement can write one register TWICE at one Order (SWAP, a call
-            // modifying two params) and the construction's backward list scan resolves that tie to the
-            // LAST-appended write — an Order-keyed max is tie-ambiguous and provably diverged (adversarially
-            // found: valid SWAP-then-blanket programs died QINTERNAL). Indices are unique; max-index equals
-            // the backward scan by construction.
-            var lastByRef = new Dictionary<QubitRef, (int Idx, int NodeId)>();
-            int? Current(QubitRef r)
-            {
-                var bestIdx = -1; int? best = null;
-                foreach (var kv in lastByRef)
-                    if (kv.Key.Overlaps(r) && kv.Value.Idx > bestIdx) { bestIdx = kv.Value.Idx; best = kv.Value.NodeId; }
-                return best ?? graph.ParamSeed(r.Reg);
-            }
-            for (var i = 0; i < events.Count;)
-            {
-                if (i > 0 && events[i].Order < events[i - 1].Order)
-                    Fail($"event stream not program-ordered at index {i}");           // pass-3's own precondition
-                var j = i;
-                while (j < events.Count && events[j].Order == events[i].Order) j++;   // one statement's group
-                for (var x = i; x < j; x++)
-                {
-                    var e = events[x];
-                    if (e.Kind == QubitEventKind.Read)
+                    if (node.IsParamSeed)
                     {
-                        var expect = Current(e.Qubit);
-                        if (expect != e.NodeId)
-                            Fail($"read of {e.Qubit} at order {e.Order} links to node {e.NodeId}; re-derivation says {(expect?.ToString() ?? "none")}");
+                        Fail(
+                            $"write at order {@event.Order} is linked to a "
+                            + "parameter seed node");
                     }
-                    else
+
+                    if (node.Qubit != @event.Qubit)
                     {
-                        var expected = new List<QubitEdge>();
-                        void Expect(QubitRef via)
+                        Fail(
+                            $"write of {@event.Qubit} at order {@event.Order} "
+                            + $"is linked to a node of {node.Qubit}");
+                    }
+
+                    if (!creatorOrder.TryAdd(@event.NodeId, @event.Order))
+                    {
+                        Fail(
+                            $"node {@event.NodeId} has two creating events");
+                    }
+                }
+            }
+
+            var seedRegisters =
+                graph.Nodes
+                    .Where(node => node.IsParamSeed)
+                    .Select(node => node.Qubit.Reg)
+                    .ToHashSet();
+
+            if (seedRegisters.Count
+                != graph.Nodes.Count(node => node.IsParamSeed))
+            {
+                Fail("duplicate parameter seed nodes");
+            }
+
+            if (!seedRegisters.SetEquals(qubitParameterRegisters))
+            {
+                Fail(
+                    $"seed registers [{string.Join(", ", seedRegisters)}] "
+                    + "do not match the callable's qubit parameters "
+                    + $"[{string.Join(", ", qubitParameterRegisters)}]");
+            }
+
+            foreach (var register in seedRegisters)
+            {
+                if (graph.ParamSeed(register) is not int seedId
+                    || !graph.Node(seedId).IsParamSeed)
+                {
+                    Fail(
+                        $"ParamSeed(`{register}`) does not resolve to a seed node");
+                }
+            }
+
+            // Pass 2: validate node creation, parent age, and per-register version sequences.
+            var versionByRegister = new Dictionary<string, int>();
+
+            foreach (var node in graph.Nodes)
+            {
+                if (node.IsParamSeed
+                    && (node.Parents.Count != 0
+                        || node.Qubit.Index is not null))
+                {
+                    Fail(
+                        $"seed node {node.Id} is malformed "
+                        + $"({node.Qubit}, {node.Parents.Count} parents)");
+                }
+
+                if (!node.IsParamSeed
+                    && !creatorOrder.ContainsKey(node.Id))
+                {
+                    Fail(
+                        $"node {node.Id} ({node.Qubit} v{node.Version}) "
+                        + "has no creating event");
+                }
+
+                foreach (var parent in node.Parents)
+                {
+                    if (parent.NodeId < 0
+                        || parent.NodeId >= graph.Nodes.Count)
+                    {
+                        Fail(
+                            $"node {node.Id} has missing parent {parent.NodeId}");
+                    }
+
+                    var parentOrder =
+                        graph.Node(parent.NodeId).IsParamSeed
+                            ? -1
+                            : creatorOrder[parent.NodeId];
+
+                    if (parentOrder >= creatorOrder[node.Id])
+                    {
+                        Fail(
+                            $"node {node.Id} has a parent ({parent.NodeId}) "
+                            + "not older than itself");
+                    }
+                }
+
+                versionByRegister.TryGetValue(
+                    node.Qubit.Reg,
+                    out var expectedVersion);
+
+                if (node.Version != expectedVersion)
+                {
+                    Fail(
+                        $"node {node.Id} ({node.Qubit}) has version "
+                        + $"{node.Version}; the sequence says {expectedVersion}");
+                }
+
+                versionByRegister[node.Qubit.Reg] =
+                    expectedVersion + 1;
+            }
+
+            // Pass 3: re-run current-version selection per statement and compare every read link and
+            // write-parent set. Event indices disambiguate multiple writes at one statement order.
+            var lastByReference =
+                new Dictionary<
+                    QubitRef,
+                    (
+                        int EventIndex,
+                        int NodeId)>();
+
+            int? Current(QubitRef reference)
+            {
+                var bestIndex = -1;
+                int? bestNode = null;
+
+                foreach (var (
+                             candidate,
+                             state) in lastByReference)
+                {
+                    if (candidate.Overlaps(reference)
+                        && state.EventIndex > bestIndex)
+                    {
+                        bestIndex = state.EventIndex;
+                        bestNode = state.NodeId;
+                    }
+                }
+
+                return bestNode
+                       ?? graph.ParamSeed(reference.Reg);
+            }
+
+            for (var groupStart = 0; groupStart < events.Count;)
+            {
+                if (groupStart > 0
+                    && events[groupStart].Order
+                    < events[groupStart - 1].Order)
+                {
+                    Fail(
+                        $"event stream is not program ordered at "
+                        + $"index {groupStart}");
+                }
+
+                var groupEnd = groupStart;
+                while (groupEnd < events.Count
+                       && events[groupEnd].Order
+                       == events[groupStart].Order)
+                {
+                    groupEnd++;
+                }
+
+                for (var index = groupStart; index < groupEnd; index++)
+                {
+                    var @event = events[index];
+
+                    if (@event.Kind == QubitEventKind.Read)
+                    {
+                        var expectedNode = Current(@event.Qubit);
+                        if (expectedNode != @event.NodeId)
                         {
-                            if (Current(via) is int id && !expected.Any(p => p.NodeId == id && p.Via == via))
-                                expected.Add(new QubitEdge(id, via));
+                            Fail(
+                                $"read of {@event.Qubit} at order "
+                                + $"{@event.Order} links to node "
+                                + $"{@event.NodeId}; re-derivation says "
+                                + $"{expectedNode?.ToString() ?? "none"}");
                         }
-                        Expect(e.Qubit);                                                        // own previous version
-                        for (var y = i; y < j; y++) if (events[y].Qubit != e.Qubit) Expect(events[y].Qubit);
-                        var actual = graph.Node(e.NodeId).Parents;
-                        if (actual.Count != expected.Count || expected.Any(p => !actual.Contains(p)))
-                            Fail($"node {e.NodeId} ({e.Qubit} at order {e.Order}) has parents [{string.Join(", ", actual.Select(p => $"{p.NodeId} via {p.Via}"))}]; re-derivation says [{string.Join(", ", expected.Select(p => $"{p.NodeId} via {p.Via}"))}]");
+
+                        continue;
+                    }
+
+                    var expectedParents = new List<QubitEdge>();
+
+                    void Expect(QubitRef via)
+                    {
+                        if (Current(via) is int nodeId
+                            && !expectedParents.Any(
+                                parent =>
+                                    parent.NodeId == nodeId
+                                    && parent.Via == via))
+                        {
+                            expectedParents.Add(
+                                new QubitEdge(nodeId, via));
+                        }
+                    }
+
+                    Expect(@event.Qubit);
+
+                    for (var other = groupStart; other < groupEnd; other++)
+                    {
+                        if (events[other].Qubit != @event.Qubit)
+                            Expect(events[other].Qubit);
+                    }
+
+                    var actualParents =
+                        graph.Node(@event.NodeId).Parents;
+
+                    if (actualParents.Count != expectedParents.Count
+                        || expectedParents.Any(
+                            parent => !actualParents.Contains(parent)))
+                    {
+                        Fail(
+                            $"node {@event.NodeId} ({@event.Qubit} at order "
+                            + $"{@event.Order}) has parents "
+                            + $"[{FormatEdges(actualParents)}]; "
+                            + $"re-derivation says [{FormatEdges(expectedParents)}]");
                     }
                 }
-                for (var x = i; x < j; x++)                                                     // then advance the state
-                    if (events[x].Kind != QubitEventKind.Read)
-                        lastByRef[events[x].Qubit] = (x, events[x].NodeId);
-                i = j;
+
+                for (var index = groupStart; index < groupEnd; index++)
+                {
+                    if (events[index].Kind != QubitEventKind.Read)
+                    {
+                        lastByReference[events[index].Qubit] =
+                            (index, events[index].NodeId);
+                    }
+                }
+
+                groupStart = groupEnd;
             }
+
+            static string FormatEdges(
+                IEnumerable<QubitEdge> edges) =>
+                string.Join(
+                    ", ",
+                    edges.Select(
+                        edge =>
+                            $"{edge.NodeId} via {edge.Via}"));
         }
     }
 }

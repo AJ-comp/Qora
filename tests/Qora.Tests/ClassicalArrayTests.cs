@@ -835,8 +835,8 @@ public class ClassicalArrayTests
         Assert.Equal(new[] { 2, 3 }, widths);
     }
 
-    /// <summary>Functions are called as <see cref="QCallNode"/> values inside expression trees rather than
-    /// as <see cref="QGate"/> statements. The monomorphizer must therefore find calls nested under both a
+    /// <summary>Functions are called as <see cref="HirCallExpression"/> values inside expression trees rather than
+    /// as <see cref="HirCallStatement"/> nodes. The monomorphizer must therefore find calls nested under both a
     /// declaration initializer and another function call. Equal widths reuse one specialization, while a
     /// distinct width creates a second one.</summary>
     [Fact]
@@ -857,10 +857,10 @@ public class ClassicalArrayTests
             """);
 
         Assert.True(r.Succeeded, Explain(r));
-        var specs = r.Hir.EffectAnalysis!.Program!.Operations.Where(o => o.DisplayName == "CountBits").ToList();
+        var specs = r.Hir.EffectAnalysis!.Program!.Callables.Where(o => o.DisplayName == "CountBits").ToList();
         Assert.Equal(2, specs.Count);
         Assert.Equal(new[] { 2, 3 },
-            specs.Select(o => o.Params.Single().RegisterSize!.Value).Order().ToArray());
+            specs.Select(o => o.Parameters.Single().RegisterSize!.Value).Order().ToArray());
         Assert.All(specs, specialization =>
         {
             Assert.True(specialization.IsFunction);

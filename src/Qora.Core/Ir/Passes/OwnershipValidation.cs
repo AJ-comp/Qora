@@ -13,17 +13,22 @@ internal static class OwnershipValidation
         IReadOnlyList<HashSet<SymbolId>> Breaks);
 
     public static void Validate(
-        QOperation op,
+        HirCallable op,
         Scope root,
         HirScopeGraph scopeGraph,
-        IReadOnlyDictionary<int, IReadOnlyList<Symbol>> validMoves,
+        IReadOnlyDictionary<HirNodeId, IReadOnlyList<Symbol>> validMoves,
         List<QoraError> errors,
         bool deferUnknownControlFlow = false)
     {
         if (validMoves.Count == 0) return;
 
+        var callableSymbol = scopeGraph.FindDeclaration(op.Id)
+            ?? throw new InvalidOperationException(
+                $"QINTERNAL: callable `{op.Name}` has no semantic symbol");
+        var callableName =
+            op.DisplayName ?? scopeGraph.QualifiedName(callableSymbol);
         var symbols = root.AllSymbols().ToDictionary(symbol => symbol.Id);
-        var usesByStatement = new Dictionary<int, HashSet<SymbolId>>();
+        var usesByStatement = new Dictionary<HirNodeId, HashSet<SymbolId>>();
         foreach (var symbol in symbols.Values)
             foreach (var use in symbol.Uses)
             {
@@ -34,11 +39,11 @@ internal static class OwnershipValidation
 
         // Loops revisit the same statement while finding their ownership fixed point. One source use should
         // still produce one diagnostic, not one per abstract iteration.
-        var reported = new HashSet<(int StatementId, SymbolId SymbolId)>();
+        var reported = new HashSet<(HirNodeId StatementId, SymbolId SymbolId)>();
         AnalyzeBlock(op.Body, new HashSet<SymbolId>(), inLoop: false);
         return;
 
-        Flow AnalyzeBlock(IReadOnlyList<QStmt> body, HashSet<SymbolId> incoming, bool inLoop)
+        Flow AnalyzeBlock(IReadOnlyList<HirStatement> body, HashSet<SymbolId> incoming, bool inLoop)
         {
             HashSet<SymbolId>? state = Copy(incoming);
             var breaks = new List<HashSet<SymbolId>>();
@@ -49,21 +54,21 @@ internal static class OwnershipValidation
 
                 // A repeat condition runs after its body. Every other statement-owned expression (an if or
                 // while condition, for bounds, an initializer, an assignment, and call arguments) runs first.
-                if (statement is not QRepeat)
+                if (statement is not HirRepeatStatement)
                     CheckUses(statement, state);
 
                 switch (statement)
                 {
-                    case QGate:
+                    case HirCallStatement:
                         ApplyMoves(statement.Id, state);
                         break;
 
-                    case QIf conditional:
+                    case HirIfStatement conditional:
                     {
                         var conditionScope = scopeGraph.RequireScope(new HirScopeSite(
                             conditional.Id,
                             HirScopeSiteRole.IfCondition));
-                        var condition = ConditionValue(conditional.Cond.Tree, conditionScope);
+                        var condition = ConditionValue(conditional.Condition, conditionScope);
                         if (deferUnknownControlFlow && condition is null)
                             break;
                         var thenFlow = condition == false
@@ -78,7 +83,7 @@ internal static class OwnershipValidation
                         break;
                     }
 
-                    case QFor loop:
+                    case HirForStatement loop:
                     {
                         var loopFlow = AnalyzeLoop(loop.Body, state, loop, conditionAfterBody: false);
                         state = loopFlow.Next;
@@ -86,7 +91,7 @@ internal static class OwnershipValidation
                         break;
                     }
 
-                    case QWhile loop:
+                    case HirWhileStatement loop:
                     {
                         var loopFlow = AnalyzeLoop(loop.Body, state, loop, conditionAfterBody: false);
                         state = loopFlow.Next;
@@ -94,7 +99,7 @@ internal static class OwnershipValidation
                         break;
                     }
 
-                    case QRepeat loop:
+                    case HirRepeatStatement loop:
                     {
                         var loopFlow = AnalyzeLoop(loop.Body, state, loop, conditionAfterBody: true);
                         state = loopFlow.Next;
@@ -102,7 +107,7 @@ internal static class OwnershipValidation
                         break;
                     }
 
-                    case QReturn:
+                    case HirReturnStatement:
                         state = null;
                         break;
 
@@ -113,16 +118,16 @@ internal static class OwnershipValidation
         }
 
         Flow AnalyzeLoop(
-            IReadOnlyList<QStmt> body,
+            IReadOnlyList<HirStatement> body,
             HashSet<SymbolId> incoming,
-            QStmt owner,
+            HirStatement owner,
             bool conditionAfterBody)
         {
             var bodyRole = owner switch
             {
-                QFor => HirScopeSiteRole.ForBody,
-                QWhile => HirScopeSiteRole.WhileBody,
-                QRepeat => HirScopeSiteRole.RepeatBody,
+                HirForStatement => HirScopeSiteRole.ForBody,
+                HirWhileStatement => HirScopeSiteRole.WhileBody,
+                HirRepeatStatement => HirScopeSiteRole.RepeatBody,
                 _ => throw new InvalidOperationException(
                     $"QINTERNAL: `{owner.GetType().Name}` is not a loop scope owner"),
             };
@@ -133,38 +138,38 @@ internal static class OwnershipValidation
                     $"QINTERNAL: HIR scope {child.Id} has no containment parent");
             var enclosingScope = owner switch
             {
-                QFor => ParentOf(scopeGraph.RequireScope(new HirScopeSite(
+                HirForStatement => ParentOf(scopeGraph.RequireScope(new HirScopeSite(
                     owner.Id,
                     HirScopeSiteRole.ForBinder))),
-                QWhile => ParentOf(scopeGraph.RequireScope(new HirScopeSite(
+                HirWhileStatement => ParentOf(scopeGraph.RequireScope(new HirScopeSite(
                     owner.Id,
                     HirScopeSiteRole.WhileCondition))),
-                QRepeat => ParentOf(bodyScope),
+                HirRepeatStatement => ParentOf(bodyScope),
                 _ => root,
             };
             var conditionScope = owner switch
             {
-                QWhile => scopeGraph.RequireScope(new HirScopeSite(
+                HirWhileStatement => scopeGraph.RequireScope(new HirScopeSite(
                     owner.Id,
                     HirScopeSiteRole.WhileCondition)),
-                QRepeat => scopeGraph.RequireScope(new HirScopeSite(
+                HirRepeatStatement => scopeGraph.RequireScope(new HirScopeSite(
                     owner.Id,
                     HirScopeSiteRole.RepeatCondition)),
                 _ => enclosingScope,
             };
             var condition = owner switch
             {
-                QWhile loop => ConditionValue(loop.Cond.Tree, conditionScope),
-                QRepeat loop => ConditionValue(loop.Until.Tree, conditionScope),
+                HirWhileStatement loop => ConditionValue(loop.Condition, conditionScope),
+                HirRepeatStatement loop => ConditionValue(loop.Until, conditionScope),
                 _ => null,
             };
             int? knownIterationCap = owner switch
             {
-                QFor counted => IterationCap(counted, enclosingScope),
-                QWhile when condition == false => 0,
-                QWhile when condition == true => 2,
-                QRepeat when condition == true => 1,
-                QRepeat when condition == false => 2,
+                HirForStatement counted => IterationCap(counted, enclosingScope),
+                HirWhileStatement when condition == false => 0,
+                HirWhileStatement when condition == true => 2,
+                HirRepeatStatement when condition == true => 1,
+                HirRepeatStatement when condition == false => 2,
                 _ => null,
             };
             if (deferUnknownControlFlow && knownIterationCap is null)
@@ -172,15 +177,15 @@ internal static class OwnershipValidation
             var iterationCap = knownIterationCap ?? 2;
             var normalExitPossible = owner switch
             {
-                QWhile when condition == true => false,
-                QRepeat when condition == false => false,
+                HirWhileStatement when condition == true => false,
+                HirRepeatStatement when condition == false => false,
                 _ => true,
             };
             var mayExecuteZero = owner switch
             {
-                QFor => knownIterationCap is null or 0,
-                QWhile => condition != true,
-                QRepeat => false,
+                HirForStatement => knownIterationCap is null or 0,
+                HirWhileStatement => condition != true,
+                HirRepeatStatement => false,
                 _ => true,
             };
             if (iterationCap == 0)
@@ -199,7 +204,7 @@ internal static class OwnershipValidation
 
             // while evaluates its condition both before entry (already checked by the caller) and on every
             // back edge. A repeat-until condition was checked above while body locals were still visible.
-            if (firstNext is not null && owner is QWhile)
+            if (firstNext is not null && owner is HirWhileStatement)
                 CheckUses(owner, firstNext);
 
             // One extra abstract iteration reaches the fixed point because ownership facts only grow from
@@ -212,7 +217,7 @@ internal static class OwnershipValidation
                     CheckUses(owner, second.Next);
                 var secondNext = ProjectOuter(second.Next, locals);
                 exits.AddRange(second.Breaks.Select(state => ProjectOuter(state, locals)!));
-                if (secondNext is not null && owner is QWhile)
+                if (secondNext is not null && owner is HirWhileStatement)
                     CheckUses(owner, secondNext);
             }
 
@@ -240,7 +245,7 @@ internal static class OwnershipValidation
             return new Flow(after, Array.Empty<HashSet<SymbolId>>());
         }
 
-        static int? IterationCap(QFor loop, Scope scope)
+        static int? IterationCap(HirForStatement loop, Scope scope)
         {
             if (BoundFolder.Fold(loop.From, scope) is not BoundNum from
                 || BoundFolder.Fold(loop.To, scope) is not BoundNum to)
@@ -249,19 +254,19 @@ internal static class OwnershipValidation
             return from.Value == to.Value ? 1 : 2;
         }
 
-        HashSet<SymbolId> LoopLocalIds(IReadOnlyList<QStmt> body, QStmt owner)
+        HashSet<SymbolId> LoopLocalIds(IReadOnlyList<HirStatement> body, HirStatement owner)
         {
             var bodyRole = owner switch
             {
-                QFor => HirScopeSiteRole.ForBody,
-                QWhile => HirScopeSiteRole.WhileBody,
-                QRepeat => HirScopeSiteRole.RepeatBody,
+                HirForStatement => HirScopeSiteRole.ForBody,
+                HirWhileStatement => HirScopeSiteRole.WhileBody,
+                HirRepeatStatement => HirScopeSiteRole.RepeatBody,
                 _ => throw new InvalidOperationException(
                     $"QINTERNAL: `{owner.GetType().Name}` is not a loop scope owner"),
             };
             var bodyScope = scopeGraph.RequireScope(new HirScopeSite(owner.Id, bodyRole));
             var ids = bodyScope.AllSymbols().Select(symbol => symbol.Id).ToHashSet();
-            if (owner is QFor
+            if (owner is HirForStatement
                 && scopeGraph.RequireScope(new HirScopeSite(
                     owner.Id,
                     HirScopeSiteRole.ForBinder)) is { } loopScope)
@@ -271,7 +276,7 @@ internal static class OwnershipValidation
             return ids;
         }
 
-        void CheckUses(QStmt statement, HashSet<SymbolId> state)
+        void CheckUses(HirStatement statement, HashSet<SymbolId> state)
         {
             if (!usesByStatement.TryGetValue(statement.Id, out var uses)) return;
             foreach (var symbolId in uses)
@@ -279,12 +284,12 @@ internal static class OwnershipValidation
                 if (!state.Contains(symbolId) || !reported.Add((statement.Id, symbolId))) continue;
                 if (!symbols.TryGetValue(symbolId, out var symbol)) continue;
                 Add(errors, "QSEM039",
-                    $"in `{op.DisplayName ?? op.Name}`: `{symbol.SourceName}` cannot be used here because ownership was moved on an earlier execution path; create or receive a new binding before using it again",
+                    $"in `{callableName}`: `{symbol.SourceName}` cannot be used here because ownership was moved on an earlier execution path; create or receive a new binding before using it again",
                     statement.Span);
             }
         }
 
-        void ApplyMoves(int statementId, HashSet<SymbolId> state)
+        void ApplyMoves(HirNodeId statementId, HashSet<SymbolId> state)
         {
             if (!validMoves.TryGetValue(statementId, out var moves)) return;
             foreach (var symbol in moves) state.Add(symbol.Id);
@@ -323,7 +328,8 @@ internal static class OwnershipValidation
     }
 
     /// <summary>Return a definite compile-time condition, or null when both paths remain possible.</summary>
-    private static bool? ConditionValue(QNode? node, Scope scope) => BooleanFolder.Fold(node, scope);
+    private static bool? ConditionValue(HirExpression node, Scope scope) =>
+        BooleanFolder.Fold(node, scope);
 
     private static void Add(List<QoraError> errors, string code, string message, SourceSpan? span) =>
         errors.Add(new QoraError(message, code, span));

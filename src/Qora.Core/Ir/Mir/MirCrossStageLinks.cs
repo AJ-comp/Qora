@@ -21,7 +21,7 @@ public enum MirSymbolLoweringDisposition
     Callable,
     ScalarValue,
     ArrayStorage,
-    QubitResource,
+    Qubit,
     NotLoweredNamespace,
     NotLoweredBuiltin,
     NotLoweredUnreachable,
@@ -46,7 +46,7 @@ public enum MirEntityOriginKind
 public abstract record MirCallableProvenance;
 
 public sealed record MirLoweredCallableProvenance(
-    HirNodeRef Operation,
+    HirNodeRef Callable,
     HirSymbolRef Symbol)
     : MirCallableProvenance;
 
@@ -60,9 +60,9 @@ public sealed record MirSynthesizedCallableProvenance(
     MirCallableSynthesisKind Kind)
     : MirCallableProvenance;
 
-/// <summary>The exact HIR operation/node pair reached by resolving one MIR origin.</summary>
+/// <summary>The exact HIR callable/node pair reached by resolving one MIR origin.</summary>
 public readonly record struct MirResolvedHirOrigin(
-    HirNodeRef Operation,
+    HirNodeRef Callable,
     HirNodeRef Node,
     SourceSpan? Span);
 
@@ -78,19 +78,19 @@ public sealed class MirCrossStageLinks
         HirSnapshot loweredFrom,
         HirSemanticArtifact symbolsFrom,
         MirOriginTable origins,
-        IReadOnlyDictionary<HirNodeRef, MirCallableRef> callablesByHirOperation,
+        IReadOnlyDictionary<HirNodeRef, MirCallableRef> callablesByHirCallable,
         IReadOnlyDictionary<HirSymbolRef, IReadOnlyList<MirCallableRef>> callablesBySymbol,
         IReadOnlyDictionary<HirSymbolRef, IReadOnlyList<MirValueRef>> valuesBySymbol,
         IReadOnlyDictionary<MirValueRef, IReadOnlyList<HirSymbolRef>> symbolsByValue,
         IReadOnlyDictionary<HirSymbolRef, IReadOnlyList<MirStorageRef>> storagesBySymbol,
         IReadOnlyDictionary<MirStorageRef, IReadOnlyList<HirSymbolRef>> symbolsByStorage,
-        IReadOnlyDictionary<HirSymbolRef, IReadOnlyList<MirQubitResourceRef>> qubitsBySymbol,
-        IReadOnlyDictionary<MirQubitResourceRef, IReadOnlyList<HirSymbolRef>> symbolsByQubit,
+        IReadOnlyDictionary<HirSymbolRef, IReadOnlyList<MirQubitRef>> qubitsBySymbol,
+        IReadOnlyDictionary<MirQubitRef, IReadOnlyList<HirSymbolRef>> symbolsByQubit,
         IReadOnlyDictionary<HirSymbolRef, MirSymbolLoweringDisposition> symbolDispositions,
         IReadOnlyDictionary<MirCallableRef, MirCallableProvenance> callableProvenance,
         IReadOnlyDictionary<MirValueRef, MirEntityOriginKind> valueOrigins,
         IReadOnlyDictionary<MirStorageRef, MirEntityOriginKind> storageOrigins,
-        IReadOnlyDictionary<MirQubitResourceRef, MirEntityOriginKind> qubitOrigins)
+        IReadOnlyDictionary<MirQubitRef, MirEntityOriginKind> qubitOrigins)
     {
         ArgumentNullException.ThrowIfNull(loweredFrom);
         ArgumentNullException.ThrowIfNull(symbolsFrom);
@@ -108,13 +108,13 @@ public sealed class MirCrossStageLinks
         LoweredFromSnapshot = loweredFrom;
         SymbolsFromArtifact = symbolsFrom;
         Origins = origins ?? throw new ArgumentNullException(nameof(origins));
-        CallablesByHirOperation = Freeze(callablesByHirOperation);
-        if (CallablesByHirOperation.Values.Distinct().Count()
-            != CallablesByHirOperation.Count)
+        CallablesByHirCallable = Freeze(callablesByHirCallable);
+        if (CallablesByHirCallable.Values.Distinct().Count()
+            != CallablesByHirCallable.Count)
         {
             throw new ArgumentException(
-                "Each MIR callable must be linked from exactly one HIR operation.",
-                nameof(callablesByHirOperation));
+                "Each MIR callable must be linked from exactly one HIR callable.",
+                nameof(callablesByHirCallable));
         }
         CallablesBySymbol = FreezeNested(callablesBySymbol);
         ValuesBySymbol = FreezeNested(valuesBySymbol);
@@ -144,19 +144,19 @@ public sealed class MirCrossStageLinks
     public HirSnapshotId LoweredFrom => LoweredFromSnapshot.Id;
     public HirSemanticArtifactId SymbolsFrom => SymbolsFromArtifact.Id;
     public MirOriginTable Origins { get; }
-    public IReadOnlyDictionary<HirNodeRef, MirCallableRef> CallablesByHirOperation { get; }
+    public IReadOnlyDictionary<HirNodeRef, MirCallableRef> CallablesByHirCallable { get; }
     public IReadOnlyDictionary<HirSymbolRef, IReadOnlyList<MirCallableRef>> CallablesBySymbol { get; }
     public IReadOnlyDictionary<HirSymbolRef, IReadOnlyList<MirValueRef>> ValuesBySymbol { get; }
     public IReadOnlyDictionary<MirValueRef, IReadOnlyList<HirSymbolRef>> SymbolsByValue { get; }
     public IReadOnlyDictionary<HirSymbolRef, IReadOnlyList<MirStorageRef>> StoragesBySymbol { get; }
     public IReadOnlyDictionary<MirStorageRef, IReadOnlyList<HirSymbolRef>> SymbolsByStorage { get; }
-    public IReadOnlyDictionary<HirSymbolRef, IReadOnlyList<MirQubitResourceRef>> QubitsBySymbol { get; }
-    public IReadOnlyDictionary<MirQubitResourceRef, IReadOnlyList<HirSymbolRef>> SymbolsByQubit { get; }
+    public IReadOnlyDictionary<HirSymbolRef, IReadOnlyList<MirQubitRef>> QubitsBySymbol { get; }
+    public IReadOnlyDictionary<MirQubitRef, IReadOnlyList<HirSymbolRef>> SymbolsByQubit { get; }
     public IReadOnlyDictionary<HirSymbolRef, MirSymbolLoweringDisposition> SymbolDispositions { get; }
     public IReadOnlyDictionary<MirCallableRef, MirCallableProvenance> CallableProvenance { get; }
     public IReadOnlyDictionary<MirValueRef, MirEntityOriginKind> ValueOrigins { get; }
     public IReadOnlyDictionary<MirStorageRef, MirEntityOriginKind> StorageOrigins { get; }
-    public IReadOnlyDictionary<MirQubitResourceRef, MirEntityOriginKind> QubitOrigins { get; }
+    public IReadOnlyDictionary<MirQubitRef, MirEntityOriginKind> QubitOrigins { get; }
 
     public MirResolvedHirOrigin ResolveOrigin(MirOriginRef origin)
     {
@@ -166,7 +166,7 @@ public sealed class MirCrossStageLinks
             nameof(origin));
         var hir = Origins.ResolveHir(origin);
         return new MirResolvedHirOrigin(
-            new HirNodeRef(LoweredFrom, hir.HirOperationId!.Value),
+            new HirNodeRef(LoweredFrom, hir.HirCallableId!.Value),
             new HirNodeRef(LoweredFrom, hir.HirNodeId!.Value),
             hir.Span);
     }
@@ -185,7 +185,7 @@ public sealed class MirCrossStageLinks
             ?? Array.Empty<HirSymbolRef>();
     }
 
-    public IReadOnlyList<HirSymbolRef> SymbolsFor(MirQubitResourceRef qubit)
+    public IReadOnlyList<HirSymbolRef> SymbolsFor(MirQubitRef qubit)
     {
         Require(qubit.Snapshot, nameof(qubit));
         return SymbolsByQubit.GetValueOrDefault(qubit)
@@ -234,10 +234,14 @@ public sealed class MirCrossStageLinks
             new(targetSnapshot, reference.Callable, reference.Value);
         MirStorageRef Storage(MirStorageRef reference) =>
             new(targetSnapshot, reference.Callable, reference.Storage);
-        MirQubitResourceRef Qubit(MirQubitResourceRef reference) =>
-            new(targetSnapshot, reference.Callable, reference.Resource);
+        MirQubitRef Qubit(MirQubitRef reference) =>
+            new(
+                targetSnapshot,
+                reference.Callable,
+                reference.Id,
+                reference.Version);
 
-        var callablesByOperation = CallablesByHirOperation.ToDictionary(
+        var callablesByHirCallable = CallablesByHirCallable.ToDictionary(
             pair => pair.Key,
             pair => Callable(pair.Value));
         var callablesBySymbol = CallablesBySymbol.ToDictionary(
@@ -257,7 +261,7 @@ public sealed class MirCrossStageLinks
             pair => pair.Value);
         var qubitsBySymbol = QubitsBySymbol.ToDictionary(
             pair => pair.Key,
-            pair => (IReadOnlyList<MirQubitResourceRef>)pair.Value.Select(Qubit).ToArray());
+            pair => (IReadOnlyList<MirQubitRef>)pair.Value.Select(Qubit).ToArray());
         var symbolsByQubit = SymbolsByQubit.ToDictionary(
             pair => Qubit(pair.Key),
             pair => pair.Value);
@@ -310,7 +314,7 @@ public sealed class MirCrossStageLinks
                     MirEntityOriginKind.CompilerTemporary);
             foreach (var qubit in callable.Qubits)
                 qubitOrigins.TryAdd(
-                    new MirQubitResourceRef(targetSnapshot, callable.Id, qubit.Id),
+                    new MirQubitRef(targetSnapshot, callable.Id, qubit.Key),
                     MirEntityOriginKind.CompilerTemporary);
         }
 
@@ -319,7 +323,7 @@ public sealed class MirCrossStageLinks
             LoweredFromSnapshot,
             SymbolsFromArtifact,
             transformedOrigins,
-            callablesByOperation,
+            callablesByHirCallable,
             callablesBySymbol,
             valuesBySymbol,
             symbolsByValue,
@@ -336,8 +340,8 @@ public sealed class MirCrossStageLinks
 
     private void ValidateMirEndpoints()
     {
-        foreach (var reference in CallablesByHirOperation.Values)
-            Require(reference.Snapshot, nameof(CallablesByHirOperation));
+        foreach (var reference in CallablesByHirCallable.Values)
+            Require(reference.Snapshot, nameof(CallablesByHirCallable));
         foreach (var references in CallablesBySymbol.Values)
             foreach (var reference in references)
                 Require(reference.Snapshot, nameof(CallablesBySymbol));
@@ -362,7 +366,7 @@ public sealed class MirCrossStageLinks
             switch (provenance)
             {
                 case MirLoweredCallableProvenance lowered:
-                    Require(lowered.Operation.Snapshot, nameof(CallableProvenance));
+                    Require(lowered.Callable.Snapshot, nameof(CallableProvenance));
                     Require(lowered.Symbol, nameof(CallableProvenance));
                     break;
                 case MirSynthesizedCallableProvenance synthesized:
@@ -389,8 +393,8 @@ public sealed class MirCrossStageLinks
 
     private void ValidateHirEndpoints()
     {
-        foreach (var reference in CallablesByHirOperation.Keys)
-            Require(reference.Snapshot, nameof(CallablesByHirOperation));
+        foreach (var reference in CallablesByHirCallable.Keys)
+            Require(reference.Snapshot, nameof(CallablesByHirCallable));
         foreach (var reference in CallablesBySymbol.Keys)
             Require(reference, nameof(CallablesBySymbol));
         foreach (var reference in ValuesBySymbol.Keys)
@@ -456,7 +460,7 @@ public sealed class MirCrossStageLinks
             structure.SnapshotId,
             nameof(structure));
 
-        foreach (var reference in CallablesByHirOperation.Values)
+        foreach (var reference in CallablesByHirCallable.Values)
             structure.RequireCallable(reference);
         foreach (var references in CallablesBySymbol.Values)
             foreach (var reference in references)
@@ -515,17 +519,17 @@ public sealed class MirCrossStageLinks
         var loweredCallables = CallableProvenance
             .Where(pair => pair.Value is MirLoweredCallableProvenance)
             .ToDictionary(pair => pair.Key, pair => (MirLoweredCallableProvenance)pair.Value);
-        if (loweredCallables.Count != CallablesByHirOperation.Count)
+        if (loweredCallables.Count != CallablesByHirCallable.Count)
             throw new ArgumentException(
-                "Every HIR operation link must have exactly one lowered-callable provenance entry.",
+                "Every HIR callable link must have exactly one lowered-callable provenance entry.",
                 nameof(structure));
-        foreach (var (operation, callable) in CallablesByHirOperation)
+        foreach (var (hirCallable, callable) in CallablesByHirCallable)
         {
             if (!loweredCallables.TryGetValue(callable, out var provenance)
-                || provenance.Operation != operation)
+                || provenance.Callable != hirCallable)
             {
                 throw new ArgumentException(
-                    $"HIR operation link {operation} -> {callable} disagrees with callable provenance.",
+                    $"HIR callable link {hirCallable} -> {callable} disagrees with callable provenance.",
                     nameof(structure));
             }
         }
@@ -544,7 +548,7 @@ public sealed class MirCrossStageLinks
             structure.Qubits,
             QubitOrigins,
             SymbolsByQubit,
-            "qubit resource");
+            "qubit");
     }
 
     internal void VerifyAgainst(HirCompilation hir, HirLineage lineage)
@@ -582,20 +586,20 @@ public sealed class MirCrossStageLinks
 
         var expectedCallableEdges =
             new HashSet<(HirSymbolRef Symbol, MirCallableRef Callable)>();
-        foreach (var (operation, callable) in CallablesByHirOperation)
+        foreach (var (hirCallable, callable) in CallablesByHirCallable)
         {
-            if (loweredFrom.Structure.RequireKind(operation.NodeId) != HirNodeKind.Operation)
+            if (loweredFrom.Structure.RequireKind(hirCallable.NodeId) != HirNodeKind.Callable)
                 throw new ArgumentException(
-                    $"MIR callable {callable} originates from non-operation HIR node {operation}.",
+                    $"MIR callable {callable} originates from non-callable HIR node {hirCallable}.",
                     nameof(hir));
 
-            var semanticOperationId = lineage.ResolveNodeId(
+            var semanticCallableId = lineage.ResolveNodeId(
                 LoweredFrom,
                 semanticBasis.SourceId,
-                operation.NodeId);
-            var symbol = semanticBasis.Model.FindSymbol(semanticOperationId)
+                hirCallable.NodeId);
+            var symbol = semanticBasis.Model.FindSymbol(semanticCallableId)
                 ?? throw new ArgumentException(
-                    $"HIR operation {operation} has no symbol in semantic source {SymbolsFrom}.",
+                    $"HIR callable {hirCallable} has no symbol in semantic source {SymbolsFrom}.",
                     nameof(hir));
             var symbolRef = new HirSymbolRef(SymbolsFrom, symbol.Id);
             expectedCallableEdges.Add((symbolRef, callable));
@@ -603,7 +607,7 @@ public sealed class MirCrossStageLinks
                 || !linked.Contains(callable))
             {
                 throw new ArgumentException(
-                    $"HIR operation {operation} and symbol {symbolRef} disagree about MIR callable " +
+                    $"HIR callable {hirCallable} and symbol {symbolRef} disagree about MIR callable " +
                     $"{callable}.",
                     nameof(hir));
             }
@@ -611,11 +615,11 @@ public sealed class MirCrossStageLinks
                     callable,
                     out var provenance)
                 || provenance is not MirLoweredCallableProvenance lowered
-                || lowered.Operation != operation
+                || lowered.Callable != hirCallable
                 || lowered.Symbol != symbolRef)
             {
                 throw new ArgumentException(
-                    $"MIR callable {callable} does not preserve the exact HIR operation/symbol "
+                    $"MIR callable {callable} does not preserve the exact HIR callable/symbol "
                     + "provenance resolved from its lowering source.",
                     nameof(hir));
             }
@@ -630,7 +634,7 @@ public sealed class MirCrossStageLinks
         {
             throw new ArgumentException(
                 "HIR symbol-to-callable links do not exactly match the links resolved from "
-                + "HIR operations.",
+                + "HIR callables.",
                 nameof(hir));
         }
 
@@ -643,21 +647,21 @@ public sealed class MirCrossStageLinks
         foreach (var origin in Origins.Origins)
         {
             var source = Origins.ResolveHir(origin.Id);
-            if (loweredFrom.Structure.RequireKind(source.HirOperationId!.Value)
-                != HirNodeKind.Operation)
+            if (loweredFrom.Structure.RequireKind(source.HirCallableId!.Value)
+                != HirNodeKind.Callable)
             {
                 throw new ArgumentException(
-                    $"MIR origin {origin.Id} names non-operation HIR owner " +
-                    $"{source.HirOperationId}.",
+                    $"MIR origin {origin.Id} names non-callable HIR owner " +
+                    $"{source.HirCallableId}.",
                     nameof(hir));
             }
             var sourceNodeId = source.HirNodeId!.Value;
-            var owner = loweredFrom.Structure.RequireOwningOperation(sourceNodeId);
-            if (owner != source.HirOperationId)
+            var owner = loweredFrom.Structure.RequireOwningCallable(sourceNodeId);
+            if (owner != source.HirCallableId)
             {
                 throw new ArgumentException(
-                    $"MIR origin {origin.Id} assigns HIR node {sourceNodeId} to operation " +
-                    $"{source.HirOperationId}, but its structural owner is {owner}.",
+                    $"MIR origin {origin.Id} assigns HIR node {sourceNodeId} to callable " +
+                    $"{source.HirCallableId}, but its structural owner is {owner}.",
                     nameof(hir));
             }
             if (source.Span != loweredFrom.SourceMap.Find(sourceNodeId))
@@ -722,7 +726,7 @@ public sealed class MirCrossStageLinks
                 MirSymbolLoweringDisposition.Callable => hasCallable,
                 MirSymbolLoweringDisposition.ScalarValue => hasValue,
                 MirSymbolLoweringDisposition.ArrayStorage => hasStorage,
-                MirSymbolLoweringDisposition.QubitResource => hasQubit,
+                MirSymbolLoweringDisposition.Qubit => hasQubit,
                 MirSymbolLoweringDisposition.NotLoweredNamespace
                     or MirSymbolLoweringDisposition.NotLoweredBuiltin
                     or MirSymbolLoweringDisposition.NotLoweredUnreachable =>
@@ -747,10 +751,10 @@ public sealed class MirCrossStageLinks
                 MirSymbolLoweringDisposition.NotLoweredNamespace,
             SymbolKind.BuiltinGate or SymbolKind.BuiltinFunction =>
                 MirSymbolLoweringDisposition.NotLoweredBuiltin,
-            SymbolKind.Operation =>
+            SymbolKind.Callable =>
                 MirSymbolLoweringDisposition.Callable,
             _ when symbol.Type == QType.Qubit =>
-                MirSymbolLoweringDisposition.QubitResource,
+                MirSymbolLoweringDisposition.Qubit,
             _ when symbol.IsArray =>
                 MirSymbolLoweringDisposition.ArrayStorage,
             _ => MirSymbolLoweringDisposition.ScalarValue,
@@ -858,16 +862,16 @@ internal sealed class MirCrossStageLinksBuilder
     private readonly HirSnapshot _loweredFrom;
     private readonly HirSemanticArtifact _symbolsFrom;
     private readonly HirScopeGraph _scopeGraph;
-    private readonly Dictionary<HirNodeRef, MirCallableRef> _callablesByHirOperation = new();
+    private readonly Dictionary<HirNodeRef, MirCallableRef> _callablesByHirCallable = new();
     private readonly BiMultiMap<HirSymbolRef, MirCallableRef> _callables = new();
     private readonly BiMultiMap<HirSymbolRef, MirValueRef> _values = new();
     private readonly BiMultiMap<HirSymbolRef, MirStorageRef> _storages = new();
-    private readonly BiMultiMap<HirSymbolRef, MirQubitResourceRef> _qubits = new();
+    private readonly BiMultiMap<HirSymbolRef, MirQubitRef> _qubits = new();
     private readonly Dictionary<HirSymbolRef, MirSymbolLoweringDisposition> _dispositions = new();
     private readonly Dictionary<MirCallableRef, MirCallableProvenance> _callableProvenance = new();
     private readonly Dictionary<MirValueRef, MirEntityOriginKind> _valueOrigins = new();
     private readonly Dictionary<MirStorageRef, MirEntityOriginKind> _storageOrigins = new();
-    private readonly Dictionary<MirQubitResourceRef, MirEntityOriginKind> _qubitOrigins = new();
+    private readonly Dictionary<MirQubitRef, MirEntityOriginKind> _qubitOrigins = new();
 
     public MirCrossStageLinksBuilder(
         MirSnapshotId mirSnapshot,
@@ -903,18 +907,18 @@ internal sealed class MirCrossStageLinksBuilder
     }
 
     public void LinkCallable(
-        int hirOperationId,
+        HirNodeId hirCallableId,
         SymbolId symbol,
         MirCallableId callable)
     {
-        var operation = new HirNodeRef(_loweredFrom.Id, hirOperationId);
+        var hirCallable = new HirNodeRef(_loweredFrom.Id, hirCallableId);
         var reference = new MirCallableRef(_mirSnapshot, callable);
-        if (!_callablesByHirOperation.TryAdd(operation, reference))
+        if (!_callablesByHirCallable.TryAdd(hirCallable, reference))
             throw new InvalidOperationException(
-                $"HIR operation {operation} was lowered more than once");
+                $"HIR callable {hirCallable} was lowered more than once");
         if (!_callableProvenance.TryAdd(
                 reference,
-                new MirLoweredCallableProvenance(operation, Symbol(symbol))))
+                new MirLoweredCallableProvenance(hirCallable, Symbol(symbol))))
         {
             throw new InvalidOperationException(
                 $"MIR callable {reference} was registered more than once");
@@ -964,13 +968,13 @@ internal sealed class MirCrossStageLinksBuilder
     public void LinkQubit(
         SymbolId symbol,
         MirCallableId callable,
-        MirQubitResourceId qubit)
+        MirQubitKey qubit)
     {
-        RecordDisposition(symbol, MirSymbolLoweringDisposition.QubitResource);
-        var reference = new MirQubitResourceRef(_mirSnapshot, callable, qubit);
+        RecordDisposition(symbol, MirSymbolLoweringDisposition.Qubit);
+        var reference = new MirQubitRef(_mirSnapshot, callable, qubit);
         if (!_qubitOrigins.TryAdd(reference, MirEntityOriginKind.SourceSymbol))
             throw new InvalidOperationException(
-                $"MIR qubit resource {reference} was registered more than once.");
+                $"MIR qubit {reference} was registered more than once.");
         _qubits.Add(Symbol(symbol), reference);
     }
 
@@ -992,7 +996,7 @@ internal sealed class MirCrossStageLinksBuilder
             _loweredFrom,
             _symbolsFrom,
             origins,
-            _callablesByHirOperation.ToFrozenDictionary(),
+            _callablesByHirCallable.ToFrozenDictionary(),
             _callables.Forward(),
             _values.Forward(),
             _values.Reverse(),

@@ -10,12 +10,13 @@ namespace Qora.Compiler;
 /// </summary>
 internal sealed class LoadedSourceGraph
 {
-    private readonly FrozenDictionary<SourceDocumentRef, QProgram> _loweredDocuments;
+    private readonly FrozenDictionary<SourceDocumentRef, HirProgram> _loweredDocuments;
 
     public LoadedSourceGraph(
         SourceSetSnapshot sources,
-        IReadOnlyDictionary<SourceDocumentRef, QProgram> loweredDocuments,
-        IEnumerable<QoraError> importDiagnostics)
+        IReadOnlyDictionary<SourceDocumentRef, HirProgram> loweredDocuments,
+        IEnumerable<QoraError> importDiagnostics,
+        HirConstructionCore constructionCore)
     {
         Sources = sources ?? throw new ArgumentNullException(nameof(sources));
         ArgumentNullException.ThrowIfNull(loweredDocuments);
@@ -29,14 +30,24 @@ internal sealed class LoadedSourceGraph
                     nameof(loweredDocuments));
 
         ImportDiagnostics = importDiagnostics.ToImmutableArray();
+        ConstructionCore = constructionCore
+            ?? throw new ArgumentNullException(nameof(constructionCore));
+        if (constructionCore.CompilationId != sources.CompilationId
+            || constructionCore.CompilationRevision != sources.CompilationRevision)
+        {
+            throw new ArgumentException(
+                "The source graph and HIR construction authority belong to different compilation revisions.",
+                nameof(constructionCore));
+        }
     }
 
     public SourceSetSnapshot Sources { get; }
-    public IReadOnlyDictionary<SourceDocumentRef, QProgram> LoweredDocuments =>
+    public IReadOnlyDictionary<SourceDocumentRef, HirProgram> LoweredDocuments =>
         _loweredDocuments;
     public IReadOnlyList<QoraError> ImportDiagnostics { get; }
-    public QProgram? EntryProgram =>
+    public HirProgram? EntryProgram =>
         _loweredDocuments.GetValueOrDefault(Sources.Entry);
+    internal HirConstructionCore ConstructionCore { get; }
 }
 
 /// <summary>
@@ -55,12 +66,15 @@ internal static class SourceGraphLoader
         ArgumentNullException.ThrowIfNull(options);
         var documents = new List<SourceDocumentSnapshot>();
         var syntax = new List<SyntaxSnapshot>();
-        var lowered = new Dictionary<SourceDocumentRef, QProgram>();
+        var lowered = new Dictionary<SourceDocumentRef, HirProgram>();
         var edges = new List<ImportEdge>();
         var importDiagnostics = new List<QoraError>();
         var canonicalDocuments = new Dictionary<string, SourceDocumentRef>(
             SourcePathComparer);
         var nextDocument = 0;
+        var constructionCore = new HirConstructionCore(
+            compilationId,
+            compilationRevision);
 
         SourceDocumentSnapshot AddDocument(
             string text,
@@ -70,6 +84,7 @@ internal static class SourceGraphLoader
                 compilationId,
                 compilationRevision,
                 new SourceDocumentId(nextDocument++));
+            constructionCore.RegisterDocument(reference);
             var document = new SourceDocumentSnapshot(reference, text, path);
             documents.Add(document);
 
@@ -78,9 +93,8 @@ internal static class SourceGraphLoader
             if (parseProduct.Snapshot.Succeeded
                 && parseProduct.LoweringAst is { } ast)
             {
-                var program = QoraLowering.Lower(ast, reference)
-                    ?? throw new InvalidOperationException(
-                        $"QINTERNAL: lowering syntax for {reference} produced no HIR program.");
+                var loweringSession = constructionCore.BeginLowering(reference);
+                var program = AstToHirLowering.Lower(ast, loweringSession);
                 lowered.Add(reference, program);
             }
 
@@ -110,14 +124,16 @@ internal static class SourceGraphLoader
             documents,
             syntax,
             imports);
+        constructionCore.BindSourceSet(sources);
         return new LoadedSourceGraph(
             sources,
             lowered,
-            importDiagnostics);
+            importDiagnostics,
+            constructionCore);
 
         void LoadImports(
             SourceDocumentSnapshot importer,
-            QProgram program,
+            HirProgram program,
             string? directory)
         {
             if (program.Imports is not { Count: > 0 })

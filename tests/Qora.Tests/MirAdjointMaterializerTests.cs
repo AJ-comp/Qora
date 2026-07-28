@@ -76,6 +76,19 @@ public sealed class MirAdjointMaterializerTests
         Assert.All(
             inverseGates,
             gate => Assert.Equal(new[] { MirFunctor.Adjoint }, gate.Functors));
+        var inverseParameter = Assert.Single(
+            inverse.Parameters.OfType<MirQubitParameter>());
+        var firstInverseInput = Assert.IsType<MirQubitCallOperand>(
+            Assert.Single(inverseGates[0].Operands));
+        Assert.Equal(inverseParameter.Key, firstInverseInput.Qubit.Qubit);
+        var firstInverseResult = Assert.Single(inverseGates[0].QubitResults);
+        Assert.Equal(1, firstInverseResult.Version.Value);
+        var secondInverseInput = Assert.IsType<MirQubitCallOperand>(
+            Assert.Single(inverseGates[1].Operands));
+        Assert.Equal(firstInverseResult.Key, secondInverseInput.Qubit.Qubit);
+        Assert.Equal(
+            2,
+            Assert.Single(inverseGates[1].QubitResults).Version.Value);
         MirAdjointMaterializer.VerifyMaterialized(output);
 
         var provenance = Assert.IsType<MirSynthesizedCallableProvenance>(
@@ -86,7 +99,7 @@ public sealed class MirAdjointMaterializerTests
         Assert.Equal(MirCallableSynthesisKind.Inverse, provenance.Kind);
         Assert.DoesNotContain(
             inverseRef,
-            output.Links.CallablesByHirOperation.Values);
+            output.Links.CallablesByHirCallable.Values);
 
         var originalOrigin = source.Links.ResolveOrigin(worker.Origin);
         var inverseOrigin = output.Links.ResolveOrigin(inverse.Origin);
@@ -271,7 +284,7 @@ public sealed class MirAdjointMaterializerTests
         foreach (var qubit in inverseMiddle.Qubits)
         {
             var reference =
-                new MirQubitResourceRef(output.Id, inverseMiddle.Id, qubit.Id);
+                new MirQubitRef(output.Id, inverseMiddle.Id, qubit.Key);
             Assert.Equal(
                 MirEntityOriginKind.CompilerTemporary,
                 output.Links.QubitOrigins[reference]);
@@ -279,10 +292,10 @@ public sealed class MirAdjointMaterializerTests
         }
         Assert.DoesNotContain(
             inverseLeafRef,
-            output.Links.CallablesByHirOperation.Values);
+            output.Links.CallablesByHirCallable.Values);
         Assert.DoesNotContain(
             inverseMiddleRef,
-            output.Links.CallablesByHirOperation.Values);
+            output.Links.CallablesByHirCallable.Values);
     }
 
     [Fact]

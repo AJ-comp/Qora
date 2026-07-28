@@ -221,12 +221,12 @@ public class TypeInferenceTests
 
         var analyzed = Assert.IsType<HirSemanticArtifact>(
             compilation.Hir.EffectAnalysis);
-        var result = analyzed.Program.Operations
+        var result = analyzed.Program.Callables
             .SelectMany(operation => operation.Body)
-            .OfType<QDecl>()
+            .OfType<HirVariableDeclarationStatement>()
             .Single(declaration => declaration.Name == "result");
         var graph = Assert.IsType<HirScopeGraph>(analyzed.Model.ScopeGraph);
-        var main = analyzed.Program.Operations.Single(
+        var main = analyzed.Program.Callables.Single(
             operation => operation.Name == "Main");
         var mainScope = Assert.IsType<Scope>(
             graph.FindCallableScope(main.Id));
@@ -237,7 +237,7 @@ public class TypeInferenceTests
 
         Assert.Equal(QType.Float, analyzed.Model.FindSymbol(result.Id)!.Type);
         Assert.Equal(SymbolKind.Var, localValue.Kind);
-        Assert.Equal(SymbolKind.Operation, callable.Kind);
+        Assert.Equal(SymbolKind.Callable, callable.Kind);
         Assert.NotEqual(localValue.Id, callable.Id);
     }
 
@@ -270,12 +270,12 @@ public class TypeInferenceTests
 
         var analyzed = Assert.IsType<HirSemanticArtifact>(
             compilation.Hir.EffectAnalysis);
-        var declaration = analyzed.Program.Operations
+        var declaration = analyzed.Program.Callables
             .SelectMany(operation => operation.Body)
-            .OfType<QDecl>()
+            .OfType<HirVariableDeclarationStatement>()
             .Single(item => item.Name == "result");
         var symbol = analyzed.Model.FindSymbol(declaration.Id);
-        var function = analyzed.Program.Operations.Single(
+        var function = analyzed.Program.Callables.Single(
             operation => operation.Name == "half");
         var graph = Assert.IsType<HirScopeGraph>(analyzed.Model.ScopeGraph);
         var callable = graph.LookupCallable("half");
@@ -295,9 +295,9 @@ public class TypeInferenceTests
         AssertSucceeded(compilation);
         var analyzed = Assert.IsType<HirSemanticArtifact>(
             compilation.Hir.EffectAnalysis);
-        var declaration = analyzed.Program.Operations
+        var declaration = analyzed.Program.Callables
             .SelectMany(operation => DescendantStatements(operation.Body))
-            .OfType<QDecl>()
+            .OfType<HirVariableDeclarationStatement>()
             .Single(item => item.Name == variable);
 
         Assert.Equal(expected, analyzed.Model.FindSymbol(declaration.Id)!.Type);
@@ -306,29 +306,29 @@ public class TypeInferenceTests
         return compilation;
     }
 
-    private static IEnumerable<QStmt> DescendantStatements(
-        IEnumerable<QStmt> statements)
+    private static IEnumerable<HirStatement> DescendantStatements(
+        IEnumerable<HirStatement> statements)
     {
         foreach (var statement in statements)
         {
             yield return statement;
             switch (statement)
             {
-                case QIf branch:
+                case HirIfStatement branch:
                     foreach (var nested in DescendantStatements(branch.Then))
                         yield return nested;
                     foreach (var nested in DescendantStatements(branch.Else))
                         yield return nested;
                     break;
-                case QFor loop:
+                case HirForStatement loop:
                     foreach (var nested in DescendantStatements(loop.Body))
                         yield return nested;
                     break;
-                case QWhile loop:
+                case HirWhileStatement loop:
                     foreach (var nested in DescendantStatements(loop.Body))
                         yield return nested;
                     break;
-                case QRepeat loop:
+                case HirRepeatStatement loop:
                     foreach (var nested in DescendantStatements(loop.Body))
                         yield return nested;
                     break;

@@ -9,21 +9,27 @@ namespace Qora.Ir.Passes;
 /// </summary>
 internal static class ModuleLoader
 {
-    public sealed record Result(
-        QProgram Program,
-        IReadOnlyList<HirNodeIntroduction> Introductions);
+    public sealed record Result(HirRewriteResult Rewrite)
+    {
+        public HirProgram Program => Rewrite.Root;
+    }
 
-    public static Result Expand(LoadedSourceGraph loaded)
+    public static Result Expand(
+        LoadedSourceGraph loaded,
+        HirRewriteSession rewrite)
     {
         ArgumentNullException.ThrowIfNull(loaded);
+        ArgumentNullException.ThrowIfNull(rewrite);
         var program = loaded.EntryProgram
             ?? throw new ArgumentException(
                 "Module expansion requires a successfully lowered entry document.",
                 nameof(loaded));
-        var operations = new List<QOperation>(program.Operations);
-        var introductions = new List<HirNodeIntroduction>();
-        var opens = new Dictionary<string, List<QOpen>>();
-        MergeOpens(opens, program.Opens);
+        if (!ReferenceEquals(rewrite.Source.Program, program))
+            throw new ArgumentException(
+                "Module expansion must rewrite the exact lowered entry snapshot.",
+                nameof(rewrite));
+        var declarations =
+            new List<HirDeclaration>(program.Declarations);
         var visited = new HashSet<SourceDocumentRef>
         {
             loaded.Sources.Entry,
@@ -31,20 +37,12 @@ internal static class ModuleLoader
 
         MergeImports(loaded.Sources.Entry);
 
+        var expanded = rewrite.RewriteProgram(
+            program,
+            declarations,
+            Array.Empty<HirImportDirective>());
         return new Result(
-            program with
-            {
-                Operations = operations,
-                Imports = null,
-                Opens = opens.Count > 0
-                    ? opens.ToDictionary(
-                        pair => pair.Key,
-                        pair => (IReadOnlyList<QOpen>)pair.Value
-                            .DistinctBy(open => open.Target)
-                            .ToList())
-                    : null,
-            },
-            introductions.AsReadOnly());
+            rewrite.Publish(expanded));
 
         void MergeImports(SourceDocumentRef importer)
         {
@@ -62,32 +60,14 @@ internal static class ModuleLoader
                 if (!loaded.LoweredDocuments.TryGetValue(imported, out var importedProgram))
                     continue;
 
-                operations.AddRange(importedProgram.Operations);
-                var importedStructure = new HirStructuralIndex(importedProgram);
-                introductions.AddRange(
-                    importedStructure.NodeIds
-                        .Where(nodeId => nodeId != importedProgram.Id)
-                        .Select(nodeId => new HirNodeIntroduction(
-                            nodeId,
-                            imported,
-                            HirNodeIntroductionKind.ImportedDocument)));
-                MergeOpens(opens, importedProgram.Opens);
+                foreach (var declaration in importedProgram.Declarations)
+                {
+                    rewrite.AdoptImportedSubtree(
+                        declaration,
+                        imported);
+                    declarations.Add(declaration);
+                }
             }
-        }
-    }
-
-    private static void MergeOpens(
-        Dictionary<string, List<QOpen>> into,
-        IReadOnlyDictionary<string, IReadOnlyList<QOpen>>? opens)
-    {
-        if (opens is null)
-            return;
-
-        foreach (var (namespaceName, directives) in opens)
-        {
-            if (!into.TryGetValue(namespaceName, out var existing))
-                into.Add(namespaceName, existing = new List<QOpen>());
-            existing.AddRange(directives);
         }
     }
 }

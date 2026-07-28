@@ -307,24 +307,26 @@ operation Main() {
 
   <h2 id="s3"><span class="n">3</span>Lower — AST to source-shaped HIR (crossing the boundary)</h2>
 
-  <p class="stagehead">in: engine AST &nbsp;·&nbsp; out: <code>QProgram</code> (source-shaped HIR) &nbsp;·&nbsp; pass: <code>QoraLowering</code></p>
+  <p class="stagehead">in: engine AST + revision-bound session &nbsp;·&nbsp; out: <code>HirProgram</code> (source-shaped HIR) &nbsp;·&nbsp; pass: <code>AstToHirLowering</code></p>
 
   <p>
-    Lowering walks the engine's tree <strong>once</strong> and rebuilds it as Qora's own IR — a hierarchy of
-    strongly-typed records (<code>QOperation</code>, <code>QGate</code>, <code>QFor</code>, <code>QIf</code>,
-    <code>QDecl</code>, <code>QUse</code>, <code>QMeasure</code>, …). String tokens become
-    <strong>typed nodes</strong>, while any source modifier that the grammar supports becomes structured
-    data on its node. The IR of our example:
+    Lowering walks the engine's tree <strong>once</strong> and rebuilds it as Qora's own immutable IR.
+    <code>HirProgram.Declarations</code> is the authoritative containment tree: a
+    <code>HirNamespaceDeclaration</code> owns nested declarations and <code>open</code> directives, while a
+    <code>HirCallable</code> owns its parameters and <code>HirBlock</code>. Every statement and expression is
+    a typed, identity-bearing node minted by the exact lowering session. The IR of our example:
   </p>
 
-<pre><code>QOperation Prep.Fanout(Qubit q)
-  QFor(i in 0..n - 1)
-    QGate(functors=[], name=H, args=[q[i]])
+<pre><code>HirProgram
+  Declarations[0] = HirNamespaceDeclaration("Prep")
+    Declarations[0] = HirCallable("Fanout", Qubit q)
+      HirForStatement(i, 0, n - 1)
+        HirCallStatement(H, q[i])
 
-QOperation Main()
-  QUse(name=reg, size=3)
-  QGate(functors=[],        name=Prep.Fanout, args=[reg])
-  QDecl(const=False, type=Bit, name=r, value=QMeasure(reg[0]))</code></pre>
+  Declarations[1] = HirCallable("Main")
+    HirQubitDeclarationStatement(reg, 3)
+    HirCallStatement(Prep.Fanout, reg)
+    HirVariableDeclarationStatement(bit r, HirMeasurementExpression(reg[0]))</code></pre>
 
   <div class="call why">
     <span class="h">Why rebuild the tree as typed data?</span>
@@ -339,30 +341,44 @@ QOperation Main()
 
   <p>
     <strong>Expand</strong> is the module loader. If the file had <code>import "lib/prep.qor"</code>, this
-    pass parses that file, lowers it, and merges its operations into one <code>QProgram</code> so everything
-    downstream sees a single flat program. (Our example imports nothing, so this is a no-op here. A missing
+    pass parses that file, lowers it, and appends its top-level declaration subtrees to one
+    <code>HirProgram</code>. Everything downstream sees one program, but namespace ownership remains
+    structural rather than being flattened into copied name strings. (Our example imports nothing, so this
+    is a no-op here. A missing
     file becomes <code>QSEM020</code>, while a cyclic back-edge reaches a path already registered in
     <code>loaded</code> and is skipped without an error. <code>QSEM021</code> is retained only as a
     retired/reserved code and is no longer emitted.)
   </p>
 
   <p>
-    Between the two, one small desugaring runs — <strong>MeasureConditionLowering</strong>. OpenQASM has no
-    measurement <em>inside</em> a condition, so <code>if (M(q[0]) == 1)</code> is rewritten into the two-step
-    form OpenQASM needs: the measurement is pulled out into a hoisted <code>bit</code>, which the condition then
-    tests. A <code>while</code> re-measures at the end of each iteration, and <code>repeat … until</code> at the
-    body's end. Everything downstream then sees only plain bit conditions:
+    A measurement expression is not rewritten into target-shaped HIR between expansion and resolution.
+    <code>if (M(q[0]) == 1)</code> remains a canonical <code>HirMeasurementExpression</code> inside the condition.
+    Later, <code>QoraMirLowering</code> places the measurement at its exact evaluation point and represents
+    short-circuit control flow explicitly in the CFG. OpenQASM target lowering then recovers structured control
+    flow and emits the required measured <code>bit</code>:
   </p>
 
 <pre><code>operation Main() {
     use q = Qubit[2];
     <span class="hl">if (M(q[0]) == 1)</span> { X(q[1]); }
 }
-                       <span class="cm">↓ MeasureConditionLowering</span>
+                       <span class="cm">↓ MIR lowering + OpenQASM target lowering</span>
 qubit[2] q;
-<span class="add">bit __m0;</span>
-<span class="add">__m0 = measure q[0];</span>          <span class="cm">← the measurement, hoisted out of the condition</span>
-<span class="add">if (__m0 == true)</span> { x q[1]; }
+int v0;
+<span class="add">bit v1;</span>
+int v2;
+int v3;
+bit v4;
+int v5;
+v0 = 0;
+<span class="add">v1 = measure q[v0];</span>            <span class="cm">← the measurement result is now an SSA-backed target value</span>
+v2 = 1;
+v3 = int(v1);
+v4 = v3 == v2;
+<span class="add">if (v4)</span> {
+    v5 = 1;
+    x q[v5];
+}
 </code></pre>
 
   <p>
@@ -513,13 +529,12 @@ MirQuantumApply(Target = __qora_inverse_..., Functors = [])</code></pre>
     <table class="amp">
       <tr><th>Stage</th><th>Pass</th><th>Turns … into …</th></tr>
       <tr><td>Parse</td><td><em>Janglim engine</em></td><td>source text → syntax tree (no meaning yet)</td></tr>
-      <tr><td>Lower HIR</td><td><code>QoraLowering</code></td><td>engine tree → source-shaped typed HIR</td></tr>
-      <tr><td>Expand</td><td><code>ModuleLoader</code></td><td>imports → one merged program</td></tr>
-      <tr><td>Desugar measure</td><td><code>MeasureConditionLowering</code></td><td>a measurement inside a condition → a hoisted <code>bit</code>, assigned then tested</td></tr>
+      <tr><td>Lower HIR</td><td><code>AstToHirLowering</code></td><td>engine tree + lowering session → immutable <code>HirProgram</code> declaration tree</td></tr>
+      <tr><td>Expand</td><td><code>ModuleLoader</code></td><td>document declaration subtrees → one merged <code>HirProgram</code></td></tr>
       <tr><td>Resolve</td><td><code>Resolver</code></td><td>operation call targets → fully-qualified names</td></tr>
       <tr><td>Validate</td><td><code>QoraValidator</code> + <code>SymbolTableBuilder</code></td><td>IR → symbol tables + every semantic error (a hard gate on emission)</td></tr>
       <tr><td>Monomorphize</td><td><code>Monomorphizer</code></td><td><code>Qubit[]</code> calls → call-size-specific internal copies, then re-validate if changed</td></tr>
-      <tr><td>Lower MIR</td><td><code>QoraMirLowering</code></td><td>accepted HIR + semantic facts → typed SSA/CFG <code>MirSnapshot</code></td></tr>
+      <tr><td>Lower MIR</td><td><code>QoraMirLowering</code></td><td>accepted HIR + semantic facts → typed SSA/CFG <code>MirSnapshot</code>, with measurements lowered at their evaluation points</td></tr>
       <tr><td>Analyze MIR</td><td><code>MirAnalysisStore</code></td><td>exact MIR revision → control-flow, effects, alias, memory, and path facts</td></tr>
       <tr><td>Materialize</td><td><code>MirAdjointMaterializer</code></td><td>MIR-only inverse requests → synthesized inverse MIR callables</td></tr>
       <tr><td>Target-lower</td><td><code>MirOpenQasmLowering</code></td><td>materialized MIR → typed <code>MirOpenQasmTargetProgram</code></td></tr>
@@ -550,8 +565,8 @@ MirQuantumApply(Target = __qora_inverse_..., Functors = [])</code></pre>
     Source, AST, HIR, and OpenQASM listings come from the Qora compiler
     (<code>qora --json --stages</code>); compact MIR listings are explanatory sketches using the real MIR types.<br>
     Source, in pipeline order: <code>QoraGrammar.cs</code> (grammar) ·
-    <code>Ir/QoraLowering.cs</code> (AST→IR) ·
-    <code>Ir/Passes/ModuleLoader.cs</code> · <code>MeasureConditionLowering.cs</code> · <code>Resolver.cs</code> · <code>SymbolTable.cs</code> · <code>QoraValidator.cs</code> ·
+    <code>Ir/AstToHirLowering.cs</code> + <code>Ir/AstExpressionLowering.cs</code> (AST→HIR) ·
+    <code>Ir/Passes/ModuleLoader.cs</code> · <code>Resolver.cs</code> · <code>SymbolTable.cs</code> · <code>QoraValidator.cs</code> ·
     <code>Monomorphizer.cs</code> · <code>Ir/Mir/QoraMirLowering.cs</code> ·
     <code>Ir/Mir/MirAdjointMaterializer.cs</code> · <code>Ir/Qasm/MirOpenQasmLowering.cs</code> ·
     <code>Ir/Qasm/MirQasmEmitter.cs</code> (typed target model→OpenQASM).

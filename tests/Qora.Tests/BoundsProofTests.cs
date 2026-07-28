@@ -1,3 +1,4 @@
+using Qora.Ir;
 using Qora.Ir.Passes;
 
 namespace Qora.Tests;
@@ -489,7 +490,7 @@ public class BoundsProofTests
             """);
         Assert.False(r.Succeeded);
         var specializedSnapshot = Assert.IsType<HirSnapshot>(r.Hir.Specialized);
-        var specialized = specializedSnapshot.Program.Operations.Single(o => o.Name.Contains("Helper"));
+        var specialized = specializedSnapshot.Program.Callables.Single(o => o.Name.Contains("Helper"));
         var contract = r.Hir.SpecializedValidation!.Model.RequiredArgLengths(specialized.Id);
         Assert.NotNull(contract);
         Assert.Equal(9L, contract!["x"]);
@@ -618,9 +619,8 @@ public class BoundsProofTests
         Assert.Single(r.Hir.SpecializedValidation!.Model.UnprovenIndexes);
     }
 
-    /// <summary>A measurement in a WHILE condition lowers to two statements (a pre-loop measure and an
-    /// end-of-body re-measure sharing one span). An out-of-range measured index must still report ONCE —
-    /// value-equal diagnostics collapse — not once per lowered copy.</summary>
+    /// <summary>A measurement in a while condition remains one canonical HIR access site. MIR places that
+    /// occurrence in the repeated condition CFG, so an out-of-range index has one exact diagnostic owner.</summary>
     [Fact]
     public void ReportsASingleDiagnosticForAnOutOfRangeMeasureInAWhileCondition()
     {
@@ -629,10 +629,10 @@ public class BoundsProofTests
         Assert.Single(r.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(), e => e.Code == "QSEM016");
     }
 
-    /// <summary>For an UNPROVEN measured index, the model preserves both lowered access sites while the
-    /// OpenQASM policy still collapses their value-equal source diagnostics to one QSEM030.</summary>
+    /// <summary>For an unproven measured index, the semantic model preserves the one canonical HIR access
+    /// site and the OpenQASM policy reports one QSEM030 for that exact site.</summary>
     [Fact]
-    public void RecordsBothUnprovenMeasureSitesButReportsOneDiagnostic()
+    public void RecordsOneCanonicalUnprovenMeasureSiteAndOneDiagnostic()
     {
         var r = Compiler.Compile("""
             operation Foo(q: Qubit[]) {
@@ -643,7 +643,7 @@ public class BoundsProofTests
             operation Main() { use r = Qubit[3]; Foo(r); }
             """);
         Assert.False(r.Succeeded);
-        Assert.Equal(2, r.Hir.SpecializedValidation!.Model.UnprovenIndexes.Count);
+        Assert.Single(r.Hir.SpecializedValidation!.Model.UnprovenIndexes);
         Assert.Single(r.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(), error => error.Code == "QSEM030");
     }
 
@@ -1310,7 +1310,7 @@ public class BoundsProofTests
             }
             """);
         Assert.True(r.Succeeded);
-        var helper = r.Hir.Resolved!.Program!.Operations.Single(o => o.Name == "Helper");
+        var helper = r.Hir.Resolved!.Program!.Callables.Single(o => o.Name == "Helper");
         Assert.Null(r.Hir.SpecializedValidation!.Model.RequiredArgLengths(helper.Id));
     }
 
@@ -1575,7 +1575,7 @@ public class BoundsProofTests
             }
             """);
         Assert.True(r.Succeeded);
-        var helper = r.Hir.Resolved!.Program!.Operations.Single(o => o.Name == "Helper");
+        var helper = r.Hir.Resolved!.Program!.Callables.Single(o => o.Name == "Helper");
         var contract = r.Hir.SpecializedValidation!.Model.RequiredArgLengths(helper.Id);
         Assert.NotNull(contract);
         Assert.Equal(6L, contract!["x"]);
@@ -1689,15 +1689,15 @@ public class BoundsProofTests
         Assert.True(r.Succeeded);
 
         QoraValidator.Validate(r.Hir.Resolved!.Program, out var pre);
-        var ops = r.Hir.Resolved!.Program!.Operations.ToDictionary(o => o.Name, o => o.Id);
+        var ops = r.Hir.Resolved!.Program!.Callables.ToDictionary(o => o.Name, o => o.Id);
         Assert.True(pre!.WillBeRechecked(ops["Main"]));    // concrete: checks complete without deferral
         Assert.True(pre.WillBeRechecked(ops["Flip"]));     // generic reached from Main
         Assert.False(pre.WillBeRechecked(ops["Dead1"]));   // generic nothing calls
         Assert.False(pre.WillBeRechecked(ops["Dead2"]));   // one caller — but a dead one
-        Assert.Null(pre.WillBeRechecked(-1));              // an op this validation never saw
+        Assert.Null(pre.WillBeRechecked(new HirNodeId(int.MaxValue))); // a callable this validation never saw
 
         // The FINAL (post-mono) model: every surviving op is concrete, so every verdict is true.
-        Assert.All(r.Hir.Specialized!.Program!.Operations, o => Assert.True(r.Hir.SpecializedValidation!.Model.WillBeRechecked(o.Id)));
+        Assert.All(r.Hir.Specialized!.Program!.Callables, o => Assert.True(r.Hir.SpecializedValidation!.Model.WillBeRechecked(o.Id)));
     }
 
     /// <summary>A digit-run index too large for long lowers to a verbatim literal node — the diagnostic

@@ -32,28 +32,49 @@ public class GeneralIndexExpressionLoweringTests
         Assert.DoesNotContain(snapshot.Diagnostics, error => error.Code == "CE0001");
 
         var ast = Assert.IsAssignableFrom<AstSymbol>(parseProduct.LoweringAst);
-        var program = Assert.IsType<QProgram>(
-            QoraLowering.Lower(ast, snapshot.Document.Ref));
-        var main = Assert.Single(program.Operations, operation => operation.Name == "Main");
+        var program = new HirTestFactory(snapshot.Document.Ref)
+            .Lower(ast);
+        var main = Assert.Single(program.Callables, operation => operation.Name == "Main");
 
-        var write = Assert.IsType<QAssign>(main.Body[2]);
-        Assert.Equal("xs", write.Name);
-        AssertIndexCall(write.Index);
+        var write = Assert.IsType<HirAssignmentStatement>(main.Body[2]);
+        var writeTarget = Assert.IsType<HirIndexExpression>(write.Target);
+        Assert.Equal(
+            "xs",
+            Assert.IsType<HirNameExpression>(
+                writeTarget.Receiver).Name);
+        AssertIndexCall(writeTarget.Index);
 
-        var gate = Assert.IsType<QGate>(main.Body[3]);
-        var gateTarget = Assert.IsType<QQubitArg>(Assert.Single(gate.Args));
-        Assert.Equal("q", gateTarget.Reg);
+        var gate = Assert.IsType<HirCallStatement>(main.Body[3]);
+        var gateTarget = Assert.IsType<HirIndexExpression>(
+            Assert.Single(gate.Call.Arguments).Expression);
+        Assert.Equal(
+            "q",
+            Assert.IsType<HirNameExpression>(
+                gateTarget.Receiver).Name);
         AssertIndexCall(gateTarget.Index);
 
-        var measurementDecl = Assert.IsType<QDecl>(main.Body[4]);
-        var measurement = Assert.IsType<QMeasure>(measurementDecl.Value);
-        var measuredTarget = Assert.IsType<QIndexNode>(measurement.Target);
-        Assert.Equal("q", Assert.IsType<QNameRef>(measuredTarget.Base).Name);
+        var measurementDecl =
+            Assert.IsType<HirVariableDeclarationStatement>(
+                main.Body[4]);
+        var measurement =
+            Assert.IsType<HirMeasurementExpression>(
+                measurementDecl.Value);
+        var measuredTarget = Assert.IsType<HirIndexExpression>(
+            measurement.Target);
+        Assert.Equal(
+            "q",
+            Assert.IsType<HirNameExpression>(
+                measuredTarget.Receiver).Name);
         AssertIndexCall(measuredTarget.Index);
 
-        var readDecl = Assert.IsType<QDecl>(main.Body[5]);
-        var read = Assert.IsType<QIndexNode>(Assert.IsType<QText>(readDecl.Value).Tree);
-        Assert.Equal("xs", Assert.IsType<QNameRef>(read.Base).Name);
+        var readDecl = Assert.IsType<HirVariableDeclarationStatement>(
+            main.Body[5]);
+        var read = Assert.IsType<HirIndexExpression>(
+            readDecl.Value);
+        Assert.Equal(
+            "xs",
+            Assert.IsType<HirNameExpression>(
+                read.Receiver).Name);
         AssertIndexCall(read.Index);
     }
 
@@ -76,22 +97,28 @@ public class GeneralIndexExpressionLoweringTests
         Assert.DoesNotContain(snapshot.Diagnostics, error => error.Code == "CE0001");
 
         var ast = Assert.IsAssignableFrom<AstSymbol>(parseProduct.LoweringAst);
-        var program = Assert.IsType<QProgram>(
-            QoraLowering.Lower(ast, snapshot.Document.Ref));
-        var main = Assert.Single(program.Operations, operation => operation.Name == "Main");
-        var declaration = Assert.IsType<QDecl>(main.Body[1]);
-        var read = Assert.IsType<QIndexNode>(Assert.IsType<QText>(declaration.Value).Tree);
+        var program = new HirTestFactory(snapshot.Document.Ref)
+            .Lower(ast);
+        var main = Assert.Single(program.Callables, operation => operation.Name == "Main");
+        var declaration =
+            Assert.IsType<HirVariableDeclarationStatement>(
+                main.Body[1]);
+        var read = Assert.IsType<HirIndexExpression>(
+            declaration.Value);
 
-        var plus = Assert.IsType<QBinOp>(read.Index);
-        Assert.Equal("+", plus.Op);
+        var plus = Assert.IsType<HirBinaryExpression>(read.Index);
+        Assert.Equal(HirBinaryOperator.Add, plus.Operator);
         AssertIndexCall(plus.Left);
-        Assert.Equal(1, Assert.IsType<QNumLit>(plus.Right).Value);
+        Assert.Equal(
+            1,
+            Assert.IsType<HirIntegerLiteralExpression>(
+                plus.Right).Value);
     }
 
-    private static void AssertIndexCall(QNode? node)
+    private static void AssertIndexCall(HirExpression? node)
     {
-        var call = Assert.IsType<QCallNode>(node);
-        Assert.Equal("idx", call.Name);
-        Assert.Empty(call.Args);
+        var call = Assert.IsType<HirCallExpression>(node);
+        Assert.Equal("idx", HirExpressions.QualifiedNameOf(call.Callee));
+        Assert.Empty(call.Arguments);
     }
 }

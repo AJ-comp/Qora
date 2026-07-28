@@ -23,8 +23,8 @@ public class QubitGraphTests
         return (r, r.Hir.EffectAnalysis!.Model);
     }
 
-    private static QOperation Op(Compilation r, string name) =>
-        r.Hir.EffectAnalysis!.Program.Operations.Single(o => o.Name == name);
+    private static HirCallable Op(Compilation r, string name) =>
+        r.Hir.EffectAnalysis!.Program.Callables.Single(o => o.Name == name);
     private static QubitRef At(string reg, int i) => new(reg, i);
     private static QubitRef Whole(string reg) => new(reg, null);
 

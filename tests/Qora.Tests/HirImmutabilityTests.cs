@@ -7,50 +7,152 @@ namespace Qora.Tests;
 public sealed class HirImmutabilityTests
 {
     [Fact]
-    public void CollectionBearingHirRecordsDefensivelyFreezeConstructorInputs()
+    public void ConcreteHirNodesExposeNoPublicInstanceConstructors()
     {
-        var parameter = new QParam("p", QType.Int, null);
-        var statement = new QDecl(false, QType.Int, "x", new QText(new QNumLit(1)));
-        var argument = new QTextArg(new QNumLit(1));
-        var expression = new QText(new QNumLit(1));
+        var concreteNodeTypes = typeof(HirNode)
+            .Assembly
+            .GetTypes()
+            .Where(type =>
+                typeof(HirNode).IsAssignableFrom(type)
+                && !type.IsAbstract)
+            .OrderBy(type => type.FullName, StringComparer.Ordinal)
+            .ToArray();
 
-        var parameters = new List<QParam> { parameter };
-        var body = new List<QStmt> { statement };
-        var operation = new QOperation("F", parameters, body);
-        var operations = new List<QOperation> { operation };
-        var imports = new List<QImport> { new("lib.qor") };
-        var openDirectives = new List<QOpen> { new("Lib") };
-        var opens = new Dictionary<string, IReadOnlyList<QOpen>>
+        Assert.Contains(typeof(HirProgram), concreteNodeTypes);
+        Assert.Contains(typeof(HirNamespaceDeclaration), concreteNodeTypes);
+        Assert.Contains(typeof(HirCallable), concreteNodeTypes);
+        Assert.Contains(typeof(HirBlock), concreteNodeTypes);
+        Assert.Contains(
+            concreteNodeTypes,
+            type => typeof(HirStatement).IsAssignableFrom(type));
+        Assert.Contains(
+            concreteNodeTypes,
+            type => typeof(HirExpression).IsAssignableFrom(type));
+        Assert.Contains(typeof(HirArgument), concreteNodeTypes);
+        Assert.Contains(typeof(HirParameter), concreteNodeTypes);
+
+        var exposedConstructors = concreteNodeTypes
+            .SelectMany(type =>
+                type.GetConstructors()
+                    .Select(constructor =>
+                        $"{type.FullName}: {constructor}"))
+            .ToArray();
+
+        Assert.True(
+            exposedConstructors.Length == 0,
+            "HIR nodes must be constructed only by lowering/rewrite authorities: "
+            + string.Join(" | ", exposedConstructors));
+    }
+
+    [Fact]
+    public void ConstructionAuthorityRejectsRegisteringOneDocumentTwice()
+    {
+        var hir = new HirTestFactory();
+
+        var error = Assert.Throws<InvalidOperationException>(
+            hir.RegisterEntryDocumentAgain);
+
+        Assert.Contains("already registered", error.Message);
+    }
+
+    [Fact]
+    public void ConstructionAuthorityRejectsTwoLoweringSessionsForOneDocument()
+    {
+        var hir = new HirTestFactory();
+
+        var error = Assert.Throws<InvalidOperationException>(
+            hir.BeginEntryDocumentLoweringAgain);
+
+        Assert.Contains("already began", error.Message);
+    }
+
+    [Fact]
+    public void ConstructionAuthorityRejectsLoweringAfterSourceSetBinding()
+    {
+        var hir = new HirTestFactory();
+
+        var error = Assert.Throws<InvalidOperationException>(
+            hir.BeginEntryDocumentLoweringAfterBindingSourceSet);
+
+        Assert.Contains("source set is sealed", error.Message);
+    }
+
+    [Fact]
+    public void CollectionBearingHirNodesDefensivelyFreezeConstructionInputs()
+    {
+        var hir = new HirTestFactory();
+        var parameter = hir.Parameter("p", QType.Int);
+        var statement = hir.Variable(
+            "x",
+            hir.Integer(1),
+            QType.Int);
+        var argument = hir.Argument(hir.Integer(1));
+        var expression = hir.Integer(1);
+
+        var parameters = new List<HirParameter> { parameter };
+        var body = new List<HirStatement> { statement };
+        var operation = hir.Callable("F", parameters, body);
+        var imports = new List<HirImportDirective>
         {
-            ["App"] = openDirectives,
+            hir.Import("lib.qor"),
         };
-        var program = new QProgram(operations, imports, opens);
+        var openDirectives = new List<HirOpenDirective>
+        {
+            hir.Open("Lib"),
+        };
+        var namespaceDeclarations = new List<HirDeclaration>
+        {
+            operation,
+        };
+        var app = hir.Namespace(
+            "App",
+            namespaceDeclarations,
+            openDirectives);
+        var declarations = new List<HirDeclaration> { app };
+        var program = hir.Program(declarations, imports);
 
         var modifiers = new List<QGateModifier> { QGateModifier.Controlled };
-        var arguments = new List<QArg> { argument };
-        var gate = new QGate(modifiers, "F", arguments);
-        var thenBody = new List<QStmt> { statement };
-        var elseBody = new List<QStmt> { statement };
-        var conditional = new QIf(new QCond(new QNumLit(1)), thenBody, elseBody);
-        var forBody = new List<QStmt> { statement };
-        var loop = new QFor("i", new QNumLit(0), new QNumLit(1), forBody);
-        var whileBody = new List<QStmt> { statement };
-        var whileLoop = new QWhile(new QCond(new QNumLit(1)), whileBody);
-        var repeatBody = new List<QStmt> { statement };
-        var repeat = new QRepeat(repeatBody, new QCond(new QNumLit(1)));
-        var elements = new List<QExpr> { expression };
-        var literal = new QArrayLiteral(elements);
-        var callArguments = new List<QNode> { new QNumLit(1) };
-        var call = new QCallNode("F", callArguments);
+        var arguments = new List<HirArgument> { argument };
+        var gate = hir.Apply(
+            modifiers,
+            hir.Call("F", arguments));
+        var thenBody = new List<HirStatement> { statement };
+        var elseBody = new List<HirStatement> { statement };
+        var conditional = hir.If(
+            hir.Integer(1),
+            thenBody,
+            elseBody);
+        var forBody = new List<HirStatement> { statement };
+        var loop = hir.For(
+            "i",
+            hir.Integer(0),
+            hir.Integer(1),
+            forBody);
+        var whileBody = new List<HirStatement> { statement };
+        var whileLoop = hir.While(
+            hir.Integer(1),
+            whileBody);
+        var repeatBody = new List<HirStatement> { statement };
+        var repeat = hir.Repeat(
+            repeatBody,
+            hir.Integer(1));
+        var elements = new List<HirExpression> { expression };
+        var literal = hir.ArrayLiteral(elements);
+        var callArguments = new List<HirArgument>
+        {
+            hir.Argument(hir.Integer(1)),
+        };
+        var call = hir.Call("F", callArguments);
         var slots = new List<IParamSpec> { parameter };
         var signature = new GateSig("F", slots);
+        _ = hir.Publish(program);
 
         parameters.Clear();
         body.Clear();
-        operations.Clear();
+        declarations.Clear();
+        namespaceDeclarations.Clear();
         imports.Clear();
         openDirectives.Clear();
-        opens.Clear();
         modifiers.Clear();
         arguments.Clear();
         thenBody.Clear();
@@ -62,116 +164,53 @@ public sealed class HirImmutabilityTests
         callArguments.Clear();
         slots.Clear();
 
-        Assert.Single(operation.Params);
+        Assert.Single(operation.Parameters);
         Assert.Single(operation.Body);
-        Assert.Single(program.Operations);
-        Assert.Single(program.Imports!);
-        Assert.Single(program.Opens!);
-        Assert.Single(program.Opens!["App"]);
+        Assert.Single(program.Declarations);
+        Assert.Single(program.Callables);
+        Assert.Single(program.Imports);
+        Assert.Single(app.OpenDirectives);
+        Assert.Single(app.Declarations);
+        Assert.Same(operation, program.Callables.Single());
+        Assert.Equal("App", program.NamespaceOf(operation));
         Assert.Single(gate.Modifiers);
-        Assert.Single(gate.Args);
+        Assert.Single(gate.Call.Arguments);
         Assert.Single(conditional.Then);
         Assert.Single(conditional.Else);
         Assert.Single(loop.Body);
         Assert.Single(whileLoop.Body);
         Assert.Single(repeat.Body);
         Assert.Single(literal.Elements);
-        Assert.Single(call.Args);
-        Assert.Single(signature.Params);
+        Assert.Single(call.Arguments);
+        Assert.Single(signature.Parameters);
     }
 
     [Fact]
-    public void WithExpressionsCannotReintroduceMutableCollectionAliases()
+    public void PublishedHirCannotBeExtendedThroughItsConstructionAuthority()
     {
-        var parameter = new QParam("p", QType.Int, null);
-        var statement = new QDecl(false, QType.Int, "x", new QText(new QNumLit(1)));
-        var argument = new QTextArg(new QNumLit(1));
-        var operation = new QOperation("F", Array.Empty<QParam>(), Array.Empty<QStmt>());
-        var program = new QProgram(Array.Empty<QOperation>());
-        var gate = new QGate(Array.Empty<QGateModifier>(), "F", Array.Empty<QArg>());
-        var conditional = new QIf(
-            new QCond(new QNumLit(1)),
-            Array.Empty<QStmt>(),
-            Array.Empty<QStmt>());
-        var loop = new QFor(
-            "i",
-            new QNumLit(0),
-            new QNumLit(1),
-            Array.Empty<QStmt>());
-        var whileLoop = new QWhile(new QCond(new QNumLit(1)), Array.Empty<QStmt>());
-        var repeat = new QRepeat(Array.Empty<QStmt>(), new QCond(new QNumLit(1)));
-        var literal = new QArrayLiteral(Array.Empty<QExpr>());
-        var call = new QCallNode("F", Array.Empty<QNode>());
-        var signature = new GateSig("F", Array.Empty<IParamSpec>());
+        var hir = new HirTestFactory();
+        var declaration = hir.Variable(
+            "value",
+            hir.Integer(1),
+            QType.Int);
+        var main = hir.Callable(
+            "Main",
+            body: new HirStatement[] { declaration });
+        var program = hir.PublishProgram(new[] { main });
+        var pipeline = hir.CreatePipelineBuilder();
+        var snapshot = pipeline.PublishLowered(program);
+        var publishedIds = snapshot.Structure.NodeIds.ToArray();
 
-        var parameters = new List<QParam> { parameter };
-        var body = new List<QStmt> { statement };
-        var operations = new List<QOperation> { operation };
-        var imports = new List<QImport> { new("lib.qor") };
-        var openDirectives = new List<QOpen> { new("Lib") };
-        var opens = new Dictionary<string, IReadOnlyList<QOpen>>
-        {
-            ["App"] = openDirectives,
-        };
-        var modifiers = new List<QGateModifier> { QGateModifier.Controlled };
-        var arguments = new List<QArg> { argument };
-        var thenBody = new List<QStmt> { statement };
-        var elseBody = new List<QStmt> { statement };
-        var forBody = new List<QStmt> { statement };
-        var whileBody = new List<QStmt> { statement };
-        var repeatBody = new List<QStmt> { statement };
-        var elements = new List<QExpr> { new QText(new QNumLit(1)) };
-        var callArguments = new List<QNode> { new QNumLit(1) };
-        var slots = new List<IParamSpec> { parameter };
-
-        var rewrittenOperation = operation with { Params = parameters, Body = body };
-        var rewrittenProgram = program with
-        {
-            Operations = operations,
-            Imports = imports,
-            Opens = opens,
-        };
-        var rewrittenGate = gate with { Modifiers = modifiers, Args = arguments };
-        var rewrittenConditional = conditional with { Then = thenBody, Else = elseBody };
-        var rewrittenLoop = loop with { Body = forBody };
-        var rewrittenWhile = whileLoop with { Body = whileBody };
-        var rewrittenRepeat = repeat with { Body = repeatBody };
-        var rewrittenLiteral = literal with { Elements = elements };
-        var rewrittenCall = call with { Args = callArguments };
-        var rewrittenSignature = signature with { Params = slots };
-
-        parameters.Clear();
-        body.Clear();
-        operations.Clear();
-        imports.Clear();
-        openDirectives.Clear();
-        opens.Clear();
-        modifiers.Clear();
-        arguments.Clear();
-        thenBody.Clear();
-        elseBody.Clear();
-        forBody.Clear();
-        whileBody.Clear();
-        repeatBody.Clear();
-        elements.Clear();
-        callArguments.Clear();
-        slots.Clear();
-
-        Assert.Single(rewrittenOperation.Params);
-        Assert.Single(rewrittenOperation.Body);
-        Assert.Single(rewrittenProgram.Operations);
-        Assert.Single(rewrittenProgram.Imports!);
-        Assert.Single(rewrittenProgram.Opens!["App"]);
-        Assert.Single(rewrittenGate.Modifiers);
-        Assert.Single(rewrittenGate.Args);
-        Assert.Single(rewrittenConditional.Then);
-        Assert.Single(rewrittenConditional.Else);
-        Assert.Single(rewrittenLoop.Body);
-        Assert.Single(rewrittenWhile.Body);
-        Assert.Single(rewrittenRepeat.Body);
-        Assert.Single(rewrittenLiteral.Elements);
-        Assert.Single(rewrittenCall.Args);
-        Assert.Single(rewrittenSignature.Params);
+        Assert.Throws<InvalidOperationException>(
+            () => hir.Integer(2));
+        Assert.Throws<InvalidOperationException>(
+            () => hir.Publish(program));
+        Assert.Equal(
+            publishedIds,
+            snapshot.Structure.NodeIds);
+        Assert.Same(
+            declaration,
+            snapshot.Structure.RequireNode(declaration.Id));
     }
 
     [Fact]
@@ -195,13 +234,21 @@ public sealed class HirImmutabilityTests
         var analyzedArtifact = Assert.IsType<HirSemanticArtifact>(compilation.Hir.EffectAnalysis);
         var analyzed = analyzedArtifact.Source;
         var model = analyzedArtifact.Model;
-        var main = analyzed.Program.Operations.Single(operation => operation.Name == "Main");
-        var declaration = main.Body.OfType<QDecl>().Single(item => item.Name == "x");
+        var main = analyzed.Program.Callables.Single(
+            callable => callable.Name == "Main");
+        var declaration = main.Body
+            .OfType<HirVariableDeclarationStatement>()
+            .Single(item => item.Name == "x");
         var symbol = Assert.IsType<Symbol>(model.FindSymbol(declaration.Id));
         var graph = Assert.IsType<QubitGraph>(model.Graph(main.Id));
         var scopeGraph = Assert.IsType<HirScopeGraph>(model.ScopeGraph);
 
-        AssertCannotAdd(symbol.Uses, new UseSite(-1, "mutation", -1));
+        AssertCannotAdd(
+            symbol.Uses,
+            new UseSite(
+                -1,
+                "mutation",
+                new HirNodeId(int.MaxValue)));
         AssertCannotAdd(graph.Nodes, graph.Nodes[0]);
         AssertDictionaryCannotRemove(scopeGraph.Symbols, symbol.Id);
         AssertDictionaryCannotRemove(scopeGraph.Scopes, scopeGraph.RootScope.Id);
@@ -233,18 +280,18 @@ public sealed class HirImmutabilityTests
             compilation.Hir.SpecializedValidation);
         var model = validation.Model;
         var graph = Assert.IsType<HirScopeGraph>(model.ScopeGraph);
-        var main = validation.Program.Operations.Single();
+        var main = validation.Program.Callables.Single();
         var callableScope = Assert.IsType<Scope>(
             graph.FindCallableScope(main.Id));
         var callableSymbol = Assert.IsType<Symbol>(
             graph.FindDeclaration(main.Id));
         var usesBefore = callableSymbol.Uses;
-        var lateRootSymbol = new Symbol(
+        var lateRootSymbol = graph.CreateSymbol(
             graph.RootScope.Id,
             "Late",
-            SymbolKind.Operation,
-            declarationNodeId: -1);
-        var lateLocalSymbol = new Symbol(
+            SymbolKind.Callable,
+            declarationNodeId: main.Id);
+        var lateLocalSymbol = graph.CreateSymbol(
             callableScope.Id,
             "late",
             SymbolKind.Var,
@@ -257,7 +304,7 @@ public sealed class HirImmutabilityTests
             HirScopeKind.Block,
             callableScope.Id));
         AssertSealed(() => graph.BindScopeSite(
-            new HirScopeSite(-1, HirScopeSiteRole.IfThen),
+            new HirScopeSite(main.Id, HirScopeSiteRole.IfThen),
             callableScope));
         AssertSealed(() => graph.RegisterCallableScope(main.Id, callableScope));
         AssertSealed(() => graph.AddLookupEdge(
@@ -267,9 +314,14 @@ public sealed class HirImmutabilityTests
         AssertSealed(() => callableScope.TryAdd(lateLocalSymbol));
         AssertSealed(() => callableScope.Bind(lateLocalSymbol));
         AssertSealed(() => callableSymbol.AddUse(
-            new UseSite(-1, "late mutation", -1)));
+            new UseSite(-1, "late mutation", main.Id)));
 
-        Assert.Null(graph.FindDeclaration(-1));
+        var nonDeclarationId = Assert
+            .IsType<HirVariableDeclarationStatement>(
+                Assert.Single(main.Body))
+            .Value
+            .Id;
+        Assert.Null(graph.FindDeclaration(nonDeclarationId));
         Assert.Null(graph.LookupMember(callableScope.Id, "late"));
         Assert.Same(usesBefore, callableSymbol.Uses);
     }
@@ -285,7 +337,7 @@ public sealed class HirImmutabilityTests
         Assert.Throws<InvalidOperationException>(() => { _ = graph.CallableScopes; });
         Assert.Throws<InvalidOperationException>(() => { _ = graph.AllSymbols; });
 
-        var symbol = new Symbol(
+        var symbol = graph.CreateSymbol(
             graph.RootScope.Id,
             "N",
             SymbolKind.Namespace);
@@ -313,32 +365,34 @@ public sealed class HirImmutabilityTests
     [Fact]
     public void SemanticFactInputsAndEffectRecordsAreDefensivelyFrozen()
     {
+        var hir = new HirTestFactory();
+        var callable = hir.Callable("F");
+        var firstIndex = hir.Index("xs", 0);
+        var secondIndex = hir.Index("ys", 0);
         var validation = new HirSemanticModel();
         var required = new Dictionary<string, long> { ["xs"] = 2 };
-        validation.SetRequiredArgLengths(7, required);
+        validation.SetRequiredArgLengths(callable.Id, required);
         validation.AddUnprovenIndex(
             new UnprovenIndex(
-                new HirIndexAccessId(0),
+                firstIndex.Id,
                 "F",
                 "xs",
                 "i",
                 null,
-                null),
-            owningStatementId: 1,
-            new object());
+                null));
         validation.AddDeferredSizeCheck(new DeferredSizeCheck("F", "xs", "xs[i]", "size", null));
         required["xs"] = 99;
         required["ys"] = 1;
 
         var needs = Assert.IsAssignableFrom<IReadOnlyDictionary<string, long>>(
-            validation.RequiredArgLengths(7));
+            validation.RequiredArgLengths(callable.Id));
         Assert.Equal(2, needs["xs"]);
         Assert.False(needs.ContainsKey("ys"));
         AssertDictionaryCannotRemove(needs, "xs");
         AssertCannotAdd(
             validation.UnprovenIndexes,
             new UnprovenIndex(
-                new HirIndexAccessId(1),
+                secondIndex.Id,
                 "Injected",
                 "ys",
                 "0",
@@ -379,7 +433,7 @@ public sealed class HirImmutabilityTests
         var specialized = Assert.IsType<HirSemanticArtifact>(
             compilation.Hir.SpecializedValidation);
         var analyzed = Assert.IsType<HirSemanticArtifact>(compilation.Hir.EffectAnalysis);
-        var main = analyzed.Program.Operations.Single();
+        var main = analyzed.Program.Callables.Single();
 
         Assert.NotSame(specialized.Model, analyzed.Model);
         Assert.Same(specialized.Model.ScopeGraph, analyzed.Model.ScopeGraph);

@@ -33,9 +33,9 @@ public class OwnershipParameterTests
             """);
 
         Assert.True(result.Succeeded, Describe(result));
-        var transfer = Assert.Single(result.Hir.Resolved!.Program!.Operations, operation => operation.Name == "Transfer");
+        var transfer = Assert.Single(result.Hir.Resolved!.Program!.Callables, operation => operation.Name == "Transfer");
         Assert.Collection(
-            transfer.Params,
+            transfer.Parameters,
             parameter => AssertMode(parameter, QOwnershipMode.Borrowed, QAccessMode.ReadOnly),
             parameter => AssertMode(parameter, QOwnershipMode.Borrowed, QAccessMode.Mutable),
             parameter => AssertMode(parameter, QOwnershipMode.Moved, QAccessMode.ReadOnly),
@@ -539,11 +539,13 @@ public class OwnershipParameterTests
 
         Assert.True(result.Succeeded, Describe(result));
         var specialized = Assert.Single(
-            result.Hir.Specialized!.Program!.Operations,
+            result.Hir.Specialized!.Program!.Callables,
             operation => operation.DisplayName == "Observe");
-        var declaration = Assert.IsType<QDecl>(Assert.Single(specialized.Body));
-        var value = Assert.IsType<QText>(declaration.Value);
-        Assert.IsType<QMember>(value.Tree);
+        var declaration =
+            Assert.IsType<HirVariableDeclarationStatement>(
+                Assert.Single(specialized.Body));
+        Assert.IsType<HirMemberAccessExpression>(
+            declaration.Value);
 
         var target = Assert.IsType<OpenQasmArtifact>(result.Targets.OpenQasm);
         var targetObserve = Assert.Single(
@@ -840,17 +842,20 @@ public class OwnershipParameterTests
 
         Assert.True(result.Succeeded, Describe(result));
         var specialized = Assert.Single(
-            result.Hir.EffectAnalysis!.Program!.Operations,
+            result.Hir.EffectAnalysis!.Program!.Callables,
             operation => operation.DisplayName == "Buffers.Transfer");
         Assert.Collection(
-            specialized.Params,
+            specialized.Parameters,
             parameter => AssertMode(parameter, QOwnershipMode.Moved, QAccessMode.ReadOnly),
             parameter => AssertMode(parameter, QOwnershipMode.Moved, QAccessMode.Mutable));
         Assert.Contains("mutable array[int, #dim = 1] values", result.Targets.OpenQasm!.Text);
         Assert.DoesNotContain("move ", result.Targets.OpenQasm!.Text);
     }
 
-    private static void AssertMode(QParam parameter, QOwnershipMode ownership, QAccessMode access)
+    private static void AssertMode(
+        HirParameter parameter,
+        QOwnershipMode ownership,
+        QAccessMode access)
     {
         Assert.Equal(ownership, parameter.Ownership);
         Assert.Equal(access, parameter.Access);

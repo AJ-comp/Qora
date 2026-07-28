@@ -3,10 +3,9 @@ using Qora.Ir;
 namespace Qora.Tests;
 
 /// <summary>
-/// A measurement written inside a condition is DESUGARED to the two-step form OpenQASM needs
-/// (<see cref="Ir.Passes.MeasureConditionLowering"/>): a hoisted <c>bit</c> measures the qubit, the condition
-/// tests the bit. Verifies acceptance, the emitted shape per construct (if / while / repeat), scope
-/// containment (only conditions, not other positions), and that non-measurement calls are still rejected.
+/// A measurement inside a condition remains a canonical HIR expression. HIR-to-MIR lowering emits the
+/// measurement at that expression's exact control-flow position, so short-circuit and loop evaluation
+/// order are preserved. Verifies acceptance, target shape, HIR preservation, and invalid placements.
 /// </summary>
 public class MeasureConditionTests
 {
@@ -23,7 +22,7 @@ public class MeasureConditionTests
     public void AcceptsMeasurementInCondition(string source) => Compiler.Accepts(source);
 
     [Fact]
-    public void IfDesugarsToBitThenTest()
+    public void IfLowersMeasurementAtItsConditionPoint()
     {
         var artifact = MirQasmTestModel.Compile(
             "operation Main(){ use q=Qubit[2]; if(M(q[0])==1){ X(q[1]); } }");
@@ -37,80 +36,40 @@ public class MeasureConditionTests
     }
 
     [Fact]
-    public void WhileReMeasuresAtEndOfBody()
+    public void WhileKeepsMeasurementInsideTheRepeatedConditionFlow()
     {
         var artifact = MirQasmTestModel.Compile(
             "operation Main(){ use q=Qubit[1]; while(M(q[0])==1){ X(q[0]); } }");
-        var statements = MirQasmTestModel
-            .Statements(artifact.Program.EntryPoint.Body)
-            .ToArray();
+        var loop = Assert.Single(
+            artifact.Program.EntryPoint.Body
+                .OfType<MirQasmWhileStatement>());
 
-        Assert.Equal(
-            2,
-            statements
-                .OfType<MirQasmMeasurementAssignmentStatement>()
-                .Count());
-        Assert.Single(statements.OfType<MirQasmWhileStatement>());
-    }
-
-    [Fact]
-    public void UserThatShadowsTempNameStillCompiles()
-    {
-        // a user variable literally named `__m0` must not collide with the synthetic temp (would be QSEM015)
-        var r = Compiler.Compile("operation Main(){ use q=Qubit[1]; var __m0 = 5; if(M(q[0])==1){ Rx(__m0, q[0]); } }");
-        Assert.True(r.Succeeded, string.Join(" | ", r.Diagnostics.Select(diagnostic => diagnostic.Error).ToList().Select(e => $"{e.Code}: {e.Message}")));
-    }
-
-    [Fact]
-    public void SyntheticTempStaysDistinctFromUserNames()
-    {
-        var artifact = MirQasmTestModel.Compile(
-            "operation Main(){ use q=Qubit[1]; var __m0=1; var __m1=2; if(M(q[0])==1){ X(q[0]); } }");
-        var declarations = MirQasmTestModel
-            .Statements(artifact.Program.EntryPoint.Body)
-            .Select(
-                statement => statement switch
-                {
-                    MirQasmValueDeclarationStatement value =>
-                        (value.Declaration, value.EmittedName),
-                    MirQasmQubitDeclarationStatement qubit =>
-                        (qubit.Declaration, qubit.EmittedName),
-                    _ => ((MirQasmDeclarationId, string)?)null,
-                })
-            .Where(item => item.HasValue)
-            .Select(item => item!.Value)
-            .ToArray();
-
-        Assert.Equal(
-            declarations.Length,
-            declarations.Select(item => item.Item1).Distinct().Count());
-        Assert.Equal(
-            declarations.Length,
-            declarations.Select(item => item.Item2).Distinct().Count());
-        Assert.DoesNotContain(
-            declarations,
-            item => item.Item2.Contains('#'));
         Assert.Single(
             MirQasmTestModel
-                .Statements(artifact.Program.EntryPoint.Body)
+                .Statements(loop.Body)
                 .OfType<MirQasmMeasurementAssignmentStatement>());
+        Assert.DoesNotContain(
+            artifact.Program.EntryPoint.Body,
+            statement => statement is MirQasmMeasurementAssignmentStatement);
     }
 
-    /// <summary>The masking hole (Codex R-report): a synthetic temp named exactly `__m0` used to become a
-    /// real declaration BEFORE validation, so a user's UNDECLARED `__m0 = …` silently bound to it and its
-    /// `QSEM025` was lost. With the placeholder temp, the user's `__m0` stays undeclared and is reported.</summary>
     [Fact]
-    public void UndeclaredAssignmentToTempSpellingIsStillReported()
+    public void HirKeepsTheCanonicalMeasurementInsideTheCondition()
     {
-        var masked = Compiler.Compile("operation Main(){ use q=Qubit[1]; if(M(q[0])==1){ X(q[0]); } __m0 = 1; }");
-        Assert.False(masked.Succeeded);
-        Assert.Contains(masked.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(), e => e.Code == "QSEM025");
+        var compiled = Compiler.Compile(
+            "operation Main(){ use q=Qubit[1]; if(M(q[0])==1){ X(q[0]); } }");
+        Assert.True(compiled.Succeeded);
+        var resolved = compiled.Hir.Resolved!.Program;
+        var branch = Assert.IsType<HirIfStatement>(
+            resolved.Callables.Single().Body[1]);
 
-        // control: the identical shape with any other undeclared name already reported QSEM025 — the fix
-        // makes `__m0` behave the same, not specially.
-        var control = Compiler.Compile("operation Main(){ use q=Qubit[1]; if(M(q[0])==1){ X(q[0]); } foo = 1; }");
-        Assert.False(control.Succeeded);
-        Assert.Contains(control.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(), e => e.Code == "QSEM025");
+        Assert.Single(
+            HirExpressions
+                .DescendantsAndSelf(branch.Condition)
+                .OfType<HirMeasurementExpression>());
+        Assert.DoesNotContain(
+            resolved.Callables.Single().Body,
+            statement => statement is HirVariableDeclarationStatement);
     }
 
     [Theory]

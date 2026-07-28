@@ -94,7 +94,9 @@ public sealed class CompilationOutputPlanTests
     public void SuccessfulCompilationCannotPublishAnEmptyHirHistory()
     {
         var source = QoraCompiler.Compile("operation Main() { }");
-        var builder = new HirPipelineBuilder(source.Id, source.Revision);
+        var builder = new HirTestFactory(
+                source.Sources.Entry)
+            .CreateUnstartedPipelineBuilder();
         var emptyHir = builder.Build();
 
         var error = Assert.Throws<ArgumentException>(

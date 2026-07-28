@@ -396,11 +396,11 @@ public class MutableParameterTests
 
         Assert.True(result.Succeeded, string.Join(" | ", result.Diagnostics.Select(diagnostic => diagnostic.Error).ToList().Select(e => $"{e.Code}: {e.Message}")));
         var specialization = Assert.Single(
-            result.Hir.EffectAnalysis!.Program!.Operations,
+            result.Hir.EffectAnalysis!.Program!.Callables,
             operation => operation.DisplayName == "Touch");
-        Assert.Equal(2, specialization.Params[0].RegisterSize);
-        Assert.Equal(QOwnershipMode.Borrowed, specialization.Params[1].Ownership);
-        Assert.Equal(QAccessMode.Mutable, specialization.Params[1].Access);
+        Assert.Equal(2, specialization.Parameters[0].RegisterSize);
+        Assert.Equal(QOwnershipMode.Borrowed, specialization.Parameters[1].Ownership);
+        Assert.Equal(QAccessMode.Mutable, specialization.Parameters[1].Access);
         var target = result.Targets.OpenQasm!.Program;
         var touch = Assert.Single(
             target.Definitions.Where(
@@ -438,11 +438,11 @@ public class MutableParameterTests
 
         Assert.True(result.Succeeded, string.Join(" | ", result.Diagnostics.Select(diagnostic => diagnostic.Error).ToList().Select(e => $"{e.Code}: {e.Message}")));
         var specialization = Assert.Single(
-            result.Hir.EffectAnalysis!.Program!.Operations,
+            result.Hir.EffectAnalysis!.Program!.Callables,
             operation => operation.DisplayName == "CountInto");
-        Assert.Equal(3, specialization.Params[0].RegisterSize);
-        Assert.Equal(QOwnershipMode.Borrowed, specialization.Params[1].Ownership);
-        Assert.Equal(QAccessMode.Mutable, specialization.Params[1].Access);
+        Assert.Equal(3, specialization.Parameters[0].RegisterSize);
+        Assert.Equal(QOwnershipMode.Borrowed, specialization.Parameters[1].Ownership);
+        Assert.Equal(QAccessMode.Mutable, specialization.Parameters[1].Access);
         var target = result.Targets.OpenQasm!.Program;
         var countInto = Assert.Single(
             target.Definitions.Where(

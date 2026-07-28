@@ -10,11 +10,12 @@ public class BoundFoldingTests
     [Fact]
     public void DoesNotCombineCountsFromDifferentSameNamedSymbols()
     {
+        var hir = new HirTestFactory();
         var graph = new HirScopeGraph();
         var outerScope = graph.CreateScope(
             HirScopeKind.Callable,
             graph.RootScope.Id);
-        var outerArray = new Symbol(
+        var outerArray = graph.CreateSymbol(
             outerScope.Id,
             "xs",
             SymbolKind.Parameter,
@@ -23,23 +24,21 @@ public class BoundFoldingTests
         Assert.True(outerScope.TryAdd(outerArray));
 
         var outerLength = BoundFolder.Fold(
-            new QMember(new QNameRef("xs"), "Count"),
+            hir.Member("xs", "Count"),
             outerScope);
         Assert.IsType<ArrayLengthBound>(outerLength);
 
         var innerScope = graph.CreateScope(
             HirScopeKind.Block,
             outerScope.Id);
-        var outerLengthAlias = new Symbol(
+        var outerLengthAlias = graph.CreateSymbol(
             innerScope.Id,
             "outerLength",
             SymbolKind.Const,
             QType.Int,
-            isConst: true)
-        {
-            FoldedBound = outerLength,
-        };
-        var innerArray = new Symbol(
+            isConst: true,
+            foldedBound: outerLength);
+        var innerArray = graph.CreateSymbol(
             innerScope.Id,
             "xs",
             SymbolKind.Var,
@@ -50,10 +49,9 @@ public class BoundFoldingTests
         Assert.NotEqual(outerArray.Id, innerArray.Id);
 
         var difference = BoundFolder.Fold(
-            new QBinOp(
-                "-",
-                new QNameRef("outerLength"),
-                new QMember(new QNameRef("xs"), "Count")),
+            hir.Subtract(
+                hir.Name("outerLength"),
+                hir.Member("xs", "Count")),
             innerScope);
 
         Assert.Null(difference);

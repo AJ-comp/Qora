@@ -1,3 +1,4 @@
+using Qora.Compiler;
 using Qora.Ir;
 using Qora.Ir.Passes;
 
@@ -201,7 +202,7 @@ public class GeneralIndexExpressionSemanticTests
             diagnostic => diagnostic.Error.Code == "QSEM030");
         Assert.Contains(compiled.Hir.ResolvedValidation!.Model.UnprovenIndexes, fact => fact.Op == "Dead");
         Assert.DoesNotContain(
-            compiled.Hir.Specialized!.Program.Operations,
+            compiled.Hir.Specialized!.Program.Callables,
             operation => operation.Name == "Dead");
         Assert.NotNull(compiled.Targets.OpenQasm);
     }
@@ -222,16 +223,22 @@ public class GeneralIndexExpressionSemanticTests
             """);
         Assert.Contains(compiled.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(), error => error.Code == "QSEM030");
 
-        var mono = Monomorphizer.Run(Assert.IsType<QProgram>(compiled.Hir.Resolved!.Program));
-        var specialization = Assert.Single(mono.Program.Operations,
-            operation => operation.DisplayName == "CountBits" && operation.Params[0].RegisterSize == 2);
-        var main = Assert.Single(mono.Program.Operations, operation => operation.Name == "Main");
-        var value = Assert.Single(main.Body.OfType<QDecl>(), declaration => declaration.Name == "value");
-        var indexedRead = Assert.IsType<QIndexNode>(Assert.IsType<QText>(value.Value).Tree);
-        var call = Assert.IsType<QCallNode>(indexedRead.Index);
+        var mono = HirTestFactory.Monomorphize(
+            Assert.IsType<HirSnapshot>(
+                compiled.Hir.Resolved));
+        var specialization = Assert.Single(mono.Program.Callables,
+            operation => operation.DisplayName == "CountBits" && operation.Parameters[0].RegisterSize == 2);
+        var main = Assert.Single(mono.Program.Callables, operation => operation.Name == "Main");
+        var value = Assert.Single(
+            main.Body.OfType<HirVariableDeclarationStatement>(),
+            declaration => declaration.Name == "value");
+        var indexedRead = Assert.IsType<HirIndexExpression>(
+            value.Value);
+        var call = Assert.IsType<HirCallExpression>(
+            indexedRead.Index);
 
-        Assert.Equal(specialization.Id, call.CalleeOpId);
-        Assert.Contains("__sz2", call.Name);
+        Assert.Equal(specialization.Id, call.CalleeId);
+        Assert.Contains("__sz2", HirExpressions.QualifiedNameOf(call.Callee));
     }
 
     [Fact]

@@ -36,7 +36,7 @@ internal sealed class MirSnapshotTransformation
             {
                 MirOriginKind.HirNode =>
                     _origins.Hir(
-                        origin.HirOperationId!.Value,
+                        origin.HirCallableId!.Value,
                         origin.HirNodeId!.Value),
                 MirOriginKind.Synthesized =>
                     _origins.Synthesized(

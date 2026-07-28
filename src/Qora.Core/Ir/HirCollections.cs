@@ -7,8 +7,8 @@ namespace Qora.Ir;
 /// Freezes collections at the HIR boundary. An <see cref="IReadOnlyList{T}"/> or
 /// <see cref="IReadOnlyDictionary{TKey,TValue}"/> type alone is not enough: a caller can retain and
 /// mutate the original <see cref="List{T}"/> or <see cref="Dictionary{TKey,TValue}"/> after construction.
-/// Every collection-bearing HIR record uses these helpers both for its primary constructor and its
-/// <c>init</c> setter, so <c>with</c> expressions cannot reintroduce mutable aliases.
+/// Every collection-bearing HIR node copies through these helpers in its internal constructor, so a
+/// lowering or rewrite session cannot leak a mutable collection into a published snapshot.
 /// </summary>
 internal static class HirCollections
 {

@@ -17,6 +17,18 @@ public sealed class MirSnapshotTests
         Assert.Empty(typeof(MirProgram).GetConstructors(publicInstance));
         Assert.Empty(typeof(MirSnapshot).GetConstructors(publicInstance));
         Assert.Empty(typeof(MirOriginTable).GetConstructors(publicInstance));
+        Assert.Empty(typeof(MirQubitId).GetConstructors(publicInstance));
+        Assert.Empty(typeof(MirQubitVersion).GetConstructors(publicInstance));
+        Assert.Empty(typeof(MirQubitKey).GetConstructors(publicInstance));
+        Assert.Empty(typeof(MirQubitParameter).GetConstructors(publicInstance));
+        Assert.Empty(typeof(MirQubitFromUse).GetConstructors(publicInstance));
+        Assert.Empty(typeof(MirQubitAfterInstruction).GetConstructors(publicInstance));
+        Assert.Empty(typeof(MirQubitPhi).GetConstructors(publicInstance));
+        Assert.Empty(typeof(MirControlFlowEdge).GetConstructors(publicInstance));
+        Assert.Empty(typeof(MirQubitPhiInput).GetConstructors(publicInstance));
+        Assert.Empty(typeof(MirQubitAccess).GetConstructors(publicInstance));
+        Assert.Empty(typeof(MirQubitRef).GetConstructors(publicInstance));
+        Assert.Empty(typeof(MirQubitAccessRef).GetConstructors(publicInstance));
     }
 
     [Fact]
@@ -26,22 +38,27 @@ public sealed class MirSnapshotTests
         var compilationRevision = new CompilationRevision(7);
         var snapshotId =
             new MirSnapshotId(compilation, compilationRevision, revision: 5);
-        var program = ProgramWithTwoCallables(snapshotId);
         var hir = HirFixtureFor(
             snapshotId,
-            (10, "First"),
-            (20, "Second"));
+            "First",
+            "Second");
+        var firstHirCallable = CallableId(hir, "First");
+        var secondHirCallable = CallableId(hir, "Second");
+        var program = ProgramWithTwoCallables(
+            snapshotId,
+            firstHirCallable,
+            secondHirCallable);
         var linkBuilder = new MirCrossStageLinksBuilder(
             snapshotId,
             hir.Snapshot,
             hir.Semantics);
         linkBuilder.LinkCallable(
-            10,
-            hir.Semantics.Model.FindSymbol(10)!.Id,
+            firstHirCallable,
+            hir.Semantics.Model.FindSymbol(firstHirCallable)!.Id,
             new MirCallableId(0));
         linkBuilder.LinkCallable(
-            20,
-            hir.Semantics.Model.FindSymbol(20)!.Id,
+            secondHirCallable,
+            hir.Semantics.Model.FindSymbol(secondHirCallable)!.Id,
             new MirCallableId(1));
         foreach (var callable in program.Callables)
             foreach (var value in callable.Values)
@@ -65,8 +82,8 @@ public sealed class MirSnapshotTests
             new MirSnapshotId(unrelatedCompilation, compilationRevision, revision: 5);
         var unrelatedHir = HirFixtureFor(
             unrelatedSnapshotId,
-            (10, "First"),
-            (20, "Second"));
+            "First",
+            "Second");
         Assert.Throws<ArgumentException>(
             () => new MirCrossStageLinksBuilder(
                 snapshotId,
@@ -81,31 +98,37 @@ public sealed class MirSnapshotTests
     }
 
     [Fact]
-    public void CallableOperationLinksRejectDuplicateValuesEvenWithCompleteCoverage()
+    public void CallableHirLinksRejectDuplicateValuesEvenWithCompleteCoverage()
     {
-        var program = ProgramWithTwoCallables();
-        var snapshotId = program.SnapshotId;
+        var snapshotId = MirTestContext.Create().SnapshotId;
         var hir = HirFixtureFor(
             snapshotId,
-            (10, "First"),
-            (20, "Second"),
-            (30, "Third"));
+            "First",
+            "Second",
+            "Third");
+        var firstHirCallable = CallableId(hir, "First");
+        var secondHirCallable = CallableId(hir, "Second");
+        var thirdHirCallable = CallableId(hir, "Third");
+        var program = ProgramWithTwoCallables(
+            snapshotId,
+            firstHirCallable,
+            secondHirCallable);
         var linkBuilder = new MirCrossStageLinksBuilder(
             snapshotId,
             hir.Snapshot,
             hir.Semantics);
         linkBuilder.LinkCallable(
-            10,
-            hir.Semantics.Model.FindSymbol(10)!.Id,
+            firstHirCallable,
+            hir.Semantics.Model.FindSymbol(firstHirCallable)!.Id,
             new MirCallableId(0));
         linkBuilder.LinkCallable(
-            20,
-            hir.Semantics.Model.FindSymbol(20)!.Id,
+            secondHirCallable,
+            hir.Semantics.Model.FindSymbol(secondHirCallable)!.Id,
             new MirCallableId(1));
         var error = Assert.Throws<InvalidOperationException>(
             () => linkBuilder.LinkCallable(
-                30,
-                hir.Semantics.Model.FindSymbol(30)!.Id,
+                thirdHirCallable,
+                hir.Semantics.Model.FindSymbol(thirdHirCallable)!.Id,
                 new MirCallableId(1)));
 
         Assert.Contains("registered more than once", error.Message);
@@ -138,7 +161,7 @@ public sealed class MirSnapshotTests
             links.LoweredFromSnapshot,
             links.SymbolsFromArtifact,
             links.Origins,
-            links.CallablesByHirOperation,
+            links.CallablesByHirCallable,
             callableEdges,
             links.ValuesBySymbol,
             links.SymbolsByValue,
@@ -194,7 +217,7 @@ public sealed class MirSnapshotTests
             links.LoweredFromSnapshot,
             links.SymbolsFromArtifact,
             links.Origins,
-            links.CallablesByHirOperation,
+            links.CallablesByHirCallable,
             links.CallablesBySymbol,
             valuesBySymbol,
             symbolsByValue,
@@ -240,9 +263,9 @@ public sealed class MirSnapshotTests
                 compilation.Diagnostics.Select(diagnostic => diagnostic.Error.Message)));
         var mir = Assert.IsType<MirSnapshot>(compilation.Mir);
         var semanticProgram = mir.Links.SymbolsFromArtifact.Program;
-        var deadDeclaration = semanticProgram.Operations
-            .SelectMany(operation => operation.Body)
-            .OfType<QDecl>()
+        var deadDeclaration = semanticProgram.Callables
+            .SelectMany(callable => callable.Body)
+            .OfType<HirVariableDeclarationStatement>()
             .Single(declaration => declaration.Name == "dead");
         var dead = Assert.IsType<Symbol>(
             mir.Links.SymbolsFromArtifact.Model.FindSymbol(deadDeclaration.Id));
@@ -257,7 +280,7 @@ public sealed class MirSnapshotTests
     [Fact]
     public void CompositeReferencesKeepEqualLocalIdsSeparateAcrossCallables()
     {
-        var snapshot = Snapshot(ProgramWithTwoCallables());
+        var snapshot = SnapshotWithTwoCallables();
         var snapshotId = snapshot.Id;
         var firstCallable = new MirCallableId(0);
         var secondCallable = new MirCallableId(1);
@@ -277,8 +300,16 @@ public sealed class MirSnapshotTests
             new MirStorageRef(snapshotId, firstCallable, new MirStorageId(0)),
             new MirStorageRef(snapshotId, secondCallable, new MirStorageId(0)));
         Assert.NotEqual(
-            new MirQubitResourceRef(snapshotId, firstCallable, new MirQubitResourceId(0)),
-            new MirQubitResourceRef(snapshotId, secondCallable, new MirQubitResourceId(0)));
+            new MirQubitRef(
+                snapshotId,
+                firstCallable,
+                new MirQubitId(0),
+                new MirQubitVersion(0)),
+            new MirQubitRef(
+                snapshotId,
+                secondCallable,
+                new MirQubitId(0),
+                new MirQubitVersion(0)));
 
         Assert.Equal(
             "First",
@@ -288,14 +319,22 @@ public sealed class MirSnapshotTests
             "Second",
             snapshot.Structure.RequireCallable(
                 new MirCallableRef(snapshotId, secondCallable)).Name);
+        var firstHirCallable = snapshot.Links.CallablesByHirCallable
+            .Single(pair => pair.Value.Callable == firstCallable)
+            .Key
+            .NodeId;
+        var secondHirCallable = snapshot.Links.CallablesByHirCallable
+            .Single(pair => pair.Value.Callable == secondCallable)
+            .Key
+            .NodeId;
         Assert.Equal(
-            10,
+            firstHirCallable,
             snapshot.Origins.ResolveHir(
-                snapshot.Structure.RequireBlock(firstBlock).Origin).HirOperationId);
+                snapshot.Structure.RequireBlock(firstBlock).Origin).HirCallableId);
         Assert.Equal(
-            20,
+            secondHirCallable,
             snapshot.Origins.ResolveHir(
-                snapshot.Structure.RequireBlock(secondBlock).Origin).HirOperationId);
+                snapshot.Structure.RequireBlock(secondBlock).Origin).HirCallableId);
         Assert.Equal(
             "10",
             Assert.IsType<MirConstant>(
@@ -323,7 +362,7 @@ public sealed class MirSnapshotTests
     [Fact]
     public async Task AnalysisStoreCachesResultsAndReusesOneCfgPerCallable()
     {
-        var snapshot = Snapshot(ProgramWithTwoCallables());
+        var snapshot = SnapshotWithTwoCallables();
         var callable = new MirCallableRef(snapshot.Id, new MirCallableId(0));
         var analyses = snapshot.Analyses;
 
@@ -394,8 +433,8 @@ public sealed class MirSnapshotTests
         var secondValue = secondCallable.Values.First(value => value.Type.IsArray);
         var firstStorage = Assert.Single(firstCallable.Storages);
         var secondStorage = Assert.Single(secondCallable.Storages);
-        var firstQubit = Assert.Single(firstCallable.Qubits);
-        var secondQubit = Assert.Single(secondCallable.Qubits);
+        var firstQubit = Assert.Single(firstCallable.Qubits.OfType<MirQubitFromUse>());
+        var secondQubit = Assert.Single(secondCallable.Qubits.OfType<MirQubitFromUse>());
 
         Assert.Equal(firstCallable.Id, secondCallable.Id);
         Assert.Equal(firstBlock.Id, secondBlock.Id);
@@ -414,7 +453,7 @@ public sealed class MirSnapshotTests
         var staleStorage =
             new MirStorageRef(first.Id, firstCallable.Id, firstStorage.Id);
         var staleQubit =
-            new MirQubitResourceRef(first.Id, firstCallable.Id, firstQubit.Id);
+            new MirQubitRef(first.Id, firstCallable.Id, firstQubit.Key);
         var currentCallable = new MirCallableRef(second.Id, secondCallable.Id);
         var currentBlock =
             new MirBlockRef(second.Id, secondCallable.Id, secondBlock.Id);
@@ -461,17 +500,22 @@ public sealed class MirSnapshotTests
             () => second.Analyses.Effects.EffectAt(staleEffect.Site));
     }
 
-    private static MirSnapshot Snapshot(MirProgram program)
+    private static MirSnapshot SnapshotWithTwoCallables()
+    {
+        var snapshotId = MirTestContext.Create().SnapshotId;
+        var hir = HirFixtureFor(snapshotId, "First", "Second");
+        var program = ProgramWithTwoCallables(
+            snapshotId,
+            CallableId(hir, "First"),
+            CallableId(hir, "Second"));
+        return Snapshot(program, hir);
+    }
+
+    private static MirSnapshot Snapshot(
+        MirProgram program,
+        HirFixture hir)
     {
         var snapshotId = program.SnapshotId;
-        var hirOperations = program.Callables
-            .Select(callable =>
-            {
-                var origin = program.Origins.ResolveHir(callable.Origin);
-                return (origin.HirOperationId!.Value, callable.Name);
-            })
-            .ToArray();
-        var hir = HirFixtureFor(snapshotId, hirOperations);
         var linkBuilder = new MirCrossStageLinksBuilder(
             snapshotId,
             hir.Snapshot,
@@ -479,10 +523,10 @@ public sealed class MirSnapshotTests
         foreach (var callable in program.Callables)
         {
             var origin = program.Origins.ResolveHir(callable.Origin);
-            var operationId = origin.HirOperationId!.Value;
+            var callableId = origin.HirCallableId!.Value;
             linkBuilder.LinkCallable(
-                operationId,
-                hir.Semantics.Model.FindSymbol(operationId)!.Id,
+                callableId,
+                hir.Semantics.Model.FindSymbol(callableId)!.Id,
                 callable.Id);
             foreach (var value in callable.Values)
                 linkBuilder.RegisterTemporaryValue(callable.Id, value.Id);
@@ -497,23 +541,19 @@ public sealed class MirSnapshotTests
 
     private static HirFixture HirFixtureFor(
         MirSnapshotId snapshotId,
-        params (int Id, string Name)[] operations)
+        params string[] callableNames)
     {
-        var program = new QProgram(
-            operations
-                .Select(operation =>
-                    new QOperation(
-                        operation.Name,
-                        Array.Empty<QParam>(),
-                        Array.Empty<QStmt>())
-                    {
-                        Id = operation.Id,
-                    })
-                .ToArray());
-        var builder = new HirPipelineBuilder(
-            snapshotId.CompilationId,
-            snapshotId.CompilationRevision);
-        var snapshot = builder.Advance(HirStage.Lowered, program);
+        var hir = new HirTestFactory(
+            new SourceDocumentRef(
+                snapshotId.CompilationId,
+                snapshotId.CompilationRevision,
+                new SourceDocumentId(0)));
+        var callables = callableNames
+            .Select(name => hir.Callable(name))
+            .ToArray();
+        var program = hir.PublishProgram(callables);
+        var builder = hir.CreatePipelineBuilder();
+        var snapshot = builder.PublishLowered(program);
         var validation = builder.ValidateSnapshot(snapshot);
         Assert.True(
             validation.IsAccepted,
@@ -523,16 +563,23 @@ public sealed class MirSnapshotTests
             validation);
     }
 
+    private static HirNodeId CallableId(
+        HirFixture fixture,
+        string name) =>
+        fixture.Snapshot.Program.Callables
+            .Single(callable => callable.Name == name)
+            .Id;
+
     private sealed record HirFixture(
         HirSnapshot Snapshot,
         HirSemanticArtifact Semantics);
 
     private static MirProgram ProgramWithTwoCallables(
-        MirSnapshotId? snapshotId = null)
+        MirSnapshotId snapshotId,
+        HirNodeId firstHirCallable,
+        HirNodeId secondHirCallable)
     {
-        var context = snapshotId is MirSnapshotId id
-            ? MirTestContext.For(id)
-            : MirTestContext.Create();
+        var context = MirTestContext.For(snapshotId);
         return context.Program(
             new MirCallableId(0),
             new[]
@@ -540,8 +587,8 @@ public sealed class MirSnapshotTests
                 Callable(new MirCallableId(0), context.Origin(0), "First", "10"),
                 Callable(new MirCallableId(1), context.Origin(1), "Second", "20"),
             },
-            (10, 10),
-            (20, 20));
+            (firstHirCallable, firstHirCallable),
+            (secondHirCallable, secondHirCallable));
     }
 
     private static MirCallable Callable(
@@ -574,13 +621,12 @@ public sealed class MirSnapshotTests
             id,
             name,
             MirCallableKind.Operation,
-            ReturnType: null,
-            Array.Empty<MirParameter>(),
+            returnType: null,
+            Array.Empty<IMirParameter>(),
             blockId,
             new[] { block },
             new[] { value },
             Array.Empty<MirArrayStorage>(),
-            Array.Empty<MirQubitResource>(),
             source);
     }
 }

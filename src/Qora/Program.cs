@@ -80,7 +80,7 @@ if (args.Contains("--json"))
                 ast = compilation.Sources.EntrySyntax.AstText,
                 ir = resolved is null
                     ? string.Empty
-                    : Qora.Ir.IrPrinter.Print(resolved.Program),
+                    : Qora.Ir.HirPrinter.Print(resolved.Program),
                 symbols = resolvedValidation is null
                     ? string.Empty
                     : CompilationReports.FormatSymbols(resolvedValidation),
@@ -176,7 +176,7 @@ static string FormatMirEffects(MirEffectSnapshot effects)
             : string.Join(
                 ", ",
                 summary.FormalQubits.Select(effect =>
-                    $"&{effect.Resource}={effect.Flags}"));
+                    $"&{effect.Qubit}={effect.Flags}"));
         text.AppendLine(
             $"callable @{summary.Callable}: qubits [{formalEffects}], "
             + $"irreversible={summary.IsIrreversible}, ownership-transfer={summary.TransfersOwnership}");
@@ -192,7 +192,7 @@ static string FormatMirEffects(MirEffectSnapshot effects)
             : string.Join(
                 ", ",
                 effect.Qubits.Select(qubit =>
-                    $"{qubit.Place}={qubit.Flags}"));
+                    $"{qubit.Access}={qubit.Flags}"));
         var witnesses = effect.ClassicalWitnesses.Count == 0
             ? "none"
             : string.Join(

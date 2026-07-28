@@ -22,7 +22,7 @@ public sealed class OpenQasmTargetInvariantTests
         Assert.Equal(typeof(MirSnapshot), parameters[0].ParameterType);
         Assert.DoesNotContain(
             parameters,
-            parameter => parameter.ParameterType == typeof(QProgram));
+            parameter => parameter.ParameterType == typeof(HirProgram));
     }
 
     [Fact]
@@ -65,7 +65,7 @@ public sealed class OpenQasmTargetInvariantTests
                     .Select(field => field.FieldType))
             .ToArray();
 
-        Assert.DoesNotContain(typeof(QProgram), sourceTypes);
+        Assert.DoesNotContain(typeof(HirProgram), sourceTypes);
         Assert.DoesNotContain(typeof(MirProgram), sourceTypes);
         Assert.DoesNotContain(typeof(MirSnapshot), sourceTypes);
     }

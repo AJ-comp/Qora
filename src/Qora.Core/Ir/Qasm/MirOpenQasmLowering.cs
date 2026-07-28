@@ -164,14 +164,13 @@ internal static class MirOpenQasmLowering
         private readonly IReadOnlyDictionary<MirBlockId, MirBlock> _blocks;
         private readonly IReadOnlyDictionary<MirValueId, MirValue> _values;
         private readonly IReadOnlyDictionary<MirStorageId, MirArrayStorage> _storages;
-        private readonly IReadOnlyDictionary<MirQubitResourceId, MirQubitResource> _qubits;
         private readonly NameAllocator _names;
 
         private readonly List<MirQasmParameter> _parameters = new();
         private readonly List<MirQasmStatement> _prologue = new();
         private readonly Dictionary<MirValueId, MirQasmExpression> _scalarValues = new();
         private readonly Dictionary<MirStorageId, MirQasmExpression> _storagePlaces = new();
-        private readonly Dictionary<MirQubitResourceId, MirQasmExpression> _qubitPlaces = new();
+        private readonly Dictionary<MirQubitId, MirQasmExpression> _qubitBindings = new();
         private readonly Dictionary<HiddenStorageKey, MirQasmExpression> _hiddenPlaces = new();
         private readonly Dictionary<EdgeArgumentKey, MirQasmDeclarationId> _edgeTemporaries = new();
         private readonly HashSet<MirBlockId> _emittedBlocks = new();
@@ -205,7 +204,6 @@ internal static class MirOpenQasmLowering
             _blocks = callable.Blocks.ToDictionary(block => block.Id);
             _values = callable.Values.ToDictionary(value => value.Id);
             _storages = callable.Storages.ToDictionary(storage => storage.Id);
-            _qubits = callable.Qubits.ToDictionary(qubit => qubit.Id);
 
             var targetReserved = isEntry
                 ? QoraGates.QasmReserved
@@ -289,7 +287,7 @@ internal static class MirOpenQasmLowering
             PrepareOriginalParameters();
             PrepareHiddenArrayBindings();
             PrepareLocalStorages();
-            PrepareQubitResources();
+            PrepareLocalQubitBindings();
             PrepareScalarValues();
             PrepareEdgeTemporaries();
             PrepareFunctionReturnState();
@@ -349,8 +347,8 @@ internal static class MirOpenQasmLowering
                                 new MirQasmQubitType(
                                     count,
                                     isRegister: qubit.IsArray)));
-                        _qubitPlaces.Add(
-                            qubit.Resource,
+                        _qubitBindings.Add(
+                            qubit.Id,
                             new MirQasmParameterReferenceExpression(targetId));
                         break;
                     }
@@ -442,20 +440,16 @@ internal static class MirOpenQasmLowering
             }
         }
 
-        private void PrepareQubitResources()
+        private void PrepareLocalQubitBindings()
         {
-            foreach (var resource in _callable.Qubits
-                         .Where(resource => resource.Kind == MirQubitResourceKind.Local)
-                         .OrderBy(resource => resource.Id.Value))
+            foreach (var qubit in _callable.Qubits
+                         .OfType<MirQubitFromUse>()
+                         .OrderBy(qubit => qubit.Id.Value))
             {
-                var count = resource.IsArray
-                    ? resource.Length
-                      ?? throw Unsupported(
-                          $"qubit resource `{resource.Name}` has unknown target width")
-                    : 1;
+                var count = qubit.Length;
                 var declaration = NextDeclaration();
                 var name = _names.Fresh(
-                    Identifier.Sanitize(resource.Name, $"q_{resource.Id.Value}"));
+                    Identifier.Sanitize(qubit.Name, $"q_{qubit.Id.Value}"));
                 _prologue.Add(
                     new MirQasmQubitDeclarationStatement(
                         NextStatement(),
@@ -463,9 +457,9 @@ internal static class MirOpenQasmLowering
                         name,
                         new MirQasmQubitType(
                             count,
-                            isRegister: resource.IsArray)));
-                _qubitPlaces.Add(
-                    resource.Id,
+                            isRegister: qubit.IsArray)));
+                _qubitBindings.Add(
+                    qubit.Id,
                     new MirQasmDeclarationReferenceExpression(declaration));
             }
         }
@@ -1157,12 +1151,17 @@ internal static class MirOpenQasmLowering
                             output);
                         break;
 
-                    case MirQubitAllocate:
-                        // Physical resources are declared in the target prologue. The instruction remains
+                    case MirQubitAllocate allocation:
+                        // Physical qubits are declared in the target prologue. The instruction remains
                         // the MIR lifetime marker but has no second textual OpenQASM operation.
+                        _ = QubitBindingExpression(allocation.Result.Id);
                         break;
 
                     case MirQuantumApply apply:
+                        RequireVersionErasureCompatibility(
+                            apply.QubitAccesses,
+                            apply.QubitResults,
+                            "quantum apply");
                         output.Add(LowerQuantumApply(apply));
                         foreach (var result in apply.MutableArrayResults)
                         {
@@ -1180,11 +1179,15 @@ internal static class MirOpenQasmLowering
                         break;
 
                     case MirMeasure measure:
+                        RequireVersionErasureCompatibility(
+                            measure.Qubit,
+                            measure.QubitResult,
+                            "measurement");
                         output.Add(
                             new MirQasmMeasurementAssignmentStatement(
                                 NextStatement(),
                                 ValueExpression(measure.Result),
-                                QubitPlaceExpression(measure.Place)));
+                                QubitAccessExpression(measure.Qubit)));
                         break;
 
                     default:
@@ -1428,13 +1431,19 @@ internal static class MirOpenQasmLowering
                     $"array value {value} resolves to unbound storage {storage}");
         }
 
-        private MirQasmExpression QubitPlaceExpression(MirQubitPlace place)
+        private MirQasmExpression QubitBindingExpression(MirQubitId qubit)
         {
-            if (!_qubitPlaces.TryGetValue(place.Resource, out var resource))
-                throw Internal($"qubit resource {place.Resource} has no target binding");
-            return place.Index is MirValueId index
-                ? new MirQasmIndexExpression(resource, ValueExpression(index))
-                : resource;
+            return _qubitBindings.TryGetValue(qubit, out var binding)
+                ? binding
+                : throw Internal($"qubit {qubit} has no target binding");
+        }
+
+        private MirQasmExpression QubitAccessExpression(MirQubitAccess access)
+        {
+            var binding = QubitBindingExpression(access.Qubit.Id);
+            return access.Index is MirValueId index
+                ? new MirQasmIndexExpression(binding, ValueExpression(index))
+                : binding;
         }
 
         private MirQasmExpression CallOperandExpression(
@@ -1444,10 +1453,44 @@ internal static class MirOpenQasmLowering
                 MirClassicalCallOperand classical =>
                     ValueExpression(classical.Value),
                 MirQubitCallOperand qubit =>
-                    QubitPlaceExpression(qubit.Place),
+                    QubitAccessExpression(qubit.Qubit),
                 _ => throw Internal(
                     $"unknown MIR call operand {operand.GetType().Name}"),
             };
+
+        private void RequireVersionErasureCompatibility(
+            IReadOnlyList<MirQubitAccess> accesses,
+            IReadOnlyList<MirQubitAfterInstruction> results,
+            string role)
+        {
+            var accessedIds = accesses
+                .Select(access => access.Qubit.Id)
+                .ToHashSet();
+            foreach (var access in accesses)
+                _ = QubitBindingExpression(access.Qubit.Id);
+            foreach (var result in results)
+            {
+                if (!accessedIds.Contains(result.Id))
+                {
+                    throw Internal(
+                        $"{role} produces {result.Key} without accessing qubit {result.Id}");
+                }
+                _ = QubitBindingExpression(result.Id);
+            }
+        }
+
+        private void RequireVersionErasureCompatibility(
+            MirQubitAccess access,
+            MirQubitAfterInstruction result,
+            string role)
+        {
+            if (access.Qubit.Id != result.Id)
+            {
+                throw Internal(
+                    $"{role} changes qubit identity from {access.Qubit} to {result.Key}");
+            }
+            _ = QubitBindingExpression(result.Id);
+        }
 
         private void RequireSameArrayPlace(
             MirValueId left,

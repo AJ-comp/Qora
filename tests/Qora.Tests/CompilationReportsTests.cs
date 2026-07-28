@@ -13,6 +13,6 @@ public sealed class CompilationReportsTests
 
         var validation = Assert.IsType<HirSemanticArtifact>(
             compilation.Hir.SpecializedValidation);
-        Assert.Contains("Main: operation", CompilationReports.FormatSymbols(validation));
+        Assert.Contains("Main: callable", CompilationReports.FormatSymbols(validation));
     }
 }

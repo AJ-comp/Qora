@@ -1,3 +1,4 @@
+using Qora.Ir;
 using Qora.Ir.Passes;
 
 namespace Qora.Tests;
@@ -9,11 +10,11 @@ internal sealed class ExactHirSemanticContext(
     public HirSemanticModel SourceModel { get; } =
         sourceModel ?? throw new ArgumentNullException(nameof(sourceModel));
 
-    public Symbol? FindSymbol(int nodeId) =>
+    public Symbol? FindSymbol(HirNodeId nodeId) =>
         SourceModel.FindSymbol(nodeId);
 
-    public Scope? FindRootScope(int operationId) =>
-        SourceModel.FindRootScope(operationId);
+    public Scope? FindRootScope(HirNodeId callableId) =>
+        SourceModel.FindRootScope(callableId);
 
     public Scope? FindScope(HirScopeSite site) =>
         SourceModel.FindScope(site);

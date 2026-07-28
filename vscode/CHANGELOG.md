@@ -2,6 +2,20 @@
 
 All notable changes to the Qora Language extension.
 
+## 0.26.0
+
+- Bundles the **Qora v0.33** compiler with its new revision-bound AST → immutable HIR construction
+  boundary. Namespaces, declarations, qualified calls, and expressions now form one authoritative typed
+  tree, while scope and lookup indexes are derived from that tree.
+- The compilation pipeline now preserves exact expression-level HIR → SSA/CFG MIR provenance and hides
+  node, qubit-resource, and version allocation behind compiler-owned construction sessions.
+- Measurements now lower at their real MIR evaluation points. Short-circuit conditions measure only on
+  the executed edge, merge qubit versions with Phi nodes, and carry the correct state through loops.
+  Nested measurement, purity, effect-ordering, and array-index diagnostics are hardened accordingly.
+- Removes the duplicate legacy IR/lowering/expression-tree stack and the eager HIR condition-measurement
+  rewrite, so the extension's stage output follows the same single HIR → MIR → target pipeline used for
+  compilation.
+
 ## 0.25.0
 
 - Bundles the **Qora v0.32** compiler and its canonical HIR → SSA/CFG MIR → typed OpenQASM target pipeline.

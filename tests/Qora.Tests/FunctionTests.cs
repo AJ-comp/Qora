@@ -126,6 +126,12 @@ public class FunctionTests
     public void RejectsMeasurementInFunction() =>
         Compiler.Rejects("function f(): bit { return M(q[0]); }\noperation Main(){ use q=Qubit[1]; }", "QSEM033");
 
+    [Fact]
+    public void RejectsMeasurementNestedInAFunctionCondition() =>
+        Compiler.Rejects(
+            "function f(x: int): int { if(M(x) == 1){ return 1; } return 0; }\noperation Main(){}",
+            "QSEM033");
+
     [Theory]
     // a function parameter (and its return) is classical, never a qubit (QSEM034):
     [InlineData("function f(a: Qubit): int { return 1; }\noperation Main(){ use q=Qubit[1]; }")]
@@ -210,9 +216,8 @@ public class FunctionTests
 
     // --- a function call in EXPRESSION position is a call like any other ---
     //
-    // A `function` introduced a SECOND call form: a QCallNode inside an expression tree, where every other
-    // callable is a QGate statement. Passes written before it existed switched only on the statement shape
-    // and skipped the new one silently. These pin the three places that mattered.
+    // A value-returning callable is represented by a call expression. Older passes switched only on the
+    // statement form and skipped expression calls silently, so these tests pin the three places that matter.
 
     [Theory]
     // The SAME signature check the statement form runs. Checking only the argument COUNT let a whole array —
@@ -516,7 +521,7 @@ public class FunctionTests
     [Fact]
     public void TheIrViewShowsReturns() =>
         // the `--stages` IR view dropped every `return`, rendering function bodies as incomplete
-        Assert.Contains("QReturn", Qora.Ir.IrPrinter.Print(
+        Assert.Contains("HirReturn", Qora.Ir.HirPrinter.Print(
             Compiler.Compile("function two(): int { return 2; }\noperation Main(){ use q=Qubit[1]; var k: int = two(); }").Hir.Resolved!.Program));
 
     private static MirOpenQasmTargetProgram CompileTarget(string source) =>

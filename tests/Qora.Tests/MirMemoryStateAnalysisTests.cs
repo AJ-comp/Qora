@@ -344,14 +344,21 @@ public sealed class MirMemoryStateAnalysisTests
         MirCallable callable,
         MirBlock replacement)
     {
-        var rewrittenCallable = callable with
-        {
-            Blocks = callable.Blocks
+        var rewrittenCallable = new MirCallable(
+            callable.Id,
+            callable.Name,
+            callable.Kind,
+            callable.ReturnType,
+            callable.Parameters,
+            callable.EntryBlock,
+            callable.Blocks
                 .Select(block => block.Id == replacement.Id
                     ? replacement
                     : block)
                 .ToArray(),
-        };
+            callable.Values,
+            callable.Storages,
+            callable.Origin);
         return new MirProgram(
             program.SnapshotId,
             program.Origins,

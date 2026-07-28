@@ -22,14 +22,17 @@ public sealed class MirImmutabilityTests
         var originalApply = Assert.Single(originalBlock.Instructions.OfType<MirQuantumApply>());
 
         var operands = originalApply.Operands.ToList();
+        var qubitResults = originalApply.QubitResults.ToList();
         var mutableArrayResults = originalApply.MutableArrayResults.ToList();
         var functors = originalApply.Functors.ToList();
-        var clonedApply = originalApply with
-        {
-            Operands = operands,
-            MutableArrayResults = mutableArrayResults,
-            Functors = functors,
-        };
+        var clonedApply = new MirQuantumApply(
+            originalApply.Id,
+            originalApply.Target,
+            operands,
+            qubitResults,
+            mutableArrayResults,
+            functors,
+            originalApply.Origin);
 
         var instructions = originalBlock.Instructions
             .Select(instruction => instruction.Id == originalApply.Id ? clonedApply : instruction)
@@ -47,15 +50,17 @@ public sealed class MirImmutabilityTests
             .ToList();
         var values = originalCallable.Values.ToList();
         var storages = originalCallable.Storages.ToList();
-        var qubits = originalCallable.Qubits.ToList();
-        var clonedCallable = originalCallable with
-        {
-            Parameters = parameters,
-            Blocks = blocks,
-            Values = values,
-            Storages = storages,
-            Qubits = qubits,
-        };
+        var clonedCallable = new MirCallable(
+            originalCallable.Id,
+            originalCallable.Name,
+            originalCallable.Kind,
+            originalCallable.ReturnType,
+            parameters,
+            originalCallable.EntryBlock,
+            blocks,
+            values,
+            storages,
+            originalCallable.Origin);
 
         var callables = new List<MirCallable> { clonedCallable };
         var program = new MirProgram(
@@ -75,10 +80,10 @@ public sealed class MirImmutabilityTests
         blocks.Clear();
         values.Clear();
         storages.Clear();
-        qubits.Clear();
         blockArguments.Clear();
         instructions.Clear();
         operands.Clear();
+        qubitResults.Clear();
         mutableArrayResults.Add(new MirMutableArrayResult(0, new MirValueId(int.MaxValue)));
         functors.Add(MirFunctor.Adjoint);
 
@@ -87,6 +92,7 @@ public sealed class MirImmutabilityTests
         var retainedBlock = Assert.IsType<MirBlock>(clonedCallable.FindBlock(clonedBlock.Id));
         var retainedApply = Assert.Single(retainedBlock.Instructions.OfType<MirQuantumApply>());
         Assert.Single(retainedApply.Operands);
+        Assert.Single(retainedApply.QubitResults);
         Assert.Empty(retainedApply.MutableArrayResults);
         Assert.Empty(retainedApply.Functors);
 
@@ -162,6 +168,14 @@ public sealed class MirImmutabilityTests
         var context = MirTestContext.Create();
         var source = context.Origin();
         var callable = new MirCallableId(0);
+        var qubit = new MirQubitParameter(
+            new MirQubitId(0),
+            "q",
+            isArray: false,
+            length: null,
+            QOwnershipMode.Borrowed,
+            source);
+        var qubitRef = context.Qubit(callable, qubit);
         var storages = new List<MirStorageRef>
         {
             context.Storage(callable, new MirStorageId(0)),
@@ -173,8 +187,7 @@ public sealed class MirImmutabilityTests
         {
             new(
                 null,
-                new MirQubitPlaceRef(
-                    context.Qubit(callable, new MirQubitResourceId(0))),
+                new MirQubitAccessRef(qubitRef),
                 MirQubitEffectFlags.Read),
         };
         var witnesses = new List<MirClassicalWitness>();
@@ -196,6 +209,7 @@ public sealed class MirImmutabilityTests
             MirPathCondition.Always,
             MirExecutionMultiplicity.Single,
             results,
+            Array.Empty<MirQubitRef>(),
             IsIrreversible: false,
             TransfersOwnership: false,
             source);
@@ -203,7 +217,7 @@ public sealed class MirImmutabilityTests
         var formalQubits = new List<MirFormalQubitEffect>
         {
             new(
-                context.Qubit(callable, new MirQubitResourceId(0)),
+                qubitRef,
                 MirQubitEffectFlags.Read),
         };
         var summary = new MirCallableEffectSummary(

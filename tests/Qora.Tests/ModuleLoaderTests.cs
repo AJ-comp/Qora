@@ -34,8 +34,8 @@ public class ModuleLoaderTests
                 string.Join(" | ", result.Diagnostics.Select(diagnostic => diagnostic.Error).ToList().Select(error => $"{error.Code}: {error.Message}")));
             Assert.DoesNotContain(result.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(), error => error.Code == "QSEM021");
 
-            var operations = Assert.IsAssignableFrom<IReadOnlyList<Ir.QOperation>>(
-                result.Hir.Resolved!.Program.Operations);
+            var operations = Assert.IsAssignableFrom<IReadOnlyList<Ir.HirCallable>>(
+                result.Hir.Resolved!.Program.Callables);
             Assert.Equal(3, operations.Count);
             Assert.Single(operations, operation => operation.Name == "Main");
             Assert.Single(operations, operation => operation.Name == "FromA");
@@ -95,7 +95,7 @@ public class ModuleLoaderTests
 
             var resolved = compilation.Hir.Resolved!;
             var library = Assert.Single(
-                resolved.Program.Operations,
+                resolved.Program.Callables,
                 operation => operation.Name == "Library");
             Assert.Equal(
                 imported.Ref,
@@ -148,7 +148,7 @@ public class ModuleLoaderTests
                 compilation.Sources.Imports.Edges.Count(
                     edge => edge.Imported == shared.Ref));
             Assert.Single(
-                compilation.Hir.Resolved!.Program.Operations,
+                compilation.Hir.Resolved!.Program.Callables,
                 operation => operation.Name == "Shared");
         }
         finally

@@ -152,7 +152,7 @@
         <text class="svg-code" x="536" y="135" text-anchor="middle" fill="#174f8a" font-size="16" font-weight="850">Hir</text>
         <rect x="382" y="158" width="144" height="84" rx="9" fill="#fff" stroke="#9bbddd"/>
         <text class="svg-code" x="454" y="184" text-anchor="middle" fill="#334155" font-size="12.5" font-weight="800">HirSnapshot</text>
-        <text class="svg-code" x="454" y="207" text-anchor="middle" fill="#64748b" font-size="10.8">QProgram</text>
+        <text class="svg-code" x="454" y="207" text-anchor="middle" fill="#64748b" font-size="10.8">HirProgram declaration tree</text>
         <text class="svg-code" x="454" y="226" text-anchor="middle" fill="#64748b" font-size="10.8">Structure + SourceMap</text>
         <rect x="550" y="158" width="140" height="84" rx="9" fill="#f7f1ff" stroke="#a994dc"/>
         <text class="svg-code" x="620" y="184" text-anchor="middle" fill="#5a3fa7" font-size="12.2" font-weight="800">SemanticArtifact</text>
@@ -230,15 +230,14 @@
     <table class="spec">
       <tr><th>구간</th><th>생산자</th><th>입력 → 출력</th><th>권위 경계</th></tr>
       <tr><td class="k">구문 경계</td><td><code>QoraParser.Parse</code> / <code>ParseOnCurrentThread</code></td><td>문서 텍스트 → 불변 <code>SyntaxSnapshot</code> + 내부 transient <code>SyntaxParseProduct</code></td><td>Janglim AST는 즉시 lowering하는 내부 산출물에만 있고 공개 snapshot에는 없음</td></tr>
-      <tr><td class="k">소스 그래프</td><td><code>SourceGraphLoader</code></td><td>entry + 경로 문맥 → <code>SourceSetSnapshot</code>, 문서별 <code>QProgram</code>, import 진단</td><td>파일 I/O를 수행하며 각 문서에서 parser와 lowering을 순서대로 호출</td></tr>
-      <tr><td class="k">↳ 문서별</td><td><a href="ir-pass-01-qora-lowering.html"><code>QoraLowering</code></a></td><td><code>SyntaxParseProduct.LoweringAst</code> + <code>SourceDocumentRef</code> → source-shaped <code>QProgram</code></td><td>parser-owned AST를 장기 snapshot에 저장하지 않는 document-qualified 변환</td></tr>
-      <tr><td class="k">통합 HIR 1</td><td><a href="ir-pass-02-module-loader.html"><code>ModuleLoader</code></a></td><td>prepared <code>LoadedSourceGraph</code> → 통합 <code>QProgram</code> + <code>HirNodeIntroduction</code></td><td>I/O·파싱 없이 순수 병합하고 imported node를 source introduction으로 분류</td></tr>
-      <tr><td class="k">통합 HIR 2</td><td><a href="ir-pass-03-measure-condition-lowering.html"><code>MeasureConditionLowering</code></a></td><td>조건 속 측정 → 선행 측정 문장 + 조건 + <code>NodeSynthesis</code></td><td>새 임시 node의 provenance만 기록하며 semantic identity로 번역하지 않음</td></tr>
-      <tr><td class="k">통합 HIR 3</td><td><code>Resolver</code></td><td>short name → FQN + <code>CalleeOpId</code></td><td><code>HirScopeGraph</code> 기반 이름 해소</td></tr>
+      <tr><td class="k">소스 그래프</td><td><code>SourceGraphLoader</code></td><td>entry + 경로 문맥 → <code>SourceSetSnapshot</code>, 문서별 <code>HirProgram</code>, import 진단</td><td>파일 I/O를 수행하며 각 문서에서 parser와 revision-bound lowering을 순서대로 호출</td></tr>
+      <tr><td class="k">↳ 문서별</td><td><a href="ir-pass-01-ast-to-hir-lowering.html"><code>AstToHirLowering</code></a></td><td><code>SyntaxParseProduct.LoweringAst</code> + <code>AstToHirLoweringSession</code> → source-shaped <code>HirProgram</code></td><td><code>Declarations</code>를 유일한 소유 트리로 만들고 parser-owned AST를 장기 snapshot에 저장하지 않음</td></tr>
+      <tr><td class="k">통합 HIR 1</td><td><a href="ir-pass-02-module-loader.html"><code>ModuleLoader</code></a></td><td>prepared <code>LoadedSourceGraph</code> → 통합 <code>HirProgram</code> + <code>HirNodeIntroduction</code></td><td>I/O·파싱 없이 문서별 declaration subtree를 병합하고 imported node를 source introduction으로 분류</td></tr>
+      <tr><td class="k">통합 HIR 2</td><td><code>Resolver</code></td><td>short name → FQN + callable <code>HirNodeId</code>인 <code>CalleeId</code></td><td><code>HirScopeGraph</code> 기반 이름 해소</td></tr>
       <tr><td class="k">semantic 1</td><td><code>QoraValidator</code></td><td>resolved HIR → validation <code>HirSemanticArtifact</code>가 소유하는 Accepted/Rejected outcome</td><td>모델·상태·진단을 exact snapshot의 하나의 권위 결과로 발행</td></tr>
-      <tr><td class="k">통합 HIR 4</td><td><code>Monomorphizer</code></td><td>resolved HIR → size-specialized HIR</td><td>실제 rewrite가 없으면 기존 snapshot alias</td></tr>
+      <tr><td class="k">통합 HIR 3</td><td><code>Monomorphizer</code></td><td>resolved HIR → size-specialized HIR</td><td>실제 rewrite가 없으면 기존 snapshot alias</td></tr>
       <tr><td class="k">semantic 2</td><td><code>EffectAnalysis</code></td><td>exact accepted specialized validation artifact → effect-analysis artifact</td><td>같은 snapshot의 <code>ValidationBasis</code>를 명시하며 새 HIR stage 없음</td></tr>
-      <tr><td class="k">MIR lowering</td><td><code>QoraMirLowering</code></td><td>specialized HIR + exact <code>HirSemanticContext</code> → <code>MirSnapshot</code></td><td>typed SSA/CFG, exact semantic basis, total symbol/entity 분류</td></tr>
+      <tr><td class="k">MIR lowering</td><td><code>QoraMirLowering</code></td><td>specialized HIR + exact <code>HirSemanticContext</code> → <code>MirSnapshot</code></td><td>typed SSA/CFG, exact semantic basis, total symbol/entity 분류, 측정식과 short-circuit 평가 위치의 명시화</td></tr>
       <tr><td class="k">MIR 분석</td><td><code>MirAnalysisStore</code></td><td>verified MIR → CFG·효과 등 revision-bound 분석</td><td>공유 의존성을 snapshot 안에서 재사용</td></tr>
       <tr><td class="k">MIR 역연산</td><td><code>MirAdjointMaterializer</code></td><td>MIR-only inverse request → synthesized inverse callable + materialized <code>MirSnapshot</code></td><td>Qora source와 HIR에는 Adjoint 표현이 없으며 snapshot revision·parent·origin을 보존</td></tr>
       <tr><td class="k">target lowering</td><td><code>QasmBackend</code> / <code>MirOpenQasmLowering</code></td><td>exact materialized <code>MirSnapshot</code> → <code>MirOpenQasmTargetProgram</code></td><td>backend가 HIR로 되돌아가지 않으며 artifact가 target model을 받아 text를 파생</td></tr>
@@ -247,7 +246,7 @@
 
   <div class="callout warn">
     <span class="h">구조 stage와 분석 phase를 구분합니다</span>
-    <code>Resolved</code>와 <code>Specialized</code> 같은 이름은 <code>QProgram</code> 구조 milestone입니다.<br>
+    <code>Resolved</code>와 <code>Specialized</code> 같은 이름은 <code>HirProgram</code> 구조 milestone입니다.<br>
     반면에 validation과 effect analysis는 같은 구조를 설명하는 별도 <code>HirSemanticArtifact</code>이며, 분석 때문에 새로운 구조 HIR stage를 만들지 않습니다.
   </div>
 
@@ -279,7 +278,7 @@
   <h2 id="s4">4. HIR 구조와 semantic artifact</h2>
 
   <p>
-    <code>HirSnapshot</code>은 한 세대의 <code>QProgram</code>, 부모 snapshot Id, 구조 인덱스, node Id 기반 source map을 소유합니다.<br>
+    <code>HirSnapshot</code>은 한 세대의 <code>HirProgram</code> 선언 트리, 부모 snapshot Id, 구조 인덱스, node Id 기반 source map을 소유합니다.<br>
     이 객체에는 의미 모델을 넣지 않으며, 의미 사실은 <code>HirSemanticArtifactId(Source, Phase)</code>로 식별되는 별도 <code>HirSemanticArtifact</code>가 소유합니다.<br>
     validation artifact는 모델과 함께 <code>HirValidationOutcome</code>을 소유하며, 그 outcome의 <code>Status</code>와 불변 <code>Diagnostics</code>가 accepted/rejected 판단의 유일한 권위입니다.<br>
     <code>HirCompilation</code>은 이 구조 세대와 의미 산출물뿐 아니라 같은 snapshot 객체 집합을 사용하는 <code>HirLineage</code>도 직접 소유하므로, 계보와 HIR history가 서로 분리된 권위 저장소로 어긋날 수 없습니다.<br>
@@ -300,7 +299,7 @@
   </div>
 
   <p>
-    HIR milestone의 정식 순서는 <code>Lowered → ImportsExpanded → MeasurementLowered → Resolved → Specialized</code>입니다.<br>
+    HIR milestone의 정식 순서는 <code>Lowered → ImportsExpanded → Resolved → Specialized</code>입니다.<br>
     <code>Adjoint</code>와 conjugation은 사용자 문법과 HIR에 존재하지 않으며, 내부 역연산 처리 단계는 MIR의 <code>Lowered → InverseRequestsInjected → AdjointsMaterialized</code> 순서로 관리합니다.<br>
     실제 rewrite가 없을 때 뒤 milestone이 앞 snapshot을 alias할 수는 있지만, 뒤 단계가 앞 단계보다 오래된 revision을 가리킬 수는 없습니다.
   </p>
@@ -369,7 +368,7 @@
   <p>
     각 IR은 자신의 구조와 자기 단계 내부의 관계를 소유하며, <code>Compilation.Links</code>는 단계 간 질의를 위한 exact 공유 뷰를 제공합니다.<br>
     HIR 내부 계보의 권위 소유자는 <code>HirCompilation.Lineage</code>이고 <code>Links.Hir</code>는 같은 instance이며, <code>Links.Mir</code>는 MIR이 lowering된 exact HIR snapshot과 symbol semantic artifact를 명시합니다.<br>
-    MIR callable은 HIR operation node와 symbol에서 찾을 수 있는 typed 참조로 연결됩니다.<br>
+    MIR callable은 HIR callable node와 symbol에서 찾을 수 있는 typed 참조로 연결됩니다.<br>
     반면에 HIR symbol과 MIR value·storage·qubit의 관계는 양쪽에서 조회할 수 있는 typed many-to-many 맵이며, 별도의 total disposition map이 링크가 없는 경우도 의도적인 non-lowering 또는 compiler temporary로 설명합니다.
   </p>
 
@@ -377,11 +376,11 @@
     <table class="spec">
       <tr><th>관계</th><th>참조 형식</th><th>사용 예</th></tr>
       <tr><td class="k">HIR 세대 간</td><td><code>HirNodeRef(HirSnapshotId, NodeId)</code></td><td>복제된 후속 노드에서 분석 기준 조상 노드 찾기</td></tr>
-      <tr><td class="k">MIR callable</td><td><code>CallablesByHirOperation</code>, <code>CallablesBySymbol</code></td><td>HIR operation 또는 exact semantic symbol에서 MIR callable 찾기</td></tr>
+      <tr><td class="k">MIR callable</td><td><code>CallablesByHirCallable</code>, <code>CallablesBySymbol</code></td><td>HIR callable 또는 exact semantic symbol에서 MIR callable 찾기</td></tr>
       <tr><td class="k">HIR symbol</td><td><code>HirSymbolRef(HirSemanticArtifactId, SymbolId)</code></td><td>exact semantic artifact의 symbol과 MIR value·storage·qubit을 양방향으로 연결</td></tr>
       <tr><td class="k">symbol lowering 결과</td><td><code>MirSymbolLoweringDisposition</code></td><td>모든 HIR symbol이 어떤 MIR 종류가 되었거나 왜 내려가지 않았는지 확인</td></tr>
       <tr><td class="k">MIR entity 기원</td><td><code>MirEntityOriginKind</code></td><td>모든 value·storage·qubit이 source-backed인지 compiler temporary인지 확인</td></tr>
-      <tr><td class="k">MIR local identity</td><td><code>MirValueRef</code>, <code>MirStorageRef</code>, <code>MirQubitResourceRef</code></td><td>서로 다른 callable의 같은 dense Id 구분</td></tr>
+      <tr><td class="k">MIR local identity</td><td><code>MirValueRef</code>, <code>MirStorageRef</code>, <code>MirQubitRef</code></td><td>서로 다른 callable의 같은 dense Id 구분</td></tr>
       <tr><td class="k">소스 위치</td><td><code>SourceSpan(SourceDocumentRef, Start, End)</code></td><td>다중 문서와 재컴파일 revision을 넘나드는 정확한 진단</td></tr>
     </table>
   </div>
@@ -433,7 +432,7 @@
       <tr><th>상황</th><th>남는 값</th><th>없는 값</th></tr>
       <tr><td class="k">entry 구문 실패</td><td><code>Sources</code>, entry <code>SyntaxSnapshot</code>, syntax 진단</td><td>HIR·MIR·target</td></tr>
       <tr><td class="k">빈 소스에서 entry HIR 미생성</td><td><code>Sources</code>, <code>SyntaxSnapshot</code>, <code>HirPreflight</code>의 <code>QSEM040</code></td><td>HIR·MIR·target</td></tr>
-      <tr><td class="k">통합 <code>QProgram</code>에 callable 없음</td><td>검증 전까지 공개된 구조 HIR milestone, <code>HirValidation</code>의 <code>QSEM040</code></td><td>validation artifact·MIR·target</td></tr>
+      <tr><td class="k">통합 <code>HirProgram</code>에 callable 없음</td><td>검증 전까지 공개된 구조 HIR milestone, <code>HirValidation</code>의 <code>QSEM040</code></td><td>validation artifact·MIR·target</td></tr>
       <tr><td class="k">import 실패</td><td>전체 <code>SourceSet</code>, <code>ImportGraph</code>, lowered/expanded HIR milestone, import 진단</td><td>후속 semantic·MIR·target</td></tr>
       <tr><td class="k">HIR 검증 실패</td><td>실패한 구조 HIR, rejected validation artifact와 그 exact diagnostics, stage-qualified 진단 투영</td><td>effect-analysis artifact·후속 MIR·성공 target</td></tr>
       <tr><td class="k">target policy 실패</td><td>source/HIR/semantic, 도달했다면 MIR, backend + exact MIR input을 담은 target origin 진단</td><td><code>Targets.OpenQasm</code></td></tr>
@@ -469,9 +468,8 @@
   </div>
 
   <nav class="doc-links" aria-label="IR 패스 문서">
-    <a class="doc-link" href="ir-pass-01-qora-lowering.html">1. QoraLowering</a>
+    <a class="doc-link" href="ir-pass-01-ast-to-hir-lowering.html">1. AstToHirLowering</a>
     <a class="doc-link" href="ir-pass-02-module-loader.html">2. SourceGraphLoader / ModuleLoader</a>
-    <a class="doc-link" href="ir-pass-03-measure-condition-lowering.html">3. MeasureConditionLowering</a>
   </nav>
 
   <footer>

@@ -68,46 +68,69 @@ public readonly record struct MirStorageRef(
 }
 
 /// <summary>
-/// A qubit-resource address which remains unambiguous across all compilations and MIR revisions.
-/// <see cref="MirQubitResourceId"/> values are dense identities local to one callable.
+/// The exact snapshot-qualified address of one version of one qubit binding. The raw callable-local
+/// identity and version remain readable for analysis queries, while construction stays inside the
+/// compiler so external callers cannot manufacture detached MIR identities.
 /// </summary>
-public readonly record struct MirQubitResourceRef(
-    MirSnapshotId Snapshot,
-    MirCallableId Callable,
-    MirQubitResourceId Resource)
+public readonly record struct MirQubitRef
 {
+    internal MirQubitRef(
+        MirSnapshotId snapshot,
+        MirCallableId callable,
+        MirQubitId id,
+        MirQubitVersion version)
+    {
+        Snapshot = snapshot;
+        Callable = callable;
+        Id = id;
+        Version = version;
+    }
+
+    internal MirQubitRef(
+        MirSnapshotId snapshot,
+        MirCallableId callable,
+        MirQubitKey key)
+        : this(snapshot, callable, key.Id, key.Version)
+    {
+    }
+
+    public MirSnapshotId Snapshot { get; }
+    public MirCallableId Callable { get; }
+    public MirQubitId Id { get; }
+    public MirQubitVersion Version { get; }
+    public MirQubitKey Key => new(Id, Version);
     public MirCallableRef CallableRef => new(Snapshot, Callable);
 
-    public override string ToString() => $"{Snapshot}/{Callable}/{Resource}";
+    public override string ToString() => $"{Snapshot}/{Callable}/{Key}";
 }
 
 /// <summary>
-/// A qubit place projected across the MIR snapshot boundary. A dynamic index, when present, must be
-/// an SSA value from the same snapshot and callable as the physical qubit resource.
+/// A versioned qubit access projected across the MIR snapshot boundary. A dynamic index, when present,
+/// must be an SSA value from the same snapshot and callable as the accessed qubit version.
 /// </summary>
-public readonly record struct MirQubitPlaceRef
+public readonly record struct MirQubitAccessRef
 {
-    public MirQubitPlaceRef(
-        MirQubitResourceRef resource,
+    internal MirQubitAccessRef(
+        MirQubitRef qubit,
         MirValueRef? index = null)
     {
         if (index is MirValueRef value
-            && (value.Snapshot != resource.Snapshot
-                || value.Callable != resource.Callable))
+            && (value.Snapshot != qubit.Snapshot
+                || value.Callable != qubit.Callable))
         {
             throw new ArgumentException(
-                "a qubit-place index must belong to the same MIR snapshot and callable as its resource",
+                "a qubit-access index must belong to the same MIR snapshot and callable as its qubit",
                 nameof(index));
         }
 
-        Resource = resource;
+        Qubit = qubit;
         Index = index;
     }
 
-    public MirQubitResourceRef Resource { get; }
+    public MirQubitRef Qubit { get; }
     public MirValueRef? Index { get; }
-    public MirSnapshotId Snapshot => Resource.Snapshot;
-    public MirCallableId Callable => Resource.Callable;
+    public MirSnapshotId Snapshot => Qubit.Snapshot;
+    public MirCallableId Callable => Qubit.Callable;
 }
 
 /// <summary>

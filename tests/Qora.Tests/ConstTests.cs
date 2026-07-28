@@ -77,9 +77,9 @@ public class ConstTests
                 compilation.Diagnostics.Select(diagnostic => diagnostic.Error)));
         var analyzed = Assert.IsType<HirSemanticArtifact>(
             compilation.Hir.EffectAnalysis);
-        var declaration = analyzed.Program.Operations
+        var declaration = analyzed.Program.Callables
             .SelectMany(operation => operation.Body)
-            .OfType<QDecl>()
+            .OfType<HirVariableDeclarationStatement>()
             .Single(item => item.Name == name);
         var symbol = Assert.IsType<Symbol>(
             analyzed.Model.FindSymbol(declaration.Id));

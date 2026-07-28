@@ -204,7 +204,7 @@ public sealed class MirWitnessAvailabilitySnapshot
                 .ToArray(),
             requiresIterationLocalPlacement,
             RequiresBoundsRevalidation: effect.Qubits.Any(
-                qubit => qubit.Place.Index is not null));
+                qubit => qubit.Access.Index is not null));
     }
 }
 

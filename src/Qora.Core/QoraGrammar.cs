@@ -6,7 +6,7 @@ using Janglim.FrontEnd.RegularGrammar;
 namespace Qora;
 
 /// <summary>
-/// Qora v0.32 — a Q#/C#-flavored quantum language on the Janglim engine.
+/// Qora v0.33 — a Q#/C#-flavored quantum language on the Janglim engine.
 ///
 ///   operation Bell(q: Qubit[]) {        // a subroutine, with trailing-type parameters (name: T)
 ///       H(q[0]);
@@ -62,7 +62,7 @@ namespace Qora;
 /// length, a loop over <c>0..a.Count-1</c>, a constant-bounded loop, a call-site minimum-length floor for a
 /// classical-array parameter, or a guard <c>if (0 &lt;= n &amp;&amp; n &lt; a.Count)</c> proves it; an index that
 /// cannot be proven is <c>QSEM030</c> (OpenQASM 3 has no runtime bounds check). Expressions are parsed to a
-/// tree (<c>Ir/ExprTree.cs</c>) once at lowering, and every consumer reads that tree rather than re-parsing
+/// tree (<c>Ir/AstExpressionLowering.cs</c>) once at lowering, and every consumer reads that tree rather than re-parsing
 /// text. A name used before its own-scope declaration is <c>QSEM025</c> (point-of-declaration scoping).
 /// v0.23 lets array locals live anywhere a scalar does — helper operations, loops, branches. OpenQASM
 /// wants arrays at global scope and hides mutable globals from defs, so the backend's
@@ -110,7 +110,7 @@ namespace Qora;
 /// result or a whole array. An untyped declaration follows the same resolved function signature, so
 /// <c>var x = f()</c> carries <c>f</c>'s declared return type instead of defaulting to <c>int</c>.
 /// A function may take classical arrays. In particular, a <c>bit[]</c> parameter is specialized per concrete
-/// argument width, and every expression-position <see cref="Ir.QCallNode"/> is rewritten through the same
+/// argument width, and every expression-position <see cref="Ir.HirCallExpression"/> is rewritten through the same
 /// monomorphization cache used by statement calls.
 /// Literals, names, operators, array elements, and calls all use that one expression-type reader, so an
 /// untyped declaration also preserves facts such as <c>true</c> being <c>bit</c> and an angle-valued name

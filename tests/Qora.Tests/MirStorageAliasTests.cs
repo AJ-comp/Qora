@@ -130,7 +130,9 @@ public sealed class MirStorageAliasTests
         var inspect = Callable(program, "Inspect");
         var storage = Assert.Single(inspect.Storages);
         var malformedStorage = storage with { AliasMode = MirStorageAliasMode.ExclusiveParameter };
-        var malformedCallable = inspect with { Storages = new[] { malformedStorage } };
+        var malformedCallable = RebuildCallable(
+            inspect,
+            storages: new[] { malformedStorage });
         var malformedProgram = new MirProgram(
             program.SnapshotId,
             program.Origins,
@@ -169,14 +171,18 @@ public sealed class MirStorageAliasTests
             originalCall.Operands[0]);
         var second = Assert.IsType<MirClassicalCallOperand>(
             originalCall.Operands[1]);
-        var aliasedCall = originalCall with
-        {
-            Operands = originalCall.Operands
+        var aliasedCall = new MirQuantumApply(
+            originalCall.Id,
+            originalCall.Target,
+            originalCall.Operands
                 .Select((operand, index) => index == 1
                     ? second with { Value = first.Value }
                     : operand)
                 .ToArray(),
-        };
+            originalCall.QubitResults,
+            originalCall.MutableArrayResults,
+            originalCall.Functors,
+            originalCall.Origin);
         var malformedMain = ReplaceInstruction(main, aliasedCall);
         var malformedProgram = new MirProgram(
             program.SnapshotId,
@@ -222,9 +228,9 @@ public sealed class MirStorageAliasTests
     private static MirCallable ReplaceInstruction(
         MirCallable callable,
         MirInstruction replacement) =>
-        callable with
-        {
-            Blocks = callable.Blocks
+        RebuildCallable(
+            callable,
+            blocks: callable.Blocks
                 .Select(block => block.Instructions.Any(
                         instruction => instruction.Id == replacement.Id)
                     ? block with
@@ -236,6 +242,21 @@ public sealed class MirStorageAliasTests
                             .ToArray(),
                     }
                     : block)
-                .ToArray(),
-        };
+                .ToArray());
+
+    private static MirCallable RebuildCallable(
+        MirCallable source,
+        IReadOnlyList<MirBlock>? blocks = null,
+        IReadOnlyList<MirArrayStorage>? storages = null) =>
+        new(
+            source.Id,
+            source.Name,
+            source.Kind,
+            source.ReturnType,
+            source.Parameters,
+            source.EntryBlock,
+            blocks ?? source.Blocks,
+            source.Values,
+            storages ?? source.Storages,
+            source.Origin);
 }

@@ -1,349 +1,848 @@
 namespace Qora.Ir.Passes;
 
 /// <summary>
-/// Specializes source-level <c>Qubit[]</c>/<c>bit[]</c> callables by concrete call-site widths.
-/// The length stays out of the source type: each distinct tuple of call-site lengths produces one hidden
-/// specialization, while unreachable unsized callables disappear with the rest of the generic source
-/// definitions.
-///
-/// Statement calls (<see cref="QGate"/>) and function calls inside expressions
-/// (<see cref="QCallNode"/>) share one specialization cache and worklist.
-///
-/// This common pass owns only callable cloning, call retargeting, and dead-generic elimination.
-/// It deliberately preserves every <c>.Count</c> expression so later HIR validation and non-OpenQASM
-/// consumers continue to observe the source-level read. A target that requires literal widths performs
-/// that rewrite in its own lowering boundary.
+/// Specializes source-level unsized <c>Qubit[]</c>/<c>bit[]</c> callables by concrete call-site widths.
+/// Statement and value calls share <see cref="HirCallExpression"/>, so one worklist handles both forms.
 /// </summary>
 internal static class Monomorphizer
 {
-    public sealed record Result(
-        QProgram Program,
-        IReadOnlyList<NodeDerivation> Derivations);
-
-    public static Result Run(QProgram program)
+    public sealed record Result(HirRewriteResult Rewrite)
     {
-        var derivations = new List<NodeDerivation>();
-        void Record(int sourceId, int derivedId) =>
-            derivations.Add(new NodeDerivation(sourceId, derivedId));
+        public HirProgram Program => Rewrite.Root;
+    }
 
-        // The specialization trigger IS QParam.NeedsMonoSizing — the one definition every consumer of
-        // "monomorphization supplies this length" shares (validator generic test, prover deferral gates).
-        static bool IsUnsizedArray(QParam p) => p.NeedsMonoSizing;
-        static bool NeedsSpecialization(QOperation o) => o.Params.Any(IsUnsizedArray);
+    public static Result Run(
+        HirProgram program,
+        HirRewriteSession rewrite)
+    {
+        ArgumentNullException.ThrowIfNull(program);
+        ArgumentNullException.ThrowIfNull(rewrite);
+        if (!ReferenceEquals(rewrite.Source.Program, program))
+            throw new ArgumentException(
+                "Monomorphization must consume the rewrite session's exact source program.",
+                nameof(program));
 
-        var genericById = program.Operations.Where(NeedsSpecialization).ToDictionary(o => o.Id);
+        static bool IsUnsizedArray(HirParameter parameter) =>
+            parameter.NeedsMonoSizing;
+
+        static bool NeedsSpecialization(HirCallable callable) =>
+            callable.Parameters.Any(IsUnsizedArray);
+
+        var genericById = program.Callables
+            .Where(NeedsSpecialization)
+            .ToDictionary(callable => callable.Id);
         if (genericById.Count == 0)
-            return new Result(program, Array.Empty<NodeDerivation>());
+            return new Result(rewrite.Publish(program));
 
-        var concrete = program.Operations.Where(o => !NeedsSpecialization(o)).ToList();
-        var allNames = new HashSet<string>(program.Operations.Select(o => o.Name));
-        var specs = new Dictionary<string, QOperation>();
-        var specNameByKey = new Dictionary<string, string>();
+        var concrete = program.Callables
+            .Where(callable => !NeedsSpecialization(callable))
+            .ToList();
+        var namesByNamespace = program.Callables
+            .GroupBy(
+                callable => program.NamespaceOf(callable),
+                StringComparer.Ordinal)
+            .ToDictionary(
+                group => group.Key,
+                group => new HashSet<string>(
+                    group.Select(callable => callable.Name),
+                    StringComparer.Ordinal),
+                StringComparer.Ordinal);
+        var specializations = new Dictionary<string, HirCallable>(
+            StringComparer.Ordinal);
+        var specializationsBySourceId = genericById.Keys
+            .ToDictionary(
+                callableId => callableId,
+                _ => new List<HirCallable>());
+        HirCallable? GenericCallee(HirCallExpression call) =>
+            call.CalleeId is { } id
+            && genericById.TryGetValue(id, out var callable)
+                ? callable
+                : null;
 
-        QOperation? GenericCallee(QGate gate)
+        Dictionary<string, int> ConcreteRegisters(HirCallable callable)
         {
-            if (gate.CalleeOpId is int id && genericById.TryGetValue(id, out var byId)) return byId;
-            return null;
-        }
-
-        QOperation? GenericExpressionCallee(QCallNode call)
-        {
-            if (call.CalleeOpId is int boundId
-                && genericById.TryGetValue(boundId, out var bound))
-                return bound;
-            return null;
-        }
-
-        Dictionary<string, int> ConcreteRegisters(QOperation op)
-        {
-            var regs = new Dictionary<string, int>();
-            foreach (var p in op.Params)
-                if ((p.IsQubitArray || p is { Type: QType.Bit, IsArray: true }) && p.RegisterSize is int n)
-                    regs[p.Name] = n;   // sized Qubit[]/bit[] params can size a nested generic callee's slot
-
-            // `use` declarations are semantically hoisted. Seed every allocation before rewriting so a
-            // legal call/Count that textually precedes its `use` still resolves.
-            void CollectUses(IReadOnlyList<QStmt> body)
+            var registers = new Dictionary<string, int>(
+                StringComparer.Ordinal);
+            foreach (var parameter in callable.Parameters)
             {
-                foreach (var stmt in body)
-                    switch (stmt)
-                    {
-                        case QUse u: regs[u.Name] = u.Size; break;
-                        // NOTE: `bit[]` DECLARATIONS are deliberately NOT seeded here. They are block-scoped,
-                        // so two same-named ones in disjoint blocks are different arrays with different
-                        // lengths; a flat op-wide entry made every `.Count` fold to whichever came last.
-                        // Each is bound at its own declaration site instead — see Rewrite.
-                        case QIf i: CollectUses(i.Then); CollectUses(i.Else); break;
-                        case QFor f: CollectUses(f.Body); break;
-                        case QWhile w: CollectUses(w.Body); break;
-                        case QRepeat r: CollectUses(r.Body); break;
-                    }
+                if ((parameter.IsQubitArray
+                     || parameter is
+                     {
+                         Type: QType.Bit,
+                         IsArray: true,
+                     })
+                    && parameter.RegisterSize is int size)
+                {
+                    registers[parameter.Name] = size;
+                }
             }
-            CollectUses(op.Body);
-            return regs;
+
+            CollectUses(callable.Body, registers);
+            return registers;
         }
 
-        // Walk every expression position because a generic function call can be nested inside another
-        // call, an index, a condition, or an arithmetic expression. Count nodes are ordinary preserved
-        // members here; only the OpenQASM target is allowed to replace a known Count with a literal.
-        QNode? RewriteNode(QNode? node, IReadOnlyDictionary<string, int> regs) => node switch
+        static void CollectUses(
+            HirBlock body,
+            Dictionary<string, int> registers)
         {
-            null => null,
-            QMember m => m with { Base = RewriteNode(m.Base, regs)! },
-            QBinOp b => b with { Left = RewriteNode(b.Left, regs)!, Right = RewriteNode(b.Right, regs)! },
-            QUnary u => u with { Operand = RewriteNode(u.Operand, regs)! },
-            QIndexNode i => i with { Base = RewriteNode(i.Base, regs)!, Index = RewriteNode(i.Index, regs)! },
-            QCallNode c => RewriteCall(c, regs),
-            _ => node,
-        };
-
-        QCallNode RewriteCall(QCallNode call, IReadOnlyDictionary<string, int> regs)
-        {
-            var rewritten = call with { Args = call.Args.Select(a => RewriteNode(a, regs)!).ToList() };
-            if (GenericExpressionCallee(rewritten) is not { } callee) return rewritten;
-
-            var actualNames = rewritten.Args
-                .Select(a => a is QNameRef name ? name.Name : null)
-                .ToList();
-            var specialization = SpecializationFor(callee, actualNames, regs);
-            return rewritten with
+            foreach (var statement in body)
             {
-                Name = specialization.Name,
-                CalleeOpId = specialization.Id,
+                switch (statement)
+                {
+                    case HirQubitDeclarationStatement declaration:
+                        registers[declaration.Name] = declaration.Size;
+                        break;
+                    case HirIfStatement branch:
+                        CollectUses(branch.Then, registers);
+                        CollectUses(branch.Else, registers);
+                        break;
+                    case HirForStatement loop:
+                        CollectUses(loop.Body, registers);
+                        break;
+                    case HirWhileStatement loop:
+                        CollectUses(loop.Body, registers);
+                        break;
+                    case HirRepeatStatement loop:
+                        CollectUses(loop.Body, registers);
+                        break;
+                }
+            }
+        }
+
+        HirExpression RewriteExpression(
+            HirExpression source,
+            IReadOnlyDictionary<string, int> registers,
+            bool copy)
+        {
+            HirExpression result = source switch
+            {
+                HirUnaryExpression unary =>
+                    RewriteUnary(unary, registers, copy),
+                HirBinaryExpression binary =>
+                    RewriteBinary(binary, registers, copy),
+                HirMemberAccessExpression member =>
+                    RewriteMember(member, registers, copy),
+                HirIndexExpression index =>
+                    RewriteIndex(index, registers, copy),
+                HirCallExpression call =>
+                    RewriteCall(call, registers, copy),
+                HirMeasurementExpression measurement =>
+                    RewriteMeasurement(measurement, registers, copy),
+                HirArrayLiteralExpression literal =>
+                    RewriteArrayLiteral(literal, registers, copy),
+                _ => copy
+                    ? rewrite.DeriveExpression(source)
+                    : source,
             };
+            return result;
         }
 
-        QArg ResolveArg(QArg arg, IReadOnlyDictionary<string, int> regs) => arg switch
+        HirUnaryExpression RewriteUnary(
+            HirUnaryExpression unary,
+            IReadOnlyDictionary<string, int> registers,
+            bool copy)
         {
-            QTextArg t => t with { Tree = RewriteNode(t.Tree, regs) },
-            QQubitArg q => q with { Index = RewriteNode(q.Index, regs)! },
-            _ => arg,
-        };
+            var operand = RewriteExpression(
+                unary.Operand,
+                registers,
+                copy);
+            return copy
+                ? rewrite.DeriveUnary(
+                    unary,
+                    unary.Operator,
+                    operand)
+                : ReferenceEquals(operand, unary.Operand)
+                    ? unary
+                    : rewrite.RewriteUnary(
+                        unary,
+                        unary.Operator,
+                        operand);
+        }
 
-        QExpr ResolveExpr(QExpr expr, IReadOnlyDictionary<string, int> regs) => expr switch
+        HirBinaryExpression RewriteBinary(
+            HirBinaryExpression binary,
+            IReadOnlyDictionary<string, int> registers,
+            bool copy)
         {
-            QText t => t with { Tree = RewriteNode(t.Tree, regs) },
-            QMeasure measure => measure with { Target = RewriteNode(measure.Target, regs)! },
-            QArrayLiteral literal => literal with
+            var left = RewriteExpression(binary.Left, registers, copy);
+            var right = RewriteExpression(binary.Right, registers, copy);
+            return copy
+                ? rewrite.DeriveBinary(
+                    binary,
+                    binary.Operator,
+                    left,
+                    right)
+                : ReferenceEquals(left, binary.Left)
+                  && ReferenceEquals(right, binary.Right)
+                    ? binary
+                    : rewrite.RewriteBinary(
+                        binary,
+                        binary.Operator,
+                        left,
+                        right);
+        }
+
+        HirMemberAccessExpression RewriteMember(
+            HirMemberAccessExpression member,
+            IReadOnlyDictionary<string, int> registers,
+            bool copy)
+        {
+            var receiver = RewriteExpression(
+                member.Receiver,
+                registers,
+                copy);
+            return copy
+                ? rewrite.DeriveMember(
+                    member,
+                    receiver,
+                    member.MemberName)
+                : ReferenceEquals(receiver, member.Receiver)
+                    ? member
+                    : rewrite.RewriteMember(
+                        member,
+                        receiver,
+                        member.MemberName);
+        }
+
+        HirIndexExpression RewriteIndex(
+            HirIndexExpression index,
+            IReadOnlyDictionary<string, int> registers,
+            bool copy)
+        {
+            var receiver = RewriteExpression(
+                index.Receiver,
+                registers,
+                copy);
+            var indexValue = RewriteExpression(
+                index.Index,
+                registers,
+                copy);
+            return copy
+                ? rewrite.DeriveIndex(
+                    index,
+                    receiver,
+                    indexValue)
+                : ReferenceEquals(receiver, index.Receiver)
+                  && ReferenceEquals(indexValue, index.Index)
+                    ? index
+                    : rewrite.RewriteIndex(
+                        index,
+                        receiver,
+                        indexValue);
+        }
+
+        HirMeasurementExpression RewriteMeasurement(
+            HirMeasurementExpression measurement,
+            IReadOnlyDictionary<string, int> registers,
+            bool copy)
+        {
+            var target = RewriteExpression(
+                measurement.Target,
+                registers,
+                copy);
+            return copy
+                ? rewrite.DeriveMeasurement(measurement, target)
+                : ReferenceEquals(target, measurement.Target)
+                    ? measurement
+                    : rewrite.RewriteMeasurement(
+                        measurement,
+                        target);
+        }
+
+        HirArrayLiteralExpression RewriteArrayLiteral(
+            HirArrayLiteralExpression literal,
+            IReadOnlyDictionary<string, int> registers,
+            bool copy)
+        {
+            var elements = literal.Elements
+                .Select(element =>
+                    RewriteExpression(element, registers, copy))
+                .ToArray();
+            if (copy)
+                return rewrite.DeriveArrayLiteral(literal, elements);
+            return elements
+                .Where((element, index) =>
+                    !ReferenceEquals(element, literal.Elements[index]))
+                .Any()
+                    ? rewrite.RewriteArrayLiteral(literal, elements)
+                    : literal;
+        }
+
+        HirCallExpression RewriteCall(
+            HirCallExpression call,
+            IReadOnlyDictionary<string, int> registers,
+            bool copy)
+        {
+            var arguments = call.Arguments
+                .Select(argument =>
+                {
+                    var expression = RewriteExpression(
+                        argument.Expression,
+                        registers,
+                        copy);
+                    return copy
+                        ? rewrite.DeriveArgument(argument, expression)
+                        : ReferenceEquals(
+                            expression,
+                            argument.Expression)
+                            ? argument
+                            : rewrite.RewriteArgument(
+                                argument,
+                                expression,
+                                argument.Ownership,
+                                argument.Access);
+                })
+                .ToArray();
+
+            var generic = GenericCallee(call);
+            HirCallable? specialization = null;
+            if (generic is not null)
             {
-                Elements = literal.Elements.Select(element => ResolveExpr(element, regs)).ToList(),
-            },
-            _ => expr,
-        };
+                var actualNames = arguments
+                    .Select(argument =>
+                        argument.Expression is HirNameExpression name
+                            ? name.Name
+                            : null)
+                    .ToArray();
+                specialization = SpecializationFor(
+                    generic,
+                    actualNames,
+                    registers);
+            }
 
-        /// <summary>A `bit[]` declaration binds its literal length HERE, at its own site: the initializer is
-        /// specialized first (it is evaluated before the name is bound), then the length enters the CURRENT
-        /// block map so later generic calls can bind an unsized <c>bit[]</c> parameter.</summary>
-        QStmt ResolveDecl(QDecl d, Dictionary<string, int> regs)
-        {
-            var rewritten = d with { Value = ResolveExpr(d.Value, regs) };
-            // A declaration shadows any enclosing size binding. A bit[] binds its own literal length for
-            // subsequent specialization; every other declaration removes the inherited entry so a call
-            // cannot accidentally borrow the width of a different same-named qubit/bit register.
-            if (d is { IsArray: true, Type: QType.Bit } && BitArrayLength(d) is int len) regs[d.Name] = len;
-            else regs.Remove(d.Name);
-            return rewritten;
+            var callee = specialization is null
+                ? copy
+                    ? RewriteExpression(call.Callee, registers, copy: true)
+                    : call.Callee
+                : copy
+                    ? rewrite.DeriveQualifiedCallee(
+                        call.Callee,
+                        QualifiedNameInSourceNamespace(
+                            generic!,
+                            specialization.Name))
+                    : rewrite.RewriteQualifiedCallee(
+                        call.Callee,
+                        QualifiedNameInSourceNamespace(
+                            generic!,
+                            specialization.Name));
+            var calleeId = specialization?.Id ?? call.CalleeId;
+
+            if (copy)
+            {
+                return rewrite.DeriveCall(
+                    call,
+                    callee,
+                    arguments,
+                    calleeId);
+            }
+
+            var changed = specialization is not null
+                          || arguments
+                              .Where((argument, index) =>
+                                  !ReferenceEquals(
+                                      argument,
+                                      call.Arguments[index]))
+                              .Any();
+            return changed
+                ? rewrite.RewriteCall(
+                    call,
+                    callee,
+                    arguments,
+                    calleeId)
+                : call;
         }
 
-        /// <summary>The enclosing length map with one name SHADOWED — a declaration of that name in the
-        /// inner block means a different thing, so the outer binding must not leak into it.</summary>
-        static Dictionary<string, int> Shadow(Dictionary<string, int> outer, string name)
+        HirVariableDeclarationStatement RewriteDeclaration(
+            HirVariableDeclarationStatement declaration,
+            Dictionary<string, int> registers,
+            bool copy)
         {
-            var inner = new Dictionary<string, int>(outer);
+            var value = RewriteExpression(
+                declaration.Value,
+                registers,
+                copy);
+            if (declaration is
+                {
+                    IsArray: true,
+                    Type: QType.Bit,
+                }
+                && BitArrayLength(declaration) is int length)
+            {
+                registers[declaration.Name] = length;
+            }
+            else
+            {
+                registers.Remove(declaration.Name);
+            }
+
+            return copy
+                ? rewrite.DeriveVariableDeclaration(
+                    declaration,
+                    value)
+                : ReferenceEquals(value, declaration.Value)
+                    ? declaration
+                    : rewrite.RewriteVariableDeclaration(
+                        declaration,
+                        declaration.IsConst,
+                        declaration.Type,
+                        declaration.Name,
+                        value,
+                        declaration.IsArray);
+        }
+
+        static Dictionary<string, int> Shadow(
+            Dictionary<string, int> outer,
+            string name)
+        {
+            var inner = new Dictionary<string, int>(
+                outer,
+                StringComparer.Ordinal);
             inner.Remove(name);
             return inner;
         }
 
-        QRepeat RewriteRepeat(QRepeat repeat, Dictionary<string, int> outer)
+        HirBlock RewriteBlock(
+            HirBlock body,
+            Dictionary<string, int> outer,
+            bool copy,
+            Dictionary<string, int>? finalRegisters = null)
         {
-            // `until` executes after the body and resolves in the body's scope, so declarations made at the
-            // body's top level (including a sized bit[]) must remain visible while its expression is rewritten.
-            var bodyFinal = new Dictionary<string, int>();
-            var rewrittenBody = Rewrite(repeat.Body, outer, bodyFinal);
-            return repeat with
-            {
-                Body = rewrittenBody,
-                Until = repeat.Until with { Tree = RewriteNode(repeat.Until.Tree, bodyFinal) },
-            };
-        }
+            var registers = new Dictionary<string, int>(
+                outer,
+                StringComparer.Ordinal);
+            var statements = new List<HirStatement>(body.Count);
+            var changed = copy;
 
-        List<QStmt> Rewrite(IReadOnlyList<QStmt> body, Dictionary<string, int> outer,
-            Dictionary<string, int>? finalRegs = null)
-        {
-            // A block gets its own specialization-size map, seeded from the enclosing one. Parameters and
-            // `use` registers arrive already seeded at operation level (they are forward-referenceable).
-            var regs = new Dictionary<string, int>(outer);
-            var output = new List<QStmt>(body.Count);
-            foreach (var stmt in body)
+            foreach (var statement in body)
             {
-                QStmt rewritten = stmt switch
+                HirStatement rewritten;
+                switch (statement)
                 {
-                    QGate g => g with { Args = g.Args.Select(a => ResolveArg(a, regs)).ToList() },
-                    QDecl d => ResolveDecl(d, regs),
-                    QAssign a => a with
+                    case HirCallStatement call:
                     {
-                        Index = RewriteNode(a.Index, regs),
-                        Value = ResolveExpr(a.Value, regs),
-                    },
-                    QReturn r => r with { Value = ResolveExpr(r.Value, regs) },
-                    QIf i => i with
-                    {
-                        Cond = i.Cond with { Tree = RewriteNode(i.Cond.Tree, regs) },
-                        Then = Rewrite(i.Then, regs),
-                        Else = Rewrite(i.Else, regs),
-                    },
-                    QFor f => f with
-                    {
-                        From = RewriteNode(f.From, regs)!,   // bounds evaluate in the ENCLOSING block
-                        To = RewriteNode(f.To, regs)!,
-                        Body = Rewrite(f.Body, Shadow(regs, f.Var)),   // the loop variable shadows in the body
-                    },
-                    QWhile w => w with
-                    {
-                        Cond = w.Cond with { Tree = RewriteNode(w.Cond.Tree, regs) },
-                        Body = Rewrite(w.Body, regs),
-                    },
-                    QRepeat r => RewriteRepeat(r, regs),
-                    _ => stmt,
-                };
+                        var rewrittenCall = RewriteCall(
+                            call.Call,
+                            registers,
+                            copy);
+                        rewritten = copy
+                            ? rewrite.DeriveCallStatement(
+                                call,
+                                rewrittenCall)
+                            : ReferenceEquals(rewrittenCall, call.Call)
+                                ? call
+                                : rewrite.RewriteCallStatement(
+                                    call,
+                                    call.Modifiers,
+                                    rewrittenCall);
+                        break;
+                    }
 
-                if (rewritten is QGate gate && GenericCallee(gate) is { } callee)
-                    rewritten = SpecializeCall(gate, callee, regs);
-                output.Add(rewritten);
+                    case HirVariableDeclarationStatement declaration:
+                        rewritten = RewriteDeclaration(
+                            declaration,
+                            registers,
+                            copy);
+                        break;
+
+                    case HirAssignmentStatement assignment:
+                    {
+                        var target = RewriteExpression(
+                            assignment.Target,
+                            registers,
+                            copy);
+                        var value = RewriteExpression(
+                            assignment.Value,
+                            registers,
+                            copy);
+                        rewritten = copy
+                            ? rewrite.DeriveAssignment(
+                                assignment,
+                                target,
+                                value)
+                            : ReferenceEquals(value, assignment.Value)
+                              && ReferenceEquals(target, assignment.Target)
+                                ? assignment
+                                : rewrite.RewriteAssignment(
+                                    assignment,
+                                    target,
+                                    value);
+                        break;
+                    }
+
+                    case HirReturnStatement returned:
+                    {
+                        var value = RewriteExpression(
+                            returned.Value,
+                            registers,
+                            copy);
+                        rewritten = copy
+                            ? rewrite.DeriveReturn(returned, value)
+                            : ReferenceEquals(value, returned.Value)
+                                ? returned
+                                : rewrite.RewriteReturn(
+                                    returned,
+                                    value);
+                        break;
+                    }
+
+                    case HirIfStatement branch:
+                    {
+                        var condition = RewriteExpression(
+                            branch.Condition,
+                            registers,
+                            copy);
+                        var then = RewriteBlock(
+                            branch.Then,
+                            registers,
+                            copy);
+                        var @else = RewriteBlock(
+                            branch.Else,
+                            registers,
+                            copy);
+                        rewritten = copy
+                            ? rewrite.DeriveIf(
+                                branch,
+                                condition,
+                                then,
+                                @else)
+                            : ReferenceEquals(
+                                  condition,
+                                  branch.Condition)
+                              && ReferenceEquals(then, branch.Then)
+                              && ReferenceEquals(@else, branch.Else)
+                                ? branch
+                                : rewrite.RewriteIf(
+                                    branch,
+                                    condition,
+                                    then,
+                                    @else);
+                        break;
+                    }
+
+                    case HirForStatement loop:
+                    {
+                        var from = RewriteExpression(
+                            loop.From,
+                            registers,
+                            copy);
+                        var to = RewriteExpression(
+                            loop.To,
+                            registers,
+                            copy);
+                        var nested = RewriteBlock(
+                            loop.Body,
+                            Shadow(registers, loop.Variable),
+                            copy);
+                        rewritten = copy
+                            ? rewrite.DeriveFor(
+                                loop,
+                                from,
+                                to,
+                                nested)
+                            : ReferenceEquals(from, loop.From)
+                              && ReferenceEquals(to, loop.To)
+                              && ReferenceEquals(nested, loop.Body)
+                                ? loop
+                                : rewrite.RewriteFor(
+                                    loop,
+                                    loop.Variable,
+                                    from,
+                                    to,
+                                    nested);
+                        break;
+                    }
+
+                    case HirWhileStatement loop:
+                    {
+                        var condition = RewriteExpression(
+                            loop.Condition,
+                            registers,
+                            copy);
+                        var nested = RewriteBlock(
+                            loop.Body,
+                            registers,
+                            copy);
+                        rewritten = copy
+                            ? rewrite.DeriveWhile(
+                                loop,
+                                condition,
+                                nested)
+                            : ReferenceEquals(
+                                  condition,
+                                  loop.Condition)
+                              && ReferenceEquals(nested, loop.Body)
+                                ? loop
+                                : rewrite.RewriteWhile(
+                                    loop,
+                                    condition,
+                                    nested);
+                        break;
+                    }
+
+                    case HirRepeatStatement loop:
+                    {
+                        var bodyFinal =
+                            new Dictionary<string, int>(
+                                StringComparer.Ordinal);
+                        var nested = RewriteBlock(
+                            loop.Body,
+                            registers,
+                            copy,
+                            bodyFinal);
+                        var until = RewriteExpression(
+                            loop.Until,
+                            bodyFinal,
+                            copy);
+                        rewritten = copy
+                            ? rewrite.DeriveRepeat(
+                                loop,
+                                nested,
+                                until)
+                            : ReferenceEquals(nested, loop.Body)
+                              && ReferenceEquals(until, loop.Until)
+                                ? loop
+                                : rewrite.RewriteRepeat(
+                                    loop,
+                                    nested,
+                                    until);
+                        break;
+                    }
+
+                    case HirQubitDeclarationStatement qubit:
+                        rewritten = copy
+                            ? rewrite.DeriveQubitDeclaration(qubit)
+                            : qubit;
+                        break;
+
+                    default:
+                        throw new InvalidOperationException(
+                            $"QINTERNAL: monomorphization does not handle {statement.GetType().Name}.");
+                }
+
+                statements.Add(rewritten);
+                changed |= !ReferenceEquals(rewritten, statement);
             }
-            if (finalRegs is not null)
+
+            if (finalRegisters is not null)
             {
-                finalRegs.Clear();
-                foreach (var (name, size) in regs) finalRegs[name] = size;
+                finalRegisters.Clear();
+                foreach (var (name, size) in registers)
+                    finalRegisters[name] = size;
             }
-            return output;
+
+            return copy
+                ? rewrite.DeriveBlock(body, statements)
+                : changed
+                    ? rewrite.RewriteBlock(body, statements)
+                    : body;
         }
 
-        QGate SpecializeCall(QGate gate, QOperation callee, IReadOnlyDictionary<string, int> regs)
+        HirCallable SpecializationFor(
+            HirCallable callee,
+            IReadOnlyList<string?> actualNames,
+            IReadOnlyDictionary<string, int> registers)
         {
-            var actualNames = gate.Args.Select(arg => arg is QTextArg { Tree: QNameRef name }
-                ? name.Name
-                : null).ToList();
-            var specialization = SpecializationFor(callee, actualNames, regs);
-            return gate with { Name = specialization.Name, CalleeOpId = specialization.Id };
-        }
-
-        QOperation SpecializationFor(QOperation callee, IReadOnlyList<string?> actualNames,
-            IReadOnlyDictionary<string, int> regs)
-        {
-            var bindings = new Dictionary<int, int>(); // parameter Id -> concrete length
-            for (var i = 0; i < callee.Params.Count; i++)
+            var bindings = new Dictionary<HirNodeId, int>();
+            for (var index = 0;
+                 index < callee.Parameters.Count;
+                 index++)
             {
-                var parameter = callee.Params[i];
-                if (!IsUnsizedArray(parameter)) continue;
-                // Either call form supplies an unsized Qubit[]/bit[] slot as one bare register name.
-                var actualName = i < actualNames.Count ? actualNames[i] : null;
-                if (actualName is null || !regs.TryGetValue(actualName, out var size))
+                var parameter = callee.Parameters[index];
+                if (!IsUnsizedArray(parameter))
+                    continue;
+                var actualName = index < actualNames.Count
+                    ? actualNames[index]
+                    : null;
+                if (actualName is null
+                    || !registers.TryGetValue(
+                        actualName,
+                        out var size))
+                {
                     throw new InvalidOperationException(
                         $"QINTERNAL: call to `{callee.Name}` cannot bind the size of array parameter `{parameter.Name}` after validation");
+                }
                 bindings[parameter.Id] = size;
             }
 
-            var arrays = callee.Params.Where(IsUnsizedArray).ToList();
-            if (bindings.Count != arrays.Count)
-                throw new InvalidOperationException(
-                    $"QINTERNAL: call to `{callee.Name}` bound {bindings.Count} of {arrays.Count} array parameter sizes");
-
-            var sizes = arrays.Select(p => bindings[p.Id]).ToList();
-            var key = $"{callee.Id}|{string.Join(",", sizes)}";
-            if (!specNameByKey.TryGetValue(key, out var specName))
+            var arrays = callee.Parameters
+                .Where(IsUnsizedArray)
+                .ToArray();
+            if (bindings.Count != arrays.Length)
             {
-                specName = MakeName(callee.Name, sizes);
-                specNameByKey[key] = specName;
-                var spec = Specialize(callee, bindings, specName);
-                specs[specName] = spec;
+                throw new InvalidOperationException(
+                    $"QINTERNAL: call to `{callee.Name}` bound {bindings.Count} of {arrays.Length} array parameter sizes");
             }
 
-            return specs[specName];
+            var sizes = arrays
+                .Select(parameter => bindings[parameter.Id])
+                .ToArray();
+            var key =
+                $"{callee.Id.Value}|{string.Join(",", sizes)}";
+            if (!specializations.TryGetValue(
+                    key,
+                    out var specialization))
+            {
+                var specializationName = MakeName(
+                    program.NamespaceOf(callee),
+                    callee.Name,
+                    sizes);
+                specialization = Specialize(
+                    callee,
+                    bindings,
+                    specializationName);
+                specializations.Add(key, specialization);
+                specializationsBySourceId[callee.Id].Add(
+                    specialization);
+            }
+
+            return specialization;
         }
 
-        string MakeName(string baseName, IReadOnlyList<int> sizes)
+        string MakeName(
+            string namespacePath,
+            string baseName,
+            IReadOnlyList<int> sizes)
         {
-            var name = baseName + "__sz" + string.Join("_", sizes);
-            while (allNames.Contains(name)) name += "_";
-            allNames.Add(name);
+            if (!namesByNamespace.TryGetValue(
+                    namespacePath,
+                    out var names))
+            {
+                names = new HashSet<string>(StringComparer.Ordinal);
+                namesByNamespace.Add(namespacePath, names);
+            }
+
+            var name =
+                baseName + "__sz" + string.Join("_", sizes);
+            while (names.Contains(name))
+                name += "_";
+            names.Add(name);
             return name;
         }
 
-        QOperation Specialize(QOperation source, IReadOnlyDictionary<int, int> bindings, string specName)
+        string QualifiedNameInSourceNamespace(
+            HirCallable source,
+            string localName)
         {
-            var parameters = source.Params.Select(p =>
-            {
-                var fresh = p with { Id = QNodeIds.Next() };
-                Record(p.Id, fresh.Id);
-                return IsUnsizedArray(p)
-                    ? fresh with { RegisterSize = bindings[p.Id], IsArray = true }
-                    : fresh;
-            }).ToList();
-
-            var shell = new QOperation(specName, parameters, Array.Empty<QStmt>(), source.Namespace)
-            {
-                Span = source.Span,
-                DisplayName = source.DisplayName ?? source.Name,
-                IsFunction = source.IsFunction,
-                ReturnType = source.ReturnType,
-            };
-            Record(source.Id, shell.Id);
-            var regs = ConcreteRegisters(shell);
-            var rewrittenBody = Rewrite(source.Body, regs);
-            return shell with { Body = ReId.Run(rewrittenBody, Record) };
+            var namespacePath = program.NamespaceOf(source);
+            return namespacePath.Length == 0
+                ? localName
+                : $"{namespacePath}.{localName}";
         }
 
-        var outputOps = new List<QOperation>();
-        foreach (var op in concrete)
-            outputOps.Add(op with { Body = Rewrite(op.Body, ConcreteRegisters(op)) });
-        outputOps.AddRange(specs.Values);
+        HirCallable Specialize(
+            HirCallable source,
+            IReadOnlyDictionary<HirNodeId, int> bindings,
+            string specializationName)
+        {
+            var parameters = source.Parameters
+                .Select(parameter =>
+                    rewrite.DeriveParameter(
+                        parameter,
+                        IsUnsizedArray(parameter)
+                            ? bindings[parameter.Id]
+                            : parameter.RegisterSize))
+                .ToArray();
 
-        var result = program with { Operations = outputOps };
-        if (HasGenericCall(result, genericById.Keys.ToHashSet()))
+            var registers = new Dictionary<string, int>(
+                StringComparer.Ordinal);
+            foreach (var parameter in parameters)
+            {
+                if ((parameter.IsQubitArray
+                     || parameter is
+                     {
+                         Type: QType.Bit,
+                         IsArray: true,
+                     })
+                    && parameter.RegisterSize is int size)
+                {
+                    registers[parameter.Name] = size;
+                }
+            }
+            CollectUses(source.Body, registers);
+            var body = RewriteBlock(
+                source.Body,
+                registers,
+                copy: true);
+            return rewrite.DeriveCallable(
+                source,
+                specializationName,
+                parameters,
+                body,
+                source.IsFunction,
+                source.ReturnType,
+                source.DisplayName
+                ?? QualifiedNameInSourceNamespace(
+                    source,
+                    source.Name));
+        }
+
+        var concreteReplacements =
+            new Dictionary<HirNodeId, HirCallable>();
+        foreach (var callable in concrete)
+        {
+            var body = RewriteBlock(
+                callable.Body,
+                ConcreteRegisters(callable),
+                copy: false);
+            concreteReplacements.Add(
+                callable.Id,
+                ReferenceEquals(body, callable.Body)
+                    ? callable
+                    : rewrite.RewriteCallable(
+                        callable,
+                        callable.Name,
+                        callable.Parameters,
+                        body,
+                        callable.IsFunction,
+                        callable.ReturnType,
+                        callable.DisplayName));
+        }
+
+        var result = rewrite.ReplaceCallables(
+            program,
+            callable =>
+                genericById.ContainsKey(callable.Id)
+                    ? specializationsBySourceId[callable.Id]
+                    : new[]
+                    {
+                        concreteReplacements[callable.Id],
+                    });
+        var genericIds = genericById.Keys.ToHashSet();
+        if (HasGenericCall(result, genericIds))
+        {
             throw new InvalidOperationException(
                 "QINTERNAL: monomorphization removed a generic callable while a call still points to it");
-        if (result.Operations.SelectMany(o => o.Params).Any(IsUnsizedArray))
+        }
+        if (result.Callables
+            .SelectMany(callable => callable.Parameters)
+            .Any(IsUnsizedArray))
+        {
             throw new InvalidOperationException(
                 "QINTERNAL: monomorphization left an unresolved Qubit[]/bit[] parameter in the specialized HIR");
-        return new Result(result, derivations.AsReadOnly());
-    }
-
-    /// <summary>The declared length of a <c>bit[]</c>, which QSEM016/QSEM029 guarantee is a literal.</summary>
-    private static int? BitArrayLength(QDecl d) => d.Value switch
-    {
-        QArrayLiteral literal => literal.Elements.Count,
-        QArrayNew allocation => allocation.Length,
-        _ => null,
-    };
-
-    private static bool HasGenericCall(QProgram program, IReadOnlySet<int> genericIds) =>
-        program.Operations.Any(op => HasGenericCall(op.Body, genericIds));
-
-    private static bool HasGenericCall(IReadOnlyList<QStmt> body, IReadOnlySet<int> genericIds)
-    {
-        foreach (var statement in body)
-        {
-            if (statement is QGate gate
-                && gate.CalleeOpId is int id
-                && genericIds.Contains(id))
-                return true;
-            if (QNodes.ExpressionSites(statement)
-                .SelectMany(QNodes.CallsIn)
-                .Any(call => call.CalleeOpId is int id && genericIds.Contains(id)))
-                return true;
-
-            var nested = statement switch
-            {
-                QIf branch => HasGenericCall(branch.Then, genericIds)
-                              || HasGenericCall(branch.Else, genericIds),
-                QFor loop => HasGenericCall(loop.Body, genericIds),
-                QWhile loop => HasGenericCall(loop.Body, genericIds),
-                QRepeat loop => HasGenericCall(loop.Body, genericIds),
-                _ => false,
-            };
-            if (nested) return true;
         }
-        return false;
+
+        return new Result(rewrite.Publish(result));
     }
+
+    private static int? BitArrayLength(
+        HirVariableDeclarationStatement declaration) =>
+        declaration.Value switch
+        {
+            HirArrayLiteralExpression literal =>
+                literal.Elements.Count,
+            HirArrayCreationExpression allocation =>
+                allocation.Length,
+            _ => null,
+        };
+
+    private static bool HasGenericCall(
+        HirProgram program,
+        IReadOnlySet<HirNodeId> genericIds) =>
+        program.Callables.Any(callable =>
+            HirExpressions
+                .DescendantsAndSelf(callable.Body)
+                .OfType<HirCallExpression>()
+                .Any(call =>
+                    call.CalleeId is { } id
+                    && genericIds.Contains(id)));
 }

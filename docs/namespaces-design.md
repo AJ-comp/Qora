@@ -166,14 +166,14 @@ QoraCompiler.Compile
   `SourceDocumentRef`, lowers every successfully parsed document with a document-qualified
   `SourceSpan`, and records resolved and unresolved edges in an immutable `ImportGraph`.
   `ModuleLoader.Expand(LoadedSourceGraph)` performs no I/O or parsing; it purely merges the prepared
-  `SourceDocumentRef -> QProgram` map by those graph edges and returns an exact
+  `SourceDocumentRef -> HirProgram` map by those graph edges and returns an exact
   `HirNodeIntroduction` for every HIR node imported from another document.
 - `CompilationSession` is the only revision-allocation authority for one logical compilation.
   Recompiling the same parent twice produces distinct sibling revisions, while each child records that
   parent in `Compilation.ParentRevision`. `CompilationOutputPlan` independently fixes the exact
   requested HIR goal, MIR presence, and backend set. A successful result must match that plan exactly;
   it cannot contain an unsolicited MIR or target artifact.
-- A `HirSnapshot` always owns one published `QProgram` generation and an immutable
+- A `HirSnapshot` always owns one published `HirProgram` generation and an immutable
   `nodeId -> SourceSpan` source map. Semantic facts are separate `HirSemanticArtifact` values qualified
   by that exact snapshot and `HirSemanticPhase`. Each validation artifact owns the authoritative
   `HirValidationOutcome`: accepted means an empty diagnostic set, while rejected retains the exact
@@ -183,8 +183,9 @@ QoraCompiler.Compile
   one snapshot when a pass performs no rewrite. Validation and `EffectAnalysis` therefore do not
   manufacture another structural HIR stage; callers query `Compilation.Hir.EffectAnalysis` for the
   exact semantic artifact.
-  Milestones follow the canonical order `Lowered -> ImportsExpanded -> MeasurementLowered -> Resolved
-  -> Specialized`. Adjoint and conjugation are absent from Qora source and HIR.
+  Milestones follow the canonical order `Lowered -> ImportsExpanded -> Resolved -> Specialized`.
+  Measurements stay as canonical HIR expressions until MIR lowers them at their exact CFG evaluation
+  points. Adjoint and conjugation are absent from Qora source and HIR.
 - HIR lineage is owned by `HirCompilation`; `Compilation.Links.Hir` is the same instance, not another
   ledger. `NodeDerivation` means same semantic identity, `NodeSynthesis` records only provenance for a
   new entity, and `HirNodeIntroduction` records a source node entering through import expansion.
@@ -209,8 +210,8 @@ QoraCompiler.Compile
 - The resolver reads the graph. A bare call walks the caller's namespace containment chain outward
   (`A.B → A → program`) before inspecting the direct callable members reached by that exact namespace's
   `Import` edges. A qualified call starts at the program scope. Successful user-callable bindings write
-  the fully-qualified target and declaring operation Id to both statement `QGate` calls and expression
-  `QCallNode`s.
+  the fully-qualified target and declaring callable Id to the shared `HirCallExpression` used by both
+  statement and value positions.
 - Resolver recursively rebuilds declaration/assignment/return values, conditions, loop bounds, gate
   arguments, array elements, and nested call arguments, so no expression position keeps an unresolved
   short spelling.
@@ -289,7 +290,8 @@ New semantic codes:
    was a false QSEM019. `BuildHirScopeGraph` registers empty namespace scopes and every intermediate
    segment of a dotted namespace, not just namespaces that directly contain callables.
 5. **Function calls in namespace resolution** — DONE. The expression grammar accepts qualified call
-   targets, `QCallNode` carries the same stable callee reference as `QGate`, and the resolver visits every
+  targets, every `HirCallExpression` carries one stable callee reference regardless of whether it appears
+  as a statement or a value, and the resolver visits every
    expression-bearing IR position. Same-namespace, qualified, and `open`-visible functions now resolve
    through `HirScopeGraph`; ambiguity remains QSEM018, and monomorphization re-points both the name
    and Id when it selects a width-specialized `bit[]` function. Callable bodies and nested lexical

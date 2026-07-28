@@ -218,7 +218,17 @@ public sealed class MirPathConditionAnalysisTests
         var callableId = new MirCallableId(0);
         var a = new MirValueId(0);
         var b = new MirValueId(1);
-        var qubit = new MirQubitResourceId(0);
+        var qubit = new MirQubitParameter(
+            new MirQubitId(0),
+            "q",
+            isArray: false,
+            length: null,
+            QOwnershipMode.Borrowed,
+            source);
+        var qubitResult = new MirQubitAfterInstruction(
+            qubit.Id,
+            new MirQubitVersion(1),
+            source);
         var entry = new MirBlockId(0);
         var testB = new MirBlockId(1);
         var bypass = new MirBlockId(2);
@@ -228,8 +238,9 @@ public sealed class MirPathConditionAnalysisTests
             new MirBuiltinGateTarget("X"),
             new MirCallOperand[]
             {
-                new MirQubitCallOperand(new MirQubitPlace(qubit)),
+                new MirQubitCallOperand(new MirQubitAccess(qubit)),
             },
+            new[] { qubitResult },
             Array.Empty<MirMutableArrayResult>(),
             Array.Empty<MirFunctor>(),
             source);
@@ -242,10 +253,10 @@ public sealed class MirPathConditionAnalysisTests
             {
                 new MirCallable(
                     callableId,
-                    Name: "TailMerge",
+                    name: "TailMerge",
                     MirCallableKind.Operation,
-                    ReturnType: null,
-                    Parameters: new MirParameter[]
+                    returnType: null,
+                    parameters: new IMirParameter[]
                     {
                         new MirClassicalParameter(
                             "a",
@@ -257,15 +268,10 @@ public sealed class MirPathConditionAnalysisTests
                             source,
                             b,
                             MirType.Scalar(QType.Bit)),
-                        new MirQubitParameter(
-                            "q",
-                            source,
-                            qubit,
-                            IsArray: false,
-                            Length: null),
+                        qubit,
                     },
-                    EntryBlock: entry,
-                    Blocks: new[]
+                    entryBlock: entry,
+                    blocks: new[]
                     {
                         new MirBlock(
                             entry,
@@ -304,7 +310,7 @@ public sealed class MirPathConditionAnalysisTests
                             new MirReturn(Value: null, source),
                             source),
                     },
-                    Values: new[]
+                    values: new[]
                     {
                         new MirValue(
                             a,
@@ -317,27 +323,16 @@ public sealed class MirPathConditionAnalysisTests
                             MirValueDefinition.ParameterAt(1),
                             Origin: source),
                     },
-                    Storages: Array.Empty<MirArrayStorage>(),
-                    Qubits: new[]
-                    {
-                        new MirQubitResource(
-                            qubit,
-                            "q",
-                            MirQubitResourceKind.Parameter,
-                            IsArray: false,
-                            Length: null,
-                            AllocationInstruction: null,
-                            source),
-                    },
+                    storages: Array.Empty<MirArrayStorage>(),
                     source),
                 new MirCallable(
                     entryPointId,
-                    Name: "Main",
+                    name: "Main",
                     MirCallableKind.Operation,
-                    ReturnType: null,
-                    Parameters: Array.Empty<MirParameter>(),
-                    EntryBlock: entryPointBlock,
-                    Blocks: new[]
+                    returnType: null,
+                    parameters: Array.Empty<IMirParameter>(),
+                    entryBlock: entryPointBlock,
+                    blocks: new[]
                     {
                         new MirBlock(
                             entryPointBlock,
@@ -346,9 +341,8 @@ public sealed class MirPathConditionAnalysisTests
                             new MirReturn(Value: null, source),
                             source),
                     },
-                    Values: Array.Empty<MirValue>(),
-                    Storages: Array.Empty<MirArrayStorage>(),
-                    Qubits: Array.Empty<MirQubitResource>(),
+                    values: Array.Empty<MirValue>(),
+                    storages: Array.Empty<MirArrayStorage>(),
                     source),
             });
     }

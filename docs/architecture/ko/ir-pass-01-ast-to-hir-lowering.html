@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>1. AstToHirLowering — 문서 AST를 source-shaped HIR로 — Qora IR 패스 데이터시트</title>
+<style>
+  :root {
+    --bg:#fff; --ink:#1f2430; --muted:#5b6472; --line:#e1e5eb; --panel:#f6f7f9;
+    --blue:#1457d6; --green:#11875b; --amber:#9a6700; --navy:#263141;
+  }
+  * { box-sizing:border-box; }
+  html { scroll-behavior:smooth; }
+  body {
+    margin:0; background:var(--bg); color:var(--ink); word-break:keep-all; overflow-wrap:break-word;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Apple SD Gothic Neo",
+      "Malgun Gothic","Noto Sans KR","Segoe UI Symbol",sans-serif;
+    font-size:16.5px; line-height:1.72;
+  }
+  a { color:#1745b5; }
+  code,pre { font-family:"SF Mono","JetBrains Mono","D2Coding",Consolas,monospace; }
+  code { padding:1px 6px; border:1px solid var(--line); border-radius:5px;
+         background:var(--panel); font-size:.9em; word-break:normal; }
+  pre { margin:16px 0; padding:15px 17px; overflow-x:auto; border-radius:10px;
+        background:#111827; color:#eef4ff; font-size:.84rem; line-height:1.55;
+        white-space:pre; word-break:normal; }
+  pre code { padding:0; border:0; background:none; color:inherit; font-size:inherit; }
+  .wrap { max-width:940px; margin:0 auto; padding:0 20px 110px; }
+  .hero { padding:58px 20px 36px; text-align:center; border-bottom:1px solid var(--line);
+          background:#f7f8fa; }
+  .hero h1 { margin:0 0 10px; font-size:2rem; letter-spacing:-.5px; }
+  .hero p { margin:0; color:var(--muted); }
+  .tag { display:inline-block; margin-bottom:14px; color:var(--muted); font-size:.78rem;
+         font-weight:800; letter-spacing:.12em; text-transform:uppercase; }
+  h2 { margin:52px 0 12px; padding-bottom:10px; border-bottom:1px solid var(--line);
+       font-size:1.4rem; letter-spacing:-.3px; }
+  h3 { margin:28px 0 8px; font-size:1.08rem; }
+  p { margin:12px 0; }
+  .lead { margin-top:24px; font-size:1.04rem; }
+  .doc-links { display:flex; flex-wrap:wrap; gap:10px; margin:20px 0 6px; }
+  .doc-link { display:inline-flex; align-items:center; padding:7px 15px;
+              border:1px solid #cddcff; border-radius:999px; background:#f6f9ff;
+              color:#1745b5; font-size:.92rem; font-weight:750; text-decoration:none; }
+  .doc-link:hover { border-color:#9bb8ff; background:#eef4ff; }
+  .meta,.callout { margin:20px 0; overflow:hidden; border:1px solid #d9dee6;
+                   border-radius:10px; background:#fff; }
+  .meta-title { display:flex; justify-content:space-between; gap:16px; padding:11px 18px;
+                background:var(--navy); color:#f7f9fc; font-size:.76rem; font-weight:800;
+                letter-spacing:.09em; }
+  .meta-body { padding:17px 18px; }
+  .callout { padding:15px 17px; background:#f8fafc; }
+  .callout.good { border-color:#b9decf; background:#f5faf7; }
+  .callout.warn { border-color:#e6d2ad; background:#fffaf1; }
+  .callout .h { display:block; margin-bottom:7px; color:#526071; font-size:.72rem;
+                font-weight:850; letter-spacing:.08em; text-transform:uppercase; }
+  .diagram { margin:22px 0; overflow:hidden; border:1px solid #d4dde8;
+             border-radius:12px; background:#f8fafc; }
+  .diagram-scroll { overflow-x:auto; }
+  .diagram svg { display:block; width:100%; min-width:820px; height:auto; }
+  .diagram figcaption { padding:11px 15px; border-top:1px solid #dfe5ed;
+                       background:#fff; color:#536074; font-size:.82rem; }
+  .svg-ui { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Apple SD Gothic Neo",
+            "Malgun Gothic","Noto Sans KR",sans-serif; }
+  .svg-code { font-family:"SF Mono","JetBrains Mono","D2Coding",Consolas,monospace; }
+  .panel { margin:16px 0; overflow-x:auto; border:1px solid var(--line);
+           border-radius:9px; background:#fff; }
+  table.spec { width:100%; border-collapse:collapse; font-size:.91rem; }
+  table.spec th,table.spec td { padding:9px 11px; border-bottom:1px solid var(--line);
+                               text-align:left; vertical-align:top; }
+  table.spec th { background:#fbfbfe; color:var(--muted); font-size:.77rem;
+                  font-weight:800; letter-spacing:.02em; }
+  table.spec tr:last-child td { border-bottom:0; }
+  table.spec td.k { width:1%; color:#1a2740; font-weight:750; white-space:nowrap; }
+  .cards { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; margin:16px 0; }
+  .card { padding:14px 15px; border:1px solid #dce2e9; border-radius:9px; background:#f8fafc; }
+  .card b { display:block; margin-bottom:5px; color:#24344d; }
+  .card p { margin:0; font-size:.91rem; }
+  footer { margin-top:58px; padding-top:24px; border-top:1px solid var(--line);
+           color:var(--muted); text-align:center; font-size:.9rem; }
+  @media (max-width:720px) {
+    .wrap { padding-right:16px; padding-left:16px; }
+    .hero { padding-right:16px; padding-left:16px; }
+    .hero h1 { font-size:1.5rem; line-height:1.38; }
+    .cards { grid-template-columns:1fr; }
+    table.spec td.k { white-space:normal; }
+  }
+</style>
+</head>
+<body>
+<div class="qora-lang-switch" style="position:sticky;top:0;z-index:99;text-align:right;padding:8px 16px;background:rgba(255,255,255,.92);backdrop-filter:blur(4px);border-bottom:1px solid #e6e8ee;font-size:13px;font-family:sans-serif;"><a href="../en/index.html">English</a> · <strong>한국어</strong> · <a href="../ja/index.html">日本語</a></div>
+
+<header class="hero">
+  <div class="tag">Qora · IR 패스 데이터시트 · 1장</div>
+  <h1>1. AstToHirLowering</h1>
+  <p>문서 AST를 source-shaped HIR와 하나의 표현식 트리로 변환</p>
+</header>
+
+<div class="wrap">
+  <nav class="doc-links" aria-label="IR 패스 데이터시트 내비게이션">
+    <a class="doc-link" href="datasheet.html#passes">패스 목차</a>
+    <a class="doc-link" href="ir-pass-02-module-loader.html">2. SourceGraphLoader / ModuleLoader →</a>
+  </nav>
+
+  <p class="lead">
+    공개 <code>QoraParser.Parse</code>는 토큰, Qora 소유의 불변 파스 트리·AST 투영, 캡처된 트리 문자열, 구문 진단을 담은 <code>SyntaxSnapshot</code>에서 멈춥니다.<br>
+    이 스냅샷은 Janglim AST를 보관하지 않으며, parser가 만든 변경 가능한 AST는 내부 <code>SyntaxParseProduct</code>가 HIR lowering 직전까지만 임시로 소유합니다.<br>
+    whole-program 컴파일에서는 <code>SourceGraphLoader</code>가 문서를 <code>HirConstructionCore</code>에 등록하고, exact <code>SourceDocumentRef</code>로 <code>AstToHirLoweringSession</code>을 연 뒤 이 임시 AST를 <code>AstToHirLowering</code>에 전달합니다.<br>
+    <code>AstToHirLowering</code>은 파일 하나의 선언·문장·표현식을 source-shaped <code>HirProgram</code>으로 옮깁니다.<br>
+    이때 <code>Declarations</code>가 namespace와 callable의 유일한 소유 트리가 되며, 변환을 발행하면 lowering session과 parser-owned AST를 다시 사용하지 않습니다.
+  </p>
+
+  <section class="meta" aria-label="AstToHirLowering 핵심 사양">
+    <div class="meta-title"><span>PASS SPECIFICATION</span><span>AstToHirLowering.Lower(AstSymbol, AstToHirLoweringSession)</span></div>
+    <div class="meta-body">
+      <div class="panel">
+        <table class="spec">
+          <tr><th>항목</th><th>계약</th></tr>
+          <tr><td class="k">입력 구조</td><td>문서 하나의 Janglim program <code>AstSymbol</code>과 exact 문서에 결박된 <code>AstToHirLoweringSession</code></td></tr>
+          <tr><td class="k">성공 출력</td><td><code>Declarations</code>와 <code>Imports</code>를 담은 불변 <code>HirProgram</code>; namespace의 <code>open</code>과 하위 선언은 해당 <code>HirNamespaceDeclaration</code>이 직접 소유</td></tr>
+          <tr><td class="k">입력 위반</td><td>program nonterminal이 아니거나 문법이 보장한 AST 형태가 깨졌으면 내부 계약 오류; 빈 소스에서 callable이 없으면 compiler가 이후 <code>QSEM040</code>으로 중단</td></tr>
+          <tr><td class="k">위치</td><td>노드가 속한 문서를 포함하는 반열림 <code>SourceSpan(Document, Start, End)</code></td></tr>
+          <tr><td class="k">identity</td><td>모든 선언·문장·표현식에 compilation revision 안에서 유일한 <code>HirNodeId</code>를 session이 발급</td></tr>
+          <tr><td class="k">하지 않는 일</td><td>import I/O, 문서 병합, 이름 해소, 타입·소유권·범위 검증, MIR·target 생성</td></tr>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <figure class="diagram" aria-labelledby="lowering-title lowering-caption">
+    <div class="diagram-scroll" tabindex="0">
+      <svg viewBox="0 0 1000 520" role="img" aria-labelledby="lowering-title lowering-desc">
+        <title id="lowering-title">문서 AST가 HirProgram 선언 트리와 HirExpression 트리로 변환되는 과정</title>
+        <desc id="lowering-desc">내부 SyntaxParseProduct의 일시적인 LoweringAst와 문서에 결박된 AstToHirLoweringSession이 AstToHirLowering으로 들어갑니다. 공개 SyntaxSnapshot에는 Qora 소유의 불변 투영만 남습니다. 결과 HirProgram의 Declarations는 namespace와 callable을 구조적으로 소유하며, 모든 표현식 occurrence는 고유 HirNodeId를 가진 HirExpression 트리로 한 번 구조화됩니다.</desc>
+        <defs>
+          <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+            <path d="M0 0 L10 5 L0 10 Z" fill="#64748b"/>
+          </marker>
+        </defs>
+
+        <rect x="34" y="50" width="214" height="142" rx="12" fill="#fff8eb" stroke="#d7ae5f" stroke-width="2"/>
+        <text class="svg-ui" x="141" y="79" text-anchor="middle" fill="#745013" font-size="16" font-weight="850">내부 일시 입력</text>
+        <text class="svg-code" x="56" y="112" fill="#334155" font-size="12.5">SyntaxParseProduct</text>
+        <text class="svg-code" x="56" y="141" fill="#334155" font-size="12.5">LoweringAst + LoweringSession</text>
+        <text class="svg-code" x="56" y="170" fill="#64748b" font-size="11.5">snapshot에는 AST 참조 없음</text>
+
+        <path d="M248 121 H326" fill="none" stroke="#64748b" stroke-width="3" marker-end="url(#arr)"/>
+
+        <rect x="334" y="38" width="280" height="166" rx="12" fill="#eef5ff" stroke="#75a3d8" stroke-width="2"/>
+        <text class="svg-code" x="474" y="69" text-anchor="middle" fill="#174f8a" font-size="16" font-weight="850">AstToHirLowering</text>
+        <text class="svg-ui" x="358" y="103" fill="#334155" font-size="12.5">• 선언과 문장을 typed HIR node로 변환</text>
+        <text class="svg-ui" x="358" y="131" fill="#334155" font-size="12.5">• 표현식·조건을 HirExpression tree로 변환</text>
+        <text class="svg-ui" x="358" y="159" fill="#334155" font-size="12.5">• node Id와 SourceSpan 기록</text>
+        <text class="svg-ui" x="358" y="187" fill="#64748b" font-size="11.5">문서 I/O와 semantic 판단 없음</text>
+
+        <path d="M614 121 H684" fill="none" stroke="#64748b" stroke-width="3" marker-end="url(#arr)"/>
+
+        <rect x="692" y="38" width="274" height="166" rx="12" fill="#f3faf7" stroke="#78b89f" stroke-width="2"/>
+        <text class="svg-code" x="829" y="69" text-anchor="middle" fill="#116347" font-size="16" font-weight="850">HirProgram</text>
+        <text class="svg-code" x="716" y="103" fill="#334155" font-size="12.5">Declarations tree</text>
+        <text class="svg-code" x="716" y="131" fill="#334155" font-size="12.5">Imports</text>
+        <text class="svg-code" x="716" y="159" fill="#334155" font-size="12.5">Namespace.OpenDirectives</text>
+        <text class="svg-code" x="716" y="187" fill="#64748b" font-size="11.5">source-shaped, unresolved</text>
+
+        <path d="M474 204 V268" fill="none" stroke="#64748b" stroke-width="3" marker-end="url(#arr)"/>
+
+        <rect x="126" y="278" width="748" height="190" rx="13" fill="#fff" stroke="#cbd5e1" stroke-width="2"/>
+        <text class="svg-code" x="500" y="308" text-anchor="middle" fill="#334155" font-size="15" font-weight="850">표현식의 단일 권위 표현: HirExpression tree</text>
+        <rect x="151" y="334" width="190" height="104" rx="9" fill="#f8fafc" stroke="#aeb9c7"/>
+        <text class="svg-code" x="246" y="360" text-anchor="middle" fill="#334155" font-size="12.5" font-weight="800">results[0] == 1</text>
+        <text class="svg-code" x="171" y="390" fill="#64748b" font-size="11">HirBinaryExpression(Equal,</text>
+        <text class="svg-code" x="171" y="412" fill="#64748b" font-size="11">  HirIndexExpression(...),</text>
+        <text class="svg-code" x="171" y="434" fill="#64748b" font-size="11">  HirIntegerLiteralExpression(1))</text>
+        <rect x="405" y="334" width="190" height="104" rx="9" fill="#f8fafc" stroke="#aeb9c7"/>
+        <text class="svg-code" x="500" y="360" text-anchor="middle" fill="#334155" font-size="12.5" font-weight="800">M(q[i]) + 1</text>
+        <text class="svg-code" x="425" y="390" fill="#64748b" font-size="11">HirBinaryExpression(Add,</text>
+        <text class="svg-code" x="425" y="412" fill="#64748b" font-size="11">  HirMeasurementExpression(...),</text>
+        <text class="svg-code" x="425" y="434" fill="#64748b" font-size="11">  HirIntegerLiteralExpression(1))</text>
+        <rect x="659" y="334" width="190" height="104" rx="9" fill="#f8fafc" stroke="#aeb9c7"/>
+        <text class="svg-code" x="754" y="360" text-anchor="middle" fill="#334155" font-size="12.5" font-weight="800">M(a)</text>
+        <text class="svg-code" x="679" y="390" fill="#64748b" font-size="11">HirMeasurementExpression(</text>
+        <text class="svg-code" x="679" y="412" fill="#64748b" font-size="11">  HirNameExpression("a"))</text>
+      </svg>
+    </div>
+    <figcaption id="lowering-caption">
+      표현식 문자열을 각 소비자가 다시 해석하지 않습니다.<br>
+      lowering에서 만든 <code>HirExpression</code> 트리가 유일한 저장 표현이며, 진단·IR 출력·target 방출에 필요한 문자열은 이 트리에서 렌더링합니다.
+    </figcaption>
+  </figure>
+
+  <h2 id="top-level">1. 최상위 선언 변환</h2>
+
+  <div class="panel">
+    <table class="spec">
+      <tr><th>AST 구성</th><th>HIR 결과</th><th>보존하는 값</th></tr>
+      <tr><td class="k"><code>operation</code></td><td><code>HirCallable(IsFunction = false)</code></td><td>이름, <code>HirParameter</code>, <code>HirBlock</code>, 선언 전체의 <code>SourceSpan</code></td></tr>
+      <tr><td class="k"><code>function</code></td><td><code>HirCallable(IsFunction = true)</code></td><td>return type, 파라미터, <code>HirReturnStatement</code>를 포함한 본문</td></tr>
+      <tr><td class="k"><code>import "lib.qor"</code></td><td><code>HirImportDirective</code></td><td>따옴표를 제거한 target과 선언문 전체 <code>SourceSpan</code></td></tr>
+      <tr><td class="k"><code>namespace A.B</code></td><td><code>HirNamespaceDeclaration("A")</code> 아래의 <code>HirNamespaceDeclaration("B")</code></td><td>각 이름 segment와 하위 선언의 실제 소유 관계</td></tr>
+      <tr><td class="k"><code>open A.B</code></td><td>현재 namespace node의 <code>HirOpenDirective</code></td><td>target과 선언문 전체 <code>SourceSpan</code></td></tr>
+    </table>
+  </div>
+
+  <p>
+    <code>HirProgram.Callables</code>, <code>NamespacePaths</code>, <code>OpenDirectivesByNamespace</code>는 별도 저장소가 아니라 <code>Declarations</code>에서 만든 읽기 전용 index입니다.<br>
+    따라서 같은 namespace를 여러 source block에서 선언해도 원래 namespace node는 그대로 남고, 이름 해소용 조회 결과만 동일한 경로 아래에서 결합됩니다.<br>
+    이 단계의 callable 이름은 아직 소스에 적힌 이름이며 call의 <code>CalleeId</code>도 연결되지 않습니다.<br>
+    여러 문서의 <code>HirProgram</code>이 준비된 뒤 <code>ModuleLoader</code>가 declaration subtree를 병합하고, 그 다음 <code>Resolver</code>가 선언 트리와 <code>open</code>을 사용해 완전 수식 이름과 user-callable <code>HirNodeId</code>를 결정합니다.
+  </p>
+
+  <h2 id="statements">2. 문장과 중첩 본문</h2>
+
+  <p>
+    lowering은 AST tag에 따라 전용 <code>HirStatement</code> subtype을 선택하고, 중첩 본문을 소스 순서대로 재귀 변환합니다.<br>
+    문장과 그 하위 표현식은 모두 같은 <code>AstToHirLoweringSession</code>에서 만들어지므로, 서로 다른 occurrence가 같은 identity를 공유하지 않으며 각 노드가 자신의 정확한 범위를 기록합니다.
+  </p>
+
+  <div class="panel">
+    <table class="spec">
+      <tr><th>소스 형태</th><th>생성 HIR</th><th>핵심 필드</th></tr>
+      <tr><td class="k"><code>use q = Qubit[2];</code></td><td><code>HirQubitDeclarationStatement</code></td><td>이름과 정수 크기</td></tr>
+      <tr><td class="k">gate / operation 호출</td><td><code>HirCallStatement</code> + <code>HirCallExpression</code></td><td>modifier, 아직 해소되지 않은 callee 표현식, <code>HirArgument</code> 목록</td></tr>
+      <tr><td class="k"><code>var</code> / <code>const</code></td><td><code>HirVariableDeclarationStatement</code></td><td>선택적 타입, 배열 여부, 이름, 초기값 <code>HirExpression</code></td></tr>
+      <tr><td class="k">대입</td><td><code>HirAssignmentStatement</code></td><td>이름·index·미래 field access를 담을 왼쪽 <code>Target</code>과 오른쪽 <code>Value</code></td></tr>
+      <tr><td class="k"><code>if</code> / <code>else</code></td><td><code>HirIfStatement</code></td><td><code>Condition</code>과 then/else <code>HirBlock</code></td></tr>
+      <tr><td class="k"><code>for</code></td><td><code>HirForStatement</code></td><td>binder, <code>From</code>/<code>To</code> 표현식, 본문</td></tr>
+      <tr><td class="k"><code>while</code> / <code>repeat</code></td><td><code>HirWhileStatement</code> / <code>HirRepeatStatement</code></td><td>구조화된 조건과 본문</td></tr>
+      <tr><td class="k"><code>return expr;</code></td><td><code>HirReturnStatement</code></td><td>반환값 <code>HirExpression</code></td></tr>
+    </table>
+  </div>
+
+  <h2 id="expressions">3. 표현식은 lowering에서 한 번 구조화</h2>
+
+  <p>
+    Janglim의 평평한 expression AST는 <code>AstExpressionLowering</code>의 <code>ToHirExpression</code> 확장 메서드가 연산자 우선순위를 적용해 하나의 <code>HirExpression</code> 트리로 바꿉니다.<br>
+    기본 node는 <code>HirIntegerLiteralExpression</code>, <code>HirLiteralExpression</code>, <code>HirNameExpression</code>이며, 조합 node는 <code>HirUnaryExpression</code>, <code>HirBinaryExpression</code>, <code>HirMemberAccessExpression</code>, <code>HirIndexExpression</code>, <code>HirCallExpression</code>입니다.<br>
+    문법이 허용한 token을 일부만 소비한 경우에는 짧아진 트리를 조용히 반환하지 않고 내부 오류로 중단합니다.
+  </p>
+
+  <div class="cards">
+    <div class="card">
+      <b><code>HirArgument(Expression)</code></b>
+      <p><code>q</code>, <code>q[i + 1]</code>, <code>pi / 2</code>, 함수 호출을 모두 같은 expression 필드에 넣습니다.<br>qubit인지 classical value인지는 HIR 구조를 중복하지 않고 후속 semantic model이 판정합니다.</p>
+    </div>
+    <div class="card">
+      <b><code>HirCallExpression(Callee, Arguments)</code></b>
+      <p><code>two()</code>와 <code>L.two()</code>의 callee도 각각 이름 또는 member-access expression으로 보존합니다.<br>resolver가 이 구조를 따라 선언을 찾고 <code>CalleeId</code>를 연결합니다.</p>
+    </div>
+    <div class="card">
+      <b><code>HirMeasurementExpression(Target)</code></b>
+      <p><code>M(target)</code>은 선언·대입뿐 아니라 배열 원소와 중첩식에서도 즉시 canonical measurement가 됩니다.<br>target이 실제로 측정 가능한 큐비트인지는 validator가 판정합니다.</p>
+    </div>
+    <div class="card">
+      <b>모든 expression occurrence의 identity</b>
+      <p>동일한 소스 문자열이 두 semantic role에서 쓰여도 각 occurrence를 별도로 lowering하여 서로 다른 <code>HirNodeId</code>를 발급합니다.<br>후속 provenance와 IDE 질의는 이 identity를 기준으로 연결됩니다.</p>
+    </div>
+  </div>
+
+  <h3>측정의 canonical 분류</h3>
+
+  <p>
+    단순 builtin 이름 <code>M</code>에 인수가 하나 있으면 값 문맥의 위치와 관계없이 <code>HirMeasurementExpression</code>을 만듭니다.<br>
+    따라서 <code>M(a)</code>는 <code>HirMeasurementExpression(HirNameExpression("a"))</code>가 되고, <code>M(q[i])</code>는 name receiver와 index를 가진 <code>HirIndexExpression</code>을 target으로 소유합니다.<br>
+    또한 <code>M(q[i]) + 1</code>에서도 측정 node가 binary expression 안에 그대로 남으므로, 후속 패스가 문자열이나 특수한 최상위 형태를 다시 찾을 필요가 없습니다.
+  </p>
+
+  <div class="panel">
+    <table class="spec">
+      <tr><th>소스</th><th>lowering 결과</th><th>후속 처리</th></tr>
+      <tr><td class="k"><code>Apply(q[i + 1])</code></td><td><code>HirArgument(HirIndexExpression(q, HirBinaryExpression(Add, i, 1)))</code></td><td>symbol·type·bounds 검증</td></tr>
+      <tr><td class="k"><code>Apply(pi / 2)</code></td><td><code>HirArgument(HirBinaryExpression(Divide, pi, 2))</code></td><td>인자 타입 검증</td></tr>
+      <tr><td class="k"><code>var x = f(1) + 2;</code></td><td><code>HirBinaryExpression(Add, HirCallExpression(f, ...), 2)</code></td><td>함수 이름·signature·return type 해소</td></tr>
+      <tr><td class="k"><code>if (M(q[0]) == 1)</code></td><td><code>HirBinaryExpression</code> 안의 canonical <code>HirMeasurementExpression</code></td><td>MIR lowering이 정확한 평가 위치의 measurement instruction과 short-circuit CFG로 변환</td></tr>
+      <tr><td class="k"><code>for i in 0..values.Count - 1</code></td><td><code>From = HirIntegerLiteralExpression(0)</code>, <code>To = HirBinaryExpression(Subtract, HirMemberAccessExpression(...), 1)</code></td><td>bounds·MIR lowering에서 동일 tree 소비</td></tr>
+    </table>
+  </div>
+
+  <div class="callout good">
+    <span class="h">단일 source of truth</span>
+    선언 초기값, 대입값, 조건, 반환값, 호출 인자는 모두 같은 <code>HirExpression</code> 계층을 사용합니다.<br>
+    printer와 backend가 필요한 spelling은 이 트리에서 만들기 때문에, bounds proof·resolver·emitter가 같은 식을 서로 다르게 재해석할 수 없습니다.
+  </div>
+
+  <h2 id="spans">4. node identity와 SourceSpan</h2>
+
+  <p>
+    모든 <code>HirNode</code>는 현재 compilation revision 안에서 유일한 <code>HirNodeId</code>를 가지며, published tree는 불변입니다.<br>
+    같은 논리 occurrence를 재작성할 때는 Id를 보존하고, subtree를 복제하거나 compiler가 새 node를 만들 때는 새 Id와 derivation·synthesis provenance를 기록합니다.<br>
+    source location이 있는 선언·문장·표현식에는 현재 문서의 <code>SourceDocumentRef</code>가 포함된 <code>SourceSpan</code>을 붙입니다.<br>
+    import 문서도 별도 document identity로 lowering되므로 위치를 null로 버리거나 entry 문서 offset으로 가장하지 않습니다.
+  </p>
+
+  <div class="panel">
+    <table class="spec">
+      <tr><th>노드</th><th>Id</th><th>SourceSpan 범위</th></tr>
+      <tr><td class="k"><code>HirProgram</code></td><td>있음</td><td>문서 program 범위</td></tr>
+      <tr><td class="k"><code>HirNamespaceDeclaration</code> / <code>HirCallable</code></td><td>있음</td><td>각 선언의 source 범위</td></tr>
+      <tr><td class="k"><code>HirParameter</code></td><td>있음</td><td>parameter 범위</td></tr>
+      <tr><td class="k"><code>HirStatement</code> / <code>HirBlock</code></td><td>있음</td><td>문장 또는 본문의 반열림 범위</td></tr>
+      <tr><td class="k"><code>HirImportDirective</code> / <code>HirOpenDirective</code></td><td>있음</td><td>지시문 전체 반열림 범위</td></tr>
+      <tr><td class="k"><code>HirExpression</code> / <code>HirArgument</code></td><td>있음</td><td>각 expression occurrence와 인자의 정확한 범위</td></tr>
+    </table>
+  </div>
+
+  <h2 id="handoff">5. 다음 경계</h2>
+
+  <p>
+    <code>SourceGraphLoader</code>는 문서별 lowering 결과와 <code>ImportGraph</code>를 내부 <code>LoadedSourceGraph</code>로 묶습니다.<br>
+    이때 공개 <code>SyntaxSnapshot</code>에는 이미 만들어 둔 불변 구문 투영만 저장하며, <code>SyntaxParseProduct.LoweringAst</code>는 문서별 <code>HirProgram</code>을 만든 뒤 더 이상 유지하지 않습니다.<br>
+    entry 문서의 lowering 결과는 <code>HirPipelineBuilder.PublishLowered</code>가 첫 <code>HirSnapshot</code>으로 발행합니다.<br>
+    <code>ModuleLoader</code>는 이 exact snapshot에서 연 <code>HirRewriteSession</code>으로 prepared graph를 순수 병합하고, <code>QoraCompiler</code>가 rewrite 결과를 <code>ImportsExpanded</code> milestone으로 전진시킵니다.<br>
+    이후 <code>Resolver</code>가 같은 선언 트리에서 이름을 해소하여 <code>Resolved</code> milestone으로 바로 전진시킵니다.<br>
+    type·signature·ownership·index 유효성, effect analysis, MIR, target 정책은 각각 자신의 입력이 준비된 후속 단계가 소유합니다.
+  </p>
+
+<pre><code>SourceGraphLoader
+  ├─ parse: SyntaxParseProduct(SyntaxSnapshot, LoweringAst)
+  ├─ publish: immutable SyntaxSnapshot only
+  ├─ session: ConstructionCore.BeginLowering(documentRef)
+  ├─ lower immediately: AstToHirLowering.Lower(LoweringAst, session)
+  ├─ discard parser-owned LoweringAst
+  └─ ImportGraph + LoweredDocuments
+       └─ PublishLowered(entry HirProgram)
+            └─ BeginRewrite(exact latest snapshot)
+                 └─ ModuleLoader.Expand(loaded, rewrite)
+                      └─ Resolver
+                           └─ validation semantic artifact
+                                └─ HirValidationOutcome(Accepted | Rejected)</code></pre>
+
+  <nav class="doc-links" aria-label="IR 패스 데이터시트 내비게이션">
+    <a class="doc-link" href="datasheet.html#passes">패스 목차</a>
+    <a class="doc-link" href="ir-pass-02-module-loader.html">2. SourceGraphLoader / ModuleLoader →</a>
+  </nav>
+
+  <footer>
+    IR 패스 데이터시트 · 1장 · <code>AstToHirLowering</code> ·
+    <a href="datasheet.html">컴파일러 데이터시트</a>
+  </footer>
+</div>
+</body>
+</html>

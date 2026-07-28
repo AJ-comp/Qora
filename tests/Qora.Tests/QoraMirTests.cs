@@ -1,3 +1,4 @@
+using Qora.Ir;
 using Qora.Ir.Mir;
 using Qora.Ir.Mir.Analysis;
 
@@ -35,6 +36,14 @@ public sealed class QoraMirTests
                 && target.Callable == flipIf.Id)
             .ToArray();
         Assert.Equal(2, calls.Length);
+
+        var firstQubitResult = Assert.Single(calls[0].QubitResults);
+        var secondQubitInput = Assert.IsType<MirQubitCallOperand>(
+            calls[1].Operands[1]);
+        Assert.Equal(firstQubitResult.Key, secondQubitInput.Qubit.Qubit);
+        Assert.Equal(
+            2,
+            Assert.Single(calls[1].QubitResults).Version.Value);
 
         var firstInput = Assert.IsType<MirClassicalCallOperand>(calls[0].Operands[0]).Value;
         var secondInput = Assert.IsType<MirClassicalCallOperand>(calls[1].Operands[0]).Value;
@@ -248,7 +257,7 @@ public sealed class QoraMirTests
         Assert.Equal(apply.Id, target.Callable);
 
         var qubitOperand = Assert.IsType<MirQubitCallOperand>(Assert.Single(call.Operands));
-        var index = Assert.IsType<MirValueId>(qubitOperand.Place.Index);
+        var index = Assert.IsType<MirValueId>(qubitOperand.Qubit.Index);
         _ = Assert.IsType<MirValue>(main.FindValue(index));
         Assert.Single(SymbolsOf(snapshot, main.Id, index));
 
@@ -256,6 +265,504 @@ public sealed class QoraMirTests
             EffectFor(effects, main.Id, call.Id).ClassicalWitnesses,
             candidate => candidate.Role == MirClassicalWitnessRole.QubitIndex);
         Assert.Equal(index, witness.Value.Value);
+    }
+
+    [Fact]
+    public void NestedExpressionTermsKeepTheirExactHirOrigins()
+    {
+        var compilation = Compiler.Compile("""
+            function f(value: int): int {
+                return value;
+            }
+
+            operation Main() {
+                var xs: int[] = [10, 20];
+                var y: int = f(xs[1]);
+            }
+            """);
+        Assert.True(
+            compilation.Succeeded,
+            string.Join(
+                " | ",
+                compilation.Diagnostics.Select(diagnostic =>
+                    $"{diagnostic.Error.Code}: {diagnostic.Error.Message}")));
+
+        var hirMain = compilation.Hir.Specialized!.Program.Callables
+            .Single(callable => callable.Name == "Main");
+        var declaration = Assert.Single(
+            hirMain.Body.Statements
+                .OfType<HirVariableDeclarationStatement>(),
+            statement => statement.Name == "y");
+        var callExpression =
+            Assert.IsType<HirCallExpression>(declaration.Value);
+        var loadExpression =
+            Assert.IsType<HirIndexExpression>(
+                Assert.Single(callExpression.Arguments).Expression);
+        var indexExpression =
+            Assert.IsType<HirIntegerLiteralExpression>(
+                loadExpression.Index);
+
+        var snapshot = Assert.IsType<MirSnapshot>(compilation.Mir);
+        var main = Callable(snapshot.Program, "Main");
+        var instructions = main.Blocks
+            .SelectMany(block => block.Instructions)
+            .ToArray();
+        var load = Assert.Single(instructions.OfType<MirArrayLoad>());
+        var call = Assert.Single(instructions.OfType<MirPureCall>());
+        var index = Assert.Single(
+            instructions.OfType<MirConstant>(),
+            constant => constant.Constant.Text == "1");
+        var operand = Assert.IsType<MirClassicalCallOperand>(
+            Assert.Single(call.Operands));
+
+        Assert.Equal(load.Result, operand.Value);
+        Assert.Equal(loadExpression.Id, OriginNode(load.Origin));
+        Assert.Equal(callExpression.Id, OriginNode(call.Origin));
+        Assert.Equal(indexExpression.Id, OriginNode(index.Origin));
+        Assert.Equal(
+            loadExpression.Id,
+            OriginNode(
+                Assert.IsType<MirValue>(
+                    main.FindValue(load.Result)).Origin));
+        Assert.Equal(
+            callExpression.Id,
+            OriginNode(
+                Assert.IsType<MirValue>(
+                    main.FindValue(call.Result)).Origin));
+        Assert.NotEqual(declaration.Id, OriginNode(load.Origin));
+        Assert.NotEqual(declaration.Id, OriginNode(call.Origin));
+
+        HirNodeId OriginNode(MirOriginRef origin) =>
+            snapshot.Links.ResolveOrigin(origin).Node.NodeId;
+    }
+
+    [Fact]
+    public void QuantumWritesAdvanceOnlyTheWrittenQubitAndFollowingInstructionsReadThatVersion()
+    {
+        var snapshot = CompileSnapshot("""
+            operation Main() {
+                use control = Qubit[1];
+                use target = Qubit[1];
+                CNOT(control[0], target[0]);
+                X(target[0]);
+            }
+            """);
+        var main = Callable(snapshot.Program, "Main");
+        var applies = main.Blocks
+            .SelectMany(block => block.Instructions)
+            .OfType<MirQuantumApply>()
+            .ToArray();
+        Assert.Equal(2, applies.Length);
+
+        var cnot = applies[0];
+        var control = Assert.IsType<MirQubitCallOperand>(cnot.Operands[0]).Qubit;
+        var targetBefore = Assert.IsType<MirQubitCallOperand>(cnot.Operands[1]).Qubit;
+        Assert.Equal(0, control.Qubit.Version.Value);
+        Assert.Equal(0, targetBefore.Qubit.Version.Value);
+
+        var targetAfterCnot = Assert.Single(cnot.QubitResults);
+        Assert.Equal(targetBefore.Qubit.Id, targetAfterCnot.Id);
+        Assert.Equal(1, targetAfterCnot.Version.Value);
+        Assert.DoesNotContain(cnot.QubitResults, result => result.Id == control.Qubit.Id);
+
+        var x = applies[1];
+        var xInput = Assert.IsType<MirQubitCallOperand>(Assert.Single(x.Operands)).Qubit;
+        Assert.Equal(targetAfterCnot.Key, xInput.Qubit);
+        var targetAfterX = Assert.Single(x.QubitResults);
+        Assert.Equal(targetAfterCnot.Id, targetAfterX.Id);
+        Assert.Equal(2, targetAfterX.Version.Value);
+
+        var effect = EffectFor(snapshot.Analyses.Effects, main.Id, cnot.Id);
+        Assert.Equal(
+            targetAfterCnot.Key,
+            Assert.Single(effect.QubitResults).Key);
+
+        var targetRef = new MirQubitRef(
+            snapshot.Id,
+            main.Id,
+            targetAfterCnot.Key);
+        var targetSymbol = Assert.Single(snapshot.Links.SymbolsFor(targetRef));
+        Assert.Equal(
+            new[] { 0, 1, 2 },
+            snapshot.Links.QubitsBySymbol[targetSymbol]
+                .Where(reference => reference.Id == targetAfterCnot.Id)
+                .Select(reference => reference.Version.Value)
+                .Order()
+                .ToArray());
+    }
+
+    [Fact]
+    public void MeasurementProducesTheVersionReadByTheFollowingQuantumInstruction()
+    {
+        var snapshot = CompileSnapshot("""
+            operation Main() {
+                use target = Qubit[1];
+                var measured: bit = M(target[0]);
+                X(target[0]);
+            }
+            """);
+        var main = Callable(snapshot.Program, "Main");
+        var measure = Assert.Single(
+            main.Blocks.SelectMany(block => block.Instructions).OfType<MirMeasure>());
+        Assert.Equal(0, measure.Qubit.Qubit.Version.Value);
+        Assert.Equal(measure.Qubit.Qubit.Id, measure.QubitResult.Id);
+        Assert.Equal(1, measure.QubitResult.Version.Value);
+
+        var x = Assert.Single(
+            main.Blocks.SelectMany(block => block.Instructions).OfType<MirQuantumApply>());
+        var xInput = Assert.IsType<MirQubitCallOperand>(Assert.Single(x.Operands));
+        Assert.Equal(measure.QubitResult.Key, xInput.Qubit.Qubit);
+        Assert.Equal(2, Assert.Single(x.QubitResults).Version.Value);
+
+        var effect = EffectFor(snapshot.Analyses.Effects, main.Id, measure.Id);
+        Assert.Equal(
+            measure.QubitResult.Key,
+            Assert.Single(effect.QubitResults).Key);
+    }
+
+    [Fact]
+    public void OneInstructionWritingTwoElementsProducesOneRegisterVersion()
+    {
+        var snapshot = CompileSnapshot("""
+            operation Main() {
+                use register = Qubit[2];
+                SWAP(register[0], register[1]);
+                X(register[0]);
+            }
+            """);
+        var main = Callable(snapshot.Program, "Main");
+        var applies = main.Blocks
+            .SelectMany(block => block.Instructions)
+            .OfType<MirQuantumApply>()
+            .ToArray();
+        Assert.Equal(2, applies.Length);
+
+        var swap = applies[0];
+        var inputs = swap.Operands
+            .OfType<MirQubitCallOperand>()
+            .Select(operand => operand.Qubit)
+            .ToArray();
+        Assert.Equal(2, inputs.Length);
+        Assert.Equal(inputs[0].Qubit, inputs[1].Qubit);
+        Assert.NotEqual(inputs[0].Index, inputs[1].Index);
+
+        var registerAfterSwap = Assert.Single(swap.QubitResults);
+        Assert.Equal(inputs[0].Qubit.Id, registerAfterSwap.Id);
+        Assert.Equal(1, registerAfterSwap.Version.Value);
+        Assert.Equal(
+            registerAfterSwap.Key,
+            Assert.IsType<MirQubitCallOperand>(
+                Assert.Single(applies[1].Operands)).Qubit.Qubit);
+    }
+
+    [Fact]
+    public void IfJoinCreatesOneQubitPhiAndTheFollowingAccessReadsIt()
+    {
+        var snapshot = CompileSnapshot("""
+            operation Main() {
+                use target = Qubit[1];
+                if (1 == 1) {
+                    X(target[0]);
+                } else {
+                    H(target[0]);
+                }
+                Z(target[0]);
+            }
+            """);
+        var main = Callable(snapshot.Program, "Main");
+        var phi = Assert.Single(
+            main.Blocks.SelectMany(block => block.QubitPhis));
+        Assert.Equal(2, phi.Inputs.Count);
+        Assert.All(phi.Inputs, input => Assert.Equal(phi.Id, input.Qubit.Id));
+        Assert.Equal(2, phi.Inputs.Select(input => input.Qubit).Distinct().Count());
+
+        var z = Assert.Single(
+            main.Blocks
+                .SelectMany(block => block.Instructions)
+                .OfType<MirQuantumApply>(),
+            apply => apply.Target is MirBuiltinGateTarget { Name: "Z" });
+        var zInput = Assert.IsType<MirQubitCallOperand>(Assert.Single(z.Operands));
+        Assert.Equal(phi.Key, zInput.Qubit.Qubit);
+        Assert.Empty(z.QubitResults);
+    }
+
+    [Fact]
+    public void LoopHeaderQubitPhiConnectsTheEntryAndBackedgeVersions()
+    {
+        var snapshot = CompileSnapshot("""
+            operation Main() {
+                use target = Qubit[1];
+                var index: int = 0;
+                while (index < 1) {
+                    X(target[0]);
+                    index = index + 1;
+                }
+                Z(target[0]);
+            }
+            """);
+        var main = Callable(snapshot.Program, "Main");
+        var header = Assert.Single(main.Blocks, block => block.QubitPhis.Count != 0);
+        var phi = Assert.Single(header.QubitPhis);
+        Assert.Equal(2, phi.Inputs.Count);
+        Assert.Contains(phi.Inputs, input => input.Qubit.Version.Value == 0);
+
+        var x = Assert.Single(
+            main.Blocks
+                .SelectMany(block => block.Instructions)
+                .OfType<MirQuantumApply>(),
+            apply => apply.Target is MirBuiltinGateTarget { Name: "X" });
+        var xInput = Assert.IsType<MirQubitCallOperand>(Assert.Single(x.Operands));
+        Assert.Equal(phi.Key, xInput.Qubit.Qubit);
+        var loopResult = Assert.Single(x.QubitResults);
+        Assert.Contains(phi.Inputs, input => input.Qubit == loopResult.Key);
+
+        var z = Assert.Single(
+            main.Blocks
+                .SelectMany(block => block.Instructions)
+                .OfType<MirQuantumApply>(),
+            apply => apply.Target is MirBuiltinGateTarget { Name: "Z" });
+        Assert.Equal(
+            phi.Key,
+            Assert.IsType<MirQubitCallOperand>(Assert.Single(z.Operands)).Qubit.Qubit);
+    }
+
+    [Fact]
+    public void VerifierRejectsAStaleQubitVersionAfterAWrite()
+    {
+        var (program, _) = CompileMir("""
+            operation Main() {
+                use register = Qubit[1];
+                X(register[0]);
+                X(register[0]);
+            }
+            """);
+        var callable = Assert.Single(program.Callables);
+        var seed = Assert.Single(callable.Qubits.OfType<MirQubitFromUse>());
+        var applies = callable.Blocks
+            .SelectMany(block => block.Instructions)
+            .OfType<MirQuantumApply>()
+            .ToArray();
+        Assert.Equal(2, applies.Length);
+
+        var second = applies[1];
+        var operand = Assert.IsType<MirQubitCallOperand>(
+            Assert.Single(second.Operands));
+        var staleOperand = new MirQubitCallOperand(
+            new MirQubitAccess(seed, operand.Qubit.Index),
+            operand.Ownership,
+            operand.Access);
+        var malformedApply = new MirQuantumApply(
+            second.Id,
+            second.Target,
+            new MirCallOperand[] { staleOperand },
+            second.QubitResults,
+            second.MutableArrayResults,
+            second.Functors,
+            second.Origin);
+        var malformed = ReplaceInstruction(
+            program,
+            callable,
+            malformedApply);
+
+        var error = Assert.Single(
+            QoraMirVerifier.Verify(malformed),
+            candidate => candidate.Code == "MIR146");
+        Assert.Contains("stale version", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void VerifierRejectsMixedVersionsOfOneRegisterWithinAnInstruction()
+    {
+        var (program, _) = CompileMir("""
+            operation Main() {
+                use register = Qubit[2];
+                X(register[0]);
+                SWAP(register[0], register[1]);
+            }
+            """);
+        var callable = Assert.Single(program.Callables);
+        var seed = Assert.Single(callable.Qubits.OfType<MirQubitFromUse>());
+        var swap = Assert.Single(
+            callable.Blocks
+                .SelectMany(block => block.Instructions)
+                .OfType<MirQuantumApply>(),
+            apply => apply.Target is MirBuiltinGateTarget { Name: "SWAP" });
+        var operands = swap.Operands
+            .Cast<MirQubitCallOperand>()
+            .ToArray();
+        Assert.Equal(2, operands.Length);
+        Assert.Equal(operands[0].Qubit.Qubit, operands[1].Qubit.Qubit);
+
+        var staleFirst = new MirQubitCallOperand(
+            new MirQubitAccess(seed, operands[0].Qubit.Index),
+            operands[0].Ownership,
+            operands[0].Access);
+        var malformedApply = new MirQuantumApply(
+            swap.Id,
+            swap.Target,
+            new MirCallOperand[] { staleFirst, operands[1] },
+            swap.QubitResults,
+            swap.MutableArrayResults,
+            swap.Functors,
+            swap.Origin);
+        var malformed = ReplaceInstruction(
+            program,
+            callable,
+            malformedApply);
+
+        var error = Assert.Single(
+            QoraMirVerifier.Verify(malformed),
+            candidate => candidate.Code == "MIR146");
+        Assert.Contains(
+            "multiple input versions",
+            error.Message,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void VerifierRejectsAStaleQubitPhiInput()
+    {
+        var (program, _) = CompileMir("""
+            operation Main() {
+                use target = Qubit[1];
+                if (1 == 1) {
+                    X(target[0]);
+                } else {
+                    H(target[0]);
+                }
+                X(target[0]);
+            }
+            """);
+        var callable = Assert.Single(program.Callables);
+        var seed = Assert.Single(callable.Qubits.OfType<MirQubitFromUse>());
+        var merge = Assert.Single(
+            callable.Blocks,
+            block => block.QubitPhis.Count != 0);
+        var phi = Assert.Single(merge.QubitPhis);
+        var malformedPhi = phi with
+        {
+            Inputs = phi.Inputs
+                .Select((input, index) =>
+                    index == 0
+                        ? new MirQubitPhiInput(input.Edge, seed.Key)
+                        : input)
+                .ToArray(),
+        };
+        var malformedMerge = merge with
+        {
+            QubitPhis = new[] { malformedPhi },
+        };
+        var malformedCallable = CopyCallable(
+            callable,
+            blocks: callable.Blocks
+                .Select(block =>
+                    block.Id == merge.Id
+                        ? malformedMerge
+                        : block)
+                .ToArray());
+        var malformed = new MirProgram(
+            program.SnapshotId,
+            program.Origins,
+            program.EntryPoint,
+            new[] { malformedCallable });
+
+        var error = Assert.Single(
+            QoraMirVerifier.Verify(malformed),
+            candidate => candidate.Code == "MIR146");
+        Assert.Contains("stale version", error.Message, StringComparison.Ordinal);
+        Assert.Contains("Phi", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void VerifierRejectsAJoinWhoseCurrentQubitVersionsLackAPhi()
+    {
+        var (program, _) = CompileMir("""
+            operation Main() {
+                use target = Qubit[1];
+                if (1 == 1) {
+                    X(target[0]);
+                } else {
+                    H(target[0]);
+                }
+            }
+            """);
+        var callable = Assert.Single(program.Callables);
+        var merge = Assert.Single(
+            callable.Blocks,
+            block => block.QubitPhis.Count != 0);
+        var malformedMerge = merge with
+        {
+            QubitPhis = Array.Empty<MirQubitPhi>(),
+        };
+        var malformedCallable = CopyCallable(
+            callable,
+            blocks: callable.Blocks
+                .Select(block =>
+                    block.Id == merge.Id
+                        ? malformedMerge
+                        : block)
+                .ToArray());
+        var malformed = new MirProgram(
+            program.SnapshotId,
+            program.Origins,
+            program.EntryPoint,
+            new[] { malformedCallable });
+
+        var error = Assert.Single(
+            QoraMirVerifier.Verify(malformed),
+            candidate => candidate.Code == "MIR146");
+        Assert.Contains("reachable join", error.Message, StringComparison.Ordinal);
+        Assert.Contains("exactly one Phi", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void BranchLocalQubitDoesNotRequireAPhiAfterItsLifetimeEnds()
+    {
+        var (program, _) = CompileMir("""
+            operation Main() {
+                use local = Qubit[1];
+                if (1 == 1) {
+                } else {
+                }
+            }
+            """);
+        var callable = Assert.Single(program.Callables);
+        var entry = Assert.IsType<MirBlock>(
+            callable.FindBlock(callable.EntryBlock));
+        var branch = Assert.IsType<MirBranch>(entry.Terminator);
+        var trueBlock = Assert.IsType<MirBlock>(
+            callable.FindBlock(branch.TrueTarget));
+        var allocation = Assert.Single(
+            entry.Instructions.OfType<MirQubitAllocate>());
+        var rewrittenEntry = entry with
+        {
+            Instructions = entry.Instructions
+                .Where(instruction => instruction.Id != allocation.Id)
+                .ToArray(),
+        };
+        var rewrittenTrue = trueBlock with
+        {
+            Instructions = trueBlock.Instructions
+                .Prepend(allocation)
+                .ToArray(),
+        };
+        var malformedCallable = CopyCallable(
+            callable,
+            blocks: callable.Blocks
+                .Select(block => block.Id switch
+                {
+                    var id when id == rewrittenEntry.Id => rewrittenEntry,
+                    var id when id == rewrittenTrue.Id => rewrittenTrue,
+                    _ => block,
+                })
+                .ToArray());
+        var branchLocal = new MirProgram(
+            program.SnapshotId,
+            program.Origins,
+            program.EntryPoint,
+            new[] { malformedCallable });
+
+        Assert.Empty(QoraMirVerifier.Verify(branchLocal));
     }
 
     [Fact]
@@ -320,11 +827,100 @@ public sealed class QoraMirTests
     }
 
     [Fact]
+    public void VerifierRejectsAMissingTransitiveUserCallQubitResult()
+    {
+        var (program, _) = CompileMir("""
+            operation Mutate(q: Qubit) {
+                X(q);
+            }
+
+            operation Forward(q: Qubit) {
+                Mutate(q);
+            }
+
+            operation Main() {
+                use register = Qubit[1];
+                Forward(register[0]);
+            }
+            """);
+        var main = Callable(program, "Main");
+        var call = Assert.Single(
+            main.Blocks
+                .SelectMany(block => block.Instructions)
+                .OfType<MirQuantumApply>());
+        Assert.IsType<MirUserCallableTarget>(call.Target);
+        Assert.Single(call.QubitResults);
+
+        var malformedCall = new MirQuantumApply(
+            call.Id,
+            call.Target,
+            call.Operands,
+            Array.Empty<MirQubitAfterInstruction>(),
+            call.MutableArrayResults,
+            call.Functors,
+            call.Origin);
+        var malformed = ReplaceInstruction(program, main, malformedCall);
+
+        var error = Assert.Single(
+            QoraMirVerifier.Verify(malformed),
+            candidate => candidate.Code == "MIR142");
+        Assert.Contains(
+            "semantic write set",
+            error.Message,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void VerifierRejectsASpuriousReadOnlyUserCallQubitResult()
+    {
+        var (program, _) = CompileMir("""
+            operation Inspect(q: Qubit) {}
+
+            operation Main() {
+                use register = Qubit[1];
+                Inspect(register[0]);
+            }
+            """);
+        var main = Callable(program, "Main");
+        var call = Assert.Single(
+            main.Blocks
+                .SelectMany(block => block.Instructions)
+                .OfType<MirQuantumApply>());
+        var operand = Assert.IsType<MirQubitCallOperand>(
+            Assert.Single(call.Operands));
+        Assert.Empty(call.QubitResults);
+
+        var spurious = new MirQubitAfterInstruction(
+            operand.Qubit.Qubit.Id,
+            new MirQubitVersion(1),
+            call.Origin);
+        var malformedCall = new MirQuantumApply(
+            call.Id,
+            call.Target,
+            call.Operands,
+            new[] { spurious },
+            call.MutableArrayResults,
+            call.Functors,
+            call.Origin);
+        var malformed = ReplaceInstruction(program, main, malformedCall);
+
+        var error = Assert.Single(
+            QoraMirVerifier.Verify(malformed),
+            candidate => candidate.Code == "MIR142");
+        Assert.Contains(
+            "semantic write set",
+            error.Message,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void VerifierRejectsAMissingEntryBlock()
     {
         var (program, _) = CompileMir("operation Main() {}");
         var callable = Assert.Single(program.Callables);
-        var malformedCallable = callable with { EntryBlock = new MirBlockId(int.MaxValue) };
+        var malformedCallable = CopyCallable(
+            callable,
+            entryBlock: new MirBlockId(int.MaxValue));
         var malformed = new MirProgram(
             program.SnapshotId,
             program.Origins,
@@ -336,6 +932,34 @@ public sealed class QoraMirTests
         var exception = Assert.Throws<InvalidOperationException>(
             () => QoraMirVerifier.VerifyOrThrow(malformed));
         Assert.Contains("MIR014", exception.Message);
+    }
+
+    [Fact]
+    public void VerifierRejectsAnEntryBlockWithAPredecessor()
+    {
+        var (program, _) = CompileMir("operation Main() {}");
+        var callable = Assert.Single(program.Callables);
+        var entry = Assert.Single(callable.Blocks);
+        var malformedEntry = entry with
+        {
+            Terminator = new MirJump(
+                entry.Id,
+                Array.Empty<MirValueId>(),
+                entry.Terminator.Origin),
+        };
+        var malformedCallable = CopyCallable(
+            callable,
+            blocks: new[] { malformedEntry });
+        var malformed = new MirProgram(
+            program.SnapshotId,
+            program.Origins,
+            program.EntryPoint,
+            new[] { malformedCallable });
+
+        var error = Assert.Single(
+            QoraMirVerifier.Verify(malformed),
+            candidate => candidate.Code == "MIR147");
+        Assert.Contains("unique CFG root", error.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -414,10 +1038,9 @@ public sealed class QoraMirTests
         var block = Assert.Single(callable.Blocks);
         var reset = Assert.Single(
             block.Instructions.OfType<MirQuantumApply>());
-        var malformedReset = reset with
-        {
-            Functors = new[] { MirFunctor.Adjoint },
-        };
+        var malformedReset = CopyApplyWithFunctors(
+            reset,
+            new[] { MirFunctor.Adjoint });
         var malformedBlock = block with
         {
             Instructions = block.Instructions
@@ -427,10 +1050,9 @@ public sealed class QoraMirTests
                         : instruction)
                 .ToArray(),
         };
-        var malformedCallable = callable with
-        {
-            Blocks = new[] { malformedBlock },
-        };
+        var malformedCallable = CopyCallable(
+            callable,
+            blocks: new[] { malformedBlock });
         var malformed = new MirProgram(
             program.SnapshotId,
             program.Origins,
@@ -463,7 +1085,7 @@ public sealed class QoraMirTests
 
         MirProgram WithFunctors(params MirFunctor[] functors)
         {
-            var rewrittenApply = apply with { Functors = functors };
+            var rewrittenApply = CopyApplyWithFunctors(apply, functors);
             var rewrittenBlock = block with
             {
                 Instructions = block.Instructions
@@ -479,10 +1101,7 @@ public sealed class QoraMirTests
                 program.EntryPoint,
                 new[]
                 {
-                    callable with
-                    {
-                        Blocks = new[] { rewrittenBlock },
-                    },
+                    CopyCallable(callable, blocks: new[] { rewrittenBlock }),
                 });
         }
 
@@ -508,6 +1127,66 @@ public sealed class QoraMirTests
                     MirFunctor.Controlled,
                     MirFunctor.Adjoint)),
             error => error.Code == "MIR141");
+    }
+
+    private static MirCallable CopyCallable(
+        MirCallable source,
+        MirBlockId? entryBlock = null,
+        IReadOnlyList<MirBlock>? blocks = null) =>
+        new(
+            source.Id,
+            source.Name,
+            source.Kind,
+            source.ReturnType,
+            source.Parameters,
+            entryBlock ?? source.EntryBlock,
+            blocks ?? source.Blocks,
+            source.Values,
+            source.Storages,
+            source.Origin);
+
+    private static MirQuantumApply CopyApplyWithFunctors(
+        MirQuantumApply source,
+        IReadOnlyList<MirFunctor> functors) =>
+        new(
+            source.Id,
+            source.Target,
+            source.Operands,
+            source.QubitResults,
+            source.MutableArrayResults,
+            functors,
+            source.Origin);
+
+    private static MirProgram ReplaceInstruction(
+        MirProgram program,
+        MirCallable callable,
+        MirInstruction replacement)
+    {
+        var blocks = callable.Blocks
+            .Select(block => block.Instructions.Any(
+                instruction => instruction.Id == replacement.Id)
+                ? block with
+                {
+                    Instructions = block.Instructions
+                        .Select(instruction =>
+                            instruction.Id == replacement.Id
+                                ? replacement
+                                : instruction)
+                        .ToArray(),
+                }
+                : block)
+            .ToArray();
+        var rewritten = CopyCallable(callable, blocks: blocks);
+        return new MirProgram(
+            program.SnapshotId,
+            program.Origins,
+            program.EntryPoint,
+            program.Callables
+                .Select(candidate =>
+                    candidate.Id == callable.Id
+                        ? rewritten
+                        : candidate)
+                .ToArray());
     }
 
     private static (MirProgram Program, MirEffectSnapshot Effects) CompileMir(string source)

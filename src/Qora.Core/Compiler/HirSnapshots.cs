@@ -8,13 +8,12 @@ namespace Qora.Compiler;
 /// <summary>
 /// A structural HIR pipeline milestone. Several milestones may name the same snapshot when a pass proves
 /// that no tree rewrite was necessary; analysis itself is not a HIR stage because it does not create a
-/// new <see cref="QProgram"/>.
+/// new <see cref="HirProgram"/>.
 /// </summary>
 public enum HirStage
 {
     Lowered,
     ImportsExpanded,
-    MeasurementLowered,
     Resolved,
     Specialized,
 }
@@ -23,104 +22,194 @@ public enum HirStage
 public enum HirNodeKind
 {
     Program,
-    Operation,
+    Declaration,
+    NamespaceDeclaration,
+    Callable,
     Parameter,
+    Block,
     Statement,
+    Import,
+    Open,
+    Argument,
+    Expression,
 }
 
 /// <summary>
-/// Immutable node-membership index for one exact HIR generation. Besides serving tooling queries, this
-/// index lets the lineage graph reject a copied-node edge whose source or target does not actually exist.
+/// Immutable structural view of one exact HIR generation. The child relation on <see cref="HirNode"/> is
+/// the sole tree authority; this index derives membership, parents, owning callables, and node kinds from
+/// the selected root. It therefore rejects a duplicate occurrence, a shared child, a cycle, or a node
+/// stamped by another construction authority before any semantic side table can observe the tree.
 /// </summary>
 public sealed class HirStructuralIndex
 {
-    private readonly FrozenDictionary<int, HirNodeKind> _nodes;
-    private readonly FrozenDictionary<int, int> _owningOperations;
+    private readonly FrozenDictionary<HirNodeId, HirNode> _nodes;
+    private readonly FrozenDictionary<HirNodeId, HirNodeKind> _kinds;
+    private readonly FrozenDictionary<HirNodeId, HirNodeId> _parents;
+    private readonly FrozenDictionary<HirNodeId, HirNodeId> _owningCallables;
 
-    internal HirStructuralIndex(QProgram program)
+    internal HirStructuralIndex(HirProgram program)
     {
         ArgumentNullException.ThrowIfNull(program);
-        var nodes = new Dictionary<int, HirNodeKind>();
-        var owningOperations = new Dictionary<int, int>();
+        var core = program.Core;
+        var nodes = new Dictionary<HirNodeId, HirNode>();
+        var kinds = new Dictionary<HirNodeId, HirNodeKind>();
+        var parents = new Dictionary<HirNodeId, HirNodeId>();
+        var owningCallables = new Dictionary<HirNodeId, HirNodeId>();
+        var active = new HashSet<HirNode>(ReferenceEqualityComparer.Instance);
 
-        void Add(
-            int id,
-            HirNodeKind kind,
-            int? owningOperation = null)
+        void Visit(
+            HirNode node,
+            HirNodeId? parent,
+            HirNodeId? owningCallable)
         {
-            if (!nodes.TryAdd(id, kind))
+            if (node is null)
                 throw new ArgumentException(
-                    $"HIR node identity {id} occurs more than once in one snapshot.",
+                    "A HIR child relation contains a null node.",
                     nameof(program));
-            if (owningOperation is { } owner)
-                owningOperations.Add(id, owner);
-        }
-
-        void AddStatements(
-            int operationId,
-            IReadOnlyList<QStmt> statements)
-        {
-            foreach (var statement in statements)
+            if (!ReferenceEquals(node.Core, core))
             {
-                Add(statement.Id, HirNodeKind.Statement, operationId);
-                switch (statement)
+                throw new ArgumentException(
+                    $"HIR node {node.Id} belongs to another construction authority.",
+                    nameof(program));
+            }
+            if (!node.CreationSession.IsSealed)
+            {
+                throw new ArgumentException(
+                    $"HIR node {node.Id} belongs to a construction session that has not published "
+                    + "its result.",
+                    nameof(program));
+            }
+            if (!active.Add(node))
+            {
+                throw new ArgumentException(
+                    $"HIR node {node.Id} forms a cycle in one snapshot.",
+                    nameof(program));
+            }
+            if (!nodes.TryAdd(node.Id, node))
+            {
+                active.Remove(node);
+                throw new ArgumentException(
+                    $"HIR node identity {node.Id} occurs more than once in one snapshot; "
+                    + "one source occurrence cannot have multiple parents.",
+                    nameof(program));
+            }
+
+            var kind = KindOf(node);
+            kinds.Add(node.Id, kind);
+            if (parent is { } parentId)
+                parents.Add(node.Id, parentId);
+
+            var effectiveOwner = node is HirCallable
+                ? node.Id
+                : owningCallable;
+            if (effectiveOwner is { } callableId)
+                owningCallables.Add(node.Id, callableId);
+
+            IEnumerable<HirNode> children;
+            try
+            {
+                children = node.Children()
+                    ?? throw new ArgumentException(
+                        $"HIR node {node.Id} returned a null child sequence.",
+                        nameof(program));
+                foreach (var child in children)
                 {
-                    case QIf branch:
-                        AddStatements(operationId, branch.Then);
-                        AddStatements(operationId, branch.Else);
-                        break;
-                    case QFor loop:
-                        AddStatements(operationId, loop.Body);
-                        break;
-                    case QWhile loop:
-                        AddStatements(operationId, loop.Body);
-                        break;
-                    case QRepeat loop:
-                        AddStatements(operationId, loop.Body);
-                        break;
+                    if (child is null)
+                        throw new ArgumentException(
+                            $"HIR node {node.Id} contains a null child.",
+                            nameof(program));
+                    Visit(child, node.Id, effectiveOwner);
                 }
+            }
+            finally
+            {
+                active.Remove(node);
             }
         }
 
-        Add(program.Id, HirNodeKind.Program);
-        foreach (var operation in program.Operations)
-        {
-            Add(operation.Id, HirNodeKind.Operation, operation.Id);
-            foreach (var parameter in operation.Params)
-                Add(parameter.Id, HirNodeKind.Parameter, operation.Id);
-            AddStatements(operation.Id, operation.Body);
-        }
+        Visit(program, parent: null, owningCallable: null);
 
+        RootId = program.Id;
         _nodes = nodes.ToFrozenDictionary();
-        _owningOperations = owningOperations.ToFrozenDictionary();
+        _kinds = kinds.ToFrozenDictionary();
+        _parents = parents.ToFrozenDictionary();
+        _owningCallables = owningCallables.ToFrozenDictionary();
     }
 
-    public IReadOnlyCollection<int> NodeIds => _nodes.Keys;
+    public HirNodeId RootId { get; }
+    public IReadOnlyCollection<HirNodeId> NodeIds => _nodes.Keys;
+    public IReadOnlyDictionary<HirNodeId, HirNode> Nodes => _nodes;
+    public IReadOnlyDictionary<HirNodeId, HirNodeId> Parents => _parents;
+    public IReadOnlyDictionary<HirNodeId, HirNodeId> OwningCallables =>
+        _owningCallables;
 
-    public bool Contains(int nodeId) => _nodes.ContainsKey(nodeId);
+    public bool Contains(HirNodeId nodeId) => _nodes.ContainsKey(nodeId);
 
-    public HirNodeKind RequireKind(int nodeId) =>
-        _nodes.TryGetValue(nodeId, out var kind)
+    public HirNode? FindNode(HirNodeId nodeId) =>
+        _nodes.GetValueOrDefault(nodeId);
+
+    public HirNode RequireNode(HirNodeId nodeId) =>
+        FindNode(nodeId)
+        ?? throw new ArgumentOutOfRangeException(
+            nameof(nodeId),
+            nodeId,
+            "the HIR node does not belong to this snapshot");
+
+    public HirNodeKind RequireKind(HirNodeId nodeId) =>
+        _kinds.TryGetValue(nodeId, out var kind)
             ? kind
             : throw new ArgumentOutOfRangeException(
                 nameof(nodeId),
                 nodeId,
                 "the HIR node does not belong to this snapshot");
 
-    public int? OwningOperationOf(int nodeId)
+    public HirNodeId? ParentOf(HirNodeId nodeId)
     {
-        _ = RequireKind(nodeId);
-        return _owningOperations.TryGetValue(nodeId, out var owner)
+        _ = RequireNode(nodeId);
+        return _parents.TryGetValue(nodeId, out var parent)
+            ? parent
+            : null;
+    }
+
+    public HirNodeId RequireParent(HirNodeId nodeId) =>
+        ParentOf(nodeId)
+        ?? throw new ArgumentOutOfRangeException(
+            nameof(nodeId),
+            nodeId,
+            "the HIR root node has no parent");
+
+    public HirNodeId? OwningCallableOf(HirNodeId nodeId)
+    {
+        _ = RequireNode(nodeId);
+        return _owningCallables.TryGetValue(nodeId, out var owner)
             ? owner
             : null;
     }
 
-    public int RequireOwningOperation(int nodeId) =>
-        OwningOperationOf(nodeId)
+    public HirNodeId RequireOwningCallable(HirNodeId nodeId) =>
+        OwningCallableOf(nodeId)
         ?? throw new ArgumentOutOfRangeException(
             nameof(nodeId),
             nodeId,
-            "the HIR node has no owning operation");
+            "the HIR node has no owning callable");
+
+    private static HirNodeKind KindOf(HirNode node) => node switch
+    {
+        HirProgram => HirNodeKind.Program,
+        HirNamespaceDeclaration => HirNodeKind.NamespaceDeclaration,
+        HirCallable => HirNodeKind.Callable,
+        HirDeclaration => HirNodeKind.Declaration,
+        HirParameter => HirNodeKind.Parameter,
+        HirBlock => HirNodeKind.Block,
+        HirStatement => HirNodeKind.Statement,
+        HirImportDirective => HirNodeKind.Import,
+        HirOpenDirective => HirNodeKind.Open,
+        HirArgument => HirNodeKind.Argument,
+        HirExpression => HirNodeKind.Expression,
+        _ => throw new ArgumentException(
+            $"Unknown HIR node kind `{node.GetType().Name}`.",
+            nameof(node)),
+    };
 }
 
 /// <summary>
@@ -130,75 +219,38 @@ public sealed class HirStructuralIndex
 /// </summary>
 public sealed class HirSourceMap
 {
-    private readonly FrozenDictionary<int, SourceSpan> _spans;
+    private readonly FrozenDictionary<HirNodeId, SourceSpan> _spans;
 
     internal HirSourceMap(
         HirSnapshotId snapshot,
-        QProgram program)
+        HirStructuralIndex structure)
     {
-        ArgumentNullException.ThrowIfNull(program);
-        var spans = new Dictionary<int, SourceSpan>();
-
-        void Add(
-            int nodeId,
-            SourceSpan? span)
+        ArgumentNullException.ThrowIfNull(structure);
+        var spans = new Dictionary<HirNodeId, SourceSpan>();
+        foreach (var nodeId in structure.NodeIds)
         {
-            if (span is not { } source)
-                return;
+            var node = structure.RequireNode(nodeId);
+            if (node.Span is not { } source)
+                continue;
             if (source.Document.CompilationId != snapshot.CompilationId
                 || source.Document.CompilationRevision != snapshot.CompilationRevision)
             {
                 throw new ArgumentException(
                     $"HIR node {nodeId} carries a source span from another Compilation snapshot.",
-                    nameof(program));
+                    nameof(structure));
             }
-            if (!spans.TryAdd(nodeId, source))
-                throw new ArgumentException(
-                    $"HIR source map contains duplicate node identity {nodeId}.",
-                    nameof(program));
-        }
-
-        void AddStatements(IReadOnlyList<QStmt> statements)
-        {
-            foreach (var statement in statements)
-            {
-                Add(statement.Id, statement.Span);
-                switch (statement)
-                {
-                    case QIf branch:
-                        AddStatements(branch.Then);
-                        AddStatements(branch.Else);
-                        break;
-                    case QFor loop:
-                        AddStatements(loop.Body);
-                        break;
-                    case QWhile loop:
-                        AddStatements(loop.Body);
-                        break;
-                    case QRepeat loop:
-                        AddStatements(loop.Body);
-                        break;
-                }
-            }
-        }
-
-        foreach (var operation in program.Operations)
-        {
-            Add(operation.Id, operation.Span);
-            foreach (var parameter in operation.Params)
-                Add(parameter.Id, parameter.Span);
-            AddStatements(operation.Body);
+            spans.Add(nodeId, source);
         }
 
         _spans = spans.ToFrozenDictionary();
     }
 
-    public IReadOnlyDictionary<int, SourceSpan> Spans => _spans;
+    public IReadOnlyDictionary<HirNodeId, SourceSpan> Spans => _spans;
 
-    public SourceSpan? Find(int nodeId) =>
+    public SourceSpan? Find(HirNodeId nodeId) =>
         _spans.TryGetValue(nodeId, out var span) ? span : null;
 
-    public SourceSpan Require(int nodeId) =>
+    public SourceSpan Require(HirNodeId nodeId) =>
         Find(nodeId)
         ?? throw new ArgumentOutOfRangeException(
             nameof(nodeId),
@@ -215,7 +267,7 @@ public sealed class HirSnapshot
     internal HirSnapshot(
         HirSnapshotId id,
         HirStage producedBy,
-        QProgram program,
+        HirProgram program,
         HirSnapshotId? parent)
     {
         if (!Enum.IsDefined(producedBy))
@@ -229,6 +281,19 @@ public sealed class HirSnapshot
         Program = program ?? throw new ArgumentNullException(nameof(program));
         Parent = parent;
 
+        if (program.Core.CompilationId != id.CompilationId
+            || program.Core.CompilationRevision != id.CompilationRevision)
+        {
+            throw new ArgumentException(
+                "A HIR root must belong to the exact Compilation revision named by its snapshot.",
+                nameof(program));
+        }
+        if (!program.CreationSession.IsSealed)
+        {
+            throw new ArgumentException(
+                "A HIR snapshot can only publish a root from a sealed construction session.",
+                nameof(program));
+        }
         if (parent is { } parentId
             && (parentId.CompilationId != id.CompilationId
                 || parentId.CompilationRevision != id.CompilationRevision))
@@ -239,7 +304,7 @@ public sealed class HirSnapshot
         }
 
         Structure = new HirStructuralIndex(program);
-        SourceMap = new HirSourceMap(id, program);
+        SourceMap = new HirSourceMap(id, Structure);
     }
 
     public HirSnapshotId Id { get; }
@@ -247,10 +312,11 @@ public sealed class HirSnapshot
     /// <summary>The pass which first created this tree generation.</summary>
     public HirStage ProducedBy { get; }
 
-    public QProgram Program { get; }
+    public HirProgram Program { get; }
     public HirSnapshotId? Parent { get; }
     public HirStructuralIndex Structure { get; }
     public HirSourceMap SourceMap { get; }
+    internal HirConstructionCore ConstructionCore => Program.Core;
 }
 
 /// <summary>
@@ -390,7 +456,7 @@ public sealed class HirSemanticArtifact
     public HirSnapshot Source { get; }
     public HirSemanticPhase Phase => Id.Phase;
     public HirSnapshotId SourceId => Id.Source;
-    public QProgram Program => Source.Program;
+    public HirProgram Program => Source.Program;
     public HirSemanticModel Model { get; }
     public HirValidationOutcome ValidationOutcome { get; }
     public bool IsAccepted => ValidationOutcome.IsAccepted;
@@ -416,7 +482,6 @@ public sealed class HirCompilation
     {
         HirStage.Lowered,
         HirStage.ImportsExpanded,
-        HirStage.MeasurementLowered,
         HirStage.Resolved,
         HirStage.Specialized,
     };
@@ -461,7 +526,16 @@ public sealed class HirCompilation
                     || snapshot.Id.CompilationRevision != ordered[0].Id.CompilationRevision))
             {
                 throw new ArgumentException(
-                "All HIR snapshots must belong to one Compilation snapshot.",
+                    "All HIR snapshots must belong to one Compilation snapshot.",
+                    nameof(snapshots));
+            }
+            if (index > 0
+                && !ReferenceEquals(
+                    snapshot.ConstructionCore,
+                    ordered[0].ConstructionCore))
+            {
+                throw new ArgumentException(
+                    "All HIR snapshots in one history must share the exact construction authority.",
                     nameof(snapshots));
             }
         }
@@ -576,7 +650,6 @@ public sealed class HirCompilation
 
     public HirSnapshot? Lowered => Find(HirStage.Lowered);
     public HirSnapshot? ImportsExpanded => Find(HirStage.ImportsExpanded);
-    public HirSnapshot? MeasurementLowered => Find(HirStage.MeasurementLowered);
     public HirSnapshot? Resolved => Find(HirStage.Resolved);
     public HirSnapshot? Specialized => Find(HirStage.Specialized);
 
@@ -596,8 +669,44 @@ public sealed class HirCompilation
             : null;
 }
 
+/// <summary>
+/// Identity-preserving copy relation between adjacent structural generations. Both endpoints are
+/// revision-local node identities; <see cref="HirLineage"/> qualifies them with the transition snapshots.
+/// </summary>
+public readonly record struct NodeDerivation(
+    HirNodeId SourceNodeId,
+    HirNodeId DerivedNodeId);
+
+/// <summary>
+/// Provenance-only relation for a genuinely new occurrence synthesized from an existing HIR node.
+/// Synthesis never grants semantic identity inheritance, and its non-empty reason remains queryable in
+/// the lineage rather than being discarded after construction.
+/// </summary>
+public readonly record struct NodeSynthesis
+{
+    public NodeSynthesis(
+        HirNodeId sourceNodeId,
+        HirNodeId synthesizedNodeId,
+        string reason)
+    {
+        if (string.IsNullOrWhiteSpace(reason))
+            throw new ArgumentException(
+                "A synthesized HIR node requires a reason.",
+                nameof(reason));
+        SourceNodeId = sourceNodeId;
+        SynthesizedNodeId = synthesizedNodeId;
+        Reason = reason;
+    }
+
+    public HirNodeId SourceNodeId { get; }
+    public HirNodeId SynthesizedNodeId { get; }
+    public string Reason { get; }
+}
+
 /// <summary>A revision-qualified HIR node reference.</summary>
-public readonly record struct HirNodeRef(HirSnapshotId Snapshot, int NodeId);
+public readonly record struct HirNodeRef(
+    HirSnapshotId Snapshot,
+    HirNodeId NodeId);
 
 /// <summary>The source-level reason a node first enters an existing HIR history.</summary>
 public enum HirNodeIntroductionKind
@@ -611,9 +720,14 @@ public enum HirNodeIntroductionKind
 /// parent-to-child structural delta.
 /// </summary>
 public readonly record struct HirNodeIntroduction(
-    int IntroducedNodeId,
+    HirNodeId IntroducedNodeId,
     SourceDocumentRef Document,
     HirNodeIntroductionKind Kind);
+
+/// <summary>A revision-qualified synthesis origin and the compiler reason which created it.</summary>
+public readonly record struct HirNodeSynthesisOrigin(
+    HirNodeRef Source,
+    string Reason);
 
 /// <summary>
 /// Cross-generation HIR lineage. Identity-preserving derivations and provenance-only synthesis origins are
@@ -625,7 +739,7 @@ public sealed class HirLineage
     private readonly FrozenDictionary<HirSnapshotId, HirSnapshot> _snapshots;
     private readonly FrozenDictionary<HirSnapshotId, HirSnapshotId?> _parents;
     private readonly FrozenDictionary<HirNodeRef, HirNodeRef> _directOrigins;
-    private readonly FrozenDictionary<HirNodeRef, HirNodeRef> _synthesisOrigins;
+    private readonly FrozenDictionary<HirNodeRef, HirNodeSynthesisOrigin> _synthesisOrigins;
     private readonly FrozenDictionary<HirNodeRef, HirNodeIntroduction> _introductions;
 
     internal HirLineage(
@@ -646,6 +760,19 @@ public sealed class HirLineage
             HirNodeIntroduction Introduction)>();
 
         var snapshotMap = snapshots.ToDictionary(snapshot => snapshot.Id);
+        var constructionCore = snapshotMap.Values
+            .Select(snapshot => snapshot.ConstructionCore)
+            .FirstOrDefault();
+        if (constructionCore is not null
+            && snapshotMap.Values.Any(
+                snapshot => !ReferenceEquals(
+                    snapshot.ConstructionCore,
+                    constructionCore)))
+        {
+            throw new ArgumentException(
+                "One HIR lineage cannot mix construction authorities.",
+                nameof(snapshots));
+        }
         _snapshots = snapshotMap.ToFrozenDictionary();
         _parents = snapshotMap.Values.ToFrozenDictionary(
             snapshot => snapshot.Id,
@@ -666,7 +793,7 @@ public sealed class HirLineage
                     $"HIR derivation transition {sourceSnapshot.Id} -> {targetSnapshot.Id} is not a parent edge.",
                     nameof(derivations));
 
-            var rawByDerived = new Dictionary<int, int>();
+            var rawByDerived = new Dictionary<HirNodeId, HirNodeId>();
             foreach (var item in transition)
             {
                 if (!rawByDerived.TryAdd(
@@ -687,7 +814,7 @@ public sealed class HirLineage
                     continue;
 
                 var sourceId = rawSourceId;
-                var visited = new HashSet<int>();
+                var visited = new HashSet<HirNodeId>();
                 while (!sourceSnapshot.Structure.Contains(sourceId))
                 {
                     if (!visited.Add(sourceId))
@@ -720,7 +847,7 @@ public sealed class HirLineage
 
         _directOrigins = direct.ToFrozenDictionary();
 
-        var synthesized = new Dictionary<HirNodeRef, HirNodeRef>();
+        var synthesized = new Dictionary<HirNodeRef, HirNodeSynthesisOrigin>();
         foreach (var transition in syntheses.GroupBy(item => (item.Source, item.Target)))
         {
             if (!snapshotMap.TryGetValue(transition.Key.Source, out var sourceSnapshot)
@@ -741,6 +868,12 @@ public sealed class HirLineage
             {
                 var sourceId = item.Synthesis.SourceNodeId;
                 var synthesizedId = item.Synthesis.SynthesizedNodeId;
+                if (string.IsNullOrWhiteSpace(item.Synthesis.Reason))
+                {
+                    throw new ArgumentException(
+                        $"HIR synthesis target {synthesizedId} has no reason.",
+                        nameof(syntheses));
+                }
                 _ = sourceSnapshot.Structure.RequireKind(sourceId);
                 _ = targetSnapshot.Structure.RequireKind(synthesizedId);
 
@@ -759,7 +892,11 @@ public sealed class HirLineage
                         $"HIR node {target} cannot be both an identity copy and a synthesis.",
                         nameof(syntheses));
                 }
-                if (!synthesized.TryAdd(target, source))
+                if (!synthesized.TryAdd(
+                        target,
+                        new HirNodeSynthesisOrigin(
+                            source,
+                            item.Synthesis.Reason)))
                 {
                     throw new ArgumentException(
                         $"Duplicate HIR synthesis origin for {target}.",
@@ -847,7 +984,7 @@ public sealed class HirLineage
     private static void VerifyTotalOriginCoverage(
         IReadOnlyDictionary<HirSnapshotId, HirSnapshot> snapshots,
         IReadOnlyDictionary<HirNodeRef, HirNodeRef> derivations,
-        IReadOnlyDictionary<HirNodeRef, HirNodeRef> syntheses,
+        IReadOnlyDictionary<HirNodeRef, HirNodeSynthesisOrigin> syntheses,
         IReadOnlyDictionary<HirNodeRef, HirNodeIntroduction> introductions)
     {
         foreach (var targetSnapshot in snapshots.Values)
@@ -881,11 +1018,27 @@ public sealed class HirLineage
                         + "same-identity parent edge.");
                 }
                 if (existed
-                    && parentSnapshot.Structure.OwningOperationOf(nodeId)
-                        != targetSnapshot.Structure.OwningOperationOf(nodeId))
+                    && parentSnapshot.SourceMap.Find(nodeId)
+                        != targetSnapshot.SourceMap.Find(nodeId))
                 {
                     throw new ArgumentException(
-                        $"HIR node {nodeId} changes its owning operation across an implicit "
+                        $"HIR node {nodeId} changes its source span across an implicit "
+                        + "same-identity parent edge.");
+                }
+                if (existed
+                    && parentSnapshot.Structure.OwningCallableOf(nodeId)
+                        != targetSnapshot.Structure.OwningCallableOf(nodeId))
+                {
+                    throw new ArgumentException(
+                        $"HIR node {nodeId} changes its owning callable across an implicit "
+                        + "same-identity parent edge.");
+                }
+                if (existed
+                    && parentSnapshot.Structure.ParentOf(nodeId)
+                        != targetSnapshot.Structure.ParentOf(nodeId))
+                {
+                    throw new ArgumentException(
+                        $"HIR node {nodeId} changes its structural parent across an implicit "
                         + "same-identity parent edge.");
                 }
                 if (!existed && classificationCount != 1)
@@ -912,6 +1065,21 @@ public sealed class HirLineage
         _ = _snapshots[node.Snapshot].Structure.RequireKind(node.NodeId);
         return _introductions.TryGetValue(node, out var introduction)
             ? introduction
+            : null;
+    }
+
+    public HirNodeSynthesisOrigin? FindSynthesisOrigin(HirNodeRef node)
+    {
+        if (!_snapshots.ContainsKey(node.Snapshot))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(node),
+                node,
+                "HIR node reference does not belong to this lineage");
+        }
+        _ = _snapshots[node.Snapshot].Structure.RequireKind(node.NodeId);
+        return _synthesisOrigins.TryGetValue(node, out var origin)
+            ? origin
             : null;
     }
 
@@ -979,7 +1147,10 @@ public sealed class HirLineage
     /// Resolve a node in <paramref name="from"/> back to <paramref name="ancestor"/>. An explicit copy edge
     /// changes the node ID; otherwise the same stable ID must exist in the immediate parent generation.
     /// </summary>
-    public int ResolveNodeId(HirSnapshotId from, HirSnapshotId ancestor, int nodeId)
+    public HirNodeId ResolveNodeId(
+        HirSnapshotId from,
+        HirSnapshotId ancestor,
+        HirNodeId nodeId)
     {
         if (from.CompilationId != ancestor.CompilationId
             || from.CompilationRevision != ancestor.CompilationRevision)
@@ -1051,7 +1222,7 @@ public sealed class HirLineage
     public HirNodeRef ResolveProvenance(
         HirSnapshotId from,
         HirSnapshotId ancestor,
-        int nodeId)
+        HirNodeId nodeId)
     {
         if (from.CompilationId != ancestor.CompilationId
             || from.CompilationRevision != ancestor.CompilationRevision)
@@ -1089,7 +1260,7 @@ public sealed class HirLineage
             }
             if (_synthesisOrigins.TryGetValue(current, out var synthesis))
             {
-                current = synthesis;
+                current = synthesis.Source;
                 continue;
             }
 
@@ -1201,15 +1372,19 @@ internal sealed class HirSemanticContext : IHirSemanticContext
     public HirLineage Lineage { get; }
     public HirSemanticModel SourceModel { get; }
 
-    public Symbol? FindSymbol(int nodeId) =>
+    public Symbol? FindSymbol(HirNodeId nodeId) =>
         SourceModel.FindSymbol(ResolveNodeId(nodeId));
 
-    public Scope? FindRootScope(int operationId) =>
-        SourceModel.FindRootScope(ResolveNodeId(operationId));
+    public Scope? FindRootScope(HirNodeId callableId) =>
+        SourceModel.FindRootScope(ResolveNodeId(callableId));
 
     public Scope? FindScope(HirScopeSite site) =>
-        SourceModel.FindScope(site with { OwnerNodeId = ResolveNodeId(site.OwnerNodeId) });
+        SourceModel.FindScope(
+            site with
+            {
+                OwnerNodeId = ResolveNodeId(site.OwnerNodeId),
+            });
 
-    public int ResolveNodeId(int nodeId) =>
+    public HirNodeId ResolveNodeId(HirNodeId nodeId) =>
         Lineage.ResolveNodeId(Current.Id, SemanticBasis.SourceId, nodeId);
 }

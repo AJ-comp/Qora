@@ -11,7 +11,6 @@ public class ArgumentTests
     [InlineData("operation Main(){ use q=Qubit[1]; const c: int=0; H(c); }")]            // classical in a qubit slot
     [InlineData("operation Main(){ use q=Qubit[2]; H(q[0], q[1]); }")]                  // too many args
     [InlineData("operation Main(){ use q=Qubit[2]; Controlled X(q[0]); }")]             // Controlled adds an arg
-    [InlineData("operation Main(){ use q=Qubit[1]; var c: int=0; Rx(c[0], q[0]); }")]        // indexed classical in a value slot
     // --- user operations ---
     [InlineData("operation Foo(a: Qubit){ H(a); }\noperation Main(){ use q=Qubit[2]; Foo(q); }")]                 // single-qubit param given a whole register
     [InlineData("operation Foo(a: Qubit, x: int){ H(a); }\noperation Main(){ use q=Qubit[2]; Foo(q[0], q[1]); }")] // classical param given a qubit
@@ -34,7 +33,8 @@ public class ArgumentTests
     [InlineData("operation Main(){ use q=Qubit[2]; var r: bit=M(q[0]); Rx(r[0], q[1]); }")]            // gate angle slot, bit
     [InlineData("operation Main(){ use q=Qubit[2]; var c: int=0; Controlled Rx(c[0], q[0], q[1]); }")] // under a Controlled functor
     [InlineData("operation Foo(x: int, a: Qubit){ H(a); }\noperation Main(){ use q=Qubit[1]; var c: int=0; Foo(c[0], q[0]); }")] // a user-op classical parameter
-    public void RejectsIndexedClassicalInValueSlot(string source) => Compiler.Rejects(source, "QSEM006");
+    public void RejectsIndexedClassicalInValueSlot(string source) =>
+        Compiler.RejectsExactly(source, "QSEM016");
 
     [Theory]
     [InlineData("operation Main(){ use q=Qubit[1]; Rx(pi/2, q[0]); }")]                 // rotation, angle then qubit
