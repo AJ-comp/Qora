@@ -13,13 +13,13 @@ public enum MirScalarValueAvailabilityKind
 /// in dependency order. Measurements and values depending on unavailable Phi inputs are not replayed.
 /// </summary>
 public sealed record MirScalarValueAvailability(
-    MirValueRef Value,
+    MirValueId Value,
     MirScalarValueAvailabilityKind Kind,
-    IReadOnlyList<MirInstructionRef> Recipe)
+    IReadOnlyList<MirInstructionId> Recipe)
 {
-    private IReadOnlyList<MirInstructionRef> _recipe = MirCollections.Freeze(Recipe);
+    private IReadOnlyList<MirInstructionId> _recipe = MirCollections.Freeze(Recipe);
 
-    public IReadOnlyList<MirInstructionRef> Recipe
+    public IReadOnlyList<MirInstructionId> Recipe
     {
         get => _recipe;
         init => _recipe = MirCollections.Freeze(value);
@@ -57,11 +57,11 @@ public sealed class MirScalarValueAvailabilitySnapshot
             .SelectMany(block => block.Instructions)
             .ToDictionary(instruction => instruction.Id);
         SnapshotId = sourceProgram.SnapshotId;
-        Callable = new MirCallableRef(SnapshotId, callable.Id);
+        Callable = callable.Id;
     }
 
     public MirSnapshotId SnapshotId { get; }
-    public MirCallableRef Callable { get; }
+    public MirCallableId Callable { get; }
     internal MirControlFlowSnapshot ControlFlow => _cfg;
     internal MirMemoryStateSnapshot MemoryState => _memory;
 
@@ -69,23 +69,17 @@ public sealed class MirScalarValueAvailabilitySnapshot
         ReferenceEquals(_sourceProgram, program)
         && ReferenceEquals(_callable, program.FindCallable(callable))
         && SnapshotId == program.SnapshotId
-        && Callable.Callable == callable;
+        && Callable == callable;
 
     public MirScalarValueAvailability CheckBeforeInstruction(
-        MirValueRef value,
-        MirInstructionRef instruction)
-    {
-        Require(value);
-        return Check(value.Value, _cfg.PointBeforeInstruction(instruction));
-    }
+        MirValueId value,
+        MirInstructionId instruction) =>
+        Check(value, _cfg.PointBeforeInstruction(instruction));
 
     public MirScalarValueAvailability CheckAtTerminator(
-        MirValueRef value,
-        MirBlockRef block)
-    {
-        Require(value);
-        return Check(value.Value, _cfg.TerminatorPoint(block));
-    }
+        MirValueId value,
+        MirBlockId block) =>
+        Check(value, _cfg.TerminatorPoint(block));
 
     internal MirScalarValueAvailability Check(
         MirValueId value,
@@ -119,9 +113,9 @@ public sealed class MirScalarValueAvailabilitySnapshot
                     return Cache(Unavailable(current));
                 if (_cfg.IsValueAvailableAt(current, point))
                     return Cache(new MirScalarValueAvailability(
-                        ValueRef(current),
+                        current,
                         MirScalarValueAvailabilityKind.Available,
-                        Array.Empty<MirInstructionRef>()));
+                        Array.Empty<MirInstructionId>()));
                 if (currentValue.Definition.Kind != MirValueDefinitionKind.InstructionResult
                     || currentValue.Definition.Instruction is not MirInstructionId instructionId
                     || !_instructions.TryGetValue(instructionId, out var instruction))
@@ -137,7 +131,7 @@ public sealed class MirScalarValueAvailabilitySnapshot
                     {
                         var memory = _memory.CheckAtLocation(
                             input,
-                            point.Block.Block,
+                            point.Block,
                             point.InstructionIndex);
                         if (!memory.IsAvailable)
                             return Cache(Unavailable(current));
@@ -148,18 +142,17 @@ public sealed class MirScalarValueAvailabilitySnapshot
                     if (!inputAvailability.CanSupplyValue)
                         return Cache(Unavailable(current));
                     dependencies.AddRange(
-                        inputAvailability.Recipe.Select(reference => reference.Instruction));
+                        inputAvailability.Recipe);
                 }
 
                 if (!IsPureRematerializable(instruction))
                     return Cache(Unavailable(current));
                 dependencies.Add(instruction.Id);
                 return Cache(new MirScalarValueAvailability(
-                    ValueRef(current),
+                    current,
                     MirScalarValueAvailabilityKind.Rematerializable,
                     dependencies
                         .Distinct()
-                        .Select(InstructionRef)
                         .ToArray()));
             }
             finally
@@ -170,28 +163,10 @@ public sealed class MirScalarValueAvailabilitySnapshot
 
         MirScalarValueAvailability Cache(MirScalarValueAvailability result)
         {
-            cache[result.Value.Value] = result;
+            cache[result.Value] = result;
             return result;
         }
     }
-
-    private void Require(MirValueRef value)
-    {
-        MirReferenceValidation.RequireSnapshot(
-            SnapshotId,
-            value.Snapshot,
-            nameof(value));
-        if (value.Callable != Callable.Callable)
-            throw new ArgumentException(
-                $"MIR value belongs to callable {value.Callable}; expected {Callable}",
-                nameof(value));
-    }
-
-    private MirValueRef ValueRef(MirValueId value) =>
-        new(SnapshotId, Callable.Callable, value);
-
-    private MirInstructionRef InstructionRef(MirInstructionId instruction) =>
-        new(SnapshotId, Callable.Callable, instruction);
 
     private static bool IsPureRematerializable(MirInstruction instruction) =>
         instruction is MirConstant
@@ -204,9 +179,9 @@ public sealed class MirScalarValueAvailabilitySnapshot
 
     private MirScalarValueAvailability Unavailable(MirValueId value) =>
         new(
-            ValueRef(value),
+            value,
             MirScalarValueAvailabilityKind.Unavailable,
-            Array.Empty<MirInstructionRef>());
+            Array.Empty<MirInstructionId>());
 }
 
 internal static class MirScalarValueAvailabilityAnalysis

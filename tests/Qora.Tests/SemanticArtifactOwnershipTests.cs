@@ -1,11 +1,33 @@
 using Qora.Compiler;
 using Qora.Ir;
+using Qora.Ir.Mir;
 using Qora.Ir.Passes;
 
 namespace Qora.Tests;
 
 public sealed class SemanticArtifactOwnershipTests
 {
+    [Fact]
+    public void HirToMirConsumesOnlyTheCanonicalFinalEffectArtifact()
+    {
+        var compilation = QoraCompiler.Compile(
+            "operation Main() { var value: int = 1; value = value + 1; }",
+            new CompilationOptions(outputPlan: CompilationOutputPlan.HirOnly));
+        Assert.True(compilation.Succeeded);
+        var analyzed = Assert.IsType<HirSemanticArtifact>(
+            compilation.Hir.EffectAnalysis);
+
+        var mir = compilation.Hir.ToMir();
+
+        Assert.Equal(analyzed.SourceId, mir.LoweredFrom);
+        Assert.Same(analyzed.Source, mir.LoweringSource.Source);
+        Assert.Same(analyzed, mir.LoweringSource);
+        Assert.Equal(0, mir.Id.Revision);
+        Assert.Equal(MirStage.Lowered, mir.Stage);
+        Assert.Null(mir.Parent);
+        Assert.Single(mir.Program.Callables);
+    }
+
     [Fact]
     public void SemanticModelCannotBeAttachedToAnotherExactHirSnapshot()
     {
@@ -69,53 +91,88 @@ public sealed class SemanticArtifactOwnershipTests
     }
 
     [Fact]
-    public void HirLoweringContextRejectsARegisteredValidationArtifact()
+    public void HirToMirRejectsACompilationWithoutFinalEffectAnalysis()
     {
-        var compilation = QoraCompiler.Compile(
-            "operation Main() { var value: int = 1; }",
-            new CompilationOptions(outputPlan: CompilationOutputPlan.HirOnly));
-        Assert.True(compilation.Succeeded);
+        var hir = new HirTestFactory();
+        var program = hir.PublishProgram(
+            new[] { hir.Callable("Main") });
+        var builder = hir.CreatePipelineBuilder();
+        var snapshot = builder.PublishLowered(program);
+        builder.Alias(HirStage.ImportsExpanded, snapshot);
+        builder.Alias(HirStage.Resolved, snapshot);
+        _ = builder.ValidateSnapshot(snapshot);
+        builder.Alias(HirStage.Specialized, snapshot);
+        var compilation = builder.Build();
 
-        var current = Assert.IsType<HirSnapshot>(
-            compilation.Hir.Specialized);
-        var validation = Assert.IsType<HirSemanticArtifact>(
-            compilation.Hir.SpecializedValidation);
+        var error = Assert.Throws<InvalidOperationException>(
+            () => compilation.ToMir());
 
-        var error = Assert.Throws<ArgumentException>(
-            () => new HirSemanticContext(
-                compilation.Hir,
-                current,
-                validation));
-
-        Assert.Contains("exact accepted canonical effect-analysis", error.Message);
+        Assert.Contains("final effect-analyzed HIR", error.Message);
     }
 
     [Fact]
-    public void HirLoweringContextRejectsAnOlderRegisteredEffectArtifact()
+    public void EffectAnalysisAndMirLoweringRequireTheFinalSpecializedHir()
     {
         var hir = new HirTestFactory();
         var program = hir.PublishProgram(
             new[] { hir.Callable("Main") });
         var builder = hir.CreatePipelineBuilder();
         var resolved = builder.PublishLowered(program);
+        builder.Alias(HirStage.ImportsExpanded, resolved);
         builder.Alias(HirStage.Resolved, resolved);
         var resolvedValidation = builder.ValidateSnapshot(resolved);
-        var oldEffect = builder.AnalyzeEffects(resolvedValidation);
+        var premature = Assert.Throws<InvalidOperationException>(
+            () => builder.AnalyzeEffects(resolvedValidation));
+        Assert.Contains("latest canonical specialized HIR", premature.Message);
+
         var specialization = hir.RewriteProgramRoot(resolved);
         var specialized = builder.Advance(
             HirStage.Specialized,
             specialization);
         var specializedValidation = builder.ValidateSnapshot(specialized);
-        _ = builder.AnalyzeEffects(specializedValidation);
+        var finalEffect = builder.AnalyzeEffects(specializedValidation);
         var owner = builder.Build();
 
-        var error = Assert.Throws<ArgumentException>(
-            () => new HirSemanticContext(
-                owner,
-                specialized,
-                oldEffect));
+        var mir = owner.ToMir();
 
-        Assert.Contains("exact accepted canonical effect-analysis", error.Message);
+        Assert.Equal(finalEffect.SourceId, mir.LoweredFrom);
+        Assert.Same(finalEffect.Source, mir.LoweringSource.Source);
+        Assert.Same(finalEffect, mir.LoweringSource);
+    }
+
+    [Fact]
+    public void FinalEffectAnalysisSealsTheHirPipeline()
+    {
+        var hir = new HirTestFactory();
+        var program = hir.PublishProgram(
+            new[] { hir.Callable("Main") });
+        var builder = hir.CreatePipelineBuilder();
+        var specialized = builder.PublishLowered(program);
+        builder.Alias(HirStage.ImportsExpanded, specialized);
+        builder.Alias(HirStage.Resolved, specialized);
+        builder.Alias(HirStage.Specialized, specialized);
+        var validation = builder.ValidateSnapshot(specialized);
+        var unpublishedRewrite = hir.RewriteProgramRoot(specialized);
+
+        var finalEffect = builder.AnalyzeEffects(validation);
+        var owner = builder.Build();
+
+        Assert.Same(finalEffect, owner.EffectAnalysis);
+        Assert.Same(finalEffect.Source, owner.ToMir().LoweringSource.Source);
+
+        var rewriteError = Assert.Throws<InvalidOperationException>(
+            () => builder.BeginRewrite(specialized, "late-pass"));
+        var advanceError = Assert.Throws<InvalidOperationException>(
+            () => builder.Advance(HirStage.Specialized, unpublishedRewrite));
+        var aliasError = Assert.Throws<InvalidOperationException>(
+            () => builder.Alias(HirStage.Specialized, specialized));
+        var validationError = Assert.Throws<InvalidOperationException>(
+            () => builder.ValidateSnapshot(specialized));
+
+        Assert.Contains("sealed after final effect analysis", rewriteError.Message);
+        Assert.Contains("sealed after final effect analysis", advanceError.Message);
+        Assert.Contains("sealed after final effect analysis", aliasError.Message);
+        Assert.Contains("sealed after final effect analysis", validationError.Message);
     }
 
     [Fact]
@@ -227,7 +284,6 @@ public sealed class SemanticArtifactOwnershipTests
                 shell.Sources,
                 hir,
                 mir: null,
-                new CrossStageLinks(hir, mir: null),
                 new TargetArtifactSet(Array.Empty<ITargetArtifact>()),
                 new[] { decoy }));
 
@@ -262,7 +318,6 @@ public sealed class SemanticArtifactOwnershipTests
                 shell.Sources,
                 hir,
                 mir: null,
-                new CrossStageLinks(hir, mir: null),
                 new TargetArtifactSet(Array.Empty<ITargetArtifact>()),
                 Array.Empty<CompilationDiagnostic>()));
 

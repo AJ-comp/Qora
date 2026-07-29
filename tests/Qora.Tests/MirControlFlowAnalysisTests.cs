@@ -16,7 +16,7 @@ public sealed class MirControlFlowAnalysisTests
         Assert.Equal(new[] { B(1), B(2) }, cfg.SuccessorsOf(B(0)));
         Assert.Equal(new[] { B(1), B(2) }, cfg.PredecessorsOf(B(3)));
         Assert.Equal(
-            new[] { BR(program, 0), BR(program, 1), BR(program, 2), BR(program, 3) },
+            new[] { B(0), B(1), B(2), B(3) },
             cfg.ReachableBlocks);
         Assert.False(cfg.IsReachable(B(4)));
 
@@ -26,7 +26,7 @@ public sealed class MirControlFlowAnalysisTests
         Assert.True(cfg.PostDominates(B(3), B(1)));
         Assert.False(cfg.PostDominates(B(1), B(0)));
 
-        Assert.Equal(new[] { BR(program, 3) }, cfg.ExitBlocks);
+        Assert.Equal(new[] { B(3) }, cfg.ExitBlocks);
         Assert.True(cfg.CanReachExit(B(0)));
         Assert.False(cfg.CanReachExit(B(4)));
     }
@@ -137,7 +137,7 @@ public sealed class MirControlFlowAnalysisTests
         var program = context.Program(callable.Id, new[] { callable });
         var cfg = MirControlFlowAnalysis.Analyze(program, callable.Id);
 
-        Assert.Equal(new[] { BR(program, 1), BR(program, 3) }, cfg.ExitBlocks);
+        Assert.Equal(new[] { B(1), B(3) }, cfg.ExitBlocks);
         Assert.False(cfg.CanReachExit(B(4)));
         Assert.True(cfg.PostDominates(B(4), B(4)));
         Assert.False(cfg.PostDominates(B(1), B(0)));
@@ -309,9 +309,6 @@ public sealed class MirControlFlowAnalysisTests
             storages: Array.Empty<MirArrayStorage>(),
             source);
     }
-
-    private static MirBlockRef BR(MirProgram program, int value) =>
-        new(program.SnapshotId, C(0), B(value));
 
     private static MirCallableId C(int value) => new(value);
     private static MirBlockId B(int value) => new(value);

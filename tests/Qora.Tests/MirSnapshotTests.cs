@@ -27,8 +27,6 @@ public sealed class MirSnapshotTests
         Assert.Empty(typeof(MirControlFlowEdge).GetConstructors(publicInstance));
         Assert.Empty(typeof(MirQubitPhiInput).GetConstructors(publicInstance));
         Assert.Empty(typeof(MirQubitAccess).GetConstructors(publicInstance));
-        Assert.Empty(typeof(MirQubitRef).GetConstructors(publicInstance));
-        Assert.Empty(typeof(MirQubitAccessRef).GetConstructors(publicInstance));
     }
 
     [Fact]
@@ -48,28 +46,11 @@ public sealed class MirSnapshotTests
             snapshotId,
             firstHirCallable,
             secondHirCallable);
-        var linkBuilder = new MirCrossStageLinksBuilder(
-            snapshotId,
-            hir.Snapshot,
-            hir.Semantics);
-        linkBuilder.LinkCallable(
-            firstHirCallable,
-            hir.Semantics.Model.FindSymbol(firstHirCallable)!.Id,
-            new MirCallableId(0));
-        linkBuilder.LinkCallable(
-            secondHirCallable,
-            hir.Semantics.Model.FindSymbol(secondHirCallable)!.Id,
-            new MirCallableId(1));
-        foreach (var callable in program.Callables)
-            foreach (var value in callable.Values)
-                linkBuilder.RegisterTemporaryValue(callable.Id, value.Id);
-        var links = linkBuilder.Build(program.Origins);
-
         var snapshot = new MirSnapshot(
             snapshotId,
             MirLoweringProfile.CanonicalV1,
             program,
-            links);
+            hir.FinalHir);
 
         Assert.Equal(compilation, snapshot.Id.CompilationId);
         Assert.Equal(compilationRevision, snapshot.Id.CompilationRevision);
@@ -85,285 +66,95 @@ public sealed class MirSnapshotTests
             "First",
             "Second");
         Assert.Throws<ArgumentException>(
-            () => new MirCrossStageLinksBuilder(
+            () => new MirSnapshot(
                 snapshotId,
-                unrelatedHir.Snapshot,
-                unrelatedHir.Semantics));
+                MirLoweringProfile.CanonicalV1,
+                program,
+                unrelatedHir.FinalHir));
         Assert.Throws<ArgumentException>(
             () => new MirSnapshot(
                 new MirSnapshotId(compilation, compilationRevision, revision: 4),
                 MirLoweringProfile.CanonicalV1,
                 program,
-                links));
+                hir.FinalHir));
     }
 
     [Fact]
-    public void CallableHirLinksRejectDuplicateValuesEvenWithCompleteCoverage()
-    {
-        var snapshotId = MirTestContext.Create().SnapshotId;
-        var hir = HirFixtureFor(
-            snapshotId,
-            "First",
-            "Second",
-            "Third");
-        var firstHirCallable = CallableId(hir, "First");
-        var secondHirCallable = CallableId(hir, "Second");
-        var thirdHirCallable = CallableId(hir, "Third");
-        var program = ProgramWithTwoCallables(
-            snapshotId,
-            firstHirCallable,
-            secondHirCallable);
-        var linkBuilder = new MirCrossStageLinksBuilder(
-            snapshotId,
-            hir.Snapshot,
-            hir.Semantics);
-        linkBuilder.LinkCallable(
-            firstHirCallable,
-            hir.Semantics.Model.FindSymbol(firstHirCallable)!.Id,
-            new MirCallableId(0));
-        linkBuilder.LinkCallable(
-            secondHirCallable,
-            hir.Semantics.Model.FindSymbol(secondHirCallable)!.Id,
-            new MirCallableId(1));
-        var error = Assert.Throws<InvalidOperationException>(
-            () => linkBuilder.LinkCallable(
-                thirdHirCallable,
-                hir.Semantics.Model.FindSymbol(thirdHirCallable)!.Id,
-                new MirCallableId(1)));
-
-        Assert.Contains("registered more than once", error.Message);
-    }
-
-    [Fact]
-    public void CallableSymbolLinksRejectExtraMismatchedEdge()
-    {
-        var compilation = QoraCompiler.Compile(
-            """
-            operation First() { }
-            operation Main() { }
-            """);
-        Assert.True(compilation.Succeeded);
-        var mir = Assert.IsType<MirSnapshot>(compilation.Mir);
-        var links = mir.Links;
-        var callableEdges = links.CallablesBySymbol.ToDictionary(
-            pair => pair.Key,
-            pair => pair.Value);
-        var symbolLinks = callableEdges.ToArray();
-        Assert.Equal(2, symbolLinks.Length);
-        var first = symbolLinks[0];
-        var second = symbolLinks[1];
-        callableEdges[first.Key] = first.Value
-            .Append(Assert.Single(second.Value))
-            .ToArray();
-
-        var adversarial = new MirCrossStageLinks(
-            links.MirSnapshot,
-            links.LoweredFromSnapshot,
-            links.SymbolsFromArtifact,
-            links.Origins,
-            links.CallablesByHirCallable,
-            callableEdges,
-            links.ValuesBySymbol,
-            links.SymbolsByValue,
-            links.StoragesBySymbol,
-            links.SymbolsByStorage,
-            links.QubitsBySymbol,
-            links.SymbolsByQubit,
-            links.SymbolDispositions,
-            links.CallableProvenance,
-            links.ValueOrigins,
-            links.StorageOrigins,
-            links.QubitOrigins);
-
-        var error = Assert.Throws<ArgumentException>(
-            () => adversarial.VerifyAgainst(compilation.Hir, compilation.Links.Hir));
-
-        Assert.Contains("do not exactly match", error.Message);
-    }
-
-    [Fact]
-    public void EveryMirValueKeepsEitherItsCompleteSourceLinkOrAnExplicitTemporaryOrigin()
-    {
-        var compilation = QoraCompiler.Compile(
-            """
-            operation Main() {
-                var x: int = 1;
-                x = x + 1;
-            }
-            """);
-        Assert.True(compilation.Succeeded);
-        var mir = Assert.IsType<MirSnapshot>(compilation.Mir);
-        var links = mir.Links;
-        var sourceBacked = Assert.Single(
-            links.ValuesBySymbol,
-            pair => pair.Value.Count > 1);
-        var sourceSymbol = sourceBacked.Key;
-        var removedValue = sourceBacked.Value[^1];
-
-        var valuesBySymbol = links.ValuesBySymbol.ToDictionary(
-            pair => pair.Key,
-            pair => (IReadOnlyList<MirValueRef>)pair.Value.ToArray());
-        valuesBySymbol[sourceSymbol] = valuesBySymbol[sourceSymbol]
-            .Where(value => value != removedValue)
-            .ToArray();
-        var symbolsByValue = links.SymbolsByValue
-            .Where(pair => pair.Key != removedValue)
-            .ToDictionary(
-                pair => pair.Key,
-                pair => (IReadOnlyList<HirSymbolRef>)pair.Value.ToArray());
-
-        var adversarial = new MirCrossStageLinks(
-            links.MirSnapshot,
-            links.LoweredFromSnapshot,
-            links.SymbolsFromArtifact,
-            links.Origins,
-            links.CallablesByHirCallable,
-            links.CallablesBySymbol,
-            valuesBySymbol,
-            symbolsByValue,
-            links.StoragesBySymbol,
-            links.SymbolsByStorage,
-            links.QubitsBySymbol,
-            links.SymbolsByQubit,
-            links.SymbolDispositions,
-            links.CallableProvenance,
-            links.ValueOrigins,
-            links.StorageOrigins,
-            links.QubitOrigins);
-
-        var error = Assert.Throws<ArgumentException>(
-            () => new MirSnapshot(
-                mir.Id,
-                mir.Profile,
-                mir.Program,
-                adversarial));
-
-        Assert.Contains("SourceSymbol", error.Message);
-    }
-
-    [Fact]
-    public void UnreachableDeclarationsHaveAnExplicitNonLoweringDisposition()
-    {
-        var compilation = QoraCompiler.Compile(
-            """
-            function f(): int {
-                return 1;
-                var dead: int = 2;
-            }
-
-            operation Main() {
-                var result: int = f();
-            }
-            """);
-
-        Assert.True(
-            compilation.Succeeded,
-            string.Join(
-                Environment.NewLine,
-                compilation.Diagnostics.Select(diagnostic => diagnostic.Error.Message)));
-        var mir = Assert.IsType<MirSnapshot>(compilation.Mir);
-        var semanticProgram = mir.Links.SymbolsFromArtifact.Program;
-        var deadDeclaration = semanticProgram.Callables
-            .SelectMany(callable => callable.Body)
-            .OfType<HirVariableDeclarationStatement>()
-            .Single(declaration => declaration.Name == "dead");
-        var dead = Assert.IsType<Symbol>(
-            mir.Links.SymbolsFromArtifact.Model.FindSymbol(deadDeclaration.Id));
-        var deadRef = new HirSymbolRef(mir.Links.SymbolsFrom, dead.Id);
-
-        Assert.Equal(
-            MirSymbolLoweringDisposition.NotLoweredUnreachable,
-            mir.Links.SymbolDispositions[deadRef]);
-        Assert.False(mir.Links.ValuesBySymbol.ContainsKey(deadRef));
-    }
-
-    [Fact]
-    public void CompositeReferencesKeepEqualLocalIdsSeparateAcrossCallables()
+    public void CallableLocalIdsRemainIsolatedByTheirOwningCallable()
     {
         var snapshot = SnapshotWithTwoCallables();
-        var snapshotId = snapshot.Id;
-        var firstCallable = new MirCallableId(0);
-        var secondCallable = new MirCallableId(1);
-        var firstBlock = new MirBlockRef(snapshotId, firstCallable, new MirBlockId(0));
-        var secondBlock = new MirBlockRef(snapshotId, secondCallable, new MirBlockId(0));
-        var firstInstruction =
-            new MirInstructionRef(snapshotId, firstCallable, new MirInstructionId(0));
-        var secondInstruction =
-            new MirInstructionRef(snapshotId, secondCallable, new MirInstructionId(0));
-        var firstValue = new MirValueRef(snapshotId, firstCallable, new MirValueId(0));
-        var secondValue = new MirValueRef(snapshotId, secondCallable, new MirValueId(0));
+        var firstCallable = snapshot.Program.RequireCallable(new MirCallableId(0));
+        var secondCallable = snapshot.Program.RequireCallable(new MirCallableId(1));
+        var blockId = new MirBlockId(0);
+        var instructionId = new MirInstructionId(0);
+        var valueId = new MirValueId(0);
+        var firstBlock = firstCallable.RequireBlock(blockId);
+        var secondBlock = secondCallable.RequireBlock(blockId);
+        var firstInstruction = firstCallable.RequireInstruction(instructionId);
+        var secondInstruction = secondCallable.RequireInstruction(instructionId);
+        var firstValue = firstCallable.RequireValue(valueId);
+        var secondValue = secondCallable.RequireValue(valueId);
 
-        Assert.NotEqual(firstBlock, secondBlock);
-        Assert.NotEqual(firstInstruction, secondInstruction);
-        Assert.NotEqual(firstValue, secondValue);
-        Assert.NotEqual(
-            new MirStorageRef(snapshotId, firstCallable, new MirStorageId(0)),
-            new MirStorageRef(snapshotId, secondCallable, new MirStorageId(0)));
-        Assert.NotEqual(
-            new MirQubitRef(
-                snapshotId,
-                firstCallable,
-                new MirQubitId(0),
-                new MirQubitVersion(0)),
-            new MirQubitRef(
-                snapshotId,
-                secondCallable,
-                new MirQubitId(0),
-                new MirQubitVersion(0)));
+        Assert.Equal("First", firstCallable.Name);
+        Assert.Equal("Second", secondCallable.Name);
+        Assert.Same(firstCallable, snapshot.Program.RequireCallable(firstCallable));
+        Assert.Same(secondCallable, snapshot.Program.RequireCallable(secondCallable));
 
-        Assert.Equal(
-            "First",
-            snapshot.Structure.RequireCallable(
-                new MirCallableRef(snapshotId, firstCallable)).Name);
-        Assert.Equal(
-            "Second",
-            snapshot.Structure.RequireCallable(
-                new MirCallableRef(snapshotId, secondCallable)).Name);
-        var firstHirCallable = snapshot.Links.CallablesByHirCallable
-            .Single(pair => pair.Value.Callable == firstCallable)
-            .Key
-            .NodeId;
-        var secondHirCallable = snapshot.Links.CallablesByHirCallable
-            .Single(pair => pair.Value.Callable == secondCallable)
-            .Key
-            .NodeId;
-        Assert.Equal(
-            firstHirCallable,
-            snapshot.Origins.ResolveHir(
-                snapshot.Structure.RequireBlock(firstBlock).Origin).HirCallableId);
-        Assert.Equal(
-            secondHirCallable,
-            snapshot.Origins.ResolveHir(
-                snapshot.Structure.RequireBlock(secondBlock).Origin).HirCallableId);
+        Assert.NotSame(firstBlock, secondBlock);
+        Assert.NotSame(firstInstruction, secondInstruction);
+        Assert.NotSame(firstValue, secondValue);
+        Assert.True(firstCallable.ContainsBlock(firstBlock));
+        Assert.True(firstCallable.ContainsInstruction(firstInstruction));
+        Assert.True(firstCallable.ContainsValue(firstValue));
+        Assert.False(firstCallable.ContainsBlock(secondBlock));
+        Assert.False(firstCallable.ContainsInstruction(secondInstruction));
+        Assert.False(firstCallable.ContainsValue(secondValue));
+        Assert.Throws<ArgumentException>(() => firstCallable.RequireBlock(secondBlock));
+        Assert.Throws<ArgumentException>(
+            () => firstCallable.RequireInstruction(secondInstruction));
+        Assert.Throws<ArgumentException>(() => firstCallable.RequireValue(secondValue));
+
+        var firstHirCallable = snapshot.Origins.ResolveHir(
+            firstBlock.Origin).HirCallableId;
+        var secondHirCallable = snapshot.Origins.ResolveHir(
+            secondBlock.Origin).HirCallableId;
+        Assert.NotNull(firstHirCallable);
+        Assert.NotNull(secondHirCallable);
+        Assert.NotEqual(firstHirCallable, secondHirCallable);
         Assert.Equal(
             "10",
-            Assert.IsType<MirConstant>(
-                snapshot.Structure.RequireInstruction(firstInstruction)).Constant.Text);
+            Assert.IsType<MirConstant>(firstInstruction).Constant.Text);
         Assert.Equal(
             "20",
-            Assert.IsType<MirConstant>(
-                snapshot.Structure.RequireInstruction(secondInstruction)).Constant.Text);
-        Assert.Equal(
-            new MirInstructionLocation(firstBlock, 0),
-            snapshot.Structure.RequireInstructionLocation(firstInstruction));
-        Assert.Equal(
-            new MirInstructionLocation(secondBlock, 0),
-            snapshot.Structure.RequireInstructionLocation(secondInstruction));
-        Assert.Equal(new MirCallableId(0), firstValue.Callable);
-        Assert.Equal(new MirCallableId(1), secondValue.Callable);
+            Assert.IsType<MirConstant>(secondInstruction).Constant.Text);
+
+        var firstLocation = firstCallable.RequireInstructionLocation(instructionId);
+        var secondLocation = secondCallable.RequireInstructionLocation(instructionId);
+        Assert.Same(firstBlock, firstLocation.Block);
+        Assert.Same(secondBlock, secondLocation.Block);
+        Assert.Equal(0, firstLocation.Index);
+        Assert.Equal(0, secondLocation.Index);
+        Assert.Same(
+            firstInstruction,
+            snapshot.Program.RequireInstruction(
+                new MirInstructionSite(firstCallable.Id, instructionId)));
+        Assert.Same(
+            secondInstruction,
+            snapshot.Program.RequireInstruction(
+                new MirInstructionSite(secondCallable.Id, instructionId)));
         Assert.Equal(
             new MirInstructionId(0),
-            snapshot.Structure.RequireValue(firstValue).Definition.Instruction);
+            firstValue.Definition.Instruction);
         Assert.Equal(
             new MirInstructionId(0),
-            snapshot.Structure.RequireValue(secondValue).Definition.Instruction);
+            secondValue.Definition.Instruction);
     }
 
     [Fact]
     public async Task AnalysisStoreCachesResultsAndReusesOneCfgPerCallable()
     {
         var snapshot = SnapshotWithTwoCallables();
-        var callable = new MirCallableRef(snapshot.Id, new MirCallableId(0));
+        var callable = snapshot.Program.RequireCallable(new MirCallableId(0));
         var analyses = snapshot.Analyses;
 
         var cfg = analyses.ControlFlow(callable);
@@ -374,13 +165,13 @@ public sealed class MirSnapshotTests
         var effects = analyses.Effects;
         var witnesses = analyses.WitnessAvailability(callable);
 
-        Assert.Same(cfg, analyses.ControlFlow(callable));
-        Assert.Same(provenance, analyses.StorageProvenance(callable));
-        Assert.Same(memory, analyses.MemoryState(callable));
-        Assert.Same(paths, analyses.PathConditions(callable));
-        Assert.Same(scalars, analyses.ScalarAvailability(callable));
+        Assert.Same(cfg, analyses.ControlFlow(callable.Id));
+        Assert.Same(provenance, analyses.StorageProvenance(callable.Id));
+        Assert.Same(memory, analyses.MemoryState(callable.Id));
+        Assert.Same(paths, analyses.PathConditions(callable.Id));
+        Assert.Same(scalars, analyses.ScalarAvailability(callable.Id));
         Assert.Same(effects, analyses.Effects);
-        Assert.Same(witnesses, analyses.WitnessAvailability(callable));
+        Assert.Same(witnesses, analyses.WitnessAvailability(callable.Id));
 
         Assert.Same(cfg, memory.ControlFlow);
         Assert.Same(provenance, memory.StorageProvenance);
@@ -398,7 +189,7 @@ public sealed class MirSnapshotTests
     }
 
     [Fact]
-    public void ExactReferencesRejectEqualDenseIdsFromOtherRevisionsAndCompilations()
+    public void OwnerLocalLookupsRejectForeignObjectsWithEqualIds()
     {
         const string source = """
             operation Main() {
@@ -445,59 +236,47 @@ public sealed class MirSnapshotTests
         Assert.Equal(firstInstruction.Origin.Value, secondInstruction.Origin.Value);
         Assert.NotEqual(firstInstruction.Origin, secondInstruction.Origin);
 
-        var staleCallable = new MirCallableRef(first.Id, firstCallable.Id);
-        var staleBlock = new MirBlockRef(first.Id, firstCallable.Id, firstBlock.Id);
-        var staleInstruction =
-            new MirInstructionRef(first.Id, firstCallable.Id, firstInstruction.Id);
-        var staleValue = new MirValueRef(first.Id, firstCallable.Id, firstValue.Id);
-        var staleStorage =
-            new MirStorageRef(first.Id, firstCallable.Id, firstStorage.Id);
-        var staleQubit =
-            new MirQubitRef(first.Id, firstCallable.Id, firstQubit.Key);
-        var currentCallable = new MirCallableRef(second.Id, secondCallable.Id);
-        var currentBlock =
-            new MirBlockRef(second.Id, secondCallable.Id, secondBlock.Id);
+        Assert.False(second.Program.ContainsCallable(firstCallable));
+        Assert.False(secondCallable.ContainsBlock(firstBlock));
+        Assert.False(secondCallable.ContainsInstruction(firstInstruction));
+        Assert.False(secondCallable.ContainsValue(firstValue));
+        Assert.False(secondCallable.ContainsStorage(firstStorage));
+        Assert.False(secondCallable.ContainsQubit(firstQubit));
 
         Assert.Throws<ArgumentException>(
-            () => second.Structure.RequireCallable(staleCallable));
+            () => second.Program.RequireCallable(firstCallable));
         Assert.Throws<ArgumentException>(
-            () => second.Structure.RequireBlock(staleBlock));
+            () => unrelated.Program.RequireCallable(firstCallable));
+        Assert.Throws<ArgumentException>(() => secondCallable.RequireBlock(firstBlock));
         Assert.Throws<ArgumentException>(
-            () => second.Structure.RequireInstruction(staleInstruction));
-        Assert.Throws<ArgumentException>(
-            () => second.Structure.RequireValue(staleValue));
-        Assert.Throws<ArgumentException>(
-            () => second.Structure.RequireStorage(staleStorage));
-        Assert.Throws<ArgumentException>(
-            () => second.Structure.RequireQubit(staleQubit));
-        Assert.Throws<ArgumentException>(
-            () => unrelated.Structure.RequireCallable(staleCallable));
+            () => secondCallable.RequireInstruction(firstInstruction));
+        Assert.Throws<ArgumentException>(() => secondCallable.RequireValue(firstValue));
+        Assert.Throws<ArgumentException>(() => secondCallable.RequireStorage(firstStorage));
+        Assert.Throws<ArgumentException>(() => secondCallable.RequireQubit(firstQubit));
+
+        Assert.Same(secondCallable, second.Program.RequireCallable(firstCallable.Id));
+        Assert.Same(secondBlock, secondCallable.RequireBlock(firstBlock.Id));
+        Assert.Same(
+            secondInstruction,
+            secondCallable.RequireInstruction(firstInstruction.Id));
+        Assert.Same(secondValue, secondCallable.RequireValue(firstValue.Id));
+        Assert.Same(secondStorage, secondCallable.RequireStorage(firstStorage.Id));
+        Assert.Same(secondQubit, secondCallable.RequireQubit(firstQubit.Key));
 
         Assert.Throws<ArgumentException>(
-            () => second.Analyses.ControlFlow(staleCallable));
-        var cfg = second.Analyses.ControlFlow(currentCallable);
-        Assert.Throws<ArgumentException>(() => cfg.IsReachable(staleBlock));
-        Assert.Throws<ArgumentException>(
-            () => cfg.PointBeforeInstruction(staleInstruction));
-        Assert.Throws<ArgumentException>(
-            () => cfg.IsValueAvailableAtTerminator(staleValue, currentBlock));
-        Assert.Throws<ArgumentException>(
-            () => second.Analyses.PathConditions(currentCallable).ConditionFor(staleBlock));
-
-        Assert.Throws<ArgumentException>(
-            () => second.Links.SymbolsFor(staleValue));
-        Assert.Throws<ArgumentException>(
-            () => second.Links.SymbolsFor(staleStorage));
-        Assert.Throws<ArgumentException>(
-            () => second.Links.SymbolsFor(staleQubit));
+            () => second.Analyses.ControlFlow(firstCallable));
+        var firstCfg = first.Analyses.ControlFlow(firstCallable);
+        var secondCfg = second.Analyses.ControlFlow(secondCallable);
+        var foreignPoint = firstCfg.TerminatorPoint(firstBlock.Id);
+        Assert.Throws<InvalidOperationException>(
+            () => secondCfg.IsValueAvailableAt(secondValue.Id, foreignPoint));
+        Assert.Throws<InvalidOperationException>(
+            () => first.Analyses.Effects.EnsureFor(second.Program));
 
         Assert.Throws<ArgumentException>(
             () => second.Origins.Require(firstInstruction.Origin));
         Assert.Throws<ArgumentException>(
-            () => second.Links.ResolveOrigin(firstInstruction.Origin));
-        var staleEffect = Assert.Single(first.Analyses.Effects.Effects);
-        Assert.Throws<ArgumentException>(
-            () => second.Analyses.Effects.EffectAt(staleEffect.Site));
+            () => second.Origins.ResolveHir(firstInstruction.Origin));
     }
 
     private static MirSnapshot SnapshotWithTwoCallables()
@@ -516,27 +295,11 @@ public sealed class MirSnapshotTests
         HirFixture hir)
     {
         var snapshotId = program.SnapshotId;
-        var linkBuilder = new MirCrossStageLinksBuilder(
-            snapshotId,
-            hir.Snapshot,
-            hir.Semantics);
-        foreach (var callable in program.Callables)
-        {
-            var origin = program.Origins.ResolveHir(callable.Origin);
-            var callableId = origin.HirCallableId!.Value;
-            linkBuilder.LinkCallable(
-                callableId,
-                hir.Semantics.Model.FindSymbol(callableId)!.Id,
-                callable.Id);
-            foreach (var value in callable.Values)
-                linkBuilder.RegisterTemporaryValue(callable.Id, value.Id);
-        }
-        var links = linkBuilder.Build(program.Origins);
         return new MirSnapshot(
             snapshotId,
             MirLoweringProfile.CanonicalV1,
             program,
-            links);
+            hir.FinalHir);
     }
 
     private static HirFixture HirFixtureFor(
@@ -554,13 +317,17 @@ public sealed class MirSnapshotTests
         var program = hir.PublishProgram(callables);
         var builder = hir.CreatePipelineBuilder();
         var snapshot = builder.PublishLowered(program);
+        builder.Alias(HirStage.ImportsExpanded, snapshot);
+        builder.Alias(HirStage.Resolved, snapshot);
+        builder.Alias(HirStage.Specialized, snapshot);
         var validation = builder.ValidateSnapshot(snapshot);
         Assert.True(
             validation.IsAccepted,
             string.Join(Environment.NewLine, validation.Diagnostics.Select(error => error.Message)));
+        var finalHir = builder.AnalyzeEffects(validation);
         return new HirFixture(
             snapshot,
-            validation);
+            finalHir);
     }
 
     private static HirNodeId CallableId(
@@ -572,7 +339,7 @@ public sealed class MirSnapshotTests
 
     private sealed record HirFixture(
         HirSnapshot Snapshot,
-        HirSemanticArtifact Semantics);
+        HirSemanticArtifact FinalHir);
 
     private static MirProgram ProgramWithTwoCallables(
         MirSnapshotId snapshotId,

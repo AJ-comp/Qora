@@ -39,7 +39,7 @@ public sealed class MirMemoryStateAnalysisTests
             oldAvailability.Kind);
         Assert.Equal(
             store.Id,
-            Assert.Single(oldAvailability.ClobberingMutations).Instruction.Instruction);
+            Assert.Single(oldAvailability.ClobberingMutations).Instruction);
 
         var currentAvailability = analysis.CheckAtTerminator(store.Result, exit.Id);
         Assert.True(currentAvailability.IsAvailable);
@@ -189,7 +189,7 @@ public sealed class MirMemoryStateAnalysisTests
         Assert.Equal(
             2,
             analysis.Mutations.Count(
-                mutation => mutation.Instruction.Instruction == call.Id));
+                mutation => mutation.Instruction == call.Id));
     }
 
     [Fact]

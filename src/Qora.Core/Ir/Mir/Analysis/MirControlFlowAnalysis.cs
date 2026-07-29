@@ -23,24 +23,22 @@ public sealed class MirProgramPoint
     {
         _snapshotIdentity = snapshotIdentity;
         SnapshotId = snapshotId;
-        Callable = new MirCallableRef(snapshotId, callable);
-        Block = new MirBlockRef(snapshotId, callable, block);
+        Callable = callable;
+        Block = block;
         InstructionIndex = instructionIndex;
-        Instruction = instruction is MirInstructionId id
-            ? new MirInstructionRef(snapshotId, callable, id)
-            : null;
+        Instruction = instruction;
     }
 
     public MirSnapshotId SnapshotId { get; }
-    public MirCallableRef Callable { get; }
-    public MirBlockRef Block { get; }
+    public MirCallableId Callable { get; }
+    public MirBlockId Block { get; }
 
     /// <summary>
     /// The number of ordinary instructions which have completed before this point.
     /// </summary>
     public int InstructionIndex { get; }
 
-    public MirInstructionRef? Instruction { get; }
+    public MirInstructionId? Instruction { get; }
     public bool IsBeforeInstruction => Instruction is not null;
     public bool IsTerminator => Instruction is null;
 
@@ -48,7 +46,7 @@ public sealed class MirProgramPoint
         ReferenceEquals(_snapshotIdentity, snapshotIdentity);
 
     public override string ToString() =>
-        Instruction is MirInstructionRef instruction
+        Instruction is MirInstructionId instruction
             ? $"{Callable}/{Block}:before {instruction}"
             : $"{Callable}/{Block}:terminator";
 }
@@ -93,8 +91,8 @@ public sealed class MirControlFlowSnapshot
         _sourceProgram = sourceProgram;
         _sourceCallable = sourceCallable;
         SnapshotId = sourceProgram.SnapshotId;
-        Callable = new MirCallableRef(SnapshotId, sourceCallable.Id);
-        EntryBlock = BlockRef(sourceCallable.EntryBlock);
+        Callable = sourceCallable.Id;
+        EntryBlock = sourceCallable.EntryBlock;
 
         _blocks = blocks.ToFrozenDictionary();
         _values = values.ToFrozenDictionary();
@@ -116,18 +114,15 @@ public sealed class MirControlFlowSnapshot
         Blocks = ReadOnly(
             blocks.Keys
                 .OrderBy(id => id.Value)
-                .Select(BlockRef)
                 .ToArray());
         ReachableBlocks = ReadOnly(
             reachable
                 .OrderBy(id => id.Value)
-                .Select(BlockRef)
                 .ToArray());
         ExitBlocks = ReadOnly(
             reachable
                 .Where(block => successors[block].Count == 0)
                 .OrderBy(id => id.Value)
-                .Select(BlockRef)
                 .ToArray());
 
         _instructionPoints = instructionLocations.ToFrozenDictionary(
@@ -135,7 +130,7 @@ public sealed class MirControlFlowSnapshot
             pair => new MirProgramPoint(
                 _snapshotIdentity,
                 SnapshotId,
-                Callable.Callable,
+                Callable,
                 pair.Value.Block,
                 pair.Value.Index,
                 pair.Key));
@@ -144,29 +139,29 @@ public sealed class MirControlFlowSnapshot
             pair => new MirProgramPoint(
                 _snapshotIdentity,
                 SnapshotId,
-                Callable.Callable,
+                Callable,
                 pair.Key,
                 pair.Value.Instructions.Count,
                 instruction: null));
     }
 
     public MirSnapshotId SnapshotId { get; }
-    public MirCallableRef Callable { get; }
-    public MirBlockRef EntryBlock { get; }
-    public IReadOnlyList<MirBlockRef> Blocks { get; }
-    public IReadOnlyList<MirBlockRef> ReachableBlocks { get; }
+    public MirCallableId Callable { get; }
+    public MirBlockId EntryBlock { get; }
+    public IReadOnlyList<MirBlockId> Blocks { get; }
+    public IReadOnlyList<MirBlockId> ReachableBlocks { get; }
 
     /// <summary>
     /// Reachable blocks with no CFG successor. Both <see cref="MirReturn"/> and
     /// <see cref="MirUnreachable"/> are exits for structural post-dominance.
     /// </summary>
-    public IReadOnlyList<MirBlockRef> ExitBlocks { get; }
+    public IReadOnlyList<MirBlockId> ExitBlocks { get; }
 
     internal bool IsFor(MirProgram program, MirCallableId callable) =>
         ReferenceEquals(_sourceProgram, program)
         && ReferenceEquals(_sourceCallable, program.FindCallable(callable))
         && SnapshotId == program.SnapshotId
-        && Callable.Callable == callable;
+        && Callable == callable;
 
     internal void EnsureFor(MirProgram program, MirCallableId callable)
     {
@@ -176,32 +171,32 @@ public sealed class MirControlFlowSnapshot
                 $"reanalyze {callable} in snapshot {program.SnapshotId}");
     }
 
-    public bool IsReachable(MirBlockRef block)
+    public bool IsReachable(MirBlockId block)
     {
-        var local = RequireBlock(block);
-        return _reachable.Contains(local);
+        RequireBlock(block);
+        return _reachable.Contains(block);
     }
 
     /// <summary>
     /// True when at least one path from the block reaches a return or unreachable terminator.
     /// A false result commonly identifies a non-terminating loop.
     /// </summary>
-    public bool CanReachExit(MirBlockRef block)
+    public bool CanReachExit(MirBlockId block)
     {
-        var local = RequireBlock(block);
-        return _canReachExit.Contains(local);
+        RequireBlock(block);
+        return _canReachExit.Contains(block);
     }
 
-    public IReadOnlyList<MirBlockRef> SuccessorsOf(MirBlockRef block)
+    public IReadOnlyList<MirBlockId> SuccessorsOf(MirBlockId block)
     {
-        var local = RequireBlock(block);
-        return ReadOnly(_successors[local].Select(BlockRef).ToArray());
+        RequireBlock(block);
+        return _successors[block];
     }
 
-    public IReadOnlyList<MirBlockRef> PredecessorsOf(MirBlockRef block)
+    public IReadOnlyList<MirBlockId> PredecessorsOf(MirBlockId block)
     {
-        var local = RequireBlock(block);
-        return ReadOnly(_predecessors[local].Select(BlockRef).ToArray());
+        RequireBlock(block);
+        return _predecessors[block];
     }
 
     /// <summary>
@@ -209,48 +204,48 @@ public sealed class MirControlFlowSnapshot
     /// A block reaches itself by the empty path. Use <see cref="IsInCycle"/> when a non-empty
     /// path back to the same block is required.
     /// </summary>
-    public bool CanReach(MirBlockRef source, MirBlockRef target)
+    public bool CanReach(MirBlockId source, MirBlockId target)
     {
-        var localSource = RequireBlock(source);
-        var localTarget = RequireBlock(target);
-        return _reachableFrom[localSource].Contains(localTarget);
+        RequireBlock(source);
+        RequireBlock(target);
+        return _reachableFrom[source].Contains(target);
     }
 
     /// <summary>
     /// True when the block belongs to a non-trivial CFG cycle or has a self edge. A quantum
     /// effect in such a block can execute more than once even though it has one static instruction ID.
     /// </summary>
-    public bool IsInCycle(MirBlockRef block)
+    public bool IsInCycle(MirBlockId block)
     {
-        var local = RequireBlock(block);
-        return _successors[local].Any(
-            successor => successor == local || _reachableFrom[successor].Contains(local));
+        RequireBlock(block);
+        return _successors[block].Any(
+            successor => successor == block || _reachableFrom[successor].Contains(block));
     }
 
-    public bool Dominates(MirBlockRef candidate, MirBlockRef block)
+    public bool Dominates(MirBlockId candidate, MirBlockId block)
     {
-        var localCandidate = RequireBlock(candidate);
-        var localBlock = RequireBlock(block);
-        return _dominators[localBlock].Contains(localCandidate);
+        RequireBlock(candidate);
+        RequireBlock(block);
+        return _dominators[block].Contains(candidate);
     }
 
-    public bool StrictlyDominates(MirBlockRef candidate, MirBlockRef block) =>
+    public bool StrictlyDominates(MirBlockId candidate, MirBlockId block) =>
         candidate != block && Dominates(candidate, block);
 
-    public bool PostDominates(MirBlockRef candidate, MirBlockRef block)
+    public bool PostDominates(MirBlockId candidate, MirBlockId block)
     {
-        var localCandidate = RequireBlock(candidate);
-        var localBlock = RequireBlock(block);
-        return _postDominators[localBlock].Contains(localCandidate);
+        RequireBlock(candidate);
+        RequireBlock(block);
+        return _postDominators[block].Contains(candidate);
     }
 
-    public bool StrictlyPostDominates(MirBlockRef candidate, MirBlockRef block) =>
+    public bool StrictlyPostDominates(MirBlockId candidate, MirBlockId block) =>
         candidate != block && PostDominates(candidate, block);
 
-    public MirProgramPoint PointBeforeInstruction(MirInstructionRef instruction)
+    public MirProgramPoint PointBeforeInstruction(MirInstructionId instruction)
     {
-        var local = RequireInstruction(instruction);
-        if (!_instructionPoints.TryGetValue(local, out var point))
+        RequireInstruction(instruction);
+        if (!_instructionPoints.TryGetValue(instruction, out var point))
             throw new ArgumentOutOfRangeException(
                 nameof(instruction),
                 instruction,
@@ -259,17 +254,17 @@ public sealed class MirControlFlowSnapshot
     }
 
     public bool TryGetPointBeforeInstruction(
-        MirInstructionRef instruction,
+        MirInstructionId instruction,
         out MirProgramPoint? point)
     {
-        var local = RequireInstruction(instruction);
-        return _instructionPoints.TryGetValue(local, out point);
+        RequireInstruction(instruction);
+        return _instructionPoints.TryGetValue(instruction, out point);
     }
 
-    public MirProgramPoint TerminatorPoint(MirBlockRef block)
+    public MirProgramPoint TerminatorPoint(MirBlockId block)
     {
-        var local = RequireBlock(block);
-        return _terminatorPoints[local];
+        RequireBlock(block);
+        return _terminatorPoints[block];
     }
 
     /// <summary>
@@ -277,11 +272,11 @@ public sealed class MirControlFlowSnapshot
     /// callable-wide. Block arguments are available from block entry. An instruction result is available
     /// only after its defining instruction, and cross-block definitions must dominate the use block.
     /// </summary>
-    public bool IsValueAvailableAt(MirValueRef value, MirProgramPoint point)
+    public bool IsValueAvailableAt(MirValueId value, MirProgramPoint point)
     {
         EnsurePoint(point);
-        var local = RequireValue(value);
-        if (!_values.TryGetValue(local, out var definition))
+        RequireValue(value);
+        if (!_values.TryGetValue(value, out var definition))
             throw new ArgumentOutOfRangeException(
                 nameof(value),
                 value,
@@ -291,7 +286,7 @@ public sealed class MirControlFlowSnapshot
         {
             MirValueDefinitionKind.Parameter => true,
             MirValueDefinitionKind.BlockArgument =>
-                IsBlockDefinitionAvailable(definition.Definition.Block, point.Block.Block),
+                IsBlockDefinitionAvailable(definition.Definition.Block, point.Block),
             MirValueDefinitionKind.InstructionResult =>
                 IsInstructionDefinitionAvailable(definition.Definition.Instruction, point),
             _ => false,
@@ -299,21 +294,11 @@ public sealed class MirControlFlowSnapshot
     }
 
     public bool IsValueAvailableBeforeInstruction(
-        MirValueRef value,
-        MirInstructionRef instruction) =>
-        IsValueAvailableAt(value, PointBeforeInstruction(instruction));
-
-    public bool IsValueAvailableAtTerminator(
-        MirValueRef value,
-        MirBlockRef block) =>
-        IsValueAvailableAt(value, TerminatorPoint(block));
-
-    internal bool IsValueAvailableBeforeInstruction(
         MirValueId value,
         MirInstructionId instruction) =>
         IsValueAvailableAt(value, PointBeforeInstruction(instruction));
 
-    internal bool IsValueAvailableAtTerminator(
+    public bool IsValueAvailableAtTerminator(
         MirValueId value,
         MirBlockId block) =>
         IsValueAvailableAt(value, TerminatorPoint(block));
@@ -332,9 +317,9 @@ public sealed class MirControlFlowSnapshot
             || !_instructionLocations.TryGetValue(instruction, out var definition))
             return false;
 
-        return definition.Block == usePoint.Block.Block
+        return definition.Block == usePoint.Block
             ? definition.Index < usePoint.InstructionIndex
-            : _dominators[usePoint.Block.Block].Contains(definition.Block);
+            : _dominators[usePoint.Block].Contains(definition.Block);
     }
 
     private void EnsurePoint(MirProgramPoint? point)
@@ -345,100 +330,41 @@ public sealed class MirControlFlowSnapshot
                 "the MIR program point belongs to a different control-flow snapshot");
     }
 
-    internal bool IsInCycleLocal(MirBlockId block) =>
-        IsInCycle(BlockRef(block));
-
-    internal bool IsReachable(MirBlockId block) =>
-        IsReachable(BlockRef(block));
-
-    internal bool CanReachExit(MirBlockId block) =>
-        CanReachExit(BlockRef(block));
-
-    internal IReadOnlyList<MirBlockId> SuccessorsOf(MirBlockId block)
-    {
-        RequireBlock(BlockRef(block));
-        return _successors[block];
-    }
-
-    internal IReadOnlyList<MirBlockId> PredecessorsOf(MirBlockId block)
-    {
-        RequireBlock(BlockRef(block));
-        return _predecessors[block];
-    }
-
-    internal bool CanReach(MirBlockId source, MirBlockId target) =>
-        CanReach(BlockRef(source), BlockRef(target));
-
-    internal bool IsInCycle(MirBlockId block) =>
-        IsInCycle(BlockRef(block));
-
-    internal bool Dominates(MirBlockId candidate, MirBlockId block) =>
-        Dominates(BlockRef(candidate), BlockRef(block));
-
-    internal bool PostDominates(MirBlockId candidate, MirBlockId block) =>
-        PostDominates(BlockRef(candidate), BlockRef(block));
-
-    internal MirProgramPoint PointBeforeInstruction(MirInstructionId instruction) =>
-        PointBeforeInstruction(InstructionRef(instruction));
-
-    internal MirProgramPoint TerminatorPoint(MirBlockId block) =>
-        TerminatorPoint(BlockRef(block));
-
-    internal bool IsValueAvailableAt(MirValueId value, MirProgramPoint point) =>
-        IsValueAvailableAt(ValueRef(value), point);
-
     internal MirProgramPoint PointBeforeInstructionLocal(MirInstructionId instruction) =>
-        PointBeforeInstruction(InstructionRef(instruction));
+        PointBeforeInstruction(instruction);
 
     internal MirProgramPoint TerminatorPointLocal(MirBlockId block) =>
-        TerminatorPoint(BlockRef(block));
+        TerminatorPoint(block);
 
     internal bool IsValueAvailableAtLocal(MirValueId value, MirProgramPoint point) =>
-        IsValueAvailableAt(ValueRef(value), point);
+        IsValueAvailableAt(value, point);
 
-    private MirBlockId RequireBlock(MirBlockRef block)
+    private void RequireBlock(MirBlockId block)
     {
-        RequireCallable(block.Snapshot, block.Callable, nameof(block));
-        if (!_blocks.ContainsKey(block.Block))
+        if (!_blocks.ContainsKey(block))
             throw new ArgumentOutOfRangeException(
                 nameof(block),
                 block,
                 $"block {block} does not belong to callable {Callable}");
-        return block.Block;
     }
 
-    private MirInstructionId RequireInstruction(MirInstructionRef instruction)
+    private void RequireInstruction(MirInstructionId instruction)
     {
-        RequireCallable(instruction.Snapshot, instruction.Callable, nameof(instruction));
-        return instruction.Instruction;
+        if (!_instructionLocations.ContainsKey(instruction))
+            throw new ArgumentOutOfRangeException(
+                nameof(instruction),
+                instruction,
+                $"instruction {instruction} does not belong to callable {Callable}");
     }
 
-    private MirValueId RequireValue(MirValueRef value)
+    private void RequireValue(MirValueId value)
     {
-        RequireCallable(value.Snapshot, value.Callable, nameof(value));
-        return value.Value;
+        if (!_values.ContainsKey(value))
+            throw new ArgumentOutOfRangeException(
+                nameof(value),
+                value,
+                $"SSA value {value} does not belong to callable {Callable}");
     }
-
-    private void RequireCallable(
-        MirSnapshotId snapshot,
-        MirCallableId callable,
-        string parameter)
-    {
-        MirReferenceValidation.RequireSnapshot(SnapshotId, snapshot, parameter);
-        if (callable != Callable.Callable)
-            throw new ArgumentException(
-                $"MIR reference belongs to callable {callable}; expected {Callable}",
-                parameter);
-    }
-
-    private MirBlockRef BlockRef(MirBlockId block) =>
-        new(SnapshotId, Callable.Callable, block);
-
-    private MirInstructionRef InstructionRef(MirInstructionId instruction) =>
-        new(SnapshotId, Callable.Callable, instruction);
-
-    private MirValueRef ValueRef(MirValueId value) =>
-        new(SnapshotId, Callable.Callable, value);
 
     private static ReadOnlyCollection<T> ReadOnly<T>(IReadOnlyList<T> items) =>
         Array.AsReadOnly(items.ToArray());

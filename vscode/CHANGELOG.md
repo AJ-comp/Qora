@@ -2,6 +2,20 @@
 
 All notable changes to the Qora Language extension.
 
+## 0.27.0
+
+- Bundles the **Qora v0.34** compiler, whose final analyzed HIR now binds every name and call expression
+  directly to its exact semantic symbol before MIR lowering. Shadowing and intrinsic calls therefore use
+  one name-resolution authority rather than a second lowering-time lookup.
+- MIR now uses callable-local ownership for blocks, instructions, SSA values, storage, and qubit versions.
+  Its call graph and effect summaries are derived from the completed MIR, while the former global
+  structural index and snapshot-qualified entity-reference wrappers have been removed.
+- Ordinary extension compilation no longer retains IDE-only symbol-to-MIR maps in the compiler core.
+  Optional language-service indexing remains a separate host API and is not part of the current VSIX
+  runtime.
+- The HIR-to-MIR boundary is closed around one final accepted semantic artifact, removing the legacy
+  cross-stage link and semantic-lineage translation machinery. Qora source syntax is unchanged.
+
 ## 0.26.0
 
 - Bundles the **Qora v0.33** compiler with its new revision-bound AST → immutable HIR construction

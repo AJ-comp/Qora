@@ -22,7 +22,8 @@ public enum SymbolKind
 /// <summary>One place a name is used (a gate operand, a measurement target, an angle argument, …).
 /// <see cref="Order"/> is a pre-order index over the operation's statements — monotonic in program order,
 /// so the LAST use of a register is its liveness "death point" in straight-line code. <see cref="NodeId"/>
-/// is the using statement's stable <see cref="HirNode.Id"/>, tying the use back to the exact HIR node.</summary>
+/// is the using statement's stable <see cref="HirNode.Id"/>, tying the use back to the exact HIR
+/// statement. Exact expression-to-symbol bindings live once in <see cref="HirScopeGraph"/>.</summary>
 public sealed record UseSite(int Order, string Detail, HirNodeId NodeId);
 
 /// <summary>One declared name and everything the compiler knows about it. <see cref="Uses"/> accumulates as
@@ -434,8 +435,13 @@ internal static class SymbolTableBuilder
             && scope.Lookup(name.Name) is { Type: QType.Bit, IsArray: true } symbol
                 ? symbol
                 : null;
-        void Record(Scope scope, string name, string detail, SourceSpan? span)
+        void Record(
+            Scope scope,
+            HirNameExpression reference,
+            string detail,
+            SourceSpan? span)
         {
+            var name = reference.Name;
             // pi/tau/euler/true/false mean something in an expression but are never declared, so they are
             // exempt from resolution entirely and checked before lookup.
             if (IsReservedName(name)) return;
@@ -448,14 +454,59 @@ internal static class SymbolTableBuilder
             if (callableValue is { Kind: SymbolKind.Callable })
                 AddStatementError("QSEM028", $"in `{opName}`: `{name}` is an operation, not a value — it can only be called (`{name}(…)`)", span);
             else if (sym is not null)
-                sym.AddUse(new UseSite(
+            {
+                scopeGraph.RecordUse(sym, new UseSite(
                     order,
                     detail,
                     currentStatementId
                     ?? throw new InvalidOperationException(
-                        "QINTERNAL: a HIR name use was recorded outside a statement")));
+                        "QINTERNAL: a HIR name use was recorded outside a statement")),
+                    reference.Id);
+            }
             else
                 AddStatementError("QSEM025", $"in `{opName}`: `{name}` is not declared in scope here — an unknown name, or a name used before its declaration", span);
+        }
+
+        Symbol? BuiltinCallable(string qualifiedName, SymbolKind kind)
+        {
+            // Resolver rewrites every accepted intrinsic call to its canonical simple name. A dotted name
+            // here is therefore unresolved HIR; never recover a built-in by taking its last segment.
+            if (qualifiedName.Contains('.'))
+                return null;
+            var name = qualifiedName;
+            var known = kind switch
+            {
+                SymbolKind.BuiltinGate => QoraGates.Names.ContainsKey(name),
+                SymbolKind.BuiltinFunction => QoraGates.Functions.ContainsKey(name),
+                _ => false,
+            };
+            if (!known) return null;
+            var intrinsic = scopeGraph.FindNamespaceScope(
+                QoraGates.IntrinsicNamespace);
+            return intrinsic is null
+                ? null
+                : scopeGraph.LookupMember(intrinsic.Id, name, kind);
+        }
+
+        void RecordCall(
+            HirCallExpression call,
+            SymbolKind builtinKind,
+            string detail,
+            HirNodeId statementId)
+        {
+            var callable = call.CalleeId is HirNodeId calleeId
+                ? scopeGraph.FindDeclaration(calleeId)
+                : BuiltinCallable(call.Name, builtinKind);
+            var expectedKind = call.CalleeId is null
+                ? builtinKind
+                : SymbolKind.Callable;
+            if (callable?.Kind != expectedKind) return;
+
+            scopeGraph.RecordUse(callable, new UseSite(
+                order,
+                detail,
+                statementId),
+                call.Callee.Id);
         }
 
         // Resolve every identifier inside an EXPRESSION TREE — a condition, a range bound, a qubit index
@@ -478,7 +529,7 @@ internal static class SymbolTableBuilder
                     or HirLiteralExpression:
                     return;
                 case HirNameExpression name:
-                    Record(scope, name.Name, detail, span);
+                    Record(scope, name, detail, span);
                     // QSEM026 at most once per statement span: `reported026.Add` is false on a repeat, so
                     // `if (q == q)` and a `for`'s `q..q` (From/To share the span) each report one diagnostic.
                     if (classicalOnly && scope.Lookup(name.Name) is { Type: QType.Qubit }
@@ -498,7 +549,7 @@ internal static class SymbolTableBuilder
                 {
                     Receiver: HirNameExpression receiver,
                 } member:
-                    Record(scope, receiver.Name, detail, span);
+                    Record(scope, receiver, detail, span);
                     if (scope.Lookup(receiver.Name) is not { } owner)
                         return; // Record already produced QSEM025
                     if (member.MemberName != "Count")
@@ -542,18 +593,14 @@ internal static class SymbolTableBuilder
                 case HirCallExpression call:
                     // Resolver is the only name-binding authority. Downstream semantic passes consume its
                     // declaration ID and must never guess a user callable from spelling. Built-ins are the
-                    // sole calls without a program declaration.
-                    if (call.CalleeId is HirNodeId expressionCalleeId)
-                    {
-                        var callable = scopeGraph.FindDeclaration(expressionCalleeId);
-                        if (callable is { Kind: SymbolKind.Callable })
-                            callable.AddUse(new UseSite(
-                                order,
-                                $"call @ {call.Name}",
-                                currentStatementId
-                                ?? throw new InvalidOperationException(
-                                    "QINTERNAL: a HIR call use was recorded outside a statement")));
-                    }
+                    // sole calls without a program declaration, and resolve through the intrinsic scope.
+                    RecordCall(
+                        call,
+                        SymbolKind.BuiltinFunction,
+                        $"call @ {call.Name}",
+                        currentStatementId
+                        ?? throw new InvalidOperationException(
+                            "QINTERNAL: a HIR call use was recorded outside a statement"));
                     // Missing/dangling user IDs deliberately produce no guessed edge here. QoraValidator
                     // owns the QINTERNAL diagnostic, and a rejected validation artifact cannot reach later
                     // analysis.
@@ -638,14 +685,22 @@ internal static class SymbolTableBuilder
             SourceSpan? span)
         {
             var rendered = HirExpressions.Render(target);
-            var registerName = HirExpressions.RegisterNameOf(target);
-            if (registerName.Length == 0)
+            var register = target switch
+            {
+                HirNameExpression name => name,
+                HirIndexExpression
+                {
+                    Receiver: HirNameExpression name,
+                } => name,
+                _ => null,
+            };
+            if (register is null)
             {
                 RecordExpr(targetScope, target, $"measure @ {rendered}", span);
                 return;
             }
 
-            Record(targetScope, registerName, $"measure @ {rendered}", span);
+            Record(targetScope, register, $"measure @ {rendered}", span);
             RecordExpr(
                 targetScope,
                 HirExpressions.IndexOf(target),
@@ -666,15 +721,11 @@ internal static class SymbolTableBuilder
                         // an operation CALL (not a built-in gate) records a use on the callee's operation
                         // symbol — its "used-where", accumulated across every caller. A user call must carry
                         // Resolver's stable declaration ID; only a built-in gate legitimately has no ID.
-                        if (callStatement.Call.CalleeId is HirNodeId calleeId)
-                        {
-                            var callee = scopeGraph.FindDeclaration(calleeId);
-                            if (callee is { Kind: SymbolKind.Callable })
-                                callee.AddUse(new UseSite(
-                                    order,
-                                    $"call @ {callStatement.Name}",
-                                    callStatement.Id));
-                        }
+                        RecordCall(
+                            callStatement.Call,
+                            SymbolKind.BuiltinGate,
+                            $"call @ {callStatement.Name}",
+                            callStatement.Id);
                         // Missing/dangling user IDs deliberately produce no guessed edge here. Validation
                         // reports the broken reference before this model can feed downstream analysis.
                         foreach (var argument in callStatement.Call.Arguments)
@@ -818,15 +869,23 @@ internal static class SymbolTableBuilder
                         Value: HirMeasurementExpression measurement,
                     } assignment:
                     {
-                        var assignedName =
-                            HirExpressions.AssignmentNameOf(assignment.Target)
+                        var assignedReference = assignment.Target switch
+                        {
+                            HirNameExpression name => name,
+                            HirIndexExpression
+                            {
+                                Receiver: HirNameExpression name,
+                            } => name,
+                            _ => null,
+                        }
                             ?? throw new InvalidOperationException(
                                 "QINTERNAL: semantic binding received an unsupported assignment target");
+                        var assignedName = assignedReference.Name;
                         var assignedIndex =
                             HirExpressions.AssignmentIndexOf(assignment.Target);
                         Record(
                             scope,
-                            assignedName,
+                            assignedReference,
                             $"assign {assignedName}",
                             assignment.Span);
                         RecordExpr(
@@ -843,15 +902,23 @@ internal static class SymbolTableBuilder
                     }
                     case HirAssignmentStatement assignment:
                     {
-                        var assignedName =
-                            HirExpressions.AssignmentNameOf(assignment.Target)
+                        var assignedReference = assignment.Target switch
+                        {
+                            HirNameExpression name => name,
+                            HirIndexExpression
+                            {
+                                Receiver: HirNameExpression name,
+                            } => name,
+                            _ => null,
+                        }
                             ?? throw new InvalidOperationException(
                                 "QINTERNAL: semantic binding received an unsupported assignment target");
+                        var assignedName = assignedReference.Name;
                         var assignedIndex =
                             HirExpressions.AssignmentIndexOf(assignment.Target);
                         Record(
                             scope,
-                            assignedName,
+                            assignedReference,
                             $"assign {assignedName}",
                             assignment.Span);
                         RecordExpr(

@@ -4,9 +4,9 @@ namespace Qora.Ir.Passes;
 /// Stable identity of one semantic symbol inside a <see cref="HirScopeGraph"/> snapshot. This is
 /// deliberately distinct from a HIR declaration node Id: a namespace can merge declarations from several
 /// files and synthetic/built-in symbols have no declaring HIR node at all. Compiler stages may rebuild the
-/// graph after structural rewrites; cross-stage references therefore use the preserved declaration node Id
-/// (<see cref="Symbol.DeclarationNodeId"/> / <see cref="HirCallExpression.CalleeId"/>), not a graph-local
-/// SymbolId.
+/// graph after structural rewrites, but every resulting HIR snapshot must publish its own exact semantic
+/// artifact before MIR lowering. Inside that artifact the SymbolId is authoritative, and MIR consumes it
+/// only together with the same artifact's exact HIR source.
 /// </summary>
 public readonly record struct SymbolId(int Value)
 {
@@ -224,6 +224,7 @@ public sealed class HirScopeGraph
     private readonly Dictionary<SymbolId, Symbol> _symbols = new();
     private readonly Dictionary<ScopeId, Scope> _scopes = new();
     private readonly Dictionary<HirNodeId, SymbolId> _symbolByDeclaration = new();
+    private readonly Dictionary<HirNodeId, SymbolId> _symbolByReference = new();
     private readonly Dictionary<ScopeId, List<ScopeId>> _childrenByParent = new();
     private readonly Dictionary<(SymbolId Symbol, HirScopeKind Kind), ScopeId> _ownedScopes = new();
     private readonly Dictionary<string, ScopeId> _namespaceByPath =
@@ -294,6 +295,16 @@ public sealed class HirScopeGraph
 
     public Symbol? FindDeclaration(HirNodeId declarationNodeId) =>
         _symbolByDeclaration.TryGetValue(declarationNodeId, out var id)
+            ? FindSymbol(id)
+            : null;
+
+    /// <summary>
+    /// The exact semantic symbol selected for one HIR use-site expression. Name lookup happens once while
+    /// validation walks the lexical scopes; MIR lowering and IDE queries consume this binding directly
+    /// instead of resolving the source spelling again.
+    /// </summary>
+    public Symbol? FindReferencedSymbol(HirNodeId referenceNodeId) =>
+        _symbolByReference.TryGetValue(referenceNodeId, out var id)
             ? FindSymbol(id)
             : null;
 
@@ -516,6 +527,48 @@ public sealed class HirScopeGraph
         }
 
         _symbolByDeclaration.Add(declarationNodeId, symbolId);
+    }
+
+    /// <summary>
+    /// Binds one exact HIR use-site to the symbol selected by the semantic scope walk. A HIR occurrence
+    /// may be recorded exactly once; seeing it twice means two semantic walks are competing for ownership.
+    /// </summary>
+    private void BindReference(HirNodeId referenceNodeId, SymbolId symbolId)
+    {
+        RequireOpen();
+        if (!_symbols.ContainsKey(symbolId))
+            throw new InvalidOperationException(
+                $"QINTERNAL: reference node {referenceNodeId} names unknown semantic symbol {symbolId}");
+
+        if (_symbolByReference.TryGetValue(referenceNodeId, out var existing))
+            throw new InvalidOperationException(
+                $"QINTERNAL: reference node {referenceNodeId} is already bound to semantic symbol {existing}");
+
+        _symbolByReference.Add(referenceNodeId, symbolId);
+    }
+
+    /// <summary>
+    /// Atomically records both directions of one semantic use relation: the symbol's ordered use list and
+    /// the exact HIR reference-to-symbol index. Keeping this as the sole production insertion door prevents
+    /// those two query views from drifting.
+    /// </summary>
+    internal void RecordUse(
+        Symbol symbol,
+        UseSite use,
+        HirNodeId referenceNodeId)
+    {
+        RequireOpen();
+        ArgumentNullException.ThrowIfNull(symbol);
+        ArgumentNullException.ThrowIfNull(use);
+        if (!_symbols.TryGetValue(symbol.Id, out var registered)
+            || !ReferenceEquals(registered, symbol))
+        {
+            throw new InvalidOperationException(
+                $"QINTERNAL: use names semantic symbol {symbol.Id} from another HIR scope graph");
+        }
+
+        BindReference(referenceNodeId, symbol.Id);
+        symbol.AddUse(use);
     }
 
     internal Scope CreateScope(

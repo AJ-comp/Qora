@@ -26,7 +26,7 @@ internal sealed class MirSnapshotTransformation
             source.Id.Revision + 1);
         _origins = new MirOriginTableBuilder(
             _target,
-            source.Links.LoweredFromSnapshot);
+            source.LoweringSource.Source);
 
         // Parent origins precede children by contract, so one forward traversal can reproduce the
         // entire origin DAG with target-snapshot-qualified references.
@@ -53,7 +53,7 @@ internal sealed class MirSnapshotTransformation
 
     public MirOriginRef Rebase(MirOriginRef source)
     {
-        MirReferenceValidation.RequireSnapshot(
+        MirOriginValidation.RequireSnapshot(
             _source.Id,
             source.Snapshot,
             nameof(source));

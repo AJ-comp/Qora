@@ -296,6 +296,11 @@ public sealed class HirImmutabilityTests
             "late",
             SymbolKind.Var,
             QType.Int);
+        var nonDeclarationId = Assert
+            .IsType<HirVariableDeclarationStatement>(
+                Assert.Single(main.Body))
+            .Value
+            .Id;
 
         Assert.True(graph.IsSealed);
         AssertSealed(() => graph.GetOrAddNamespace(string.Empty));
@@ -315,12 +320,11 @@ public sealed class HirImmutabilityTests
         AssertSealed(() => callableScope.Bind(lateLocalSymbol));
         AssertSealed(() => callableSymbol.AddUse(
             new UseSite(-1, "late mutation", main.Id)));
+        AssertSealed(() => graph.RecordUse(
+            callableSymbol,
+            new UseSite(-1, "late mutation", main.Id),
+            nonDeclarationId));
 
-        var nonDeclarationId = Assert
-            .IsType<HirVariableDeclarationStatement>(
-                Assert.Single(main.Body))
-            .Value
-            .Id;
         Assert.Null(graph.FindDeclaration(nonDeclarationId));
         Assert.Null(graph.LookupMember(callableScope.Id, "late"));
         Assert.Same(usesBefore, callableSymbol.Uses);

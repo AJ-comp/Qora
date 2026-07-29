@@ -30,9 +30,9 @@ public sealed class MirPathConditionAnalysisTests
         var condition = paths.ConditionFor(applySite.Block);
         Assert.Equal(MirPathConditionKind.Predicate, condition.Kind);
         var predicate = Assert.IsType<MirPathPredicate>(condition.Predicate);
-        Assert.Equal(branch.Condition, predicate.Condition.Value);
+        Assert.Equal(branch.Condition, predicate.Condition);
         Assert.True(predicate.ExpectedValue);
-        Assert.Equal(branch.TrueTarget, predicate.TakenSuccessor.Block);
+        Assert.Equal(branch.TrueTarget, predicate.TakenSuccessor);
         Assert.Equal(MirExecutionMultiplicity.Single, paths.MultiplicityOf(applySite.Block));
     }
 
@@ -166,8 +166,7 @@ public sealed class MirPathConditionAnalysisTests
         var callable = Assert.Single(program.Callables);
         var effect = Assert.Single(
             effects.Effects,
-            candidate => candidate.Site.Callable
-                == new MirCallableRef(program.SnapshotId, callable.Id));
+            candidate => candidate.Site.Callable == callable.Id);
 
         Assert.Equal(MirExecutionMultiplicity.LoopCarried, effect.ExecutionMultiplicity);
         Assert.Equal(MirPathConditionKind.All, effect.PathCondition.Kind);

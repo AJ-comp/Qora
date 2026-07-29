@@ -113,7 +113,7 @@ declared at `Main` top level and lowers to OpenQASM general arrays. (clean)
 - **#17 — wiring the injector to MIR-only inverse materialization.** A safe verdict on a register
   written by a call such as `Bcast(a)` promises an internal inverse request for that exact MIR
   instruction. `MirAdjointMaterializer` already owns this boundary: `InjectRequests` marks an exact
-  `MirInstructionRef` by attaching `MirFunctor.Adjoint` to its `MirQuantumApply`, and `Run` synthesizes
+  `MirInstructionSite` by attaching `MirFunctor.Adjoint` to its `MirQuantumApply`, and `Run` synthesizes
   the required inverse MIR callable before rewriting the request to a typed call. Qora source and HIR
   contain no inverse marker or HIR-side inversion machinery. Rung ④ must therefore compute a global LIFO cleanup
   schedule, inject requests into a new MIR revision, and pass that exact snapshot to the materializer.
@@ -178,11 +178,13 @@ The rung-③ analysis (events + qubit graph + ContainerMap) answers the injector
   non-invertible-call set by operation name. Names change across specialization and target mangling, so
   a fact built in one tree could silently miss when queried against another. The durable rule is now
   stronger than “use a node Id”: a reference crossing HIR generations uses
-  `HirNodeRef(HirSnapshotId, NodeId)`, a semantic symbol uses
-  `HirSymbolRef(HirSemanticArtifactId, SymbolId)`, and callable-local MIR identities use composite
-  references such as `MirValueRef(MirSnapshotId, MirCallableId, MirValueId)`. HIR lineage lives in
-  `HirCompilation.Lineage`, outside `HirSemanticModel`, while `Compilation.Links.Hir` exposes that same
-  exact instance and OpenQASM emitted names live only in
+  `HirNodeRef(HirSnapshotId, NodeId)`, while a semantic symbol is interpreted only inside the exact
+  `HirSemanticArtifact` that owns its `SymbolId`. MIR entity IDs are interpreted only through the exact
+  immutable `MirProgram` and owning `MirCallable`; program-wide sites carry only the callable ID and
+  callable-local entity ID because the owning snapshot is already fixed by the analysis or transformation.
+  HIR lineage lives directly in `HirCompilation.Lineage`, outside `HirSemanticModel`;
+  `MirSnapshot.LoweringSource` and `MirSnapshot.Origins` retain only the HIR basis and source
+  provenance required by Core. OpenQASM emitted names live only in
   `OpenQasmSymbolMap`. Source names remain lookup/diagnostic data at the edge; they are never analysis
   identity.
 - **#19 — bind calls to their callee by node reference, not by name — ✅ SHIPPED (2026-07-14; unified
@@ -197,7 +199,7 @@ The rung-③ analysis (events + qubit graph + ContainerMap) answers the injector
 - **#20 — immutable compilation snapshots and explicit stage ownership — ✅ SHIPPED
   (2026-07-27); incremental invalidation remains future work.** `QoraParser.Parse` is syntax-only and
   `QoraCompiler.Compile` returns one immutable `Compilation` whose authoritative top-level owners are
-  `Sources`, `Hir`, optional `Mir`, `Links`, `Targets`, and stage-qualified `Diagnostics`.
+  `Sources`, `Hir`, optional `Mir`, `Targets`, and stage-qualified `Diagnostics`.
   `CompilationSession` owns branch-safe monotonic revision allocation, and each result records its
   actual `ParentRevision`; sibling recompiles therefore cannot collide. `CompilationOutputPlan`
   separately fixes the exact canonical HIR goal, MIR request, and backend set, and a successful result
@@ -214,22 +216,26 @@ The rung-③ analysis (events + qubit graph + ContainerMap) answers the injector
   `HirValidationOutcome` with accepted/rejected status and immutable diagnostics; effect analysis can
   consume only the exact accepted validation artifact for the same snapshot and records that
   `ValidationBasis`. `HirCompilation` owns both its exact snapshot history and
-  `HirLineage`; `Compilation.Links.Hir` is the same lineage instance. Every newly appearing HIR node is
+  `HirLineage`. Every newly appearing HIR node is
   classified exactly once as an identity-preserving `NodeDerivation`, provenance-only `NodeSynthesis`,
   or source `HirNodeIntroduction`. Analysis never creates a fake structural HIR stage, and canonical
   milestones cannot move backwards.
-  `MirSnapshot` owns its structural index and lazily cached analysis store; shared dependencies such as
-  CFG are reused within that snapshot. MIR callables and entities use exact HIR/semantic references.
-  Every HIR symbol has one `MirSymbolLoweringDisposition`, while every MIR value/storage/qubit has one
-  `MirEntityOriginKind`, so non-lowering and compiler temporaries are explicit rather than missing.
+  `MirSnapshot` owns its exact `LoweringSource`, program-owned `Origins`, and lazily cached analysis
+  store. `MirProgram` owns callable lookup, while each `MirCallable` owns its local block, instruction,
+  value, storage, and qubit lookup; shared dependencies such as CFG are reused within that snapshot. Core does
+  not retain an always-on HIR-symbol-to-MIR-entity index. `Qora.LanguageServices.MirSemanticIndex`
+  collects the exact lowering relationships through an opt-in trace and stores its callable-scoped
+  query maps above the compiler IR layer. Ordinary compilation and every backend run without creating
+  that index.
   Target results live in the backend-keyed `TargetArtifactSet.Artifacts` map. `QasmBackend` consumes the
   exact materialized `MirSnapshot` and produces `MirOpenQasmTargetProgram`; `OpenQasmArtifact.Text` is
   derived from that model. The artifact records the exact MIR source it consumed, and the backend never
   reaches back into HIR. Target diagnostics likewise carry the backend plus a typed MIR input identity.
   The CLI renders `--stages` from this completed aggregate without rerunning passes.
-  This revision-bound model is the required foundation for IDE queries and future incremental
-  compilation, but document dependency invalidation, snapshot reuse, and separate compilation are
-  **not implemented yet** and must not be described as unnecessary.
+  The revision-bound Core model is the input to optional language-service queries and future
+  incremental compilation, but IDE indexes are not compiler-owned facts. Document dependency
+  invalidation, snapshot reuse, and separate compilation are **not implemented yet** and must not be
+  described as unnecessary.
 
 ## Sequencing note
 
@@ -240,6 +246,7 @@ effect/liveness facts, insert identity-bound internal inverse requests, preserve
 publish a new MIR snapshot with the correct parent, origins, and invalidated analyses rather than mutate an
 earlier snapshot. Local allocation lowering
 depends on that guarantee. Incremental invalidation and IDE query indexes should extend the existing
-document identities, typed cross-stage links, and source maps; they must not introduce a second mutable
-ledger of semantic facts. `bool`, automatic controlled-operation generation, and the target-erased
+document identities, exact lowering source, origin table, and source maps. IDE-only symbol-to-MIR
+lookups belong to the opt-in `Qora.LanguageServices.MirSemanticIndex`; they must not become a second
+mutable ledger of semantic facts inside Core. `bool`, automatic controlled-operation generation, and the target-erased
 `Result` / `Pauli` abstractions remain later language work.

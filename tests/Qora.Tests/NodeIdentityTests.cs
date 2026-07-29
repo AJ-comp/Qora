@@ -89,6 +89,127 @@ public class NodeIdentityTests
     }
 
     [Fact]
+    public void SemanticModelBindsEveryShadowedUseToItsExactDeclaration()
+    {
+        var compilation = QoraCompiler.Compile(
+            """
+            operation Main() {
+                var x: int = 1;
+                if (1 == 1) {
+                    var x: int = x + 1;
+                    x = x + 1;
+                }
+                x = x + 1;
+            }
+            """);
+        AssertSucceeded(compilation);
+
+        var analyzed = Assert.IsType<HirSemanticArtifact>(
+            compilation.Hir.EffectAnalysis);
+        var main = Assert.Single(analyzed.Program.Callables);
+        var outerDeclaration = Assert.IsType<HirVariableDeclarationStatement>(
+            main.Body.Statements[0]);
+        var branch = Assert.IsType<HirIfStatement>(
+            main.Body.Statements[1]);
+        var innerDeclaration = Assert.IsType<HirVariableDeclarationStatement>(
+            branch.Then.Statements[0]);
+        var innerAssignment = Assert.IsType<HirAssignmentStatement>(
+            branch.Then.Statements[1]);
+        var outerAssignment = Assert.IsType<HirAssignmentStatement>(
+            main.Body.Statements[2]);
+
+        var outerSymbol = Assert.IsType<Symbol>(
+            analyzed.Model.FindSymbol(outerDeclaration.Id));
+        var innerSymbol = Assert.IsType<Symbol>(
+            analyzed.Model.FindSymbol(innerDeclaration.Id));
+        Assert.NotEqual(outerSymbol.Id, innerSymbol.Id);
+
+        var innerInitializer = Assert.IsType<HirBinaryExpression>(
+            innerDeclaration.Value);
+        var initializerRead = Assert.IsType<HirNameExpression>(
+            innerInitializer.Left);
+        Assert.Equal(
+            outerSymbol.Id,
+            Assert.IsType<Symbol>(
+                analyzed.Model.FindReferencedSymbol(initializerRead.Id)).Id);
+
+        AssertAssignmentBindsTo(
+            analyzed.Model,
+            innerAssignment,
+            innerSymbol.Id);
+        AssertAssignmentBindsTo(
+            analyzed.Model,
+            outerAssignment,
+            outerSymbol.Id);
+
+        static void AssertAssignmentBindsTo(
+            HirSemanticModel model,
+            HirAssignmentStatement assignment,
+            SymbolId expected)
+        {
+            var target = Assert.IsType<HirNameExpression>(
+                assignment.Target);
+            var value = Assert.IsType<HirBinaryExpression>(
+                assignment.Value);
+            var read = Assert.IsType<HirNameExpression>(value.Left);
+
+            Assert.Equal(
+                expected,
+                Assert.IsType<Symbol>(
+                    model.FindReferencedSymbol(target.Id)).Id);
+            Assert.Equal(
+                expected,
+                Assert.IsType<Symbol>(
+                    model.FindReferencedSymbol(read.Id)).Id);
+        }
+    }
+
+    [Fact]
+    public void SemanticModelBindsCallExpressionsToTheirExactCallableSymbols()
+    {
+        var compilation = QoraCompiler.Compile(
+            """
+            function one(): int {
+                return 1;
+            }
+
+            operation Main() {
+                use q = Qubit[1];
+                var value: int = one();
+                H(q[0]);
+            }
+            """);
+        AssertSucceeded(compilation);
+
+        var analyzed = Assert.IsType<HirSemanticArtifact>(
+            compilation.Hir.EffectAnalysis);
+        var function = Assert.Single(
+            analyzed.Program.Callables,
+            callable => callable.Name == "one");
+        var main = Assert.Single(
+            analyzed.Program.Callables,
+            callable => callable.Name == "Main");
+        var declaration = Assert.Single(
+            main.Body.OfType<HirVariableDeclarationStatement>());
+        var functionCall = Assert.IsType<HirCallExpression>(
+            declaration.Value);
+        var gateCall = Assert.Single(
+            main.Body.OfType<HirCallStatement>()).Call;
+
+        var functionSymbol = Assert.IsType<Symbol>(
+            analyzed.Model.FindSymbol(function.Id));
+        Assert.Equal(
+            functionSymbol.Id,
+            Assert.IsType<Symbol>(
+                analyzed.Model.FindReferencedSymbol(functionCall.Callee.Id)).Id);
+
+        var gateSymbol = Assert.IsType<Symbol>(
+            analyzed.Model.FindReferencedSymbol(gateCall.Callee.Id));
+        Assert.Equal(SymbolKind.BuiltinGate, gateSymbol.Kind);
+        Assert.Equal("H", gateSymbol.SourceName);
+    }
+
+    [Fact]
     public void SymbolFormatReadsTheExactAnalyzedSnapshot()
     {
         var compilation = QoraCompiler.Compile(
@@ -158,28 +279,6 @@ public class NodeIdentityTests
             "operation Main(){ use q=Qubit[2]; " +
             "for i in 0..1 { H(q[i]); } for i in 0..1 { X(q[i]); } }");
         AssertSucceeded(compilation);
-
-        var analyzed = Assert.IsType<HirSemanticArtifact>(
-            compilation.Hir.EffectAnalysis);
-        var loops = analyzed.Program.Callables.Single().Body
-            .OfType<HirForStatement>()
-            .ToArray();
-        var mir = Assert.IsType<MirSnapshot>(compilation.Mir);
-        var loweredValues = loops
-            .Select(
-                loop =>
-                {
-                    var symbol = Assert.IsType<Symbol>(
-                        analyzed.Model.FindSymbol(loop.Id));
-                    var reference = new HirSymbolRef(analyzed.Id, symbol.Id);
-                    return mir.Links.ValuesBySymbol[reference];
-                })
-            .ToArray();
-
-        Assert.Equal(2, loweredValues.Length);
-        Assert.NotEmpty(loweredValues[0]);
-        Assert.NotEmpty(loweredValues[1]);
-        Assert.Empty(loweredValues[0].Intersect(loweredValues[1]));
 
         var artifact = Assert.IsType<OpenQasmArtifact>(
             compilation.Targets.OpenQasm);

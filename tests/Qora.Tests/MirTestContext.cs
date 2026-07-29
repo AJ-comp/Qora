@@ -6,7 +6,7 @@ namespace Qora.Tests;
 
 /// <summary>
 /// Internal test seam for hand-authored MIR. Production construction remains compiler-owned, while
-/// fixtures still receive one exact snapshot identity for their program, origins, and references.
+/// fixtures still receive one exact snapshot identity for their program and origins.
 /// </summary>
 internal sealed class MirTestContext
 {
@@ -60,25 +60,8 @@ internal sealed class MirTestContext
             entryPoint,
             callables);
 
-    public MirCallableRef Callable(MirCallableId callable) =>
-        new(SnapshotId, callable);
-
-    public MirBlockRef Block(MirCallableId callable, MirBlockId block) =>
-        new(SnapshotId, callable, block);
-
-    public MirInstructionRef Instruction(
+    public MirInstructionSite InstructionSite(
         MirCallableId callable,
         MirInstructionId instruction) =>
-        new(SnapshotId, callable, instruction);
-
-    public MirValueRef Value(MirCallableId callable, MirValueId value) =>
-        new(SnapshotId, callable, value);
-
-    public MirStorageRef Storage(MirCallableId callable, MirStorageId storage) =>
-        new(SnapshotId, callable, storage);
-
-    public MirQubitRef Qubit(
-        MirCallableId callable,
-        MirQubit qubit) =>
-        new(SnapshotId, callable, qubit.Key);
+        new(callable, instruction);
 }

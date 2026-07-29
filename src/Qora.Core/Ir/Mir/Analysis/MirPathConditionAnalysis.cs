@@ -7,10 +7,10 @@ namespace Qora.Ir.Mir.Analysis;
 /// evaluated by the controlling branch, not a reconstructed source expression.
 /// </summary>
 public sealed record MirPathPredicate(
-    MirBlockRef Controller,
-    MirValueRef Condition,
+    MirBlockId Controller,
+    MirValueId Condition,
     bool ExpectedValue,
-    MirBlockRef TakenSuccessor);
+    MirBlockId TakenSuccessor);
 
 /// <summary>
 /// The shape of an exact block-execution condition. <see cref="All"/> and <see cref="Any"/> are
@@ -53,10 +53,10 @@ public sealed class MirPathCondition
                     ? Array.Empty<MirPathPredicate>()
                     : new[] { predicate })
                 .Distinct()
-                .OrderBy(item => item.Controller.Block.Value)
-                .ThenBy(item => item.Condition.Value.Value)
+                .OrderBy(item => item.Controller.Value)
+                .ThenBy(item => item.Condition.Value)
                 .ThenBy(item => item.ExpectedValue)
-                .ThenBy(item => item.TakenSuccessor.Block.Value)
+                .ThenBy(item => item.TakenSuccessor.Value)
                 .ToArray());
         Key = key;
     }
@@ -95,7 +95,7 @@ public sealed class MirPathCondition
             MirPathConditionKind.Predicate,
             predicate,
             Array.Empty<MirPathCondition>(),
-            $"p:{predicate.Condition.Value.Value}:{predicate.ExpectedValue}:{predicate.Controller.Block.Value}:{predicate.TakenSuccessor.Block.Value}");
+            $"p:{predicate.Condition.Value}:{predicate.ExpectedValue}:{predicate.Controller.Value}:{predicate.TakenSuccessor.Value}");
     }
 
     internal static MirPathCondition And(params MirPathCondition[] conditions) =>
@@ -182,20 +182,20 @@ public sealed class MirPathConditionSnapshot
         _sourceCallable = sourceCallable;
         _cfg = cfg;
         SnapshotId = sourceProgram.SnapshotId;
-        Callable = new MirCallableRef(SnapshotId, sourceCallable.Id);
+        Callable = sourceCallable.Id;
         _conditions = conditions.ToFrozenDictionary();
         _multiplicity = multiplicity.ToFrozenDictionary();
     }
 
     public MirSnapshotId SnapshotId { get; }
-    public MirCallableRef Callable { get; }
+    public MirCallableId Callable { get; }
     internal MirControlFlowSnapshot ControlFlow => _cfg;
 
     internal bool IsFor(MirProgram program, MirCallableId callable) =>
         ReferenceEquals(_sourceProgram, program)
         && ReferenceEquals(_sourceCallable, program.FindCallable(callable))
         && SnapshotId == program.SnapshotId
-        && Callable.Callable == callable;
+        && Callable == callable;
 
     internal void EnsureFor(MirProgram program, MirCallableId callable)
     {
@@ -205,13 +205,7 @@ public sealed class MirPathConditionSnapshot
                 $"reanalyze {callable} in snapshot {program.SnapshotId}");
     }
 
-    public MirPathCondition ConditionFor(MirBlockRef block)
-    {
-        var local = Require(block);
-        return ConditionFor(local);
-    }
-
-    internal MirPathCondition ConditionFor(MirBlockId block) =>
+    public MirPathCondition ConditionFor(MirBlockId block) =>
         _conditions.TryGetValue(block, out var condition)
             ? condition
             : throw new ArgumentOutOfRangeException(
@@ -219,13 +213,7 @@ public sealed class MirPathConditionSnapshot
                 block,
                 $"block {block} does not belong to callable {Callable}");
 
-    public MirExecutionMultiplicity MultiplicityOf(MirBlockRef block)
-    {
-        var local = Require(block);
-        return MultiplicityOf(local);
-    }
-
-    internal MirExecutionMultiplicity MultiplicityOf(MirBlockId block) =>
+    public MirExecutionMultiplicity MultiplicityOf(MirBlockId block) =>
         _multiplicity.TryGetValue(block, out var multiplicity)
             ? multiplicity
             : throw new ArgumentOutOfRangeException(
@@ -233,18 +221,6 @@ public sealed class MirPathConditionSnapshot
                 block,
                 $"block {block} does not belong to callable {Callable}");
 
-    private MirBlockId Require(MirBlockRef block)
-    {
-        MirReferenceValidation.RequireSnapshot(
-            SnapshotId,
-            block.Snapshot,
-            nameof(block));
-        if (block.Callable != Callable.Callable)
-            throw new ArgumentException(
-                $"MIR block belongs to callable {block.Callable}; expected {Callable}",
-                nameof(block));
-        return block.Block;
-    }
 }
 
 /// <summary>
@@ -337,8 +313,6 @@ internal static class MirPathConditionAnalysis
             }
 
             foreach (var (successor, edgeCondition) in Edges(
-                         program.SnapshotId,
-                         callable.Id,
                          blockId,
                          blocks[blockId].Terminator))
             {
@@ -370,8 +344,6 @@ internal static class MirPathConditionAnalysis
     }
 
     private static IEnumerable<(MirBlockId Successor, MirPathCondition Condition)> Edges(
-        MirSnapshotId snapshotId,
-        MirCallableId callable,
         MirBlockId controller,
         MirTerminator terminator)
     {
@@ -385,17 +357,17 @@ internal static class MirPathConditionAnalysis
                 yield return (
                     branch.TrueTarget,
                     MirPathCondition.Test(new MirPathPredicate(
-                        new MirBlockRef(snapshotId, callable, controller),
-                        new MirValueRef(snapshotId, callable, branch.Condition),
+                        controller,
+                        branch.Condition,
                         ExpectedValue: true,
-                        new MirBlockRef(snapshotId, callable, branch.TrueTarget))));
+                        branch.TrueTarget)));
                 yield return (
                     branch.FalseTarget,
                     MirPathCondition.Test(new MirPathPredicate(
-                        new MirBlockRef(snapshotId, callable, controller),
-                        new MirValueRef(snapshotId, callable, branch.Condition),
+                        controller,
+                        branch.Condition,
                         ExpectedValue: false,
-                        new MirBlockRef(snapshotId, callable, branch.FalseTarget))));
+                        branch.FalseTarget)));
                 break;
         }
     }

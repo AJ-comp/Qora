@@ -6,14 +6,18 @@ namespace Qora.Compiler;
 
 /// <summary>
 /// Whole-program compiler entry point. Parsing is delegated to <see cref="QoraParser"/>; this type owns
-/// HIR revisions, semantic analysis, MIR, cross-stage links, and target artifacts.
+/// HIR revisions, semantic analysis, MIR, and target artifacts.
 /// </summary>
 public static class QoraCompiler
 {
     public static Compilation Compile(
         string source,
-        CompilationOptions? options = null) =>
-        new CompilationSession().Compile(source, options);
+        CompilationOptions? options = null,
+        CompilationInstrumentation? instrumentation = null) =>
+        new CompilationSession().Compile(
+            source,
+            options,
+            instrumentation);
 
     /// <summary>
     /// Compile a new immutable revision of the same logical compilation. The previous snapshot is never
@@ -22,15 +26,21 @@ public static class QoraCompiler
     public static Compilation Recompile(
         Compilation previous,
         string source,
-        CompilationOptions? options = null)
+        CompilationOptions? options = null,
+        CompilationInstrumentation? instrumentation = null)
     {
         ArgumentNullException.ThrowIfNull(previous);
-        return previous.Session.Recompile(previous, source, options);
+        return previous.Session.Recompile(
+            previous,
+            source,
+            options,
+            instrumentation);
     }
 
     internal static Compilation CompileSnapshot(
         string source,
         CompilationOptions options,
+        CompilationInstrumentation? instrumentation,
         CompilationSession session,
         CompilationRevision compilationRevision,
         CompilationRevision? parentRevision)
@@ -46,6 +56,7 @@ public static class QoraCompiler
                     compilation = CompileOnCurrentThread(
                         source ?? string.Empty,
                         options,
+                        instrumentation,
                         session,
                         compilationRevision,
                         parentRevision);
@@ -67,6 +78,7 @@ public static class QoraCompiler
     private static Compilation CompileOnCurrentThread(
         string source,
         CompilationOptions options,
+        CompilationInstrumentation? instrumentation,
         CompilationSession session,
         CompilationRevision compilationRevision,
         CompilationRevision? parentRevision)
@@ -85,11 +97,12 @@ public static class QoraCompiler
             loadedSources.ConstructionCore);
         var diagnostics = new List<CompilationDiagnostic>();
         MirSnapshot? mir = null;
+        HirCompilation? builtHir = null;
         var targetArtifacts = new List<ITargetArtifact>();
 
         Compilation Finish()
         {
-            var hir = hirBuilder.Build();
+            builtHir ??= hirBuilder.Build();
             return new Compilation(
                 compilationId,
                 compilationRevision,
@@ -97,9 +110,8 @@ public static class QoraCompiler
                 parentRevision,
                 options,
                 sources,
-                hir,
+                builtHir,
                 mir,
-                new CrossStageLinks(hir, mir?.Links),
                 new TargetArtifactSet(targetArtifacts),
                 diagnostics);
         }
@@ -272,19 +284,13 @@ public static class QoraCompiler
             }
         }
 
-        var analyzed = hirBuilder.AnalyzeEffects(specializedValidation);
+        hirBuilder.AnalyzeEffects(specializedValidation);
+        builtHir = hirBuilder.Build();
 
         if (options.OutputPlan.RequiresMir)
         {
-            var loweringHir = hirBuilder.Build();
-            var semanticContext = new HirSemanticContext(
-                loweringHir,
-                specialized,
-                analyzed);
-            var mirLowering = QoraMirLowering.Lower(
-                semanticContext,
-                revision: 0);
-            mir = mirLowering.CreateSnapshot();
+            mir = builtHir.ToMir(
+                instrumentation?.MirLowering);
 
             // MIR analyses run on the canonical lowered graph before any internal inverse request can
             // be injected. The future cleanup scheduler will consume these revision-bound facts, mark

@@ -110,7 +110,6 @@ public sealed class CompilationOutputPlanTests
                 source.Sources,
                 emptyHir,
                 null,
-                new CrossStageLinks(emptyHir, null),
                 new TargetArtifactSet(Array.Empty<ITargetArtifact>()),
                 Array.Empty<CompilationDiagnostic>()));
         Assert.Contains("resolved HIR", error.Message);
@@ -209,9 +208,6 @@ public sealed class CompilationOutputPlanTests
         TargetArtifactSet targets,
         IReadOnlyList<CompilationDiagnostic> diagnostics)
     {
-        var links = new CrossStageLinks(
-            source.Hir,
-            mir?.Links);
         return new Compilation(
             source.Id,
             source.Revision,
@@ -221,7 +217,6 @@ public sealed class CompilationOutputPlanTests
             source.Sources,
             source.Hir,
             mir,
-            links,
             targets,
             diagnostics);
     }

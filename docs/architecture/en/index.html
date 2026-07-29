@@ -469,10 +469,13 @@ v1 = add v0, 1
 return</code></pre>
 
   <p>
-    The result is one immutable, revision-qualified <code>MirSnapshot</code>. Its origin table and typed
-    cross-stage links connect every MIR callable, value, storage object, and qubit resource to its HIR
-    source or explicitly classify it as a compiler temporary. A backend therefore never has to guess
-    which source declaration a MIR identity came from.
+    The result is one immutable, revision-qualified <code>MirSnapshot</code>. Core retains the exact
+    <code>LoweringSource</code> and the program-owned <code>Origins</code> required for diagnostics,
+    transformation provenance, and backend errors; it does not retain an always-on
+    HIR-symbol-to-MIR-entity query index. When editor tooling requests those relationships,
+    <code>Qora.LanguageServices.MirSemanticIndex</code> collects an opt-in lowering trace and builds
+    callable-scoped symbol, value, storage, and qubit maps above the compiler IR layer. Backends consume
+    MIR directly and never depend on that language-service index.
   </p>
 
   <h2 id="s8"><span class="n">8</span>Analyze MIR and materialize internal inverses</h2>

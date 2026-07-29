@@ -144,6 +144,9 @@ public sealed class CompilationArchitectureTests
         Assert.Throws<ArgumentException>(
             () => first.ValidateSnapshot(secondSnapshot));
 
+        first.Alias(HirStage.ImportsExpanded, firstSnapshot);
+        first.Alias(HirStage.Resolved, firstSnapshot);
+        first.Alias(HirStage.Specialized, firstSnapshot);
         var validationArtifact = first.ValidateSnapshot(firstSnapshot);
         Assert.True(validationArtifact.IsAccepted);
         Assert.Equal(firstSnapshot.Id, validationArtifact.SourceId);
@@ -158,7 +161,7 @@ public sealed class CompilationArchitectureTests
         Assert.Equal(firstSnapshot.Id, analyzed.SourceId);
         Assert.Throws<InvalidOperationException>(
             () => first.AnalyzeEffects(validationArtifact));
-        Assert.Throws<ArgumentException>(
+        Assert.Throws<InvalidOperationException>(
             () => first.AnalyzeEffects(analyzed));
     }
 
@@ -421,39 +424,30 @@ public sealed class CompilationArchitectureTests
         var target = Assert.IsType<OpenQasmArtifact>(compilation.Targets.OpenQasm);
         Assert.Equal(analyzed.SourceId, mir.LoweredFrom);
         Assert.Equal(mir.Id, target.Source);
-        Assert.Equal(analyzed.Id, mir.Links.SymbolsFrom);
-        Assert.Same(mir.Links, compilation.Links.Mir);
     }
 
     [Fact]
-    public void HirSymbolsAndSsaValuesHaveManyToManyCrossStageLinks()
+    public void CoreArtifactsDoNotRetainLanguageServiceIndexes()
     {
         var compilation = QoraCompiler.Compile(
-            """
-            operation Main() {
-                var x: int = 1;
-                var y: int = x;
-                var z: int = y + 1;
-            }
-            """);
-        Assert.True(compilation.Succeeded);
+            "operation Main() { var x: int = 1; }");
+        var mir = Assert.IsType<MirSnapshot>(compilation.Mir);
 
-        var analyzed = Assert.IsType<HirSemanticArtifact>(compilation.Hir.EffectAnalysis);
-        var model = analyzed.Model;
-        var declarations = Assert.Single(analyzed.Program.Callables).Body
-            .OfType<HirVariableDeclarationStatement>()
-            .ToDictionary(declaration => declaration.Name);
-        var x = model.FindSymbol(declarations["x"].Id)!;
-        var y = model.FindSymbol(declarations["y"].Id)!;
-        var links = Assert.IsType<MirCrossStageLinks>(compilation.Links.Mir);
-        var xRef = new HirSymbolRef(links.SymbolsFrom, x.Id);
-        var yRef = new HirSymbolRef(links.SymbolsFrom, y.Id);
-
-        var xValue = Assert.Single(links.ValuesBySymbol[xRef]);
-        var yValue = Assert.Single(links.ValuesBySymbol[yRef]);
-        Assert.Equal(xValue, yValue);
-        Assert.Contains(xRef, links.SymbolsByValue[xValue]);
-        Assert.Contains(yRef, links.SymbolsByValue[xValue]);
+        Assert.Null(typeof(Compilation).GetProperty("Links"));
+        Assert.Null(typeof(MirSnapshot).GetProperty("Links"));
+        Assert.DoesNotContain(
+            typeof(Compilation).GetProperties(),
+            property => property.PropertyType.Name.Contains(
+                "SemanticIndex",
+                StringComparison.Ordinal));
+        Assert.DoesNotContain(
+            typeof(MirSnapshot).GetProperties(),
+            property => property.PropertyType.Name.Contains(
+                "SemanticIndex",
+                StringComparison.Ordinal));
+        Assert.Equal(
+            compilation.Hir.EffectAnalysis!.SourceId,
+            mir.LoweredFrom);
     }
 
     [Fact]
@@ -463,14 +457,14 @@ public sealed class CompilationArchitectureTests
             "operation Main() { use q = Qubit[1]; H(q[0]); }");
         var mir = Assert.IsType<MirSnapshot>(compilation.Mir);
         var callable = Assert.Single(mir.Program.Callables);
-        var callableRef = new MirCallableRef(mir.Id, callable.Id);
 
         Assert.Same(
-            mir.Analyses.ControlFlow(callableRef),
-            mir.Analyses.ControlFlow(callableRef));
+            mir.Analyses.ControlFlow(callable),
+            mir.Analyses.ControlFlow(callable.Id));
         Assert.Same(
-            mir.Analyses.MemoryState(callableRef),
-            mir.Analyses.MemoryState(callableRef));
+            mir.Analyses.MemoryState(callable),
+            mir.Analyses.MemoryState(callable.Id));
+        Assert.Same(mir.Analyses.CallGraph, mir.Analyses.CallGraph);
         Assert.Same(mir.Analyses.Effects, mir.Analyses.Effects);
     }
 
@@ -550,7 +544,6 @@ public sealed class CompilationArchitectureTests
                 source.Sources,
                 source.Hir,
                 mir,
-                source.Links,
                 new TargetArtifactSet(Array.Empty<ITargetArtifact>()),
                 new[]
                 {

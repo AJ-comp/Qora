@@ -201,7 +201,7 @@ static string FormatMirEffects(MirEffectSnapshot effects)
                     $"%{witness.Value}:{witness.Role}"));
 
         text.AppendLine(
-            $"@{effect.Site.Callable}/{effect.Site.Block}/%{effect.Site.Instruction}: "
+            $"@{effect.Site.Callable}/{effect.Site.Block}/%{effect.Site.Instruction.Instruction}: "
             + $"{target}; qubits [{qubits}]; witnesses [{witnesses}]");
     }
 

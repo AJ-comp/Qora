@@ -1,6 +1,7 @@
 using Qora.Ir;
 using Qora.Ir.Mir;
 using Qora.Ir.Mir.Analysis;
+using Qora.Ir.Passes;
 
 namespace Qora.Tests;
 
@@ -49,20 +50,14 @@ public sealed class QoraMirTests
         var secondInput = Assert.IsType<MirClassicalCallOperand>(calls[1].Operands[0]).Value;
         Assert.NotEqual(firstInput, secondInput);
 
-        var firstSymbol = Assert.Single(
-            SymbolsOf(snapshot, main.Id, firstInput));
-        var secondSymbol = Assert.Single(
-            SymbolsOf(snapshot, main.Id, secondInput));
-        Assert.Equal(firstSymbol, secondSymbol);
-
         var firstWitness = Assert.Single(
             EffectFor(effects, main.Id, calls[0].Id).ClassicalWitnesses,
             witness => witness.Role == MirClassicalWitnessRole.CallOperand);
         var secondWitness = Assert.Single(
             EffectFor(effects, main.Id, calls[1].Id).ClassicalWitnesses,
             witness => witness.Role == MirClassicalWitnessRole.CallOperand);
-        Assert.Equal(firstInput, firstWitness.Value.Value);
-        Assert.Equal(secondInput, secondWitness.Value.Value);
+        Assert.Equal(firstInput, firstWitness.Value);
+        Assert.Equal(secondInput, secondWitness.Value);
         Assert.NotEqual(firstWitness.Value, secondWitness.Value);
     }
 
@@ -111,14 +106,6 @@ public sealed class QoraMirTests
         Assert.Equal(
             2,
             incoming.Select(arguments => arguments[argumentIndex]).Distinct().Count());
-        var mergedSymbol = Assert.Single(
-            SymbolsOf(snapshot, main.Id, mergedInput));
-        Assert.All(
-            incoming,
-            arguments => Assert.Contains(
-                mergedSymbol,
-                SymbolsOf(snapshot, main.Id, arguments[argumentIndex])));
-
         static int blockArgumentIndex(MirBlock block, MirBlockArgument argument) =>
             block.Arguments.ToList().FindIndex(candidate => candidate.Value == argument.Value);
     }
@@ -185,12 +172,12 @@ public sealed class QoraMirTests
 
         var arrayEffect = Assert.Single(
             EffectFor(effects, main.Id, call.Id).ArrayStates);
-        Assert.Equal(inputState, arrayEffect.InputState.Value);
-        Assert.Equal(transition.Result, arrayEffect.OutputState?.Value);
+        Assert.Equal(inputState, arrayEffect.InputState);
+        Assert.Equal(transition.Result, arrayEffect.OutputState);
         Assert.True(arrayEffect.Storage.IsComplete);
         Assert.Equal(
             new[] { create.Storage },
-            arrayEffect.Storage.PossibleStorages.Select(storage => storage.Storage));
+            arrayEffect.Storage.PossibleStorages);
     }
 
     [Fact]
@@ -215,11 +202,6 @@ public sealed class QoraMirTests
             .ToArray();
         Assert.Equal(2, storages.Length);
         Assert.NotEqual(storages[0].Id, storages[1].Id);
-        var outerSymbol = Assert.Single(
-            SymbolsOf(snapshot, main.Id, storages[0].Id));
-        var innerSymbol = Assert.Single(
-            SymbolsOf(snapshot, main.Id, storages[1].Id));
-        Assert.NotEqual(outerSymbol, innerSymbol);
 
         var creates = main.Blocks
             .SelectMany(block => block.Instructions)
@@ -227,6 +209,59 @@ public sealed class QoraMirTests
             .ToArray();
         Assert.Equal(2, creates.Length);
         Assert.Equal(2, creates.Select(create => create.Storage).Distinct().Count());
+    }
+
+    [Fact]
+    public void ShadowedScalarAssignmentsKeepIndependentSsaIdentity()
+    {
+        var compilation = Compiler.Compile("""
+            operation Observe(value: int, target: Qubit) {
+                X(target);
+            }
+
+            operation Main() {
+                use q = Qubit[1];
+                var value: int = 1;
+                Observe(value, q[0]);
+
+                if (true) {
+                    var value: int = value + 1;
+                    Observe(value, q[0]);
+
+                    value = 3;
+                    Observe(value, q[0]);
+                }
+
+                value = 4;
+                Observe(value, q[0]);
+            }
+            """);
+        Assert.True(
+            compilation.Succeeded,
+            string.Join(
+                " | ",
+                compilation.Diagnostics.Select(
+                    diagnostic =>
+                        $"{diagnostic.Error.Code}: {diagnostic.Error.Message}")));
+        var snapshot = Assert.IsType<MirSnapshot>(compilation.Mir);
+        var program = snapshot.Program;
+        var observe = Callable(program, "Observe");
+        var main = Callable(program, "Main");
+        var calls = main.Blocks
+            .SelectMany(block => block.Instructions)
+            .OfType<MirQuantumApply>()
+            .Where(instruction =>
+                instruction.Target is MirUserCallableTarget target
+                && target.Callable == observe.Id)
+            .ToArray();
+        Assert.Equal(4, calls.Length);
+
+        var values = calls
+            .Select(call =>
+                Assert.IsType<MirClassicalCallOperand>(
+                    call.Operands[0]).Value)
+            .ToArray();
+        Assert.Equal(4, values.Distinct().Count());
     }
 
     [Fact]
@@ -259,12 +294,11 @@ public sealed class QoraMirTests
         var qubitOperand = Assert.IsType<MirQubitCallOperand>(Assert.Single(call.Operands));
         var index = Assert.IsType<MirValueId>(qubitOperand.Qubit.Index);
         _ = Assert.IsType<MirValue>(main.FindValue(index));
-        Assert.Single(SymbolsOf(snapshot, main.Id, index));
 
         var witness = Assert.Single(
             EffectFor(effects, main.Id, call.Id).ClassicalWitnesses,
             candidate => candidate.Role == MirClassicalWitnessRole.QubitIndex);
-        Assert.Equal(index, witness.Value.Value);
+        Assert.Equal(index, witness.Value);
     }
 
     [Fact]
@@ -333,7 +367,7 @@ public sealed class QoraMirTests
         Assert.NotEqual(declaration.Id, OriginNode(call.Origin));
 
         HirNodeId OriginNode(MirOriginRef origin) =>
-            snapshot.Links.ResolveOrigin(origin).Node.NodeId;
+            snapshot.Origins.ResolveHir(origin).HirNodeId!.Value;
     }
 
     [Fact]
@@ -375,20 +409,8 @@ public sealed class QoraMirTests
         var effect = EffectFor(snapshot.Analyses.Effects, main.Id, cnot.Id);
         Assert.Equal(
             targetAfterCnot.Key,
-            Assert.Single(effect.QubitResults).Key);
+            Assert.Single(effect.QubitResults));
 
-        var targetRef = new MirQubitRef(
-            snapshot.Id,
-            main.Id,
-            targetAfterCnot.Key);
-        var targetSymbol = Assert.Single(snapshot.Links.SymbolsFor(targetRef));
-        Assert.Equal(
-            new[] { 0, 1, 2 },
-            snapshot.Links.QubitsBySymbol[targetSymbol]
-                .Where(reference => reference.Id == targetAfterCnot.Id)
-                .Select(reference => reference.Version.Value)
-                .Order()
-                .ToArray());
     }
 
     [Fact]
@@ -417,7 +439,7 @@ public sealed class QoraMirTests
         var effect = EffectFor(snapshot.Analyses.Effects, main.Id, measure.Id);
         Assert.Equal(
             measure.QubitResult.Key,
-            Assert.Single(effect.QubitResults).Key);
+            Assert.Single(effect.QubitResults));
     }
 
     [Fact]
@@ -822,7 +844,7 @@ public sealed class QoraMirTests
             qubit => qubit.Flags.HasFlag(MirQubitEffectFlags.OwnershipTransfer));
 
         var summary = Assert.IsType<MirCallableEffectSummary>(
-            effects.SummaryOf(new MirCallableRef(program.SnapshotId, main.Id)));
+            effects.SummaryOf(main.Id));
         Assert.True(summary.TransfersOwnership);
     }
 
@@ -1204,22 +1226,6 @@ public sealed class QoraMirTests
         return Assert.IsType<MirSnapshot>(result.Mir);
     }
 
-    private static IReadOnlyList<HirSymbolRef> SymbolsOf(
-        MirSnapshot snapshot,
-        MirCallableId callable,
-        MirValueId value) =>
-        Assert.Contains(
-            new MirValueRef(snapshot.Id, callable, value),
-            snapshot.Links.SymbolsByValue);
-
-    private static IReadOnlyList<HirSymbolRef> SymbolsOf(
-        MirSnapshot snapshot,
-        MirCallableId callable,
-        MirStorageId storage) =>
-        Assert.Contains(
-            new MirStorageRef(snapshot.Id, callable, storage),
-            snapshot.Links.SymbolsByStorage);
-
     private static MirCallable Callable(MirProgram program, string name) =>
         Assert.Single(program.Callables, callable => callable.Name == name);
 
@@ -1229,8 +1235,7 @@ public sealed class QoraMirTests
         MirInstructionId instruction) =>
         Assert.Single(
             effects.Effects,
-            effect => effect.Site.Callable
-                    == new MirCallableRef(effects.SnapshotId, callable)
+            effect => effect.Site.Callable == callable
                 && effect.Site.Instruction.Instruction == instruction);
 
     private static IReadOnlyList<IReadOnlyList<MirValueId>> IncomingArguments(

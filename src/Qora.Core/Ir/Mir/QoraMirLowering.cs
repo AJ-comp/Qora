@@ -4,53 +4,70 @@ using Qora.Ir.Passes;
 namespace Qora.Ir.Mir;
 
 /// <summary>
-/// Lowers the validated, source-shaped Qora HIR into typed SSA/CFG MIR.
+/// Lowers Qora's final effect-analyzed, source-shaped HIR into typed SSA/CFG MIR.
 ///
-/// Name lookup is deliberately confined to this boundary. The lowering environment resolves each HIR
-/// spelling to the declaration's <see cref="SymbolId"/> while walking lexical scopes. Symbols remain in
-/// <see cref="MirCrossStageLinks"/> rather than being copied into MIR entities; every emitted MIR
-/// reference is then a dense MIR ID, never a string. Classical assignments create immutable SSA states,
-/// block arguments represent Phi values, arrays retain both storage identity and state versions, and
-/// qubits use a separate versioned identity space.
+/// HIR name resolution is complete before this boundary. Lowering consumes the exact use-site
+/// <see cref="SymbolId"/> recorded by the semantic model and only tracks that symbol's current MIR state;
+/// it never resolves source spelling again. Symbols are not copied into MIR entities; an optional
+/// <see cref="IMirLoweringTraceSink"/> may observe exact source relationships for an upper query layer.
+/// Every emitted MIR reference is a dense MIR ID, never a string.
+/// Classical assignments create immutable SSA states, block arguments represent Phi values, arrays retain
+/// both storage identity and state versions, and qubits use a separate versioned identity space.
 /// </summary>
 internal static class QoraMirLowering
 {
-    public static MirLoweringResult Lower(
-        HirSemanticContext semantics,
-        int revision = 0)
+    /// <summary>
+    /// Converts the compilation's final effect-analyzed HIR. The <see cref="HirCompilation"/> owns the
+    /// canonical final artifact, so callers cannot combine a HIR snapshot with another snapshot's model.
+    /// </summary>
+    public static MirSnapshot ToMir(
+        this HirCompilation hir,
+        IMirLoweringTraceSink? trace = null)
     {
-        ArgumentNullException.ThrowIfNull(semantics);
-        if (revision < 0) throw new ArgumentOutOfRangeException(nameof(revision));
+        ArgumentNullException.ThrowIfNull(hir);
 
-        var hir = semantics.Current.Program;
+        var finalHir = hir.EffectAnalysis
+            ?? throw new InvalidOperationException(
+                "MIR lowering requires the compilation's final effect-analyzed HIR");
+        return Lower(finalHir, trace);
+    }
+
+    private static MirSnapshot Lower(
+        HirSemanticArtifact finalHir,
+        IMirLoweringTraceSink? trace)
+    {
+        ArgumentNullException.ThrowIfNull(finalHir);
+
+        var source = finalHir.Source;
+        var semanticModel = finalHir.Model;
+        var hir = source.Program;
         var snapshotId = new MirSnapshotId(
-            semantics.Current.Id.CompilationId,
-            semantics.Current.Id.CompilationRevision,
-            revision);
+            source.Id.CompilationId,
+            source.Id.CompilationRevision,
+            revision: 0);
         var origins = new MirOriginTableBuilder(
             snapshotId,
-            semantics.Current);
-        var links = new MirCrossStageLinksBuilder(
-            snapshotId,
-            semantics.Current,
-            semantics.SemanticBasis);
+            source);
         var callableIds = hir.Callables
             .Select((callable, index) => (SourceId: callable.Id, MirId: new MirCallableId(index)))
             .ToDictionary(item => item.SourceId, item => item.MirId);
-        var callablesById = hir.Callables.ToDictionary(callable => callable.Id);
+        var callablesBySymbol = hir.Callables.ToDictionary(
+            callable => semanticModel.FindSymbol(callable.Id)?.Id
+                ?? throw new InvalidOperationException(
+                    $"validated callable `{callable.Name}` has no semantic symbol"));
         var boundsSites =
-            new Dictionary<HirNodeId, MirIndexedAccessRef>();
+            new Dictionary<HirNodeId, MirIndexedAccessSite>();
         var callables = hir.Callables
             .Select(callable => new CallableLowerer(
                 callable,
                 callableIds[callable.Id],
                 QualifiedName(hir, callable),
                 snapshotId,
-                semantics,
+                semanticModel,
                 callableIds,
-                callablesById,
+                callablesBySymbol,
                 origins,
-                links,
+                trace,
                 boundsSites).Lower())
             .ToList();
 
@@ -58,17 +75,21 @@ internal static class QoraMirLowering
         var entryCallable = hir.EntryCallable
             ?? throw new InvalidOperationException(
                 "validated HIR must contain an operation before MIR lowering");
-        return new MirLoweringResult(
-            new MirProgram(
-                snapshotId,
-                originTable,
-                callableIds[entryCallable.Id],
-                callables),
-            links.Build(originTable),
-            MirSafetyFacts.FromHir(
-                snapshotId,
-                semantics.SourceModel,
-                boundsSites));
+        var program = new MirProgram(
+            snapshotId,
+            originTable,
+            callableIds[entryCallable.Id],
+            callables);
+        var safety = MirSafetyFacts.FromHir(
+            snapshotId,
+            semanticModel,
+            boundsSites);
+        return new MirSnapshot(
+            snapshotId,
+            MirLoweringProfile.CanonicalV1,
+            program,
+            finalHir,
+            safety: safety);
 
         static string QualifiedName(
             HirProgram program,
@@ -87,12 +108,12 @@ internal static class QoraMirLowering
         private readonly MirCallableId _callableId;
         private readonly string _qualifiedName;
         private readonly MirSnapshotId _snapshotId;
-        private readonly IHirSemanticContext _semantics;
+        private readonly HirSemanticModel _semanticModel;
         private readonly IReadOnlyDictionary<HirNodeId, MirCallableId> _callableIds;
-        private readonly IReadOnlyDictionary<HirNodeId, HirCallable> _callablesById;
+        private readonly IReadOnlyDictionary<SymbolId, HirCallable> _callablesBySymbol;
         private readonly MirOriginTableBuilder _origins;
-        private readonly MirCrossStageLinksBuilder _links;
-        private readonly Dictionary<HirNodeId, MirIndexedAccessRef> _boundsSites;
+        private readonly IMirLoweringTraceSink? _trace;
+        private readonly Dictionary<HirNodeId, MirIndexedAccessSite> _boundsSites;
 
         private readonly List<BlockBuilder> _blocks = new();
         private readonly List<MirValue> _values = new();
@@ -115,22 +136,22 @@ internal static class QoraMirLowering
             MirCallableId callableId,
             string qualifiedName,
             MirSnapshotId snapshotId,
-            IHirSemanticContext semantics,
+            HirSemanticModel semanticModel,
             IReadOnlyDictionary<HirNodeId, MirCallableId> callableIds,
-            IReadOnlyDictionary<HirNodeId, HirCallable> callablesById,
+            IReadOnlyDictionary<SymbolId, HirCallable> callablesBySymbol,
             MirOriginTableBuilder origins,
-            MirCrossStageLinksBuilder links,
-            Dictionary<HirNodeId, MirIndexedAccessRef> boundsSites)
+            IMirLoweringTraceSink? trace,
+            Dictionary<HirNodeId, MirIndexedAccessSite> boundsSites)
         {
             _callable = callable;
             _callableId = callableId;
             _qualifiedName = qualifiedName;
             _snapshotId = snapshotId;
-            _semantics = semantics;
+            _semanticModel = semanticModel;
             _callableIds = callableIds;
-            _callablesById = callablesById;
+            _callablesBySymbol = callablesBySymbol;
             _origins = origins;
-            _links = links;
+            _trace = trace;
             _boundsSites = boundsSites;
             _callableOrigin = _origins.Hir(
                 callable.Id,
@@ -142,7 +163,7 @@ internal static class QoraMirLowering
             var callableSymbol = RequireSymbol(
                 _callable.Id,
                 $"callable `{_callable.Name}`");
-            _links.LinkCallable(
+            _trace?.LinkCallable(
                 _callable.Id,
                 callableSymbol.Id,
                 _callableId);
@@ -191,7 +212,7 @@ internal static class QoraMirLowering
                 var parameterOrigin = _origins.Hir(
                     _callable.Id,
                     parameter.Id);
-                _state.Declare(parameter.Name, symbol.Id);
+                _state.Declare(symbol.Id);
 
                 if (parameter.Type == QType.Qubit)
                 {
@@ -234,7 +255,7 @@ internal static class QoraMirLowering
                         index,
                         AllocationInstruction: null,
                         parameterOrigin));
-                    _links.LinkStorage(
+                    _trace?.LinkStorage(
                         symbol.Id,
                         _callableId,
                         storageId.Value);
@@ -257,7 +278,7 @@ internal static class QoraMirLowering
             foreach (var use in statements.OfType<HirQubitDeclarationStatement>())
             {
                 var symbol = RequireSymbol(use.Id, $"qubit allocation `{use.Name}`");
-                _state.Declare(use.Name, symbol.Id);
+                _state.Declare(symbol.Id);
                 var instructionId = NextInstruction();
                 var qubitId = NextQubitId();
                 var source = SourceOf(use);
@@ -288,8 +309,11 @@ internal static class QoraMirLowering
 
         private void MarkUnreachableDeclarations(HirStatement statement)
         {
-            if (_semantics.FindSymbol(statement.Id) is { } symbol)
-                _links.MarkUnreachable(symbol.Id);
+            if (_trace is null)
+                return;
+
+            if (_semanticModel.FindSymbol(statement.Id) is { } symbol)
+                _trace.MarkUnreachable(symbol.Id);
 
             switch (statement)
             {
@@ -396,7 +420,7 @@ internal static class QoraMirLowering
                     ParameterIndex: null,
                     instructionId,
                     source));
-                _links.LinkStorage(
+                _trace?.LinkStorage(
                     symbol.Id,
                     _callableId,
                     storageId);
@@ -409,7 +433,7 @@ internal static class QoraMirLowering
                     length,
                     elements,
                     source));
-                _state.Declare(declaration.Name, symbol.Id);
+                _state.Declare(symbol.Id);
                 _state.Values[symbol.Id] = result;
                 _state.Storages[symbol.Id] = storageId;
                 return;
@@ -422,7 +446,7 @@ internal static class QoraMirLowering
                 declaration.Value,
                 MirType.Scalar(declaredType));
             AttachSymbol(value, symbol.Id);
-            _state.Declare(declaration.Name, symbol.Id);
+            _state.Declare(symbol.Id);
             _state.Values[symbol.Id] = value;
         }
 
@@ -432,8 +456,9 @@ internal static class QoraMirLowering
 
             if (assignment.Target is HirNameExpression name)
             {
-                var symbolId = _state.Resolve(name.Name)
-                    ?? throw Internal($"assignment target `{name.Name}` is not active");
+                var symbolId = RequireReferencedSymbol(
+                    name,
+                    $"assignment target `{name.Name}`");
                 var expected = _state.Values.TryGetValue(symbolId, out var current)
                     ? TypeOf(current)
                     : throw Internal($"assignment target `{name.Name}` has no SSA state");
@@ -452,8 +477,9 @@ internal static class QoraMirLowering
                     $"unsupported assignment target `{HirExpressions.Render(assignment.Target)}`");
             }
 
-            var indexedSymbolId = _state.Resolve(receiver.Name)
-                ?? throw Internal($"assignment target `{receiver.Name}` is not active");
+            var indexedSymbolId = RequireReferencedSymbol(
+                receiver,
+                $"assignment target `{receiver.Name}`");
             if (!_state.Values.TryGetValue(indexedSymbolId, out var array))
                 throw Internal($"indexed assignment target `{receiver.Name}` has no array state");
             var arrayType = TypeOf(array);
@@ -483,8 +509,10 @@ internal static class QoraMirLowering
         {
             var source = SourceOf(statement);
             var call = statement.Call;
-            var callee = ResolveUserCallable(call.CalleeId);
-            if (callee is { IsFunction: true })
+            var targetSymbol = RequireCallTarget(call);
+            var callee = ResolveUserCallable(targetSymbol);
+            if (targetSymbol.Kind == SymbolKind.Callable
+                && callee is { IsFunction: true })
             {
                 LowerPureCall(
                     new MirUserCallableTarget(_callableIds[callee.Id]),
@@ -493,16 +521,23 @@ internal static class QoraMirLowering
                 return;
             }
 
-            if (callee is not null)
+            if (targetSymbol.Kind == SymbolKind.Callable
+                && callee is not null)
             {
                 LowerOperationCall(statement, callee, source);
                 return;
             }
 
+            if (targetSymbol.Kind != SymbolKind.BuiltinGate)
+            {
+                throw Internal(
+                    $"statement call `{call.Name}` targets semantic symbol kind {targetSymbol.Kind}");
+            }
+            var gateName = targetSymbol.SourceName;
             var signature = QoraGates.SigOf(
-                call.Name,
+                gateName,
                 statement.Modifiers.Count(modifier => modifier == QGateModifier.Controlled))
-                ?? throw Internal($"validated built-in gate `{call.Name}` has no signature");
+                ?? throw Internal($"validated built-in gate `{gateName}` has no signature");
             var operands = new List<MirCallOperand>(call.Arguments.Count);
             for (var index = 0; index < call.Arguments.Count; index++)
             {
@@ -530,11 +565,11 @@ internal static class QoraMirLowering
             var instructionId = NextInstruction();
             EmitQuantumApply(
                 instructionId,
-                new MirBuiltinGateTarget(call.Name),
+                new MirBuiltinGateTarget(gateName),
                 operands,
                 Array.Empty<MirMutableArrayResult>(),
                 LowerModifiers(statement.Modifiers),
-                WrittenBuiltinQubitOperands(statement),
+                WrittenBuiltinQubitOperands(statement, gateName),
                 source);
             RegisterQubitArgumentBoundsSites(
                 call.Arguments,
@@ -581,15 +616,16 @@ internal static class QoraMirLowering
                     && parameter.Access == QAccessMode.Mutable)
                 {
                     var actualType = TypeOf(value);
+                    var symbolId = SymbolOfWholeArgument(argument)
+                        ?? throw Internal(
+                            $"mutable array argument {index} of `{callee.Name}` is not a binding");
                     var result = AddInstructionResult(
                         instructionId,
                         actualType,
-                        SymbolOfWholeArgument(argument),
+                        symbolId,
                         source,
                         mutableResults.Count);
                     mutableResults.Add(new MirMutableArrayResult(index, result));
-                    var symbolId = SymbolOfWholeArgument(argument)
-                        ?? throw Internal($"mutable array argument {index} of `{callee.Name}` is not a binding");
                     mutableBindings.Add((symbolId, result));
                 }
             }
@@ -792,7 +828,7 @@ internal static class QoraMirLowering
                 MirType.Scalar(QType.Int),
                 loopSymbol.Id,
                 source);
-            headerState.Declare(loop.Variable, loopSymbol.Id);
+            headerState.Declare(loopSymbol.Id);
             headerState.Values[loopSymbol.Id] = loopValue;
             initialArguments.Add(from);
             preheader.Terminator = new MirJump(header.Id, initialArguments, source);
@@ -1040,8 +1076,9 @@ internal static class QoraMirLowering
 
                 case HirNameExpression name:
                 {
-                    var symbol = _state.Resolve(name.Name)
-                        ?? throw Internal($"classical name `{name.Name}` is not active");
+                    var symbol = RequireReferencedSymbol(
+                        name,
+                        $"classical name `{name.Name}`");
                     if (!_state.Values.TryGetValue(symbol, out var value))
                         throw Internal($"name `{name.Name}` does not denote a classical SSA value");
                     return value;
@@ -1115,9 +1152,9 @@ internal static class QoraMirLowering
                 {
                     if (receiver is HirNameExpression name)
                     {
-                        var symbol = _state.Resolve(name.Name)
-                            ?? throw Internal(
-                                $"Count receiver `{name.Name}` is not active");
+                        var symbol = RequireReferencedSymbol(
+                            name,
+                            $"Count receiver `{name.Name}`");
                         if (_state.Qubits.TryGetValue(symbol, out var currentQubit))
                         {
                             var (isArray, length) = QubitShape(currentQubit.Id);
@@ -1182,12 +1219,21 @@ internal static class QoraMirLowering
 
                 case HirCallExpression call:
                 {
-                    if (QoraGates.Functions.ContainsKey(call.Name))
+                    var targetSymbol = RequireCallTarget(call);
+                    if (targetSymbol.Kind == SymbolKind.BuiltinFunction)
+                    {
                         return LowerPureCall(
-                            new MirBuiltinFunctionTarget(call.Name),
+                            new MirBuiltinFunctionTarget(
+                                targetSymbol.SourceName),
                             callee: null,
                             call);
-                    var callee = ResolveUserCallable(call.CalleeId)
+                    }
+                    if (targetSymbol.Kind != SymbolKind.Callable)
+                    {
+                        throw Internal(
+                            $"expression call `{call.Name}` targets semantic symbol kind {targetSymbol.Kind}");
+                    }
+                    var callee = ResolveUserCallable(targetSymbol)
                         ?? throw Internal($"resolved function `{call.Name}` has no callable");
                     if (!callee.IsFunction)
                         throw Internal($"expression call `{call.Name}` targets an operation");
@@ -1299,8 +1345,9 @@ internal static class QoraMirLowering
             {
                 case HirNameExpression name:
                 {
-                    var symbol = _state.Resolve(name.Name)
-                        ?? throw Internal($"qubit name `{name.Name}` is not active");
+                    var symbol = RequireReferencedSymbol(
+                        name,
+                        $"qubit name `{name.Name}`");
                     if (!_state.Qubits.TryGetValue(symbol, out var qubit))
                         throw Internal($"name `{name.Name}` does not denote a qubit");
                     return new MirQubitAccess(qubit);
@@ -1311,8 +1358,9 @@ internal static class QoraMirLowering
                     Index: { } index,
                 }:
                 {
-                    var symbol = _state.Resolve(name.Name)
-                        ?? throw Internal($"qubit name `{name.Name}` is not active");
+                    var symbol = RequireReferencedSymbol(
+                        name,
+                        $"qubit name `{name.Name}`");
                     if (!_state.Qubits.TryGetValue(symbol, out var qubit))
                         throw Internal($"name `{name.Name}` does not denote a qubit");
                     var offset = LowerExpressionAs(
@@ -1459,14 +1507,13 @@ internal static class QoraMirLowering
             var id = new MirValueId(_values.Count);
             _valueIndexes[id] = _values.Count;
             _values.Add(new MirValue(id, type, definition, source));
-            _links.RegisterTemporaryValue(_callableId, id);
             if (symbol is SymbolId sourceSymbol)
-                _links.LinkValue(sourceSymbol, _callableId, id);
+                _trace?.LinkValue(sourceSymbol, _callableId, id);
             return id;
         }
 
         private void AttachSymbol(MirValueId value, SymbolId symbol) =>
-            _links.LinkValue(symbol, _callableId, value);
+            _trace?.LinkValue(symbol, _callableId, value);
 
         private MirType TypeOf(MirValueId value) => _values[_valueIndexes[value]].Type;
 
@@ -1496,16 +1543,15 @@ internal static class QoraMirLowering
             MirIndexedAccessKind kind,
             int ordinal = 0)
         {
-            if (_semantics.SourceModel.UnprovenIndexSite(
+            if (_semanticModel.UnprovenIndexSite(
                     exactHirSite.Id)
                 is not { } semanticSite)
             {
                 return;
             }
 
-            var loweredSite = new MirIndexedAccessRef(
-                new MirInstructionRef(
-                    _snapshotId,
+            var loweredSite = new MirIndexedAccessSite(
+                new MirInstructionSite(
                     _callableId,
                     instruction),
                 kind,
@@ -1563,11 +1609,12 @@ internal static class QoraMirLowering
         }
 
         private IReadOnlyList<int> WrittenBuiltinQubitOperands(
-            HirCallStatement statement)
+            HirCallStatement statement,
+            string gateName)
         {
             var call = statement.Call;
-            if (!QoraGates.Gates.TryGetValue(call.Name, out var info))
-                throw Internal($"built-in gate `{call.Name}` has no effect metadata");
+            if (!QoraGates.Gates.TryGetValue(gateName, out var info))
+                throw Internal($"built-in gate `{gateName}` has no effect metadata");
 
             var firstQubit = info.AngleFirst ? 1 : 0;
             var qubitOperands = Enumerable.Range(
@@ -1584,7 +1631,7 @@ internal static class QoraMirLowering
             if (controlCount > qubitOperands.Count)
             {
                 throw Internal(
-                    $"built-in gate `{call.Name}` declares more controls than qubit operands");
+                    $"built-in gate `{gateName}` declares more controls than qubit operands");
             }
 
             return qubitOperands.Skip(controlCount).ToArray();
@@ -1592,7 +1639,7 @@ internal static class QoraMirLowering
 
         private IReadOnlyList<int> WrittenUserQubitOperands(HirCallable callee)
         {
-            var effects = _semantics.SourceModel.FindOpEffects(callee.Id)
+            var effects = _semanticModel.FindOpEffects(callee.Id)
                 ?? throw Internal($"callable `{callee.Name}` has no HIR effect summary");
             var written = new List<int>();
             for (var index = 0; index < callee.Parameters.Count; index++)
@@ -1616,7 +1663,7 @@ internal static class QoraMirLowering
             if (!_qubitSeeds.TryAdd(qubit.Id, qubit))
                 throw Internal($"qubit identity {qubit.Id} was allocated more than once");
             _nextQubitVersions.Add(qubit.Id, 1);
-            _links.LinkQubit(symbol, _callableId, qubit.Key);
+            _trace?.LinkQubit(symbol, _callableId, qubit.Key);
         }
 
         private MirQubitAfterInstruction NextQubitAfterInstruction(
@@ -1649,7 +1696,7 @@ internal static class QoraMirLowering
                 inputs,
                 source);
             block.QubitPhis.Add(phi);
-            _links.LinkQubit(symbol, _callableId, phi.Key);
+            _trace?.LinkQubit(symbol, _callableId, phi.Key);
             return phi;
         }
 
@@ -1707,7 +1754,7 @@ internal static class QoraMirLowering
                 {
                     merged.Qubits[symbol] = phi;
                     if (symbol != group.Symbols[0])
-                        _links.LinkQubit(symbol, _callableId, phi.Key);
+                        _trace?.LinkQubit(symbol, _callableId, phi.Key);
                 }
             }
 
@@ -1772,7 +1819,7 @@ internal static class QoraMirLowering
                 {
                     headerState.Qubits[symbol] = phi;
                     if (symbol != symbols[0])
-                        _links.LinkQubit(symbol, _callableId, phi.Key);
+                        _trace?.LinkQubit(symbol, _callableId, phi.Key);
                 }
 
                 bindings.Add(new LoopQubitPhiBinding(phi, symbols));
@@ -1829,7 +1876,7 @@ internal static class QoraMirLowering
             foreach (var symbol in symbols)
             {
                 _state.Qubits[symbol] = qubit;
-                _links.LinkQubit(symbol, _callableId, qubit.Key);
+                _trace?.LinkQubit(symbol, _callableId, qubit.Key);
             }
         }
 
@@ -1875,13 +1922,24 @@ internal static class QoraMirLowering
         private MirQubitId NextQubitId() => new(_nextQubit++);
 
         private Symbol RequireSymbol(HirNodeId declarationId, string role) =>
-            _semantics.FindSymbol(declarationId)
+            _semanticModel.FindSymbol(declarationId)
             ?? throw Internal($"{role} has no semantic symbol");
 
-        private HirCallable? ResolveUserCallable(HirNodeId? sourceCallableId)
+        private SymbolId RequireReferencedSymbol(
+            HirNameExpression reference,
+            string role) =>
+            _semanticModel.FindReferencedSymbol(reference.Id)?.Id
+            ?? throw Internal($"{role} has no semantic binding");
+
+        private Symbol RequireCallTarget(HirCallExpression call) =>
+            _semanticModel.FindReferencedSymbol(call.Callee.Id)
+            ?? throw Internal(
+                $"call target `{call.Name}` has no semantic binding");
+
+        private HirCallable? ResolveUserCallable(Symbol target)
         {
-            if (sourceCallableId is HirNodeId id
-                && _callablesById.TryGetValue(id, out var byId))
+            if (target.Kind == SymbolKind.Callable
+                && _callablesBySymbol.TryGetValue(target.Id, out var byId))
             {
                 return byId;
             }
@@ -1891,7 +1949,9 @@ internal static class QoraMirLowering
         private SymbolId? SymbolOfWholeArgument(HirArgument argument)
         {
             if (argument.Expression is not HirNameExpression name) return null;
-            return _state.Resolve(name.Name);
+            return RequireReferencedSymbol(
+                name,
+                $"argument `{name.Name}`");
         }
 
         private static IReadOnlyList<MirFunctor> LowerModifiers(
@@ -2001,16 +2061,18 @@ internal static class QoraMirLowering
 
         private sealed class FlowState
         {
-            private readonly List<Dictionary<string, SymbolId>> _scopes;
+            // These are lifetime frames, not name-resolution scopes. HIR has already resolved every use to
+            // a SymbolId; the frames only identify states that must disappear when a lexical block exits.
+            private readonly List<HashSet<SymbolId>> _lifetimeFrames;
             public Dictionary<SymbolId, MirValueId> Values { get; }
             public Dictionary<SymbolId, MirStorageId> Storages { get; }
             public Dictionary<SymbolId, MirQubit> Qubits { get; }
 
             public FlowState()
             {
-                _scopes = new List<Dictionary<string, SymbolId>>
+                _lifetimeFrames = new List<HashSet<SymbolId>>
                 {
-                    new(StringComparer.Ordinal),
+                    new(),
                 };
                 Values = new();
                 Storages = new();
@@ -2018,35 +2080,35 @@ internal static class QoraMirLowering
             }
 
             private FlowState(
-                List<Dictionary<string, SymbolId>> scopes,
+                List<HashSet<SymbolId>> scopes,
                 Dictionary<SymbolId, MirValueId> values,
                 Dictionary<SymbolId, MirStorageId> storages,
                 Dictionary<SymbolId, MirQubit> qubits)
             {
-                _scopes = scopes;
+                _lifetimeFrames = scopes;
                 Values = values;
                 Storages = storages;
                 Qubits = qubits;
             }
 
             public FlowState Clone() => new(
-                _scopes
-                    .Select(scope => new Dictionary<string, SymbolId>(scope, StringComparer.Ordinal))
+                _lifetimeFrames
+                    .Select(scope => new HashSet<SymbolId>(scope))
                     .ToList(),
                 new Dictionary<SymbolId, MirValueId>(Values),
                 new Dictionary<SymbolId, MirStorageId>(Storages),
                 new Dictionary<SymbolId, MirQubit>(Qubits));
 
             public void PushScope() =>
-                _scopes.Add(new Dictionary<string, SymbolId>(StringComparer.Ordinal));
+                _lifetimeFrames.Add(new HashSet<SymbolId>());
 
             public void PopScope()
             {
-                if (_scopes.Count == 1)
+                if (_lifetimeFrames.Count == 1)
                     throw new InvalidOperationException("QINTERNAL: cannot pop the MIR root lexical scope");
-                var removed = _scopes[^1];
-                _scopes.RemoveAt(_scopes.Count - 1);
-                foreach (var symbol in removed.Values)
+                var removed = _lifetimeFrames[^1];
+                _lifetimeFrames.RemoveAt(_lifetimeFrames.Count - 1);
+                foreach (var symbol in removed)
                 {
                     Values.Remove(symbol);
                     Storages.Remove(symbol);
@@ -2054,15 +2116,11 @@ internal static class QoraMirLowering
                 }
             }
 
-            public void Declare(string name, SymbolId symbol) =>
-                _scopes[^1][name] = symbol;
-
-            public SymbolId? Resolve(string name)
+            public void Declare(SymbolId symbol)
             {
-                for (var index = _scopes.Count - 1; index >= 0; index--)
-                    if (_scopes[index].TryGetValue(name, out var symbol))
-                        return symbol;
-                return null;
+                if (!_lifetimeFrames[^1].Add(symbol))
+                    throw new InvalidOperationException(
+                        $"QINTERNAL: semantic symbol {symbol} was declared twice in one MIR scope");
             }
         }
     }

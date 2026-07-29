@@ -92,7 +92,7 @@
 <header class="hero">
   <div class="tag">Qora · Compiler Architecture Datasheet</div>
   <h1>Qora 컴파일러 데이터시트</h1>
-  <p>Compilation · SourceSet · HIR semantics · MIR · cross-stage links · target artifacts</p>
+  <p>Compilation · SourceSet · HIR semantics · MIR provenance · language-service index · target artifacts</p>
 </header>
 
 <div class="wrap">
@@ -102,7 +102,7 @@
     <a href="#s3">SourceSet</a>
     <a href="#s4">HIR</a>
     <a href="#s5">MIR</a>
-    <a href="#s6">단계 링크</a>
+    <a href="#s6">소유 경계·IDE 인덱스</a>
     <a href="#s7">Targets</a>
     <a href="#s8">진단·불변 조건</a>
   </nav>
@@ -110,7 +110,7 @@
   <p class="lead">
     Qora의 공개 컴파일 결과는 한 source revision을 나타내는 불변 <code>Compilation</code>입니다.<br>
     <code>CompilationSession</code>이 한 논리 컴파일의 identity와 branch-safe revision 발급을 소유하고, 각 결과는 자신의 <code>Revision</code>과 선택적 <code>ParentRevision</code>을 기록합니다.<br>
-    이 aggregate가 <code>Sources</code>, <code>Hir</code>, 요청된 경우의 <code>Mir</code>, <code>Links</code>, <code>Targets</code>, <code>Diagnostics</code>를 소유하며, 각 단계의 사실은 자신이 설명하는 정확한 snapshot identity로 한정됩니다.<br>
+    이 aggregate가 <code>Sources</code>, <code>Hir</code>, 요청된 경우의 <code>Mir</code>, <code>Targets</code>, <code>Diagnostics</code>를 소유하며, 각 단계의 사실은 자신이 설명하는 정확한 snapshot identity로 한정됩니다.<br>
     따라서 HIR 트리와 다른 세대의 의미 모델을 우연히 결합하거나, backend가 원본 의미 정보를 덮어쓰는 구조를 허용하지 않습니다.
   </p>
 
@@ -124,9 +124,9 @@
 
   <figure class="diagram" aria-labelledby="pipeline-title pipeline-caption">
     <div class="diagram-scroll" tabindex="0">
-      <svg viewBox="0 0 1100 680" role="img" aria-labelledby="pipeline-title pipeline-desc">
-        <title id="pipeline-title">Compilation이 소스, HIR, MIR, 링크, 대상 아티팩트를 소유하는 구조</title>
-        <desc id="pipeline-desc">SourceGraphLoader가 SourceSet을 만들고 구조 HIR snapshot과 별도 semantic artifact가 이어집니다. HIR을 SSA와 CFG 기반 MIR로 lowering하고, cross-stage links가 관계를 기록합니다. OpenQASM은 materialized MIR에서 만들어져 Targets의 backend map에 저장됩니다.</desc>
+      <svg viewBox="0 0 1100 800" role="img" aria-labelledby="pipeline-title pipeline-desc">
+        <title id="pipeline-title">Compilation의 Core 소유 구조와 선택적 language-service 인덱스</title>
+        <desc id="pipeline-desc">SourceGraphLoader가 SourceSet을 만들고 구조 HIR snapshot과 별도 semantic artifact가 이어집니다. HIR을 SSA와 CFG 기반 MIR로 lowering하며, Core는 HIR lineage와 MIR lowering source 및 origin만 보존합니다. 요청한 경우에만 Qora.LanguageServices가 lowering trace를 수집해 IDE 질의 인덱스를 만듭니다.</desc>
         <defs>
           <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
             <path d="M0 0 L10 5 L0 10 Z" fill="#64748b"/>
@@ -168,16 +168,16 @@
         <rect x="358" y="422" width="356" height="170" rx="12" fill="#f3faf7" stroke="#78b89f" stroke-width="2"/>
         <text class="svg-code" x="536" y="452" text-anchor="middle" fill="#116347" font-size="16" font-weight="850">Mir</text>
         <text class="svg-code" x="382" y="484" fill="#334155" font-size="12.5">MirSnapshot · typed SSA / CFG</text>
-        <text class="svg-code" x="382" y="512" fill="#334155" font-size="12.5">Structure · Origins · Links</text>
+        <text class="svg-code" x="382" y="512" fill="#334155" font-size="12.5">Structure · LoweringSource · Origins</text>
         <text class="svg-code" x="382" y="540" fill="#334155" font-size="12.5">Analyses.ControlFlow(...)</text>
         <text class="svg-code" x="382" y="568" fill="#334155" font-size="12.5">Analyses.Effects</text>
 
         <rect x="758" y="112" width="272" height="178" rx="12" fill="#f8fafc" stroke="#9aa7b7" stroke-width="2"/>
-        <text class="svg-code" x="894" y="142" text-anchor="middle" fill="#334155" font-size="16" font-weight="850">Links</text>
-        <text class="svg-code" x="780" y="175" fill="#334155" font-size="12.5">HirLineage</text>
-        <text class="svg-code" x="780" y="202" fill="#334155" font-size="12.5">MirCrossStageLinks</text>
-        <text class="svg-code" x="780" y="229" fill="#64748b" font-size="11.5">HIR ↔ MIR typed references</text>
-        <text class="svg-code" x="780" y="256" fill="#64748b" font-size="11.5">revision-bound provenance</text>
+        <text class="svg-code" x="894" y="142" text-anchor="middle" fill="#334155" font-size="16" font-weight="850">Core provenance</text>
+        <text class="svg-code" x="780" y="175" fill="#334155" font-size="12.5">HirCompilation.Lineage</text>
+        <text class="svg-code" x="780" y="202" fill="#334155" font-size="12.5">MirSnapshot.LoweringSource</text>
+        <text class="svg-code" x="780" y="229" fill="#334155" font-size="12.5">MirSnapshot.Origins</text>
+        <text class="svg-code" x="780" y="256" fill="#64748b" font-size="11.5">컴파일·진단에 필요한 최소 사실</text>
 
         <path d="M714 233 H758" fill="none" stroke="#64748b" stroke-width="3" marker-end="url(#arr)"/>
         <path d="M714 507 H742 V263 H758" fill="none" stroke="#64748b" stroke-width="3" marker-end="url(#arr)"/>
@@ -190,19 +190,26 @@
         <text class="svg-code" x="780" y="568" fill="#64748b" font-size="11.5">Typed TargetProgram + Text</text>
 
         <path d="M714 507 H758" fill="none" stroke="#b2745e" stroke-width="3" marker-end="url(#arr)"/>
+
+        <path d="M536 592 V678" fill="none" stroke="#8b75c4" stroke-width="2.5" stroke-dasharray="8 6" marker-end="url(#arr)"/>
+        <rect x="238" y="686" width="596" height="82" rx="12" fill="#f7f1ff" stroke="#a994dc" stroke-width="2" stroke-dasharray="8 5"/>
+        <text class="svg-code" x="536" y="716" text-anchor="middle" fill="#5a3fa7" font-size="15" font-weight="850">Qora.LanguageServices (opt-in)</text>
+        <text class="svg-code" x="536" y="744" text-anchor="middle" fill="#334155" font-size="12.5">LanguageServiceCompilation · MirSemanticIndex · opt-in lowering trace</text>
       </svg>
     </div>
     <figcaption id="pipeline-caption">
       상자는 소유권을, 화살표는 typed identity로 기록되는 관계를 나타냅니다.<br>
-      OpenQASM backend는 정확한 <code>AdjointsMaterialized</code> MIR snapshot을 직접 소비하며, target artifact가 그 snapshot identity를 보존합니다.
+      점선 상자는 일반 컴파일 결과 밖에서 요청할 때만 생성되는 language-service 인덱스입니다.<br>
+      OpenQASM backend는 정확한 <code>AdjointsMaterialized</code> MIR snapshot을 직접 소비하며, IDE 인덱스에 의존하지 않습니다.
     </figcaption>
   </figure>
 
   <div class="owner-grid">
     <div class="owner"><b><code>Sources</code></b><p>원문과 구문을 소유합니다.<br>HIR·의미 사실·backend 이름을 흡수하지 않습니다.</p></div>
-    <div class="owner"><b><code>Hir</code></b><p>구조 세대, semantic artifact, <code>HirLineage</code>를 함께 소유합니다.<br><code>Links.Hir</code>는 같은 lineage의 aggregate 편의 뷰입니다.</p></div>
-    <div class="owner"><b><code>Mir</code></b><p>typed SSA/CFG 구조, origin, 구조 인덱스, 분석 cache를 한 snapshot에 묶습니다.<br>동일한 callable-local 정수 Id는 composite reference로 구분합니다.</p></div>
+    <div class="owner"><b><code>Hir</code></b><p>구조 세대, semantic artifact, <code>HirCompilation.Lineage</code>를 함께 소유합니다.<br>별도의 aggregate 링크 장부를 만들지 않습니다.</p></div>
+    <div class="owner"><b><code>Mir</code></b><p>typed SSA/CFG 구조, exact <code>LoweringSource</code>, <code>Origins</code>, owner-local 조회 인덱스, 분석 cache를 한 snapshot에 묶습니다.<br>IDE용 symbol 양방향 맵은 소유하지 않습니다.</p></div>
     <div class="owner"><b><code>Targets</code></b><p>backend별 최종 아티팩트를 맵으로 소유합니다.<br>대상 전용 이름·타입·합성 사실은 원본 HIR로 역류하지 않습니다.</p></div>
+    <div class="owner"><b><code>Qora.LanguageServices</code></b><p><code>LanguageServiceCompilation</code>이 exact compiler snapshot과 trace로 만든 <code>MirSemanticIndex</code>를 함께 소유합니다.<br>일반 컴파일과 backend는 이 선택적 인덱스를 만들거나 읽지 않습니다.</p></div>
   </div>
 
   <h3>세션, revision, 요청 산출물</h3>
@@ -237,7 +244,7 @@
       <tr><td class="k">semantic 1</td><td><code>QoraValidator</code></td><td>resolved HIR → validation <code>HirSemanticArtifact</code>가 소유하는 Accepted/Rejected outcome</td><td>모델·상태·진단을 exact snapshot의 하나의 권위 결과로 발행</td></tr>
       <tr><td class="k">통합 HIR 3</td><td><code>Monomorphizer</code></td><td>resolved HIR → size-specialized HIR</td><td>실제 rewrite가 없으면 기존 snapshot alias</td></tr>
       <tr><td class="k">semantic 2</td><td><code>EffectAnalysis</code></td><td>exact accepted specialized validation artifact → effect-analysis artifact</td><td>같은 snapshot의 <code>ValidationBasis</code>를 명시하며 새 HIR stage 없음</td></tr>
-      <tr><td class="k">MIR lowering</td><td><code>QoraMirLowering</code></td><td>specialized HIR + exact <code>HirSemanticContext</code> → <code>MirSnapshot</code></td><td>typed SSA/CFG, exact semantic basis, total symbol/entity 분류, 측정식과 short-circuit 평가 위치의 명시화</td></tr>
+      <tr><td class="k">MIR lowering</td><td><code>QoraMirLowering</code></td><td><code>HirCompilation.EffectAnalysis</code>의 exact source·model → <code>MirSnapshot</code></td><td>최종 artifact 하나만 소비하며 typed SSA/CFG, <code>LoweringSource</code>, program-owned <code>Origins</code>를 생성하고 요청된 경우에만 language-service trace를 발행</td></tr>
       <tr><td class="k">MIR 분석</td><td><code>MirAnalysisStore</code></td><td>verified MIR → CFG·효과 등 revision-bound 분석</td><td>공유 의존성을 snapshot 안에서 재사용</td></tr>
       <tr><td class="k">MIR 역연산</td><td><code>MirAdjointMaterializer</code></td><td>MIR-only inverse request → synthesized inverse callable + materialized <code>MirSnapshot</code></td><td>Qora source와 HIR에는 Adjoint 표현이 없으며 snapshot revision·parent·origin을 보존</td></tr>
       <tr><td class="k">target lowering</td><td><code>QasmBackend</code> / <code>MirOpenQasmLowering</code></td><td>exact materialized <code>MirSnapshot</code> → <code>MirOpenQasmTargetProgram</code></td><td>backend가 HIR로 되돌아가지 않으며 artifact가 target model을 받아 text를 파생</td></tr>
@@ -310,15 +317,17 @@
     <code>HirSemanticModel</code>은 자신이 분석한 exact HIR의 scope graph와 의미 사실만 담습니다.<br>
     <code>HirSemanticArtifact.Diagnostics</code>는 자신이 소유한 <code>ValidationOutcome.Diagnostics</code>의 뷰이며, <code>CompilationDiagnostic</code>은 여기에 stage와 origin을 붙여 투영할 뿐 별도의 validation 결과를 유지하지 않습니다.<br>
     effect-analysis artifact는 같은 snapshot의 exact accepted validation artifact를 <code>ValidationBasis</code>로 명시하고 동일한 validation outcome을 공유합니다.<br>
-    후속 구조 패스의 관계는 <code>HirCompilation.Lineage</code>가 소유하고, <code>Compilation.Links.Hir</code>는 그 exact instance를 다시 노출합니다.<br>
-    <code>HirSemanticContext</code>는 owner <code>HirCompilation</code>에 실제로 들어 있는 current snapshot과 semantic artifact 객체만 받으며, semantic identity를 보존하는 경로를 통해서만 node Id를 분석 기준 snapshot으로 변환합니다.<br>
-    따라서 copy lineage와 의미 사실이 하나의 mutable bag에서 서로 drift하지 않으며, 새 임시 선언을 원본 제어문의 symbol로 잘못 해석하지 않습니다.
+    후속 구조 패스의 관계는 <code>HirCompilation.Lineage</code>가 직접 소유하며, 이를 다시 감싸는 별도 aggregate 링크 장부는 없습니다.<br>
+    반면에 MIR lowering은 이 lineage로 semantic node Id를 번역하지 않습니다.<br>
+    <code>HirCompilation.ToMir()</code>는 최종 <code>EffectAnalysis</code> artifact만 선택하며, 그 artifact의 <code>Source</code>와 <code>Model</code>은 같은 exact specialized HIR snapshot에 고정됩니다.<br>
+    구조 rewrite가 새 HIR snapshot을 만들었다면 그 snapshot의 validation과 effect analysis를 완료하기 전에는 MIR로 전달할 수 없습니다.<br>
+    최종 effect analysis가 발행된 뒤에는 HIR pipeline이 봉인되므로 추가 rewrite, alias, validation을 게시할 수 없습니다.
   </p>
 
   <div class="panel">
     <table class="spec">
       <tr><th>전이 분류</th><th>뜻</th><th>허용 질의</th></tr>
-      <tr><td class="k"><code>NodeDerivation</code></td><td>같은 kind와 논리 identity를 유지한 명시적 복사</td><td><code>ResolveNodeId</code>와 provenance 질의 모두 통과</td></tr>
+      <tr><td class="k"><code>NodeDerivation</code></td><td>같은 kind와 논리 identity를 유지한 명시적 복사</td><td>구조 세대 사이의 provenance 질의가 원본 node 관계를 따라갈 때 사용</td></tr>
       <tr><td class="k"><code>NodeSynthesis</code></td><td>기존 owner에서 만들어진 새로운 HIR entity</td><td><code>ResolveProvenance</code>만 통과하며 semantic identity 번역 금지</td></tr>
       <tr><td class="k"><code>HirNodeIntroduction</code></td><td>import 문서에서 부모 HIR history로 처음 들어온 source node</td><td><code>FindIntroduction</code>으로 exact 문서와 도입 사유 조회</td></tr>
       <tr><td class="k">암시적 동일 Id</td><td>부모에도 같은 Id·kind·소유 operation이 존재하는 보존 node</td><td>별도 edge 없이 부모로 이동</td></tr>
@@ -340,7 +349,9 @@
 
   <p>
     <code>Compilation.Mir</code>는 컴파일이 MIR lowering까지 도달했을 때만 존재하는 <code>MirSnapshot</code>입니다.<br>
-    이 snapshot은 <code>MirSnapshotId</code>, <code>MirStage</code>, 선택적 exact <code>Parent</code>, lowering 원본 <code>HirSnapshotId</code>, lowering profile, typed SSA/CFG 프로그램, origin table, 구조 인덱스, cross-stage links, 분석 저장소를 함께 소유합니다.<br>
+    이 snapshot은 <code>MirSnapshotId</code>, <code>MirStage</code>, 선택적 exact <code>Parent</code>, exact final HIR artifact인 <code>LoweringSource</code>, lowering profile, typed SSA/CFG 프로그램과 그 <code>Origins</code>, 분석 저장소를 함께 소유합니다.<br>
+    <code>MirProgram</code>은 callable 조회를 소유하고, 각 <code>MirCallable</code>은 자신에게 속한 block, instruction, SSA value, storage, qubit 조회를 소유합니다.<br>
+    반면에 HIR symbol과 MIR entity를 양방향으로 찾는 IDE용 맵은 Core snapshot에 저장하지 않습니다.<br>
     HIR lowering이 root <code>Lowered</code> snapshot을 만들고, inverse request 주입과 materialization은 각각 더 높은 revision의 새 snapshot을 발행하므로 <code>Compilation.Mir</code>은 요청한 pipeline이 끝낸 최종 MIR을 가리킵니다.<br>
     생성 시 verifier를 통과해야 하므로 downstream 분석은 검증된 구조만 받습니다.
   </p>
@@ -349,10 +360,10 @@
     <table class="spec">
       <tr><th>구성 요소</th><th>역할</th></tr>
       <tr><td class="k"><code>Stage</code> / <code>Parent</code></td><td><code>Lowered → InverseRequestsInjected → AdjointsMaterialized</code> 전이와 exact 이전 revision을 기록</td></tr>
-      <tr><td class="k"><code>MirStructuralIndex</code></td><td>callable·block·instruction·value·storage·qubit을 snapshot-qualified composite reference로 조회</td></tr>
-      <tr><td class="k"><code>MirOriginTable</code></td><td>MIR instruction이 어떤 HIR/source 구조에서 왔는지 보존</td></tr>
-      <tr><td class="k"><code>SymbolDispositions</code></td><td>exact semantic artifact의 모든 symbol을 callable·scalar·array storage·qubit 또는 명시적 non-lowered 사유로 정확히 한 번 분류</td></tr>
-      <tr><td class="k"><code>ValueOrigins</code> / <code>StorageOrigins</code> / <code>QubitOrigins</code></td><td>모든 구조 MIR entity를 <code>SourceSymbol</code> 또는 <code>CompilerTemporary</code>로 빠짐없이 분류</td></tr>
+      <tr><td class="k"><code>LoweringSource</code></td><td>typed SSA/CFG가 소비한 exact final <code>HirSemanticArtifact</code>를 보존</td></tr>
+      <tr><td class="k"><code>MirProgram</code> / <code>MirCallable</code></td><td>program은 callable을, callable은 block·instruction·value·storage·qubit을 불변 로컬 ID로 직접 조회</td></tr>
+      <tr><td class="k"><code>MirAnalysisStore.CallGraph</code></td><td>완성된 callable의 호출 명령에서 pure·quantum 호출 간선을 한 번 계산하고 snapshot 안에서 공유</td></tr>
+      <tr><td class="k"><code>MirSnapshot.Origins</code></td><td>program-owned <code>MirOriginTable</code>을 통해 MIR instruction이 어떤 HIR/source 구조에서 왔는지 보존</td></tr>
       <tr><td class="k"><code>MirAnalysisStore</code></td><td>CFG와 effect snapshot 같은 분석을 exact MIR snapshot 안에서 lazy cache</td></tr>
       <tr><td class="k"><code>Mir.Analyses.Effects</code></td><td>정확한 SSA 값·storage state·path condition·qubit location에 대한 MIR 효과 사실</td></tr>
     </table>
@@ -363,26 +374,31 @@
     전자는 source-shaped HIR에서 자동 uncomputation 판단에 필요한 semantic event와 summary를 만들고, 후자는 SSA/CFG에서 실행 경로와 storage 상태를 포함한 MIR 수준 사실을 만듭니다.
   </p>
 
-  <h2 id="s6">6. 단계 간 링크와 source map</h2>
+  <h2 id="s6">6. Core 소유 정보와 IDE 인덱스</h2>
 
   <p>
-    각 IR은 자신의 구조와 자기 단계 내부의 관계를 소유하며, <code>Compilation.Links</code>는 단계 간 질의를 위한 exact 공유 뷰를 제공합니다.<br>
-    HIR 내부 계보의 권위 소유자는 <code>HirCompilation.Lineage</code>이고 <code>Links.Hir</code>는 같은 instance이며, <code>Links.Mir</code>는 MIR이 lowering된 exact HIR snapshot과 symbol semantic artifact를 명시합니다.<br>
-    MIR callable은 HIR callable node와 symbol에서 찾을 수 있는 typed 참조로 연결됩니다.<br>
-    반면에 HIR symbol과 MIR value·storage·qubit의 관계는 양쪽에서 조회할 수 있는 typed many-to-many 맵이며, 별도의 total disposition map이 링크가 없는 경우도 의도적인 non-lowering 또는 compiler temporary로 설명합니다.
+    Core는 컴파일과 진단에 필요한 권위 정보만 각 IR의 소유자에 둡니다.<br>
+    따라서 HIR 세대의 관계는 <code>HirCompilation.Lineage</code>가 직접 소유하고, MIR은 자신이 실제로 소비한 final HIR artifact를 <code>MirSnapshot.LoweringSource</code>로 보존하며, source 위치 추적은 program-owned <code>MirSnapshot.Origins</code>가 담당합니다.<br>
+    HIR symbol에서 MIR callable·value·storage·qubit을 찾는 양방향 조회는 컴파일이나 backend의 입력이 아니므로 Core에 상시 저장하지 않습니다.<br>
+    이 조회가 필요한 IDE 요청에서는 <code>Qora.LanguageServices</code>가 lowering과 함께 opt-in trace를 수집해 <code>MirSemanticIndex</code>를 만들고, <code>LanguageServiceCompilation</code>이 exact <code>Compilation</code>과 해당 인덱스를 한 단위로 제공합니다.
   </p>
 
   <div class="panel">
     <table class="spec">
-      <tr><th>관계</th><th>참조 형식</th><th>사용 예</th></tr>
-      <tr><td class="k">HIR 세대 간</td><td><code>HirNodeRef(HirSnapshotId, NodeId)</code></td><td>복제된 후속 노드에서 분석 기준 조상 노드 찾기</td></tr>
-      <tr><td class="k">MIR callable</td><td><code>CallablesByHirCallable</code>, <code>CallablesBySymbol</code></td><td>HIR callable 또는 exact semantic symbol에서 MIR callable 찾기</td></tr>
-      <tr><td class="k">HIR symbol</td><td><code>HirSymbolRef(HirSemanticArtifactId, SymbolId)</code></td><td>exact semantic artifact의 symbol과 MIR value·storage·qubit을 양방향으로 연결</td></tr>
-      <tr><td class="k">symbol lowering 결과</td><td><code>MirSymbolLoweringDisposition</code></td><td>모든 HIR symbol이 어떤 MIR 종류가 되었거나 왜 내려가지 않았는지 확인</td></tr>
-      <tr><td class="k">MIR entity 기원</td><td><code>MirEntityOriginKind</code></td><td>모든 value·storage·qubit이 source-backed인지 compiler temporary인지 확인</td></tr>
-      <tr><td class="k">MIR local identity</td><td><code>MirValueRef</code>, <code>MirStorageRef</code>, <code>MirQubitRef</code></td><td>서로 다른 callable의 같은 dense Id 구분</td></tr>
+      <tr><th>소유자</th><th>권위 자료</th><th>사용 범위</th></tr>
+      <tr><td class="k"><code>HirCompilation</code></td><td><code>Lineage</code></td><td>HIR 부모 세대, identity derivation, synthesis provenance, source introduction</td></tr>
+      <tr><td class="k"><code>MirSnapshot</code></td><td><code>LoweringSource</code></td><td>MIR 구조와 semantic 입력이 같은 final HIR artifact에서 왔는지 보장</td></tr>
+      <tr><td class="k"><code>MirSnapshot</code></td><td><code>Origins</code></td><td>MIR 진단과 변환 provenance를 HIR node 및 <code>SourceSpan</code>으로 해석</td></tr>
+      <tr><td class="k"><code>Qora.LanguageServices</code></td><td><code>LanguageServiceCompilation</code> + <code>MirSemanticIndex</code></td><td>요청된 경우에만 exact compilation 문맥에서 <code>SymbolId</code>와 callable-local MIR entity의 양방향 IDE 조회 제공</td></tr>
+      <tr><td class="k">lowering trace</td><td>callable·value·storage·qubit 연결 이벤트</td><td>인덱스 생성 중에만 전달되며 Core <code>Compilation</code>이나 <code>MirSnapshot</code>에 보관하지 않음</td></tr>
       <tr><td class="k">소스 위치</td><td><code>SourceSpan(SourceDocumentRef, Start, End)</code></td><td>다중 문서와 재컴파일 revision을 넘나드는 정확한 진단</td></tr>
     </table>
+  </div>
+
+  <div class="callout good">
+    <span class="h">일반 컴파일 경로</span>
+    language-service trace를 요청하지 않으면 <code>MirSemanticIndex</code>와 symbol 양방향 맵은 생성되지 않습니다.<br>
+    효과 분석, automatic uncomputation, adjoint materialization, OpenQASM lowering은 모두 Core MIR 구조와 <code>Origins</code>만 소비합니다.
   </div>
 
   <h2 id="s7">7. target artifact backend map</h2>
@@ -458,8 +474,9 @@
       <tr><td class="k">effect artifact가 exact accepted <code>ValidationBasis</code> 명시</td><td>rejected 또는 다른 snapshot의 의미 사실을 분석 입력으로 사용하는 문제 방지</td></tr>
       <tr><td class="k"><code>HirCompilation</code>과 <code>HirLineage</code>가 같은 snapshot 객체 집합 공유</td><td>같은 Id를 가장한 detached HIR 계보 방지</td></tr>
       <tr><td class="k">새 HIR node가 derivation·synthesis·introduction 가운데 정확히 하나로 분류</td><td>semantic identity와 provenance 혼동 및 origin 누락 방지</td></tr>
-      <tr><td class="k">MIR source와 semantic basis가 HIR lineage 안에 존재</td><td>cross-stage query의 검증 가능성</td></tr>
-      <tr><td class="k">모든 HIR symbol과 모든 MIR value·storage·qubit에 total disposition 존재</td><td>링크 누락이 조용히 anonymous entity로 바뀌는 문제 방지</td></tr>
+      <tr><td class="k">MIR 구조 입력과 semantic 입력이 같은 final effect-analysis HIR artifact에서 파생</td><td>서로 다른 HIR 세대의 tree와 model 조합을 구조적으로 차단</td></tr>
+      <tr><td class="k"><code>MirSnapshot.LoweringSource</code>와 <code>Origins</code>가 snapshot과 같은 compilation revision에 속함</td><td>다른 HIR 세대의 source provenance가 MIR 진단에 섞이는 문제 방지</td></tr>
+      <tr><td class="k"><code>LanguageServiceCompilation</code>이 exact <code>Compilation</code>과 같은 HIR/MIR의 <code>MirSemanticIndex</code>만 결합</td><td>IDE의 symbol-to-MIR 조회가 다른 revision의 파생 인덱스를 재사용하는 문제 방지</td></tr>
       <tr><td class="k">target 진단의 HIR/MIR input이 같은 <code>Compilation</code>에 존재</td><td>backend 독립성을 유지하면서도 진단 provenance 검증</td></tr>
       <tr><td class="k">성공 결과가 <code>CompilationOutputPlan</code>과 정확히 일치</td><td>요청 누락과 unsolicited MIR·target artifact 방지</td></tr>
       <tr><td class="k">backend당 target artifact 최대 하나</td><td>대상 결과의 단일 권위 맵 유지</td></tr>

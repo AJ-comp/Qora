@@ -58,10 +58,8 @@ public sealed class MirAdjointMaterializerTests
         Assert.Same(injected, result.Source);
         Assert.Same(output, result.Snapshot);
 
-        var sourceWorkerRef = new MirCallableRef(injected.Id, worker.Id);
-        var inverseRef = result.Inverses[sourceWorkerRef];
-        Assert.Equal(output.Id, inverseRef.Snapshot);
-        var inverse = output.Structure.RequireCallable(inverseRef);
+        var inverseId = result.Inverses[worker.Id];
+        var inverse = output.Program.RequireCallable(inverseId);
         Assert.StartsWith("__qora_inverse_", inverse.Name, StringComparison.Ordinal);
 
         var rewrittenCall = Assert.Single(UserCalls(output, "Main", inverse.Id));
@@ -91,19 +89,11 @@ public sealed class MirAdjointMaterializerTests
             Assert.Single(inverseGates[1].QubitResults).Version.Value);
         MirAdjointMaterializer.VerifyMaterialized(output);
 
-        var provenance = Assert.IsType<MirSynthesizedCallableProvenance>(
-            output.Links.CallableProvenance[inverseRef]);
-        Assert.Equal(
-            new MirCallableRef(output.Id, worker.Id),
-            provenance.DerivedFrom);
-        Assert.Equal(MirCallableSynthesisKind.Inverse, provenance.Kind);
-        Assert.DoesNotContain(
-            inverseRef,
-            output.Links.CallablesByHirCallable.Values);
-
-        var originalOrigin = source.Links.ResolveOrigin(worker.Origin);
-        var inverseOrigin = output.Links.ResolveOrigin(inverse.Origin);
-        Assert.Equal(originalOrigin, inverseOrigin);
+        var originalOrigin = source.Origins.ResolveHir(worker.Origin);
+        var inverseOrigin = output.Origins.ResolveHir(inverse.Origin);
+        Assert.Equal(originalOrigin.HirCallableId, inverseOrigin.HirCallableId);
+        Assert.Equal(originalOrigin.HirNodeId, inverseOrigin.HirNodeId);
+        Assert.Equal(originalOrigin.Span, inverseOrigin.Span);
         Assert.NotNull(inverseOrigin.Span);
 
         var backend = QasmBackend.Run(output);
@@ -180,11 +170,9 @@ public sealed class MirAdjointMaterializerTests
 
         Assert.True(result.Succeeded);
         var inverse = Assert.Single(result.Inverses);
-        Assert.Equal(
-            new MirCallableRef(injected.Id, worker.Id),
-            inverse.Key);
+        Assert.Equal(worker.Id, inverse.Key);
         var output = Assert.IsType<MirSnapshot>(result.Output);
-        var rewritten = UserCalls(output, "Main", inverse.Value.Callable);
+        var rewritten = UserCalls(output, "Main", inverse.Value);
         Assert.Equal(2, rewritten.Count);
         Assert.All(rewritten, call => Assert.Empty(call.Functors));
     }
@@ -257,11 +245,9 @@ public sealed class MirAdjointMaterializerTests
         Assert.True(result.Succeeded);
         Assert.Equal(2, result.Inverses.Count);
         var output = Assert.IsType<MirSnapshot>(result.Output);
-        var inverseLeafRef =
-            result.Inverses[new MirCallableRef(injected.Id, leaf.Id)];
-        var inverseMiddleRef =
-            result.Inverses[new MirCallableRef(injected.Id, middle.Id)];
-        var inverseMiddle = output.Structure.RequireCallable(inverseMiddleRef);
+        var inverseLeafId = result.Inverses[leaf.Id];
+        var inverseMiddleId = result.Inverses[middle.Id];
+        var inverseMiddle = output.Program.RequireCallable(inverseMiddleId);
         var inverseInstructions = inverseMiddle.Blocks
             .SelectMany(block => block.Instructions)
             .OfType<MirQuantumApply>()
@@ -269,33 +255,14 @@ public sealed class MirAdjointMaterializerTests
 
         var nested = Assert.IsType<MirUserCallableTarget>(
             inverseInstructions[0].Target);
-        Assert.Equal(inverseLeafRef.Callable, nested.Callable);
+        Assert.Equal(inverseLeafId, nested.Callable);
         Assert.Empty(inverseInstructions[0].Functors);
         Assert.Equal("H", GateName(inverseInstructions[1]));
         Assert.Equal(
             new[] { MirFunctor.Adjoint },
             inverseInstructions[1].Functors);
 
-        var provenance = Assert.IsType<MirSynthesizedCallableProvenance>(
-            output.Links.CallableProvenance[inverseMiddleRef]);
-        Assert.Equal(
-            new MirCallableRef(output.Id, middle.Id),
-            provenance.DerivedFrom);
-        foreach (var qubit in inverseMiddle.Qubits)
-        {
-            var reference =
-                new MirQubitRef(output.Id, inverseMiddle.Id, qubit.Key);
-            Assert.Equal(
-                MirEntityOriginKind.CompilerTemporary,
-                output.Links.QubitOrigins[reference]);
-            Assert.Empty(output.Links.SymbolsFor(reference));
-        }
-        Assert.DoesNotContain(
-            inverseLeafRef,
-            output.Links.CallablesByHirCallable.Values);
-        Assert.DoesNotContain(
-            inverseMiddleRef,
-            output.Links.CallablesByHirCallable.Values);
+        Assert.NotEmpty(inverseMiddle.Qubits);
     }
 
     [Fact]
@@ -335,11 +302,9 @@ public sealed class MirAdjointMaterializerTests
                 "straight-line",
                 StringComparison.Ordinal));
         Assert.Equal("MIRADJ001", error.Code);
-        Assert.Equal(
-            new MirCallableRef(injected.Id, branchy.Id),
-            error.Callable);
+        Assert.Equal(branchy.Id, error.Callable);
         Assert.Equal(injected.Id, error.Origin.Snapshot);
-        var resolved = injected.Links.ResolveOrigin(error.Origin);
+        var resolved = injected.Origins.ResolveHir(error.Origin);
         var span = Assert.IsType<SourceSpan>(resolved.Span);
         Assert.Contains(
             "Branchy",
@@ -377,10 +342,8 @@ public sealed class MirAdjointMaterializerTests
             candidate => candidate.Message.Contains(
                 "measurement is not unitary",
                 StringComparison.Ordinal));
-        Assert.Equal(
-            new MirCallableRef(injected.Id, read.Id),
-            error.Callable);
-        var resolved = injected.Links.ResolveOrigin(error.Origin);
+        Assert.Equal(read.Id, error.Callable);
+        var resolved = injected.Origins.ResolveHir(error.Origin);
         var span = Assert.IsType<SourceSpan>(resolved.Span);
         Assert.Contains("M(q)", TextAt(compilation, span), StringComparison.Ordinal);
     }
@@ -414,8 +377,7 @@ public sealed class MirAdjointMaterializerTests
             new[] { Instruction(source, "Main", request) });
         var result = MirAdjointMaterializer.Run(injected);
         var output = Assert.IsType<MirSnapshot>(result.Output);
-        var inverseWorker = result.Inverses[
-            new MirCallableRef(injected.Id, worker.Id)];
+        var inverseWorker = result.Inverses[worker.Id];
 
         Assert.Equal(source.Id, source.Safety.SnapshotId);
         Assert.Equal(injected.Id, injected.Safety.SnapshotId);
@@ -428,9 +390,6 @@ public sealed class MirAdjointMaterializerTests
         Assert.Equal(
             obligation.Site.Instruction.Instruction,
             injectedObligation.Site.Instruction.Instruction);
-        Assert.Equal(
-            injected.Id,
-            injectedObligation.Site.Instruction.Snapshot);
         var outputObligations = output.Safety.UnprovenBounds;
         Assert.Equal(2, outputObligations.Count);
         Assert.Contains(
@@ -441,18 +400,15 @@ public sealed class MirAdjointMaterializerTests
         Assert.Contains(
             outputObligations,
             candidate => candidate.Site.Instruction.Callable
-                    == inverseWorker.Callable
+                    == inverseWorker
                 && candidate.Site.Instruction.Instruction
                 == obligation.Site.Instruction.Instruction);
         Assert.All(
             outputObligations,
             candidate =>
             {
-                Assert.Equal(
-                    output.Id,
-                    candidate.Site.Instruction.Snapshot);
                 Assert.IsType<MirArrayLoad>(
-                    output.Structure.RequireInstruction(
+                    output.Program.RequireInstruction(
                         candidate.Site.Instruction));
             });
         Assert.Same(source, injected.Parent);
@@ -472,8 +428,9 @@ public sealed class MirAdjointMaterializerTests
                     CompilationId.New(),
                     source.Id.CompilationRevision,
                     source.Id.Revision + 1)));
-        Assert.Throws<ArgumentException>(
-            () => MirAdjointMaterializer.InjectRequests(
+        Assert.Same(
+            injected,
+            MirAdjointMaterializer.InjectRequests(
                 injected,
                 new[] { Instruction(source, "Main", request) }));
     }
@@ -510,7 +467,7 @@ public sealed class MirAdjointMaterializerTests
             obligations[0].Site.Instruction,
             obligations[1].Site.Instruction);
         Assert.IsType<MirQuantumApply>(
-            source.Structure.RequireInstruction(
+            source.Program.RequireInstruction(
                 obligations[0].Site.Instruction));
     }
 
@@ -584,14 +541,11 @@ public sealed class MirAdjointMaterializerTests
             .ToArray();
     }
 
-    private static MirInstructionRef Instruction(
+    private static MirInstructionSite Instruction(
         MirSnapshot snapshot,
         string owner,
         MirQuantumApply instruction) =>
-        new(
-            snapshot.Id,
-            RequireCallable(snapshot, owner).Id,
-            instruction.Id);
+        new(RequireCallable(snapshot, owner).Id, instruction.Id);
 
     private static string GateName(MirQuantumApply instruction) =>
         Assert.IsType<MirBuiltinGateTarget>(instruction.Target).Name;

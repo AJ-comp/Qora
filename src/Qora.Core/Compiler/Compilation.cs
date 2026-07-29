@@ -22,7 +22,7 @@ public sealed record CompilationOptions
 
 /// <summary>
 /// The immutable owner of every stage produced for one source snapshot. Each subsystem retains its own
-/// model, while <see cref="Links"/> records the relationships between them.
+/// model and declares the exact artifact from which it was produced.
 /// </summary>
 public sealed class Compilation
 {
@@ -37,7 +37,6 @@ public sealed class Compilation
         SourceSetSnapshot sources,
         HirCompilation hir,
         MirSnapshot? mir,
-        CrossStageLinks links,
         TargetArtifactSet targets,
         IEnumerable<CompilationDiagnostic> diagnostics)
     {
@@ -54,7 +53,6 @@ public sealed class Compilation
         Sources = sources ?? throw new ArgumentNullException(nameof(sources));
         Hir = hir ?? throw new ArgumentNullException(nameof(hir));
         Mir = mir;
-        Links = links ?? throw new ArgumentNullException(nameof(links));
         Targets = targets ?? throw new ArgumentNullException(nameof(targets));
         ArgumentNullException.ThrowIfNull(diagnostics);
         _diagnostics = Array.AsReadOnly(diagnostics.ToArray());
@@ -134,13 +132,6 @@ public sealed class Compilation
             }
         }
 
-        if (!ReferenceEquals(links.Hir, hir.Lineage))
-        {
-            throw new ArgumentException(
-                "Compilation HIR and cross-stage links do not share one exact lineage artifact.",
-                nameof(links));
-        }
-
         if (sources.CompilationId != id
             || sources.CompilationRevision != revision)
         {
@@ -158,10 +149,10 @@ public sealed class Compilation
                     $"HIR snapshot {snapshot.Id} belongs to a different Compilation snapshot.",
                     nameof(hir));
             }
-            if (!links.Hir.Contains(snapshot.Id))
+            if (!hir.Lineage.Contains(snapshot.Id))
                 throw new ArgumentException(
                     $"HIR lineage does not contain snapshot {snapshot.Id}.",
-                    nameof(links));
+                    nameof(hir));
             foreach (var span in snapshot.SourceMap.Spans.Values)
             {
                 var document = sources.FindDocument(span.Document);
@@ -177,14 +168,7 @@ public sealed class Compilation
             }
         }
 
-        if (mir is null)
-        {
-            if (links.Mir is not null)
-                throw new ArgumentException(
-                    "Compilation has MIR links but no MIR snapshot.",
-                    nameof(links));
-        }
-        else
+        if (mir is not null)
         {
             if (mir.Id.CompilationId != id
                 || mir.Id.CompilationRevision != revision)
@@ -193,36 +177,12 @@ public sealed class Compilation
                     "MIR belongs to a different Compilation snapshot.",
                     nameof(mir));
             }
-            if (hir.Find(mir.LoweredFrom) is null)
-                throw new ArgumentException(
-                    $"MIR source {mir.LoweredFrom} is not present in this HIR history.",
-                    nameof(mir));
-            if (!ReferenceEquals(mir.Links, links.Mir))
-                throw new ArgumentException(
-                    "Compilation MIR and cross-stage links do not share one exact link artifact.",
-                    nameof(links));
-            mir.Links.VerifyAgainst(hir, links.Hir);
-
-            var mirSemanticBasis = hir.FindSemantics(
-                mir.Links.SymbolsFrom.Source,
-                mir.Links.SymbolsFrom.Phase);
-            if (mirSemanticBasis is null)
-                throw new ArgumentException(
-                    $"MIR symbol links name semantic artifact {mir.Links.SymbolsFrom}, " +
-                    "which is absent from this HIR history.",
-                    nameof(mir));
-            VerifyCanonicalEffectBasis(
-                hir,
-                mirSemanticBasis,
-                "MIR",
-                nameof(mir));
-            if (!links.Hir.IsAncestor(
-                    mir.LoweredFrom,
-                    mirSemanticBasis.SourceId))
+            if (!ReferenceEquals(
+                    mir.LoweringSource,
+                    hir.EffectAnalysis))
             {
                 throw new ArgumentException(
-                    $"MIR semantic basis {mirSemanticBasis.SourceId} is not an ancestor of " +
-                    $"its structural source {mir.LoweredFrom}.",
+                    "MIR must consume this Compilation's canonical final HIR effect artifact.",
                     nameof(mir));
             }
         }
@@ -346,28 +306,6 @@ public sealed class Compilation
         VerifyValidationDiagnosticProjection(hir, _diagnostics);
     }
 
-    private static void VerifyCanonicalEffectBasis(
-        HirCompilation hir,
-        HirSemanticArtifact semanticBasis,
-        string consumer,
-        string parameterName)
-    {
-        var canonicalValidation = hir.SpecializedValidation;
-        var canonicalEffectAnalysis = hir.EffectAnalysis;
-        if (!ReferenceEquals(canonicalEffectAnalysis, semanticBasis)
-            || semanticBasis.Phase != HirSemanticPhase.EffectAnalysis
-            || !semanticBasis.IsAccepted
-            || !ReferenceEquals(
-                semanticBasis.ValidationBasisArtifact,
-                canonicalValidation))
-        {
-            throw new ArgumentException(
-                $"{consumer} must consume this Compilation's exact accepted canonical effect-analysis "
-                + "artifact and its exact specialized-validation basis.",
-                parameterName);
-        }
-    }
-
     public CompilationId Id { get; }
     public CompilationRevision Revision { get; }
     public CompilationSession Session { get; }
@@ -376,7 +314,6 @@ public sealed class Compilation
     public SourceSetSnapshot Sources { get; }
     public HirCompilation Hir { get; }
     public MirSnapshot? Mir { get; }
-    public CrossStageLinks Links { get; }
     public TargetArtifactSet Targets { get; }
     public IReadOnlyList<CompilationDiagnostic> Diagnostics => _diagnostics;
     public bool Succeeded => Diagnostics.Count == 0;

@@ -145,10 +145,9 @@ QoraCompiler.Compile
        │   └─ SemanticArtifacts[(HirSnapshotId, HirSemanticPhase)]
        │       ├─ Validation
        │       └─ EffectAnalysis
-       ├─ Mir (optional typed SSA/CFG snapshot + revision-bound analyses)
-       ├─ Links
-       │   ├─ Hir (the exact Hir.Lineage instance)
-       │   └─ Mir (typed HIR ↔ MIR provenance)
+       ├─ Mir (optional typed SSA/CFG snapshot)
+       │   ├─ LoweringSource + program-owned Origins
+       │   └─ Structure + revision-bound analyses
        ├─ Diagnostics
        │   └─ typed Source / HIR / MIR / Target(backend, HIR-or-MIR input) origin
        └─ Targets.Artifacts[TargetBackend]
@@ -156,6 +155,12 @@ QoraCompiler.Compile
                ├─ exact materialized MirSnapshot
                ├─ MirOpenQasmTargetProgram
                └─ OpenQASM 3 text derived from that target model
+
+Qora.LanguageServices (opt-in)
+   └─ LanguageServiceCompilation
+       ├─ exact Compilation
+       └─ MirSemanticIndex
+           └─ lowering trace → callable-scoped SymbolId ↔ MIR entity query maps
 ```
 
 - `QoraParser` is deliberately syntax-only. A published `SyntaxSnapshot` retains no Janglim object:
@@ -186,13 +191,16 @@ QoraCompiler.Compile
   Milestones follow the canonical order `Lowered -> ImportsExpanded -> Resolved -> Specialized`.
   Measurements stay as canonical HIR expressions until MIR lowers them at their exact CFG evaluation
   points. Adjoint and conjugation are absent from Qora source and HIR.
-- HIR lineage is owned by `HirCompilation`; `Compilation.Links.Hir` is the same instance, not another
-  ledger. `NodeDerivation` means same semantic identity, `NodeSynthesis` records only provenance for a
-  new entity, and `HirNodeIntroduction` records a source node entering through import expansion.
-  Every newly appearing node must have exactly one classification. An exact `HirSemanticContext`
-  translates only identity-preserving paths from a current HIR snapshot back to the analyzed semantic
-  basis before querying the scope graph. Target renaming therefore never mutates source semantics, and
-  a synthesized temporary can never be mistaken for its owner's symbol.
+- HIR lineage is owned directly by `HirCompilation`; there is no second aggregate link ledger.
+  `NodeDerivation` means same semantic identity, `NodeSynthesis` records only provenance for a new
+  entity, and `HirNodeIntroduction` records a source node entering through import expansion.
+  Every newly appearing node must have exactly one classification. MIR lowering does not translate
+  semantic identities across this lineage: `HirCompilation.ToMir()` consumes only the canonical
+  `EffectAnalysis` artifact, whose `Source` and `Model` belong to the same exact final HIR snapshot.
+  A structural rewrite must publish validation and effect facts for its new snapshot before MIR can
+  consume it. Publishing that final effect artifact seals the HIR pipeline against later rewrites,
+  aliases, and semantic passes. Target renaming therefore never mutates source semantics, and a
+  synthesized temporary can never be mistaken for its owner's symbol.
 - `SymbolTableBuilder.BuildHirScopeGraph` creates one `HirScopeGraph`. Its current containment chain is
   `Program → Namespace → Callable → Block`. When nominal types arrive, `Type` becomes another
   containment scope below a namespace and can contain callable scopes without introducing another
@@ -229,10 +237,12 @@ QoraCompiler.Compile
   `OpenQasmArtifact.Text` is emitted from the typed target program rather than supplied as a second
   authority. Target diagnostics record `TargetDiagnosticInput.Mir`, so provenance follows the
   backend's real input domain without reaching back into HIR.
-- MIR links are exact-reference maps. Every HIR semantic symbol has one
-  `MirSymbolLoweringDisposition`, including explicit namespace, builtin, and unreachable non-lowering
-  reasons. Every MIR value, storage, and qubit has one `MirEntityOriginKind`, distinguishing a
-  source-backed entity from a compiler temporary even when no direct symbol link exists.
+- Core retains only the MIR provenance needed by compilation: `MirSnapshot.LoweringSource` identifies
+  the exact final HIR artifact and `MirSnapshot.Origins` resolves MIR origins to HIR/source locations.
+  It does not retain always-on HIR-symbol-to-MIR-entity maps. When tooling requests those queries,
+  `Qora.LanguageServices.MirSemanticIndex` collects an opt-in lowering trace and builds
+  callable-scoped `SymbolId ↔ MirValueId/MirStorageId/MirQubitKey` indexes. Ordinary compilation and
+  target lowering neither allocate nor consume this language-service index.
 
 New semantic codes:
 
@@ -252,8 +262,10 @@ New semantic codes:
   `--base-dir <dir>` supplies the resolution root and `--source-path <path>` identifies the live entry
   document. JSON diagnostics include the exact source path and revision-qualified document identity.
 - VS Code extension: passes both `--base-dir` and `--source-path` for the open document; diagnostics stay per-keystroke on the
-  lean contract. The stages panel reads the snapshots already present in the same `Compilation`; it
-  does not rerun resolver, validation, MIR lowering, or a backend to reconstruct a view.
+  lean contract. The stages panel reads the snapshots already present in the same `Compilation`. The
+  current extension does not provide Symbol-to-MIR navigation. A future host that needs that query can
+  opt into `Qora.LanguageServices.MirSemanticIndex` during compilation instead of making the compiler
+  core retain an always-on cross-stage map.
 - Playground: single-file for now (imports error with a clear message there).
 
 ## Increments

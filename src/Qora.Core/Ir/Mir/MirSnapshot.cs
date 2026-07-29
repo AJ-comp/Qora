@@ -1,4 +1,3 @@
-using System.Collections.Frozen;
 using Qora.Compiler;
 using Qora.Ir.Mir.Analysis;
 
@@ -55,164 +54,9 @@ public enum MirStage
 }
 
 /// <summary>
-/// The exact location of an instruction within its callable and block.
-/// </summary>
-public readonly record struct MirInstructionLocation(
-    MirBlockRef Block,
-    int Index);
-
-/// <summary>
-/// Immutable structural indexes for one exact <see cref="MirProgram"/>. Every callable-local identity
-/// is keyed through its program-wide composite reference, so equal dense IDs in two callables cannot
-/// resolve to the wrong object.
-/// </summary>
-public sealed class MirStructuralIndex
-{
-    private readonly MirSnapshotId _snapshotId;
-    private readonly FrozenDictionary<MirCallableId, MirCallable> _callables;
-    private readonly FrozenDictionary<MirBlockRef, MirBlock> _blocks;
-    private readonly FrozenDictionary<MirInstructionRef, MirInstruction> _instructions;
-    private readonly FrozenDictionary<MirInstructionRef, MirInstructionLocation> _instructionLocations;
-    private readonly FrozenDictionary<MirValueRef, MirValue> _values;
-    private readonly FrozenDictionary<MirStorageRef, MirArrayStorage> _storages;
-    private readonly FrozenDictionary<MirQubitRef, MirQubit> _qubits;
-
-    internal MirStructuralIndex(
-        MirSnapshotId snapshotId,
-        MirProgram program)
-    {
-        ArgumentNullException.ThrowIfNull(program);
-        if (program.SnapshotId != snapshotId)
-            throw new ArgumentException(
-                "the MIR program belongs to a different snapshot",
-                nameof(program));
-
-        _snapshotId = snapshotId;
-        _callables = program.Callables.ToFrozenDictionary(callable => callable.Id);
-
-        var blocks = new Dictionary<MirBlockRef, MirBlock>();
-        var instructions = new Dictionary<MirInstructionRef, MirInstruction>();
-        var instructionLocations =
-            new Dictionary<MirInstructionRef, MirInstructionLocation>();
-        var values = new Dictionary<MirValueRef, MirValue>();
-        var storages = new Dictionary<MirStorageRef, MirArrayStorage>();
-        var qubits = new Dictionary<MirQubitRef, MirQubit>();
-
-        foreach (var callable in program.Callables)
-        {
-            foreach (var block in callable.Blocks)
-            {
-                var blockRef = new MirBlockRef(snapshotId, callable.Id, block.Id);
-                blocks.Add(blockRef, block);
-
-                for (var index = 0; index < block.Instructions.Count; index++)
-                {
-                    var instruction = block.Instructions[index];
-                    var instructionRef =
-                        new MirInstructionRef(snapshotId, callable.Id, instruction.Id);
-                    instructions.Add(instructionRef, instruction);
-                    instructionLocations.Add(
-                        instructionRef,
-                        new MirInstructionLocation(blockRef, index));
-                }
-            }
-
-            foreach (var value in callable.Values)
-                values.Add(new MirValueRef(snapshotId, callable.Id, value.Id), value);
-            foreach (var storage in callable.Storages)
-                storages.Add(new MirStorageRef(snapshotId, callable.Id, storage.Id), storage);
-            foreach (var qubit in callable.Qubits)
-                qubits.Add(new MirQubitRef(snapshotId, callable.Id, qubit.Key), qubit);
-        }
-
-        _blocks = blocks.ToFrozenDictionary();
-        _instructions = instructions.ToFrozenDictionary();
-        _instructionLocations = instructionLocations.ToFrozenDictionary();
-        _values = values.ToFrozenDictionary();
-        _storages = storages.ToFrozenDictionary();
-        _qubits = qubits.ToFrozenDictionary();
-    }
-
-    public MirSnapshotId SnapshotId => _snapshotId;
-    public IReadOnlyCollection<MirCallableRef> Callables =>
-        _callables.Keys.Select(callable => new MirCallableRef(_snapshotId, callable)).ToArray();
-    public IReadOnlyCollection<MirBlockRef> Blocks => _blocks.Keys;
-    public IReadOnlyCollection<MirInstructionRef> Instructions => _instructions.Keys;
-    public IReadOnlyCollection<MirValueRef> Values => _values.Keys;
-    public IReadOnlyCollection<MirStorageRef> Storages => _storages.Keys;
-    public IReadOnlyCollection<MirQubitRef> Qubits => _qubits.Keys;
-
-    public MirCallable RequireCallable(MirCallableRef reference)
-    {
-        RequireSnapshot(reference.Snapshot, nameof(reference));
-        return _callables.TryGetValue(reference.Callable, out var callable)
-            ? callable
-            : throw Missing(nameof(reference), reference);
-    }
-
-    internal MirCallable RequireCallableLocal(MirCallableId id) =>
-        _callables.TryGetValue(id, out var callable)
-            ? callable
-            : throw Missing(nameof(id), id);
-
-    public MirBlock RequireBlock(MirBlockRef reference)
-    {
-        RequireSnapshot(reference.Snapshot, nameof(reference));
-        return _blocks.TryGetValue(reference, out var block)
-            ? block
-            : throw Missing(nameof(reference), reference);
-    }
-
-    public MirInstruction RequireInstruction(MirInstructionRef reference)
-    {
-        RequireSnapshot(reference.Snapshot, nameof(reference));
-        return _instructions.TryGetValue(reference, out var instruction)
-            ? instruction
-            : throw Missing(nameof(reference), reference);
-    }
-
-    public MirInstructionLocation RequireInstructionLocation(MirInstructionRef reference)
-    {
-        RequireSnapshot(reference.Snapshot, nameof(reference));
-        return _instructionLocations.TryGetValue(reference, out var location)
-            ? location
-            : throw Missing(nameof(reference), reference);
-    }
-
-    public MirValue RequireValue(MirValueRef reference)
-    {
-        RequireSnapshot(reference.Snapshot, nameof(reference));
-        return _values.TryGetValue(reference, out var value)
-            ? value
-            : throw Missing(nameof(reference), reference);
-    }
-
-    public MirArrayStorage RequireStorage(MirStorageRef reference)
-    {
-        RequireSnapshot(reference.Snapshot, nameof(reference));
-        return _storages.TryGetValue(reference, out var storage)
-            ? storage
-            : throw Missing(nameof(reference), reference);
-    }
-
-    public MirQubit RequireQubit(MirQubitRef reference)
-    {
-        RequireSnapshot(reference.Snapshot, nameof(reference));
-        return _qubits.TryGetValue(reference, out var qubit)
-            ? qubit
-            : throw Missing(nameof(reference), reference);
-    }
-
-    private void RequireSnapshot(MirSnapshotId actual, string parameter) =>
-        MirReferenceValidation.RequireSnapshot(_snapshotId, actual, parameter);
-
-    private static ArgumentOutOfRangeException Missing<T>(string parameter, T value) =>
-        new(parameter, value, $"MIR reference {value} does not belong to this snapshot");
-}
-
-/// <summary>
 /// One immutable MIR artifact tied to the exact HIR snapshot and lowering profile which produced it.
-/// Structural indexes and analyses are owned by this snapshot rather than by a mutable global model.
+/// Callable-local structural indexes and analyses are owned by this snapshot rather than by a mutable
+/// global model.
 /// </summary>
 public sealed class MirSnapshot
 {
@@ -220,19 +64,26 @@ public sealed class MirSnapshot
         MirSnapshotId id,
         MirLoweringProfile profile,
         MirProgram program,
-        MirCrossStageLinks links,
+        HirSemanticArtifact loweringSource,
         MirStage stage = MirStage.Lowered,
         MirSnapshot? parent = null,
         MirSafetyFacts? safety = null)
     {
         ArgumentNullException.ThrowIfNull(program);
-        ArgumentNullException.ThrowIfNull(links);
+        ArgumentNullException.ThrowIfNull(loweringSource);
 
-        if (id.CompilationId != links.LoweredFrom.CompilationId
-            || id.CompilationRevision != links.LoweredFrom.CompilationRevision)
+        if (loweringSource.Phase != HirSemanticPhase.EffectAnalysis
+            || !loweringSource.IsAccepted)
+        {
+            throw new ArgumentException(
+                "MIR lowering requires an accepted final HIR effect-analysis artifact.",
+                nameof(loweringSource));
+        }
+        if (id.CompilationId != loweringSource.SourceId.CompilationId
+            || id.CompilationRevision != loweringSource.SourceId.CompilationRevision)
             throw new ArgumentException(
                 "the MIR snapshot and its HIR origin must belong to the same compilation snapshot",
-                nameof(links));
+                nameof(loweringSource));
         if (id != program.SnapshotId)
             throw new ArgumentException(
                 $"MIR snapshot identity {id} disagrees with program identity {program.SnapshotId}",
@@ -241,14 +92,6 @@ public sealed class MirSnapshot
             throw new ArgumentOutOfRangeException(nameof(profile), profile, "unknown MIR lowering profile");
         if (!Enum.IsDefined(stage))
             throw new ArgumentOutOfRangeException(nameof(stage), stage, "unknown MIR stage");
-        if (links.MirSnapshot != id)
-            throw new ArgumentException(
-                "the cross-stage links do not belong to this MIR snapshot",
-                nameof(links));
-        if (!ReferenceEquals(program.Origins, links.Origins))
-            throw new ArgumentException(
-                "the MIR program and its cross-stage links must share one origin table",
-                nameof(links));
         safety ??= MirSafetyFacts.Empty(id);
         if (safety.SnapshotId != id)
             throw new ArgumentException(
@@ -288,14 +131,11 @@ public sealed class MirSnapshot
                     nameof(stage));
             }
             if (!ReferenceEquals(
-                    parent.Links.LoweredFromSnapshot,
-                    links.LoweredFromSnapshot)
-                || !ReferenceEquals(
-                    parent.Links.SymbolsFromArtifact,
-                    links.SymbolsFromArtifact))
+                    parent.LoweringSource,
+                    loweringSource))
                 throw new ArgumentException(
-                    "a MIR transformation must retain its parent's exact HIR and semantic authorities",
-                    nameof(links));
+                    "a MIR transformation must retain its parent's exact final HIR artifact",
+                    nameof(loweringSource));
         }
 
         QoraMirVerifier.VerifyOrThrow(program);
@@ -306,19 +146,17 @@ public sealed class MirSnapshot
         Parent = parent;
         Program = program;
         Safety = safety;
-        Links = links;
-        Structure = new MirStructuralIndex(id, program);
+        LoweringSource = loweringSource;
         foreach (var obligation in safety.UnprovenBounds)
             VerifyBoundsSite(
                 obligation.Site,
-                Structure.RequireInstruction(
+                program.RequireInstruction(
                     obligation.Site.Instruction));
-        links.VerifyAgainst(Structure);
         Analyses = new MirAnalysisStore(this);
     }
 
     private static void VerifyBoundsSite(
-        MirIndexedAccessRef site,
+        MirIndexedAccessSite site,
         MirInstruction instruction)
     {
         var matches = (site.Kind, instruction) switch
@@ -358,15 +196,14 @@ public sealed class MirSnapshot
         };
 
     public MirSnapshotId Id { get; }
-    public HirSnapshotId LoweredFrom => Links.LoweredFrom;
+    public HirSnapshotId LoweredFrom => LoweringSource.SourceId;
     public MirLoweringProfile Profile { get; }
     public MirStage Stage { get; }
     public MirSnapshot? Parent { get; }
     public MirProgram Program { get; }
     public MirSafetyFacts Safety { get; }
     public MirOriginTable Origins => Program.Origins;
-    public MirCrossStageLinks Links { get; }
-    public MirStructuralIndex Structure { get; }
+    internal HirSemanticArtifact LoweringSource { get; }
     public MirAnalysisStore Analyses { get; }
 
     public bool DescendsFrom(MirSnapshotId ancestor)

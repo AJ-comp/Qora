@@ -24,15 +24,15 @@ public enum MirIndexedAccessKind
 }
 
 /// <summary>
-/// Exact identity of one indexed access. An instruction reference alone is insufficient because one
+/// Exact identity of one indexed access. An instruction site alone is insufficient because one
 /// quantum application can contain several independently indexed qubit operands. <see cref="Ordinal"/>
 /// is zero for the single index of an array load/store or measurement, and is the call operand slot for
 /// <see cref="MirIndexedAccessKind.QubitOperand"/>.
 /// </summary>
-public readonly record struct MirIndexedAccessRef
+public readonly record struct MirIndexedAccessSite
 {
-    public MirIndexedAccessRef(
-        MirInstructionRef instruction,
+    public MirIndexedAccessSite(
+        MirInstructionSite instruction,
         MirIndexedAccessKind kind,
         int ordinal)
     {
@@ -56,7 +56,7 @@ public readonly record struct MirIndexedAccessRef
         Ordinal = ordinal;
     }
 
-    public MirInstructionRef Instruction { get; }
+    public MirInstructionSite Instruction { get; }
     public MirIndexedAccessKind Kind { get; }
     public int Ordinal { get; }
 
@@ -71,7 +71,7 @@ public readonly record struct MirIndexedAccessRef
 /// </summary>
 public sealed record MirBoundsObligation(
     MirBoundsObligationId Id,
-    MirIndexedAccessRef Site,
+    MirIndexedAccessSite Site,
     string Operation,
     string Aggregate,
     string Index,
@@ -102,10 +102,6 @@ public sealed class MirSafetyFacts
                     $"MIR bounds obligation slot {index} has identity {obligation.Id}",
                     nameof(bounds));
             }
-            MirReferenceValidation.RequireSnapshot(
-                snapshotId,
-                obligation.Site.Instruction.Snapshot,
-                nameof(bounds));
         }
     }
 
@@ -115,7 +111,7 @@ public sealed class MirSafetyFacts
     internal static MirSafetyFacts FromHir(
         MirSnapshotId snapshotId,
         HirSemanticModel semantics,
-        IReadOnlyDictionary<HirNodeId, MirIndexedAccessRef> loweredSites)
+        IReadOnlyDictionary<HirNodeId, MirIndexedAccessSite> loweredSites)
     {
         ArgumentNullException.ThrowIfNull(semantics);
         ArgumentNullException.ThrowIfNull(loweredSites);
@@ -154,17 +150,7 @@ public sealed class MirSafetyFacts
 
         return new MirSafetyFacts(
             snapshotId,
-            _bounds.Select(
-                obligation => obligation with
-                {
-                    Site = new MirIndexedAccessRef(
-                        obligation.Site.Instruction with
-                        {
-                            Snapshot = snapshotId,
-                        },
-                        obligation.Site.Kind,
-                        obligation.Site.Ordinal),
-                }));
+            _bounds);
     }
 
     /// <summary>
@@ -191,9 +177,8 @@ public sealed class MirSafetyFacts
                 obligation with
                 {
                     Id = new MirBoundsObligationId(rebased.Count),
-                    Site = new MirIndexedAccessRef(
-                        new MirInstructionRef(
-                            snapshotId,
+                    Site = new MirIndexedAccessSite(
+                        new MirInstructionSite(
                             duplicate,
                             obligation.Site.Instruction.Instruction),
                         obligation.Site.Kind,

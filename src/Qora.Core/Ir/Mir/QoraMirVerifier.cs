@@ -56,6 +56,8 @@ internal static class QoraMirVerifier
         private readonly MirProgram _program;
         private readonly List<MirVerificationError> _errors = new();
         private readonly Dictionary<MirCallableId, MirCallable> _callables = new();
+        private readonly Dictionary<object, MirCallableId> _entityOwners =
+            new(ReferenceEqualityComparer.Instance);
 
         public Verifier(MirProgram program)
         {
@@ -91,6 +93,11 @@ internal static class QoraMirVerifier
                     Add("MIR003", $"callable `{callable.Name}` has negative identity {callable.Id}", callable);
                 if (!_callables.TryAdd(callable.Id, callable))
                     Add("MIR004", $"callable identity {callable.Id} is declared more than once", callable);
+                else if (!_program.ContainsCallable(callable))
+                    Add(
+                        "MIR149",
+                        $"program lookup does not own the exact callable object {callable.Id}",
+                        callable);
             }
 
             VerifyEntryPoint();
@@ -113,8 +120,12 @@ internal static class QoraMirVerifier
             MirFormalQubitEffectQuery effects;
             try
             {
+                var callGraph =
+                    MirCallGraphAnalysis.AnalyzeVerified(_program);
                 effects =
-                    MirEffectAnalysis.CreateFormalQubitEffectQueryUnchecked(_program);
+                    MirEffectAnalysis.CreateFormalQubitEffectQueryUnchecked(
+                        _program,
+                        callGraph);
                 effects.SummarizeAll();
             }
             catch (InvalidOperationException failure)
@@ -209,6 +220,9 @@ internal static class QoraMirVerifier
                 "MIR013",
                 "qubit version",
                 callable);
+
+            VerifyLocalOwnership(callable);
+            VerifyLocalIndexes(callable);
 
             foreach (var parameter in callable.Parameters)
                 if (parameter is not null)
@@ -307,6 +321,119 @@ internal static class QoraMirVerifier
 
             if (_errors.Count == callableErrorStart)
                 VerifyGraphContracts(callable, blocks, values);
+        }
+
+        private void VerifyLocalOwnership(MirCallable callable)
+        {
+            foreach (var parameter in callable.Parameters)
+                ClaimOwner(callable, parameter, "parameter");
+            foreach (var block in callable.Blocks)
+            {
+                ClaimOwner(callable, block, "block");
+                if (block is null)
+                    continue;
+                foreach (var instruction in block.Instructions)
+                    ClaimOwner(callable, instruction, "instruction");
+            }
+            foreach (var value in callable.Values)
+                ClaimOwner(callable, value, "SSA value");
+            foreach (var storage in callable.Storages)
+                ClaimOwner(callable, storage, "array storage");
+            foreach (var qubit in callable.Qubits)
+                ClaimOwner(callable, qubit, "qubit version");
+        }
+
+        private void ClaimOwner(
+            MirCallable callable,
+            object? entity,
+            string role)
+        {
+            if (entity is null)
+                return;
+            if (!_entityOwners.TryGetValue(entity, out var owner))
+            {
+                _entityOwners.Add(entity, callable.Id);
+                return;
+            }
+            if (owner != callable.Id)
+            {
+                Add(
+                    "MIR149",
+                    $"{role} object is owned by both {owner} and {callable.Id}",
+                    callable);
+            }
+        }
+
+        private void VerifyLocalIndexes(MirCallable callable)
+        {
+            foreach (var block in callable.Blocks)
+            {
+                if (block is null)
+                    continue;
+                if (!callable.ContainsBlock(block))
+                {
+                    Add(
+                        "MIR150",
+                        $"callable lookup does not own the exact block object {block.Id}",
+                        callable,
+                        block);
+                }
+
+                for (var index = 0; index < block.Instructions.Count; index++)
+                {
+                    var instruction = block.Instructions[index];
+                    if (instruction is null)
+                        continue;
+                    if (!callable.ContainsInstruction(instruction))
+                    {
+                        Add(
+                            "MIR150",
+                            $"callable lookup does not own the exact instruction object {instruction.Id}",
+                            callable,
+                            block,
+                            instruction);
+                        continue;
+                    }
+
+                    var location = callable.RequireInstructionLocation(instruction.Id);
+                    if (!ReferenceEquals(location.Block, block)
+                        || location.Index != index)
+                    {
+                        Add(
+                            "MIR150",
+                            $"instruction lookup places {instruction.Id} at "
+                            + $"{location.Block.Id}[{location.Index}], expected {block.Id}[{index}]",
+                            callable,
+                            block,
+                            instruction);
+                    }
+                }
+            }
+
+            foreach (var value in callable.Values)
+            {
+                if (value is not null && !callable.ContainsValue(value))
+                    Add(
+                        "MIR150",
+                        $"callable lookup does not own the exact SSA value object {value.Id}",
+                        callable);
+            }
+            foreach (var storage in callable.Storages)
+            {
+                if (storage is not null && !callable.ContainsStorage(storage))
+                    Add(
+                        "MIR150",
+                        $"callable lookup does not own the exact array storage object {storage.Id}",
+                        callable);
+            }
+            foreach (var qubit in callable.Qubits)
+            {
+                if (qubit is not null && !callable.ContainsQubit(qubit))
+                    Add(
+                        "MIR150",
+                        $"callable lookup does not own the exact qubit object {qubit.Key}",
+                        callable);
+            }
         }
 
         /// <summary>

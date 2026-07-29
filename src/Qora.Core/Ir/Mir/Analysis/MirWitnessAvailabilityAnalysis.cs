@@ -15,7 +15,7 @@ public enum MirWitnessIssueKind
 /// </summary>
 public sealed record MirWitnessIssue(
     MirWitnessIssueKind Kind,
-    MirValueRef Value,
+    MirValueId Value,
     MirMemoryStateAvailability? Memory = null);
 
 /// <summary>
@@ -78,14 +78,14 @@ public sealed class MirWitnessAvailabilitySnapshot
         _memory = memory;
         _scalars = scalars;
         SnapshotId = sourceProgram.SnapshotId;
-        Callable = new MirCallableRef(SnapshotId, callable.Id);
+        Callable = callable.Id;
         _effectBySite = effects.Effects
             .Where(effect => effect.Site.Callable == Callable)
             .ToFrozenDictionary(effect => effect.Site);
     }
 
     public MirSnapshotId SnapshotId { get; }
-    public MirCallableRef Callable { get; }
+    public MirCallableId Callable { get; }
     internal MirControlFlowSnapshot ControlFlow => _cfg;
     internal MirMemoryStateSnapshot MemoryState => _memory;
     internal MirScalarValueAvailabilitySnapshot ScalarAvailability => _scalars;
@@ -98,7 +98,7 @@ public sealed class MirWitnessAvailabilitySnapshot
         && ReferenceEquals(_effects, effects)
         && ReferenceEquals(_callable, program.FindCallable(callable))
         && SnapshotId == program.SnapshotId
-        && Callable.Callable == callable
+        && Callable == callable
         && effects.IsFor(program);
 
     internal void EnsureFor(
@@ -114,36 +114,18 @@ public sealed class MirWitnessAvailabilitySnapshot
 
     public MirWitnessAvailability CheckBeforeInstruction(
         MirEffectSite effect,
-        MirInstructionRef target) =>
+        MirInstructionId target) =>
         Check(effect, _cfg.PointBeforeInstruction(target));
 
     public MirWitnessAvailability CheckAtTerminator(
         MirEffectSite effect,
-        MirBlockRef target) =>
-        Check(effect, _cfg.TerminatorPoint(target));
-
-    internal MirWitnessAvailability CheckBeforeInstruction(
-        MirEffectSite effect,
-        MirInstructionId target) =>
-        CheckBeforeInstruction(
-            effect,
-            new MirInstructionRef(SnapshotId, Callable.Callable, target));
-
-    internal MirWitnessAvailability CheckAtTerminator(
-        MirEffectSite effect,
         MirBlockId target) =>
-        CheckAtTerminator(
-            effect,
-            new MirBlockRef(SnapshotId, Callable.Callable, target));
+        Check(effect, _cfg.TerminatorPoint(target));
 
     private MirWitnessAvailability Check(
         MirEffectSite site,
         MirProgramPoint point)
     {
-        MirReferenceValidation.RequireSnapshot(
-            SnapshotId,
-            site.Snapshot,
-            nameof(site));
         if (site.Callable != Callable
             || !_effectBySite.TryGetValue(site, out var effect))
             throw new ArgumentOutOfRangeException(
@@ -155,7 +137,7 @@ public sealed class MirWitnessAvailabilitySnapshot
         var rematerializations = new List<MirScalarValueAvailability>();
         foreach (var witness in effect.ClassicalWitnesses)
         {
-            var availability = _scalars.Check(witness.Value.Value, point);
+            var availability = _scalars.Check(witness.Value, point);
             if (!availability.CanSupplyValue)
                 issues.Add(new MirWitnessIssue(
                     MirWitnessIssueKind.ScalarValueUnavailable,
@@ -170,7 +152,7 @@ public sealed class MirWitnessAvailabilitySnapshot
         foreach (var predicate in effect.PathCondition.Predicates
                      .DistinctBy(predicate => predicate.Condition))
         {
-            var availability = _scalars.Check(predicate.Condition.Value, point);
+            var availability = _scalars.Check(predicate.Condition, point);
             if (!availability.CanSupplyValue)
                 issues.Add(new MirWitnessIssue(
                     MirWitnessIssueKind.PathPredicateUnavailable,
@@ -184,8 +166,8 @@ public sealed class MirWitnessAvailabilitySnapshot
         foreach (var array in effect.ArrayStates)
         {
             var availability = _memory.CheckAtLocation(
-                array.InputState.Value,
-                point.Block.Block,
+                array.InputState,
+                point.Block,
                 point.InstructionIndex);
             requiresIterationLocalPlacement |= availability.RequiresSameIteration;
             if (!availability.IsAvailable)

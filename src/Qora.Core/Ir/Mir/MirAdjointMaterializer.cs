@@ -1,4 +1,5 @@
 using System.Collections.Frozen;
+using Qora.Ir.Mir.Analysis;
 
 namespace Qora.Ir.Mir;
 
@@ -6,7 +7,7 @@ namespace Qora.Ir.Mir;
 public sealed record MirAdjointMaterializationError(
     string Code,
     string Message,
-    MirCallableRef Callable,
+    MirCallableId Callable,
     MirOriginRef Origin);
 
 /// <summary>
@@ -18,7 +19,7 @@ public sealed class MirAdjointMaterializationResult
     internal MirAdjointMaterializationResult(
         MirSnapshot source,
         MirSnapshot? output,
-        IReadOnlyDictionary<MirCallableRef, MirCallableRef> inverses,
+        IReadOnlyDictionary<MirCallableId, MirCallableId> inverses,
         IReadOnlyList<MirAdjointMaterializationError> errors)
     {
         Source = source ?? throw new ArgumentNullException(nameof(source));
@@ -31,10 +32,10 @@ public sealed class MirAdjointMaterializationResult
     public MirSnapshot? Output { get; }
     public MirSnapshot Snapshot => Output ?? Source;
     /// <summary>
-    /// Exact source-callable → synthesized-output-callable relationships. Both endpoints are
-    /// snapshot-qualified so a local callable ID can never be consumed in the wrong MIR revision.
+    /// Source-callable → synthesized-output-callable relationships. <see cref="Source"/> owns every
+    /// key and <see cref="Output"/> owns every value, so the result supplies both exact snapshots.
     /// </summary>
-    public IReadOnlyDictionary<MirCallableRef, MirCallableRef> Inverses { get; }
+    public IReadOnlyDictionary<MirCallableId, MirCallableId> Inverses { get; }
     public IReadOnlyList<MirAdjointMaterializationError> Errors { get; }
     public bool Succeeded => Errors.Count == 0;
     public bool Changed => Output is not null;
@@ -60,24 +61,24 @@ public static class MirAdjointMaterializer
             return new MirAdjointMaterializationResult(
                 source,
                 output: null,
-                new Dictionary<MirCallableRef, MirCallableRef>(),
+                new Dictionary<MirCallableId, MirCallableId>(),
                 new[]
                 {
                     new MirAdjointMaterializationError(
                         UnsupportedCode,
                         $"cannot materialize inverse of non-unitary built-in `{builtin.Name}`",
-                        new MirCallableRef(source.Id, invalidBuiltin.Callable.Id),
+                        invalidBuiltin.Callable.Id,
                         invalidBuiltin.Apply.Origin),
                 });
         }
 
-        var requested = RequestedCallableInverses(source.Program);
-        if (!ContainsCallableAdjointMarkers(source.Program))
+        var requested = RequestedCallableInverses(source);
+        if (!ContainsCallableAdjointMarkers(source))
         {
             return new MirAdjointMaterializationResult(
                 source,
                 output: null,
-                new Dictionary<MirCallableRef, MirCallableRef>(),
+                new Dictionary<MirCallableId, MirCallableId>(),
                 Array.Empty<MirAdjointMaterializationError>());
         }
 
@@ -137,23 +138,33 @@ public static class MirAdjointMaterializer
         return null;
     }
 
-    private static HashSet<MirCallableId> RequestedCallableInverses(MirProgram program) =>
-        program.Callables
-            .SelectMany(callable => callable.Blocks)
-            .SelectMany(block => block.Instructions)
-            .OfType<MirQuantumApply>()
-            .Where(apply => apply.Target is MirUserCallableTarget
-                && HasAdjoint(apply.Functors))
-            .Select(apply => ((MirUserCallableTarget)apply.Target).Callable)
+    private static HashSet<MirCallableId> RequestedCallableInverses(
+        MirSnapshot snapshot) =>
+        UserCallableApplies(snapshot)
+            .Where(call => HasAdjoint(call.Apply.Functors))
+            .Select(call => call.Site.Callee)
             .ToHashSet();
 
-    private static bool ContainsCallableAdjointMarkers(MirProgram program) =>
-        program.Callables
-            .SelectMany(callable => callable.Blocks)
-            .SelectMany(block => block.Instructions)
-            .OfType<MirQuantumApply>()
-            .Any(apply => apply.Target is MirUserCallableTarget
-                && ContainsAdjoint(apply.Functors));
+    private static bool ContainsCallableAdjointMarkers(MirSnapshot snapshot) =>
+        UserCallableApplies(snapshot)
+            .Any(call => ContainsAdjoint(call.Apply.Functors));
+
+    private static IEnumerable<(MirCallSite Site, MirQuantumApply Apply)>
+        UserCallableApplies(MirSnapshot snapshot)
+    {
+        foreach (var caller in snapshot.Program.Callables)
+        {
+            foreach (var site in snapshot.Analyses.CallGraph.CallsFrom(caller.Id))
+            {
+                if (site.Kind != MirCallKind.QuantumApply)
+                    continue;
+                var instruction = caller.RequireInstruction(
+                    site.Instruction.Instruction);
+                if (instruction is MirQuantumApply apply)
+                    yield return (site, apply);
+            }
+        }
+    }
 
     private static bool HasAdjoint(IReadOnlyList<MirFunctor> functors) =>
         functors.Count(functor => functor == MirFunctor.Adjoint) % 2 == 1;
@@ -167,7 +178,7 @@ public static class MirAdjointMaterializer
     /// </summary>
     internal static MirSnapshot InjectRequests(
         MirSnapshot source,
-        IEnumerable<MirInstructionRef> sites)
+        IEnumerable<MirInstructionSite> sites)
     {
         ArgumentNullException.ThrowIfNull(source);
         ArgumentNullException.ThrowIfNull(sites);
@@ -177,11 +188,8 @@ public static class MirAdjointMaterializer
         var introducesRequest = false;
         foreach (var site in requested)
         {
-            MirReferenceValidation.RequireSnapshot(
-                source.Id,
-                site.Snapshot,
-                nameof(sites));
-            var instruction = source.Structure.RequireInstruction(site);
+            var callable = source.Program.RequireCallable(site.Callable);
+            var instruction = callable.RequireInstruction(site.Instruction);
             if (instruction is not MirQuantumApply apply)
             {
                 throw new ArgumentException(
@@ -222,14 +230,13 @@ public static class MirAdjointMaterializer
                 terminatorOrigin: transformation.Rebase,
                 instructionTransform: instruction =>
                 {
-                    var reference = new MirInstructionRef(
-                        source.Id,
+                    var site = new MirInstructionSite(
                         callable.Id,
                         instruction.Id);
                     var rebound = Planner.CloneInstruction(
                         instruction,
                         transformation.Rebase(instruction.Origin));
-                    if (!requested.Contains(reference)
+                    if (!requested.Contains(site)
                         || rebound is not MirQuantumApply apply
                         || HasAdjoint(apply.Functors))
                         return rebound;
@@ -254,17 +261,11 @@ public static class MirAdjointMaterializer
             origins,
             source.Program.EntryPoint,
             callables);
-        var links = source.Links.CloneForAdditiveTransformation(
-            program,
-            origins,
-            new Dictionary<
-                MirCallableId,
-                (MirCallableId DerivedFrom, MirCallableSynthesisKind Kind)>());
         return new MirSnapshot(
             transformation.Target,
             source.Profile,
             program,
-            links,
+            source.LoweringSource,
             MirStage.InverseRequestsInjected,
             source,
             source.Safety.Rebase(transformation.Target));
@@ -273,6 +274,7 @@ public static class MirAdjointMaterializer
     private sealed class Planner
     {
         private readonly MirSnapshot _source;
+        private readonly MirCallGraph _callGraph;
         private readonly IReadOnlyDictionary<MirCallableId, MirCallable> _callables;
         private readonly HashSet<MirCallableId> _required;
         private readonly List<MirAdjointMaterializationError> _errors = new();
@@ -283,6 +285,7 @@ public static class MirAdjointMaterializer
             HashSet<MirCallableId> requested)
         {
             _source = source;
+            _callGraph = source.Analyses.CallGraph;
             _callables = source.Program.Callables.ToDictionary(callable => callable.Id);
             _required = requested;
         }
@@ -325,20 +328,11 @@ public static class MirAdjointMaterializer
                 origins,
                 _source.Program.EntryPoint,
                 rewritten);
-            var synthesized = inverseIds.ToDictionary(
-                pair => pair.Value,
-                pair => (
-                    DerivedFrom: pair.Key,
-                    Kind: MirCallableSynthesisKind.Inverse));
-            var links = _source.Links.CloneForAdditiveTransformation(
-                program,
-                origins,
-                synthesized);
             var output = new MirSnapshot(
                 transformation.Target,
                 _source.Profile,
                 program,
-                links,
+                _source.LoweringSource,
                 MirStage.AdjointsMaterialized,
                 _source,
                 _source.Safety.CloneForAdditiveTransformation(
@@ -346,13 +340,10 @@ public static class MirAdjointMaterializer
                     inverseIds));
             VerifyMaterialized(output);
 
-            var exactInverseRefs = inverseIds.ToDictionary(
-                pair => new MirCallableRef(_source.Id, pair.Key),
-                pair => new MirCallableRef(output.Id, pair.Value));
             return new MirAdjointMaterializationResult(
                 _source,
                 output,
-                exactInverseRefs,
+                inverseIds,
                 Array.Empty<MirAdjointMaterializationError>());
         }
 
@@ -379,14 +370,16 @@ public static class MirAdjointMaterializer
                 return;
             }
 
-            var block = callable.Blocks[0];
-            foreach (var apply in block.Instructions.OfType<MirQuantumApply>())
+            foreach (var site in _callGraph.CallsFrom(callableId))
             {
-                if (apply.Target is not MirUserCallableTarget user
-                    || HasAdjoint(apply.Functors))
+                if (site.Kind != MirCallKind.QuantumApply)
                     continue;
-                _required.Add(user.Callable);
-                Discover(user.Callable);
+                var apply = (MirQuantumApply)callable.RequireInstruction(
+                    site.Instruction.Instruction);
+                if (HasAdjoint(apply.Functors))
+                    continue;
+                _required.Add(site.Callee);
+                Discover(site.Callee);
             }
             _visit[callableId] = VisitState.Visited;
         }
@@ -505,14 +498,14 @@ public static class MirAdjointMaterializer
                 new MirAdjointMaterializationError(
                     UnsupportedCode,
                     $"cannot materialize inverse of `{callable.Name}`: {message}",
-                    new MirCallableRef(_source.Id, callable.Id),
+                    callable.Id,
                     origin));
 
         private MirAdjointMaterializationResult Failure() =>
             new(
                 _source,
                 output: null,
-                new Dictionary<MirCallableRef, MirCallableRef>(),
+                new Dictionary<MirCallableId, MirCallableId>(),
                 _errors);
 
         private static bool IsReadOnlyBorrow(MirCallOperand operand) =>

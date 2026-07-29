@@ -54,8 +54,7 @@ public sealed class MirOpenQasmLoweringTests
         var main = Assert.Single(
             mir.Program.Callables,
             callable => callable.Name == "Main");
-        var regions = mir.Analyses.ControlRegions(
-            new MirCallableRef(mir.Id, main.Id));
+        var regions = mir.Analyses.ControlRegions(main);
         var loop = Assert.Single(regions.NaturalLoops);
 
         Assert.NotNull(loop.NormalExit);
@@ -85,8 +84,7 @@ public sealed class MirOpenQasmLoweringTests
         var main = Assert.Single(
             mir.Program.Callables,
             callable => callable.Name == "Main");
-        var loops = mir.Analyses.ControlRegions(
-                new MirCallableRef(mir.Id, main.Id))
+        var loops = mir.Analyses.ControlRegions(main)
             .NaturalLoops;
 
         Assert.Equal(2, loops.Count);
@@ -122,15 +120,15 @@ public sealed class MirOpenQasmLoweringTests
             mir.Program.Callables,
             callable => callable.Name == "find");
         var loop = Assert.Single(
-            mir.Analyses.ControlRegions(
-                    new MirCallableRef(mir.Id, find.Id))
+            mir.Analyses.ControlRegions(find)
                 .NaturalLoops);
         var sideExit = Assert.Single(loop.SideExits);
 
         Assert.NotNull(loop.NormalExit);
         Assert.Equal(MirLoopSideExitKind.CallableReturn, sideExit.Kind);
-        Assert.Equal(mir.Id, sideExit.Source.Snapshot);
-        Assert.Equal(mir.Id, sideExit.Target.Snapshot);
+        Assert.Equal(mir.Id, loop.SnapshotId);
+        Assert.Equal(sideExit.Source, find.RequireBlock(sideExit.Source).Id);
+        Assert.Equal(sideExit.Target, find.RequireBlock(sideExit.Target).Id);
         var qasm = Assert.IsType<OpenQasmArtifact>(
             compilation.Targets.OpenQasm).Text;
         Assert.Contains("int return_done = 0;", qasm);
@@ -164,8 +162,7 @@ public sealed class MirOpenQasmLoweringTests
         var find = Assert.Single(
             mir.Program.Callables,
             callable => callable.Name == "find");
-        var loops = mir.Analyses.ControlRegions(
-                new MirCallableRef(mir.Id, find.Id))
+        var loops = mir.Analyses.ControlRegions(find)
             .NaturalLoops;
 
         Assert.Equal(2, loops.Count);

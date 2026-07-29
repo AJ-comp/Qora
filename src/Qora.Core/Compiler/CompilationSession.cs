@@ -28,10 +28,12 @@ public sealed class CompilationSession
     /// <summary>Compile an independent root snapshot owned by this session.</summary>
     public Compilation Compile(
         string source,
-        CompilationOptions? options = null) =>
+        CompilationOptions? options = null,
+        CompilationInstrumentation? instrumentation = null) =>
         CompileCore(
             source,
             options ?? new CompilationOptions(),
+            instrumentation,
             parent: null);
 
     /// <summary>
@@ -41,7 +43,8 @@ public sealed class CompilationSession
     public Compilation Recompile(
         Compilation previous,
         string source,
-        CompilationOptions? options = null)
+        CompilationOptions? options = null,
+        CompilationInstrumentation? instrumentation = null)
     {
         ArgumentNullException.ThrowIfNull(previous);
         if (!ReferenceEquals(previous.Session, this))
@@ -54,12 +57,14 @@ public sealed class CompilationSession
         return CompileCore(
             source,
             options ?? previous.Options,
+            instrumentation,
             previous.Revision);
     }
 
     private Compilation CompileCore(
         string source,
         CompilationOptions options,
+        CompilationInstrumentation? instrumentation,
         CompilationRevision? parent)
     {
         var revisionValue = Interlocked.Increment(ref _lastRevision);
@@ -72,6 +77,7 @@ public sealed class CompilationSession
         return QoraCompiler.CompileSnapshot(
             source,
             options,
+            instrumentation,
             this,
             new CompilationRevision((int)revisionValue),
             parent);

@@ -203,7 +203,6 @@ public class ModuleLoaderTests
                     compilation.Sources,
                     compilation.Hir,
                     compilation.Mir,
-                    compilation.Links,
                     compilation.Targets,
                     new[] { wrongOrigin }));
 
@@ -222,7 +221,6 @@ public class ModuleLoaderTests
                     compilation.Sources,
                     compilation.Hir,
                     compilation.Mir,
-                    compilation.Links,
                     compilation.Targets,
                     new[] { hirOrigin }));
         }

@@ -1,10 +1,12 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/Qora.Core/Qora.Core.csproj" />
+    <Project Path="src/Qora.LanguageServices/Qora.LanguageServices.csproj" />
     <Project Path="src/Qora.Playground/Qora.Playground.csproj" />
     <Project Path="src/Qora/Qora.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/Qora.LanguageServices.Tests/Qora.LanguageServices.Tests.csproj" />
     <Project Path="tests/Qora.Tests/Qora.Tests.csproj" />
   </Folder>
 </Solution>

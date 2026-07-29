@@ -1,8 +1,12 @@
+using System.Collections.Frozen;
+
 namespace Qora.Ir.Mir;
 
-// The MIR owns its own dense callable-local identities. References that cross the immutable program
-// boundary always carry the exact MirSnapshotId. Every entity retains a snapshot-qualified origin for
-// diagnostics and derivation; no MIR pass resolves a value, block, or resource by source spelling.
+// The MIR owns stable identities within an explicit program or callable authority. IDs are not required
+// to be contiguous: immutable owner-local indexes provide lookup without forcing unrelated entities to
+// be renumbered after deletion or partial transformation. Program-wide sites pair a callable identity
+// with one owner-local identity, while every entity retains a snapshot-qualified origin for diagnostics
+// and derivation. No MIR pass resolves a value, block, or resource by source spelling.
 public readonly record struct MirCallableId(int Value)
 {
     public override string ToString() => $"c{Value}";
@@ -16,6 +20,17 @@ public readonly record struct MirBlockId(int Value)
 public readonly record struct MirInstructionId(int Value)
 {
     public override string ToString() => $"i{Value}";
+}
+
+/// <summary>
+/// The program-wide location of one instruction inside one immutable MIR snapshot. The snapshot itself
+/// is supplied by the owning <see cref="MirProgram"/> or <see cref="MirSnapshot"/>.
+/// </summary>
+public readonly record struct MirInstructionSite(
+    MirCallableId Callable,
+    MirInstructionId Instruction)
+{
+    public override string ToString() => $"{Callable}/{Instruction}";
 }
 
 public readonly record struct MirValueId(int Value)
@@ -96,6 +111,8 @@ public enum MirCallableKind
 /// </summary>
 public sealed class MirProgram
 {
+    private readonly FrozenDictionary<MirCallableId, MirCallable> _callables;
+
     internal MirProgram(
         MirSnapshotId snapshotId,
         MirOriginTable origins,
@@ -112,6 +129,7 @@ public sealed class MirProgram
         SnapshotId = snapshotId;
         Origins = origins;
         Callables = MirCollections.Freeze(callables);
+        _callables = IndexCallables(Callables);
         EntryPoint = entryPoint;
     }
 
@@ -122,8 +140,61 @@ public sealed class MirProgram
 
     internal int Revision => SnapshotId.Revision;
 
+    public bool ContainsCallable(MirCallableId id) =>
+        _callables.ContainsKey(id);
+
+    public bool ContainsCallable(MirCallable? callable) =>
+        callable is not null
+        && _callables.TryGetValue(callable.Id, out var owned)
+        && ReferenceEquals(owned, callable);
+
+    public MirCallable RequireCallable(MirCallableId id) =>
+        _callables.TryGetValue(id, out var callable)
+            ? callable
+            : throw new ArgumentOutOfRangeException(
+                nameof(id),
+                id,
+                $"callable {id} does not belong to MIR program {SnapshotId}");
+
+    public MirCallable RequireCallable(MirCallable callable)
+    {
+        ArgumentNullException.ThrowIfNull(callable);
+        return ContainsCallable(callable)
+            ? callable
+            : throw new ArgumentException(
+                $"callable {callable.Id} is not the exact object owned by MIR program {SnapshotId}",
+                nameof(callable));
+    }
+
+    public bool ContainsInstruction(MirInstructionSite site) =>
+        _callables.TryGetValue(site.Callable, out var callable)
+        && callable.ContainsInstruction(site.Instruction);
+
+    public MirInstruction RequireInstruction(MirInstructionSite site) =>
+        RequireCallable(site.Callable).RequireInstruction(site.Instruction);
+
+    public (MirCallable Callable, MirBlock Block, int Index)
+        RequireInstructionLocation(MirInstructionSite site)
+    {
+        var callable = RequireCallable(site.Callable);
+        var location = callable.RequireInstructionLocation(site.Instruction);
+        return (callable, location.Block, location.Index);
+    }
+
     internal MirCallable? FindCallable(MirCallableId id) =>
-        Callables.FirstOrDefault(callable => callable.Id == id);
+        _callables.GetValueOrDefault(id);
+
+    private static FrozenDictionary<MirCallableId, MirCallable> IndexCallables(
+        IEnumerable<MirCallable> callables)
+    {
+        var indexed = new Dictionary<MirCallableId, MirCallable>();
+        foreach (var callable in callables)
+        {
+            if (callable is not null)
+                indexed.TryAdd(callable.Id, callable);
+        }
+        return indexed.ToFrozenDictionary();
+    }
 }
 
 /// <summary>
@@ -134,6 +205,15 @@ public sealed class MirProgram
 /// </summary>
 public sealed class MirCallable
 {
+    private readonly FrozenDictionary<MirBlockId, MirBlock> _blocks;
+    private readonly FrozenDictionary<
+        MirInstructionId,
+        (MirInstruction Instruction, MirBlock Block, int Index)> _instructions;
+    private readonly FrozenDictionary<MirValueId, MirValue> _values;
+    private readonly FrozenDictionary<MirStorageId, MirArrayStorage> _storages;
+    private readonly FrozenDictionary<MirQubitKey, MirQubit> _qubits;
+    private readonly FrozenDictionary<MirQubitId, MirQubit> _initialQubits;
+
     internal MirCallable(
         MirCallableId id,
         string name,
@@ -156,6 +236,12 @@ public sealed class MirCallable
         Values = MirCollections.Freeze(values);
         Storages = MirCollections.Freeze(storages);
         Qubits = CollectQubits(Parameters, Blocks);
+        _blocks = IndexFirst(Blocks, block => block.Id);
+        _instructions = IndexInstructions(Blocks);
+        _values = IndexFirst(Values, value => value.Id);
+        _storages = IndexFirst(Storages, storage => storage.Id);
+        _qubits = IndexFirst(Qubits, qubit => qubit.Key);
+        _initialQubits = IndexInitialQubits(Qubits);
         Origin = origin;
     }
 
@@ -171,20 +257,131 @@ public sealed class MirCallable
     public IReadOnlyList<MirQubit> Qubits { get; }
     public MirOriginRef Origin { get; }
 
+    public bool ContainsBlock(MirBlockId id) =>
+        _blocks.ContainsKey(id);
+
+    public bool ContainsBlock(MirBlock? block) =>
+        block is not null
+        && _blocks.TryGetValue(block.Id, out var owned)
+        && ReferenceEquals(owned, block);
+
+    public MirBlock RequireBlock(MirBlockId id) =>
+        _blocks.TryGetValue(id, out var block)
+            ? block
+            : throw Missing(nameof(id), id, "block");
+
+    public MirBlock RequireBlock(MirBlock block)
+    {
+        ArgumentNullException.ThrowIfNull(block);
+        return ContainsBlock(block)
+            ? block
+            : throw Foreign(nameof(block), block.Id, "block");
+    }
+
+    public bool ContainsInstruction(MirInstructionId id) =>
+        _instructions.ContainsKey(id);
+
+    public bool ContainsInstruction(MirInstruction? instruction) =>
+        instruction is not null
+        && _instructions.TryGetValue(instruction.Id, out var owned)
+        && ReferenceEquals(owned.Instruction, instruction);
+
+    public MirInstruction RequireInstruction(MirInstructionId id) =>
+        _instructions.TryGetValue(id, out var location)
+            ? location.Instruction
+            : throw Missing(nameof(id), id, "instruction");
+
+    public MirInstruction RequireInstruction(MirInstruction instruction)
+    {
+        ArgumentNullException.ThrowIfNull(instruction);
+        return ContainsInstruction(instruction)
+            ? instruction
+            : throw Foreign(nameof(instruction), instruction.Id, "instruction");
+    }
+
+    public (MirBlock Block, int Index) RequireInstructionLocation(
+        MirInstructionId id) =>
+        _instructions.TryGetValue(id, out var location)
+            ? (location.Block, location.Index)
+            : throw Missing(nameof(id), id, "instruction");
+
+    public bool ContainsValue(MirValueId id) =>
+        _values.ContainsKey(id);
+
+    public bool ContainsValue(MirValue? value) =>
+        value is not null
+        && _values.TryGetValue(value.Id, out var owned)
+        && ReferenceEquals(owned, value);
+
+    public MirValue RequireValue(MirValueId id) =>
+        _values.TryGetValue(id, out var value)
+            ? value
+            : throw Missing(nameof(id), id, "SSA value");
+
+    public MirValue RequireValue(MirValue value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        return ContainsValue(value)
+            ? value
+            : throw Foreign(nameof(value), value.Id, "SSA value");
+    }
+
+    public bool ContainsStorage(MirStorageId id) =>
+        _storages.ContainsKey(id);
+
+    public bool ContainsStorage(MirArrayStorage? storage) =>
+        storage is not null
+        && _storages.TryGetValue(storage.Id, out var owned)
+        && ReferenceEquals(owned, storage);
+
+    public MirArrayStorage RequireStorage(MirStorageId id) =>
+        _storages.TryGetValue(id, out var storage)
+            ? storage
+            : throw Missing(nameof(id), id, "array storage");
+
+    public MirArrayStorage RequireStorage(MirArrayStorage storage)
+    {
+        ArgumentNullException.ThrowIfNull(storage);
+        return ContainsStorage(storage)
+            ? storage
+            : throw Foreign(nameof(storage), storage.Id, "array storage");
+    }
+
+    public bool ContainsQubit(MirQubitKey key) =>
+        _qubits.ContainsKey(key);
+
+    public bool ContainsQubit(MirQubit? qubit) =>
+        qubit is not null
+        && _qubits.TryGetValue(qubit.Key, out var owned)
+        && ReferenceEquals(owned, qubit);
+
+    public MirQubit RequireQubit(MirQubitKey key) =>
+        _qubits.TryGetValue(key, out var qubit)
+            ? qubit
+            : throw Missing(nameof(key), key, "qubit version");
+
+    public MirQubit RequireQubit(MirQubit qubit)
+    {
+        ArgumentNullException.ThrowIfNull(qubit);
+        return ContainsQubit(qubit)
+            ? qubit
+            : throw Foreign(nameof(qubit), qubit.Key, "qubit version");
+    }
+
     internal MirBlock? FindBlock(MirBlockId id) =>
-        Blocks.FirstOrDefault(block => block.Id == id);
+        _blocks.GetValueOrDefault(id);
 
     internal MirValue? FindValue(MirValueId id) =>
-        Values.FirstOrDefault(value => value.Id == id);
+        _values.GetValueOrDefault(id);
 
     internal MirArrayStorage? FindStorage(MirStorageId id) =>
-        Storages.FirstOrDefault(storage => storage.Id == id);
+        _storages.GetValueOrDefault(id);
 
     internal MirQubit? FindQubit(MirQubitKey key) =>
-        Qubits.FirstOrDefault(qubit => qubit.Key == key);
+        _qubits.GetValueOrDefault(key);
 
     internal MirQubit? FindInitialQubit(MirQubitId id) =>
-        Qubits.FirstOrDefault(qubit => qubit.Id == id && qubit.Version.Value == 0);
+        _initialQubits.GetValueOrDefault(id);
 
     private static IReadOnlyList<MirQubit> CollectQubits(
         IReadOnlyList<IMirParameter> parameters,
@@ -215,6 +412,73 @@ public sealed class MirCallable
 
         return MirCollections.Freeze(qubits);
     }
+
+    private static FrozenDictionary<TKey, TValue> IndexFirst<TKey, TValue>(
+        IEnumerable<TValue> values,
+        Func<TValue, TKey> key)
+        where TKey : notnull
+        where TValue : class
+    {
+        var indexed = new Dictionary<TKey, TValue>();
+        foreach (var value in values)
+        {
+            if (value is not null)
+                indexed.TryAdd(key(value), value);
+        }
+        return indexed.ToFrozenDictionary();
+    }
+
+    private static FrozenDictionary<
+        MirInstructionId,
+        (MirInstruction Instruction, MirBlock Block, int Index)> IndexInstructions(
+        IEnumerable<MirBlock> blocks)
+    {
+        var indexed =
+            new Dictionary<
+                MirInstructionId,
+                (MirInstruction Instruction, MirBlock Block, int Index)>();
+        foreach (var block in blocks)
+        {
+            if (block is null)
+                continue;
+            for (var index = 0; index < block.Instructions.Count; index++)
+            {
+                var instruction = block.Instructions[index];
+                if (instruction is not null)
+                    indexed.TryAdd(instruction.Id, (instruction, block, index));
+            }
+        }
+        return indexed.ToFrozenDictionary();
+    }
+
+    private static FrozenDictionary<MirQubitId, MirQubit> IndexInitialQubits(
+        IEnumerable<MirQubit> qubits)
+    {
+        var indexed = new Dictionary<MirQubitId, MirQubit>();
+        foreach (var qubit in qubits)
+        {
+            if (qubit is not null && qubit.Version.Value == 0)
+                indexed.TryAdd(qubit.Id, qubit);
+        }
+        return indexed.ToFrozenDictionary();
+    }
+
+    private ArgumentOutOfRangeException Missing<TId>(
+        string parameter,
+        TId id,
+        string entity) =>
+        new(
+            parameter,
+            id,
+            $"{entity} {id} does not belong to MIR callable {Id}");
+
+    private ArgumentException Foreign<TId>(
+        string parameter,
+        TId id,
+        string entity) =>
+        new(
+            $"{entity} {id} is not the exact object owned by MIR callable {Id}",
+            parameter);
 }
 
 // Parameters remain ordered because call operands are positional.

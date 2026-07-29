@@ -678,6 +678,13 @@ public sealed class HirSemanticModel
     public Symbol? FindSymbol(HirNodeId nodeId) =>
         _validation.ScopeGraph?.FindDeclaration(nodeId);
 
+    /// <summary>
+    /// The symbol selected for this exact HIR use-site expression, if any. This is the authoritative
+    /// result of HIR name resolution; later stages must not repeat lookup from source spelling.
+    /// </summary>
+    public Symbol? FindReferencedSymbol(HirNodeId nodeId) =>
+        _validation.ScopeGraph?.FindReferencedSymbol(nodeId);
+
     /// <summary>The callable scope of this operation (or of the operation it was derived from), if any.</summary>
     public Scope? FindRootScope(HirNodeId opId) =>
         _validation.ScopeGraph?.FindCallableScope(opId);

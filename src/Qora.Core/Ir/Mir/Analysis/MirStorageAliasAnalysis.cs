@@ -34,13 +34,9 @@ internal static class MirStorageAliasAnalysis
             foreach (var rightId in right.PossibleStorages)
             {
                 if (leftId == rightId) return true;
-                if (leftId.Snapshot != rightId.Snapshot
-                    || leftId.Callable != callable.Id
-                    || rightId.Callable != callable.Id)
-                    return true;
 
-                var leftStorage = callable.FindStorage(leftId.Storage);
-                var rightStorage = callable.FindStorage(rightId.Storage);
+                var leftStorage = callable.FindStorage(leftId);
+                var rightStorage = callable.FindStorage(rightId);
                 if (leftStorage is null || rightStorage is null)
                     return true;
 

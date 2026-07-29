@@ -47,6 +47,7 @@ internal sealed class HirPipelineBuilder
         HirSnapshot source,
         string passName)
     {
+        RequireOpen();
         RequireOwned(source, nameof(source));
         if (!ReferenceEquals(Latest, source))
         {
@@ -63,6 +64,7 @@ internal sealed class HirPipelineBuilder
     /// </summary>
     public HirSnapshot PublishLowered(HirProgram program)
     {
+        RequireOpen();
         ArgumentNullException.ThrowIfNull(program);
         if (!ReferenceEquals(program.Core, _constructionCore))
         {
@@ -85,6 +87,7 @@ internal sealed class HirPipelineBuilder
         HirStage stage,
         HirRewriteResult rewrite)
     {
+        RequireOpen();
         ArgumentNullException.ThrowIfNull(rewrite);
         var latest = Latest
             ?? throw new InvalidOperationException(
@@ -164,6 +167,7 @@ internal sealed class HirPipelineBuilder
     /// </summary>
     public HirSnapshot Alias(HirStage stage, HirSnapshot snapshot)
     {
+        RequireOpen();
         ArgumentNullException.ThrowIfNull(snapshot);
         if (!ReferenceEquals(Latest, snapshot))
             throw new ArgumentException(
@@ -181,6 +185,7 @@ internal sealed class HirPipelineBuilder
     /// </summary>
     public HirSemanticArtifact ValidateSnapshot(HirSnapshot source)
     {
+        RequireOpen();
         RequireOwned(source, nameof(source));
         RequireSemanticPhaseOpen(
             source.Id,
@@ -210,6 +215,7 @@ internal sealed class HirPipelineBuilder
     public HirSemanticArtifact AnalyzeEffects(
         HirSemanticArtifact validation)
     {
+        RequireOpen();
         ArgumentNullException.ThrowIfNull(validation);
         if (validation.Phase != HirSemanticPhase.Validation)
             throw new ArgumentException(
@@ -227,6 +233,15 @@ internal sealed class HirPipelineBuilder
                 nameof(validation));
         }
         RequireOwned(validation.Source, nameof(validation));
+        if (!ReferenceEquals(Latest, validation.Source)
+            || !_milestones.TryGetValue(
+                HirStage.Specialized,
+                out var specialized)
+            || specialized != validation.SourceId)
+        {
+            throw new InvalidOperationException(
+                "Effect analysis can run only on the latest canonical specialized HIR.");
+        }
         RequireSemanticPhaseOpen(
             validation.SourceId,
             HirSemanticPhase.EffectAnalysis);
@@ -270,6 +285,21 @@ internal sealed class HirPipelineBuilder
         if (_semantics.ContainsKey(id))
             throw new InvalidOperationException(
                 $"Semantic artifact {id} was already published.");
+    }
+
+    private void RequireOpen()
+    {
+        if (_milestones.TryGetValue(
+                HirStage.Specialized,
+                out var specialized)
+            && _semantics.ContainsKey(
+                new HirSemanticArtifactId(
+                    specialized,
+                    HirSemanticPhase.EffectAnalysis)))
+        {
+            throw new InvalidOperationException(
+                "The HIR pipeline is sealed after final effect analysis.");
+        }
     }
 
     public HirCompilation Build()

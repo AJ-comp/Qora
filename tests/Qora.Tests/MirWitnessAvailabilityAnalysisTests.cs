@@ -147,8 +147,7 @@ public sealed class MirWitnessAvailabilityAnalysisTests
         var main = Callable(program, "Main");
         var effect = Assert.Single(
             effects.Effects,
-            candidate => candidate.Site.Callable
-                    == new MirCallableRef(program.SnapshotId, main.Id)
+            candidate => candidate.Site.Callable == main.Id
                 && candidate.Target?.DisplayName == "X");
         var analysis = MirWitnessAvailabilityAnalysis.Analyze(
             program,
@@ -194,7 +193,7 @@ public sealed class MirWitnessAvailabilityAnalysisTests
             instruction =>
                 main.Blocks.SelectMany(block => block.Instructions)
                     .OfType<MirArrayLoad>()
-                    .Any(load => load.Id == instruction.Instruction));
+                    .Any(load => load.Id == instruction));
     }
 
     private static (MirProgram Program, MirEffectSnapshot Effects) Compile(string source)
@@ -216,8 +215,7 @@ public sealed class MirWitnessAvailabilityAnalysisTests
         MirCallable callable) =>
         Assert.Single(
             effects.Effects,
-            effect => effect.Site.Callable
-                == new MirCallableRef(effects.SnapshotId, callable.Id));
+            effect => effect.Site.Callable == callable.Id);
 
     private static MirBlock ExitBlock(MirCallable callable) =>
         Assert.Single(

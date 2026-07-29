@@ -25,36 +25,45 @@ public sealed class MirAnalysisStore
     private readonly ConcurrentDictionary<MirCallableId, Lazy<MirWitnessAvailabilitySnapshot>>
         _witnessAvailability = new();
     private readonly Lazy<MirEffectSnapshot> _effects;
+    private readonly Lazy<MirCallGraph> _callGraph;
 
     internal MirAnalysisStore(MirSnapshot snapshot)
     {
         _snapshot = snapshot ?? throw new ArgumentNullException(nameof(snapshot));
+        _callGraph = NewLazy(
+            () => MirCallGraphAnalysis.AnalyzeVerified(Program));
         _effects = NewLazy(
             () => MirEffectAnalysis.AnalyzeVerified(
                 Program,
-                callable => StorageProvenance(Local(callable)),
-                callable => PathConditions(Local(callable))));
+                CallGraph,
+                callable => StorageProvenance(callable),
+                callable => PathConditions(callable)));
     }
 
     public MirSnapshotId SnapshotId => _snapshot.Id;
     public MirEffectSnapshot Effects => _effects.Value;
+    public MirCallGraph CallGraph => _callGraph.Value;
 
-    public MirControlFlowSnapshot ControlFlow(MirCallableRef reference)
+    public MirControlFlowSnapshot ControlFlow(MirCallableId callable) =>
+        ControlFlow(Program.RequireCallable(callable));
+
+    public MirControlFlowSnapshot ControlFlow(MirCallable callable)
     {
-        var source = RequireCallable(reference);
-        var callable = reference.Callable;
+        var source = Program.RequireCallable(callable);
         return _controlFlow.GetOrAdd(
-            callable,
+            source.Id,
             _ => NewLazy(
                 () => MirControlFlowAnalysis.AnalyzeUnchecked(Program, source))).Value;
     }
 
-    public MirStorageProvenanceSnapshot StorageProvenance(MirCallableRef reference)
+    public MirStorageProvenanceSnapshot StorageProvenance(MirCallableId callable) =>
+        StorageProvenance(Program.RequireCallable(callable));
+
+    public MirStorageProvenanceSnapshot StorageProvenance(MirCallable callable)
     {
-        var source = RequireCallable(reference);
-        var callable = reference.Callable;
+        var source = Program.RequireCallable(callable);
         return _storageProvenance.GetOrAdd(
-            callable,
+            source.Id,
             _ => NewLazy(
                 () => MirStorageProvenanceAnalysis.AnalyzeUnchecked(Program, source))).Value;
     }
@@ -63,83 +72,87 @@ public sealed class MirAnalysisStore
     /// Natural-loop and structured-region facts derived from the canonical CFG for this exact snapshot.
     /// The result never stores a second executable tree; target lowerings remain consumers of MIR blocks.
     /// </summary>
-    public MirControlRegionSnapshot ControlRegions(MirCallableRef reference)
+    public MirControlRegionSnapshot ControlRegions(MirCallableId callable) =>
+        ControlRegions(Program.RequireCallable(callable));
+
+    public MirControlRegionSnapshot ControlRegions(MirCallable callable)
     {
-        var source = RequireCallable(reference);
-        var callable = reference.Callable;
+        var source = Program.RequireCallable(callable);
         return _controlRegions.GetOrAdd(
-            callable,
+            source.Id,
             _ => NewLazy(
                 () => MirControlRegionAnalysis.AnalyzeVerified(
                     Program,
                     source,
-                    ControlFlow(reference)))).Value;
+                    ControlFlow(source)))).Value;
     }
 
-    public MirMemoryStateSnapshot MemoryState(MirCallableRef reference)
+    public MirMemoryStateSnapshot MemoryState(MirCallableId callable) =>
+        MemoryState(Program.RequireCallable(callable));
+
+    public MirMemoryStateSnapshot MemoryState(MirCallable callable)
     {
-        var source = RequireCallable(reference);
-        var callable = reference.Callable;
+        var source = Program.RequireCallable(callable);
         return _memoryState.GetOrAdd(
-            callable,
+            source.Id,
             _ => NewLazy(
                 () => MirMemoryStateAnalysis.AnalyzeVerified(
                     Program,
                     source,
-                    ControlFlow(reference),
-                    StorageProvenance(reference)))).Value;
+                    ControlFlow(source),
+                    StorageProvenance(source)))).Value;
     }
 
-    public MirPathConditionSnapshot PathConditions(MirCallableRef reference)
+    public MirPathConditionSnapshot PathConditions(MirCallableId callable) =>
+        PathConditions(Program.RequireCallable(callable));
+
+    public MirPathConditionSnapshot PathConditions(MirCallable callable)
     {
-        var source = RequireCallable(reference);
-        var callable = reference.Callable;
+        var source = Program.RequireCallable(callable);
         return _pathConditions.GetOrAdd(
-            callable,
+            source.Id,
             _ => NewLazy(
                 () => MirPathConditionAnalysis.AnalyzeVerified(
                     Program,
                     source,
-                    ControlFlow(reference)))).Value;
+                    ControlFlow(source)))).Value;
     }
 
-    public MirScalarValueAvailabilitySnapshot ScalarAvailability(MirCallableRef reference)
+    public MirScalarValueAvailabilitySnapshot ScalarAvailability(MirCallableId callable) =>
+        ScalarAvailability(Program.RequireCallable(callable));
+
+    public MirScalarValueAvailabilitySnapshot ScalarAvailability(MirCallable callable)
     {
-        var source = RequireCallable(reference);
-        var callable = reference.Callable;
+        var source = Program.RequireCallable(callable);
         return _scalarAvailability.GetOrAdd(
-            callable,
+            source.Id,
             _ => NewLazy(
                 () => MirScalarValueAvailabilityAnalysis.AnalyzeVerified(
                     Program,
                     source,
-                    ControlFlow(reference),
-                    MemoryState(reference)))).Value;
+                    ControlFlow(source),
+                    MemoryState(source)))).Value;
     }
 
-    public MirWitnessAvailabilitySnapshot WitnessAvailability(MirCallableRef reference)
+    public MirWitnessAvailabilitySnapshot WitnessAvailability(MirCallableId callable) =>
+        WitnessAvailability(Program.RequireCallable(callable));
+
+    public MirWitnessAvailabilitySnapshot WitnessAvailability(MirCallable callable)
     {
-        var source = RequireCallable(reference);
-        var callable = reference.Callable;
+        var source = Program.RequireCallable(callable);
         return _witnessAvailability.GetOrAdd(
-            callable,
+            source.Id,
             _ => NewLazy(
                 () => MirWitnessAvailabilityAnalysis.AnalyzeVerified(
                     Program,
                     Effects,
                     source,
-                    ControlFlow(reference),
-                    MemoryState(reference),
-                    ScalarAvailability(reference)))).Value;
+                    ControlFlow(source),
+                    MemoryState(source),
+                    ScalarAvailability(source)))).Value;
     }
 
     private MirProgram Program => _snapshot.Program;
-
-    private MirCallable RequireCallable(MirCallableRef reference) =>
-        _snapshot.Structure.RequireCallable(reference);
-
-    private MirCallableRef Local(MirCallableId callable) =>
-        new(_snapshot.Id, callable);
 
     private static Lazy<T> NewLazy<T>(Func<T> factory) =>
         new(factory, LazyThreadSafetyMode.ExecutionAndPublication);

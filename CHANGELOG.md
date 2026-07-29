@@ -15,6 +15,41 @@ emitted as **OpenQASM 3.0**.
 > named there may have been retired by a later release; the newest release notes and current architecture
 > documents define the present pipeline.
 
+## 0.34 — 2026-07-29
+
+### Changed
+- **Every HIR reference is resolved once by the authoritative semantic scope graph.** Name and call
+  expressions retain the exact `SymbolId` selected during semantic analysis, including shadowed locals and
+  intrinsic callables. MIR lowering consumes those bindings directly instead of rebuilding a second
+  string-keyed name scope.
+- **The HIR-to-MIR boundary now accepts only the final canonical HIR artifact.** Effect analysis seals the
+  HIR pipeline, and a `MirSnapshot` retains that exact accepted artifact as its lowering source. Invalid
+  combinations of a later HIR tree with an earlier semantic model can no longer be constructed or repaired
+  through lineage translation.
+- **MIR structure is owned where its identities are meaningful.** `MirProgram` owns callable lookup, while
+  each `MirCallable` owns its blocks, instructions, SSA values, storage objects, and qubit versions. IDs may
+  remain sparse across transformations, and exact-object membership checks reject entities borrowed from a
+  different callable or snapshot.
+- **Program-wide analyses derive relationships from the completed MIR.** The call graph is computed lazily
+  from callable-local instruction sites and reused by effect analysis, adjoint materialization, and
+  OpenQASM lowering instead of being maintained as duplicate mutable state.
+
+### Added
+- **Language-service indexing is now an explicit opt-in layer.** `Qora.LanguageServices` can collect exact
+  HIR-symbol-to-MIR relationships through compile-call-scoped instrumentation. Ordinary compilation stores
+  no IDE-only cross-stage maps, while language-service consumers receive one index bound to the exact HIR
+  artifact and MIR snapshot that produced it.
+
+### Removed
+- The global `CrossStageLinks`, translated `HirSemanticContext`, and semantic lineage-recovery path. Their
+  former valid use case is now represented by the single final HIR artifact passed directly into MIR
+  lowering.
+- `MirStructuralIndex` and the snapshot-qualified structural wrappers `MirCallableRef`, `MirBlockRef`,
+  `MirInstructionRef`, `MirValueRef`, `MirStorageRef`, `MirQubitRef`, `MirQubitAccessRef`, and
+  `MirIndexedAccessRef`. Program-wide instruction locations now use the minimal callable/local-ID pair
+  `MirInstructionSite`; public MIR analysis results and queries now use owner-local IDs or exact owned
+  objects. `MirOriginRef` remains solely for snapshot-specific source and transformation provenance.
+
 ## 0.33 — 2026-07-28
 
 ### Changed

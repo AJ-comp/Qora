@@ -127,7 +127,7 @@ public sealed class MirOriginTable
 
     public MirOrigin Require(MirOriginRef reference)
     {
-        MirReferenceValidation.RequireSnapshot(
+        MirOriginValidation.RequireSnapshot(
             SnapshotId,
             reference.Snapshot,
             nameof(reference));
@@ -141,7 +141,7 @@ public sealed class MirOriginTable
 
     public bool Contains(MirOriginRef reference)
     {
-        MirReferenceValidation.RequireSnapshot(
+        MirOriginValidation.RequireSnapshot(
             SnapshotId,
             reference.Snapshot,
             nameof(reference));
@@ -211,7 +211,7 @@ internal sealed class MirOriginTableBuilder
         MirOriginRef parent,
         string reason)
     {
-        MirReferenceValidation.RequireSnapshot(
+        MirOriginValidation.RequireSnapshot(
             _snapshotId,
             parent.Snapshot,
             nameof(parent));

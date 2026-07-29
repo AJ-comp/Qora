@@ -95,7 +95,9 @@ internal static class MirOpenQasmLowering
                         (callable.Id, Target: new MirQasmCallableId(index)))
                 .ToDictionary(pair => pair.Id, pair => pair.Target);
             _callableNames = AllocateCallableNames(source.Program.Callables);
-            _hiddenArrays = HiddenArrayPlan.Build(source.Program, _callables);
+            _hiddenArrays = HiddenArrayPlan.Build(
+                source.Analyses.CallGraph,
+                _callables);
         }
 
         public MirOpenQasmTargetProgram Lower()
@@ -150,14 +152,13 @@ internal static class MirOpenQasmLowering
 
     private sealed class CallableLowerer
     {
-        private readonly MirSnapshot _snapshot;
+        private readonly MirCallableId _entryPoint;
         private readonly MirCallable _callable;
         private readonly bool _isEntry;
         private readonly IReadOnlyDictionary<MirCallableId, MirCallable> _callables;
         private readonly IReadOnlyDictionary<MirCallableId, MirQasmCallableId> _targetCallables;
         private readonly IReadOnlyDictionary<MirCallableId, string> _callableNames;
         private readonly HiddenArrayPlan _hiddenArrays;
-        private readonly MirCallableRef _callableRef;
         private readonly MirControlFlowSnapshot _controlFlow;
         private readonly MirControlRegionSnapshot _regions;
         private readonly MirStorageProvenanceSnapshot _storageProvenance;
@@ -190,17 +191,16 @@ internal static class MirOpenQasmLowering
             IReadOnlyDictionary<MirCallableId, string> callableNames,
             HiddenArrayPlan hiddenArrays)
         {
-            _snapshot = snapshot;
+            _entryPoint = snapshot.Program.EntryPoint;
             _callable = callable;
             _isEntry = isEntry;
             _callables = callables;
             _targetCallables = targetCallables;
             _callableNames = callableNames;
             _hiddenArrays = hiddenArrays;
-            _callableRef = new MirCallableRef(snapshot.Id, callable.Id);
-            _controlFlow = snapshot.Analyses.ControlFlow(_callableRef);
-            _regions = snapshot.Analyses.ControlRegions(_callableRef);
-            _storageProvenance = snapshot.Analyses.StorageProvenance(_callableRef);
+            _controlFlow = snapshot.Analyses.ControlFlow(callable);
+            _regions = snapshot.Analyses.ControlRegions(callable);
+            _storageProvenance = snapshot.Analyses.StorageProvenance(callable);
             _blocks = callable.Blocks.ToDictionary(block => block.Id);
             _values = callable.Values.ToDictionary(value => value.Id);
             _storages = callable.Storages.ToDictionary(storage => storage.Id);
@@ -255,9 +255,7 @@ internal static class MirOpenQasmLowering
             if (outcome.Kind == PathOutcomeKind.ReachedStop)
                 throw Internal($"callable `{_callable.Name}` unexpectedly reached a missing outer join");
 
-            var reachable = _controlFlow.ReachableBlocks
-                .Select(reference => reference.Block)
-                .ToHashSet();
+            var reachable = _controlFlow.ReachableBlocks.ToHashSet();
             var missing = reachable
                 .Where(block => !_emittedBlocks.Contains(block))
                 .OrderBy(block => block.Value)
@@ -884,7 +882,6 @@ internal static class MirOpenQasmLowering
             MirNaturalLoopRegion? loop)
         {
             var candidates = _controlFlow.ReachableBlocks
-                .Select(reference => reference.Block)
                 .Where(candidate => candidate != branch)
                 .Where(candidate => !_emittedBlocks.Contains(candidate))
                 .Where(
@@ -906,7 +903,6 @@ internal static class MirOpenQasmLowering
                 // The target return_done state guards that continuation, so recover the nearest common
                 // reachable block without weakening CFG authority or duplicating it.
                 candidates = _controlFlow.ReachableBlocks
-                    .Select(reference => reference.Block)
                     .Where(candidate => candidate != branch)
                     .Where(candidate => !_emittedBlocks.Contains(candidate))
                     .Where(
@@ -1230,7 +1226,7 @@ internal static class MirOpenQasmLowering
             {
                 case MirUserCallableTarget user:
                     RequireUserCall(user.Callable, MirCallableKind.Function, "pure call");
-                    if (user.Callable == _snapshot.Program.EntryPoint)
+                    if (user.Callable == _entryPoint)
                         throw Unsupported("the MIR entry point cannot be called as a function");
                     arguments.AddRange(HiddenArgumentsFor(user.Callable));
                     return new MirQasmFunctionCallExpression(
@@ -1279,7 +1275,7 @@ internal static class MirOpenQasmLowering
                             $"user callable {user.Callable} still carries unmaterialized modifier(s): " +
                             modifiers);
                     }
-                    if (user.Callable == _snapshot.Program.EntryPoint)
+                    if (user.Callable == _entryPoint)
                         throw Unsupported("the MIR entry point cannot be called");
                     allArguments.AddRange(HiddenArgumentsFor(user.Callable));
                     return new MirQasmQuantumApplyStatement(
@@ -1415,8 +1411,7 @@ internal static class MirOpenQasmLowering
                     : throw Internal($"scalar value {value} has no target binding");
             }
 
-            var provenance = _storageProvenance.ProvenanceOf(
-                new MirValueRef(_snapshot.Id, _callable.Id, value));
+            var provenance = _storageProvenance.ProvenanceOf(value);
             if (!provenance.IsComplete
                 || provenance.PossibleStorages.Count != 1)
             {
@@ -1424,7 +1419,7 @@ internal static class MirOpenQasmLowering
                     $"array SSA value {value} has " +
                     $"{(provenance.IsComplete ? "ambiguous" : "incomplete")} storage provenance");
             }
-            var storage = provenance.PossibleStorages[0].Storage;
+            var storage = provenance.PossibleStorages[0];
             return _storagePlaces.TryGetValue(storage, out var place)
                 ? place
                 : throw Internal(
@@ -1636,7 +1631,7 @@ internal static class MirOpenQasmLowering
                     $"hidden OpenQASM array key {key.Owner}/{key.Storage} has no storage");
 
         public static HiddenArrayPlan Build(
-            MirProgram program,
+            MirCallGraph callGraph,
             IReadOnlyDictionary<MirCallableId, MirCallable> callables)
         {
             var storages = new Dictionary<HiddenStorageKey, MirArrayStorage>();
@@ -1645,7 +1640,9 @@ internal static class MirOpenQasmLowering
                 _ => new HashSet<HiddenStorageKey>());
             var callees = callables.Keys.ToDictionary(
                 callable => callable,
-                _ => new HashSet<MirCallableId>());
+                callable => callGraph.CallsFrom(callable)
+                    .Select(site => site.Callee)
+                    .ToHashSet());
 
             foreach (var callable in callables.Values)
             {
@@ -1659,23 +1656,7 @@ internal static class MirOpenQasmLowering
                     required[callable.Id].Add(key);
                 }
 
-                foreach (var target in callable.Blocks
-                             .SelectMany(block => block.Instructions)
-                             .Select(
-                                 instruction => instruction switch
-                                 {
-                                     MirPureCall
-                                     {
-                                         Target: MirUserCallableTarget user
-                                     } => (MirCallableId?)user.Callable,
-                                     MirQuantumApply
-                                     {
-                                         Target: MirUserCallableTarget user
-                                     } => user.Callable,
-                                     _ => null,
-                                 })
-                             .Where(target => target is not null)
-                             .Select(target => target!.Value))
+                foreach (var target in callees[callable.Id])
                 {
                     if (!callables.ContainsKey(target))
                         throw Internal(
