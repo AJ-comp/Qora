@@ -398,7 +398,7 @@
   <div class="callout good">
     <span class="h">일반 컴파일 경로</span>
     language-service trace를 요청하지 않으면 <code>MirSemanticIndex</code>와 symbol 양방향 맵은 생성되지 않습니다.<br>
-    효과 분석, automatic uncomputation, adjoint materialization, OpenQASM lowering은 모두 Core MIR 구조와 <code>Origins</code>만 소비합니다.
+    효과 분석, adjoint materialization, OpenQASM lowering은 Core MIR 구조와 <code>Origins</code>만 소비하며, 향후 automatic uncomputation도 같은 경계를 따릅니다.
   </div>
 
   <h2 id="s7">7. target artifact backend map</h2>
