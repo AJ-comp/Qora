@@ -74,43 +74,16 @@ public sealed class OpenQasmTargetInvariantTests
     public void TargetRejectsAUserCallToAnUndefinedTargetCallableId()
     {
         var dangling = new MirQasmQuantumApplyStatement(
-            new MirQasmStatementId(0),
             new MirQasmUserQuantumTarget(new MirQasmCallableId(7)),
             Array.Empty<MirQasmExpression>(),
             Array.Empty<MirQasmExpression>());
-        var entry = new MirQasmEntryPoint(
-            new MirQasmCallableId(0),
-            "Main",
-            new[] { dangling });
 
         var error = Assert.Throws<ArgumentException>(
             () => new MirOpenQasmTargetProgram(
-                entry,
+                new[] { dangling },
                 Array.Empty<MirQasmCallableDefinition>()));
 
         Assert.Contains(new MirQasmCallableId(7).ToString(), error.Message);
-    }
-
-    [Fact]
-    public void TargetRejectsDuplicateCallableIdsAcrossEntryAndDefinitions()
-    {
-        var id = new MirQasmCallableId(0);
-        var entry = new MirQasmEntryPoint(
-            id,
-            "Main",
-            Array.Empty<MirQasmStatement>());
-        var definition = new MirQasmCallableDefinition(
-            id,
-            "Worker",
-            MirQasmCallableKind.Operation,
-            Array.Empty<MirQasmParameter>(),
-            returnType: null,
-            Array.Empty<MirQasmStatement>());
-
-        var error = Assert.Throws<ArgumentException>(
-            () => new MirOpenQasmTargetProgram(entry, new[] { definition }));
-
-        Assert.Contains("occurs more than once", error.Message);
     }
 
     [Fact]
@@ -118,18 +91,12 @@ public sealed class OpenQasmTargetInvariantTests
     {
         var workerId = new MirQasmCallableId(1);
         var call = new MirQasmQuantumApplyStatement(
-            new MirQasmStatementId(0),
             new MirQasmUserQuantumTarget(workerId),
             Array.Empty<MirQasmExpression>(),
             Array.Empty<MirQasmExpression>());
-        var entry = new MirQasmEntryPoint(
-            new MirQasmCallableId(0),
-            "Main",
-            new[] { call });
         var worker = new MirQasmCallableDefinition(
             workerId,
             "Worker",
-            MirQasmCallableKind.Operation,
             new[]
             {
                 new MirQasmParameter(
@@ -141,7 +108,7 @@ public sealed class OpenQasmTargetInvariantTests
             Array.Empty<MirQasmStatement>());
 
         var error = Assert.Throws<ArgumentException>(
-            () => new MirOpenQasmTargetProgram(entry, new[] { worker }));
+            () => new MirOpenQasmTargetProgram(new[] { call }, new[] { worker }));
 
         Assert.Contains("0 operand(s), expected 1", error.Message);
     }
@@ -154,22 +121,17 @@ public sealed class OpenQasmTargetInvariantTests
         var call = new MirQasmFunctionCallExpression(
             new MirQasmUserFunctionTarget(functionId),
             Array.Empty<MirQasmExpression>());
-        var entry = new MirQasmEntryPoint(
-            new MirQasmCallableId(0),
-            "Main",
-            new[]
-            {
-                new MirQasmValueDeclarationStatement(
-                    new MirQasmStatementId(0),
-                    new MirQasmDeclarationId(0),
-                    "result",
-                    intType,
-                    call),
-            });
+        var entryBody = new[]
+        {
+            new MirQasmValueDeclarationStatement(
+                new MirQasmDeclarationId(0),
+                "result",
+                intType,
+                call),
+        };
         var function = new MirQasmCallableDefinition(
             functionId,
             "Identity",
-            MirQasmCallableKind.Function,
             new[]
             {
                 new MirQasmParameter(
@@ -181,13 +143,12 @@ public sealed class OpenQasmTargetInvariantTests
             new[]
             {
                 new MirQasmReturnStatement(
-                    new MirQasmStatementId(1),
                     new MirQasmParameterReferenceExpression(
                         new MirQasmParameterId(0))),
             });
 
         var error = Assert.Throws<ArgumentException>(
-            () => new MirOpenQasmTargetProgram(entry, new[] { function }));
+            () => new MirOpenQasmTargetProgram(entryBody, new[] { function }));
 
         Assert.Contains("0 argument(s), expected 1", error.Message);
     }

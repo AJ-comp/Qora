@@ -98,7 +98,7 @@ public sealed class QoraMirTests
         var mergeBlock = Assert.IsType<MirBlock>(main.FindBlock(mergeBlockId));
         var blockArgument = Assert.Single(
             mergeBlock.Arguments,
-            argument => argument.Value == mergedInput);
+            argument => argument == mergedInput);
         var incoming = IncomingArguments(main, mergeBlock.Id);
         Assert.Equal(2, incoming.Count);
         Assert.All(incoming, arguments => Assert.Equal(mergeBlock.Arguments.Count, arguments.Count));
@@ -106,8 +106,8 @@ public sealed class QoraMirTests
         Assert.Equal(
             2,
             incoming.Select(arguments => arguments[argumentIndex]).Distinct().Count());
-        static int blockArgumentIndex(MirBlock block, MirBlockArgument argument) =>
-            block.Arguments.ToList().FindIndex(candidate => candidate.Value == argument.Value);
+        static int blockArgumentIndex(MirBlock block, MirValueId argument) =>
+            block.Arguments.ToList().FindIndex(candidate => candidate == argument);
     }
 
     [Fact]
@@ -302,6 +302,63 @@ public sealed class QoraMirTests
     }
 
     [Fact]
+    public void HirCallableNodeIdsArePreservedAsMirCallableIds()
+    {
+        var compilation = Compiler.Compile("""
+            operation Main() {
+                use target = Qubit[1];
+                Apply(target[0]);
+            }
+
+            operation Apply(target: Qubit) {
+                X(target);
+            }
+            """);
+        Assert.True(
+            compilation.Succeeded,
+            string.Join(
+                " | ",
+                compilation.Diagnostics.Select(diagnostic =>
+                    $"{diagnostic.Error.Code}: {diagnostic.Error.Message}")));
+
+        var finalHirArtifact = compilation.Hir.EffectAnalysis!;
+        var mirSnapshot = Assert.IsType<MirSnapshot>(compilation.Mir);
+
+        foreach (var hirCallable in finalHirArtifact.Program.Callables)
+        {
+            var mirCallable = Assert.Single(
+                mirSnapshot.Program.Callables,
+                candidate => candidate.Name == hirCallable.Name);
+            Assert.Equal(
+                hirCallable.Id.Value,
+                mirCallable.Id.Value);
+        }
+
+        Assert.Equal(
+            finalHirArtifact.Program.EntryCallable!.Id.Value,
+            mirSnapshot.Program.EntryPoint.Value);
+    }
+
+    [Fact]
+    public void MirProgramConstructionRejectsDuplicateCallableIdsImmediately()
+    {
+        var snapshot = CompileSnapshot("operation Main() {}");
+        var callable = Assert.Single(snapshot.Program.Callables);
+
+        var error = Assert.Throws<ArgumentException>(
+            () => new MirProgram(
+                snapshot.Program.SnapshotId,
+                snapshot.Program.Origins,
+                snapshot.Program.EntryPoint,
+                new[] { callable, callable }));
+
+        Assert.Contains(
+            callable.Id.ToString(),
+            error.Message,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void NestedExpressionTermsKeepTheirExactHirOrigins()
     {
         var compilation = Compiler.Compile("""
@@ -345,7 +402,7 @@ public sealed class QoraMirTests
         var call = Assert.Single(instructions.OfType<MirPureCall>());
         var index = Assert.Single(
             instructions.OfType<MirConstant>(),
-            constant => constant.Constant.Text == "1");
+            constant => constant.Text == "1");
         var operand = Assert.IsType<MirClassicalCallOperand>(
             Assert.Single(call.Operands));
 
@@ -366,7 +423,7 @@ public sealed class QoraMirTests
         Assert.NotEqual(declaration.Id, OriginNode(load.Origin));
         Assert.NotEqual(declaration.Id, OriginNode(call.Origin));
 
-        HirNodeId OriginNode(MirOriginRef origin) =>
+        HirNodeId OriginNode(MirOriginId origin) =>
             snapshot.Origins.ResolveHir(origin).HirNodeId!.Value;
     }
 
@@ -407,9 +464,11 @@ public sealed class QoraMirTests
         Assert.Equal(2, targetAfterX.Version.Value);
 
         var effect = EffectFor(snapshot.Analyses.Effects, main.Id, cnot.Id);
+        var effectInstruction = Assert.IsType<MirQuantumApply>(
+            snapshot.Analyses.Effects.RequireInstruction(effect.Site));
         Assert.Equal(
             targetAfterCnot.Key,
-            Assert.Single(effect.QubitResults));
+            Assert.Single(effectInstruction.QubitResults).Key);
 
     }
 
@@ -437,9 +496,11 @@ public sealed class QoraMirTests
         Assert.Equal(2, Assert.Single(x.QubitResults).Version.Value);
 
         var effect = EffectFor(snapshot.Analyses.Effects, main.Id, measure.Id);
+        var effectInstruction = Assert.IsType<MirMeasure>(
+            snapshot.Analyses.Effects.RequireInstruction(effect.Site));
         Assert.Equal(
             measure.QubitResult.Key,
-            Assert.Single(effect.QubitResults));
+            effectInstruction.QubitResult.Key);
     }
 
     [Fact]
@@ -1158,7 +1219,6 @@ public sealed class QoraMirTests
         new(
             source.Id,
             source.Name,
-            source.Kind,
             source.ReturnType,
             source.Parameters,
             entryBlock ?? source.EntryBlock,
@@ -1236,7 +1296,7 @@ public sealed class QoraMirTests
         Assert.Single(
             effects.Effects,
             effect => effect.Site.Callable == callable
-                && effect.Site.Instruction.Instruction == instruction);
+                && effect.Site.Instruction == instruction);
 
     private static IReadOnlyList<IReadOnlyList<MirValueId>> IncomingArguments(
         MirCallable callable,
@@ -1277,6 +1337,15 @@ public sealed class QoraMirTests
         Assert.Equal(header.Arguments.Count, backedge.Arguments.Count);
         Assert.Contains(
             backedge.Arguments,
-            value => callable.FindValue(value)?.Definition.Block == backedgeBlock.Id);
+            value =>
+            {
+                var definition = callable.RequireValue(value).Definition;
+                if (definition.Instruction is not MirInstructionId instruction)
+                    return false;
+
+                return callable
+                    .RequireInstructionLocation(instruction)
+                    .Block.Id == backedgeBlock.Id;
+            });
     }
 }

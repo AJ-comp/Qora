@@ -121,12 +121,17 @@ public static class QoraCompiler
             IEnumerable<QoraError> errors,
             SourceDocumentRef fallback)
         {
-            diagnostics.AddRange(
-                errors.Select(error => new CompilationDiagnostic(
+            foreach (var error in errors)
+            {
+                var origin = new DiagnosticOrigin.Source(
+                    error.Span?.Document ?? fallback);
+                var diagnostic = new CompilationDiagnostic(
                     stage,
                     error,
-                    new DiagnosticOrigin.Source(
-                        error.Span?.Document ?? fallback))));
+                    origin);
+
+                diagnostics.Add(diagnostic);
+            }
         }
 
         void AddHirDiagnostics(
@@ -134,11 +139,16 @@ public static class QoraCompiler
             IEnumerable<QoraError> errors,
             HirSnapshot snapshot)
         {
-            diagnostics.AddRange(
-                errors.Select(error => new CompilationDiagnostic(
+            var origin = new DiagnosticOrigin.Hir(snapshot.Id);
+            foreach (var error in errors)
+            {
+                var diagnostic = new CompilationDiagnostic(
                     stage,
                     error,
-                    new DiagnosticOrigin.Hir(snapshot.Id))));
+                    origin);
+
+                diagnostics.Add(diagnostic);
+            }
         }
 
         void AddValidationDiagnostics(HirSemanticArtifact validation)

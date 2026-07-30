@@ -27,36 +27,29 @@ internal sealed class MirTestContext
     public static MirTestContext For(MirSnapshotId snapshotId) =>
         new(snapshotId);
 
-    public MirOriginRef Origin(int index = 0) =>
-        new(SnapshotId, index);
+    public MirOriginId Origin(int index = 0) =>
+        new(index);
 
-    public MirOriginTable Origins(
-        params (HirNodeId CallableId, HirNodeId NodeId)[] hirOrigins)
+    public MirOriginTable Origins(params HirNodeId[] hirOriginNodes)
     {
-        var sources = hirOrigins.Length == 0
+        var sources = hirOriginNodes.Length == 0
             ? new[]
             {
-                (
-                    CallableId: new HirNodeId(1),
-                    NodeId: new HirNodeId(1)),
+                new HirNodeId(1),
             }
-            : hirOrigins;
+            : hirOriginNodes;
         return new MirOriginTable(
-            SnapshotId,
             sources.Select(
-                (source, index) => MirOrigin.FromHir(
-                    Origin(index),
-                    source.CallableId,
-                    source.NodeId)));
+                nodeId => MirOrigin.FromHir(nodeId)));
     }
 
     public MirProgram Program(
         MirCallableId entryPoint,
         IEnumerable<MirCallable> callables,
-        params (HirNodeId CallableId, HirNodeId NodeId)[] hirOrigins) =>
+        params HirNodeId[] hirOriginNodes) =>
         new(
             SnapshotId,
-            Origins(hirOrigins),
+            Origins(hirOriginNodes),
             entryPoint,
             callables);
 

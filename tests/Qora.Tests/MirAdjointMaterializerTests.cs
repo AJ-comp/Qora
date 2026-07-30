@@ -32,9 +32,7 @@ public sealed class MirAdjointMaterializerTests
         Assert.NotSame(source, injected);
         Assert.Equal(MirStage.Lowered, source.Stage);
         Assert.Equal(MirStage.InverseRequestsInjected, injected.Stage);
-        Assert.Same(source, injected.Parent);
         Assert.Equal(source.Id.Revision + 1, injected.Id.Revision);
-        Assert.True(injected.DescendsFrom(source.Id));
         Assert.Empty(sourceCall.Functors);
         Assert.Equal(
             new[] { MirFunctor.Adjoint },
@@ -52,13 +50,14 @@ public sealed class MirAdjointMaterializerTests
         Assert.True(result.Changed);
         var output = Assert.IsType<MirSnapshot>(result.Output);
         Assert.Equal(MirStage.AdjointsMaterialized, output.Stage);
-        Assert.Same(injected, output.Parent);
         Assert.Equal(injected.Id.Revision + 1, output.Id.Revision);
-        Assert.True(output.DescendsFrom(source.Id));
         Assert.Same(injected, result.Source);
         Assert.Same(output, result.Snapshot);
 
         var inverseId = result.Inverses[worker.Id];
+        Assert.Equal(
+            source.Program.Callables.Max(callable => callable.Id.Value) + 1,
+            inverseId.Value);
         var inverse = output.Program.RequireCallable(inverseId);
         Assert.StartsWith("__qora_inverse_", inverse.Name, StringComparison.Ordinal);
 
@@ -91,7 +90,6 @@ public sealed class MirAdjointMaterializerTests
 
         var originalOrigin = source.Origins.ResolveHir(worker.Origin);
         var inverseOrigin = output.Origins.ResolveHir(inverse.Origin);
-        Assert.Equal(originalOrigin.HirCallableId, inverseOrigin.HirCallableId);
         Assert.Equal(originalOrigin.HirNodeId, inverseOrigin.HirNodeId);
         Assert.Equal(originalOrigin.Span, inverseOrigin.Span);
         Assert.NotNull(inverseOrigin.Span);
@@ -100,7 +98,7 @@ public sealed class MirAdjointMaterializerTests
         Assert.True(backend.Success);
         var target = Assert.IsType<MirOpenQasmTargetProgram>(backend.Target);
         var targetCall = Assert.Single(
-            target.EntryPoint.Body.OfType<MirQasmQuantumApplyStatement>());
+            target.EntryBody.OfType<MirQasmQuantumApplyStatement>());
         var targetInverse = Assert.IsType<MirQasmUserQuantumTarget>(
             targetCall.Target);
         var targetInverseBody = Assert.Single(
@@ -303,7 +301,7 @@ public sealed class MirAdjointMaterializerTests
                 StringComparison.Ordinal));
         Assert.Equal("MIRADJ001", error.Code);
         Assert.Equal(branchy.Id, error.Callable);
-        Assert.Equal(injected.Id, error.Origin.Snapshot);
+        Assert.True(injected.Origins.Contains(error.Origin));
         var resolved = injected.Origins.ResolveHir(error.Origin);
         var span = Assert.IsType<SourceSpan>(resolved.Span);
         Assert.Contains(
@@ -349,7 +347,7 @@ public sealed class MirAdjointMaterializerTests
     }
 
     [Fact]
-    public void SafetyFactsAndExactRevisionAuthoritySurviveBothTransformations()
+    public void BoundsObligationsSurviveBothTransformations()
     {
         var source = RequireMir(
             CompileMir(
@@ -369,7 +367,7 @@ public sealed class MirAdjointMaterializerTests
                     Worker(q[0], xs);
                 }
                 """));
-        var obligation = Assert.Single(source.Safety.UnprovenBounds);
+        var obligation = Assert.Single(source.UnprovenBounds);
         var worker = RequireCallable(source, "Worker");
         var request = Assert.Single(UserCalls(source, "Main", worker.Id));
         var injected = MirAdjointMaterializer.InjectRequests(
@@ -377,57 +375,17 @@ public sealed class MirAdjointMaterializerTests
             new[] { Instruction(source, "Main", request) });
         var result = MirAdjointMaterializer.Run(injected);
         var output = Assert.IsType<MirSnapshot>(result.Output);
-        var inverseWorker = result.Inverses[worker.Id];
-
-        Assert.Equal(source.Id, source.Safety.SnapshotId);
-        Assert.Equal(injected.Id, injected.Safety.SnapshotId);
-        Assert.Equal(output.Id, output.Safety.SnapshotId);
         var injectedObligation = Assert.Single(
-            injected.Safety.UnprovenBounds);
-        Assert.Equal(
-            obligation.Site.Instruction.Callable,
-            injectedObligation.Site.Instruction.Callable);
-        Assert.Equal(
-            obligation.Site.Instruction.Instruction,
-            injectedObligation.Site.Instruction.Instruction);
-        var outputObligations = output.Safety.UnprovenBounds;
-        Assert.Equal(2, outputObligations.Count);
-        Assert.Contains(
-            outputObligations,
-            candidate => candidate.Site.Instruction.Callable == worker.Id
-                && candidate.Site.Instruction.Instruction
-                == obligation.Site.Instruction.Instruction);
-        Assert.Contains(
-            outputObligations,
-            candidate => candidate.Site.Instruction.Callable
-                    == inverseWorker
-                && candidate.Site.Instruction.Instruction
-                == obligation.Site.Instruction.Instruction);
-        Assert.All(
-            outputObligations,
-            candidate =>
-            {
-                Assert.IsType<MirArrayLoad>(
-                    output.Program.RequireInstruction(
-                        candidate.Site.Instruction));
-            });
-        Assert.Same(source, injected.Parent);
-        Assert.Same(injected, output.Parent);
+            injected.UnprovenBounds);
+        Assert.Equal(obligation, injectedObligation);
+        Assert.Equal(obligation, Assert.Single(output.UnprovenBounds));
+        Assert.Equal("Worker", obligation.Operation);
+        Assert.Equal("xs", obligation.Aggregate);
+        Assert.Equal("idx()", obligation.Index);
+        Assert.Null(obligation.LoopBound);
+        Assert.NotNull(obligation.Span);
         Assert.Equal(source.Id.Revision + 1, injected.Id.Revision);
         Assert.Equal(injected.Id.Revision + 1, output.Id.Revision);
-
-        Assert.Throws<ArgumentException>(
-            () => source.Safety.Rebase(
-                new MirSnapshotId(
-                    source.Id.CompilationId,
-                    source.Id.CompilationRevision,
-                    source.Id.Revision + 2)));
-        Assert.Throws<ArgumentException>(
-            () => source.Safety.Rebase(
-                new MirSnapshotId(
-                    CompilationId.New(),
-                    source.Id.CompilationRevision,
-                    source.Id.Revision + 1)));
         Assert.Same(
             injected,
             MirAdjointMaterializer.InjectRequests(
@@ -436,7 +394,7 @@ public sealed class MirAdjointMaterializerTests
     }
 
     [Fact]
-    public void BoundsObligationsDistinguishIndexedOperandsOnOneInstruction()
+    public void BoundsObligationsRetainEachIndexedOperand()
     {
         var source = RequireMir(
             CompileMir(
@@ -452,23 +410,20 @@ public sealed class MirAdjointMaterializerTests
                 }
                 """));
 
-        var obligations = source.Safety.UnprovenBounds
-            .OrderBy(obligation => obligation.Site.Ordinal)
-            .ToArray();
+        var obligations = source.UnprovenBounds.ToArray();
         Assert.Equal(2, obligations.Length);
+        Assert.Equal(
+            new[] { "left", "right" },
+            obligations.Select(obligation => obligation.Aggregate));
         Assert.All(
             obligations,
-            obligation => Assert.Equal(
-                MirIndexedAccessKind.QubitOperand,
-                obligation.Site.Kind));
-        Assert.Equal(new[] { 0, 1 }, obligations.Select(
-            obligation => obligation.Site.Ordinal));
-        Assert.Equal(
-            obligations[0].Site.Instruction,
-            obligations[1].Site.Instruction);
-        Assert.IsType<MirQuantumApply>(
-            source.Program.RequireInstruction(
-                obligations[0].Site.Instruction));
+            obligation =>
+            {
+                Assert.Equal("Main", obligation.Operation);
+                Assert.Equal("idx()", obligation.Index);
+                Assert.Null(obligation.LoopBound);
+                Assert.NotNull(obligation.Span);
+            });
     }
 
     [Fact]

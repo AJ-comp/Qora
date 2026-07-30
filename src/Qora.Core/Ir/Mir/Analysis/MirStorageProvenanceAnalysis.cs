@@ -22,19 +22,15 @@ public sealed class MirStorageProvenanceSnapshot
     {
         _sourceProgram = sourceProgram;
         _sourceCallable = sourceCallable;
-        SnapshotId = sourceProgram.SnapshotId;
-        Callable = sourceCallable.Id;
         _provenance = provenance.ToFrozenDictionary();
     }
 
-    public MirSnapshotId SnapshotId { get; }
-    public MirCallableId Callable { get; }
+    public MirSnapshotId SnapshotId => _sourceProgram.SnapshotId;
+    public MirCallableId Callable => _sourceCallable.Id;
 
     internal bool IsFor(MirProgram program, MirCallableId callable) =>
         ReferenceEquals(_sourceProgram, program)
-        && ReferenceEquals(_sourceCallable, program.FindCallable(callable))
-        && SnapshotId == program.SnapshotId
-        && Callable == callable;
+        && ReferenceEquals(_sourceCallable, program.FindCallable(callable));
 
     internal void EnsureFor(MirProgram program, MirCallableId callable)
     {
@@ -146,13 +142,11 @@ internal static class MirStorageProvenanceAnalysis
         private void Build()
         {
             var incoming = IncomingBlockArguments();
-            var instructionById = _callable.Blocks
-                .SelectMany(block => block.Instructions)
-                .ToDictionary(instruction => instruction.Id);
 
             foreach (var parameter in _callable.Parameters.OfType<MirClassicalParameter>())
             {
-                if (!parameter.Type.IsArray) continue;
+                var parameterValue = _callable.RequireValue(parameter.Value);
+                if (!parameterValue.Type.IsArray) continue;
                 if (parameter.Storage is MirStorageId storage)
                     _seeds[parameter.Value] = storage;
                 else
@@ -176,9 +170,10 @@ internal static class MirStorageProvenanceAnalysis
                         break;
 
                     case MirValueDefinitionKind.InstructionResult
-                        when value.Definition.Instruction is MirInstructionId instructionId
-                             && instructionById.TryGetValue(instructionId, out var instruction):
-                        AddInstructionDefinition(value.Id, instruction);
+                        when value.Definition.Instruction is MirInstructionId instructionId:
+                        AddInstructionDefinition(
+                            value.Id,
+                            _callable.RequireInstruction(instructionId));
                         break;
 
                     case MirValueDefinitionKind.Parameter:

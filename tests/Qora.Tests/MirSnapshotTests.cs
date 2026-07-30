@@ -47,8 +47,6 @@ public sealed class MirSnapshotTests
             firstHirCallable,
             secondHirCallable);
         var snapshot = new MirSnapshot(
-            snapshotId,
-            MirLoweringProfile.CanonicalV1,
             program,
             hir.FinalHir);
 
@@ -67,16 +65,8 @@ public sealed class MirSnapshotTests
             "Second");
         Assert.Throws<ArgumentException>(
             () => new MirSnapshot(
-                snapshotId,
-                MirLoweringProfile.CanonicalV1,
                 program,
                 unrelatedHir.FinalHir));
-        Assert.Throws<ArgumentException>(
-            () => new MirSnapshot(
-                new MirSnapshotId(compilation, compilationRevision, revision: 4),
-                MirLoweringProfile.CanonicalV1,
-                program,
-                hir.FinalHir));
     }
 
     [Fact]
@@ -114,19 +104,18 @@ public sealed class MirSnapshotTests
             () => firstCallable.RequireInstruction(secondInstruction));
         Assert.Throws<ArgumentException>(() => firstCallable.RequireValue(secondValue));
 
-        var firstHirCallable = snapshot.Origins.ResolveHir(
-            firstBlock.Origin).HirCallableId;
-        var secondHirCallable = snapshot.Origins.ResolveHir(
-            secondBlock.Origin).HirCallableId;
-        Assert.NotNull(firstHirCallable);
-        Assert.NotNull(secondHirCallable);
+        var hirStructure = snapshot.LoweringSource.Source.Structure;
+        var firstHirCallable = hirStructure.RequireOwningCallable(
+            snapshot.Origins.ResolveHir(firstBlock.Origin).HirNodeId!.Value);
+        var secondHirCallable = hirStructure.RequireOwningCallable(
+            snapshot.Origins.ResolveHir(secondBlock.Origin).HirNodeId!.Value);
         Assert.NotEqual(firstHirCallable, secondHirCallable);
         Assert.Equal(
             "10",
-            Assert.IsType<MirConstant>(firstInstruction).Constant.Text);
+            Assert.IsType<MirConstant>(firstInstruction).Text);
         Assert.Equal(
             "20",
-            Assert.IsType<MirConstant>(secondInstruction).Constant.Text);
+            Assert.IsType<MirConstant>(secondInstruction).Text);
 
         var firstLocation = firstCallable.RequireInstructionLocation(instructionId);
         var secondLocation = secondCallable.RequireInstructionLocation(instructionId);
@@ -172,15 +161,6 @@ public sealed class MirSnapshotTests
         Assert.Same(scalars, analyses.ScalarAvailability(callable.Id));
         Assert.Same(effects, analyses.Effects);
         Assert.Same(witnesses, analyses.WitnessAvailability(callable.Id));
-
-        Assert.Same(cfg, memory.ControlFlow);
-        Assert.Same(provenance, memory.StorageProvenance);
-        Assert.Same(cfg, paths.ControlFlow);
-        Assert.Same(cfg, scalars.ControlFlow);
-        Assert.Same(memory, scalars.MemoryState);
-        Assert.Same(cfg, witnesses.ControlFlow);
-        Assert.Same(memory, witnesses.MemoryState);
-        Assert.Same(scalars, witnesses.ScalarAvailability);
 
         var concurrent = await Task.WhenAll(
             Enumerable.Range(0, 16)
@@ -233,8 +213,7 @@ public sealed class MirSnapshotTests
         Assert.Equal(firstValue.Id, secondValue.Id);
         Assert.Equal(firstStorage.Id, secondStorage.Id);
         Assert.Equal(firstQubit.Id, secondQubit.Id);
-        Assert.Equal(firstInstruction.Origin.Value, secondInstruction.Origin.Value);
-        Assert.NotEqual(firstInstruction.Origin, secondInstruction.Origin);
+        Assert.Equal(firstInstruction.Origin, secondInstruction.Origin);
 
         Assert.False(second.Program.ContainsCallable(firstCallable));
         Assert.False(secondCallable.ContainsBlock(firstBlock));
@@ -273,10 +252,9 @@ public sealed class MirSnapshotTests
         Assert.Throws<InvalidOperationException>(
             () => first.Analyses.Effects.EnsureFor(second.Program));
 
-        Assert.Throws<ArgumentException>(
-            () => second.Origins.Require(firstInstruction.Origin));
-        Assert.Throws<ArgumentException>(
-            () => second.Origins.ResolveHir(firstInstruction.Origin));
+        Assert.Same(
+            second.Origins.Require(secondInstruction.Origin),
+            second.Origins.Require(firstInstruction.Origin));
     }
 
     private static MirSnapshot SnapshotWithTwoCallables()
@@ -294,10 +272,7 @@ public sealed class MirSnapshotTests
         MirProgram program,
         HirFixture hir)
     {
-        var snapshotId = program.SnapshotId;
         return new MirSnapshot(
-            snapshotId,
-            MirLoweringProfile.CanonicalV1,
             program,
             hir.FinalHir);
     }
@@ -354,13 +329,13 @@ public sealed class MirSnapshotTests
                 Callable(new MirCallableId(0), context.Origin(0), "First", "10"),
                 Callable(new MirCallableId(1), context.Origin(1), "Second", "20"),
             },
-            (firstHirCallable, firstHirCallable),
-            (secondHirCallable, secondHirCallable));
+            firstHirCallable,
+            secondHirCallable);
     }
 
     private static MirCallable Callable(
         MirCallableId id,
-        MirOriginRef source,
+        MirOriginId source,
         string name,
         string constantText)
     {
@@ -370,16 +345,16 @@ public sealed class MirSnapshotTests
         var constant = new MirConstant(
             instructionId,
             valueId,
-            new MirConstantValue(QType.Int, constantText),
+            constantText,
             source);
         var value = new MirValue(
             valueId,
             MirType.Scalar(QType.Int),
-            MirValueDefinition.InstructionResultAt(blockId, instructionId),
+            MirValueDefinition.InstructionResultAt(instructionId),
             Origin: source);
         var block = new MirBlock(
             blockId,
-            Array.Empty<MirBlockArgument>(),
+            Array.Empty<MirValueId>(),
             new MirInstruction[] { constant },
             new MirReturn(Value: null, source),
             source);
@@ -387,7 +362,6 @@ public sealed class MirSnapshotTests
         return new MirCallable(
             id,
             name,
-            MirCallableKind.Operation,
             returnType: null,
             Array.Empty<IMirParameter>(),
             blockId,

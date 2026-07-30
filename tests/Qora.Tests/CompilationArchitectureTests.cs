@@ -111,8 +111,8 @@ public sealed class CompilationArchitectureTests
         Assert.NotSame(validated.Model, analyzed.Model);
 
         var main = specialized.Program.Callables.Single(operation => operation.Name == "Main");
-        Assert.False(validated.Model.WasEffectAnalyzed(main.Id));
-        Assert.True(analyzed.Model.WasEffectAnalyzed(main.Id));
+        Assert.Null(validated.Model.FindOpEffects(main.Id));
+        Assert.NotNull(analyzed.Model.FindOpEffects(main.Id));
 
         Assert.Throws<InvalidOperationException>(
             () => validated.Model.AddUnprovenIndex(

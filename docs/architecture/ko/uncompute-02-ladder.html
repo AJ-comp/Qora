@@ -142,11 +142,16 @@
   </p>
   <div class="panel">
     <table class="spec">
-      <tr><th>단계</th><th>질문</th><th>판별 기준</th><th>API</th></tr>
-      <tr><td class="k">0. 앤실라인가?</td><td>누구의 큐빗인가</td><td><code>use</code>로 만들었으면 앤실라입니다. 파라미터는 호출자의 소유이므로 제외됩니다.</td><td><code>IsAncilla</code></td></tr>
-      <tr><td class="k">1. 청소 후보인가?</td><td>측정되었는가</td><td>측정되지 않은 앤실라만 청소 후보입니다. 측정된 앤실라는 되돌릴 역연산이 없어 청소할 수 없으므로 제외됩니다.</td><td><code>IsCleanupCandidate</code></td></tr>
-      <tr><td class="k">2. 청소 가능한가?</td><td>역사가 깨끗한가</td><td>계산 이력이 4개 조항을 통과해야 합니다 (<a href="uncompute-09-qfree.html">9장</a>–<a href="uncompute-13-blanket.html">13장</a>).</td><td><code>UncomputeSafety</code></td></tr>
+      <tr><th>단계</th><th>질문</th><th>판별 기준</th><th>현재 MIR 근거</th></tr>
+      <tr><td class="k">0. 앤실라인가?</td><td>누구의 큐빗인가</td><td><code>use</code>로 만들었으면 앤실라입니다. 파라미터는 호출자의 소유이므로 제외됩니다.</td><td><code>MirQubitFromUse</code> / <code>MirQubitParameter</code></td></tr>
+      <tr><td class="k">1. 청소 후보인가?</td><td>측정되었는가</td><td>측정되지 않은 앤실라만 청소 후보입니다. 측정된 앤실라는 되돌릴 역연산이 없어 청소할 수 없으므로 제외됩니다.</td><td><code>MirQubitEffectFlags.Measure</code></td></tr>
+      <tr><td class="k">2. 청소 가능한가?</td><td>역사가 깨끗한가</td><td>계산 이력이 4개 조항을 통과해야 합니다 (<a href="uncompute-09-qfree.html">9장</a>–<a href="uncompute-13-blanket.html">13장</a>).</td><td><code>MirQuantumInstructionEffect</code>와 CFG·witness 정보, scheduler는 아직 미구현</td></tr>
     </table>
+  </div>
+  <div class="call">
+    <span class="h">구현 상태</span>
+    현재 MIR은 위 판정에 필요한 큐빗 버전과 명령별 효과를 기록해요.<br>
+    다만 cleanup scheduler가 최종 후보·safe 판정을 발행하거나 역연산을 자동 주입하는 단계는 아직 구현되지 않았어요.
   </div>
   <p>
     각 질문이 실제로 어떤 큐빗을 필터링하는지, 0번과 1번을 예제로 하나씩 확인하겠습니다.<br>
@@ -198,11 +203,9 @@ var r: bit = M(q[0]);     <span class="cm">// q를 측정해 그 값을 r에 저
     태생을 가리키는 말이 <em>앤실라</em>, 측정되지 않아 정리해야 하는 앤실라가 <em>청소 후보</em>, 판정까지 통과해 자동 정리가 확정된 후보가 <em>safe</em>입니다.</p>
   </div>
 
-  <h3>예제 — 세 질문의 답을 한 프로그램에서 한꺼번에</h3>
+  <h3>예제 — 목표 scheduler가 세 질문을 적용하면</h3>
   <p>
-    이 판별은 상상 속 절차가 아니라 지금 실행해 볼 수 있는 기능입니다.<br>
-    컴파일러의
-    <code>--stages</code> 리포트가 큐빗마다 세 질문의 답을 그대로 출력합니다.<br>
+    아래 분류는 현재 CLI가 내놓는 리포트가 아니라, 앞으로 MIR cleanup scheduler가 같은 근거를 소비해 내릴 판정이에요.<br>
     파라미터 하나,
     측정되는 레지스터 하나, 청소 후보 하나가 모두 등장하는 작은 프로그램으로
     확인해 보겠습니다.
@@ -215,7 +218,7 @@ operation Main(){
     CNOT(a[0], out[0]);          <span class="cm">// a의 값을 out에 복사한다. 이후 a는 쓰이지 않는다</span>
     var c: bit = M(out[0]);           <span class="cm">// out을 측정해 그 값을 c에 저장한다</span>
 }</code></pre>
-<pre><code><span class="cm">// --stages 의 uncompute 뷰:</span>
+<pre><code><span class="cm">// 목표 scheduler의 예상 분류:</span>
 p:   input (parameter) — caller-owned, not an ancilla
 out: ancilla, measured — promoted to output, not a cleanup candidate
 a:   ancilla, cleanup candidate — safe to uncompute</code></pre>
@@ -228,7 +231,7 @@ a:   ancilla, cleanup candidate — safe to uncompute</code></pre>
       <tr><th>큐빗</th><th>판정</th><th>사유</th></tr>
       <tr><td class="k"><code>p</code></td><td>질문 0에서 제외</td><td><code>Flip</code>이 <code>use</code>로 생성한 큐빗이 아니라 파라미터로 전달받은 큐빗이므로 앤실라에 해당하지 않습니다.</td></tr>
       <tr><td class="k"><code>out</code></td><td>질문 1에서 제외</td><td><code>use</code>로 생성한 앤실라이기는 하나, <code>M(out[0])</code>으로 측정되어 그 값이 고전 비트 <code>c</code>에 기록되었으므로 출력으로 승격됩니다.</td></tr>
-      <tr><td class="k"><code>a</code></td><td>세 질문 모두 충족</td><td><code>use</code>로 생성하였고(질문 0 충족), 측정된 이력이 없으며(질문 1 충족), X 하나만으로 값을 구성하여 복원이 가능합니다(질문 2 충족). 따라서 청소 후보이자 safe로 판정됩니다.</td></tr>
+      <tr><td class="k"><code>a</code></td><td>세 질문 모두 충족</td><td><code>use</code>로 생성하였고(질문 0 충족), 측정된 이력이 없으며(질문 1 충족), X 하나만으로 값을 구성하여 복원이 가능합니다(질문 2 충족). 따라서 목표 scheduler에서는 청소 후보이자 safe가 될 수 있습니다.</td></tr>
     </table>
   </div>
   <p>
@@ -236,8 +239,9 @@ a:   ancilla, cleanup candidate — safe to uncompute</code></pre>
     <code>a</code> 자체를 읽지 않습니다.<br>
     클래식 코드의 <code>t = ...; result = f(t);</code>에서 <code>t</code>가 임시 변수인 것과 같은
     상황입니다.<br>
-    이런 큐빗이 청소 후보가 되고, 컴파일러는 <code>a</code>가 마지막으로 쓰인 <code>CNOT</code> 직후에
-    정리 코드를 자동으로 넣습니다.<br>
+    이런 큐빗이 청소 후보가 되고, 목표 scheduler는 <code>a</code>가 마지막으로 쓰인 <code>CNOT</code> 직후에
+    정리 코드를 넣게 될 거예요.<br>
+    현재 컴파일러는 이 자동 주입 단계까지는 수행하지 않아요.<br>
     그 정리 코드가 정확히 무엇이고 어떻게 만들어지는지는
     <a href="uncompute-11-injector.html">11장</a>에서 다룹니다.
   </p>

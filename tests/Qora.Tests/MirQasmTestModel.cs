@@ -26,7 +26,7 @@ internal static class MirQasmTestModel
 
     public static IEnumerable<MirQasmStatement> Statements(
         this MirOpenQasmTargetProgram program) =>
-        Statements(program.EntryPoint.Body)
+        Statements(program.EntryBody)
             .Concat(
                 program.Definitions.SelectMany(
                     definition => Statements(definition.Body)));

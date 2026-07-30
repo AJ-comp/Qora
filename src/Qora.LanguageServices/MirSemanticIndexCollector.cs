@@ -29,29 +29,9 @@ internal sealed class MirSemanticIndexCollector : IMirLoweringTraceSink
                     : left.Version.Value.CompareTo(right.Version.Value);
             });
 
-    private readonly Dictionary<HirNodeId, MirCallableId> _callablesByDeclaration = new();
-    private readonly BiMultiMap<SymbolId, MirCallableId> _callables = new();
     private readonly Dictionary<MirCallableId, MutableCallableIndex> _byCallable = new();
     private readonly HashSet<SymbolId> _unreachable = new();
     private bool _built;
-
-    public void LinkCallable(
-        HirNodeId declaration,
-        SymbolId symbol,
-        MirCallableId callable)
-    {
-        RequireOpen();
-        if (_callablesByDeclaration.TryGetValue(declaration, out var existing)
-            && existing != callable)
-        {
-            throw new InvalidOperationException(
-                $"HIR callable {declaration} was linked to both {existing} and {callable}.");
-        }
-
-        _callablesByDeclaration[declaration] = callable;
-        _callables.Add(symbol, callable);
-        _ = Mutable(callable);
-    }
 
     public void LinkValue(
         SymbolId symbol,
@@ -111,21 +91,51 @@ internal sealed class MirSemanticIndexCollector : IMirLoweringTraceSink
 
         ValidateOwners(compilation, hirArtifact, mir);
 
-        var completedCallables = mir.Program.Callables.ToDictionary(callable => callable.Id);
-        ValidateCallableLinks(hirArtifact, graph, completedCallables);
+        var completedCallables = mir.Program.Callables;
+        var callablesByDeclaration =
+            new Dictionary<HirNodeId, MirCallableId>(
+                hirArtifact.Program.Callables.Count);
+        var callables = new BiMultiMap<SymbolId, MirCallableId>();
+        foreach (var hirCallable in hirArtifact.Program.Callables)
+        {
+            var mirCallableId = new MirCallableId(hirCallable.Id.Value);
+            _ = mir.Program.RequireCallable(mirCallableId);
 
-        var mutableByCallable = completedCallables.Keys.ToDictionary(
-            callable => callable,
-            callable => _byCallable.GetValueOrDefault(callable) ?? new MutableCallableIndex());
+            var symbol = graph.FindDeclaration(hirCallable.Id)
+                ?? throw new InvalidOperationException(
+                    $"HIR callable {hirCallable.Id} has no semantic symbol.");
+            if (symbol.Kind != SymbolKind.Callable)
+            {
+                throw new InvalidOperationException(
+                    $"HIR callable {hirCallable.Id} is bound to non-callable symbol {symbol.Id}.");
+            }
+
+            callablesByDeclaration.Add(hirCallable.Id, mirCallableId);
+            callables.Add(symbol.Id, mirCallableId);
+        }
+
+        var mutableByCallable =
+            new Dictionary<MirCallableId, MutableCallableIndex>(completedCallables.Count);
+        foreach (var callable in completedCallables)
+        {
+            var links = _byCallable.GetValueOrDefault(callable.Id)
+                ?? new MutableCallableIndex();
+            mutableByCallable.Add(callable.Id, links);
+        }
 
         foreach (var (callableId, links) in _byCallable)
         {
-            if (!completedCallables.TryGetValue(callableId, out var callable))
+            if (!mir.Program.ContainsCallable(callableId))
             {
                 throw new InvalidOperationException(
                     $"The lowering trace names missing MIR callable {callableId}.");
             }
-            ValidateCallableEntities(graph, callable, links);
+            var callable = mir.Program.RequireCallable(callableId);
+            ValidateCallableEntities(
+                graph,
+                callables,
+                callable,
+                links);
         }
 
         foreach (var symbol in graph.AllSymbols)
@@ -133,7 +143,7 @@ internal sealed class MirSemanticIndexCollector : IMirLoweringTraceSink
             if (FindOwningCallableSymbol(graph, symbol) is not { } owner)
                 continue;
 
-            foreach (var callable in _callables.ValuesFor(owner))
+            foreach (var callable in callables.ValuesFor(owner))
             {
                 if (!mutableByCallable.TryGetValue(callable, out var links))
                 {
@@ -152,7 +162,7 @@ internal sealed class MirSemanticIndexCollector : IMirLoweringTraceSink
             var owner = FindOwningCallableSymbol(graph, symbol)
                 ?? throw new InvalidOperationException(
                     $"Unreachable HIR symbol {symbolId} has no enclosing callable.");
-            var ownerCallables = _callables.ValuesFor(owner);
+            var ownerCallables = callables.ValuesFor(owner);
             if (ownerCallables.Count == 0)
             {
                 throw new InvalidOperationException(
@@ -173,125 +183,51 @@ internal sealed class MirSemanticIndexCollector : IMirLoweringTraceSink
             }
         }
 
-        ValidateTotalSymbolCoverage(graph, mutableByCallable);
+        ValidateTotalSymbolCoverage(
+            graph,
+            callables,
+            mutableByCallable);
 
-        var byCallable = completedCallables.ToDictionary(
-            pair => pair.Key,
-            pair =>
-            {
-                var links = mutableByCallable[pair.Key];
-                return new MirCallableSemanticIndex(
-                    graph,
-                    pair.Value,
-                    links.Symbols,
-                    links.Values.FreezeForward(ValueComparer),
-                    links.Values.FreezeReverse(SymbolComparer),
-                    links.Storages.FreezeForward(StorageComparer),
-                    links.Storages.FreezeReverse(SymbolComparer),
-                    links.Qubits.FreezeForward(QubitComparer),
-                    links.Qubits.FreezeReverse(SymbolComparer),
-                    links.Unreachable);
-            });
+        var byCallable =
+            new Dictionary<MirCallableId, MirCallableSemanticIndex>(completedCallables.Count);
+        foreach (var callable in completedCallables)
+        {
+            var links = mutableByCallable[callable.Id];
+            var semanticIndex = new MirCallableSemanticIndex(
+                graph,
+                callable,
+                links.Symbols,
+                links.Values.FreezeForward(ValueComparer),
+                links.Values.FreezeReverse(SymbolComparer),
+                links.Storages.FreezeForward(StorageComparer),
+                links.Storages.FreezeReverse(SymbolComparer),
+                links.Qubits.FreezeForward(QubitComparer),
+                links.Qubits.FreezeReverse(SymbolComparer),
+                links.Unreachable);
+
+            byCallable.Add(callable.Id, semanticIndex);
+        }
 
         return new MirSemanticIndex(
             compilation,
             hirArtifact,
             mir,
-            _callablesByDeclaration,
-            _callables.FreezeForward(CallableComparer),
+            callablesByDeclaration,
+            callables.FreezeForward(CallableComparer),
             byCallable);
-    }
-
-    private void ValidateCallableLinks(
-        HirSemanticArtifact hirArtifact,
-        HirScopeGraph graph,
-        IReadOnlyDictionary<MirCallableId, MirCallable> completedCallables)
-    {
-        var expectedEdges = new HashSet<(SymbolId Symbol, MirCallableId Callable)>();
-        foreach (var (declaration, callable) in _callablesByDeclaration)
-        {
-            if (!completedCallables.ContainsKey(callable))
-            {
-                throw new InvalidOperationException(
-                    $"HIR callable {declaration} links to missing MIR callable {callable}.");
-            }
-            if (!hirArtifact.Source.Structure.Contains(declaration)
-                || hirArtifact.Source.Structure.RequireKind(declaration) != HirNodeKind.Callable)
-            {
-                throw new InvalidOperationException(
-                    $"The lowering trace names non-callable HIR node {declaration}.");
-            }
-
-            var symbol = graph.FindDeclaration(declaration)
-                ?? throw new InvalidOperationException(
-                    $"HIR callable {declaration} has no semantic symbol.");
-            if (symbol.Kind != SymbolKind.Callable
-                || !_callables.Contains(symbol.Id, callable))
-            {
-                throw new InvalidOperationException(
-                    $"HIR callable {declaration}, symbol {symbol.Id}, and MIR callable {callable} disagree.");
-            }
-            expectedEdges.Add((symbol.Id, callable));
-        }
-
-        var finalDeclarations = hirArtifact.Program.Callables
-            .Select(callable => callable.Id)
-            .ToHashSet();
-        if (!finalDeclarations.SetEquals(_callablesByDeclaration.Keys))
-        {
-            throw new InvalidOperationException(
-                "MIR callable lowering traces do not exactly cover the final HIR callable declarations.");
-        }
-
-        if (_callablesByDeclaration.Values.Distinct().Count()
-            != _callablesByDeclaration.Count)
-        {
-            throw new InvalidOperationException(
-                "Distinct final HIR callable declarations were linked to the same source MIR callable.");
-        }
-
-        var actualEdges = _callables.Forward
-            .SelectMany(
-                pair => pair.Value.Select(
-                    callable => (Symbol: pair.Key, Callable: callable)))
-            .ToHashSet();
-        if (!actualEdges.SetEquals(expectedEdges))
-        {
-            throw new InvalidOperationException(
-                "HIR callable declaration, symbol, and source MIR callable links do not form one exact edge set.");
-        }
-
-        foreach (var (symbol, callables) in _callables.Forward)
-        {
-            if (graph.FindSymbol(symbol) is not { Kind: SymbolKind.Callable })
-            {
-                throw new InvalidOperationException(
-                    $"The lowering trace links non-callable HIR symbol {symbol} as a callable.");
-            }
-            foreach (var callable in callables)
-            {
-                if (!completedCallables.ContainsKey(callable))
-                {
-                    throw new InvalidOperationException(
-                        $"HIR symbol {symbol} links to missing MIR callable {callable}.");
-                }
-            }
-        }
     }
 
     private void ValidateCallableEntities(
         HirScopeGraph graph,
+        BiMultiMap<SymbolId, MirCallableId> callables,
         MirCallable callable,
         MutableCallableIndex links)
     {
-        var values = callable.Values.Select(value => value.Id).ToHashSet();
-        var storages = callable.Storages.Select(storage => storage.Id).ToHashSet();
-        var qubits = callable.Qubits.Select(qubit => qubit.Key).ToHashSet();
-
         ValidateEndpoints(
             graph,
+            callables,
             links.Values.Forward,
-            values,
+            valueId => callable.ContainsValue(valueId),
             callable.Id,
             "value",
             static symbol =>
@@ -302,15 +238,17 @@ internal sealed class MirSemanticIndexCollector : IMirLoweringTraceSink
                 && symbol.Type != QType.Qubit);
         ValidateEndpoints(
             graph,
+            callables,
             links.Storages.Forward,
-            storages,
+            storageId => callable.ContainsStorage(storageId),
             callable.Id,
             "storage",
             static symbol => symbol.Type != QType.Qubit && symbol.IsArray);
         ValidateEndpoints(
             graph,
+            callables,
             links.Qubits.Forward,
-            qubits,
+            qubitKey => callable.ContainsQubit(qubitKey),
             callable.Id,
             "qubit",
             static symbol => symbol.Type == QType.Qubit);
@@ -318,8 +256,9 @@ internal sealed class MirSemanticIndexCollector : IMirLoweringTraceSink
 
     private void ValidateEndpoints<TEntity>(
         HirScopeGraph graph,
+        BiMultiMap<SymbolId, MirCallableId> callables,
         IReadOnlyDictionary<SymbolId, HashSet<TEntity>> links,
-        IReadOnlySet<TEntity> completedEntities,
+        Func<TEntity, bool> containsEntity,
         MirCallableId callable,
         string entityName,
         Func<Symbol, bool> acceptsSymbol)
@@ -339,7 +278,7 @@ internal sealed class MirSemanticIndexCollector : IMirLoweringTraceSink
             var owner = FindOwningCallableSymbol(graph, symbol)
                 ?? throw new InvalidOperationException(
                     $"HIR symbol {symbolId} linked to MIR {entityName} has no enclosing callable.");
-            if (!_callables.Contains(owner, callable))
+            if (!callables.Contains(owner, callable))
             {
                 throw new InvalidOperationException(
                     $"HIR symbol {symbolId} belongs to callable symbol {owner}, not MIR callable {callable}.");
@@ -347,7 +286,7 @@ internal sealed class MirSemanticIndexCollector : IMirLoweringTraceSink
 
             foreach (var entity in entities)
             {
-                if (!completedEntities.Contains(entity))
+                if (!containsEntity(entity))
                 {
                     throw new InvalidOperationException(
                         $"The lowering trace names missing MIR {entityName} {entity} in {callable}.");
@@ -358,6 +297,7 @@ internal sealed class MirSemanticIndexCollector : IMirLoweringTraceSink
 
     private void ValidateTotalSymbolCoverage(
         HirScopeGraph graph,
+        BiMultiMap<SymbolId, MirCallableId> callables,
         IReadOnlyDictionary<MirCallableId, MutableCallableIndex> byCallable)
     {
         var valueSymbols = byCallable.Values
@@ -372,7 +312,7 @@ internal sealed class MirSemanticIndexCollector : IMirLoweringTraceSink
 
         foreach (var symbol in graph.AllSymbols)
         {
-            var hasCallable = _callables.ContainsLeft(symbol.Id);
+            var hasCallable = callables.ContainsLeft(symbol.Id);
             var hasValue = valueSymbols.Contains(symbol.Id);
             var hasStorage = storageSymbols.Contains(symbol.Id);
             var hasQubit = qubitSymbols.Contains(symbol.Id);
@@ -411,7 +351,7 @@ internal sealed class MirSemanticIndexCollector : IMirLoweringTraceSink
             var owner = FindOwningCallableSymbol(graph, symbol)
                 ?? throw new InvalidOperationException(
                     $"HIR symbol {symbol.Id} has no enclosing callable.");
-            var ownerCallables = _callables.ValuesFor(owner);
+            var ownerCallables = callables.ValuesFor(owner);
             if (ownerCallables.Count == 0)
             {
                 throw new InvalidOperationException(
@@ -502,14 +442,16 @@ internal sealed class MirSemanticIndexCollector : IMirLoweringTraceSink
     private MutableCallableIndex Mutable(MirCallableId callable)
     {
         if (!_byCallable.TryGetValue(callable, out var links))
-            _byCallable.Add(callable, links = new MutableCallableIndex());
+        {
+            links = new MutableCallableIndex();
+            _byCallable.Add(callable, links);
+        }
+
         return links;
     }
 
     private bool HasTraceData() =>
-        _callablesByDeclaration.Count != 0
-        || _callables.Count != 0
-        || _byCallable.Count != 0
+        _byCallable.Count != 0
         || _unreachable.Count != 0;
 
     private void RequireOpen()
@@ -578,7 +520,11 @@ internal sealed class MirSemanticIndexCollector : IMirLoweringTraceSink
             where TKey : notnull
         {
             if (!map.TryGetValue(key, out var values))
-                map.Add(key, values = new HashSet<TValue>());
+            {
+                values = new HashSet<TValue>();
+                map.Add(key, values);
+            }
+
             values.Add(value);
         }
     }

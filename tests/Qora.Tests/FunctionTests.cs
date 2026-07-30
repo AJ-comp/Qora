@@ -263,14 +263,14 @@ public class FunctionTests
         var hidden = Assert.Single(function.Parameters);
         var hiddenType = Assert.IsType<MirQasmArrayType>(hidden.Type);
         var call = Assert.Single(
-            program.EntryPoint.Body
+            program.EntryBody
                 .SelectMany(MirQasmTestModel.Expressions)
                 .OfType<MirQasmFunctionCallExpression>());
         var target = Assert.IsType<MirQasmUserFunctionTarget>(call.Target);
         var hiddenArgument = Assert.IsType<MirQasmDeclarationReferenceExpression>(
             Assert.Single(call.Arguments));
         var backing = Assert.Single(
-            MirQasmTestModel.Statements(program.EntryPoint.Body)
+            MirQasmTestModel.Statements(program.EntryBody)
                 .OfType<MirQasmArrayDeclarationStatement>(),
             declaration => declaration.Declaration == hiddenArgument.Declaration);
 
@@ -497,16 +497,14 @@ public class FunctionTests
                 && branch.Then
                     .Concat(branch.Else)
                     .Any(statement => statement is MirQasmBreakStatement));
-        var innerReturnBreak = Assert.Single(
+        _ = Assert.Single(
             MirQasmTestModel.Statements(innerReturnBranch.Then)
                 .Concat(MirQasmTestModel.Statements(innerReturnBranch.Else))
                 .OfType<MirQasmBreakStatement>());
-        var outerPropagationBreak = Assert.Single(
+        _ = Assert.Single(
             MirQasmTestModel.Statements(outerBreakGuard.Then)
                 .Concat(MirQasmTestModel.Statements(outerBreakGuard.Else))
                 .OfType<MirQasmBreakStatement>());
-
-        Assert.NotEqual(innerReturnBreak.Id, outerPropagationBreak.Id);
     }
 
     [Theory]

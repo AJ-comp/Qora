@@ -248,7 +248,7 @@
     <code>t</code>에 남긴 위상이 두 기저 상태 항 사이의 상대 위상으로 살아남고, 어떤 역연산 주입도
     <a href="uncompute-09-qfree.html">9장</a>의 두 조건을 함께 지킬 수 없게 됩니다
     (<a href="uncompute-10-y-gate.html">10장</a>).<br>
-    자동 청소가 불가능해졌으므로, 컴파일러는 조용히 넘어가는 대신 에러로 보고합니다.
+    자동 청소가 불가능해졌으므로, 목표 scheduler는 조용히 넘어가는 대신 에러로 보고하게 될 거예요.
   </p>
   <p>
     이 에러에서 벗어나는 길도 명시적입니다.<br>
@@ -271,7 +271,7 @@
   <p>
     1단계 예제에서 <code>t</code>가 청소 대상임을 표시하는 주석이나 특별한 표기는 코드 어디에도
     없었습니다.<br>
-    Qora는 <code>use</code>로 태어났는가와 측정되었는가라는 사실만으로 청소 후보를 추론하고
+    Qora의 목표 scheduler는 MIR에 기록된 <code>use</code> 태생과 측정 효과를 바탕으로 청소 후보를 추론하고
     (<a href="uncompute-02-ladder.html">2장</a>의 판별 사다리), Classiq Qmod도 같은 추론 접근으로
     앤실라를 식별합니다.<br>
     이 항목에서 두 시스템은 완전히 같은 자리에 서 있습니다.
@@ -288,8 +288,8 @@
 
   <h4>루프·조건문 안의 쓰기 — 여기서부터 달라집니다</h4>
   <p>
-    보수적인 Qora scheduler 설계는 먼저 문장 단위 역변환만 허용하므로, <code>for</code>나 <code>if</code> 같은
-    컨테이너 안에 들어 있는 앤실라 쓰기를 만나면 ContainedWrite로 분류해 자동 청소를 차단하게 돼요
+    보수적인 Qora scheduler 설계는 먼저 문장 단위 역변환만 허용하므로, <code>for</code>나 <code>if</code> 안에서
+    생긴 MIR 효과를 안전하게 배치할 수 없으면 자동 청소를 보수적으로 차단하게 돼요
     (<a href="uncompute-12-loops.html">12장</a>).
   </p>
 <pre><code>operation Main(){
@@ -299,17 +299,18 @@
     CNOT(a[0], out[0]);
     var c: bit = M(out[0]);
 }
-<span class="cm">// v1 설계: a 청소 불가 (ContainedWrite)</span></code></pre>
+<span class="cm">// v1 목표: 루프 안의 효과를 안전하게 배치할 수 없어 청소 차단</span></code></pre>
   <p>
     이 거부는 물리의 벽이 아니라 v1 설계가 안전한 쪽으로 물러서는 보수적 거부이고
     (<a href="uncompute-14-limits.html">14장</a>), Classiq Qmod는 같은 자리를 복합문 통째 역변환으로
     지원합니다.
   </p>
 
-  <h4>원소 단위 정밀도 — Qora는 원소별로 판정합니다</h4>
+  <h4>원소 단위 정밀도 — MIR은 원소를 구분하고, scheduler가 판정하게 됩니다</h4>
   <p>
-    한 레지스터 안에서 원소마다 처리가 나뉘는 경우, Qora는 원소별로 따로 판정하고 리포트도 원소
-    단위로 이유를 보고합니다 (<a href="uncompute-13-blanket.html">13장</a>).<br>
+    현재 MIR의 <code>MirQubitAccess</code>는 한 레지스터 안에서도 원소를 구분할 수 있어요.<br>
+    다만 이 근거를 이용해 원소별 cleanup 판정과 리포트를 만드는 scheduler는 아직 구현되지 않았어요
+    (<a href="uncompute-13-blanket.html">13장</a>).<br>
     아래 프로그램에서 측정된 <code>a[0]</code>은 출력으로 승격되고, <code>a[1]</code>만 청소 후보로
     판정되어 목표 scheduler에서는 역연산이 자동 주입돼요.
   </p>
@@ -331,7 +332,8 @@ operation Main(){
 
   <h4>Y·CY의 취급 — 같은 위험을 서로 다른 자리에서 막습니다</h4>
   <p>
-    2단계 예제에서 본 대로, Qora는 청소 후보의 이력에 Y·CY 쓰기가 들어오면 차단합니다
+    2단계 예제에서 본 대로, 현재 MIR 효과 분석은 Y·CY 쓰기에
+    <code>MirQubitEffectFlags.NonQfree</code>를 붙이고, 목표 v1 scheduler는 이를 차단 근거로 사용하게 돼요
     (<a href="uncompute-10-y-gate.html">10장</a>).<br>
     Classiq Qmod는 Y 자체를 허용하되, 얽힌 상대에게 비치환 연산을 금지합니다.<br>
     막는 자리가 다를 뿐 지키려는 것은 같습니다.<br>
@@ -341,7 +343,7 @@ operation Main(){
 
   <h4>동적 값 — 막는 방식이 다를 뿐 도착점은 같습니다</h4>
   <p>
-    컴파일 타임에 정해지지 않는 인덱스나 루프 경계가 이력에 들어오면 Qora는 에러로 보고합니다
+    컴파일 타임에 정해지지 않는 인덱스나 루프 경계가 cleanup 이력에 들어오면 목표 scheduler는 에러로 보고하게 돼요
     (<a href="uncompute-14-limits.html">14장</a>).<br>
     Classiq Qmod는 문법 자체가 컴파일 타임 전용이어서, 그런 값을 적을 자리부터 없습니다.<br>
     에러로 막느냐 문법으로 막느냐가 다를 뿐, 회로는 컴파일 타임에 확정된다는
@@ -354,12 +356,12 @@ operation Main(){
   <div class="panel">
     <table class="spec">
       <tr><th>비교 항목</th><th>Qora</th><th>Classiq Qmod (같은 접근의 상용 시스템)</th></tr>
-      <tr><td class="k">앤실라 식별</td><td>추론 (주석·표기 불필요)</td><td>추론 — 같은 접근</td></tr>
-      <tr><td class="k">청소 메커니즘</td><td>역연산 주입</td><td>역연산 주입 + 합성 엔진이 배치 결정</td></tr>
-      <tr><td class="k">루프/조건문의 청소</td><td>보수적 거부 (<a href="uncompute-12-loops.html">7</a>·<a href="uncompute-14-limits.html">14장</a> — 완화 예정)</td><td>복합문 통째 역변환으로 지원</td></tr>
-      <tr><td class="k">원소 단위 정밀도</td><td>원소별 판정·리포트 지원</td><td>배열은 수명상 한 덩어리 — 사용자가 수동 분할</td></tr>
-      <tr><td class="k">Y·CY 취급</td><td>차단 (<a href="uncompute-10-y-gate.html">10장</a>)</td><td>허용하되 얽힌 상대에게 비치환 연산 금지 — 다른 방식의 방어</td></tr>
-      <tr><td class="k">동적 값 (인덱스·경계)</td><td>에러</td><td>문법으로 금지 (컴파일 타임 전용)</td></tr>
+      <tr><td class="k">앤실라 식별</td><td>MIR에 추론 근거가 있음 · scheduler 판정은 roadmap</td><td>추론 — 같은 접근</td></tr>
+      <tr><td class="k">청소 메커니즘</td><td>MIR-only 역연산 실체화 구현 · schedule과 자동 주입은 roadmap</td><td>역연산 주입 + 합성 엔진이 배치 결정</td></tr>
+      <tr><td class="k">루프/조건문의 청소</td><td>v1 목표는 보수적 거부 (<a href="uncompute-12-loops.html">7</a>·<a href="uncompute-14-limits.html">14장</a> — 완화 예정)</td><td>복합문 통째 역변환으로 지원</td></tr>
+      <tr><td class="k">원소 단위 정밀도</td><td><code>MirQubitAccess</code>가 원소를 구분 · scheduler와 리포트는 roadmap</td><td>배열은 수명상 한 덩어리 — 사용자가 수동 분할</td></tr>
+      <tr><td class="k">Y·CY 취급</td><td>MIR에서 <code>NonQfree</code> 표시 · v1 목표는 차단 (<a href="uncompute-10-y-gate.html">10장</a>)</td><td>허용하되 얽힌 상대에게 비치환 연산 금지 — 다른 방식의 방어</td></tr>
+      <tr><td class="k">동적 값 (인덱스·경계)</td><td>목표 scheduler에서 에러</td><td>문법으로 금지 (컴파일 타임 전용)</td></tr>
     </table>
   </div>
 

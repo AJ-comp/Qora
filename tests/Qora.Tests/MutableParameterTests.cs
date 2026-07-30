@@ -667,7 +667,7 @@ public class MutableParameterTests
         MirQasmCallableId callable) =>
         Assert.Single(
             MirQasmTestModel
-                .Statements(program.EntryPoint.Body)
+                .Statements(program.EntryBody)
                 .OfType<MirQasmQuantumApplyStatement>(),
             apply =>
                 apply.Target is MirQasmUserQuantumTarget target

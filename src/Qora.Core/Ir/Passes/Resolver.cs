@@ -79,39 +79,39 @@ internal static class Resolver
             }
         }
 
+        IReadOnlyList<HirCallable> ResolveCallable(HirCallable callable)
+        {
+            var callableSymbol =
+                scopeGraph.FindDeclaration(callable.Id)
+                ?? throw new InvalidOperationException(
+                    $"QINTERNAL: callable `{callable.Name}` has no program symbol");
+            var namespacePath = program.NamespaceOf(callable);
+            var callerNamespace = namespacePath.Length == 0
+                ? scopeGraph.RootScope
+                : scopeGraph.FindNamespaceScope(namespacePath)
+                  ?? scopeGraph.RootScope;
+            var callableResolver = new CallableResolver(
+                scopeGraph,
+                callerNamespace,
+                scopeGraph.QualifiedName(callableSymbol),
+                errors,
+                rewrite);
+            var body = callableResolver.ResolveBlock(callable.Body);
+            var resolvedCallable = rewrite.RewriteCallable(
+                callable,
+                callable.Name,
+                callable.Parameters,
+                body,
+                callable.IsFunction,
+                callable.ReturnType,
+                callable.DisplayName);
+
+            return new[] { resolvedCallable };
+        }
+
         var resolvedProgram = rewrite.ReplaceCallables(
             program,
-            callable =>
-            {
-                var callableSymbol =
-                    scopeGraph.FindDeclaration(callable.Id)
-                    ?? throw new InvalidOperationException(
-                        $"QINTERNAL: callable `{callable.Name}` has no program symbol");
-                var namespacePath = program.NamespaceOf(callable);
-                var callerNamespace = namespacePath.Length == 0
-                    ? scopeGraph.RootScope
-                    : scopeGraph.FindNamespaceScope(namespacePath)
-                      ?? scopeGraph.RootScope;
-                var callableResolver = new CallableResolver(
-                    scopeGraph,
-                    callerNamespace,
-                    scopeGraph.QualifiedName(callableSymbol),
-                    errors,
-                    rewrite);
-                var body =
-                    callableResolver.ResolveBlock(callable.Body);
-                return new[]
-                {
-                    rewrite.RewriteCallable(
-                        callable,
-                        callable.Name,
-                        callable.Parameters,
-                        body,
-                        callable.IsFunction,
-                        callable.ReturnType,
-                        callable.DisplayName),
-                };
-            });
+            ResolveCallable);
         return new Result(
             rewrite.Publish(resolvedProgram),
             errors);
@@ -151,7 +151,10 @@ internal static class Resolver
 
         internal HirBlock ResolveBlock(HirBlock block)
         {
-            var statements = block.Select(ResolveStatement).ToArray();
+            var statements = new HirStatement[block.Count];
+            for (var index = 0; index < block.Count; index++)
+                statements[index] = ResolveStatement(block[index]);
+
             return _rewrite.RewriteBlock(block, statements);
         }
 
@@ -249,14 +252,19 @@ internal static class Resolver
             HirCallExpression call,
             CallForm form)
         {
-            var arguments = call.Arguments
-                .Select(argument =>
-                    _rewrite.RewriteArgument(
-                        argument,
-                        ResolveExpression(argument.Expression),
-                        argument.Ownership,
-                        argument.Access))
-                .ToArray();
+            var arguments = new HirArgument[call.Arguments.Count];
+            for (var index = 0; index < call.Arguments.Count; index++)
+            {
+                var argument = call.Arguments[index];
+                var expression = ResolveExpression(argument.Expression);
+
+                arguments[index] = _rewrite.RewriteArgument(
+                    argument,
+                    expression,
+                    argument.Ownership,
+                    argument.Access);
+            }
+
             var callee = ResolveCallee(
                 call.Name,
                 form,
@@ -314,13 +322,18 @@ internal static class Resolver
                 _callerNamespace.Kind == HirScopeKind.Namespace
                     ? _scopeGraph.ImportedScopes(_callerNamespace.Id)
                     : Array.Empty<Scope>();
-            var candidates = openedScopes
-                .Select(namespaceScope => _scopeGraph.LookupMember(
+            var candidates = new List<ResolvedCallee>();
+            foreach (var namespaceScope in openedScopes)
+            {
+                var symbol = _scopeGraph.LookupMember(
                     namespaceScope.Id,
                     name,
-                    SymbolKind.Callable))
-                .OfType<Symbol>()
-                .Select(Bound)
+                    SymbolKind.Callable);
+                if (symbol is not null)
+                    candidates.Add(Bound(symbol));
+            }
+
+            candidates = candidates
                 .DistinctBy(candidate => candidate.CallableId)
                 .ToList();
 

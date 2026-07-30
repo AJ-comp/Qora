@@ -125,7 +125,7 @@ public class NegationTests
         string source)
     {
         var artifact = MirQasmTestModel.Compile(source);
-        var body = artifact.Program.EntryPoint.Body;
+        var body = artifact.Program.EntryBody;
         var conditions = MirQasmTestModel
             .Statements(body)
             .Select(

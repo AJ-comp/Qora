@@ -3,6 +3,8 @@
 Release notes for the **Qora language** — its grammar (`QoraGrammar`) and compiler pipeline
 (`src/Qora.Core/Ir/`: lowering, validation, inversion, OpenQASM emission). This tracks the language
 itself; the VS Code extension is versioned separately in [`vscode/CHANGELOG.md`](vscode/CHANGELOG.md).
+Beginning with 0.35.0, language releases use the three-component `MAJOR.MINOR.PATCH` format.
+Historical two-component versions remain recorded exactly as they were released.
 
 Qora is a Q#/C#-flavored quantum learning language built on the
 [Janglim](https://www.nuget.org/packages/Janglim) parser engine: source is parsed into an AST, which is
@@ -14,6 +16,36 @@ emitted as **OpenQASM 3.0**.
 > Entries under older releases describe the implementation that shipped at that time. Types and passes
 > named there may have been retired by a later release; the newest release notes and current architecture
 > documents define the present pipeline.
+
+## 0.35.0 — 2026-07-31
+
+### Changed
+- **Detailed quantum flow now has one authority: callable-owned MIR.** HIR effect analysis retains only
+  the transitive formal-qubit modification summary needed to create correct MIR versions. Qubit histories,
+  instruction effects, path conditions, memory state, and future cleanup decisions are derived from the
+  completed MIR instead of mirrored in HIR.
+- **MIR facts now come from the structure that defines them.** Callable kind comes from the return type;
+  value-definition kind comes from its definition site; and storage kind, type, and alias contract come
+  from the parameter or allocation that owns the storage. Analyses retain only their derived results
+  rather than copying MIR entities and metadata into parallel models.
+- **MIR transformations preserve owner-local identity directly.** HIR callable node IDs become the initial
+  MIR callable IDs, existing entities keep their origin IDs across transformations, and only synthesized
+  adjoint entities allocate new identities. Bounds obligations remain attached through inverse-request
+  injection and adjoint materialization.
+- **OpenQASM and language-service consumers use the smaller owned model.** The typed OpenQASM target owns
+  its entry body directly, while optional semantic indexing queries the authoritative HIR and MIR owners
+  without retaining duplicate callable traces or entity copies.
+
+### Fixed
+- **Malformed MIR is rejected at its construction and verification boundaries.** Duplicate callable
+  identities, invalid classical MIR types or array lengths, invalid SSA definition positions, and storage
+  identities with contradictory defining sites can no longer enter later analysis or target lowering.
+
+### Removed
+- The parallel HIR qubit event stream, qubit graph, cleanup verdicts, `ContainerMap`, and their obsolete
+  test stack. Their surviving responsibilities already belong to versioned MIR analyses.
+- The legacy `MirSafetyFacts`, snapshot-qualified `MirOriginRef`, redundant call-kind and storage metadata,
+  unused lookup paths, and OpenQASM entry-point and statement-identity wrappers.
 
 ## 0.34 — 2026-07-29
 

@@ -23,7 +23,7 @@ public class ValidProgramTests
         // to the entry body, so this check never compares it with IDs owned by another callable.
         var artifact = MirQasmTestModel.Compile(
             "operation Main(){ use q=Qubit[2]; var r: bit = M(q[0]); if(r==1){ X(q[1]); } }");
-        var body = artifact.Program.EntryPoint.Body;
+        var body = artifact.Program.EntryBody;
         var statements = MirQasmTestModel.Statements(body).ToArray();
         var measured = Assert.Single(
             statements.OfType<MirQasmMeasurementAssignmentStatement>());
@@ -48,7 +48,7 @@ public class ValidProgramTests
     {
         var artifact = MirQasmTestModel.Compile(
             "operation Main(){ use q=Qubit[2]; var r: bit = M(q[0]); if(r==1){ X(q[1]); } }");
-        var body = artifact.Program.EntryPoint.Body;
+        var body = artifact.Program.EntryBody;
         var statements = MirQasmTestModel.Statements(body).ToArray();
         var measurement = Assert.Single(
             statements.OfType<MirQasmMeasurementAssignmentStatement>());
@@ -114,7 +114,7 @@ public class ValidProgramTests
         var artifact = MirQasmTestModel.Compile(
             "operation Main(){ use q=Qubit[2]; Controlled X(q[0], q[1]); }");
         var apply = Assert.Single(
-            MirQasmTestModel.Statements(artifact.Program.EntryPoint.Body)
+            MirQasmTestModel.Statements(artifact.Program.EntryBody)
                 .OfType<MirQasmQuantumApplyStatement>());
         Assert.IsType<MirQasmBuiltinGateTarget>(apply.Target);
         Assert.Equal(

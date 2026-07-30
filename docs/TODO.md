@@ -83,9 +83,9 @@ declared at `Main` top level and lowers to OpenQASM general arrays. (clean)
   correctness key is the **scope-exit |0⟩ guarantee** (reuse is legal only if the register is provably
   returned), so this SITS ON the uncompute return-semantics decision; the QSEM012 gate stays until the
   pass exists (its origin was exactly a silent-hoist bug — never hoist without the guarantee), and shapes
-  the pass cannot handle yet are loud errors, never silent skips. Standing design rule, already in force:
-  every analysis (events / liveness / verdicts / ContainerMap) is written placement-neutral, so nothing
-  built for uncompute needs rework when this lands. Decided as a goal 2026-07-10. (hard)
+  the pass cannot handle yet are loud errors, never silent skips. The allocation-lowering pass must
+  consume the scope-exit guarantee from the exact MIR cleanup result; no parallel HIR event, liveness,
+  verdict, or placement ledger is retained. Decided as a goal 2026-07-10. (hard)
 - **Expression-sized qubit allocation** — loop bounds now accept expressions, and `Qubit[]` helpers can
   iterate with `.Count`. However, `use q = Qubit[N]` still requires a positive literal size; accepting a
   const/expression there needs compile-time evaluation before allocation. (workable)
@@ -123,24 +123,26 @@ declared at `Main` top level and lowers to OpenQASM general arrays. (clean)
 
 ## Auto-uncompute — registered data gaps (from the requirements cross-check, 2026-07-11)
 
-The rung-③ analysis (events + qubit graph + ContainerMap) answers the injector's questions except:
+MIR already provides versioned qubits, instruction effects, CFG/path conditions, memory state, and
+classical-witness availability. The cleanup scheduler and injector must consume those exact
+revision-bound facts; HIR keeps no parallel qubit history or cleanup verdict. The remaining gaps are:
 
-- **#11 — classical condition-bit flow.** Lifting the `ContainedWrite` block via conditional inverses
-  (`if (r==1) { inverse }`) requires proving the condition bit unchanged between the compute and the
-  injected inverse; classical bits are not in the event stream (only `Symbol.Uses`, thin). Fill when
-  building the if-tools.
+- **#11 — conditional cleanup placement.** MIR already records path-condition SSA leaves and witness
+  availability. A scheduler that injects `if (r==1) { inverse }` must reconstruct the matching guard at
+  the chosen cleanup site, prove every required value is still available there, and reject unavailable
+  or loop-carried predicates. This is scheduler work, not a missing HIR event stream.
 - **#14 — post-injection re-analysis.** The cleanup scheduler consumes analyses bound to one exact
   `MirSnapshotId`. Rung ④ must publish the injected program as a new
   `MirStage.InverseRequestsInjected` snapshot, record its exact parent and rebased origins, and recompute
   every invalidated MIR analysis rather than reusing facts from the pre-injection revision. Successful
   materialization then publishes the next `MirStage.AdjointsMaterialized` snapshot.
-- **#16 — ancilla-identification conditions coupled to FUTURE features** (2026-07-11 literature
+- **#16 — cleanup-candidate conditions coupled to FUTURE features** (2026-07-11 literature
   cross-check: Silq PLDI'20, Q#, Unqomp PLDI'21/Reqomp, Twist POPL'22, Quipper, Bennett'73, Gidney'18 —
-  20/20 key claims source-verified). `IsCleanupCandidate`'s two conditions (`IsAncilla` use-birth + never
-  measured) are provably COMPLETE for today's quantum feature set (operations remain void, functions
-  are classical-only, and there are no general qubit aliases or closures: measurement is the only
-  value-escape channel). Future escape channels add conditions to the CANDIDACY layer
-  (`IsCleanupCandidate`); the birth layer (`IsAncilla`) is feature-invariant. Add each in the SAME change:
+  20/20 key claims source-verified). For today's quantum feature set, a future MIR scheduler can derive
+  a cleanup candidate from a local `MirQubitFromUse` birth plus the absence of measurement or escape
+  effects. Operations remain void, functions are classical-only, and there are no general qubit aliases
+  or closures, so those conditions cover every current escape channel. Future escape channels extend
+  this MIR candidate query in the SAME change:
   - **Future qubit-returning values or other qubit escape channels** → add "not returned / does not
     escape" (Silq: return consumes; Bennett: outputs are copied out of scratch). Current functions are
     classical-only, so the shipped scalar return feature does not create this escape channel.
@@ -165,11 +167,12 @@ The rung-③ analysis (events + qubit graph + ContainerMap) answers the injector
   - Escape hatch precedent: Silq ships explicit unsafe `forget(x := expr)` (witness-based, opt-in, loud)
     for legitimately-uncomputable-by-witness patterns the checker rejects — the acceptable shape if
     rule-(B) errors ever prove too strict in practice; a silent skip stays forbidden.
-- **#15 — Y/CY taint refinement (precision, not soundness).** Rung ③ now blocks EVERY Y/CY write as
-  non-qfree (matching Silq), which conservatively over-rejects a Y/CY whose target is a *definite basis
-  value* (a |0⟩-rooted classical chain), where the phase is global and the adjoint undoes it cleanly. A
-  taint pass over the qubit graph — a node is superposition-tainted iff it is a param seed, born of an
-  H/Rx/Ry write, or has a tainted parent — could re-admit a Y/CY write whose parents are all untainted.
+- **#15 — Y/CY taint refinement (precision, not soundness).** `MirEffectAnalysis` marks every Y/CY target
+  write with `MirQubitEffectFlags.NonQfree` (matching Silq). The future v1 scheduler must conservatively
+  block those effects, which over-rejects a Y/CY whose target is a *definite basis value* (a |0⟩-rooted
+  classical chain), where the phase is global and the adjoint undoes it cleanly. An optional taint pass
+  over MIR qubit versions — a version is superposition-tainted iff it is a parameter seed, born of an
+  H/Rx/Ry write, or has a tainted input — could re-admit a Y/CY write whose inputs are all untainted.
   Sound (untainted ⟹ definite basis value ⟹ global phase) and validatable by the round-5 fuzzer (its
   Y/CY-removed control already ran clean). Deferred deliberately: matching Silq is the correct minimal
   fix, and a new taint subsystem is bug surface better added under test than unsupervised.

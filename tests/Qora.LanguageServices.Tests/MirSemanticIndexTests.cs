@@ -353,12 +353,6 @@ public sealed class MirSemanticIndexTests
     private sealed class DroppingValueTrace(IMirLoweringTraceSink inner)
         : IMirLoweringTraceSink
     {
-        public void LinkCallable(
-            HirNodeId declaration,
-            SymbolId symbol,
-            MirCallableId callable) =>
-            inner.LinkCallable(declaration, symbol, callable);
-
         public void LinkValue(
             SymbolId symbol,
             MirCallableId callable,

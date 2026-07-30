@@ -27,7 +27,7 @@ public class MeasureConditionTests
         var artifact = MirQasmTestModel.Compile(
             "operation Main(){ use q=Qubit[2]; if(M(q[0])==1){ X(q[1]); } }");
         var statements = MirQasmTestModel
-            .Statements(artifact.Program.EntryPoint.Body)
+            .Statements(artifact.Program.EntryBody)
             .ToArray();
 
         Assert.Single(
@@ -41,7 +41,7 @@ public class MeasureConditionTests
         var artifact = MirQasmTestModel.Compile(
             "operation Main(){ use q=Qubit[1]; while(M(q[0])==1){ X(q[0]); } }");
         var loop = Assert.Single(
-            artifact.Program.EntryPoint.Body
+            artifact.Program.EntryBody
                 .OfType<MirQasmWhileStatement>());
 
         Assert.Single(
@@ -49,7 +49,7 @@ public class MeasureConditionTests
                 .Statements(loop.Body)
                 .OfType<MirQasmMeasurementAssignmentStatement>());
         Assert.DoesNotContain(
-            artifact.Program.EntryPoint.Body,
+            artifact.Program.EntryBody,
             statement => statement is MirQasmMeasurementAssignmentStatement);
     }
 

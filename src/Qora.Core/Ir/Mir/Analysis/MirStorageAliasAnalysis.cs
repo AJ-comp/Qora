@@ -40,19 +40,23 @@ internal static class MirStorageAliasAnalysis
                 if (leftStorage is null || rightStorage is null)
                     return true;
 
-                if (!Enum.IsDefined(leftStorage.AliasMode)
-                    || !Enum.IsDefined(rightStorage.AliasMode))
-                    return true;
+                var leftType = callable.StorageTypeOf(leftStorage);
+                var rightType = callable.StorageTypeOf(rightStorage);
 
-                if (leftStorage.Type.ElementType != rightStorage.Type.ElementType
-                    || leftStorage.Type.KnownLength is int leftLength
-                    && rightStorage.Type.KnownLength is int rightLength
+                if (leftType.ElementType != rightType.ElementType
+                    || leftType.KnownLength is int leftLength
+                    && rightType.KnownLength is int rightLength
                     && leftLength != rightLength)
                     continue;
 
+                var leftAliasMode =
+                    callable.StorageAliasModeOf(leftStorage);
+                var rightAliasMode =
+                    callable.StorageAliasModeOf(rightStorage);
+
                 // Distinct read-only formal regions may still be two views of one caller allocation.
-                if (leftStorage.AliasMode == MirStorageAliasMode.SharedParameter
-                    && rightStorage.AliasMode == MirStorageAliasMode.SharedParameter)
+                if (leftAliasMode == MirStorageAliasMode.SharedParameter
+                    && rightAliasMode == MirStorageAliasMode.SharedParameter)
                     return true;
 
                 // A local allocation is unique. An exclusive parameter is disjoint from every other

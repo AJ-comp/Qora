@@ -200,7 +200,7 @@ public sealed class MirOpenQasmKnownCountTests
     private static IEnumerable<IReadOnlyList<MirQasmStatement>> Bodies(
         MirOpenQasmTargetProgram program)
     {
-        yield return program.EntryPoint.Body;
+        yield return program.EntryBody;
         foreach (var definition in program.Definitions)
             yield return definition.Body;
     }

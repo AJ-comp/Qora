@@ -56,9 +56,9 @@ public sealed class LanguageServiceSession
             source,
             options,
             new CompilationInstrumentation(collector));
-        return new LanguageServiceCompilation(
-            compilation,
-            collector.Build(compilation));
+        var semanticIndex = collector.Build(compilation);
+
+        return new LanguageServiceCompilation(compilation, semanticIndex);
     }
 
     public LanguageServiceCompilation Recompile(
@@ -80,8 +80,8 @@ public sealed class LanguageServiceSession
             source,
             options,
             new CompilationInstrumentation(collector));
-        return new LanguageServiceCompilation(
-            compilation,
-            collector.Build(compilation));
+        var semanticIndex = collector.Build(compilation);
+
+        return new LanguageServiceCompilation(compilation, semanticIndex);
     }
 }

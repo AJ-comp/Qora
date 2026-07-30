@@ -2,6 +2,21 @@
 
 All notable changes to the Qora Language extension.
 
+## 0.28.0
+
+- Bundles the **Qora v0.35.0** compiler, the first language release using the three-component
+  `MAJOR.MINOR.PATCH` version format.
+- Detailed qubit histories, quantum effects, path conditions, memory state, and future automatic-cleanup
+  decisions now have one authority in callable-owned MIR. HIR retains only the formal-parameter
+  modification summary required to create correct MIR qubit versions.
+- MIR and OpenQASM artifacts derive callable, value-definition, storage, and target facts from their
+  owning structure instead of retaining contradictory copies. Construction now rejects duplicate
+  callable identities, invalid classical MIR types, invalid SSA definition positions, and malformed
+  storage definitions.
+- Removes the parallel HIR qubit graph, event stream, cleanup verdicts, container ledger, residual
+  snapshot-qualified origin wrappers, duplicate safety metadata, and unused OpenQASM identity wrappers.
+  Qora source syntax is unchanged.
+
 ## 0.27.0
 
 - Bundles the **Qora v0.34** compiler, whose final analyzed HIR now binds every name and call expression

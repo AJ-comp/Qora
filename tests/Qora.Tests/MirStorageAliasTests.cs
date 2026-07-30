@@ -23,15 +23,18 @@ public sealed class MirStorageAliasTests
             """);
 
         var observe = Callable(program, "Observe");
-        var formalStorages = observe.Storages
-            .Where(storage => storage.Kind == MirArrayStorageKind.Parameter)
-            .OrderBy(storage => storage.ParameterIndex)
+        var formalStorages = observe.Parameters
+            .OfType<MirClassicalParameter>()
+            .Where(parameter => parameter.Storage is not null)
+            .Select(parameter => observe.RequireStorage(parameter.Storage!.Value))
             .ToArray();
         Assert.Equal(2, formalStorages.Length);
         Assert.NotEqual(formalStorages[0].Id, formalStorages[1].Id);
         Assert.All(
             formalStorages,
-            storage => Assert.Equal(MirStorageAliasMode.SharedParameter, storage.AliasMode));
+            storage => Assert.Equal(
+                MirStorageAliasMode.SharedParameter,
+                observe.StorageAliasModeOf(storage)));
 
         var main = Callable(program, "Main");
         var call = Assert.Single(
@@ -72,12 +75,21 @@ public sealed class MirStorageAliasTests
         var shared = StorageAt(contracts, 2);
         var local = Assert.Single(
             contracts.Storages,
-            storage => storage.Kind == MirArrayStorageKind.Local);
+            storage => contracts.StorageKindOf(storage)
+                == MirArrayStorageKind.Local);
 
-        Assert.Equal(MirStorageAliasMode.ExclusiveParameter, writable.AliasMode);
-        Assert.Equal(MirStorageAliasMode.ExclusiveParameter, consumed.AliasMode);
-        Assert.Equal(MirStorageAliasMode.SharedParameter, shared.AliasMode);
-        Assert.Equal(MirStorageAliasMode.UniqueLocal, local.AliasMode);
+        Assert.Equal(
+            MirStorageAliasMode.ExclusiveParameter,
+            contracts.StorageAliasModeOf(writable));
+        Assert.Equal(
+            MirStorageAliasMode.ExclusiveParameter,
+            contracts.StorageAliasModeOf(consumed));
+        Assert.Equal(
+            MirStorageAliasMode.SharedParameter,
+            contracts.StorageAliasModeOf(shared));
+        Assert.Equal(
+            MirStorageAliasMode.UniqueLocal,
+            contracts.StorageAliasModeOf(local));
 
         Assert.False(MirStorageAliasAnalysis.MayAlias(
             contracts,
@@ -114,36 +126,6 @@ public sealed class MirStorageAliasTests
             main,
             Complete(new MirStorageId(int.MaxValue)),
             Complete(storages[1].Id)));
-    }
-
-    [Fact]
-    public void VerifierRejectsAnAliasModeThatContradictsTheStorageContract()
-    {
-        var program = CompileMir("""
-            operation Inspect(values: int[]) {}
-
-            operation Main() {
-                var values: int[] = [1];
-                Inspect(values);
-            }
-            """);
-        var inspect = Callable(program, "Inspect");
-        var storage = Assert.Single(inspect.Storages);
-        var malformedStorage = storage with { AliasMode = MirStorageAliasMode.ExclusiveParameter };
-        var malformedCallable = RebuildCallable(
-            inspect,
-            storages: new[] { malformedStorage });
-        var malformedProgram = new MirProgram(
-            program.SnapshotId,
-            program.Origins,
-            program.EntryPoint,
-            program.Callables
-                .Select(callable => callable.Id == inspect.Id ? malformedCallable : callable)
-                .ToArray());
-
-        Assert.Contains(
-            QoraMirVerifier.Verify(malformedProgram),
-            error => error.Code == "MIR138");
     }
 
     [Fact]
@@ -206,10 +188,15 @@ public sealed class MirStorageAliasTests
             new[] { storage },
             IsComplete: true);
 
-    private static MirArrayStorage StorageAt(MirCallable callable, int parameterIndex) =>
-        Assert.Single(
-            callable.Storages,
-            storage => storage.ParameterIndex == parameterIndex);
+    private static MirArrayStorage StorageAt(
+        MirCallable callable,
+        int parameterIndex)
+    {
+        var parameter = Assert.IsType<MirClassicalParameter>(
+            callable.Parameters[parameterIndex]);
+        var storage = Assert.IsType<MirStorageId>(parameter.Storage);
+        return callable.RequireStorage(storage);
+    }
 
     private static MirProgram CompileMir(string source)
     {
@@ -249,7 +236,6 @@ public sealed class MirStorageAliasTests
         new(
             source.Id,
             source.Name,
-            source.Kind,
             source.ReturnType,
             source.Parameters,
             source.EntryBlock,

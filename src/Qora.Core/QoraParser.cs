@@ -121,18 +121,31 @@ public static class QoraParser
         var hasTree = result.Success && result.Count > 0;
         var parseTree = hasTree ? result.ToParseTree : null;
         var loweringAst = hasTree ? result.AstRoot : null;
+        var projectedTokens = tokens
+            .Select(token => new QoraToken(
+                token.Data,
+                token.PatternInfo?.Terminal?.ToString() ?? "?"))
+            .ToArray();
+        var projectedParseTree = parseTree is null
+            ? null
+            : ProjectParseTree(parseTree);
+        var projectedAst = loweringAst is null
+            ? null
+            : ProjectAst(loweringAst);
+        var parseDiagnostics = result.Success
+            ? Array.Empty<QoraError>()
+            : result.AllErrors
+                .Select(error => ToQoraError(error, document.Ref))
+                .ToArray();
+
         var snapshot = new SyntaxSnapshot(
             document,
-            tokens.Select(token => new QoraToken(
-                token.Data,
-                token.PatternInfo?.Terminal?.ToString() ?? "?")),
-            parseTree is null ? null : ProjectParseTree(parseTree),
-            loweringAst is null ? null : ProjectAst(loweringAst),
+            projectedTokens,
+            projectedParseTree,
+            projectedAst,
             parseTree?.ToTreeString() ?? string.Empty,
             loweringAst?.ToTreeString() ?? string.Empty,
-            result.Success
-                ? Array.Empty<QoraError>()
-                : result.AllErrors.Select(error => ToQoraError(error, document.Ref)));
+            parseDiagnostics);
 
         return new SyntaxParseProduct(snapshot, loweringAst);
     }

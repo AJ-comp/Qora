@@ -254,18 +254,27 @@ internal static class Monomorphizer
             IReadOnlyDictionary<string, int> registers,
             bool copy)
         {
-            var elements = literal.Elements
-                .Select(element =>
-                    RewriteExpression(element, registers, copy))
-                .ToArray();
+            var elements = new HirExpression[literal.Elements.Count];
+            var elementChanged = false;
+            for (var index = 0; index < literal.Elements.Count; index++)
+            {
+                var sourceElement = literal.Elements[index];
+                var rewrittenElement = RewriteExpression(
+                    sourceElement,
+                    registers,
+                    copy);
+
+                elements[index] = rewrittenElement;
+                elementChanged |= !ReferenceEquals(
+                    rewrittenElement,
+                    sourceElement);
+            }
+
             if (copy)
                 return rewrite.DeriveArrayLiteral(literal, elements);
-            return elements
-                .Where((element, index) =>
-                    !ReferenceEquals(element, literal.Elements[index]))
-                .Any()
-                    ? rewrite.RewriteArrayLiteral(literal, elements)
-                    : literal;
+            if (elementChanged)
+                return rewrite.RewriteArrayLiteral(literal, elements);
+            return literal;
         }
 
         HirCallExpression RewriteCall(
@@ -273,58 +282,84 @@ internal static class Monomorphizer
             IReadOnlyDictionary<string, int> registers,
             bool copy)
         {
-            var arguments = call.Arguments
-                .Select(argument =>
+            var arguments = new HirArgument[call.Arguments.Count];
+            var argumentChanged = false;
+            for (var index = 0; index < call.Arguments.Count; index++)
+            {
+                var sourceArgument = call.Arguments[index];
+                var expression = RewriteExpression(
+                    sourceArgument.Expression,
+                    registers,
+                    copy);
+
+                HirArgument rewrittenArgument;
+                if (copy)
                 {
-                    var expression = RewriteExpression(
-                        argument.Expression,
-                        registers,
-                        copy);
-                    return copy
-                        ? rewrite.DeriveArgument(argument, expression)
-                        : ReferenceEquals(
-                            expression,
-                            argument.Expression)
-                            ? argument
-                            : rewrite.RewriteArgument(
-                                argument,
-                                expression,
-                                argument.Ownership,
-                                argument.Access);
-                })
-                .ToArray();
+                    rewrittenArgument = rewrite.DeriveArgument(
+                        sourceArgument,
+                        expression);
+                }
+                else if (ReferenceEquals(
+                             expression,
+                             sourceArgument.Expression))
+                {
+                    rewrittenArgument = sourceArgument;
+                }
+                else
+                {
+                    rewrittenArgument = rewrite.RewriteArgument(
+                        sourceArgument,
+                        expression,
+                        sourceArgument.Ownership,
+                        sourceArgument.Access);
+                }
+
+                arguments[index] = rewrittenArgument;
+                argumentChanged |= !ReferenceEquals(
+                    rewrittenArgument,
+                    sourceArgument);
+            }
 
             var generic = GenericCallee(call);
             HirCallable? specialization = null;
             if (generic is not null)
             {
-                var actualNames = arguments
-                    .Select(argument =>
-                        argument.Expression is HirNameExpression name
+                var actualNames = new string?[arguments.Length];
+                for (var index = 0; index < arguments.Length; index++)
+                {
+                    actualNames[index] =
+                        arguments[index].Expression is HirNameExpression name
                             ? name.Name
-                            : null)
-                    .ToArray();
+                            : null;
+                }
+
                 specialization = SpecializationFor(
                     generic,
                     actualNames,
                     registers);
             }
 
-            var callee = specialization is null
-                ? copy
+            HirExpression callee;
+            if (specialization is null)
+            {
+                callee = copy
                     ? RewriteExpression(call.Callee, registers, copy: true)
-                    : call.Callee
-                : copy
+                    : call.Callee;
+            }
+            else
+            {
+                var specializationName = QualifiedNameInSourceNamespace(
+                    generic!,
+                    specialization.Name);
+                callee = copy
                     ? rewrite.DeriveQualifiedCallee(
                         call.Callee,
-                        QualifiedNameInSourceNamespace(
-                            generic!,
-                            specialization.Name))
+                        specializationName)
                     : rewrite.RewriteQualifiedCallee(
                         call.Callee,
-                        QualifiedNameInSourceNamespace(
-                            generic!,
-                            specialization.Name));
+                        specializationName);
+            }
+
             var calleeId = specialization?.Id ?? call.CalleeId;
 
             if (copy)
@@ -336,13 +371,7 @@ internal static class Monomorphizer
                     calleeId);
             }
 
-            var changed = specialization is not null
-                          || arguments
-                              .Where((argument, index) =>
-                                  !ReferenceEquals(
-                                      argument,
-                                      call.Arguments[index]))
-                              .Any();
+            var changed = specialization is not null || argumentChanged;
             return changed
                 ? rewrite.RewriteCall(
                     call,
@@ -734,14 +763,18 @@ internal static class Monomorphizer
             IReadOnlyDictionary<HirNodeId, int> bindings,
             string specializationName)
         {
-            var parameters = source.Parameters
-                .Select(parameter =>
-                    rewrite.DeriveParameter(
-                        parameter,
-                        IsUnsizedArray(parameter)
-                            ? bindings[parameter.Id]
-                            : parameter.RegisterSize))
-                .ToArray();
+            var parameters = new HirParameter[source.Parameters.Count];
+            for (var index = 0; index < source.Parameters.Count; index++)
+            {
+                var sourceParameter = source.Parameters[index];
+                var registerSize = IsUnsizedArray(sourceParameter)
+                    ? bindings[sourceParameter.Id]
+                    : sourceParameter.RegisterSize;
+
+                parameters[index] = rewrite.DeriveParameter(
+                    sourceParameter,
+                    registerSize);
+            }
 
             var registers = new Dictionary<string, int>(
                 StringComparer.Ordinal);
@@ -784,18 +817,24 @@ internal static class Monomorphizer
                 callable.Body,
                 ConcreteRegisters(callable),
                 copy: false);
-            concreteReplacements.Add(
-                callable.Id,
-                ReferenceEquals(body, callable.Body)
-                    ? callable
-                    : rewrite.RewriteCallable(
-                        callable,
-                        callable.Name,
-                        callable.Parameters,
-                        body,
-                        callable.IsFunction,
-                        callable.ReturnType,
-                        callable.DisplayName));
+            HirCallable replacement;
+            if (ReferenceEquals(body, callable.Body))
+            {
+                replacement = callable;
+            }
+            else
+            {
+                replacement = rewrite.RewriteCallable(
+                    callable,
+                    callable.Name,
+                    callable.Parameters,
+                    body,
+                    callable.IsFunction,
+                    callable.ReturnType,
+                    callable.DisplayName);
+            }
+
+            concreteReplacements.Add(callable.Id, replacement);
         }
 
         var result = rewrite.ReplaceCallables(

@@ -243,11 +243,11 @@ public class NodeIdentityTests
         var artifact = Assert.IsType<OpenQasmArtifact>(
             compilation.Targets.OpenQasm);
         var targetDeclarations = TargetStatements(
-                artifact.Program.EntryPoint.Body)
+                artifact.Program.EntryBody)
             .OfType<MirQasmValueDeclarationStatement>()
             .ToArray();
         var targetQubit = Assert.Single(
-            TargetStatements(artifact.Program.EntryPoint.Body)
+            TargetStatements(artifact.Program.EntryBody)
                 .OfType<MirQasmQubitDeclarationStatement>());
         var targetNames = targetDeclarations
             .Select(item => item.EmittedName)
@@ -283,7 +283,7 @@ public class NodeIdentityTests
         var artifact = Assert.IsType<OpenQasmArtifact>(
             compilation.Targets.OpenQasm);
         var targetDeclarations = TargetStatements(
-                artifact.Program.EntryPoint.Body)
+                artifact.Program.EntryBody)
             .Select(
                 statement => statement switch
                 {
@@ -335,7 +335,7 @@ public class NodeIdentityTests
 
         var parameter = Assert.Single(foo.Parameters);
         var call = Assert.Single(
-            TargetStatements(artifact.Program.EntryPoint.Body)
+            TargetStatements(artifact.Program.EntryBody)
                 .OfType<MirQasmQuantumApplyStatement>(),
             apply => apply.Target is MirQasmUserQuantumTarget);
         var target = Assert.IsType<MirQasmUserQuantumTarget>(call.Target);
@@ -345,7 +345,6 @@ public class NodeIdentityTests
         Assert.Equal(foo.Id, target.Callable);
         Assert.IsType<MirQasmQubitType>(parameter.Type);
         Assert.False(string.IsNullOrWhiteSpace(parameter.EmittedName));
-        Assert.NotEqual(foo.EmittedName, artifact.Program.EntryPoint.EmittedName);
     }
 
     [Fact]
@@ -368,14 +367,13 @@ public class NodeIdentityTests
             compilation.Targets.OpenQasm);
         var bell = Assert.Single(artifact.Program.Definitions);
         var call = Assert.Single(
-            TargetStatements(artifact.Program.EntryPoint.Body)
+            TargetStatements(artifact.Program.EntryBody)
                 .OfType<MirQasmQuantumApplyStatement>(),
             apply => apply.Target is MirQasmUserQuantumTarget);
         var target = Assert.IsType<MirQasmUserQuantumTarget>(call.Target);
 
         Assert.Contains('_', bell.EmittedName);
         Assert.DoesNotContain(".", bell.EmittedName);
-        Assert.NotEqual(bell.EmittedName, artifact.Program.EntryPoint.EmittedName);
         Assert.Equal(bell.Id, target.Callable);
     }
 

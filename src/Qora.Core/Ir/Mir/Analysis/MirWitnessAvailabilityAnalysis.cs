@@ -1,5 +1,3 @@
-using System.Collections.Frozen;
-
 namespace Qora.Ir.Mir.Analysis;
 
 public enum MirWitnessIssueKind
@@ -55,51 +53,32 @@ public sealed record MirWitnessAvailability(
 /// </summary>
 public sealed class MirWitnessAvailabilitySnapshot
 {
-    private readonly MirProgram _sourceProgram;
-    private readonly MirCallable _callable;
     private readonly MirEffectSnapshot _effects;
     private readonly MirControlFlowSnapshot _cfg;
     private readonly MirMemoryStateSnapshot _memory;
     private readonly MirScalarValueAvailabilitySnapshot _scalars;
-    private readonly FrozenDictionary<MirEffectSite, MirQuantumInstructionEffect> _effectBySite;
 
     internal MirWitnessAvailabilitySnapshot(
-        MirProgram sourceProgram,
-        MirCallable callable,
         MirEffectSnapshot effects,
         MirControlFlowSnapshot cfg,
         MirMemoryStateSnapshot memory,
         MirScalarValueAvailabilitySnapshot scalars)
     {
-        _sourceProgram = sourceProgram;
-        _callable = callable;
         _effects = effects;
         _cfg = cfg;
         _memory = memory;
         _scalars = scalars;
-        SnapshotId = sourceProgram.SnapshotId;
-        Callable = callable.Id;
-        _effectBySite = effects.Effects
-            .Where(effect => effect.Site.Callable == Callable)
-            .ToFrozenDictionary(effect => effect.Site);
     }
 
-    public MirSnapshotId SnapshotId { get; }
-    public MirCallableId Callable { get; }
-    internal MirControlFlowSnapshot ControlFlow => _cfg;
-    internal MirMemoryStateSnapshot MemoryState => _memory;
-    internal MirScalarValueAvailabilitySnapshot ScalarAvailability => _scalars;
+    public MirSnapshotId SnapshotId => _cfg.SnapshotId;
+    public MirCallableId Callable => _cfg.Callable;
 
     internal bool IsFor(
         MirProgram program,
         MirEffectSnapshot effects,
         MirCallableId callable) =>
-        ReferenceEquals(_sourceProgram, program)
-        && ReferenceEquals(_effects, effects)
-        && ReferenceEquals(_callable, program.FindCallable(callable))
-        && SnapshotId == program.SnapshotId
-        && Callable == callable
-        && effects.IsFor(program);
+        ReferenceEquals(_effects, effects)
+        && _cfg.IsFor(program, callable);
 
     internal void EnsureFor(
         MirProgram program,
@@ -113,21 +92,22 @@ public sealed class MirWitnessAvailabilitySnapshot
     }
 
     public MirWitnessAvailability CheckBeforeInstruction(
-        MirEffectSite effect,
+        MirInstructionSite effect,
         MirInstructionId target) =>
         Check(effect, _cfg.PointBeforeInstruction(target));
 
     public MirWitnessAvailability CheckAtTerminator(
-        MirEffectSite effect,
+        MirInstructionSite effect,
         MirBlockId target) =>
         Check(effect, _cfg.TerminatorPoint(target));
 
     private MirWitnessAvailability Check(
-        MirEffectSite site,
+        MirInstructionSite site,
         MirProgramPoint point)
     {
+        var effect = _effects.EffectAt(site);
         if (site.Callable != Callable
-            || !_effectBySite.TryGetValue(site, out var effect))
+            || effect is null)
             throw new ArgumentOutOfRangeException(
                 nameof(site),
                 site,
@@ -216,7 +196,6 @@ internal static class MirWitnessAvailabilityAnalysis
             cfg,
             memory,
             new MirScalarValueAvailabilitySnapshot(
-                program,
                 callable,
                 cfg,
                 memory));
@@ -243,8 +222,6 @@ internal static class MirWitnessAvailabilityAnalysis
                 $"in snapshot {program.SnapshotId}");
 
         return new MirWitnessAvailabilitySnapshot(
-            program,
-            callable,
             effects,
             cfg,
             memory,

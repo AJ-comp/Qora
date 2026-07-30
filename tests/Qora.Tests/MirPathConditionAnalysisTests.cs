@@ -32,7 +32,6 @@ public sealed class MirPathConditionAnalysisTests
         var predicate = Assert.IsType<MirPathPredicate>(condition.Predicate);
         Assert.Equal(branch.Condition, predicate.Condition);
         Assert.True(predicate.ExpectedValue);
-        Assert.Equal(branch.TrueTarget, predicate.TakenSuccessor);
         Assert.Equal(MirExecutionMultiplicity.Single, paths.MultiplicityOf(applySite.Block));
     }
 
@@ -253,20 +252,15 @@ public sealed class MirPathConditionAnalysisTests
                 new MirCallable(
                     callableId,
                     name: "TailMerge",
-                    MirCallableKind.Operation,
                     returnType: null,
                     parameters: new IMirParameter[]
                     {
                         new MirClassicalParameter(
                             "a",
-                            source,
-                            a,
-                            MirType.Scalar(QType.Bit)),
+                            a),
                         new MirClassicalParameter(
                             "b",
-                            source,
-                            b,
-                            MirType.Scalar(QType.Bit)),
+                            b),
                         qubit,
                     },
                     entryBlock: entry,
@@ -274,7 +268,7 @@ public sealed class MirPathConditionAnalysisTests
                     {
                         new MirBlock(
                             entry,
-                            Array.Empty<MirBlockArgument>(),
+                            Array.Empty<MirValueId>(),
                             Array.Empty<MirInstruction>(),
                             new MirBranch(
                                 a,
@@ -286,7 +280,7 @@ public sealed class MirPathConditionAnalysisTests
                             source),
                         new MirBlock(
                             testB,
-                            Array.Empty<MirBlockArgument>(),
+                            Array.Empty<MirValueId>(),
                             Array.Empty<MirInstruction>(),
                             new MirBranch(
                                 b,
@@ -298,13 +292,13 @@ public sealed class MirPathConditionAnalysisTests
                             source),
                         new MirBlock(
                             bypass,
-                            Array.Empty<MirBlockArgument>(),
+                            Array.Empty<MirValueId>(),
                             Array.Empty<MirInstruction>(),
                             new MirReturn(Value: null, source),
                             source),
                         new MirBlock(
                             effect,
-                            Array.Empty<MirBlockArgument>(),
+                            Array.Empty<MirValueId>(),
                             new MirInstruction[] { apply },
                             new MirReturn(Value: null, source),
                             source),
@@ -327,7 +321,6 @@ public sealed class MirPathConditionAnalysisTests
                 new MirCallable(
                     entryPointId,
                     name: "Main",
-                    MirCallableKind.Operation,
                     returnType: null,
                     parameters: Array.Empty<IMirParameter>(),
                     entryBlock: entryPointBlock,
@@ -335,7 +328,7 @@ public sealed class MirPathConditionAnalysisTests
                     {
                         new MirBlock(
                             entryPointBlock,
-                            Array.Empty<MirBlockArgument>(),
+                            Array.Empty<MirValueId>(),
                             Array.Empty<MirInstruction>(),
                             new MirReturn(Value: null, source),
                             source),

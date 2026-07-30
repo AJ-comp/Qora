@@ -162,12 +162,12 @@
   <p>
     가장 먼저 확인할 부류는 기저 상태의 값만 바꾸는 편집, 곧 X·CNOT·CCX·SWAP으로만 값을 만든 경우입니다.<br>
     아래 프로그램은 앤실라 <code>a</code>에 X 게이트로 값을 만들고 CNOT 게이트로 <code>out</code>에 그 값을
-    복사하며, 컴파일러는 쓰기 이력의 역순인 X 한 번을 청소로 주입합니다.
+    복사하며, 목표 scheduler는 쓰기 이력의 역순인 X 한 번을 청소로 주입하게 될 거예요.
   </p>
 <pre><code>use a = Qubit[1];  use out = Qubit[1];
 X(a[0]);              <span class="cm">// a: |0⟩ → |1⟩ (기저 값만)</span>
 CNOT(a[0], out[0]);   <span class="cm">// a의 값을 out에 복사한다. 이후 a는 쓰이지 않는다</span>
-<span class="add">X(a[0]);</span>              <span class="cm">// ← 자동 주입될 청소: a → |0⟩</span>
+<span class="add">X(a[0]);</span>              <span class="cm">// ← 목표 scheduler가 주입할 청소: a → |0⟩</span>
 var c: bit = M(out[0]);    <span class="cm">// 결과 1, 결정론 — 주입 전과 완전 동일</span></code></pre>
   <div class="panel">
     <table class="spec">
@@ -203,7 +203,7 @@ var c: bit = M(out[0]);    <span class="cm">// 결과 1, 결정론 — 주입 �
 H(q[0]);              <span class="cm">// q: 중첩 생성</span>
 CNOT(q[0], a[0]);     <span class="cm">// a가 q의 값을 기록 (기저 값만 — 쓰기)</span>
 Z(a[0]);              <span class="cm">// a=1인 줄의 부호만 −로 (진폭만 — 읽기)</span>
-<span class="add">CNOT(q[0], a[0]);</span>     <span class="cm">// ← 자동 주입될 청소: a → |0⟩ (Z는 쓰기 이력에 없음)</span>
+<span class="add">CNOT(q[0], a[0]);</span>     <span class="cm">// ← 목표 scheduler가 주입할 청소: a → |0⟩ (Z는 쓰기 이력에 없음)</span>
 H(q[0]);
 var m: bit = M(q[0]);      <span class="cm">// m = 1 (확률 100%)</span></code></pre>
   <div class="panel">
@@ -237,8 +237,8 @@ var m: bit = M(q[0]);      <span class="cm">// m = 1 (확률 100%)</span></code>
       <tr><th>편집의 종류</th><th>게이트</th><th>판정</th><th>근거</th></tr>
       <tr><td class="k">기저 값만 변경 (진폭 불변)</td><td>X, CNOT, CCX, SWAP</td><td>✅ 청소 가능 (qfree)</td><td>역연산이 값만 되돌리고 진폭은 그대로이므로 2번 조건 충족 (위의 qfree 체인 예제)</td></tr>
       <tr><td class="k">값은 그대로, 위상만 곱함</td><td>Z, S, T, CZ, Rz</td><td>✅ 애초에 쓰기가 아님</td><td>값을 바꾸지 않아 읽기로 기록되고 청소 이력에 들어가지 않음 (위의 Z 예제)</td></tr>
-      <tr><td class="k">값 변경 + 값에 따라 다른 위상</td><td><strong>Y, CY</strong></td><td>❌ 차단 (NonQfreeWrite)</td><td>얽힌 타깃이면 위상이 상대 위상이 되어 2번 조건을 깨뜨림 (<a href="uncompute-10-y-gate.html">10장</a>)</td></tr>
-      <tr><td class="k">중첩 생성</td><td>H, Rx, Ry</td><td>❌ 차단 (NonQfreeWrite)</td><td>기저 상태 하나를 여러 기저 상태의 중첩으로 만들어 되돌릴 수 없음 (<a href="uncompute-08-gates.html">8장</a>의 H 편집)</td></tr>
+      <tr><td class="k">값 변경 + 값에 따라 다른 위상</td><td><strong>Y, CY</strong></td><td>❌ 차단 근거 (<code>MirQubitEffectFlags.NonQfree</code>)</td><td>얽힌 타깃이면 위상이 상대 위상이 되어 2번 조건을 깨뜨림 (<a href="uncompute-10-y-gate.html">10장</a>)</td></tr>
+      <tr><td class="k">중첩 생성</td><td>H, Rx, Ry</td><td>❌ 차단 근거 (<code>MirQubitEffectFlags.NonQfree</code>)</td><td>기저 상태 하나를 여러 기저 상태의 중첩으로 만들어 되돌릴 수 없음 (<a href="uncompute-08-gates.html">8장</a>의 H 편집)</td></tr>
     </table>
   </div>
   <p>

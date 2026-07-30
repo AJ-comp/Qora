@@ -1,5 +1,4 @@
 using System.Collections.Frozen;
-using System.Collections.ObjectModel;
 
 namespace Qora.Ir.Mir.Analysis;
 
@@ -10,158 +9,49 @@ namespace Qora.Ir.Mir.Analysis;
 internal sealed class MirControlRegionException : InvalidOperationException
 {
     internal MirControlRegionException(
-        MirCallableId callable,
-        MirOriginRef origin,
+        MirOriginId origin,
         string detail)
-        : base(
-            $"callable {callable} cannot be represented as structured control flow: {detail}")
+        : base($"MIR cannot be represented as structured control flow: {detail}")
     {
-        Callable = callable;
         Origin = origin;
         Detail = detail;
     }
 
-    public MirCallableId Callable { get; }
-    public MirOriginRef Origin { get; }
+    public MirOriginId Origin { get; }
     public string Detail { get; }
 }
-
-/// <summary>
-/// The semantic reason an edge leaves a natural loop without following its ordinary continuation.
-/// New non-local control-flow forms must add a distinct case instead of being guessed by a target
-/// backend from the destination block's shape.
-/// </summary>
-public enum MirLoopSideExitKind
-{
-    CallableReturn,
-}
-
-/// <summary>
-/// One exact CFG edge which leaves a natural loop through non-local control flow. The containing
-/// <see cref="MirNaturalLoopRegion"/> supplies the callable context; <see cref="SuccessorOrdinal"/>
-/// identifies the corresponding jump/branch successor and therefore the edge's Phi arguments.
-/// </summary>
-public sealed class MirLoopSideExit
-{
-    internal MirLoopSideExit(
-        MirBlockId source,
-        int successorOrdinal,
-        MirBlockId target,
-        MirLoopSideExitKind kind)
-    {
-        if (successorOrdinal < 0)
-            throw new ArgumentOutOfRangeException(
-                nameof(successorOrdinal),
-                successorOrdinal,
-                "a loop side-exit successor ordinal cannot be negative");
-        if (!Enum.IsDefined(kind))
-            throw new ArgumentOutOfRangeException(
-                nameof(kind),
-                kind,
-                "unknown loop side-exit kind");
-
-        Source = source;
-        SuccessorOrdinal = successorOrdinal;
-        Target = target;
-        Kind = kind;
-    }
-
-    public MirBlockId Source { get; }
-    public int SuccessorOrdinal { get; }
-    public MirBlockId Target { get; }
-    public MirLoopSideExitKind Kind { get; }
-}
-
-internal readonly record struct MirLocalLoopSideExit(
-    MirBlockId Source,
-    int SuccessorOrdinal,
-    MirBlockId Target,
-    MirLoopSideExitKind Kind);
 
 /// <summary>
 /// One single-entry natural loop recovered from canonical MIR CFG facts. The region is derived data:
 /// MIR blocks and edges remain the source of truth, while target backends consume this snapshot-bound
 /// view instead of retaining a second structured control-flow tree in MIR.
 /// </summary>
-public sealed class MirNaturalLoopRegion
+internal sealed class MirNaturalLoopRegion
 {
-    private readonly FrozenSet<MirBlockId> _localBlocks;
-    private readonly FrozenSet<MirBlockId> _localBackedgeSources;
-    private readonly FrozenDictionary<MirBlockId, MirLoopSideExitKind> _sideExitKindsByTarget;
+    private readonly FrozenSet<MirBlockId> _blocks;
+    private readonly FrozenSet<MirBlockId> _callableReturnTargets;
 
     internal MirNaturalLoopRegion(
-        MirSnapshotId snapshotId,
-        MirCallableId callable,
         MirBlockId header,
         MirBlockId? normalExit,
-        IEnumerable<MirLocalLoopSideExit> sideExits,
         IEnumerable<MirBlockId> blocks,
-        IEnumerable<MirBlockId> backedgeSources)
+        IEnumerable<MirBlockId> callableReturnTargets)
     {
-        SnapshotId = snapshotId;
-        Callable = callable;
         Header = header;
         NormalExit = normalExit;
-        _localBlocks = blocks.ToFrozenSet();
-        _localBackedgeSources = backedgeSources.ToFrozenSet();
-        var localSideExits = sideExits
-            .OrderBy(exit => exit.Source.Value)
-            .ThenBy(exit => exit.SuccessorOrdinal)
-            .ThenBy(exit => exit.Target.Value)
-            .ToArray();
-        _sideExitKindsByTarget = localSideExits
-            .GroupBy(exit => exit.Target)
-            .ToFrozenDictionary(
-                group => group.Key,
-                group =>
-                {
-                    var kinds = group.Select(exit => exit.Kind).Distinct().ToArray();
-                    if (kinds.Length != 1)
-                    {
-                        throw new ArgumentException(
-                            $"loop side-exit target {group.Key} has conflicting classifications",
-                            nameof(sideExits));
-                    }
-                    return kinds[0];
-                });
-        Blocks = ReadOnly(
-            _localBlocks
-                .OrderBy(block => block.Value)
-                .ToArray());
-        BackedgeSources = ReadOnly(
-            _localBackedgeSources
-                .OrderBy(block => block.Value)
-                .ToArray());
-        SideExits = ReadOnly(
-            localSideExits
-                .Select(exit => new MirLoopSideExit(
-                    exit.Source,
-                    exit.SuccessorOrdinal,
-                    exit.Target,
-                    exit.Kind))
-                .ToArray());
+        _blocks = blocks.ToFrozenSet();
+        _callableReturnTargets = callableReturnTargets.ToFrozenSet();
     }
 
-    public MirSnapshotId SnapshotId { get; }
-    public MirCallableId Callable { get; }
-    public MirBlockId Header { get; }
-    public MirBlockId? NormalExit { get; }
-    public IReadOnlyList<MirBlockId> Blocks { get; }
-    public IReadOnlyList<MirBlockId> BackedgeSources { get; }
-    public IReadOnlyList<MirLoopSideExit> SideExits { get; }
-
-    internal MirBlockId HeaderId => Header;
-    internal MirBlockId? NormalExitId => NormalExit;
-    internal IReadOnlySet<MirBlockId> LocalBlocks => _localBlocks;
-    internal bool Contains(MirBlockId block) => _localBlocks.Contains(block);
-    internal bool IsBackedgeSource(MirBlockId block) => _localBackedgeSources.Contains(block);
-    internal bool TryGetSideExitKind(
-        MirBlockId target,
-        out MirLoopSideExitKind kind) =>
-        _sideExitKindsByTarget.TryGetValue(target, out kind);
-
-    private static ReadOnlyCollection<T> ReadOnly<T>(IReadOnlyList<T> items) =>
-        Array.AsReadOnly(items.ToArray());
+    internal MirBlockId Header { get; }
+    internal MirBlockId? NormalExit { get; }
+    internal bool Contains(MirBlockId block) => _blocks.Contains(block);
+    internal bool Overlaps(MirNaturalLoopRegion other) =>
+        _blocks.Overlaps(other._blocks);
+    internal bool IsSubsetOf(MirNaturalLoopRegion other) =>
+        _blocks.IsSubsetOf(other._blocks);
+    internal bool IsCallableReturnSideExit(MirBlockId target) =>
+        _callableReturnTargets.Contains(target);
 }
 
 /// <summary>
@@ -171,42 +61,27 @@ public sealed class MirNaturalLoopRegion
 /// </summary>
 public sealed class MirControlRegionSnapshot
 {
-    private readonly MirProgram _sourceProgram;
-    private readonly MirCallable _sourceCallable;
     private readonly MirControlFlowSnapshot _controlFlow;
     private readonly FrozenDictionary<MirBlockId, MirNaturalLoopRegion> _loopsByHeader;
 
     internal MirControlRegionSnapshot(
-        MirProgram sourceProgram,
-        MirCallable sourceCallable,
         MirControlFlowSnapshot controlFlow,
         IEnumerable<MirNaturalLoopRegion> loops)
     {
-        _sourceProgram = sourceProgram;
-        _sourceCallable = sourceCallable;
         _controlFlow = controlFlow;
-        SnapshotId = sourceProgram.SnapshotId;
-        Callable = sourceCallable.Id;
-        _loopsByHeader = loops.ToFrozenDictionary(loop => loop.HeaderId);
-        NaturalLoops = Array.AsReadOnly(
-            _loopsByHeader.Values
-                .OrderBy(loop => loop.Header.Value)
-                .ToArray());
+        _loopsByHeader = loops.ToFrozenDictionary(loop => loop.Header);
     }
 
-    public MirSnapshotId SnapshotId { get; }
-    public MirCallableId Callable { get; }
-    public IReadOnlyList<MirNaturalLoopRegion> NaturalLoops { get; }
+    public MirSnapshotId SnapshotId => _controlFlow.SnapshotId;
+    public MirCallableId Callable => _controlFlow.Callable;
+    internal bool HasNaturalLoops => _loopsByHeader.Count != 0;
 
     internal bool IsFor(
         MirProgram program,
         MirCallableId callable,
         MirControlFlowSnapshot controlFlow) =>
-        ReferenceEquals(_sourceProgram, program)
-        && ReferenceEquals(_sourceCallable, program.FindCallable(callable))
-        && ReferenceEquals(_controlFlow, controlFlow)
-        && SnapshotId == program.SnapshotId
-        && Callable == callable;
+        ReferenceEquals(_controlFlow, controlFlow)
+        && _controlFlow.IsFor(program, callable);
 
     internal bool TryGetLoop(
         MirBlockId header,
@@ -231,7 +106,6 @@ internal static class MirControlRegionAnalysis
         ArgumentNullException.ThrowIfNull(controlFlow);
         controlFlow.EnsureFor(program, callable.Id);
 
-        var blocks = callable.Blocks.ToDictionary(block => block.Id);
         var reachable = controlFlow.ReachableBlocks
             .ToHashSet();
         RejectIrreducibleCycles(callable, controlFlow, reachable);
@@ -259,23 +133,17 @@ internal static class MirControlRegionAnalysis
                 callable,
                 header,
                 loopBlocks,
-                group.Select(edge => edge.Tail).ToArray(),
-                blocks);
+                group.Select(edge => edge.Tail).ToArray());
             loops.Add(
                 new MirNaturalLoopRegion(
-                    program.SnapshotId,
-                    callable.Id,
                     header,
                     exits.NormalExit,
-                    exits.SideExits,
                     loopBlocks,
-                    group.Select(edge => edge.Tail)));
+                    exits.CallableReturnTargets));
         }
 
         RejectOverlappingNonNestedLoops(callable, loops);
         return new MirControlRegionSnapshot(
-            program,
-            callable,
             controlFlow,
             loops);
     }
@@ -319,24 +187,22 @@ internal static class MirControlRegionAnalysis
 
     private sealed record ClassifiedLoopExits(
         MirBlockId? NormalExit,
-        IReadOnlyList<MirLocalLoopSideExit> SideExits);
+        IReadOnlyCollection<MirBlockId> CallableReturnTargets);
 
     private readonly record struct LoopExitEdge(
         MirBlockId Source,
-        int SuccessorOrdinal,
         MirBlockId Target);
 
     private static ClassifiedLoopExits ClassifyExits(
         MirCallable callable,
         MirBlockId header,
         IReadOnlySet<MirBlockId> loop,
-        IReadOnlyList<MirBlockId> backedgeSources,
-        IReadOnlyDictionary<MirBlockId, MirBlock> blocks)
+        IReadOnlyList<MirBlockId> backedgeSources)
     {
         var exitEdges = loop
             .OrderBy(block => block.Value)
-            .SelectMany(source => blocks[source].Terminator.Successors
-                .Select((target, ordinal) => new LoopExitEdge(source, ordinal, target)))
+            .SelectMany(source => callable.RequireBlock(source).Terminator.Successors
+                .Select(target => new LoopExitEdge(source, target)))
             .Where(edge => !loop.Contains(edge.Target))
             .ToArray();
 
@@ -372,7 +238,7 @@ internal static class MirControlRegionAnalysis
         if (normalExit is null)
         {
             var continuationTargets = exitEdges
-                .Where(edge => blocks[edge.Target].Terminator is not MirReturn)
+                .Where(edge => callable.RequireBlock(edge.Target).Terminator is not MirReturn)
                 .Select(edge => edge.Target)
                 .Distinct()
                 .ToArray();
@@ -386,44 +252,37 @@ internal static class MirControlRegionAnalysis
                 normalExit = continuationTargets[0];
         }
 
-        var sideExits = new List<MirLocalLoopSideExit>();
+        var callableReturnTargets = new HashSet<MirBlockId>();
         foreach (var edge in exitEdges)
         {
             if (edge.Target == normalExit) continue;
-            if (blocks[edge.Target].Terminator is not MirReturn)
+            if (callable.RequireBlock(edge.Target).Terminator is not MirReturn)
             {
                 throw Unsupported(
                     callable,
                     $"loop headed by {header} has an unclassified side exit from " +
                     $"{edge.Source} to {edge.Target}");
             }
-            sideExits.Add(
-                new MirLocalLoopSideExit(
-                    edge.Source,
-                    edge.SuccessorOrdinal,
-                    edge.Target,
-                    MirLoopSideExitKind.CallableReturn));
+            callableReturnTargets.Add(edge.Target);
         }
 
-        return new ClassifiedLoopExits(normalExit, sideExits);
+        return new ClassifiedLoopExits(normalExit, callableReturnTargets);
 
         void AddBranchExitCandidate(
             MirBlockId blockId,
             MirBlockId? requireInsideTarget,
             ICollection<LoopExitEdge> candidates)
         {
-            if (blocks[blockId].Terminator is not MirBranch branch) return;
+            if (callable.RequireBlock(blockId).Terminator is not MirBranch branch) return;
             var trueInside = loop.Contains(branch.TrueTarget);
             var falseInside = loop.Contains(branch.FalseTarget);
             if (trueInside == falseInside) return;
 
             var inside = trueInside ? branch.TrueTarget : branch.FalseTarget;
             if (requireInsideTarget is MirBlockId required && inside != required) return;
-            var ordinal = trueInside ? 1 : 0;
             candidates.Add(
                 new LoopExitEdge(
                     blockId,
-                    ordinal,
                     trueInside ? branch.FalseTarget : branch.TrueTarget));
         }
     }
@@ -434,16 +293,16 @@ internal static class MirControlRegionAnalysis
     {
         for (var leftIndex = 0; leftIndex < loops.Count; leftIndex++)
         {
-            var left = loops[leftIndex].LocalBlocks;
+            var left = loops[leftIndex];
             for (var rightIndex = leftIndex + 1; rightIndex < loops.Count; rightIndex++)
             {
-                var right = loops[rightIndex].LocalBlocks;
+                var right = loops[rightIndex];
                 if (!left.Overlaps(right)) continue;
                 if (left.IsSubsetOf(right) || right.IsSubsetOf(left)) continue;
                 throw Unsupported(
                     callable,
-                    $"natural loops {loops[leftIndex].HeaderId} and " +
-                    $"{loops[rightIndex].HeaderId} overlap without nesting");
+                    $"natural loops {loops[leftIndex].Header} and " +
+                    $"{loops[rightIndex].Header} overlap without nesting");
             }
         }
     }
@@ -530,5 +389,5 @@ internal static class MirControlRegionAnalysis
     private static MirControlRegionException Unsupported(
         MirCallable callable,
         string detail) =>
-        new(callable.Id, callable.Origin, detail);
+        new(callable.Origin, detail);
 }

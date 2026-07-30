@@ -5,7 +5,7 @@ namespace Qora.Ir.Mir;
 // The MIR owns stable identities within an explicit program or callable authority. IDs are not required
 // to be contiguous: immutable owner-local indexes provide lookup without forcing unrelated entities to
 // be renumbered after deletion or partial transformation. Program-wide sites pair a callable identity
-// with one owner-local identity, while every entity retains a snapshot-qualified origin for diagnostics
+// with one owner-local identity, while every entity retains an owner-local origin for diagnostics
 // and derivation. No MIR pass resolves a value, block, or resource by source spelling.
 public readonly record struct MirCallableId(int Value)
 {
@@ -82,14 +82,38 @@ public readonly record struct MirStorageId(int Value)
 /// A classical MIR type. Qubits deliberately do not inhabit this type system; they are versioned
 /// <see cref="MirQubit"/> definitions addressed through <see cref="MirQubitAccess"/>.
 /// </summary>
-public readonly record struct MirType(
-    QType ElementType,
-    bool IsArray = false,
-    int? KnownLength = null)
+public readonly record struct MirType
 {
-    public static MirType Scalar(QType type) => new(type);
+    private MirType(
+        QType elementType,
+        bool isArray,
+        int? knownLength)
+    {
+        if (!Enum.IsDefined(elementType) || elementType == QType.Qubit)
+            throw new ArgumentOutOfRangeException(
+                nameof(elementType),
+                elementType,
+                "a classical MIR type requires a non-qubit element type");
+        if (knownLength is < 0)
+            throw new ArgumentOutOfRangeException(
+                nameof(knownLength),
+                knownLength,
+                "an array length cannot be negative");
+
+        ElementType = elementType;
+        IsArray = isArray;
+        KnownLength = knownLength;
+    }
+
+    public QType ElementType { get; }
+    public bool IsArray { get; }
+    public int? KnownLength { get; }
+
+    public static MirType Scalar(QType type) =>
+        new(type, isArray: false, knownLength: null);
+
     public static MirType Array(QType elementType, int? knownLength = null) =>
-        new(elementType, IsArray: true, KnownLength: knownLength);
+        new(elementType, isArray: true, knownLength);
 
     public override string ToString()
     {
@@ -121,11 +145,6 @@ public sealed class MirProgram
     {
         ArgumentNullException.ThrowIfNull(origins);
         ArgumentNullException.ThrowIfNull(callables);
-        if (origins.SnapshotId != snapshotId)
-            throw new ArgumentException(
-                "the origin table belongs to a different MIR snapshot",
-                nameof(origins));
-
         SnapshotId = snapshotId;
         Origins = origins;
         Callables = MirCollections.Freeze(callables);
@@ -137,8 +156,6 @@ public sealed class MirProgram
     public MirOriginTable Origins { get; }
     public MirCallableId EntryPoint { get; }
     public IReadOnlyList<MirCallable> Callables { get; }
-
-    internal int Revision => SnapshotId.Revision;
 
     public bool ContainsCallable(MirCallableId id) =>
         _callables.ContainsKey(id);
@@ -191,7 +208,14 @@ public sealed class MirProgram
         foreach (var callable in callables)
         {
             if (callable is not null)
-                indexed.TryAdd(callable.Id, callable);
+            {
+                if (!indexed.TryAdd(callable.Id, callable))
+                {
+                    throw new ArgumentException(
+                        $"callable identity {callable.Id} is declared more than once",
+                        nameof(callables));
+                }
+            }
         }
         return indexed.ToFrozenDictionary();
     }
@@ -211,24 +235,32 @@ public sealed class MirCallable
         (MirInstruction Instruction, MirBlock Block, int Index)> _instructions;
     private readonly FrozenDictionary<MirValueId, MirValue> _values;
     private readonly FrozenDictionary<MirStorageId, MirArrayStorage> _storages;
+    private readonly FrozenDictionary<
+        MirStorageId,
+        (
+            MirClassicalParameter Parameter,
+            int ParameterIndex,
+            int DefinitionCount)> _parameterStorageDefinitions;
+    private readonly FrozenDictionary<
+        MirStorageId,
+        (
+            MirArrayCreate Allocation,
+            int DefinitionCount)> _localStorageDefinitions;
     private readonly FrozenDictionary<MirQubitKey, MirQubit> _qubits;
-    private readonly FrozenDictionary<MirQubitId, MirQubit> _initialQubits;
 
     internal MirCallable(
         MirCallableId id,
         string name,
-        MirCallableKind kind,
         MirType? returnType,
         IReadOnlyList<IMirParameter> parameters,
         MirBlockId entryBlock,
         IReadOnlyList<MirBlock> blocks,
         IReadOnlyList<MirValue> values,
         IReadOnlyList<MirArrayStorage> storages,
-        MirOriginRef origin)
+        MirOriginId origin)
     {
         Id = id;
         Name = name;
-        Kind = kind;
         ReturnType = returnType;
         Parameters = MirCollections.Freeze(parameters);
         EntryBlock = entryBlock;
@@ -240,14 +272,20 @@ public sealed class MirCallable
         _instructions = IndexInstructions(Blocks);
         _values = IndexFirst(Values, value => value.Id);
         _storages = IndexFirst(Storages, storage => storage.Id);
+        _parameterStorageDefinitions =
+            IndexParameterStorageDefinitions(Parameters);
+        _localStorageDefinitions =
+            IndexLocalStorageDefinitions(Blocks);
         _qubits = IndexFirst(Qubits, qubit => qubit.Key);
-        _initialQubits = IndexInitialQubits(Qubits);
         Origin = origin;
     }
 
     public MirCallableId Id { get; }
     public string Name { get; }
-    public MirCallableKind Kind { get; }
+    public MirCallableKind Kind =>
+        ReturnType is null
+            ? MirCallableKind.Operation
+            : MirCallableKind.Function;
     public MirType? ReturnType { get; }
     public IReadOnlyList<IMirParameter> Parameters { get; }
     public MirBlockId EntryBlock { get; }
@@ -255,7 +293,7 @@ public sealed class MirCallable
     public IReadOnlyList<MirValue> Values { get; }
     public IReadOnlyList<MirArrayStorage> Storages { get; }
     public IReadOnlyList<MirQubit> Qubits { get; }
-    public MirOriginRef Origin { get; }
+    public MirOriginId Origin { get; }
 
     public bool ContainsBlock(MirBlockId id) =>
         _blocks.ContainsKey(id);
@@ -347,6 +385,118 @@ public sealed class MirCallable
             : throw Foreign(nameof(storage), storage.Id, "array storage");
     }
 
+    /// <summary>
+    /// Returns whether a storage is a parameter region or a local allocation. The kind is derived
+    /// from the parameter or array-create site which owns the storage identity.
+    /// </summary>
+    public MirArrayStorageKind StorageKindOf(MirStorageId storage) =>
+        StorageKindOf(RequireStorage(storage));
+
+    public MirArrayStorageKind StorageKindOf(MirArrayStorage storage)
+    {
+        storage = RequireStorage(storage);
+        var totalDefinitionCount = StorageDefinitionCountOf(storage);
+        if (totalDefinitionCount != 1)
+        {
+            throw MalformedStorage(
+                storage,
+                $"has {totalDefinitionCount} defining sites");
+        }
+
+        var parameterDefinitionCount =
+            _parameterStorageDefinitions.TryGetValue(
+                storage.Id,
+                out var parameterDefinition)
+                ? parameterDefinition.DefinitionCount
+                : 0;
+
+        return parameterDefinitionCount == 1
+            ? MirArrayStorageKind.Parameter
+            : MirArrayStorageKind.Local;
+    }
+
+    /// <summary>
+    /// Returns the authoritative type of a storage region from the SSA value which defines it.
+    /// Parameter storage is typed by its parameter value; local storage is typed by its
+    /// <see cref="MirArrayCreate"/> result.
+    /// </summary>
+    public MirType StorageTypeOf(MirStorageId storage) =>
+        StorageTypeOf(RequireStorage(storage));
+
+    public MirType StorageTypeOf(MirArrayStorage storage)
+    {
+        storage = RequireStorage(storage);
+        return StorageKindOf(storage) switch
+        {
+            MirArrayStorageKind.Parameter =>
+                RequireValue(ParameterDefining(storage).Value).Type,
+            MirArrayStorageKind.Local =>
+                RequireValue(AllocationDefining(storage).Result).Type,
+            _ => throw MalformedStorage(
+                storage,
+                "has an unknown derived storage kind"),
+        };
+    }
+
+    /// <summary>
+    /// Derives the storage aliasing contract from its owner. Local allocations are unique.
+    /// Parameter regions are shared only when the parameter is borrowed and read-only.
+    /// </summary>
+    public MirStorageAliasMode StorageAliasModeOf(MirStorageId storage) =>
+        StorageAliasModeOf(RequireStorage(storage));
+
+    public MirStorageAliasMode StorageAliasModeOf(MirArrayStorage storage)
+    {
+        storage = RequireStorage(storage);
+        var kind = StorageKindOf(storage);
+        if (kind == MirArrayStorageKind.Local)
+            return MirStorageAliasMode.UniqueLocal;
+
+        if (kind != MirArrayStorageKind.Parameter)
+            throw MalformedStorage(
+                storage,
+                "has an unknown derived storage kind");
+
+        var parameter = ParameterDefining(storage);
+        return parameter.Ownership == QOwnershipMode.Borrowed
+               && parameter.Access == QAccessMode.ReadOnly
+            ? MirStorageAliasMode.SharedParameter
+            : MirStorageAliasMode.ExclusiveParameter;
+    }
+
+    internal int StorageParameterIndexOf(MirArrayStorage storage)
+    {
+        storage = RequireStorage(storage);
+        StorageKindOf(storage);
+        return ParameterStorageDefinition(storage).ParameterIndex;
+    }
+
+    internal MirInstructionId StorageAllocationInstructionOf(
+        MirArrayStorage storage)
+    {
+        storage = RequireStorage(storage);
+        StorageKindOf(storage);
+        return AllocationDefining(storage).Id;
+    }
+
+    internal int StorageDefinitionCountOf(MirArrayStorage storage)
+    {
+        storage = RequireStorage(storage);
+        var parameterDefinitionCount =
+            _parameterStorageDefinitions.TryGetValue(
+                storage.Id,
+                out var parameterDefinition)
+                ? parameterDefinition.DefinitionCount
+                : 0;
+        var localDefinitionCount =
+            _localStorageDefinitions.TryGetValue(
+                storage.Id,
+                out var localDefinition)
+                ? localDefinition.DefinitionCount
+                : 0;
+        return checked(parameterDefinitionCount + localDefinitionCount);
+    }
+
     public bool ContainsQubit(MirQubitKey key) =>
         _qubits.ContainsKey(key);
 
@@ -377,11 +527,48 @@ public sealed class MirCallable
     internal MirArrayStorage? FindStorage(MirStorageId id) =>
         _storages.GetValueOrDefault(id);
 
-    internal MirQubit? FindQubit(MirQubitKey key) =>
-        _qubits.GetValueOrDefault(key);
+    private MirClassicalParameter ParameterDefining(MirArrayStorage storage) =>
+        ParameterStorageDefinition(storage).Parameter;
 
-    internal MirQubit? FindInitialQubit(MirQubitId id) =>
-        _initialQubits.GetValueOrDefault(id);
+    private (
+        MirClassicalParameter Parameter,
+        int ParameterIndex,
+        int DefinitionCount) ParameterStorageDefinition(
+            MirArrayStorage storage)
+    {
+        if (!_parameterStorageDefinitions.TryGetValue(
+                storage.Id,
+                out var definition)
+            || definition.DefinitionCount != 1)
+        {
+            throw MalformedStorage(
+                storage,
+                "does not identify its defining array parameter");
+        }
+
+        return definition;
+    }
+
+    private MirArrayCreate AllocationDefining(MirArrayStorage storage)
+    {
+        if (!_localStorageDefinitions.TryGetValue(
+                storage.Id,
+                out var definition)
+            || definition.DefinitionCount != 1)
+        {
+            throw MalformedStorage(
+                storage,
+                "does not identify its defining array-create instruction");
+        }
+
+        return definition.Allocation;
+    }
+
+    private InvalidOperationException MalformedStorage(
+        MirArrayStorage storage,
+        string detail) =>
+        new(
+            $"QINTERNAL: array storage {storage.Id} in MIR callable {Id} {detail}");
 
     private static IReadOnlyList<MirQubit> CollectQubits(
         IReadOnlyList<IMirParameter> parameters,
@@ -451,15 +638,84 @@ public sealed class MirCallable
         return indexed.ToFrozenDictionary();
     }
 
-    private static FrozenDictionary<MirQubitId, MirQubit> IndexInitialQubits(
-        IEnumerable<MirQubit> qubits)
+    private static FrozenDictionary<
+        MirStorageId,
+        (
+            MirClassicalParameter Parameter,
+            int ParameterIndex,
+            int DefinitionCount)> IndexParameterStorageDefinitions(
+        IReadOnlyList<IMirParameter> parameters)
     {
-        var indexed = new Dictionary<MirQubitId, MirQubit>();
-        foreach (var qubit in qubits)
+        var indexed = new Dictionary<
+            MirStorageId,
+            (
+                MirClassicalParameter Parameter,
+                int ParameterIndex,
+                int DefinitionCount)>();
+        for (var parameterIndex = 0;
+             parameterIndex < parameters.Count;
+             parameterIndex++)
         {
-            if (qubit is not null && qubit.Version.Value == 0)
-                indexed.TryAdd(qubit.Id, qubit);
+            if (parameters[parameterIndex] is not MirClassicalParameter
+                {
+                    Storage: MirStorageId storage
+                } parameter)
+            {
+                continue;
+            }
+
+            if (indexed.TryGetValue(storage, out var existing))
+            {
+                indexed[storage] =
+                    (
+                        existing.Parameter,
+                        existing.ParameterIndex,
+                        checked(existing.DefinitionCount + 1));
+                continue;
+            }
+
+            indexed.Add(
+                storage,
+                (parameter, parameterIndex, DefinitionCount: 1));
         }
+
+        return indexed.ToFrozenDictionary();
+    }
+
+    private static FrozenDictionary<
+        MirStorageId,
+        (
+            MirArrayCreate Allocation,
+            int DefinitionCount)> IndexLocalStorageDefinitions(
+        IReadOnlyList<MirBlock> blocks)
+    {
+        var indexed = new Dictionary<
+            MirStorageId,
+            (
+                MirArrayCreate Allocation,
+                int DefinitionCount)>();
+        foreach (var block in blocks)
+        {
+            foreach (var instruction in block.Instructions)
+            {
+                if (instruction is not MirArrayCreate allocation)
+                    continue;
+
+                if (indexed.TryGetValue(allocation.Storage, out var existing))
+                {
+                    indexed[allocation.Storage] =
+                        (
+                            existing.Allocation,
+                            checked(existing.DefinitionCount + 1));
+                    continue;
+                }
+
+                indexed.Add(
+                    allocation.Storage,
+                    (allocation, DefinitionCount: 1));
+            }
+        }
+
         return indexed.ToFrozenDictionary();
     }
 
@@ -485,14 +741,11 @@ public sealed class MirCallable
 public interface IMirParameter
 {
     string Name { get; }
-    MirOriginRef Origin { get; }
 }
 
 public sealed record MirClassicalParameter(
     string Name,
-    MirOriginRef Origin,
     MirValueId Value,
-    MirType Type,
     MirStorageId? Storage = null,
     QOwnershipMode Ownership = QOwnershipMode.Borrowed,
     QAccessMode Access = QAccessMode.ReadOnly)
@@ -507,32 +760,56 @@ public enum MirValueDefinitionKind
 
 /// <summary>
 /// The one definition position of an SSA value. <see cref="Index"/> is the parameter index, block
-/// argument index, or result index according to <see cref="Kind"/>.
+/// argument index, or result index according to <see cref="Kind"/>. A block identifies a block
+/// argument, an instruction identifies an instruction result, and the absence of both identifies a
+/// parameter. An instruction result's block is derived from its instruction location.
 /// </summary>
-public sealed record MirValueDefinition(
-    MirValueDefinitionKind Kind,
-    int Index,
-    MirBlockId? Block = null,
-    MirInstructionId? Instruction = null)
+public sealed record MirValueDefinition
 {
+    private MirValueDefinition(
+        int index,
+        MirBlockId? block,
+        MirInstructionId? instruction)
+    {
+        if (index < 0)
+            throw new ArgumentOutOfRangeException(
+                nameof(index),
+                index,
+                "an SSA definition index cannot be negative");
+
+        Index = index;
+        Block = block;
+        Instruction = instruction;
+    }
+
+    public MirValueDefinitionKind Kind =>
+        Block is not null
+            ? MirValueDefinitionKind.BlockArgument
+            : Instruction is not null
+                ? MirValueDefinitionKind.InstructionResult
+                : MirValueDefinitionKind.Parameter;
+
+    public int Index { get; }
+    public MirBlockId? Block { get; }
+    public MirInstructionId? Instruction { get; }
+
     public static MirValueDefinition ParameterAt(int parameterIndex) =>
-        new(MirValueDefinitionKind.Parameter, parameterIndex);
+        new(parameterIndex, block: null, instruction: null);
 
     public static MirValueDefinition BlockArgumentAt(MirBlockId block, int argumentIndex) =>
-        new(MirValueDefinitionKind.BlockArgument, argumentIndex, Block: block);
+        new(argumentIndex, block, instruction: null);
 
     public static MirValueDefinition InstructionResultAt(
-        MirBlockId block,
         MirInstructionId instruction,
         int resultIndex = 0) =>
-        new(MirValueDefinitionKind.InstructionResult, resultIndex, Block: block, Instruction: instruction);
+        new(resultIndex, block: null, instruction);
 }
 
 public sealed record MirValue(
     MirValueId Id,
     MirType Type,
     MirValueDefinition Definition,
-    MirOriginRef Origin);
+    MirOriginId Origin);
 
 public enum MirArrayStorageKind
 {
@@ -563,17 +840,14 @@ public enum MirStorageAliasMode
 /// from several storages, so storage identity is intentionally not a mandatory field on
 /// <see cref="MirValue"/>. In particular, distinct parameter storage identities are not sufficient evidence
 /// that the caller supplied distinct physical arrays; consumers must interpret them through
-/// <see cref="AliasMode"/>.
+/// <see cref="MirCallable.StorageAliasModeOf(MirArrayStorage)"/>. The defining parameter or
+/// <see cref="MirArrayCreate"/> remains authoritative for kind, type, and definition position; these facts
+/// are not copied onto the storage object.
 /// </summary>
 public sealed record MirArrayStorage(
     MirStorageId Id,
     string Name,
-    MirArrayStorageKind Kind,
-    MirStorageAliasMode AliasMode,
-    MirType Type,
-    int? ParameterIndex,
-    MirInstructionId? AllocationInstruction,
-    MirOriginRef Origin);
+    MirOriginId Origin);
 
 /// <summary>
 /// One exact MIR version of a qubit binding. <see cref="Id"/> remains stable while
@@ -584,7 +858,7 @@ public abstract record MirQubit
     internal MirQubit(
         MirQubitId id,
         MirQubitVersion version,
-        MirOriginRef origin)
+        MirOriginId origin)
     {
         Id = id;
         Version = version;
@@ -593,7 +867,7 @@ public abstract record MirQubit
 
     public MirQubitId Id { get; }
     public MirQubitVersion Version { get; }
-    public MirOriginRef Origin { get; }
+    public MirOriginId Origin { get; }
     public MirQubitKey Key => new(Id, Version);
 }
 
@@ -606,7 +880,7 @@ public sealed record MirQubitParameter : MirQubit, IMirParameter
         bool isArray,
         int? length,
         QOwnershipMode ownership,
-        MirOriginRef origin)
+        MirOriginId origin)
         : base(id, new MirQubitVersion(0), origin)
     {
         Name = name;
@@ -628,7 +902,7 @@ public sealed record MirQubitFromUse : MirQubit
         MirQubitId id,
         string name,
         int length,
-        MirOriginRef origin)
+        MirOriginId origin)
         : base(id, new MirQubitVersion(0), origin)
     {
         Name = name;
@@ -649,7 +923,7 @@ public sealed record MirQubitAfterInstruction : MirQubit
     internal MirQubitAfterInstruction(
         MirQubitId id,
         MirQubitVersion version,
-        MirOriginRef origin)
+        MirOriginId origin)
         : base(id, version, origin)
     {
     }
@@ -659,17 +933,14 @@ public readonly record struct MirControlFlowEdge
 {
     internal MirControlFlowEdge(
         MirBlockId source,
-        int successorOrdinal,
-        MirBlockId target)
+        int successorOrdinal)
     {
         Source = source;
         SuccessorOrdinal = successorOrdinal;
-        Target = target;
     }
 
     public MirBlockId Source { get; }
     public int SuccessorOrdinal { get; }
-    public MirBlockId Target { get; }
 }
 
 public sealed record MirQubitPhiInput
@@ -694,16 +965,13 @@ public sealed record MirQubitPhi : MirQubit
     internal MirQubitPhi(
         MirQubitId id,
         MirQubitVersion version,
-        MirBlockId block,
         IReadOnlyList<MirQubitPhiInput> inputs,
-        MirOriginRef origin)
+        MirOriginId origin)
         : base(id, version, origin)
     {
-        Block = block;
         _inputs = MirCollections.Freeze(inputs);
     }
 
-    public MirBlockId Block { get; }
     public IReadOnlyList<MirQubitPhiInput> Inputs
     {
         get => _inputs;
@@ -735,18 +1003,18 @@ public readonly record struct MirQubitAccess
 /// <summary>A CFG block. Block arguments are SSA Phi results; each incoming edge supplies their values.</summary>
 public sealed record MirBlock(
     MirBlockId Id,
-    IReadOnlyList<MirBlockArgument> Arguments,
+    IReadOnlyList<MirValueId> Arguments,
     IReadOnlyList<MirInstruction> Instructions,
     MirTerminator Terminator,
-    MirOriginRef Origin,
+    MirOriginId Origin,
     IReadOnlyList<MirQubitPhi>? QubitPhis = null)
 {
-    private IReadOnlyList<MirBlockArgument> _arguments = MirCollections.Freeze(Arguments);
+    private IReadOnlyList<MirValueId> _arguments = MirCollections.Freeze(Arguments);
     private IReadOnlyList<MirInstruction> _instructions = MirCollections.Freeze(Instructions);
     private IReadOnlyList<MirQubitPhi> _qubitPhis =
         MirCollections.Freeze(QubitPhis ?? Array.Empty<MirQubitPhi>());
 
-    public IReadOnlyList<MirBlockArgument> Arguments
+    public IReadOnlyList<MirValueId> Arguments
     {
         get => _arguments;
         init => _arguments = MirCollections.Freeze(value);
@@ -764,10 +1032,6 @@ public sealed record MirBlock(
         init => _qubitPhis = MirCollections.Freeze(value);
     }
 }
-
-public sealed record MirBlockArgument(
-    MirValueId Value,
-    MirType Type);
 
 public enum MirUnaryOperator
 {
@@ -800,14 +1064,6 @@ public enum MirFunctor
     Adjoint,
     Controlled,
 }
-
-/// <summary>
-/// Typed constant payload. Text is retained exactly/canonically so real and named constants do not lose
-/// precision through an intermediate host-language floating-point conversion.
-/// </summary>
-public sealed record MirConstantValue(
-    QType Type,
-    string Text);
 
 public abstract record MirCallTarget
 {
@@ -887,7 +1143,7 @@ public sealed record MirMutableArrayResult(
 /// </summary>
 public abstract record MirInstruction(
     MirInstructionId Id,
-    MirOriginRef Origin)
+    MirOriginId Origin)
 {
     public abstract IReadOnlyList<MirValueId> InputValues { get; }
     public abstract IReadOnlyList<MirValueId> ResultValues { get; }
@@ -897,8 +1153,8 @@ public abstract record MirInstruction(
 public sealed record MirConstant(
     MirInstructionId Id,
     MirValueId Result,
-    MirConstantValue Constant,
-    MirOriginRef Origin)
+    string Text,
+    MirOriginId Origin)
     : MirInstruction(Id, Origin)
 {
     public override IReadOnlyList<MirValueId> InputValues => Array.Empty<MirValueId>();
@@ -910,7 +1166,7 @@ public sealed record MirUnary(
     MirValueId Result,
     MirUnaryOperator Operator,
     MirValueId Operand,
-    MirOriginRef Origin)
+    MirOriginId Origin)
     : MirInstruction(Id, Origin)
 {
     public override IReadOnlyList<MirValueId> InputValues => new[] { Operand };
@@ -923,7 +1179,7 @@ public sealed record MirBinary(
     MirBinaryOperator Operator,
     MirValueId Left,
     MirValueId Right,
-    MirOriginRef Origin)
+    MirOriginId Origin)
     : MirInstruction(Id, Origin)
 {
     public override IReadOnlyList<MirValueId> InputValues => new[] { Left, Right };
@@ -934,8 +1190,7 @@ public sealed record MirConvert(
     MirInstructionId Id,
     MirValueId Result,
     MirValueId Operand,
-    MirType TargetType,
-    MirOriginRef Origin)
+    MirOriginId Origin)
     : MirInstruction(Id, Origin)
 {
     public override IReadOnlyList<MirValueId> InputValues => new[] { Operand };
@@ -946,11 +1201,9 @@ public sealed record MirArrayCreate(
     MirInstructionId Id,
     MirValueId Result,
     MirStorageId Storage,
-    QType ElementType,
     MirArrayInitialization Initialization,
-    int Length,
     IReadOnlyList<MirValueId> Elements,
-    MirOriginRef Origin)
+    MirOriginId Origin)
     : MirInstruction(Id, Origin)
 {
     private IReadOnlyList<MirValueId> _elements = MirCollections.Freeze(Elements);
@@ -969,7 +1222,7 @@ public sealed record MirArrayLength(
     MirInstructionId Id,
     MirValueId Result,
     MirValueId Array,
-    MirOriginRef Origin)
+    MirOriginId Origin)
     : MirInstruction(Id, Origin)
 {
     public override IReadOnlyList<MirValueId> InputValues => new[] { Array };
@@ -981,7 +1234,7 @@ public sealed record MirArrayLoad(
     MirValueId Result,
     MirValueId Array,
     MirValueId Index,
-    MirOriginRef Origin)
+    MirOriginId Origin)
     : MirInstruction(Id, Origin)
 {
     public override IReadOnlyList<MirValueId> InputValues => new[] { Array, Index };
@@ -994,7 +1247,7 @@ public sealed record MirArrayStore(
     MirValueId Array,
     MirValueId Index,
     MirValueId Value,
-    MirOriginRef Origin)
+    MirOriginId Origin)
     : MirInstruction(Id, Origin)
 {
     public override IReadOnlyList<MirValueId> InputValues => new[] { Array, Index, Value };
@@ -1006,7 +1259,7 @@ public sealed record MirPureCall(
     MirValueId Result,
     MirCallTarget Target,
     IReadOnlyList<MirCallOperand> Operands,
-    MirOriginRef Origin)
+    MirOriginId Origin)
     : MirInstruction(Id, Origin)
 {
     private IReadOnlyList<MirCallOperand> _operands = MirCollections.Freeze(Operands);
@@ -1031,7 +1284,7 @@ public sealed record MirQubitAllocate : MirInstruction
     internal MirQubitAllocate(
         MirInstructionId id,
         MirQubitFromUse result,
-        MirOriginRef origin)
+        MirOriginId origin)
         : base(id, origin)
     {
         Result = result;
@@ -1057,7 +1310,7 @@ public sealed record MirQuantumApply : MirInstruction
         IReadOnlyList<MirQubitAfterInstruction> qubitResults,
         IReadOnlyList<MirMutableArrayResult> mutableArrayResults,
         IReadOnlyList<MirFunctor> functors,
-        MirOriginRef origin)
+        MirOriginId origin)
         : base(id, origin)
     {
         Target = target;
@@ -1090,7 +1343,7 @@ public sealed record MirMeasure : MirInstruction
         MirValueId result,
         MirQubitAccess qubit,
         MirQubitAfterInstruction qubitResult,
-        MirOriginRef origin)
+        MirOriginId origin)
         : base(id, origin)
     {
         Result = result;
@@ -1111,7 +1364,7 @@ public sealed record MirMeasure : MirInstruction
 
 /// <summary>Common terminator contract. Edge and return operands participate in normal SSA use checks.</summary>
 public abstract record MirTerminator(
-    MirOriginRef Origin)
+    MirOriginId Origin)
 {
     public abstract IReadOnlyList<MirValueId> InputValues { get; }
     public abstract IReadOnlyList<MirBlockId> Successors { get; }
@@ -1120,7 +1373,7 @@ public abstract record MirTerminator(
 public sealed record MirJump(
     MirBlockId Target,
     IReadOnlyList<MirValueId> Arguments,
-    MirOriginRef Origin)
+    MirOriginId Origin)
     : MirTerminator(Origin)
 {
     private IReadOnlyList<MirValueId> _arguments = MirCollections.Freeze(Arguments);
@@ -1141,7 +1394,7 @@ public sealed record MirBranch(
     IReadOnlyList<MirValueId> TrueArguments,
     MirBlockId FalseTarget,
     IReadOnlyList<MirValueId> FalseArguments,
-    MirOriginRef Origin)
+    MirOriginId Origin)
     : MirTerminator(Origin)
 {
     private IReadOnlyList<MirValueId> _trueArguments = MirCollections.Freeze(TrueArguments);
@@ -1167,7 +1420,7 @@ public sealed record MirBranch(
 
 public sealed record MirReturn(
     MirValueId? Value,
-    MirOriginRef Origin)
+    MirOriginId Origin)
     : MirTerminator(Origin)
 {
     public override IReadOnlyList<MirValueId> InputValues =>
@@ -1177,7 +1430,7 @@ public sealed record MirReturn(
 }
 
 public sealed record MirUnreachable(
-    MirOriginRef Origin)
+    MirOriginId Origin)
     : MirTerminator(Origin)
 {
     public override IReadOnlyList<MirValueId> InputValues => Array.Empty<MirValueId>();

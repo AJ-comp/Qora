@@ -64,7 +64,7 @@ public class ClassicalArrayTests
 
         var program = result.Targets.OpenQasm!.Program;
         var call = Assert.Single(
-            TargetStatements(program.EntryPoint.Body)
+            TargetStatements(program.EntryBody)
                 .OfType<MirQasmQuantumApplyStatement>(),
             apply => apply.Target is MirQasmUserQuantumTarget);
         var target = Assert.IsType<MirQasmUserQuantumTarget>(call.Target);
@@ -74,16 +74,16 @@ public class ClassicalArrayTests
             Assert.Single(callee.Parameters).Type);
         var operand = Assert.Single(call.Operands);
         var argument = Assert.Single(
-            program.EntryPoint.Body.DependencyClosure(operand)
+            program.EntryBody.DependencyClosure(operand)
                 .OfType<MirQasmIndexExpression>());
         var array = Assert.IsType<MirQasmArrayType>(
-            TargetPlaceType(program.EntryPoint.Body, argument.Base));
+            TargetPlaceType(program.EntryBody, argument.Base));
         Assert.Equal(MirQasmScalarKind.Int, array.ElementType.Kind);
         Assert.Equal(2, array.Length);
         Assert.Equal(
             "0",
             Assert.Single(
-                program.EntryPoint.Body.DependencyClosure(argument.Index)
+                program.EntryBody.DependencyClosure(argument.Index)
                     .OfType<MirQasmLiteralExpression>()).Text);
     }
 
@@ -177,7 +177,7 @@ public class ClassicalArrayTests
         var result = CompileSuccessfully($"operation Main(){{ var values: {type}[] = [{sourceElements}]; }}");
 
         var declaration = Assert.Single(
-            TargetStatements(result.Targets.OpenQasm!.Program.EntryPoint.Body)
+            TargetStatements(result.Targets.OpenQasm!.Program.EntryBody)
                 .OfType<MirQasmArrayDeclarationStatement>());
         Assert.Equal(targetKind, declaration.Type.ElementType.Kind);
         Assert.Equal(2, declaration.Type.Length);
@@ -203,7 +203,7 @@ public class ClassicalArrayTests
     {
         var result = CompileSuccessfully("operation Main(){ var flags: bit[] = [0,1]; }");
 
-        var body = result.Targets.OpenQasm!.Program.EntryPoint.Body;
+        var body = result.Targets.OpenQasm!.Program.EntryBody;
         var statements = TargetStatements(body);
         var declaration = Assert.Single(
             statements.OfType<MirQasmValueDeclarationStatement>(),
@@ -242,7 +242,7 @@ public class ClassicalArrayTests
         var result = CompileSuccessfully("operation Main(){ var flags: bit[] = new bit[3]; }");
 
         var statements = TargetStatements(
-            result.Targets.OpenQasm!.Program.EntryPoint.Body);
+            result.Targets.OpenQasm!.Program.EntryBody);
         var declaration = Assert.Single(
             statements.OfType<MirQasmValueDeclarationStatement>(),
             value => value.Type is MirQasmBitType { Width: 3 });
@@ -281,7 +281,7 @@ public class ClassicalArrayTests
             }
             """);
 
-        var body = result.Targets.OpenQasm!.Program.EntryPoint.Body;
+        var body = result.Targets.OpenQasm!.Program.EntryBody;
         var loop = Assert.Single(
             TargetStatements(body).OfType<MirQasmWhileStatement>());
         var dependencies = TargetLoopDependencies(body, loop).ToArray();
@@ -367,7 +367,7 @@ public class ClassicalArrayTests
         var result = CompileSuccessfully("operation Main(){ var values: int[] = new int[3]; }");
 
         var array = Assert.Single(
-            TargetStatements(result.Targets.OpenQasm!.Program.EntryPoint.Body)
+            TargetStatements(result.Targets.OpenQasm!.Program.EntryBody)
                 .OfType<MirQasmArrayDeclarationStatement>());
         Assert.Equal(MirQasmScalarKind.Int, array.Type.ElementType.Kind);
         Assert.Equal(3, array.Type.Length);
@@ -384,7 +384,7 @@ public class ClassicalArrayTests
     {
         var result = CompileSuccessfully("operation Main(){ var values: int[] = [1,2]; var saved: int = values[1]; values[0]=saved; }");
 
-        var body = result.Targets.OpenQasm!.Program.EntryPoint.Body;
+        var body = result.Targets.OpenQasm!.Program.EntryBody;
         var statements = TargetStatements(body);
         var array = Assert.Single(
             statements.OfType<MirQasmArrayDeclarationStatement>());
@@ -428,7 +428,7 @@ public class ClassicalArrayTests
     {
         var result = CompileSuccessfully("operation Main(){ var flags: bit[] = [0,1]; if(flags[1]==1){ flags[0]=1; } }");
 
-        var body = result.Targets.OpenQasm!.Program.EntryPoint.Body;
+        var body = result.Targets.OpenQasm!.Program.EntryBody;
         var branch = Assert.Single(
             TargetStatements(body).OfType<MirQasmIfStatement>());
         var equality = Assert.Single(
@@ -574,7 +574,7 @@ public class ClassicalArrayTests
     {
         var r = Compiler.Compile("operation Main(){ use q=Qubit[1]; var f: bit[] = new bit[2]; if (AsInt(f) == 1) { X(q[0]); } }");
         Assert.True(r.Succeeded, Explain(r));
-        var body = r.Targets.OpenQasm!.Program.EntryPoint.Body;
+        var body = r.Targets.OpenQasm!.Program.EntryBody;
         var cast = Assert.Single(
             TargetStatements(body)
                 .SelectMany(MirQasmTestModel.Expressions)
@@ -599,7 +599,7 @@ public class ClassicalArrayTests
             }
             """);
         Assert.True(r.Succeeded, Explain(r));
-        var body = r.Targets.OpenQasm!.Program.EntryPoint.Body;
+        var body = r.Targets.OpenQasm!.Program.EntryBody;
         var casts = TargetStatements(body)
             .SelectMany(MirQasmTestModel.Expressions)
             .OfType<MirQasmUnsignedCastExpression>()
@@ -622,7 +622,7 @@ public class ClassicalArrayTests
     {
         var r = Compiler.Compile("operation Main(){ use q=Qubit[1]; var f: bit[] = new bit[2]; var g: bit[] = new bit[2]; if (f == g) { X(q[0]); } }");
         Assert.True(r.Succeeded, Explain(r));
-        var body = r.Targets.OpenQasm!.Program.EntryPoint.Body;
+        var body = r.Targets.OpenQasm!.Program.EntryBody;
         var branch = Assert.Single(
             TargetStatements(body).OfType<MirQasmIfStatement>());
         MirQasmBinaryExpression? registerEquality = null;
@@ -710,7 +710,7 @@ public class ClassicalArrayTests
     {
         var r = Compiler.Compile("operation Main(){ use q=Qubit[1]; repeat { var f: bit[] = new bit[2]; f[0] = M(q[0]); } until (AsInt(f) == 1); }");
         Assert.True(r.Succeeded, Explain(r));
-        var body = r.Targets.OpenQasm!.Program.EntryPoint.Body;
+        var body = r.Targets.OpenQasm!.Program.EntryBody;
         var loop = Assert.Single(
             TargetStatements(body).OfType<MirQasmWhileStatement>());
         Assert.Contains(
@@ -894,7 +894,7 @@ public class ClassicalArrayTests
                     {
                         Kind: MirQasmScalarKind.Int,
                     }));
-        var entry = program.EntryPoint.Body;
+        var entry = program.EntryBody;
         var calls = TargetStatements(entry)
             .SelectMany(MirQasmTestModel.Expressions)
             .OfType<MirQasmFunctionCallExpression>()
@@ -965,7 +965,7 @@ public class ClassicalArrayTests
                         Width: 2,
                         IsRegister: true,
                     }));
-        var body = program.EntryPoint.Body;
+        var body = program.EntryBody;
         var call = Assert.Single(
             TargetStatements(body)
                 .SelectMany(MirQasmTestModel.Expressions)
@@ -1039,7 +1039,7 @@ public class ClassicalArrayTests
             ((MirQasmUserFunctionTarget)innerCall.Target).Callable);
         Assert.Contains(inner, functions);
         var entryCall = Assert.Single(
-            TargetStatements(program.EntryPoint.Body)
+            TargetStatements(program.EntryBody)
                 .SelectMany(MirQasmTestModel.Expressions)
                 .OfType<MirQasmFunctionCallExpression>(),
             call =>
@@ -1049,7 +1049,7 @@ public class ClassicalArrayTests
             3,
             Assert.IsType<MirQasmBitType>(
                 TargetPlaceType(
-                    program.EntryPoint.Body,
+                    program.EntryBody,
                     Assert.Single(entryCall.Arguments))).Width);
     }
 
@@ -1077,7 +1077,7 @@ public class ClassicalArrayTests
                         Width: 2,
                         IsRegister: true,
                     }));
-        var body = program.EntryPoint.Body;
+        var body = program.EntryBody;
         var branch = Assert.Single(
             TargetStatements(body).OfType<MirQasmIfStatement>());
         Assert.True(
@@ -1134,7 +1134,7 @@ public class ClassicalArrayTests
                 definition =>
                     ((MirQasmBitType)definition.Parameters[0].Type).Width);
         Assert.Equal(new[] { 2, 3 }, countByWidth.Keys.Order());
-        var body = program.EntryPoint.Body;
+        var body = program.EntryBody;
         Assert.Equal(
             new[] { 2, 3 },
             TargetStatements(body)
@@ -1194,7 +1194,7 @@ public class ClassicalArrayTests
                     definition.Kind == MirQasmCallableKind.Function
                     && definition.Parameters.SingleOrDefault()?.Type is
                     MirQasmScalarType { Kind: MirQasmScalarKind.Int }));
-        var body = program.EntryPoint.Body;
+        var body = program.EntryBody;
         var loop = Assert.Single(
             TargetStatements(body).OfType<MirQasmWhileStatement>());
         var conditionCall = Assert.Single(
@@ -1368,7 +1368,7 @@ public class ClassicalArrayTests
             """);
 
         var program = result.Targets.OpenQasm!.Program;
-        var entry = program.EntryPoint.Body;
+        var entry = program.EntryBody;
         var backing = Assert.Single(
             entry.OfType<MirQasmArrayDeclarationStatement>());
         Assert.Equal(MirQasmScalarKind.Int, backing.Type.ElementType.Kind);
@@ -1440,7 +1440,7 @@ public class ClassicalArrayTests
             """);
 
         var program = result.Targets.OpenQasm!.Program;
-        var entry = program.EntryPoint.Body;
+        var entry = program.EntryBody;
         var backing = Assert.Single(
             entry.OfType<MirQasmArrayDeclarationStatement>());
         Assert.Equal(2, backing.Type.Length);
@@ -1497,7 +1497,7 @@ public class ClassicalArrayTests
             }
             """);
 
-        var body = result.Targets.OpenQasm!.Program.EntryPoint.Body;
+        var body = result.Targets.OpenQasm!.Program.EntryBody;
         var backing = Assert.Single(
             body.OfType<MirQasmArrayDeclarationStatement>());
         Assert.Equal(2, backing.Type.Length);
@@ -1541,7 +1541,7 @@ public class ClassicalArrayTests
 
         var program = result.Targets.OpenQasm!.Program;
         var call = Assert.Single(
-            program.EntryPoint.Body.OfType<MirQasmQuantumApplyStatement>(),
+            program.EntryBody.OfType<MirQasmQuantumApplyStatement>(),
             apply => apply.Target is MirQasmUserQuantumTarget);
         var definition = Resolve(
             program,
@@ -1558,7 +1558,7 @@ public class ClassicalArrayTests
             definition.Parameters,
             parameter => parameter.Type is MirQasmArrayType);
         Assert.Empty(
-            program.EntryPoint.Body.OfType<MirQasmArrayDeclarationStatement>());
+            program.EntryBody.OfType<MirQasmArrayDeclarationStatement>());
         Assert.Contains(
             TargetStatements(definition.Body)
                 .OfType<MirQasmAssignmentStatement>(),
@@ -1595,7 +1595,7 @@ public class ClassicalArrayTests
 
         var program = result.Targets.OpenQasm!.Program;
         var call = Assert.Single(
-            program.EntryPoint.Body.OfType<MirQasmQuantumApplyStatement>(),
+            program.EntryBody.OfType<MirQasmQuantumApplyStatement>(),
             apply => apply.Target is MirQasmUserQuantumTarget);
         var definition = Resolve(
             program,
@@ -1650,13 +1650,13 @@ public class ClassicalArrayTests
             """);
 
         var program = result.Targets.OpenQasm!.Program;
-        var arrays = program.EntryPoint.Body
+        var arrays = program.EntryBody
             .OfType<MirQasmArrayDeclarationStatement>()
             .OrderBy(array => array.Type.Length)
             .ToArray();
         Assert.Equal(new int?[] { 1, 2 }, arrays.Select(array => array.Type.Length));
         Assert.NotEqual(arrays[0].Declaration, arrays[1].Declaration);
-        var calls = program.EntryPoint.Body
+        var calls = program.EntryBody
             .OfType<MirQasmQuantumApplyStatement>()
             .Where(apply => apply.Target is MirQasmUserQuantumTarget)
             .ToArray();
@@ -1696,7 +1696,7 @@ public class ClassicalArrayTests
             """);
 
         var program = result.Targets.OpenQasm!.Program;
-        var body = program.EntryPoint.Body;
+        var body = program.EntryBody;
         var backing = Assert.Single(
             body.OfType<MirQasmArrayDeclarationStatement>());
         Assert.Equal(1, backing.Type.Length);
@@ -1735,7 +1735,7 @@ public class ClassicalArrayTests
 
         var program = result.Targets.OpenQasm!.Program;
         var entryCall = Assert.Single(
-            program.EntryPoint.Body.OfType<MirQasmQuantumApplyStatement>(),
+            program.EntryBody.OfType<MirQasmQuantumApplyStatement>(),
             apply => apply.Target is MirQasmUserQuantumTarget);
         var mid = Resolve(
             program,
@@ -1753,7 +1753,7 @@ public class ClassicalArrayTests
             .Where(
                 reference =>
                     TargetDeclaration(
-                        program.EntryPoint.Body,
+                        program.EntryBody,
                         reference.Declaration) is MirQasmArrayDeclarationStatement)
             .Select(reference => reference.Declaration)
             .ToArray();
@@ -1801,7 +1801,7 @@ public class ClassicalArrayTests
 
         var program = result.Targets.OpenQasm!.Program;
         var call = Assert.Single(
-            program.EntryPoint.Body.OfType<MirQasmQuantumApplyStatement>(),
+            program.EntryBody.OfType<MirQasmQuantumApplyStatement>(),
             apply => apply.Target is MirQasmUserQuantumTarget);
         var helper = Resolve(
             program,
@@ -1876,7 +1876,7 @@ public class ClassicalArrayTests
 
         var program = result.Targets.OpenQasm!.Program;
         var entryCall = Assert.Single(
-            program.EntryPoint.Body.OfType<MirQasmQuantumApplyStatement>(),
+            program.EntryBody.OfType<MirQasmQuantumApplyStatement>(),
             apply => apply.Target is MirQasmUserQuantumTarget);
         var helper = Resolve(
             program,
@@ -1890,10 +1890,10 @@ public class ClassicalArrayTests
             entryCall.Operands.OfType<MirQasmDeclarationReferenceExpression>(),
             reference =>
                 TargetDeclaration(
-                    program.EntryPoint.Body,
+                    program.EntryBody,
                     reference.Declaration) is MirQasmArrayDeclarationStatement);
         Assert.NotNull(TargetDeclaration(
-            program.EntryPoint.Body,
+            program.EntryBody,
             backing.Declaration));
         var loop = Assert.Single(
             TargetStatements(helper.Body)
@@ -1929,7 +1929,7 @@ public class ClassicalArrayTests
             """);
 
         var program = result.Targets.OpenQasm!.Program;
-        var body = program.EntryPoint.Body;
+        var body = program.EntryBody;
         var backing = Assert.Single(
             body.OfType<MirQasmArrayDeclarationStatement>());
         Assert.Equal(3, backing.Type.Length);
@@ -1974,7 +1974,7 @@ public class ClassicalArrayTests
 
         var program = result.Targets.OpenQasm!.Program;
         var entryCall = Assert.Single(
-            program.EntryPoint.Body.OfType<MirQasmQuantumApplyStatement>(),
+            program.EntryBody.OfType<MirQasmQuantumApplyStatement>(),
             apply => apply.Target is MirQasmUserQuantumTarget);
         var outer = Resolve(
             program,

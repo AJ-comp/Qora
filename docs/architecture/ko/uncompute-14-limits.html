@@ -134,7 +134,7 @@
   </div>
   <p>
     앞의 설계 사례에서는 <a href="uncompute-10-y-gate.html">10장</a>의 Y 차단, <a href="uncompute-12-loops.html">12장</a>의
-    ContainedWrite, <a href="uncompute-13-blanket.html">13장</a>의 statement-wide 차단을 분류했어요.<br>
+    조건·루프 내부 쓰기에 대한 보수적 거부, <a href="uncompute-13-blanket.html">13장</a>의 statement-wide 차단을 분류했어요.<br>
     그런데 이 차단들은 같은 무게가 아니에요.<br>
     10장은 "계약을 지킬 방법이 존재하지 않는다"는 단계별 계산으로 끝났고, 12장은 callable 경계를 이용하면 미래의 보수적 scheduler가 처리할 수 있는 구조를 보여줬어요.<br>
     존재하지 않는 것과 아직 못 하는 것은 사용자에게 전혀 다른 행동을 요구하므로, 에러를 받았을 때
@@ -226,7 +226,7 @@ var m: bit = M(q[0]);    <span class="cm">// q는 출력으로 승격, t는 청�
 <span class="rd">for i in 0..2 { X(a[i]); }</span>
 CNOT(a[0], out[0]);
 var c: bit = M(out[0]);
-<span class="cm">// a 청소 불가 (ContainedWrite)</span></code></pre>
+<span class="cm">// v1 목표: 조건·루프 내부 쓰기이므로 보수적으로 청소 차단</span></code></pre>
     </div>
     <div class="card good">
       <h4>연산으로 감싼 같은 계산 — 설계상 safe 후보</h4>

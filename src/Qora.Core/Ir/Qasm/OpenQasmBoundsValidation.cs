@@ -12,7 +12,7 @@ internal static class OpenQasmBoundsValidation
     public static IReadOnlyList<QoraError> Run(MirSnapshot source)
     {
         ArgumentNullException.ThrowIfNull(source);
-        return source.Safety.UnprovenBounds
+        return source.UnprovenBounds
             .Select(ToDiagnostic)
             .Distinct()
             .ToArray();

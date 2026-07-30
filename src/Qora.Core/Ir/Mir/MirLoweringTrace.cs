@@ -11,11 +11,6 @@ namespace Qora.Ir.Mir;
 /// </summary>
 public interface IMirLoweringTraceSink
 {
-    void LinkCallable(
-        HirNodeId declaration,
-        SymbolId symbol,
-        MirCallableId callable);
-
     void LinkValue(
         SymbolId symbol,
         MirCallableId callable,

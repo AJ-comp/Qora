@@ -128,8 +128,8 @@
     <a class="doc-link" href="uncompute-11-injector.html">11. 주입기 — 문장 붙여넣기 기계 →</a>
   </nav>
   <p>
-    <a href="uncompute-09-qfree.html">9장</a>의 판정표는 Y 게이트와 CY 게이트에 차단(NonQfreeWrite) 판정을
-    내렸습니다.<br>
+    <a href="uncompute-09-qfree.html">9장</a>의 판정표는 Y 게이트와 CY 게이트에
+    <code>MirQubitEffectFlags.NonQfree</code>라는 차단 근거를 붙였습니다.<br>
     이 장에서는 그 판정이 왜 불가피한지를 반례 프로그램 하나로 끝까지 계산해 보입니다.<br>
     출발점은 Y 게이트의 정확한 정의입니다.<br>
     Y 게이트는 기저 상태를 기저 상태로 보내는 유니터리이고, 그 작용은 <code>Y|0⟩ = +i|1⟩</code>,
@@ -296,9 +296,10 @@ H(b[0]);  var m: bit = M(b[0]);   <span class="cm">// m = 0 (확률 100%)</span>
 Y(q[0]);            <span class="cm">// |0⟩ → +i|1⟩ — 줄이 하나뿐이므로 +i는 전역 위상</span>
 var m: bit = M(q[0]);    <span class="cm">// m = 1 (확률 100%) — X(q[0])를 썼을 때와 완전히 같은 결과</span></code></pre>
   <p>
-    다만 현재 판정은 이 구분을 아직 활용하지 않습니다.<br>
-    얽힘 여부와 무관하게 Y·CY 쓰기를 일괄 차단하는 보수적 형태이며, 확정 기저값 위의 Y 게이트를 다시
-    허용하는 정밀화는 계획된 개선입니다(<a href="uncompute-14-limits.html">14장</a>).
+    다만 현재 MIR 효과 분석은 이 구분을 아직 활용하지 않으며, 얽힘 여부와 무관하게 모든 Y·CY 쓰기에
+    <code>MirQubitEffectFlags.NonQfree</code>를 붙여요.<br>
+    앞으로 v1 scheduler는 이 사실을 보수적으로 차단 근거로 사용하고, 확정 기저값 위의 Y 게이트를 다시
+    허용하는 정밀화는 그다음 개선으로 남겨둡니다(<a href="uncompute-14-limits.html">14장</a>).
   </p>
 
   <h3>Z·S·T·CZ의 위상은 왜 문제가 없을까요</h3>

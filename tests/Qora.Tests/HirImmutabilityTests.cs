@@ -240,7 +240,10 @@ public sealed class HirImmutabilityTests
             .OfType<HirVariableDeclarationStatement>()
             .Single(item => item.Name == "x");
         var symbol = Assert.IsType<Symbol>(model.FindSymbol(declaration.Id));
-        var graph = Assert.IsType<QubitGraph>(model.Graph(main.Id));
+        var touch = analyzed.Program.Callables.Single(
+            callable => callable.Name == "Touch");
+        var effects = Assert.IsType<OpEffectSummary>(
+            model.FindOpEffects(touch.Id));
         var scopeGraph = Assert.IsType<HirScopeGraph>(model.ScopeGraph);
 
         AssertCannotAdd(
@@ -249,13 +252,15 @@ public sealed class HirImmutabilityTests
                 -1,
                 "mutation",
                 new HirNodeId(int.MaxValue)));
-        AssertCannotAdd(graph.Nodes, graph.Nodes[0]);
+        AssertSetCannotRemove(
+            effects.ParamModified,
+            new QubitRef("p", null));
         AssertDictionaryCannotRemove(scopeGraph.Symbols, symbol.Id);
         AssertDictionaryCannotRemove(scopeGraph.Scopes, scopeGraph.RootScope.Id);
         AssertDictionaryCannotRemove(scopeGraph.CallableScopes, main.Id);
 
         Assert.Single(symbol.Uses);
-        Assert.NotEmpty(graph.Nodes);
+        Assert.Single(effects.ParamModified);
         Assert.Same(symbol, scopeGraph.Symbols[symbol.Id]);
         Assert.Same(scopeGraph.RootScope, scopeGraph.Scopes[scopeGraph.RootScope.Id]);
         Assert.Same(model.FindRootScope(main.Id), scopeGraph.CallableScopes[main.Id]);
@@ -406,25 +411,13 @@ public sealed class HirImmutabilityTests
             validation.DeferredSizeChecks,
             new DeferredSizeCheck("Injected", "ys", "ys[0]", "mutation", null));
 
-        var parents = new List<QubitEdge>
-        {
-            new(0, new QubitRef("q", 0)),
-        };
-        var node = new QubitNode(1, new QubitRef("q", 0), 1, parents, false);
-        parents.Clear();
-        Assert.Single(node.Parents);
-        AssertCannotAdd(node.Parents, new QubitEdge(2, new QubitRef("q", 0)));
-
-        var touched = new HashSet<QubitRef> { new("q", null) };
-        var summary = new OpEffectSummary(
-            touched,
-            touched,
-            touched,
-            touched,
-            Irreversible: false);
-        touched.Clear();
-        Assert.Single(summary.ParamTouched);
-        AssertSetCannotRemove(summary.ParamTouched, new QubitRef("q", null));
+        var modified = new HashSet<QubitRef> { new("q", null) };
+        var summary = new OpEffectSummary(modified);
+        modified.Clear();
+        Assert.Single(summary.ParamModified);
+        AssertSetCannotRemove(
+            summary.ParamModified,
+            new QubitRef("q", null));
     }
 
     [Fact]
@@ -441,10 +434,8 @@ public sealed class HirImmutabilityTests
 
         Assert.NotSame(specialized.Model, analyzed.Model);
         Assert.Same(specialized.Model.ScopeGraph, analyzed.Model.ScopeGraph);
-        Assert.False(specialized.Model.WasEffectAnalyzed(main.Id));
-        Assert.True(analyzed.Model.WasEffectAnalyzed(main.Id));
-        Assert.Null(specialized.Model.Graph(main.Id));
-        Assert.NotNull(analyzed.Model.Graph(main.Id));
+        Assert.Null(specialized.Model.FindOpEffects(main.Id));
+        Assert.NotNull(analyzed.Model.FindOpEffects(main.Id));
     }
 
     private static void AssertCannotAdd<T>(IReadOnlyList<T> values, T value)

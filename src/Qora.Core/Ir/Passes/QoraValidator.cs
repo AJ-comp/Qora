@@ -1600,15 +1600,31 @@ internal static class QoraValidator
         // unresolved index covers everything / itself. Two operands on one register alias when their domains
         // overlap — so `CNOT(q[i], q[2])` both under `for i in 2..2` (singleton) and under `for i in 0..2`
         // (i reaches 2) is caught, not just literal duplicates — and at most one QSEM014 is reported per gate.
-        var refs = g.Call.Arguments
-            .Select(argument => QubitRefOf(argument, scope))
-            .Where(reference => reference is not null)
-            .Select(r => (
-                r!.Value.SymbolId,
-                r.Value.DisplayName,
-                r.Value.Index,
-                Domain: r.Value.Index is { } idx ? IndexDomain(idx, scope, bounds, ctx.WillBeRechecked) : null))
-            .ToList();
+        var refs = new List<(
+            SymbolId SymbolId,
+            string DisplayName,
+            HirExpression? Index,
+            (long Lo, long Hi)? Domain)>();
+        foreach (var argument in g.Call.Arguments)
+        {
+            var reference = QubitRefOf(argument, scope);
+            if (reference is null)
+                continue;
+
+            var index = reference.Value.Index;
+            var domain = index is null
+                ? null
+                : IndexDomain(
+                    index,
+                    scope,
+                    bounds,
+                    ctx.WillBeRechecked);
+            refs.Add((
+                reference.Value.SymbolId,
+                reference.Value.DisplayName,
+                index,
+                domain));
+        }
         // An empty loop makes runtime aliasing impossible, but it does not make malformed source valid:
         // continue through callee, type, and ownership-contract checks below. Only the execution-dependent
         // alias verdict is skipped.
@@ -2226,19 +2242,25 @@ internal static class QoraValidator
                 }
                 return IndexCheckResult.Proven;
             case HirCallExpression call:
-                return call.Arguments
-                    .Select(argument =>
-                        CheckExpressionIndexes(
-                            argument.Expression,
-                            scope,
-                            opName,
-                            ctx,
-                            span,
-                            bounds,
-                            IsQubitLike(argument, scope)))
-                    .Aggregate(
-                        IndexCheckResult.Proven,
-                        MergeIndexResults);
+            {
+                var callResult = IndexCheckResult.Proven;
+                foreach (var argument in call.Arguments)
+                {
+                    var argumentResult = CheckExpressionIndexes(
+                        argument.Expression,
+                        scope,
+                        opName,
+                        ctx,
+                        span,
+                        bounds,
+                        IsQubitLike(argument, scope));
+                    callResult = MergeIndexResults(
+                        callResult,
+                        argumentResult);
+                }
+
+                return callResult;
+            }
             default:
                 var aggregate = IndexCheckResult.Proven;
                 foreach (var child in expression.Children())
@@ -2637,13 +2659,17 @@ internal static class QoraValidator
         // access lowering and runtime-failure semantics.
         // Blame the bound that actually failed to settle: when From never folded, naming To would accuse
         // the wrong bound (and the fix hint would send the user to the wrong place).
+        string? unresolvedBound = null;
+        if (inLoop)
+            unresolvedBound = fact.FromB is null ? from : to;
+
         unproven.Add(
             new UnprovenIndex(
                 exactSite.Id,
                 opName,
                 name,
                 index,
-                !inLoop ? null : fact.FromB is null ? from : to,
+                unresolvedBound,
                 span));
         return Result(IndexCheckResult.Unproven);
     }

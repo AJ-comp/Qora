@@ -10,7 +10,7 @@ namespace Qora.Ir.Mir;
 /// <see cref="SymbolId"/> recorded by the semantic model and only tracks that symbol's current MIR state;
 /// it never resolves source spelling again. Symbols are not copied into MIR entities; an optional
 /// <see cref="IMirLoweringTraceSink"/> may observe exact source relationships for an upper query layer.
-/// Every emitted MIR reference is a dense MIR ID, never a string.
+/// Every emitted MIR reference is a typed MIR ID, never a string.
 /// Classical assignments create immutable SSA states, block arguments represent Phi values, arrays retain
 /// both storage identity and state versions, and qubits use a separate versioned identity space.
 /// </summary>
@@ -21,1248 +21,1576 @@ internal static class QoraMirLowering
     /// canonical final artifact, so callers cannot combine a HIR snapshot with another snapshot's model.
     /// </summary>
     public static MirSnapshot ToMir(
-        this HirCompilation hir,
-        IMirLoweringTraceSink? trace = null)
+        this HirCompilation hirCompilation,
+        IMirLoweringTraceSink? traceSink = null)
     {
-        ArgumentNullException.ThrowIfNull(hir);
+        ArgumentNullException.ThrowIfNull(hirCompilation);
 
-        var finalHir = hir.EffectAnalysis
+        var finalHirArtifact = hirCompilation.EffectAnalysis
             ?? throw new InvalidOperationException(
                 "MIR lowering requires the compilation's final effect-analyzed HIR");
-        return Lower(finalHir, trace);
+        return LowerFinalHirArtifact(finalHirArtifact, traceSink);
     }
 
-    private static MirSnapshot Lower(
-        HirSemanticArtifact finalHir,
-        IMirLoweringTraceSink? trace)
+    private static MirSnapshot LowerFinalHirArtifact(
+        HirSemanticArtifact finalHirArtifact,
+        IMirLoweringTraceSink? traceSink)
     {
-        ArgumentNullException.ThrowIfNull(finalHir);
+        ArgumentNullException.ThrowIfNull(finalHirArtifact);
 
-        var source = finalHir.Source;
-        var semanticModel = finalHir.Model;
-        var hir = source.Program;
-        var snapshotId = new MirSnapshotId(
-            source.Id.CompilationId,
-            source.Id.CompilationRevision,
+        var hirSnapshot = finalHirArtifact.Source;
+        var hirSemanticModel = finalHirArtifact.Model;
+        var hirProgram = hirSnapshot.Program;
+        var mirSnapshotId = new MirSnapshotId(
+            hirSnapshot.Id.CompilationId,
+            hirSnapshot.Id.CompilationRevision,
             revision: 0);
-        var origins = new MirOriginTableBuilder(
-            snapshotId,
-            source);
-        var callableIds = hir.Callables
-            .Select((callable, index) => (SourceId: callable.Id, MirId: new MirCallableId(index)))
-            .ToDictionary(item => item.SourceId, item => item.MirId);
-        var callablesBySymbol = hir.Callables.ToDictionary(
-            callable => semanticModel.FindSymbol(callable.Id)?.Id
-                ?? throw new InvalidOperationException(
-                    $"validated callable `{callable.Name}` has no semantic symbol"));
-        var boundsSites =
-            new Dictionary<HirNodeId, MirIndexedAccessSite>();
-        var callables = hir.Callables
-            .Select(callable => new CallableLowerer(
-                callable,
-                callableIds[callable.Id],
-                QualifiedName(hir, callable),
-                snapshotId,
-                semanticModel,
-                callableIds,
-                callablesBySymbol,
-                origins,
-                trace,
-                boundsSites).Lower())
-            .ToList();
+        var mirOriginTableBuilder = new MirOriginTableBuilder(
+            hirSnapshot);
+        var mirCallables =
+            new List<MirCallable>(hirProgram.Callables.Count);
 
-        var originTable = origins.Build();
-        var entryCallable = hir.EntryCallable
+        foreach (var hirCallable in hirProgram.Callables)
+        {
+            var mirCallableLowerer = new HirCallableToMirLowerer(
+                hirCallable,
+                finalHirArtifact,
+                mirOriginTableBuilder,
+                traceSink);
+            var mirCallable =
+                mirCallableLowerer.LowerToMirCallable();
+
+            mirCallables.Add(mirCallable);
+        }
+
+        var mirOriginTable = mirOriginTableBuilder.Build();
+        var hirEntryCallable = hirProgram.EntryCallable
             ?? throw new InvalidOperationException(
                 "validated HIR must contain an operation before MIR lowering");
-        var program = new MirProgram(
-            snapshotId,
-            originTable,
-            callableIds[entryCallable.Id],
-            callables);
-        var safety = MirSafetyFacts.FromHir(
-            snapshotId,
-            semanticModel,
-            boundsSites);
-        return new MirSnapshot(
-            snapshotId,
-            MirLoweringProfile.CanonicalV1,
-            program,
-            finalHir,
-            safety: safety);
-
-        static string QualifiedName(
-            HirProgram program,
-            HirCallable callable)
+        var mirEntryCallableId =
+            new MirCallableId(hirEntryCallable.Id.Value);
+        var mirProgram = new MirProgram(
+            mirSnapshotId,
+            mirOriginTable,
+            mirEntryCallableId,
+            mirCallables);
+        var mirBoundsObligations =
+            new List<MirBoundsObligation>(
+                hirSemanticModel.UnprovenIndexes.Count);
+        foreach (var unproven in hirSemanticModel.UnprovenIndexes)
         {
-            var namespacePath = program.NamespaceOf(callable);
-            return namespacePath.Length == 0
-                ? callable.Name
-                : $"{namespacePath}.{callable.Name}";
+            mirBoundsObligations.Add(new MirBoundsObligation(
+                unproven.Op,
+                unproven.Array,
+                unproven.Index,
+                unproven.LoopBound,
+                unproven.Span));
         }
+
+        return new MirSnapshot(
+            mirProgram,
+            finalHirArtifact,
+            unprovenBounds: mirBoundsObligations);
     }
 
-    private sealed class CallableLowerer
+    private sealed class HirCallableToMirLowerer
     {
-        private readonly HirCallable _callable;
-        private readonly MirCallableId _callableId;
-        private readonly string _qualifiedName;
-        private readonly MirSnapshotId _snapshotId;
-        private readonly HirSemanticModel _semanticModel;
-        private readonly IReadOnlyDictionary<HirNodeId, MirCallableId> _callableIds;
-        private readonly IReadOnlyDictionary<SymbolId, HirCallable> _callablesBySymbol;
-        private readonly MirOriginTableBuilder _origins;
-        private readonly IMirLoweringTraceSink? _trace;
-        private readonly Dictionary<HirNodeId, MirIndexedAccessSite> _boundsSites;
+        private readonly HirCallable _hirCallable;
+        private readonly MirCallableId _mirCallableId;
+        private readonly HirSemanticArtifact _finalHirArtifact;
+        private readonly MirOriginTableBuilder _mirOriginTableBuilder;
+        private readonly IMirLoweringTraceSink? _traceSink;
+        private readonly List<MirBlockBuilder> _mirBlockBuilders = new();
+        private readonly List<MirValue> _mirValues = new();
+        private readonly List<MirArrayStorage> _mirArrayStorages = new();
+        private readonly List<IMirParameter> _mirParameters = new();
+        private readonly Dictionary<MirQubitId, MirQubit>
+            _initialMirQubitsById = new();
+        private readonly Dictionary<MirQubitId, int>
+            _nextMirQubitVersionById = new();
 
-        private readonly List<BlockBuilder> _blocks = new();
-        private readonly List<MirValue> _values = new();
-        private readonly List<MirArrayStorage> _storages = new();
-        private readonly List<IMirParameter> _parameters = new();
-        private readonly Dictionary<MirQubitId, MirQubit> _qubitSeeds = new();
-        private readonly Dictionary<MirQubitId, int> _nextQubitVersions = new();
-        private readonly Dictionary<MirValueId, int> _valueIndexes = new();
-        private readonly Dictionary<MirBlockId, BlockBuilder> _blockById = new();
+        private int _nextMirInstructionIdValue;
+        private MirBlockBuilder? _currentMirBlockBuilder;
+        private LoweringFlowState _currentFlowState = new();
 
-        private int _nextInstruction;
-        private int _nextStorage;
-        private int _nextQubit;
-        private BlockBuilder? _current;
-        private FlowState _state = new();
-        private readonly MirOriginRef _callableOrigin;
-
-        public CallableLowerer(
-            HirCallable callable,
-            MirCallableId callableId,
-            string qualifiedName,
-            MirSnapshotId snapshotId,
-            HirSemanticModel semanticModel,
-            IReadOnlyDictionary<HirNodeId, MirCallableId> callableIds,
-            IReadOnlyDictionary<SymbolId, HirCallable> callablesBySymbol,
-            MirOriginTableBuilder origins,
-            IMirLoweringTraceSink? trace,
-            Dictionary<HirNodeId, MirIndexedAccessSite> boundsSites)
+        public HirCallableToMirLowerer(
+            HirCallable hirCallable,
+            HirSemanticArtifact finalHirArtifact,
+            MirOriginTableBuilder mirOriginTableBuilder,
+            IMirLoweringTraceSink? traceSink)
         {
-            _callable = callable;
-            _callableId = callableId;
-            _qualifiedName = qualifiedName;
-            _snapshotId = snapshotId;
-            _semanticModel = semanticModel;
-            _callableIds = callableIds;
-            _callablesBySymbol = callablesBySymbol;
-            _origins = origins;
-            _trace = trace;
-            _boundsSites = boundsSites;
-            _callableOrigin = _origins.Hir(
-                callable.Id,
-                callable.Id);
+            _hirCallable = hirCallable;
+            _finalHirArtifact = finalHirArtifact;
+            _mirCallableId =
+                new MirCallableId(hirCallable.Id.Value);
+            _mirOriginTableBuilder = mirOriginTableBuilder;
+            _traceSink = traceSink;
         }
 
-        public MirCallable Lower()
+        public MirCallable LowerToMirCallable()
         {
-            var callableSymbol = RequireSymbol(
-                _callable.Id,
-                $"callable `{_callable.Name}`");
-            _trace?.LinkCallable(
-                _callable.Id,
-                callableSymbol.Id,
-                _callableId);
+            var mirCallableOrigin = _mirOriginTableBuilder.Hir(_hirCallable.Id);
+            var hirCallableSymbol = RequireHirDeclarationSymbol(
+                _hirCallable.Id,
+                $"callable `{_hirCallable.Name}`");
+            var hirScopeGraph = _finalHirArtifact.Model.ScopeGraph
+                ?? throw MirLoweringError(
+                    "the final HIR semantic model has no scope graph");
+            var qualifiedSourceCallableName =
+                hirScopeGraph.QualifiedName(hirCallableSymbol);
 
-            var entry = NewBlock(_callableOrigin);
-            _current = entry;
+            var mirEntryBlock = CreateMirBlock(mirCallableOrigin);
+            _currentMirBlockBuilder = mirEntryBlock;
 
             LowerParameters();
-            HoistQubitAllocations(_callable.Body.Statements);
-            LowerStatements(_callable.Body.Statements);
+            HoistQubitAllocations(_hirCallable.Body.Statements);
+            LowerStatements(_hirCallable.Body.Statements);
 
-            if (_current is not null)
+            if (_currentMirBlockBuilder is not null)
             {
-                Terminate(_callable.IsFunction
+                TerminateCurrentMirBlock(_hirCallable.IsFunction
                     ? new MirUnreachable(
-                        _origins.Synthesized(
-                            _callableOrigin,
+                        _mirOriginTableBuilder.Synthesized(
+                            mirCallableOrigin,
                             "missing validated function return"))
                     : new MirReturn(
                         null,
-                        _origins.Synthesized(
-                            _callableOrigin,
+                        _mirOriginTableBuilder.Synthesized(
+                            mirCallableOrigin,
                             "implicit operation return")));
             }
 
-            var blocks = _blocks.Select(block => block.Build()).ToList();
+            var mirBlocks = _mirBlockBuilders
+                .Select(blockBuilder => blockBuilder.Build())
+                .ToList();
             return new MirCallable(
-                _callableId,
-                _qualifiedName,
-                _callable.IsFunction ? MirCallableKind.Function : MirCallableKind.Operation,
-                _callable.ReturnType is { } returns ? MirType.Scalar(returns) : null,
-                _parameters,
-                entry.Id,
-                blocks,
-                _values,
-                _storages,
-                _callableOrigin);
+                _mirCallableId,
+                qualifiedSourceCallableName,
+                _hirCallable.ReturnType is { } returns
+                    ? MirType.Scalar(returns)
+                    : null,
+                _mirParameters,
+                mirEntryBlock.Id,
+                mirBlocks,
+                _mirValues,
+                _mirArrayStorages,
+                mirCallableOrigin);
         }
 
         private void LowerParameters()
         {
-            for (var index = 0; index < _callable.Parameters.Count; index++)
+            for (var hirParameterIndex = 0;
+                 hirParameterIndex < _hirCallable.Parameters.Count;
+                 hirParameterIndex++)
             {
-                var parameter = _callable.Parameters[index];
-                var symbol = RequireSymbol(parameter.Id, $"parameter `{parameter.Name}`");
-                var parameterOrigin = _origins.Hir(
-                    _callable.Id,
-                    parameter.Id);
-                _state.Declare(symbol.Id);
+                var hirParameter = _hirCallable.Parameters[hirParameterIndex];
+                var hirParameterSymbol = RequireHirDeclarationSymbol(
+                    hirParameter.Id,
+                    $"parameter `{hirParameter.Name}`");
+                var mirParameterOrigin = _mirOriginTableBuilder.Hir(hirParameter.Id);
+                _currentFlowState.TrackDeclaredHirSymbol(hirParameterSymbol.Id);
 
-                if (parameter.Type == QType.Qubit)
+                if (hirParameter.Type == QType.Qubit)
                 {
-                    var qubitId = NextQubitId();
-                    var isArray = parameter.IsArray;
-                    var qubit = new MirQubitParameter(
-                        qubitId,
-                        parameter.Name,
-                        isArray,
-                        isArray ? parameter.RegisterSize : null,
-                        parameter.Ownership,
-                        parameterOrigin);
-                    RegisterQubitSeed(symbol.Id, qubit);
-                    _state.Qubits[symbol.Id] = qubit;
-                    _parameters.Add(qubit);
+                    var mirQubitId = AllocateMirQubitId();
+                    var isQubitRegister = hirParameter.IsArray;
+                    var mirQubitParameter = new MirQubitParameter(
+                        mirQubitId,
+                        hirParameter.Name,
+                        isQubitRegister,
+                        isQubitRegister ? hirParameter.RegisterSize : null,
+                        hirParameter.Ownership,
+                        mirParameterOrigin);
+                    RegisterInitialMirQubit(
+                        hirParameterSymbol.Id,
+                        mirQubitParameter);
+                    _currentFlowState.CurrentMirQubitByHirSymbolId[
+                            hirParameterSymbol.Id] =
+                        mirQubitParameter;
+                    _mirParameters.Add(mirQubitParameter);
                     continue;
                 }
 
-                var type = parameter.IsArray
-                    ? MirType.Array(parameter.Type, parameter.RegisterSize)
-                    : MirType.Scalar(parameter.Type);
-                var value = AddValue(
-                    type,
-                    MirValueDefinition.ParameterAt(index),
-                    symbol.Id,
-                    parameterOrigin);
-                MirStorageId? storageId = null;
-                if (parameter.IsArray)
+                var mirParameterType = hirParameter.IsArray
+                    ? MirType.Array(hirParameter.Type, hirParameter.RegisterSize)
+                    : MirType.Scalar(hirParameter.Type);
+                var mirParameterValueId = AddValue(
+                    mirParameterType,
+                    MirValueDefinition.ParameterAt(hirParameterIndex),
+                    hirParameterSymbol.Id,
+                    mirParameterOrigin);
+                MirStorageId? mirArrayStorageId = null;
+                if (hirParameter.IsArray)
                 {
-                    storageId = NextStorage();
-                    _storages.Add(new MirArrayStorage(
-                        storageId.Value,
-                        parameter.Name,
-                        MirArrayStorageKind.Parameter,
-                        parameter.Ownership == QOwnershipMode.Borrowed
-                            && parameter.Access == QAccessMode.ReadOnly
-                                ? MirStorageAliasMode.SharedParameter
-                                : MirStorageAliasMode.ExclusiveParameter,
-                        type,
-                        index,
-                        AllocationInstruction: null,
-                        parameterOrigin));
-                    _trace?.LinkStorage(
-                        symbol.Id,
-                        _callableId,
-                        storageId.Value);
-                    _state.Storages[symbol.Id] = storageId.Value;
+                    mirArrayStorageId = AllocateMirStorageId();
+                    _mirArrayStorages.Add(new MirArrayStorage(
+                        mirArrayStorageId.Value,
+                        hirParameter.Name,
+                        mirParameterOrigin));
+                    _traceSink?.LinkStorage(
+                        hirParameterSymbol.Id,
+                        _mirCallableId,
+                        mirArrayStorageId.Value);
                 }
-                _state.Values[symbol.Id] = value;
-                _parameters.Add(new MirClassicalParameter(
-                    parameter.Name,
-                    parameterOrigin,
-                    value,
-                    type,
-                    storageId,
-                    parameter.Ownership,
-                    parameter.Access));
+                _currentFlowState.CurrentMirValueByHirSymbolId[
+                        hirParameterSymbol.Id] =
+                    mirParameterValueId;
+                _mirParameters.Add(new MirClassicalParameter(
+                    hirParameter.Name,
+                    mirParameterValueId,
+                    mirArrayStorageId,
+                    hirParameter.Ownership,
+                    hirParameter.Access));
             }
         }
 
-        private void HoistQubitAllocations(IReadOnlyList<HirStatement> statements)
+        private void HoistQubitAllocations(IReadOnlyList<HirStatement> hirStatements)
         {
-            foreach (var use in statements.OfType<HirQubitDeclarationStatement>())
+            foreach (var hirQubitDeclaration in
+                     hirStatements.OfType<HirQubitDeclarationStatement>())
             {
-                var symbol = RequireSymbol(use.Id, $"qubit allocation `{use.Name}`");
-                _state.Declare(symbol.Id);
-                var instructionId = NextInstruction();
-                var qubitId = NextQubitId();
-                var source = SourceOf(use);
-                var qubit = new MirQubitFromUse(
-                    qubitId,
-                    use.Name,
-                    use.Size,
-                    source);
-                RegisterQubitSeed(symbol.Id, qubit);
-                Emit(new MirQubitAllocate(instructionId, qubit, source));
-                _state.Qubits[symbol.Id] = qubit;
+                var hirQubitSymbol = RequireHirDeclarationSymbol(
+                    hirQubitDeclaration.Id,
+                    $"qubit allocation `{hirQubitDeclaration.Name}`");
+                _currentFlowState.TrackDeclaredHirSymbol(hirQubitSymbol.Id);
+                var mirAllocationInstructionId = AllocateMirInstructionId();
+                var mirQubitId = AllocateMirQubitId();
+                var mirOrigin = MirOriginFor(hirQubitDeclaration);
+                var mirAllocatedQubit = new MirQubitFromUse(
+                    mirQubitId,
+                    hirQubitDeclaration.Name,
+                    hirQubitDeclaration.Size,
+                    mirOrigin);
+                RegisterInitialMirQubit(
+                    hirQubitSymbol.Id,
+                    mirAllocatedQubit);
+                EmitMirInstruction(new MirQubitAllocate(
+                    mirAllocationInstructionId,
+                    mirAllocatedQubit,
+                    mirOrigin));
+                _currentFlowState.CurrentMirQubitByHirSymbolId[
+                        hirQubitSymbol.Id] =
+                    mirAllocatedQubit;
             }
         }
 
-        private void LowerStatements(IReadOnlyList<HirStatement> statements)
+        private void LowerStatements(IReadOnlyList<HirStatement> hirStatements)
         {
-            for (var index = 0; index < statements.Count; index++)
+            for (var hirStatementIndex = 0;
+                 hirStatementIndex < hirStatements.Count;
+                 hirStatementIndex++)
             {
-                if (_current is null)
+                if (_currentMirBlockBuilder is null)
                 {
-                    for (; index < statements.Count; index++)
-                        MarkUnreachableDeclarations(statements[index]);
+                    for (;
+                         hirStatementIndex < hirStatements.Count;
+                         hirStatementIndex++)
+                    {
+                        MarkUnreachableDeclarations(
+                            hirStatements[hirStatementIndex]);
+                    }
                     return;
                 }
-                LowerStatement(statements[index]);
+                LowerStatement(hirStatements[hirStatementIndex]);
             }
         }
 
-        private void MarkUnreachableDeclarations(HirStatement statement)
+        private void MarkUnreachableDeclarations(HirStatement hirStatement)
         {
-            if (_trace is null)
+            if (_traceSink is null)
                 return;
 
-            if (_semanticModel.FindSymbol(statement.Id) is { } symbol)
-                _trace.MarkUnreachable(symbol.Id);
+            if (_finalHirArtifact.Model.FindSymbol(hirStatement.Id)
+                is { } hirDeclaredSymbol)
+                _traceSink.MarkUnreachable(hirDeclaredSymbol.Id);
 
-            switch (statement)
+            switch (hirStatement)
             {
-                case HirIfStatement conditional:
-                    foreach (var nested in conditional.Then.Statements)
-                        MarkUnreachableDeclarations(nested);
-                    foreach (var nested in conditional.Else.Statements)
-                        MarkUnreachableDeclarations(nested);
+                case HirIfStatement hirIf:
+                    foreach (var hirNestedStatement in hirIf.Then.Statements)
+                        MarkUnreachableDeclarations(hirNestedStatement);
+                    foreach (var hirNestedStatement in hirIf.Else.Statements)
+                        MarkUnreachableDeclarations(hirNestedStatement);
                     break;
-                case HirForStatement loop:
-                    foreach (var nested in loop.Body.Statements)
-                        MarkUnreachableDeclarations(nested);
+                case HirForStatement hirFor:
+                    foreach (var hirNestedStatement in hirFor.Body.Statements)
+                        MarkUnreachableDeclarations(hirNestedStatement);
                     break;
-                case HirWhileStatement loop:
-                    foreach (var nested in loop.Body.Statements)
-                        MarkUnreachableDeclarations(nested);
+                case HirWhileStatement hirWhile:
+                    foreach (var hirNestedStatement in hirWhile.Body.Statements)
+                        MarkUnreachableDeclarations(hirNestedStatement);
                     break;
-                case HirRepeatStatement loop:
-                    foreach (var nested in loop.Body.Statements)
-                        MarkUnreachableDeclarations(nested);
+                case HirRepeatStatement hirRepeat:
+                    foreach (var hirNestedStatement in hirRepeat.Body.Statements)
+                        MarkUnreachableDeclarations(hirNestedStatement);
                     break;
             }
         }
 
-        private void LowerStatement(HirStatement statement)
+        private void LowerStatement(HirStatement hirStatement)
         {
-            switch (statement)
+            switch (hirStatement)
             {
                 case HirQubitDeclarationStatement:
                     // Local qubits are allocated once in the callable entry block.
                     return;
 
-                case HirVariableDeclarationStatement declaration:
-                    LowerDeclaration(declaration);
+                case HirVariableDeclarationStatement hirDeclaration:
+                    LowerDeclaration(hirDeclaration);
                     return;
 
-                case HirAssignmentStatement assignment:
-                    LowerAssignment(assignment);
+                case HirAssignmentStatement hirAssignment:
+                    LowerAssignment(hirAssignment);
                     return;
 
-                case HirCallStatement call:
-                    LowerStatementCall(call);
+                case HirCallStatement hirCallStatement:
+                    LowerStatementCall(hirCallStatement);
                     return;
 
-                case HirIfStatement conditional:
-                    LowerIf(conditional);
+                case HirIfStatement hirIf:
+                    LowerIf(hirIf);
                     return;
 
-                case HirForStatement loop:
-                    LowerFor(loop);
+                case HirForStatement hirFor:
+                    LowerFor(hirFor);
                     return;
 
-                case HirWhileStatement loop:
-                    LowerWhile(loop);
+                case HirWhileStatement hirWhile:
+                    LowerWhile(hirWhile);
                     return;
 
-                case HirRepeatStatement loop:
-                    LowerRepeat(loop);
+                case HirRepeatStatement hirRepeat:
+                    LowerRepeat(hirRepeat);
                     return;
 
-                case HirReturnStatement returned:
-                    LowerReturn(returned);
+                case HirReturnStatement hirReturn:
+                    LowerReturn(hirReturn);
                     return;
 
                 default:
-                    throw Internal($"unsupported HIR statement {statement.GetType().Name}");
+                    throw MirLoweringError(
+                        $"unsupported HIR statement {hirStatement.GetType().Name}");
             }
         }
 
-        private void LowerDeclaration(HirVariableDeclarationStatement declaration)
+        private void LowerDeclaration(HirVariableDeclarationStatement hirDeclaration)
         {
-            var symbol = RequireSymbol(declaration.Id, $"declaration `{declaration.Name}`");
-            var source = SourceOf(declaration);
+            var hirDeclaredSymbol = RequireHirDeclarationSymbol(
+                hirDeclaration.Id,
+                $"declaration `{hirDeclaration.Name}`");
+            var mirOrigin = MirOriginFor(hirDeclaration);
 
-            if (declaration.IsArray)
+            if (hirDeclaration.IsArray)
             {
-                var elementType = declaration.Type
-                    ?? symbol.Type
-                    ?? throw Internal($"array `{declaration.Name}` has no element type");
-                var (length, initialization, elements) = declaration.Value switch
-                {
-                    HirArrayCreationExpression allocation =>
-                        (allocation.Length, MirArrayInitialization.ZeroInitialized, new List<MirValueId>()),
-                    HirArrayLiteralExpression literal =>
-                        (literal.Elements.Count, MirArrayInitialization.ExplicitElements,
-                            literal.Elements
-                                .Select(element => LowerExpressionAs(
-                                    element,
-                                    MirType.Scalar(elementType)))
-                                .ToList()),
-                    _ => throw Internal($"validated array `{declaration.Name}` has a non-array initializer"),
-                };
+                var declaredElementQType = hirDeclaration.Type
+                    ?? hirDeclaredSymbol.Type
+                    ?? throw MirLoweringError(
+                        $"array `{hirDeclaration.Name}` has no element type");
+                int declaredArrayLength;
+                MirArrayInitialization mirArrayInitialization;
+                List<MirValueId> mirElementValueIds;
 
-                var instructionId = NextInstruction();
-                var storageId = NextStorage();
-                var resultType = MirType.Array(elementType, length);
-                var result = AddInstructionResult(instructionId, resultType, symbol.Id, source);
-                _storages.Add(new MirArrayStorage(
-                    storageId,
-                    declaration.Name,
-                    MirArrayStorageKind.Local,
-                    MirStorageAliasMode.UniqueLocal,
-                    resultType,
-                    ParameterIndex: null,
-                    instructionId,
-                    source));
-                _trace?.LinkStorage(
-                    symbol.Id,
-                    _callableId,
-                    storageId);
-                Emit(new MirArrayCreate(
-                    instructionId,
-                    result,
-                    storageId,
-                    elementType,
-                    initialization,
-                    length,
-                    elements,
-                    source));
-                _state.Declare(symbol.Id);
-                _state.Values[symbol.Id] = result;
-                _state.Storages[symbol.Id] = storageId;
+                switch (hirDeclaration.Value)
+                {
+                    case HirArrayCreationExpression hirArrayCreation:
+                        declaredArrayLength = hirArrayCreation.Length;
+                        mirArrayInitialization =
+                            MirArrayInitialization.ZeroInitialized;
+                        mirElementValueIds = new List<MirValueId>();
+                        break;
+
+                    case HirArrayLiteralExpression hirArrayLiteral:
+                        declaredArrayLength = hirArrayLiteral.Elements.Count;
+                        mirArrayInitialization =
+                            MirArrayInitialization.ExplicitElements;
+                        mirElementValueIds =
+                            new List<MirValueId>(hirArrayLiteral.Elements.Count);
+                        foreach (var hirElementExpression in hirArrayLiteral.Elements)
+                        {
+                            var mirElementValueId = LowerExpressionAs(
+                                hirElementExpression,
+                                MirType.Scalar(declaredElementQType));
+                            mirElementValueIds.Add(mirElementValueId);
+                        }
+                        break;
+
+                    default:
+                        throw MirLoweringError(
+                            $"validated array `{hirDeclaration.Name}` "
+                            + "has a non-array initializer");
+                }
+
+                var mirArrayCreationInstructionId =
+                    AllocateMirInstructionId();
+                var mirArrayStorageId = AllocateMirStorageId();
+                var mirArrayType = MirType.Array(
+                    declaredElementQType,
+                    declaredArrayLength);
+                var mirArrayValueId = AddInstructionResult(
+                    mirArrayCreationInstructionId,
+                    mirArrayType,
+                    hirDeclaredSymbol.Id,
+                    mirOrigin);
+                _mirArrayStorages.Add(new MirArrayStorage(
+                    mirArrayStorageId,
+                    hirDeclaration.Name,
+                    mirOrigin));
+                _traceSink?.LinkStorage(
+                    hirDeclaredSymbol.Id,
+                    _mirCallableId,
+                    mirArrayStorageId);
+                EmitMirInstruction(new MirArrayCreate(
+                    mirArrayCreationInstructionId,
+                    mirArrayValueId,
+                    mirArrayStorageId,
+                    mirArrayInitialization,
+                    mirElementValueIds,
+                    mirOrigin));
+                _currentFlowState.TrackDeclaredHirSymbol(
+                    hirDeclaredSymbol.Id);
+                _currentFlowState.CurrentMirValueByHirSymbolId[
+                        hirDeclaredSymbol.Id] =
+                    mirArrayValueId;
                 return;
             }
 
-            var declaredType = symbol.Type
-                ?? declaration.Type
-                ?? throw Internal($"scalar `{declaration.Name}` has no inferred type");
-            var value = LowerExpressionAs(
-                declaration.Value,
-                MirType.Scalar(declaredType));
-            AttachSymbol(value, symbol.Id);
-            _state.Declare(symbol.Id);
-            _state.Values[symbol.Id] = value;
+            var declaredScalarQType = hirDeclaredSymbol.Type
+                ?? hirDeclaration.Type
+                ?? throw MirLoweringError(
+                    $"scalar `{hirDeclaration.Name}` has no inferred type");
+            var mirInitialValueId = LowerExpressionAs(
+                hirDeclaration.Value,
+                MirType.Scalar(declaredScalarQType));
+            TraceMirValueForHirSymbol(
+                mirInitialValueId,
+                hirDeclaredSymbol.Id);
+            _currentFlowState.TrackDeclaredHirSymbol(hirDeclaredSymbol.Id);
+            _currentFlowState.CurrentMirValueByHirSymbolId[
+                    hirDeclaredSymbol.Id] =
+                mirInitialValueId;
         }
 
-        private void LowerAssignment(HirAssignmentStatement assignment)
+        private void LowerAssignment(HirAssignmentStatement hirAssignment)
         {
-            var source = SourceOf(assignment);
+            var mirOrigin = MirOriginFor(hirAssignment);
 
-            if (assignment.Target is HirNameExpression name)
+            if (hirAssignment.Target is HirNameExpression hirNameTarget)
             {
-                var symbolId = RequireReferencedSymbol(
-                    name,
-                    $"assignment target `{name.Name}`");
-                var expected = _state.Values.TryGetValue(symbolId, out var current)
-                    ? TypeOf(current)
-                    : throw Internal($"assignment target `{name.Name}` has no SSA state");
-                var value = LowerExpressionAs(assignment.Value, expected);
-                AttachSymbol(value, symbolId);
-                _state.Values[symbolId] = value;
+                var hirTargetSymbolId = SymbolIdOf(
+                    hirNameTarget,
+                    $"assignment target `{hirNameTarget.Name}`");
+                var mirTargetType =
+                    _currentFlowState.CurrentMirValueByHirSymbolId.TryGetValue(
+                        hirTargetSymbolId,
+                        out var currentMirValueId)
+                    ? MirTypeOf(currentMirValueId)
+                    : throw MirLoweringError(
+                        $"assignment target `{hirNameTarget.Name}` "
+                        + "has no SSA state");
+                var mirAssignedValueId = LowerExpressionAs(
+                    hirAssignment.Value,
+                    mirTargetType);
+                TraceMirValueForHirSymbol(
+                    mirAssignedValueId,
+                    hirTargetSymbolId);
+                _currentFlowState.CurrentMirValueByHirSymbolId[
+                        hirTargetSymbolId] =
+                    mirAssignedValueId;
                 return;
             }
 
-            if (assignment.Target is not HirIndexExpression
+            if (hirAssignment.Target is not HirIndexExpression
                 {
-                    Receiver: HirNameExpression receiver,
-                } indexedTarget)
+                    Receiver: HirNameExpression hirArrayReceiver,
+                } hirIndexedTarget)
             {
-                throw Internal(
-                    $"unsupported assignment target `{HirExpressions.Render(assignment.Target)}`");
+                throw MirLoweringError(
+                    "unsupported assignment target "
+                    + $"`{HirExpressions.Render(hirAssignment.Target)}`");
             }
 
-            var indexedSymbolId = RequireReferencedSymbol(
-                receiver,
-                $"assignment target `{receiver.Name}`");
-            if (!_state.Values.TryGetValue(indexedSymbolId, out var array))
-                throw Internal($"indexed assignment target `{receiver.Name}` has no array state");
-            var arrayType = TypeOf(array);
-            if (!arrayType.IsArray)
-                throw Internal($"indexed assignment target `{receiver.Name}` is not an array");
-            var index = LowerExpressionAs(
-                indexedTarget.Index,
+            var hirArraySymbolId = SymbolIdOf(
+                hirArrayReceiver,
+                $"assignment target `{hirArrayReceiver.Name}`");
+            if (!_currentFlowState.CurrentMirValueByHirSymbolId.TryGetValue(
+                    hirArraySymbolId,
+                    out var currentMirArrayValueId))
+            {
+                throw MirLoweringError(
+                    $"indexed assignment target `{hirArrayReceiver.Name}` "
+                    + "has no array state");
+            }
+            var mirArrayType = MirTypeOf(currentMirArrayValueId);
+            if (!mirArrayType.IsArray)
+            {
+                throw MirLoweringError(
+                    $"indexed assignment target `{hirArrayReceiver.Name}` "
+                    + "is not an array");
+            }
+            var mirIndexValueId = LowerExpressionAs(
+                hirIndexedTarget.Index,
                 MirType.Scalar(QType.Int));
-            var storedValue = LowerExpressionAs(
-                assignment.Value,
-                MirType.Scalar(arrayType.ElementType));
-            var instructionId = NextInstruction();
-            var result = AddInstructionResult(
-                instructionId,
-                arrayType,
-                indexedSymbolId,
-                source);
-            Emit(new MirArrayStore(instructionId, result, array, index, storedValue, source));
-            RegisterBoundsSite(
-                indexedTarget,
-                instructionId,
-                MirIndexedAccessKind.ArrayStore);
-            _state.Values[indexedSymbolId] = result;
+            var mirStoredValueId = LowerExpressionAs(
+                hirAssignment.Value,
+                MirType.Scalar(mirArrayType.ElementType));
+            var mirArrayStoreInstructionId = AllocateMirInstructionId();
+            var mirUpdatedArrayValueId = AddInstructionResult(
+                mirArrayStoreInstructionId,
+                mirArrayType,
+                hirArraySymbolId,
+                mirOrigin);
+            EmitMirInstruction(new MirArrayStore(
+                mirArrayStoreInstructionId,
+                mirUpdatedArrayValueId,
+                currentMirArrayValueId,
+                mirIndexValueId,
+                mirStoredValueId,
+                mirOrigin));
+            _currentFlowState.CurrentMirValueByHirSymbolId[
+                    hirArraySymbolId] =
+                mirUpdatedArrayValueId;
         }
 
-        private void LowerStatementCall(HirCallStatement statement)
+        private void LowerStatementCall(
+            HirCallStatement hirCallStatement)
         {
-            var source = SourceOf(statement);
-            var call = statement.Call;
-            var targetSymbol = RequireCallTarget(call);
-            var callee = ResolveUserCallable(targetSymbol);
-            if (targetSymbol.Kind == SymbolKind.Callable
-                && callee is { IsFunction: true })
+            var mirCallOrigin = MirOriginFor(hirCallStatement);
+            var hirCall = hirCallStatement.Call;
+            var semanticCallTargetSymbol =
+                RequireHirCallTargetSymbol(hirCall);
+            if (semanticCallTargetSymbol.Kind == SymbolKind.Callable)
             {
-                LowerPureCall(
-                    new MirUserCallableTarget(_callableIds[callee.Id]),
-                    callee,
-                    call);
-                return;
-            }
-
-            if (targetSymbol.Kind == SymbolKind.Callable
-                && callee is not null)
-            {
-                LowerOperationCall(statement, callee, source);
-                return;
-            }
-
-            if (targetSymbol.Kind != SymbolKind.BuiltinGate)
-            {
-                throw Internal(
-                    $"statement call `{call.Name}` targets semantic symbol kind {targetSymbol.Kind}");
-            }
-            var gateName = targetSymbol.SourceName;
-            var signature = QoraGates.SigOf(
-                gateName,
-                statement.Modifiers.Count(modifier => modifier == QGateModifier.Controlled))
-                ?? throw Internal($"validated built-in gate `{gateName}` has no signature");
-            var operands = new List<MirCallOperand>(call.Arguments.Count);
-            for (var index = 0; index < call.Arguments.Count; index++)
-            {
-                var argument = call.Arguments[index];
-                var expected = signature.Parameters[index];
-                if (expected.Type == QType.Qubit)
+                var hirUserCallable = RequireHirCallableDeclaration(
+                    semanticCallTargetSymbol);
+                if (hirUserCallable.IsFunction)
                 {
-                    operands.Add(new MirQubitCallOperand(
-                        LowerQubitAccess(argument),
-                        argument.Ownership,
-                        argument.Access));
+                    var mirUserCallableId =
+                        new MirCallableId(hirUserCallable.Id.Value);
+                    LowerPureCall(
+                        new MirUserCallableTarget(
+                            mirUserCallableId),
+                        hirUserCallable,
+                        hirCall);
+                    return;
+                }
+
+                LowerUserOperationCall(
+                    hirCallStatement,
+                    hirUserCallable,
+                    mirCallOrigin);
+                return;
+            }
+
+            if (semanticCallTargetSymbol.Kind
+                != SymbolKind.BuiltinGate)
+            {
+                throw MirLoweringError(
+                    $"statement call `{hirCall.Name}` targets semantic symbol kind "
+                    + semanticCallTargetSymbol.Kind);
+            }
+            var builtinGateName =
+                semanticCallTargetSymbol.SourceName;
+            var builtinGateSignature = QoraGates.SigOf(
+                builtinGateName,
+                hirCallStatement.Modifiers.Count(
+                    modifier => modifier == QGateModifier.Controlled))
+                ?? throw MirLoweringError(
+                    $"validated built-in gate `{builtinGateName}` has no signature");
+            var mirCallOperands =
+                new List<MirCallOperand>(hirCall.Arguments.Count);
+            for (var argumentIndex = 0;
+                 argumentIndex < hirCall.Arguments.Count;
+                 argumentIndex++)
+            {
+                var hirArgument =
+                    hirCall.Arguments[argumentIndex];
+                var builtinParameterSpec =
+                    builtinGateSignature.Parameters[argumentIndex];
+                if (builtinParameterSpec.Type == QType.Qubit)
+                {
+                    mirCallOperands.Add(new MirQubitCallOperand(
+                        LowerQubitAccess(hirArgument),
+                        hirArgument.Ownership,
+                        hirArgument.Access));
                 }
                 else
                 {
-                    var value = LowerExpressionAs(
-                        argument.Expression,
-                        MirType.Scalar(expected.Type));
-                    operands.Add(new MirClassicalCallOperand(
-                        value,
-                        argument.Ownership,
-                        argument.Access));
+                    var mirArgumentValueId = LowerExpressionAs(
+                        hirArgument.Expression,
+                        MirType.Scalar(builtinParameterSpec.Type));
+                    mirCallOperands.Add(new MirClassicalCallOperand(
+                        mirArgumentValueId,
+                        hirArgument.Ownership,
+                        hirArgument.Access));
                 }
             }
 
-            var instructionId = NextInstruction();
-            EmitQuantumApply(
-                instructionId,
-                new MirBuiltinGateTarget(gateName),
-                operands,
+            var mirCallInstructionId = AllocateMirInstructionId();
+            EmitMirQuantumApply(
+                mirCallInstructionId,
+                new MirBuiltinGateTarget(builtinGateName),
+                mirCallOperands,
                 Array.Empty<MirMutableArrayResult>(),
-                LowerModifiers(statement.Modifiers),
-                WrittenBuiltinQubitOperands(statement, gateName),
-                source);
-            RegisterQubitArgumentBoundsSites(
-                call.Arguments,
-                signature.Parameters,
-                instructionId);
+                LowerModifiersToMirFunctors(hirCallStatement.Modifiers),
+                WrittenBuiltinQubitOperandIndexes(
+                    hirCallStatement,
+                    builtinGateName),
+                mirCallOrigin);
         }
 
-        private void LowerOperationCall(
-            HirCallStatement statement,
-            HirCallable callee,
-            MirOriginRef source)
+        private void LowerUserOperationCall(
+            HirCallStatement hirCallStatement,
+            HirCallable hirUserOperation,
+            MirOriginId mirCallOrigin)
         {
-            var call = statement.Call;
-            var instructionId = NextInstruction();
-            var operands = new List<MirCallOperand>(call.Arguments.Count);
-            var mutableResults = new List<MirMutableArrayResult>();
-            var mutableBindings = new List<(SymbolId Symbol, MirValueId Result)>();
+            var hirCall = hirCallStatement.Call;
+            var mirCallInstructionId = AllocateMirInstructionId();
+            var mirCallOperands =
+                new List<MirCallOperand>(hirCall.Arguments.Count);
+            var mirMutableArrayResults =
+                new List<MirMutableArrayResult>();
+            var mirMutableArrayValueUpdates =
+                new List<(
+                    SymbolId HirSymbolId,
+                    MirValueId UpdatedMirArrayValueId)>();
 
-            for (var index = 0; index < call.Arguments.Count; index++)
+            for (var argumentIndex = 0;
+                 argumentIndex < hirCall.Arguments.Count;
+                 argumentIndex++)
             {
-                var argument = call.Arguments[index];
-                var parameter = callee.Parameters[index];
-                if (parameter.Type == QType.Qubit)
+                var hirArgument =
+                    hirCall.Arguments[argumentIndex];
+                var hirParameter =
+                    hirUserOperation.Parameters[argumentIndex];
+                if (hirParameter.Type == QType.Qubit)
                 {
-                    operands.Add(new MirQubitCallOperand(
-                        LowerQubitAccess(argument),
-                        argument.Ownership,
-                        argument.Access));
+                    mirCallOperands.Add(new MirQubitCallOperand(
+                        LowerQubitAccess(hirArgument),
+                        hirArgument.Ownership,
+                        hirArgument.Access));
                     continue;
                 }
 
-                var value = LowerExpression(argument.Expression);
-                var expected = parameter.IsArray
-                    ? MirType.Array(parameter.Type, parameter.RegisterSize)
-                    : MirType.Scalar(parameter.Type);
-                value = EnsureCallType(
-                    value,
-                    expected,
-                    SourceOf(argument.Expression));
-                operands.Add(new MirClassicalCallOperand(value, argument.Ownership, argument.Access));
+                var mirArgumentValueId =
+                    LowerExpression(hirArgument.Expression);
+                var expectedMirArgumentType = hirParameter.IsArray
+                    ? MirType.Array(
+                        hirParameter.Type,
+                        hirParameter.RegisterSize)
+                    : MirType.Scalar(hirParameter.Type);
+                mirArgumentValueId = EnsureCallType(
+                    mirArgumentValueId,
+                    expectedMirArgumentType,
+                    MirOriginFor(hirArgument.Expression));
+                mirCallOperands.Add(new MirClassicalCallOperand(
+                    mirArgumentValueId,
+                    hirArgument.Ownership,
+                    hirArgument.Access));
 
-                if (parameter.IsArray
-                    && parameter.Ownership == QOwnershipMode.Borrowed
-                    && parameter.Access == QAccessMode.Mutable)
+                if (hirParameter.IsArray
+                    && hirParameter.Ownership == QOwnershipMode.Borrowed
+                    && hirParameter.Access == QAccessMode.Mutable)
                 {
-                    var actualType = TypeOf(value);
-                    var symbolId = SymbolOfWholeArgument(argument)
-                        ?? throw Internal(
-                            $"mutable array argument {index} of `{callee.Name}` is not a binding");
-                    var result = AddInstructionResult(
-                        instructionId,
-                        actualType,
-                        symbolId,
-                        source,
-                        mutableResults.Count);
-                    mutableResults.Add(new MirMutableArrayResult(index, result));
-                    mutableBindings.Add((symbolId, result));
+                    var actualMirArgumentType =
+                        MirTypeOf(mirArgumentValueId);
+                    var hirArgumentSymbolId =
+                        SymbolIdOfWholeArgument(hirArgument)
+                        ?? throw MirLoweringError(
+                            $"mutable array argument {argumentIndex} of "
+                            + $"`{hirUserOperation.Name}` is not a binding");
+                    var mirUpdatedArrayValueId =
+                        AddInstructionResult(
+                            mirCallInstructionId,
+                            actualMirArgumentType,
+                            hirArgumentSymbolId,
+                            mirCallOrigin,
+                            mirMutableArrayResults.Count);
+                    mirMutableArrayResults.Add(
+                        new MirMutableArrayResult(
+                            argumentIndex,
+                            mirUpdatedArrayValueId));
+                    mirMutableArrayValueUpdates.Add((
+                        hirArgumentSymbolId,
+                        mirUpdatedArrayValueId));
                 }
             }
 
-            EmitQuantumApply(
-                instructionId,
-                new MirUserCallableTarget(_callableIds[callee.Id]),
-                operands,
-                mutableResults,
-                LowerModifiers(statement.Modifiers),
-                WrittenUserQubitOperands(callee),
-                source);
-            RegisterQubitArgumentBoundsSites(
-                call.Arguments,
-                callee.Parameters,
-                instructionId);
-            foreach (var (symbol, result) in mutableBindings)
-                _state.Values[symbol] = result;
+            var mirUserOperationId =
+                new MirCallableId(hirUserOperation.Id.Value);
+            EmitMirQuantumApply(
+                mirCallInstructionId,
+                new MirUserCallableTarget(
+                    mirUserOperationId),
+                mirCallOperands,
+                mirMutableArrayResults,
+                LowerModifiersToMirFunctors(hirCallStatement.Modifiers),
+                WrittenUserQubitOperandIndexes(hirUserOperation),
+                mirCallOrigin);
+            foreach (var (
+                         hirSymbolId,
+                         updatedMirArrayValueId) in mirMutableArrayValueUpdates)
+            {
+                _currentFlowState.CurrentMirValueByHirSymbolId[
+                        hirSymbolId] =
+                    updatedMirArrayValueId;
+            }
         }
 
         private MirValueId LowerPureCall(
-            MirCallTarget target,
-            HirCallable? callee,
-            HirCallExpression call)
+            MirCallTarget mirCallTarget,
+            HirCallable? hirUserFunction,
+            HirCallExpression hirCall)
         {
-            var source = SourceOf(call);
-            IReadOnlyList<HirParameter>? parameters = callee?.Parameters;
-            var operands = new List<MirCallOperand>(call.Arguments.Count);
-            for (var index = 0; index < call.Arguments.Count; index++)
+            var mirCallOrigin = MirOriginFor(hirCall);
+            IReadOnlyList<HirParameter>? hirUserFunctionParameters =
+                hirUserFunction?.Parameters;
+            var mirCallOperands =
+                new List<MirCallOperand>(hirCall.Arguments.Count);
+            for (var argumentIndex = 0;
+                 argumentIndex < hirCall.Arguments.Count;
+                 argumentIndex++)
             {
-                var argument = call.Arguments[index].Expression;
-                var value = LowerExpression(argument);
-                if (parameters is not null)
+                var hirArgumentExpression =
+                    hirCall.Arguments[argumentIndex].Expression;
+                var mirArgumentValueId = LowerExpression(
+                    hirArgumentExpression);
+                if (hirUserFunctionParameters is not null)
                 {
-                    var parameter = parameters[index];
-                    var expected = parameter.IsArray
-                        ? MirType.Array(parameter.Type, parameter.RegisterSize)
-                        : MirType.Scalar(parameter.Type);
-                    value = EnsureCallType(
-                        value,
-                        expected,
-                        SourceOf(argument));
+                    var hirParameter =
+                        hirUserFunctionParameters[argumentIndex];
+                    var expectedMirArgumentType =
+                        hirParameter.IsArray
+                        ? MirType.Array(
+                            hirParameter.Type,
+                            hirParameter.RegisterSize)
+                        : MirType.Scalar(hirParameter.Type);
+                    mirArgumentValueId = EnsureCallType(
+                        mirArgumentValueId,
+                        expectedMirArgumentType,
+                        MirOriginFor(hirArgumentExpression));
                 }
-                operands.Add(new MirClassicalCallOperand(value));
+                mirCallOperands.Add(
+                    new MirClassicalCallOperand(
+                        mirArgumentValueId));
             }
 
-            var resultType = target switch
+            var mirCallResultType = mirCallTarget switch
             {
-                MirUserCallableTarget when callee?.ReturnType is { } returns =>
-                    MirType.Scalar(returns),
-                MirBuiltinFunctionTarget builtin
-                    when QoraGates.Functions.TryGetValue(builtin.Name, out var function) =>
-                    MirType.Scalar(function.Returns),
-                _ => throw Internal($"pure target `{target.DisplayName}` has no return type"),
+                MirUserCallableTarget
+                    when hirUserFunction?.ReturnType
+                        is { } hirReturnQType =>
+                    MirType.Scalar(hirReturnQType),
+                MirBuiltinFunctionTarget mirBuiltinTarget
+                    when QoraGates.Functions.TryGetValue(
+                        mirBuiltinTarget.Name,
+                        out var builtinFunctionSignature) =>
+                    MirType.Scalar(builtinFunctionSignature.Returns),
+                _ => throw MirLoweringError(
+                    $"pure target `{mirCallTarget.DisplayName}` has no return type"),
             };
-            var instructionId = NextInstruction();
-            var result = AddInstructionResult(instructionId, resultType, null, source);
-            Emit(new MirPureCall(instructionId, result, target, operands, source));
-            return result;
+            var mirCallInstructionId = AllocateMirInstructionId();
+            var mirCallResultValueId = AddInstructionResult(
+                mirCallInstructionId,
+                mirCallResultType,
+                null,
+                mirCallOrigin);
+            EmitMirInstruction(new MirPureCall(
+                mirCallInstructionId,
+                mirCallResultValueId,
+                mirCallTarget,
+                mirCallOperands,
+                mirCallOrigin));
+            return mirCallResultValueId;
         }
 
-        private void LowerIf(HirIfStatement conditional)
+        private void LowerIf(HirIfStatement hirIf)
         {
-            var source = SourceOf(conditional);
-            var condition = LowerExpressionAs(
-                conditional.Condition,
+            var mirOrigin = MirOriginFor(hirIf);
+            var mirConditionValueId = LowerExpressionAs(
+                hirIf.Condition,
                 MirType.Scalar(QType.Bit));
-            var branchBlock = RequireCurrent();
-            var before = _state.Clone();
-            var thenBlock = NewBlock(source);
-            var elseBlock = NewBlock(source);
-            branchBlock.Terminator = new MirBranch(
-                condition,
-                thenBlock.Id,
+            var mirBranchBlock = RequireCurrentMirBlock();
+            var flowStateBeforeBranch = _currentFlowState.Clone();
+            var mirThenBlock = CreateMirBlock(mirOrigin);
+            var mirElseBlock = CreateMirBlock(mirOrigin);
+            mirBranchBlock.Terminator = new MirBranch(
+                mirConditionValueId,
+                mirThenBlock.Id,
                 Array.Empty<MirValueId>(),
-                elseBlock.Id,
+                mirElseBlock.Id,
                 Array.Empty<MirValueId>(),
-                source);
+                mirOrigin);
 
-            var thenExit = LowerScopedBranch(
-                thenBlock,
-                before,
-                conditional.Then.Statements);
-            var elseExit = LowerScopedBranch(
-                elseBlock,
-                before,
-                conditional.Else.Statements);
+            var thenBranchExit = LowerScopedBranch(
+                mirThenBlock,
+                flowStateBeforeBranch,
+                hirIf.Then.Statements);
+            var elseBranchExit = LowerScopedBranch(
+                mirElseBlock,
+                flowStateBeforeBranch,
+                hirIf.Else.Statements);
 
-            if (thenExit.Block is null && elseExit.Block is null)
+            if (thenBranchExit.ExitBlock is null
+                && elseBranchExit.ExitBlock is null)
             {
-                _current = null;
-                _state = before;
+                _currentMirBlockBuilder = null;
+                _currentFlowState = flowStateBeforeBranch;
                 return;
             }
 
-            var merge = NewBlock(source);
-            if (thenExit.Block is null || elseExit.Block is null)
+            var mirMergeBlock = CreateMirBlock(mirOrigin);
+            if (thenBranchExit.ExitBlock is null
+                || elseBranchExit.ExitBlock is null)
             {
-                var live = thenExit.Block is not null ? thenExit : elseExit;
-                live.Block!.Terminator = new MirJump(
-                    merge.Id,
+                var survivingBranchExit =
+                    thenBranchExit.ExitBlock is not null
+                        ? thenBranchExit
+                        : elseBranchExit;
+                survivingBranchExit.ExitBlock!.Terminator = new MirJump(
+                    mirMergeBlock.Id,
                     Array.Empty<MirValueId>(),
-                    source);
-                _current = merge;
-                _state = live.State;
+                    mirOrigin);
+                _currentMirBlockBuilder = mirMergeBlock;
+                _currentFlowState = survivingBranchExit.ExitFlowState;
                 return;
             }
 
-            var merged = before.Clone();
-            var thenArguments = new List<MirValueId>();
-            var elseArguments = new List<MirValueId>();
-            foreach (var symbol in before.Values.Keys.OrderBy(id => id.Value))
+            var mergedFlowState = flowStateBeforeBranch.Clone();
+            var mirThenPhiArguments = new List<MirValueId>();
+            var mirElsePhiArguments = new List<MirValueId>();
+            foreach (var hirSymbolId in
+                     flowStateBeforeBranch.CurrentMirValueByHirSymbolId.Keys.OrderBy(
+                         id => id.Value))
             {
-                if (!thenExit.State.Values.TryGetValue(symbol, out var thenValue)
-                    || !elseExit.State.Values.TryGetValue(symbol, out var elseValue))
-                    continue;
-                if (thenValue == elseValue)
+                if (!thenBranchExit.ExitFlowState
+                        .CurrentMirValueByHirSymbolId.TryGetValue(
+                        hirSymbolId,
+                        out var mirThenValueId)
+                    || !elseBranchExit.ExitFlowState
+                        .CurrentMirValueByHirSymbolId.TryGetValue(
+                        hirSymbolId,
+                        out var mirElseValueId))
                 {
-                    merged.Values[symbol] = thenValue;
+                    continue;
+                }
+                if (mirThenValueId == mirElseValueId)
+                {
+                    mergedFlowState.CurrentMirValueByHirSymbolId[
+                            hirSymbolId] =
+                        mirThenValueId;
                     continue;
                 }
 
-                var type = TypeOf(thenValue);
-                if (TypeOf(elseValue) != type)
-                    throw Internal($"branch values for symbol {symbol} have different MIR types");
-                var phi = AddBlockArgument(merge, type, symbol, source);
-                thenArguments.Add(thenValue);
-                elseArguments.Add(elseValue);
-                merged.Values[symbol] = phi;
+                var mirValueType = MirTypeOf(mirThenValueId);
+                if (MirTypeOf(mirElseValueId) != mirValueType)
+                {
+                    throw MirLoweringError(
+                        $"branch values for symbol {hirSymbolId} "
+                        + "have different MIR types");
+                }
+                var mirPhiValueId = AddBlockArgument(
+                    mirMergeBlock,
+                    mirValueType,
+                    hirSymbolId,
+                    mirOrigin);
+                mirThenPhiArguments.Add(mirThenValueId);
+                mirElsePhiArguments.Add(mirElseValueId);
+                mergedFlowState.CurrentMirValueByHirSymbolId[hirSymbolId] =
+                    mirPhiValueId;
             }
 
             MergeQubitStatesAtJoin(
-                merged,
-                thenExit.State,
-                thenExit.Block!,
+                mergedFlowState,
+                thenBranchExit.ExitFlowState,
+                thenBranchExit.ExitBlock!,
                 firstSuccessorOrdinal: 0,
-                elseExit.State,
-                elseExit.Block!,
+                elseBranchExit.ExitFlowState,
+                elseBranchExit.ExitBlock!,
                 secondSuccessorOrdinal: 0,
-                merge,
-                source);
+                mirMergeBlock,
+                mirOrigin);
 
-            thenExit.Block.Terminator = new MirJump(merge.Id, thenArguments, source);
-            elseExit.Block.Terminator = new MirJump(merge.Id, elseArguments, source);
-            _current = merge;
-            _state = merged;
+            thenBranchExit.ExitBlock.Terminator = new MirJump(
+                mirMergeBlock.Id,
+                mirThenPhiArguments,
+                mirOrigin);
+            elseBranchExit.ExitBlock.Terminator = new MirJump(
+                mirMergeBlock.Id,
+                mirElsePhiArguments,
+                mirOrigin);
+            _currentMirBlockBuilder = mirMergeBlock;
+            _currentFlowState = mergedFlowState;
         }
 
-        private (BlockBuilder? Block, FlowState State) LowerScopedBranch(
-            BlockBuilder block,
-            FlowState seed,
-            IReadOnlyList<HirStatement> statements)
+        private (
+            MirBlockBuilder? ExitBlock,
+            LoweringFlowState ExitFlowState) LowerScopedBranch(
+            MirBlockBuilder mirBranchBlock,
+            LoweringFlowState entryFlowState,
+            IReadOnlyList<HirStatement> hirStatements)
         {
-            _current = block;
-            _state = seed.Clone();
-            _state.PushScope();
-            LowerStatements(statements);
-            _state.PopScope();
-            return (_current, _state);
+            _currentMirBlockBuilder = mirBranchBlock;
+            _currentFlowState = entryFlowState.Clone();
+            _currentFlowState.PushHirSymbolLifetimeFrame();
+            LowerStatements(hirStatements);
+            _currentFlowState.PopHirSymbolLifetimeFrame();
+            return (_currentMirBlockBuilder, _currentFlowState);
         }
 
-        private void LowerFor(HirForStatement loop)
+        private void LowerFor(HirForStatement hirFor)
         {
-            var source = SourceOf(loop);
-            var from = LowerExpressionAs(
-                loop.From,
+            var mirOrigin = MirOriginFor(hirFor);
+            var mirRangeStartValueId = LowerExpressionAs(
+                hirFor.From,
                 MirType.Scalar(QType.Int));
-            var to = LowerExpressionAs(
-                loop.To,
+            var mirRangeEndValueId = LowerExpressionAs(
+                hirFor.To,
                 MirType.Scalar(QType.Int));
-            var step = EmitConstant(QType.Int, "1", source);
-            const bool descending = false;
-            var before = _state.Clone();
-            var preheader = RequireCurrent();
-            var header = NewBlock(source);
-            var body = NewBlock(source);
-            var exit = NewBlock(source);
+            var mirStepValueId = EmitConstant(QType.Int, "1", mirOrigin);
+            const bool isDescendingRange = false;
+            var flowStateBeforeLoop = _currentFlowState.Clone();
+            var mirPreheaderBlock = RequireCurrentMirBlock();
+            var mirHeaderBlock = CreateMirBlock(mirOrigin);
+            var mirBodyBlock = CreateMirBlock(mirOrigin);
+            var mirExitBlock = CreateMirBlock(mirOrigin);
 
-            var headerState = before.Clone();
-            var initialArguments = new List<MirValueId>();
-            foreach (var symbol in before.Values.Keys.OrderBy(id => id.Value))
+            var loopHeaderFlowState = flowStateBeforeLoop.Clone();
+            var mirPreheaderArguments = new List<MirValueId>();
+            foreach (var hirSymbolId in
+                     flowStateBeforeLoop.CurrentMirValueByHirSymbolId.Keys.OrderBy(
+                         id => id.Value))
             {
-                var initial = before.Values[symbol];
-                var argument = AddBlockArgument(header, TypeOf(initial), symbol, source);
-                headerState.Values[symbol] = argument;
-                initialArguments.Add(initial);
+                var mirInitialValueId =
+                    flowStateBeforeLoop.CurrentMirValueByHirSymbolId[
+                        hirSymbolId];
+                var mirHeaderPhiValueId = AddBlockArgument(
+                    mirHeaderBlock,
+                    MirTypeOf(mirInitialValueId),
+                    hirSymbolId,
+                    mirOrigin);
+                loopHeaderFlowState.CurrentMirValueByHirSymbolId[
+                        hirSymbolId] =
+                    mirHeaderPhiValueId;
+                mirPreheaderArguments.Add(mirInitialValueId);
             }
-            var qubitPhis = CreateLoopQubitPhis(
-                before,
-                headerState,
-                preheader,
+            var loopQubitPhiBindings = CreateLoopQubitPhiBindings(
+                flowStateBeforeLoop,
+                loopHeaderFlowState,
+                mirPreheaderBlock,
                 preheaderSuccessorOrdinal: 0,
-                header,
-                source);
+                mirHeaderBlock,
+                mirOrigin);
 
-            headerState.PushScope();
-            var loopSymbol = RequireSymbol(loop.Id, $"loop variable `{loop.Variable}`");
-            var loopValue = AddBlockArgument(
-                header,
+            loopHeaderFlowState.PushHirSymbolLifetimeFrame();
+            var hirLoopVariableSymbol = RequireHirDeclarationSymbol(
+                hirFor.Id,
+                $"loop variable `{hirFor.Variable}`");
+            var mirLoopVariableValueId = AddBlockArgument(
+                mirHeaderBlock,
                 MirType.Scalar(QType.Int),
-                loopSymbol.Id,
-                source);
-            headerState.Declare(loopSymbol.Id);
-            headerState.Values[loopSymbol.Id] = loopValue;
-            initialArguments.Add(from);
-            preheader.Terminator = new MirJump(header.Id, initialArguments, source);
+                hirLoopVariableSymbol.Id,
+                mirOrigin);
+            loopHeaderFlowState.TrackDeclaredHirSymbol(
+                hirLoopVariableSymbol.Id);
+            loopHeaderFlowState.CurrentMirValueByHirSymbolId[
+                    hirLoopVariableSymbol.Id] =
+                mirLoopVariableValueId;
+            mirPreheaderArguments.Add(mirRangeStartValueId);
+            mirPreheaderBlock.Terminator = new MirJump(
+                mirHeaderBlock.Id,
+                mirPreheaderArguments,
+                mirOrigin);
 
-            _current = header;
-            _state = headerState.Clone();
-            var condition = EmitBinary(
-                descending ? MirBinaryOperator.GreaterOrEqual : MirBinaryOperator.LessOrEqual,
-                loopValue,
-                to,
+            _currentMirBlockBuilder = mirHeaderBlock;
+            _currentFlowState = loopHeaderFlowState.Clone();
+            var mirLoopConditionValueId = EmitBinary(
+                isDescendingRange
+                    ? MirBinaryOperator.GreaterOrEqual
+                    : MirBinaryOperator.LessOrEqual,
+                mirLoopVariableValueId,
+                mirRangeEndValueId,
                 MirType.Scalar(QType.Bit),
-                source);
-            Terminate(new MirBranch(
-                condition,
-                body.Id,
+                mirOrigin);
+            TerminateCurrentMirBlock(new MirBranch(
+                mirLoopConditionValueId,
+                mirBodyBlock.Id,
                 Array.Empty<MirValueId>(),
-                exit.Id,
+                mirExitBlock.Id,
                 Array.Empty<MirValueId>(),
-                source));
+                mirOrigin));
 
-            _current = body;
-            _state = headerState.Clone();
-            LowerStatements(loop.Body.Statements);
-            if (_current is not null)
+            _currentMirBlockBuilder = mirBodyBlock;
+            _currentFlowState = loopHeaderFlowState.Clone();
+            LowerStatements(hirFor.Body.Statements);
+            if (_currentMirBlockBuilder is not null)
             {
-                var currentLoopValue = _state.Values[loopSymbol.Id];
-                var next = EmitBinary(
+                var currentMirLoopVariableValueId =
+                    _currentFlowState.CurrentMirValueByHirSymbolId[
+                        hirLoopVariableSymbol.Id];
+                var nextMirLoopVariableValueId = EmitBinary(
                     MirBinaryOperator.Add,
-                    currentLoopValue,
-                    step,
+                    currentMirLoopVariableValueId,
+                    mirStepValueId,
                     MirType.Scalar(QType.Int),
-                    source);
-                var backArguments = before.Values.Keys
-                    .OrderBy(id => id.Value)
-                    .Select(symbol => _state.Values[symbol])
-                    .Append(next)
-                    .ToList();
-                var backedge = RequireCurrent();
+                    mirOrigin);
+                var mirBackedgeArguments = new List<MirValueId>(
+                    flowStateBeforeLoop.CurrentMirValueByHirSymbolId.Count + 1);
+                foreach (var hirSymbolId in
+                         flowStateBeforeLoop.CurrentMirValueByHirSymbolId.Keys
+                             .OrderBy(
+                             id => id.Value))
+                {
+                    mirBackedgeArguments.Add(
+                        _currentFlowState.CurrentMirValueByHirSymbolId[
+                            hirSymbolId]);
+                }
+                mirBackedgeArguments.Add(nextMirLoopVariableValueId);
+                var mirBackedgeBlock = RequireCurrentMirBlock();
                 AddLoopBackedgeInputs(
-                    qubitPhis,
-                    _state,
-                    backedge,
+                    loopQubitPhiBindings,
+                    _currentFlowState,
+                    mirBackedgeBlock,
                     successorOrdinal: 0,
-                    header);
-                Terminate(new MirJump(header.Id, backArguments, source));
+                    mirHeaderBlock);
+                TerminateCurrentMirBlock(new MirJump(
+                    mirHeaderBlock.Id,
+                    mirBackedgeArguments,
+                    mirOrigin));
             }
 
-            var after = headerState.Clone();
-            after.PopScope();
-            _current = exit;
-            _state = after;
+            var flowStateAfterLoop = loopHeaderFlowState.Clone();
+            flowStateAfterLoop.PopHirSymbolLifetimeFrame();
+            _currentMirBlockBuilder = mirExitBlock;
+            _currentFlowState = flowStateAfterLoop;
         }
 
-        private void LowerWhile(HirWhileStatement loop)
+        private void LowerWhile(HirWhileStatement hirWhile)
         {
-            var source = SourceOf(loop);
-            var before = _state.Clone();
-            var preheader = RequireCurrent();
-            var header = NewBlock(source);
-            var body = NewBlock(source);
-            var exit = NewBlock(source);
-            var headerState = before.Clone();
-            var initialArguments = new List<MirValueId>();
-            foreach (var symbol in before.Values.Keys.OrderBy(id => id.Value))
+            var mirOrigin = MirOriginFor(hirWhile);
+            var flowStateBeforeLoop = _currentFlowState.Clone();
+            var mirPreheaderBlock = RequireCurrentMirBlock();
+            var mirHeaderBlock = CreateMirBlock(mirOrigin);
+            var mirBodyBlock = CreateMirBlock(mirOrigin);
+            var mirExitBlock = CreateMirBlock(mirOrigin);
+            var loopHeaderFlowState = flowStateBeforeLoop.Clone();
+            var mirPreheaderArguments = new List<MirValueId>();
+            foreach (var hirSymbolId in
+                     flowStateBeforeLoop.CurrentMirValueByHirSymbolId.Keys.OrderBy(
+                         id => id.Value))
             {
-                var initial = before.Values[symbol];
-                var argument = AddBlockArgument(header, TypeOf(initial), symbol, source);
-                headerState.Values[symbol] = argument;
-                initialArguments.Add(initial);
+                var mirInitialValueId =
+                    flowStateBeforeLoop.CurrentMirValueByHirSymbolId[
+                        hirSymbolId];
+                var mirHeaderPhiValueId = AddBlockArgument(
+                    mirHeaderBlock,
+                    MirTypeOf(mirInitialValueId),
+                    hirSymbolId,
+                    mirOrigin);
+                loopHeaderFlowState.CurrentMirValueByHirSymbolId[
+                        hirSymbolId] =
+                    mirHeaderPhiValueId;
+                mirPreheaderArguments.Add(mirInitialValueId);
             }
-            var qubitPhis = CreateLoopQubitPhis(
-                before,
-                headerState,
-                preheader,
+            var loopQubitPhiBindings = CreateLoopQubitPhiBindings(
+                flowStateBeforeLoop,
+                loopHeaderFlowState,
+                mirPreheaderBlock,
                 preheaderSuccessorOrdinal: 0,
-                header,
-                source);
-            preheader.Terminator = new MirJump(header.Id, initialArguments, source);
+                mirHeaderBlock,
+                mirOrigin);
+            mirPreheaderBlock.Terminator = new MirJump(
+                mirHeaderBlock.Id,
+                mirPreheaderArguments,
+                mirOrigin);
 
-            _current = header;
-            _state = headerState.Clone();
-            var condition = LowerExpressionAs(
-                loop.Condition,
+            _currentMirBlockBuilder = mirHeaderBlock;
+            _currentFlowState = loopHeaderFlowState.Clone();
+            var mirLoopConditionValueId = LowerExpressionAs(
+                hirWhile.Condition,
                 MirType.Scalar(QType.Bit));
-            var conditionState = _state.Clone();
-            Terminate(new MirBranch(
-                condition,
-                body.Id,
+            var flowStateAfterCondition = _currentFlowState.Clone();
+            TerminateCurrentMirBlock(new MirBranch(
+                mirLoopConditionValueId,
+                mirBodyBlock.Id,
                 Array.Empty<MirValueId>(),
-                exit.Id,
+                mirExitBlock.Id,
                 Array.Empty<MirValueId>(),
-                source));
+                mirOrigin));
 
-            _current = body;
-            _state = conditionState.Clone();
-            _state.PushScope();
-            LowerStatements(loop.Body.Statements);
-            _state.PopScope();
-            if (_current is not null)
+            _currentMirBlockBuilder = mirBodyBlock;
+            _currentFlowState = flowStateAfterCondition.Clone();
+            _currentFlowState.PushHirSymbolLifetimeFrame();
+            LowerStatements(hirWhile.Body.Statements);
+            _currentFlowState.PopHirSymbolLifetimeFrame();
+            if (_currentMirBlockBuilder is not null)
             {
-                var backArguments = before.Values.Keys
-                    .OrderBy(id => id.Value)
-                    .Select(symbol => _state.Values[symbol])
-                    .ToList();
-                var backedge = RequireCurrent();
+                var mirBackedgeArguments = new List<MirValueId>(
+                    flowStateBeforeLoop.CurrentMirValueByHirSymbolId.Count);
+                foreach (var hirSymbolId in
+                         flowStateBeforeLoop.CurrentMirValueByHirSymbolId.Keys
+                             .OrderBy(
+                             id => id.Value))
+                {
+                    mirBackedgeArguments.Add(
+                        _currentFlowState.CurrentMirValueByHirSymbolId[
+                            hirSymbolId]);
+                }
+                var mirBackedgeBlock = RequireCurrentMirBlock();
                 AddLoopBackedgeInputs(
-                    qubitPhis,
-                    _state,
-                    backedge,
+                    loopQubitPhiBindings,
+                    _currentFlowState,
+                    mirBackedgeBlock,
                     successorOrdinal: 0,
-                    header);
-                Terminate(new MirJump(header.Id, backArguments, source));
+                    mirHeaderBlock);
+                TerminateCurrentMirBlock(new MirJump(
+                    mirHeaderBlock.Id,
+                    mirBackedgeArguments,
+                    mirOrigin));
             }
 
-            _current = exit;
-            _state = conditionState;
+            _currentMirBlockBuilder = mirExitBlock;
+            _currentFlowState = flowStateAfterCondition;
         }
 
-        private void LowerRepeat(HirRepeatStatement loop)
+        private void LowerRepeat(HirRepeatStatement hirRepeat)
         {
-            var source = SourceOf(loop);
-            var before = _state.Clone();
-            var preheader = RequireCurrent();
-            var header = NewBlock(source);
-            var headerState = before.Clone();
-            var initialArguments = new List<MirValueId>();
-            foreach (var symbol in before.Values.Keys.OrderBy(id => id.Value))
+            var mirOrigin = MirOriginFor(hirRepeat);
+            var flowStateBeforeLoop = _currentFlowState.Clone();
+            var mirPreheaderBlock = RequireCurrentMirBlock();
+            var mirHeaderBlock = CreateMirBlock(mirOrigin);
+            var loopHeaderFlowState = flowStateBeforeLoop.Clone();
+            var mirPreheaderArguments = new List<MirValueId>();
+            foreach (var hirSymbolId in
+                     flowStateBeforeLoop.CurrentMirValueByHirSymbolId.Keys.OrderBy(
+                         id => id.Value))
             {
-                var initial = before.Values[symbol];
-                var argument = AddBlockArgument(header, TypeOf(initial), symbol, source);
-                headerState.Values[symbol] = argument;
-                initialArguments.Add(initial);
+                var mirInitialValueId =
+                    flowStateBeforeLoop.CurrentMirValueByHirSymbolId[
+                        hirSymbolId];
+                var mirHeaderPhiValueId = AddBlockArgument(
+                    mirHeaderBlock,
+                    MirTypeOf(mirInitialValueId),
+                    hirSymbolId,
+                    mirOrigin);
+                loopHeaderFlowState.CurrentMirValueByHirSymbolId[
+                        hirSymbolId] =
+                    mirHeaderPhiValueId;
+                mirPreheaderArguments.Add(mirInitialValueId);
             }
-            var qubitPhis = CreateLoopQubitPhis(
-                before,
-                headerState,
-                preheader,
+            var loopQubitPhiBindings = CreateLoopQubitPhiBindings(
+                flowStateBeforeLoop,
+                loopHeaderFlowState,
+                mirPreheaderBlock,
                 preheaderSuccessorOrdinal: 0,
-                header,
-                source);
-            preheader.Terminator = new MirJump(header.Id, initialArguments, source);
+                mirHeaderBlock,
+                mirOrigin);
+            mirPreheaderBlock.Terminator = new MirJump(
+                mirHeaderBlock.Id,
+                mirPreheaderArguments,
+                mirOrigin);
 
-            _current = header;
-            _state = headerState.Clone();
-            _state.PushScope();
-            LowerStatements(loop.Body.Statements);
-            if (_current is null)
+            _currentMirBlockBuilder = mirHeaderBlock;
+            _currentFlowState = loopHeaderFlowState.Clone();
+            _currentFlowState.PushHirSymbolLifetimeFrame();
+            LowerStatements(hirRepeat.Body.Statements);
+            if (_currentMirBlockBuilder is null)
             {
-                _state.PopScope();
-                _state = before;
+                _currentFlowState.PopHirSymbolLifetimeFrame();
+                _currentFlowState = flowStateBeforeLoop;
                 return;
             }
 
-            var condition = LowerExpressionAs(
-                loop.Until,
+            var mirUntilConditionValueId = LowerExpressionAs(
+                hirRepeat.Until,
                 MirType.Scalar(QType.Bit));
-            _state.PopScope();
+            _currentFlowState.PopHirSymbolLifetimeFrame();
 
-            var exit = NewBlock(source);
-            var after = before.Clone();
-            var exitArguments = new List<MirValueId>();
-            var backArguments = new List<MirValueId>();
-            foreach (var symbol in before.Values.Keys.OrderBy(id => id.Value))
+            var mirExitBlock = CreateMirBlock(mirOrigin);
+            var flowStateAfterLoop = flowStateBeforeLoop.Clone();
+            var mirExitArguments = new List<MirValueId>();
+            var mirBackedgeArguments = new List<MirValueId>();
+            foreach (var hirSymbolId in
+                     flowStateBeforeLoop.CurrentMirValueByHirSymbolId.Keys.OrderBy(
+                         id => id.Value))
             {
-                var current = _state.Values[symbol];
-                var argument = AddBlockArgument(exit, TypeOf(current), symbol, source);
-                after.Values[symbol] = argument;
-                exitArguments.Add(current);
-                backArguments.Add(current);
+                var currentMirValueId =
+                    _currentFlowState.CurrentMirValueByHirSymbolId[
+                        hirSymbolId];
+                var mirExitPhiValueId = AddBlockArgument(
+                    mirExitBlock,
+                    MirTypeOf(currentMirValueId),
+                    hirSymbolId,
+                    mirOrigin);
+                flowStateAfterLoop.CurrentMirValueByHirSymbolId[
+                        hirSymbolId] =
+                    mirExitPhiValueId;
+                mirExitArguments.Add(currentMirValueId);
+                mirBackedgeArguments.Add(currentMirValueId);
             }
-            var backedge = RequireCurrent();
+            var mirBackedgeBlock = RequireCurrentMirBlock();
             AddLoopBackedgeInputs(
-                qubitPhis,
-                _state,
-                backedge,
+                loopQubitPhiBindings,
+                _currentFlowState,
+                mirBackedgeBlock,
                 successorOrdinal: 1,
-                header);
-            foreach (var symbol in before.Qubits.Keys)
-                after.Qubits[symbol] = _state.Qubits[symbol];
-            Terminate(new MirBranch(
-                condition,
-                exit.Id,
-                exitArguments,
-                header.Id,
-                backArguments,
-                source));
-            _current = exit;
-            _state = after;
+                mirHeaderBlock);
+            foreach (var hirSymbolId in
+                     flowStateBeforeLoop.CurrentMirQubitByHirSymbolId.Keys)
+            {
+                flowStateAfterLoop.CurrentMirQubitByHirSymbolId[
+                        hirSymbolId] =
+                    _currentFlowState.CurrentMirQubitByHirSymbolId[
+                        hirSymbolId];
+            }
+            TerminateCurrentMirBlock(new MirBranch(
+                mirUntilConditionValueId,
+                mirExitBlock.Id,
+                mirExitArguments,
+                mirHeaderBlock.Id,
+                mirBackedgeArguments,
+                mirOrigin));
+            _currentMirBlockBuilder = mirExitBlock;
+            _currentFlowState = flowStateAfterLoop;
         }
 
-        private void LowerReturn(HirReturnStatement returned)
+        private void LowerReturn(HirReturnStatement hirReturn)
         {
-            var source = SourceOf(returned);
-            var value = _callable.ReturnType is { } returnType
+            var mirOrigin = MirOriginFor(hirReturn);
+            var mirReturnValueId = _hirCallable.ReturnType is { } hirReturnType
                 ? LowerExpressionAs(
-                    returned.Value,
-                    MirType.Scalar(returnType))
-                : LowerExpression(returned.Value);
-            Terminate(new MirReturn(value, source));
+                    hirReturn.Value,
+                    MirType.Scalar(hirReturnType))
+                : LowerExpression(hirReturn.Value);
+            TerminateCurrentMirBlock(
+                new MirReturn(mirReturnValueId, mirOrigin));
         }
 
         private MirValueId LowerMeasurement(
-            HirMeasurementExpression measurement)
+            HirMeasurementExpression hirMeasurement)
         {
-            var source = SourceOf(measurement);
-            var access = LowerQubitAccess(measurement.Target);
-            var instructionId = NextInstruction();
-            var result = AddInstructionResult(
-                instructionId,
+            var mirOrigin = MirOriginFor(hirMeasurement);
+            var mirMeasuredQubitAccess = LowerQubitAccess(
+                hirMeasurement.Target);
+            var mirMeasurementInstructionId = AllocateMirInstructionId();
+            var mirMeasurementResultValueId = AddInstructionResult(
+                mirMeasurementInstructionId,
                 MirType.Scalar(QType.Bit),
                 null,
-                source);
-            var qubitResult = NextQubitAfterInstruction(access.Qubit.Id, source);
-            Emit(new MirMeasure(instructionId, result, access, qubitResult, source));
-            AdvanceCurrentQubit(qubitResult);
-            if (measurement.Target is HirIndexExpression indexedTarget)
-            {
-                RegisterBoundsSite(
-                    indexedTarget,
-                    instructionId,
-                    MirIndexedAccessKind.Measurement);
-            }
-            return result;
+                mirOrigin);
+            var mirQubitAfterMeasurement = CreateQubitAfterInstruction(
+                mirMeasuredQubitAccess.Qubit.Id,
+                mirOrigin);
+            EmitMirInstruction(new MirMeasure(
+                mirMeasurementInstructionId,
+                mirMeasurementResultValueId,
+                mirMeasuredQubitAccess,
+                mirQubitAfterMeasurement,
+                mirOrigin));
+            UpdateCurrentQubitAfterWrite(mirQubitAfterMeasurement);
+            return mirMeasurementResultValueId;
         }
 
-        private MirValueId LowerExpression(HirExpression expression)
+        private MirValueId LowerExpression(HirExpression hirExpression)
         {
             // Expression lowering owns its provenance boundary. Callers cannot substitute a surrounding
             // statement origin, so every emitted MIR term remains queryable by the exact HIR expression ID.
-            var source = SourceOf(expression);
-            switch (expression)
+            var mirOrigin = MirOriginFor(hirExpression);
+            switch (hirExpression)
             {
                 case HirMissingExpression:
-                    throw Internal("a missing expression reached MIR lowering");
+                    throw MirLoweringError(
+                        "a missing expression reached MIR lowering");
 
-                case HirIntegerLiteralExpression number:
-                    return EmitConstant(QType.Int, number.Value.ToString(
-                        System.Globalization.CultureInfo.InvariantCulture), source);
+                case HirIntegerLiteralExpression hirIntegerLiteral:
+                    return EmitConstant(QType.Int, hirIntegerLiteral.Value.ToString(
+                        System.Globalization.CultureInfo.InvariantCulture), mirOrigin);
 
-                case HirLiteralExpression literal:
-                    return EmitConstant(LiteralType(literal.Text), literal.Text, source);
+                case HirLiteralExpression hirLiteral:
+                    return EmitConstant(
+                        QTypeOfLiteralText(hirLiteral.Text),
+                        hirLiteral.Text,
+                        mirOrigin);
 
-                case HirNameExpression name when IsBuiltinLiteral(name.Name):
-                    return EmitConstant(LiteralType(name.Name), name.Name, source);
+                case HirNameExpression hirName
+                    when IsBuiltinLiteralName(hirName.Name):
+                    return EmitConstant(
+                        QTypeOfLiteralText(hirName.Name),
+                        hirName.Name,
+                        mirOrigin);
 
-                case HirNameExpression name:
+                case HirNameExpression hirName:
                 {
-                    var symbol = RequireReferencedSymbol(
-                        name,
-                        $"classical name `{name.Name}`");
-                    if (!_state.Values.TryGetValue(symbol, out var value))
-                        throw Internal($"name `{name.Name}` does not denote a classical SSA value");
-                    return value;
+                    var hirSymbolId = SymbolIdOf(
+                        hirName,
+                        $"classical name `{hirName.Name}`");
+                    if (!_currentFlowState.CurrentMirValueByHirSymbolId
+                        .TryGetValue(
+                            hirSymbolId,
+                            out var mirValueId))
+                    {
+                        throw MirLoweringError(
+                            $"name `{hirName.Name}` does not denote a classical SSA value");
+                    }
+
+                    return mirValueId;
                 }
 
-                case HirUnaryExpression unary:
+                case HirUnaryExpression hirUnary:
                 {
-                    var operand = LowerExpression(unary.Operand);
-                    if (unary.Operator == HirUnaryOperator.LogicalNot)
+                    var mirOperandValueId = LowerExpression(hirUnary.Operand);
+                    if (hirUnary.Operator == HirUnaryOperator.LogicalNot)
                     {
-                        operand = EnsureType(operand, MirType.Scalar(QType.Bit), source);
+                        mirOperandValueId = EnsureType(
+                            mirOperandValueId,
+                            MirType.Scalar(QType.Bit),
+                            mirOrigin);
                         return EmitUnary(
                             MirUnaryOperator.LogicalNot,
-                            operand,
+                            mirOperandValueId,
                             MirType.Scalar(QType.Bit),
-                            source);
+                            mirOrigin);
                     }
-                    if (unary.Operator != HirUnaryOperator.Negate)
-                        throw Internal($"unsupported unary operator `{unary.Operator}`");
-                    var operandType = TypeOf(operand);
-                    var resultType = operandType.ElementType == QType.Bit
+                    if (hirUnary.Operator != HirUnaryOperator.Negate)
+                    {
+                        throw MirLoweringError(
+                            $"unsupported unary operator `{hirUnary.Operator}`");
+                    }
+
+                    var mirOperandType = MirTypeOf(mirOperandValueId);
+                    var mirResultType = mirOperandType.ElementType == QType.Bit
                         ? MirType.Scalar(QType.Int)
-                        : operandType;
-                    if (operandType.ElementType == QType.Bit)
-                        operand = EnsureType(operand, resultType, source);
-                    return EmitUnary(MirUnaryOperator.Negate, operand, resultType, source);
+                        : mirOperandType;
+                    if (mirOperandType.ElementType == QType.Bit)
+                    {
+                        mirOperandValueId = EnsureType(
+                            mirOperandValueId,
+                            mirResultType,
+                            mirOrigin);
+                    }
+
+                    return EmitUnary(
+                        MirUnaryOperator.Negate,
+                        mirOperandValueId,
+                        mirResultType,
+                        mirOrigin);
                 }
 
-                case HirBinaryExpression binary:
+                case HirBinaryExpression hirBinary:
                 {
-                    if (binary.Operator is
+                    if (hirBinary.Operator is
                         HirBinaryOperator.LogicalAnd or HirBinaryOperator.LogicalOr)
-                        return LowerShortCircuit(binary);
-
-                    var left = LowerExpression(binary.Left);
-                    var right = LowerExpression(binary.Right);
-                    var op = BinaryOperator(binary.Operator);
-                    var leftType = TypeOf(left);
-                    var rightType = TypeOf(right);
-                    if (leftType.IsArray || rightType.IsArray)
                     {
-                        if (op is not (MirBinaryOperator.Equal or MirBinaryOperator.NotEqual)
-                            || leftType != rightType)
-                            throw Internal(
-                                $"validated array comparison has incompatible operands {leftType} and {rightType}");
-                        return EmitBinary(
-                            op,
-                            left,
-                            right,
-                            MirType.Scalar(QType.Bit),
-                            source);
+                        return LowerShortCircuit(hirBinary);
                     }
-                    var comparison = op is
+
+                    var mirLeftValueId = LowerExpression(hirBinary.Left);
+                    var mirRightValueId = LowerExpression(hirBinary.Right);
+                    var mirBinaryOperator =
+                        MirBinaryOperatorOf(hirBinary.Operator);
+                    var mirLeftType = MirTypeOf(mirLeftValueId);
+                    var mirRightType = MirTypeOf(mirRightValueId);
+                    if (mirLeftType.IsArray || mirRightType.IsArray)
+                    {
+                        if (mirBinaryOperator is not (
+                                MirBinaryOperator.Equal
+                                or MirBinaryOperator.NotEqual)
+                            || mirLeftType != mirRightType)
+                        {
+                            throw MirLoweringError(
+                                "validated array comparison has incompatible "
+                                + $"operands {mirLeftType} and {mirRightType}");
+                        }
+
+                        return EmitBinary(
+                            mirBinaryOperator,
+                            mirLeftValueId,
+                            mirRightValueId,
+                            MirType.Scalar(QType.Bit),
+                            mirOrigin);
+                    }
+
+                    var isComparison = mirBinaryOperator is
                         MirBinaryOperator.Equal or MirBinaryOperator.NotEqual
                         or MirBinaryOperator.Less or MirBinaryOperator.LessOrEqual
                         or MirBinaryOperator.Greater or MirBinaryOperator.GreaterOrEqual;
-                    var operandType = CommonNumericType(leftType, rightType, comparison);
-                    left = EnsureType(left, operandType, source);
-                    right = EnsureType(right, operandType, source);
-                    var resultType = comparison
+                    var mirOperandType = CommonMirNumericType(
+                        mirLeftType,
+                        mirRightType,
+                        isComparison);
+                    mirLeftValueId = EnsureType(
+                        mirLeftValueId,
+                        mirOperandType,
+                        mirOrigin);
+                    mirRightValueId = EnsureType(
+                        mirRightValueId,
+                        mirOperandType,
+                        mirOrigin);
+                    var mirResultType = isComparison
                         ? MirType.Scalar(QType.Bit)
-                        : operandType;
-                    return EmitBinary(op, left, right, resultType, source);
+                        : mirOperandType;
+                    return EmitBinary(
+                        mirBinaryOperator,
+                        mirLeftValueId,
+                        mirRightValueId,
+                        mirResultType,
+                        mirOrigin);
                 }
 
                 case HirMemberAccessExpression
                 {
-                    Receiver: { } receiver,
+                    Receiver: { } hirReceiver,
                     MemberName: "Count",
                 }:
                 {
-                    if (receiver is HirNameExpression name)
+                    if (hirReceiver is HirNameExpression hirReceiverName)
                     {
-                        var symbol = RequireReferencedSymbol(
-                            name,
-                            $"Count receiver `{name.Name}`");
-                        if (_state.Qubits.TryGetValue(symbol, out var currentQubit))
+                        var hirReceiverSymbolId = SymbolIdOf(
+                            hirReceiverName,
+                            $"Count receiver `{hirReceiverName.Name}`");
+                        if (_currentFlowState.CurrentMirQubitByHirSymbolId
+                            .TryGetValue(
+                                hirReceiverSymbolId,
+                                out var currentMirQubit))
                         {
-                            var (isArray, length) = QubitShape(currentQubit.Id);
-                            if (!isArray)
-                                throw Internal(
-                                    $"Count receiver `{name.Name}` is a scalar qubit");
-                            if (length is not int knownLength)
+                            var (
+                                isQubitArray,
+                                knownQubitArrayLength) =
+                                MirQubitShapeOf(currentMirQubit.Id);
+                            if (!isQubitArray)
                             {
-                                throw Internal(
-                                    $"specialized qubit array `{name.Name}` has no known length");
+                                throw MirLoweringError(
+                                    $"Count receiver `{hirReceiverName.Name}` "
+                                    + "is a scalar qubit");
+                            }
+
+                            if (knownQubitArrayLength
+                                is not int concreteQubitArrayLength)
+                            {
+                                throw MirLoweringError(
+                                    "specialized qubit array "
+                                    + $"`{hirReceiverName.Name}` has no known length");
                             }
 
                             return EmitConstant(
                                 QType.Int,
-                                knownLength.ToString(
+                                concreteQubitArrayLength.ToString(
                                     System.Globalization.CultureInfo.InvariantCulture),
-                                source);
+                                mirOrigin);
                         }
 
-                        if (!_state.Values.TryGetValue(symbol, out var classicalArray))
+                        if (!_currentFlowState.CurrentMirValueByHirSymbolId
+                            .TryGetValue(
+                                hirReceiverSymbolId,
+                                out var mirClassicalArrayValueId))
                         {
-                            throw Internal(
-                                $"Count receiver `{name.Name}` is neither a classical array nor a qubit");
+                            throw MirLoweringError(
+                                $"Count receiver `{hirReceiverName.Name}` "
+                                + "is neither a classical array nor a qubit");
                         }
 
-                        return EmitArrayLength(classicalArray, name.Name, source);
+                        return EmitArrayLength(
+                            mirClassicalArrayValueId,
+                            hirReceiverName.Name,
+                            mirOrigin);
                     }
 
-                    var array = LowerExpression(receiver);
+                    var mirArrayValueId = LowerExpression(hirReceiver);
                     return EmitArrayLength(
-                        array,
-                        HirExpressions.Render(receiver),
-                        source);
+                        mirArrayValueId,
+                        HirExpressions.Render(hirReceiver),
+                        mirOrigin);
                 }
 
-                case HirMemberAccessExpression member:
-                    throw Internal(
-                        $"unsupported member `{member.MemberName}` reached MIR lowering");
+                case HirMemberAccessExpression hirMemberAccess:
+                    throw MirLoweringError(
+                        $"unsupported member `{hirMemberAccess.MemberName}` "
+                        + "reached MIR lowering");
 
-                case HirIndexExpression index:
+                case HirIndexExpression hirIndex:
                 {
-                    var array = LowerExpression(index.Receiver);
-                    var arrayType = TypeOf(array);
-                    if (!arrayType.IsArray)
-                        throw Internal("an indexed classical expression does not have array type");
-                    var offset = LowerExpressionAs(
-                        index.Index,
+                    var mirArrayValueId = LowerExpression(hirIndex.Receiver);
+                    var mirArrayType = MirTypeOf(mirArrayValueId);
+                    if (!mirArrayType.IsArray)
+                    {
+                        throw MirLoweringError(
+                            "an indexed classical expression does not have array type");
+                    }
+
+                    var mirIndexValueId = LowerExpressionAs(
+                        hirIndex.Index,
                         MirType.Scalar(QType.Int));
-                    var instructionId = NextInstruction();
-                    var result = AddInstructionResult(
-                        instructionId,
-                        MirType.Scalar(arrayType.ElementType),
+                    var mirInstructionId = AllocateMirInstructionId();
+                    var mirResultValueId = AddInstructionResult(
+                        mirInstructionId,
+                        MirType.Scalar(mirArrayType.ElementType),
                         null,
-                        source);
-                    Emit(new MirArrayLoad(instructionId, result, array, offset, source));
-                    RegisterBoundsSite(
-                        index,
-                        instructionId,
-                        MirIndexedAccessKind.ArrayLoad);
-                    return result;
+                        mirOrigin);
+                    EmitMirInstruction(new MirArrayLoad(
+                        mirInstructionId,
+                        mirResultValueId,
+                        mirArrayValueId,
+                        mirIndexValueId,
+                        mirOrigin));
+                    return mirResultValueId;
                 }
 
-                case HirCallExpression call:
+                case HirCallExpression hirCall:
                 {
-                    var targetSymbol = RequireCallTarget(call);
-                    if (targetSymbol.Kind == SymbolKind.BuiltinFunction)
+                    var semanticCallTargetSymbol =
+                        RequireHirCallTargetSymbol(hirCall);
+                    if (semanticCallTargetSymbol.Kind
+                        == SymbolKind.BuiltinFunction)
                     {
                         return LowerPureCall(
                             new MirBuiltinFunctionTarget(
-                                targetSymbol.SourceName),
-                            callee: null,
-                            call);
+                                semanticCallTargetSymbol.SourceName),
+                            hirUserFunction: null,
+                            hirCall);
                     }
-                    if (targetSymbol.Kind != SymbolKind.Callable)
+                    if (semanticCallTargetSymbol.Kind
+                        != SymbolKind.Callable)
                     {
-                        throw Internal(
-                            $"expression call `{call.Name}` targets semantic symbol kind {targetSymbol.Kind}");
+                        throw MirLoweringError(
+                            $"expression call `{hirCall.Name}` targets semantic symbol kind "
+                            + semanticCallTargetSymbol.Kind);
                     }
-                    var callee = ResolveUserCallable(targetSymbol)
-                        ?? throw Internal($"resolved function `{call.Name}` has no callable");
-                    if (!callee.IsFunction)
-                        throw Internal($"expression call `{call.Name}` targets an operation");
+                    var hirUserFunction = RequireHirCallableDeclaration(
+                        semanticCallTargetSymbol);
+                    if (!hirUserFunction.IsFunction)
+                    {
+                        throw MirLoweringError(
+                            $"expression call `{hirCall.Name}` targets an operation");
+                    }
+                    var mirUserFunctionId =
+                        new MirCallableId(hirUserFunction.Id.Value);
                     return LowerPureCall(
-                        new MirUserCallableTarget(_callableIds[callee.Id]),
-                        callee,
-                        call);
+                        new MirUserCallableTarget(
+                            mirUserFunctionId),
+                        hirUserFunction,
+                        hirCall);
                 }
 
-                case HirMeasurementExpression measurement:
-                    return LowerMeasurement(measurement);
+                case HirMeasurementExpression hirMeasurement:
+                    return LowerMeasurement(hirMeasurement);
 
                 case HirArrayLiteralExpression or HirArrayCreationExpression:
-                    throw Internal(
+                    throw MirLoweringError(
                         "an array value escaped its declaration during MIR lowering");
 
                 default:
-                    throw Internal(
-                        $"unsupported HIR expression node {expression.GetType().Name}");
+                    throw MirLoweringError(
+                        "unsupported HIR expression node "
+                        + hirExpression.GetType().Name);
             }
         }
 
         private MirValueId LowerExpressionAs(
-            HirExpression expression,
-            MirType expected) =>
+            HirExpression hirExpression,
+            MirType expectedMirType) =>
             EnsureType(
-                LowerExpression(expression),
-                expected,
-                SourceOf(expression));
+                LowerExpression(hirExpression),
+                expectedMirType,
+                MirOriginFor(hirExpression));
 
         /// <summary>
         /// Lowers logical conjunction/disjunction as control flow so the right operand is evaluated
@@ -1271,700 +1599,895 @@ internal static class QoraMirLowering
         /// edge supplies the evaluated right value.
         /// </summary>
         private MirValueId LowerShortCircuit(
-            HirBinaryExpression binary)
+            HirBinaryExpression hirBinary)
         {
-            var source = SourceOf(binary);
-            var left = LowerExpressionAs(
-                binary.Left,
+            var mirOrigin = MirOriginFor(hirBinary);
+            var mirLeftValueId = LowerExpressionAs(
+                hirBinary.Left,
                 MirType.Scalar(QType.Bit));
-            var branchBlock = RequireCurrent();
-            var before = _state.Clone();
-            var rightBlock = NewBlock(source);
-            var mergeBlock = NewBlock(source);
-            var result = AddBlockArgument(
-                mergeBlock,
+            var mirBranchBlock = RequireCurrentMirBlock();
+            var flowStateBeforeRightOperand = _currentFlowState.Clone();
+            var mirRightOperandBlock = CreateMirBlock(mirOrigin);
+            var mirMergeBlock = CreateMirBlock(mirOrigin);
+            var mirResultValueId = AddBlockArgument(
+                mirMergeBlock,
                 MirType.Scalar(QType.Bit),
-                symbol: null,
-                source);
+                hirSymbolId: null,
+                mirOrigin);
 
-            if (binary.Operator == HirBinaryOperator.LogicalAnd)
+            if (hirBinary.Operator == HirBinaryOperator.LogicalAnd)
             {
-                branchBlock.Terminator = new MirBranch(
-                    left,
-                    rightBlock.Id,
+                mirBranchBlock.Terminator = new MirBranch(
+                    mirLeftValueId,
+                    mirRightOperandBlock.Id,
                     Array.Empty<MirValueId>(),
-                    mergeBlock.Id,
-                    new[] { left },
-                    source);
+                    mirMergeBlock.Id,
+                    new[] { mirLeftValueId },
+                    mirOrigin);
             }
             else
             {
-                branchBlock.Terminator = new MirBranch(
-                    left,
-                    mergeBlock.Id,
-                    new[] { left },
-                    rightBlock.Id,
+                mirBranchBlock.Terminator = new MirBranch(
+                    mirLeftValueId,
+                    mirMergeBlock.Id,
+                    new[] { mirLeftValueId },
+                    mirRightOperandBlock.Id,
                     Array.Empty<MirValueId>(),
-                    source);
+                    mirOrigin);
             }
 
-            _current = rightBlock;
-            _state = before.Clone();
-            var right = LowerExpressionAs(
-                binary.Right,
+            _currentMirBlockBuilder = mirRightOperandBlock;
+            _currentFlowState = flowStateBeforeRightOperand.Clone();
+            var mirRightValueId = LowerExpressionAs(
+                hirBinary.Right,
                 MirType.Scalar(QType.Bit));
-            var rightExit = RequireCurrent();
-            var rightState = _state.Clone();
-            Terminate(new MirJump(mergeBlock.Id, new[] { right }, source));
+            var mirRightExitBlock = RequireCurrentMirBlock();
+            var flowStateAfterRightOperand = _currentFlowState.Clone();
+            TerminateCurrentMirBlock(new MirJump(
+                mirMergeBlock.Id,
+                new[] { mirRightValueId },
+                mirOrigin));
 
-            var merged = before.Clone();
+            var mergedFlowState = flowStateBeforeRightOperand.Clone();
             MergeQubitStatesAtJoin(
-                merged,
-                before,
-                branchBlock,
+                mergedFlowState,
+                flowStateBeforeRightOperand,
+                mirBranchBlock,
                 firstSuccessorOrdinal:
-                    binary.Operator == HirBinaryOperator.LogicalAnd ? 1 : 0,
-                rightState,
-                rightExit,
+                    hirBinary.Operator == HirBinaryOperator.LogicalAnd ? 1 : 0,
+                flowStateAfterRightOperand,
+                mirRightExitBlock,
                 secondSuccessorOrdinal: 0,
-                mergeBlock,
-                source);
-            _current = mergeBlock;
-            _state = merged;
-            return result;
+                mirMergeBlock,
+                mirOrigin);
+            _currentMirBlockBuilder = mirMergeBlock;
+            _currentFlowState = mergedFlowState;
+            return mirResultValueId;
         }
 
         private MirQubitAccess LowerQubitAccess(
-            HirArgument argument) =>
-            LowerQubitAccess(argument.Expression);
+            HirArgument hirArgument) =>
+            LowerQubitAccess(hirArgument.Expression);
 
         private MirQubitAccess LowerQubitAccess(
-            HirExpression expression)
+            HirExpression hirExpression)
         {
-            switch (expression)
+            switch (hirExpression)
             {
-                case HirNameExpression name:
+                case HirNameExpression hirName:
                 {
-                    var symbol = RequireReferencedSymbol(
-                        name,
-                        $"qubit name `{name.Name}`");
-                    if (!_state.Qubits.TryGetValue(symbol, out var qubit))
-                        throw Internal($"name `{name.Name}` does not denote a qubit");
-                    return new MirQubitAccess(qubit);
+                    var hirSymbolId = SymbolIdOf(
+                        hirName,
+                        $"qubit name `{hirName.Name}`");
+                    if (!_currentFlowState.CurrentMirQubitByHirSymbolId
+                        .TryGetValue(
+                            hirSymbolId,
+                            out var currentMirQubit))
+                    {
+                        throw MirLoweringError(
+                            $"name `{hirName.Name}` does not denote a qubit");
+                    }
+
+                    return new MirQubitAccess(currentMirQubit);
                 }
                 case HirIndexExpression
                 {
-                    Receiver: HirNameExpression name,
-                    Index: { } index,
+                    Receiver: HirNameExpression hirReceiverName,
+                    Index: { } hirIndex,
                 }:
                 {
-                    var symbol = RequireReferencedSymbol(
-                        name,
-                        $"qubit name `{name.Name}`");
-                    if (!_state.Qubits.TryGetValue(symbol, out var qubit))
-                        throw Internal($"name `{name.Name}` does not denote a qubit");
-                    var offset = LowerExpressionAs(
-                        index,
+                    var hirSymbolId = SymbolIdOf(
+                        hirReceiverName,
+                        $"qubit name `{hirReceiverName.Name}`");
+                    if (!_currentFlowState.CurrentMirQubitByHirSymbolId
+                        .TryGetValue(
+                            hirSymbolId,
+                            out var currentMirQubit))
+                    {
+                        throw MirLoweringError(
+                            $"name `{hirReceiverName.Name}` does not denote a qubit");
+                    }
+
+                    var mirIndexValueId = LowerExpressionAs(
+                        hirIndex,
                         MirType.Scalar(QType.Int));
-                    return new MirQubitAccess(qubit, offset);
+                    return new MirQubitAccess(
+                        currentMirQubit,
+                        mirIndexValueId);
                 }
                 default:
-                    throw Internal(
-                        $"`{HirExpressions.Render(expression)}` is not a qubit access");
+                    throw MirLoweringError(
+                        $"`{HirExpressions.Render(hirExpression)}` "
+                        + "is not a qubit access");
             }
         }
 
-        private MirValueId EmitConstant(QType type, string text, MirOriginRef source)
+        private MirValueId EmitConstant(
+            QType scalarType,
+            string literalText,
+            MirOriginId mirOrigin)
         {
-            var instructionId = NextInstruction();
-            var result = AddInstructionResult(
-                instructionId,
-                MirType.Scalar(type),
+            var mirInstructionId = AllocateMirInstructionId();
+            var mirResultValueId = AddInstructionResult(
+                mirInstructionId,
+                MirType.Scalar(scalarType),
                 null,
-                source);
-            Emit(new MirConstant(
-                instructionId,
-                result,
-                new MirConstantValue(type, text),
-                source));
-            return result;
+                mirOrigin);
+            EmitMirInstruction(new MirConstant(
+                mirInstructionId,
+                mirResultValueId,
+                literalText,
+                mirOrigin));
+            return mirResultValueId;
         }
 
         private MirValueId EmitArrayLength(
-            MirValueId array,
-            string receiver,
-            MirOriginRef source)
+            MirValueId mirArrayValueId,
+            string hirReceiverDisplayName,
+            MirOriginId mirOrigin)
         {
-            if (!TypeOf(array).IsArray)
-                throw Internal(
-                    $"Count receiver `{receiver}` is not a classical array");
+            if (!MirTypeOf(mirArrayValueId).IsArray)
+            {
+                throw MirLoweringError(
+                    $"Count receiver `{hirReceiverDisplayName}` "
+                    + "is not a classical array");
+            }
 
-            var instructionId = NextInstruction();
-            var result = AddInstructionResult(
-                instructionId,
+            var mirInstructionId = AllocateMirInstructionId();
+            var mirResultValueId = AddInstructionResult(
+                mirInstructionId,
                 MirType.Scalar(QType.Int),
-                symbol: null,
-                source);
-            Emit(new MirArrayLength(
-                instructionId,
-                result,
-                array,
-                source));
-            return result;
+                hirSymbolId: null,
+                mirOrigin);
+            EmitMirInstruction(new MirArrayLength(
+                mirInstructionId,
+                mirResultValueId,
+                mirArrayValueId,
+                mirOrigin));
+            return mirResultValueId;
         }
 
         private MirValueId EmitUnary(
-            MirUnaryOperator op,
-            MirValueId operand,
-            MirType resultType,
-            MirOriginRef source)
+            MirUnaryOperator mirOperator,
+            MirValueId mirOperandValueId,
+            MirType mirResultType,
+            MirOriginId mirOrigin)
         {
-            var instructionId = NextInstruction();
-            var result = AddInstructionResult(instructionId, resultType, null, source);
-            Emit(new MirUnary(instructionId, result, op, operand, source));
-            return result;
+            var mirInstructionId = AllocateMirInstructionId();
+            var mirResultValueId = AddInstructionResult(
+                mirInstructionId,
+                mirResultType,
+                null,
+                mirOrigin);
+            EmitMirInstruction(new MirUnary(
+                mirInstructionId,
+                mirResultValueId,
+                mirOperator,
+                mirOperandValueId,
+                mirOrigin));
+            return mirResultValueId;
         }
 
         private MirValueId EmitBinary(
-            MirBinaryOperator op,
-            MirValueId left,
-            MirValueId right,
-            MirType resultType,
-            MirOriginRef source)
+            MirBinaryOperator mirOperator,
+            MirValueId mirLeftValueId,
+            MirValueId mirRightValueId,
+            MirType mirResultType,
+            MirOriginId mirOrigin)
         {
-            var instructionId = NextInstruction();
-            var result = AddInstructionResult(instructionId, resultType, null, source);
-            Emit(new MirBinary(instructionId, result, op, left, right, source));
-            return result;
+            var mirInstructionId = AllocateMirInstructionId();
+            var mirResultValueId = AddInstructionResult(
+                mirInstructionId,
+                mirResultType,
+                null,
+                mirOrigin);
+            EmitMirInstruction(new MirBinary(
+                mirInstructionId,
+                mirResultValueId,
+                mirOperator,
+                mirLeftValueId,
+                mirRightValueId,
+                mirOrigin));
+            return mirResultValueId;
         }
 
         private MirValueId EnsureCallType(
-            MirValueId value,
-            MirType expected,
-            MirOriginRef source)
+            MirValueId mirValueId,
+            MirType expectedMirType,
+            MirOriginId mirOrigin)
         {
-            var actual = TypeOf(value);
-            if (actual == expected) return value;
-            if (actual.IsArray && expected.IsArray
-                && actual.ElementType == expected.ElementType
-                && (expected.KnownLength is null || actual.KnownLength == expected.KnownLength))
-                return value;
-            return EnsureType(value, expected, source);
+            var actualMirType = MirTypeOf(mirValueId);
+            if (actualMirType == expectedMirType)
+                return mirValueId;
+            if (actualMirType.IsArray
+                && expectedMirType.IsArray
+                && actualMirType.ElementType == expectedMirType.ElementType
+                && (expectedMirType.KnownLength is null
+                    || actualMirType.KnownLength
+                    == expectedMirType.KnownLength))
+            {
+                return mirValueId;
+            }
+            return EnsureType(mirValueId, expectedMirType, mirOrigin);
         }
 
         private MirValueId EnsureType(
-            MirValueId value,
-            MirType expected,
-            MirOriginRef source)
+            MirValueId mirValueId,
+            MirType expectedMirType,
+            MirOriginId mirOrigin)
         {
-            var actual = TypeOf(value);
-            if (actual == expected) return value;
-            if (actual.IsArray || expected.IsArray)
-                throw Internal($"MIR lowering cannot convert {actual} to {expected}");
-            var instructionId = NextInstruction();
-            var result = AddInstructionResult(instructionId, expected, null, source);
-            Emit(new MirConvert(instructionId, result, value, expected, source));
-            return result;
+            var actualMirType = MirTypeOf(mirValueId);
+            if (actualMirType == expectedMirType)
+                return mirValueId;
+            if (actualMirType.IsArray || expectedMirType.IsArray)
+            {
+                throw MirLoweringError(
+                    $"MIR lowering cannot convert {actualMirType} "
+                    + $"to {expectedMirType}");
+            }
+            var mirInstructionId = AllocateMirInstructionId();
+            var mirResultValueId = AddInstructionResult(
+                mirInstructionId,
+                expectedMirType,
+                null,
+                mirOrigin);
+            EmitMirInstruction(new MirConvert(
+                mirInstructionId,
+                mirResultValueId,
+                mirValueId,
+                mirOrigin));
+            return mirResultValueId;
         }
 
         private MirValueId AddInstructionResult(
-            MirInstructionId instruction,
-            MirType type,
-            SymbolId? symbol,
-            MirOriginRef source,
-            int resultIndex = 0) =>
+            MirInstructionId mirInstructionId,
+            MirType mirType,
+            SymbolId? hirSymbolId,
+            MirOriginId mirOrigin,
+            int mirResultIndex = 0) =>
             AddValue(
-                type,
+                mirType,
                 MirValueDefinition.InstructionResultAt(
-                    RequireCurrent().Id,
-                    instruction,
-                    resultIndex),
-                symbol,
-                source);
+                    mirInstructionId,
+                    mirResultIndex),
+                hirSymbolId,
+                mirOrigin);
 
         private MirValueId AddBlockArgument(
-            BlockBuilder block,
-            MirType type,
-            SymbolId? symbol,
-            MirOriginRef source)
+            MirBlockBuilder mirBlockBuilder,
+            MirType mirType,
+            SymbolId? hirSymbolId,
+            MirOriginId mirOrigin)
         {
-            var index = block.Arguments.Count;
-            var value = AddValue(
-                type,
-                MirValueDefinition.BlockArgumentAt(block.Id, index),
-                symbol,
-                source);
-            block.Arguments.Add(new MirBlockArgument(value, type));
-            return value;
+            var mirBlockArgumentIndex = mirBlockBuilder.Arguments.Count;
+            var mirValueId = AddValue(
+                mirType,
+                MirValueDefinition.BlockArgumentAt(
+                    mirBlockBuilder.Id,
+                    mirBlockArgumentIndex),
+                hirSymbolId,
+                mirOrigin);
+            mirBlockBuilder.Arguments.Add(mirValueId);
+            return mirValueId;
         }
 
         private MirValueId AddValue(
-            MirType type,
-            MirValueDefinition definition,
-            SymbolId? symbol,
-            MirOriginRef source)
+            MirType mirType,
+            MirValueDefinition mirValueDefinition,
+            SymbolId? hirSymbolId,
+            MirOriginId mirOrigin)
         {
-            var id = new MirValueId(_values.Count);
-            _valueIndexes[id] = _values.Count;
-            _values.Add(new MirValue(id, type, definition, source));
-            if (symbol is SymbolId sourceSymbol)
-                _trace?.LinkValue(sourceSymbol, _callableId, id);
-            return id;
+            var mirValueId = new MirValueId(_mirValues.Count);
+            _mirValues.Add(new MirValue(
+                mirValueId,
+                mirType,
+                mirValueDefinition,
+                mirOrigin));
+            if (hirSymbolId is SymbolId sourceHirSymbolId)
+            {
+                _traceSink?.LinkValue(
+                    sourceHirSymbolId,
+                    _mirCallableId,
+                    mirValueId);
+            }
+            return mirValueId;
         }
 
-        private void AttachSymbol(MirValueId value, SymbolId symbol) =>
-            _trace?.LinkValue(symbol, _callableId, value);
+        private void TraceMirValueForHirSymbol(
+            MirValueId mirValueId,
+            SymbolId hirSymbolId) =>
+            _traceSink?.LinkValue(
+                hirSymbolId,
+                _mirCallableId,
+                mirValueId);
 
-        private MirType TypeOf(MirValueId value) => _values[_valueIndexes[value]].Type;
+        private MirType MirTypeOf(MirValueId mirValueId) =>
+            _mirValues[mirValueId.Value].Type;
 
-        private void RegisterQubitArgumentBoundsSites(
-            IReadOnlyList<HirArgument> arguments,
-            IReadOnlyList<IParamSpec> parameters,
-            MirInstructionId instruction)
+        private void EmitMirQuantumApply(
+            MirInstructionId mirInstructionId,
+            MirCallTarget mirCallTarget,
+            IReadOnlyList<MirCallOperand> mirCallOperands,
+            IReadOnlyList<MirMutableArrayResult> mirMutableArrayResults,
+            IReadOnlyList<MirFunctor> mirFunctors,
+            IReadOnlyList<int> writtenQubitOperandIndexes,
+            MirOriginId mirOrigin)
         {
-            for (var index = 0; index < arguments.Count; index++)
+            var mirQubitResults =
+                new List<MirQubitAfterInstruction>();
+            var writtenMirQubitIds = new HashSet<MirQubitId>();
+            foreach (var operandIndex in writtenQubitOperandIndexes)
             {
-                if (parameters[index].Type != QType.Qubit)
-                    continue;
-                if (arguments[index].Expression is HirIndexExpression indexed)
+                if (operandIndex < 0
+                    || operandIndex >= mirCallOperands.Count)
                 {
-                    RegisterBoundsSite(
-                        indexed,
-                        instruction,
-                        MirIndexedAccessKind.QubitOperand,
-                        index);
-                }
-            }
-        }
-
-        private void RegisterBoundsSite(
-            HirIndexExpression exactHirSite,
-            MirInstructionId instruction,
-            MirIndexedAccessKind kind,
-            int ordinal = 0)
-        {
-            if (_semanticModel.UnprovenIndexSite(
-                    exactHirSite.Id)
-                is not { } semanticSite)
-            {
-                return;
-            }
-
-            var loweredSite = new MirIndexedAccessSite(
-                new MirInstructionSite(
-                    _callableId,
-                    instruction),
-                kind,
-                ordinal);
-            if (!_boundsSites.TryAdd(semanticSite, loweredSite))
-            {
-                throw Internal(
-                    $"unproven bounds site {semanticSite} lowered more than once");
-            }
-        }
-
-        private void EmitQuantumApply(
-            MirInstructionId instructionId,
-            MirCallTarget target,
-            IReadOnlyList<MirCallOperand> operands,
-            IReadOnlyList<MirMutableArrayResult> mutableArrayResults,
-            IReadOnlyList<MirFunctor> functors,
-            IReadOnlyList<int> writtenOperandIndexes,
-            MirOriginRef source)
-        {
-            var results = new List<MirQubitAfterInstruction>();
-            var writtenQubits = new HashSet<MirQubitId>();
-            foreach (var operandIndex in writtenOperandIndexes)
-            {
-                if (operandIndex < 0 || operandIndex >= operands.Count)
-                {
-                    throw Internal(
-                        $"quantum write operand {operandIndex} is outside the operand list");
+                    throw MirLoweringError(
+                        $"quantum write operand {operandIndex} "
+                        + "is outside the operand list");
                 }
 
-                if (operands[operandIndex] is not MirQubitCallOperand qubitOperand)
+                if (mirCallOperands[operandIndex]
+                    is not MirQubitCallOperand mirQubitOperand)
                 {
-                    throw Internal(
+                    throw MirLoweringError(
                         $"quantum write operand {operandIndex} is not a qubit");
                 }
 
-                var qubitId = qubitOperand.Qubit.Qubit.Id;
-                if (!writtenQubits.Add(qubitId))
+                var mirQubitId = mirQubitOperand.Qubit.Qubit.Id;
+                if (!writtenMirQubitIds.Add(mirQubitId))
                     continue; // One register version covers all elements written by this instruction.
 
-                results.Add(NextQubitAfterInstruction(qubitId, source));
+                mirQubitResults.Add(
+                    CreateQubitAfterInstruction(mirQubitId, mirOrigin));
             }
 
-            Emit(new MirQuantumApply(
-                instructionId,
-                target,
-                operands,
-                results,
-                mutableArrayResults,
-                functors,
-                source));
+            EmitMirInstruction(new MirQuantumApply(
+                mirInstructionId,
+                mirCallTarget,
+                mirCallOperands,
+                mirQubitResults,
+                mirMutableArrayResults,
+                mirFunctors,
+                mirOrigin));
 
-            foreach (var result in results)
-                AdvanceCurrentQubit(result);
+            foreach (var mirQubitResult in mirQubitResults)
+                UpdateCurrentQubitAfterWrite(mirQubitResult);
         }
 
-        private IReadOnlyList<int> WrittenBuiltinQubitOperands(
-            HirCallStatement statement,
-            string gateName)
+        private IReadOnlyList<int> WrittenBuiltinQubitOperandIndexes(
+            HirCallStatement hirCallStatement,
+            string builtinGateName)
         {
-            var call = statement.Call;
-            if (!QoraGates.Gates.TryGetValue(gateName, out var info))
-                throw Internal($"built-in gate `{gateName}` has no effect metadata");
+            var hirCall = hirCallStatement.Call;
+            if (!QoraGates.Gates.TryGetValue(
+                    builtinGateName,
+                    out var builtinGateInfo))
+            {
+                throw MirLoweringError(
+                    $"built-in gate `{builtinGateName}` has no effect metadata");
+            }
 
-            var firstQubit = info.AngleFirst ? 1 : 0;
-            var qubitOperands = Enumerable.Range(
-                firstQubit,
-                call.Arguments.Count - firstQubit).ToList();
-            if (!info.Unitary)
-                return qubitOperands;
-            if (info.Diagonal)
+            var firstQubitOperandIndex =
+                builtinGateInfo.AngleFirst ? 1 : 0;
+            var qubitOperandIndexes = Enumerable.Range(
+                firstQubitOperandIndex,
+                hirCall.Arguments.Count - firstQubitOperandIndex).ToList();
+            if (!builtinGateInfo.Unitary)
+                return qubitOperandIndexes;
+            if (builtinGateInfo.Diagonal)
                 return Array.Empty<int>();
 
-            var controlCount = info.Controls
-                + statement.Modifiers.Count(
+            var controlQubitCount = builtinGateInfo.Controls
+                + hirCallStatement.Modifiers.Count(
                     modifier => modifier == QGateModifier.Controlled);
-            if (controlCount > qubitOperands.Count)
+            if (controlQubitCount > qubitOperandIndexes.Count)
             {
-                throw Internal(
-                    $"built-in gate `{gateName}` declares more controls than qubit operands");
+                throw MirLoweringError(
+                    $"built-in gate `{builtinGateName}` declares more controls "
+                    + "than qubit operands");
             }
 
-            return qubitOperands.Skip(controlCount).ToArray();
+            return qubitOperandIndexes.Skip(controlQubitCount).ToArray();
         }
 
-        private IReadOnlyList<int> WrittenUserQubitOperands(HirCallable callee)
+        private IReadOnlyList<int> WrittenUserQubitOperandIndexes(
+            HirCallable hirUserOperation)
         {
-            var effects = _semanticModel.FindOpEffects(callee.Id)
-                ?? throw Internal($"callable `{callee.Name}` has no HIR effect summary");
-            var written = new List<int>();
-            for (var index = 0; index < callee.Parameters.Count; index++)
+            var hirOperationEffects =
+                _finalHirArtifact.Model.FindOpEffects(hirUserOperation.Id)
+                ?? throw MirLoweringError(
+                    $"callable `{hirUserOperation.Name}` "
+                    + "has no HIR effect summary");
+            var writtenQubitOperandIndexes = new List<int>();
+            for (var hirParameterIndex = 0;
+                 hirParameterIndex < hirUserOperation.Parameters.Count;
+                 hirParameterIndex++)
             {
-                var parameter = callee.Parameters[index];
-                if (parameter.Type == QType.Qubit
-                    && effects.ParamModified.Any(reference =>
-                        string.Equals(reference.Reg, parameter.Name, StringComparison.Ordinal)))
+                var hirParameter =
+                    hirUserOperation.Parameters[hirParameterIndex];
+                if (hirParameter.Type == QType.Qubit
+                    && hirOperationEffects.ParamModified.Any(
+                        modifiedParameterReference =>
+                        string.Equals(
+                            modifiedParameterReference.Reg,
+                            hirParameter.Name,
+                            StringComparison.Ordinal)))
                 {
-                    written.Add(index);
+                    writtenQubitOperandIndexes.Add(hirParameterIndex);
                 }
             }
 
-            return written;
+            return writtenQubitOperandIndexes;
         }
 
-        private void RegisterQubitSeed(SymbolId symbol, MirQubit qubit)
+        private void RegisterInitialMirQubit(
+            SymbolId hirSymbolId,
+            MirQubit initialMirQubit)
         {
-            if (qubit.Version.Value != 0)
-                throw Internal($"initial qubit {qubit.Id} does not have version zero");
-            if (!_qubitSeeds.TryAdd(qubit.Id, qubit))
-                throw Internal($"qubit identity {qubit.Id} was allocated more than once");
-            _nextQubitVersions.Add(qubit.Id, 1);
-            _trace?.LinkQubit(symbol, _callableId, qubit.Key);
+            if (initialMirQubit.Version.Value != 0)
+            {
+                throw MirLoweringError(
+                    $"initial qubit {initialMirQubit.Id} "
+                    + "does not have version zero");
+            }
+            if (!_initialMirQubitsById.TryAdd(
+                    initialMirQubit.Id,
+                    initialMirQubit))
+            {
+                throw MirLoweringError(
+                    $"qubit identity {initialMirQubit.Id} "
+                    + "was allocated more than once");
+            }
+            _nextMirQubitVersionById.Add(initialMirQubit.Id, 1);
+            _traceSink?.LinkQubit(
+                hirSymbolId,
+                _mirCallableId,
+                initialMirQubit.Key);
         }
 
-        private MirQubitAfterInstruction NextQubitAfterInstruction(
-            MirQubitId id,
-            MirOriginRef source)
+        private MirQubitAfterInstruction CreateQubitAfterInstruction(
+            MirQubitId mirQubitId,
+            MirOriginId mirOrigin)
         {
-            if (!_nextQubitVersions.TryGetValue(id, out var next))
-                throw Internal($"qubit identity {id} has no initial definition");
-            _nextQubitVersions[id] = checked(next + 1);
+            if (!_nextMirQubitVersionById.TryGetValue(
+                    mirQubitId,
+                    out var nextMirQubitVersionValue))
+            {
+                throw MirLoweringError(
+                    $"qubit identity {mirQubitId} has no initial definition");
+            }
+            _nextMirQubitVersionById[mirQubitId] =
+                checked(nextMirQubitVersionValue + 1);
             return new MirQubitAfterInstruction(
-                id,
-                new MirQubitVersion(next),
-                source);
+                mirQubitId,
+                new MirQubitVersion(nextMirQubitVersionValue),
+                mirOrigin);
         }
 
-        private MirQubitPhi NextQubitPhi(
-            SymbolId symbol,
-            MirQubitId id,
-            BlockBuilder block,
-            IReadOnlyList<MirQubitPhiInput> inputs,
-            MirOriginRef source)
+        private MirQubitPhi CreateQubitPhi(
+            SymbolId hirSymbolId,
+            MirQubitId mirQubitId,
+            MirBlockBuilder mirJoinBlock,
+            IReadOnlyList<MirQubitPhiInput> mirPhiInputs,
+            MirOriginId mirOrigin)
         {
-            if (!_nextQubitVersions.TryGetValue(id, out var next))
-                throw Internal($"qubit identity {id} has no initial definition");
-            _nextQubitVersions[id] = checked(next + 1);
-            var phi = new MirQubitPhi(
-                id,
-                new MirQubitVersion(next),
-                block.Id,
-                inputs,
-                source);
-            block.QubitPhis.Add(phi);
-            _trace?.LinkQubit(symbol, _callableId, phi.Key);
-            return phi;
+            if (!_nextMirQubitVersionById.TryGetValue(
+                    mirQubitId,
+                    out var nextMirQubitVersionValue))
+            {
+                throw MirLoweringError(
+                    $"qubit identity {mirQubitId} has no initial definition");
+            }
+            _nextMirQubitVersionById[mirQubitId] =
+                checked(nextMirQubitVersionValue + 1);
+            var mirQubitPhi = new MirQubitPhi(
+                mirQubitId,
+                new MirQubitVersion(nextMirQubitVersionValue),
+                mirPhiInputs,
+                mirOrigin);
+            mirJoinBlock.QubitPhis.Add(mirQubitPhi);
+            _traceSink?.LinkQubit(
+                hirSymbolId,
+                _mirCallableId,
+                mirQubitPhi.Key);
+            return mirQubitPhi;
         }
 
         private void MergeQubitStatesAtJoin(
-            FlowState merged,
-            FlowState firstState,
-            BlockBuilder firstPredecessor,
+            LoweringFlowState mergedFlowState,
+            LoweringFlowState firstPredecessorFlowState,
+            MirBlockBuilder firstPredecessorBlock,
             int firstSuccessorOrdinal,
-            FlowState secondState,
-            BlockBuilder secondPredecessor,
+            LoweringFlowState secondPredecessorFlowState,
+            MirBlockBuilder secondPredecessorBlock,
             int secondSuccessorOrdinal,
-            BlockBuilder join,
-            MirOriginRef source)
+            MirBlockBuilder mirJoinBlock,
+            MirOriginId mirOrigin)
         {
-            var groups = merged.Qubits
+            var mirQubitAliasGroups =
+                mergedFlowState.CurrentMirQubitByHirSymbolId
                 .OrderBy(pair => pair.Key.Value)
                 .GroupBy(pair => pair.Value.Id)
                 .Select(group => (
-                    Id: group.Key,
-                    Symbols: group.Select(pair => pair.Key).ToArray()))
+                    MirQubitId: group.Key,
+                    HirSymbolIds: group.Select(pair => pair.Key).ToArray()))
                 .ToArray();
 
-            foreach (var group in groups)
+            foreach (var mirQubitAliasGroup in mirQubitAliasGroups)
             {
-                var first = Incoming(firstState, group.Id, group.Symbols);
-                var second = Incoming(secondState, group.Id, group.Symbols);
-                if (first.Key == second.Key)
+                var firstIncomingMirQubit = RequireIncomingMirQubit(
+                    firstPredecessorFlowState,
+                    mirQubitAliasGroup.MirQubitId,
+                    mirQubitAliasGroup.HirSymbolIds);
+                var secondIncomingMirQubit = RequireIncomingMirQubit(
+                    secondPredecessorFlowState,
+                    mirQubitAliasGroup.MirQubitId,
+                    mirQubitAliasGroup.HirSymbolIds);
+                if (firstIncomingMirQubit.Key == secondIncomingMirQubit.Key)
                 {
-                    foreach (var symbol in group.Symbols)
-                        merged.Qubits[symbol] = first;
+                    foreach (var hirSymbolId
+                             in mirQubitAliasGroup.HirSymbolIds)
+                    {
+                        mergedFlowState.CurrentMirQubitByHirSymbolId[
+                                hirSymbolId] =
+                            firstIncomingMirQubit;
+                    }
                     continue;
                 }
 
-                var phi = NextQubitPhi(
-                    group.Symbols[0],
-                    group.Id,
-                    join,
+                var mirQubitPhi = CreateQubitPhi(
+                    mirQubitAliasGroup.HirSymbolIds[0],
+                    mirQubitAliasGroup.MirQubitId,
+                    mirJoinBlock,
                     new[]
                     {
                         new MirQubitPhiInput(
                             new MirControlFlowEdge(
-                                firstPredecessor.Id,
-                                firstSuccessorOrdinal,
-                                join.Id),
-                            first.Key),
+                                firstPredecessorBlock.Id,
+                                firstSuccessorOrdinal),
+                            firstIncomingMirQubit.Key),
                         new MirQubitPhiInput(
                             new MirControlFlowEdge(
-                                secondPredecessor.Id,
-                                secondSuccessorOrdinal,
-                                join.Id),
-                            second.Key),
+                                secondPredecessorBlock.Id,
+                                secondSuccessorOrdinal),
+                            secondIncomingMirQubit.Key),
                     },
-                    source);
-                foreach (var symbol in group.Symbols)
+                    mirOrigin);
+                foreach (var hirSymbolId
+                         in mirQubitAliasGroup.HirSymbolIds)
                 {
-                    merged.Qubits[symbol] = phi;
-                    if (symbol != group.Symbols[0])
-                        _trace?.LinkQubit(symbol, _callableId, phi.Key);
+                    mergedFlowState.CurrentMirQubitByHirSymbolId[
+                            hirSymbolId] =
+                        mirQubitPhi;
+                    if (hirSymbolId
+                        != mirQubitAliasGroup.HirSymbolIds[0])
+                    {
+                        _traceSink?.LinkQubit(
+                            hirSymbolId,
+                            _mirCallableId,
+                            mirQubitPhi.Key);
+                    }
                 }
             }
 
-            MirQubit Incoming(
-                FlowState state,
-                MirQubitId expectedId,
-                IReadOnlyList<SymbolId> symbols)
+            MirQubit RequireIncomingMirQubit(
+                LoweringFlowState predecessorFlowState,
+                MirQubitId expectedMirQubitId,
+                IReadOnlyList<SymbolId> hirSymbolIds)
             {
-                if (!state.Qubits.TryGetValue(symbols[0], out var incoming)
-                    || incoming.Id != expectedId)
+                if (!predecessorFlowState.CurrentMirQubitByHirSymbolId
+                        .TryGetValue(
+                            hirSymbolIds[0],
+                            out var incomingMirQubit)
+                    || incomingMirQubit.Id != expectedMirQubitId)
                 {
-                    throw Internal(
-                        $"join predecessor has no current state for qubit {expectedId}");
+                    throw MirLoweringError(
+                        "join predecessor has no current state for qubit "
+                        + expectedMirQubitId);
                 }
-                if (symbols.Any(symbol =>
-                        !state.Qubits.TryGetValue(symbol, out var alias)
-                        || alias.Key != incoming.Key))
+                foreach (var hirSymbolId in hirSymbolIds)
                 {
-                    throw Internal(
-                        $"aliases of qubit {expectedId} reach a join with different versions");
+                    if (!predecessorFlowState.CurrentMirQubitByHirSymbolId
+                            .TryGetValue(
+                                hirSymbolId,
+                                out var aliasMirQubit)
+                        || aliasMirQubit.Key != incomingMirQubit.Key)
+                    {
+                        throw MirLoweringError(
+                            $"aliases of qubit {expectedMirQubitId} "
+                            + "reach a join with different versions");
+                    }
                 }
-                return incoming;
+
+                return incomingMirQubit;
             }
         }
 
-        private IReadOnlyList<LoopQubitPhiBinding> CreateLoopQubitPhis(
-            FlowState before,
-            FlowState headerState,
-            BlockBuilder preheader,
+        private IReadOnlyList<LoopQubitPhiBinding>
+            CreateLoopQubitPhiBindings(
+            LoweringFlowState flowStateBeforeLoop,
+            LoweringFlowState loopHeaderFlowState,
+            MirBlockBuilder mirPreheaderBlock,
             int preheaderSuccessorOrdinal,
-            BlockBuilder header,
-            MirOriginRef source)
+            MirBlockBuilder mirHeaderBlock,
+            MirOriginId mirOrigin)
         {
-            var bindings = new List<LoopQubitPhiBinding>();
-            foreach (var group in before.Qubits
+            var loopQubitPhiBindings = new List<LoopQubitPhiBinding>();
+            foreach (var mirQubitAliasGroup
+                     in flowStateBeforeLoop.CurrentMirQubitByHirSymbolId
                          .OrderBy(pair => pair.Key.Value)
                          .GroupBy(pair => pair.Value.Id))
             {
-                var symbols = group.Select(pair => pair.Key).ToArray();
-                var incoming = group.First().Value;
-                if (group.Any(pair => pair.Value.Key != incoming.Key))
+                var hirSymbolIds =
+                    mirQubitAliasGroup.Select(pair => pair.Key).ToArray();
+                var incomingMirQubit = mirQubitAliasGroup.First().Value;
+                if (mirQubitAliasGroup.Any(
+                        pair => pair.Value.Key != incomingMirQubit.Key))
                 {
-                    throw Internal(
-                        $"aliases of qubit {incoming.Id} enter a loop with different versions");
+                    throw MirLoweringError(
+                        $"aliases of qubit {incomingMirQubit.Id} "
+                        + "enter a loop with different versions");
                 }
 
-                var phi = NextQubitPhi(
-                    symbols[0],
-                    incoming.Id,
-                    header,
+                var mirQubitPhi = CreateQubitPhi(
+                    hirSymbolIds[0],
+                    incomingMirQubit.Id,
+                    mirHeaderBlock,
                     new[]
                     {
                         new MirQubitPhiInput(
                             new MirControlFlowEdge(
-                                preheader.Id,
-                                preheaderSuccessorOrdinal,
-                                header.Id),
-                            incoming.Key),
+                                mirPreheaderBlock.Id,
+                                preheaderSuccessorOrdinal),
+                            incomingMirQubit.Key),
                     },
-                    source);
-                foreach (var symbol in symbols)
+                    mirOrigin);
+                foreach (var hirSymbolId in hirSymbolIds)
                 {
-                    headerState.Qubits[symbol] = phi;
-                    if (symbol != symbols[0])
-                        _trace?.LinkQubit(symbol, _callableId, phi.Key);
+                    loopHeaderFlowState.CurrentMirQubitByHirSymbolId[
+                            hirSymbolId] =
+                        mirQubitPhi;
+                    if (hirSymbolId != hirSymbolIds[0])
+                    {
+                        _traceSink?.LinkQubit(
+                            hirSymbolId,
+                            _mirCallableId,
+                            mirQubitPhi.Key);
+                    }
                 }
 
-                bindings.Add(new LoopQubitPhiBinding(phi, symbols));
+                loopQubitPhiBindings.Add(
+                    new LoopQubitPhiBinding(
+                        mirQubitPhi,
+                        hirSymbolIds));
             }
 
-            return bindings;
+            return loopQubitPhiBindings;
         }
 
         private void AddLoopBackedgeInputs(
-            IReadOnlyList<LoopQubitPhiBinding> bindings,
-            FlowState backedgeState,
-            BlockBuilder backedge,
+            IReadOnlyList<LoopQubitPhiBinding> loopQubitPhiBindings,
+            LoweringFlowState backedgeFlowState,
+            MirBlockBuilder mirBackedgeBlock,
             int successorOrdinal,
-            BlockBuilder header)
+            MirBlockBuilder mirHeaderBlock)
         {
-            foreach (var binding in bindings)
+            foreach (var loopQubitPhiBinding in loopQubitPhiBindings)
             {
-                var incoming = backedgeState.Qubits[binding.Symbols[0]];
-                if (incoming.Id != binding.Phi.Id)
+                var incomingMirQubit =
+                    backedgeFlowState.CurrentMirQubitByHirSymbolId[
+                        loopQubitPhiBinding.HirSymbolIds[0]];
+                if (incomingMirQubit.Id
+                    != loopQubitPhiBinding.MirQubitPhi.Id)
                 {
-                    throw Internal(
-                        $"loop backedge replaces qubit {binding.Phi.Id} with {incoming.Id}");
+                    throw MirLoweringError(
+                        "loop backedge replaces qubit "
+                        + $"{loopQubitPhiBinding.MirQubitPhi.Id} with "
+                        + incomingMirQubit.Id);
                 }
-                if (binding.Symbols.Any(symbol =>
-                        backedgeState.Qubits[symbol].Key != incoming.Key))
+                if (loopQubitPhiBinding.HirSymbolIds.Any(
+                        hirSymbolId =>
+                            backedgeFlowState
+                                .CurrentMirQubitByHirSymbolId[
+                                    hirSymbolId].Key
+                            != incomingMirQubit.Key))
                 {
-                    throw Internal(
-                        $"aliases of qubit {incoming.Id} leave a loop with different versions");
+                    throw MirLoweringError(
+                        $"aliases of qubit {incomingMirQubit.Id} "
+                        + "leave a loop with different versions");
                 }
 
-                header.ReplacePhi(binding.Phi with
+                mirHeaderBlock.ReplaceQubitPhi(
+                    loopQubitPhiBinding.MirQubitPhi with
                 {
-                    Inputs = binding.Phi.Inputs
+                    Inputs = loopQubitPhiBinding.MirQubitPhi.Inputs
                         .Append(new MirQubitPhiInput(
                             new MirControlFlowEdge(
-                                backedge.Id,
-                                successorOrdinal,
-                                header.Id),
-                            incoming.Key))
+                                mirBackedgeBlock.Id,
+                                successorOrdinal),
+                            incomingMirQubit.Key))
                         .ToArray(),
                 });
             }
         }
 
-        private void AdvanceCurrentQubit(MirQubit qubit)
+        private void UpdateCurrentQubitAfterWrite(MirQubit updatedMirQubit)
         {
-            var symbols = _state.Qubits
-                .Where(pair => pair.Value.Id == qubit.Id)
+            var hirSymbolIds =
+                _currentFlowState.CurrentMirQubitByHirSymbolId
+                .Where(pair => pair.Value.Id == updatedMirQubit.Id)
                 .Select(pair => pair.Key)
                 .ToArray();
-            if (symbols.Length == 0)
-                throw Internal($"written qubit {qubit.Id} has no active HIR binding");
-
-            foreach (var symbol in symbols)
+            if (hirSymbolIds.Length == 0)
             {
-                _state.Qubits[symbol] = qubit;
-                _trace?.LinkQubit(symbol, _callableId, qubit.Key);
+                throw MirLoweringError(
+                    $"written qubit {updatedMirQubit.Id} "
+                    + "has no active HIR binding");
+            }
+
+            foreach (var hirSymbolId in hirSymbolIds)
+            {
+                _currentFlowState.CurrentMirQubitByHirSymbolId[
+                        hirSymbolId] =
+                    updatedMirQubit;
+                _traceSink?.LinkQubit(
+                    hirSymbolId,
+                    _mirCallableId,
+                    updatedMirQubit.Key);
             }
         }
 
-        private (bool IsArray, int? Length) QubitShape(MirQubitId id) =>
-            RequireQubitSeed(id) switch
+        private (bool IsArray, int? KnownLength) MirQubitShapeOf(
+            MirQubitId mirQubitId) =>
+            RequireInitialMirQubit(mirQubitId) switch
             {
-                MirQubitParameter parameter => (parameter.IsArray, parameter.Length),
-                MirQubitFromUse local => (local.IsArray, local.Length),
-                var seed => throw Internal(
-                    $"qubit {id} has invalid initial definition {seed.GetType().Name}"),
+                MirQubitParameter mirQubitParameter => (
+                    mirQubitParameter.IsArray,
+                    mirQubitParameter.Length),
+                MirQubitFromUse mirLocalQubit => (
+                    mirLocalQubit.IsArray,
+                    mirLocalQubit.Length),
+                var invalidInitialMirQubit => throw MirLoweringError(
+                    $"qubit {mirQubitId} has invalid initial definition "
+                    + invalidInitialMirQubit.GetType().Name),
             };
 
-        private MirQubit RequireQubitSeed(MirQubitId id) =>
-            _qubitSeeds.TryGetValue(id, out var seed)
-                ? seed
-                : throw Internal($"qubit identity {id} has no initial definition");
+        private MirQubit RequireInitialMirQubit(MirQubitId mirQubitId) =>
+            _initialMirQubitsById.TryGetValue(
+                mirQubitId,
+                out var initialMirQubit)
+                ? initialMirQubit
+                : throw MirLoweringError(
+                    $"qubit identity {mirQubitId} has no initial definition");
 
-        private void Emit(MirInstruction instruction) =>
-            RequireCurrent().Instructions.Add(instruction);
+        private void EmitMirInstruction(MirInstruction mirInstruction) =>
+            RequireCurrentMirBlock().Instructions.Add(mirInstruction);
 
-        private void Terminate(MirTerminator terminator)
+        private void TerminateCurrentMirBlock(MirTerminator mirTerminator)
         {
-            var block = RequireCurrent();
-            if (block.Terminator is not null)
-                throw Internal($"block {block.Id} already has a terminator");
-            block.Terminator = terminator;
-            _current = null;
-        }
-
-        private BlockBuilder RequireCurrent() =>
-            _current ?? throw Internal("attempted to emit into a terminated control-flow path");
-
-        private BlockBuilder NewBlock(MirOriginRef source)
-        {
-            var block = new BlockBuilder(new MirBlockId(_blocks.Count), source);
-            _blocks.Add(block);
-            _blockById.Add(block.Id, block);
-            return block;
-        }
-
-        private MirInstructionId NextInstruction() => new(_nextInstruction++);
-        private MirStorageId NextStorage() => new(_nextStorage++);
-        private MirQubitId NextQubitId() => new(_nextQubit++);
-
-        private Symbol RequireSymbol(HirNodeId declarationId, string role) =>
-            _semanticModel.FindSymbol(declarationId)
-            ?? throw Internal($"{role} has no semantic symbol");
-
-        private SymbolId RequireReferencedSymbol(
-            HirNameExpression reference,
-            string role) =>
-            _semanticModel.FindReferencedSymbol(reference.Id)?.Id
-            ?? throw Internal($"{role} has no semantic binding");
-
-        private Symbol RequireCallTarget(HirCallExpression call) =>
-            _semanticModel.FindReferencedSymbol(call.Callee.Id)
-            ?? throw Internal(
-                $"call target `{call.Name}` has no semantic binding");
-
-        private HirCallable? ResolveUserCallable(Symbol target)
-        {
-            if (target.Kind == SymbolKind.Callable
-                && _callablesBySymbol.TryGetValue(target.Id, out var byId))
+            var currentMirBlock = RequireCurrentMirBlock();
+            if (currentMirBlock.Terminator is not null)
             {
-                return byId;
+                throw MirLoweringError(
+                    $"block {currentMirBlock.Id} already has a terminator");
             }
-            return null;
+            currentMirBlock.Terminator = mirTerminator;
+            _currentMirBlockBuilder = null;
         }
 
-        private SymbolId? SymbolOfWholeArgument(HirArgument argument)
+        private MirBlockBuilder RequireCurrentMirBlock() =>
+            _currentMirBlockBuilder
+            ?? throw MirLoweringError(
+                "attempted to emit into a terminated control-flow path");
+
+        private MirBlockBuilder CreateMirBlock(MirOriginId mirOrigin)
         {
-            if (argument.Expression is not HirNameExpression name) return null;
-            return RequireReferencedSymbol(
-                name,
-                $"argument `{name.Name}`");
+            var mirBlockBuilder = new MirBlockBuilder(
+                new MirBlockId(_mirBlockBuilders.Count),
+                mirOrigin);
+            _mirBlockBuilders.Add(mirBlockBuilder);
+            return mirBlockBuilder;
         }
 
-        private static IReadOnlyList<MirFunctor> LowerModifiers(
-            IReadOnlyList<QGateModifier> modifiers) =>
-            modifiers.Select(modifier => modifier switch
+        private MirInstructionId AllocateMirInstructionId() =>
+            new(_nextMirInstructionIdValue++);
+
+        private MirStorageId AllocateMirStorageId() =>
+            new(_mirArrayStorages.Count);
+
+        private MirQubitId AllocateMirQubitId() =>
+            new(_initialMirQubitsById.Count);
+
+        private Symbol RequireHirDeclarationSymbol(
+            HirNodeId hirDeclarationNodeId,
+            string diagnosticRole) =>
+            _finalHirArtifact.Model.FindSymbol(hirDeclarationNodeId)
+            ?? throw MirLoweringError(
+                $"{diagnosticRole} has no semantic symbol");
+
+        private SymbolId SymbolIdOf(
+            HirNameExpression hirNameReference,
+            string diagnosticRole) =>
+            _finalHirArtifact.Model
+                .FindReferencedSymbol(hirNameReference.Id)?.Id
+            ?? throw MirLoweringError(
+                $"{diagnosticRole} has no semantic binding");
+
+        private Symbol RequireHirCallTargetSymbol(
+            HirCallExpression hirCall) =>
+            _finalHirArtifact.Model
+                .FindReferencedSymbol(hirCall.Callee.Id)
+            ?? throw MirLoweringError(
+                $"call target `{hirCall.Name}` has no semantic binding");
+
+        private HirCallable RequireHirCallableDeclaration(
+            Symbol semanticCallTargetSymbol)
+        {
+            if (semanticCallTargetSymbol.Kind != SymbolKind.Callable)
+            {
+                throw MirLoweringError(
+                    $"symbol `{semanticCallTargetSymbol.SourceName}` "
+                    + "is not a user callable");
+            }
+
+            var hirDeclarationNodeId =
+                semanticCallTargetSymbol.DeclarationNodeId
+                ?? throw MirLoweringError(
+                    $"callable symbol `{semanticCallTargetSymbol.SourceName}` "
+                    + "has no declaration node");
+            return _finalHirArtifact.Source.Structure
+                .FindNode(hirDeclarationNodeId)
+                as HirCallable
+                ?? throw MirLoweringError(
+                    $"callable symbol `{semanticCallTargetSymbol.SourceName}` points to "
+                    + "a non-callable HIR node");
+        }
+
+        private SymbolId? SymbolIdOfWholeArgument(HirArgument hirArgument)
+        {
+            if (hirArgument.Expression
+                is not HirNameExpression hirArgumentName)
+            {
+                return null;
+            }
+
+            return SymbolIdOf(
+                hirArgumentName,
+                $"argument `{hirArgumentName.Name}`");
+        }
+
+        private static IReadOnlyList<MirFunctor> LowerModifiersToMirFunctors(
+            IReadOnlyList<QGateModifier> hirModifiers) =>
+            hirModifiers.Select(hirModifier => hirModifier switch
             {
                 QGateModifier.Controlled => MirFunctor.Controlled,
                 _ => throw new InvalidOperationException(
-                    $"QINTERNAL: unsupported HIR gate modifier `{modifier}` reached MIR lowering"),
+                    "QINTERNAL: unsupported HIR gate modifier "
+                    + $"`{hirModifier}` reached MIR lowering"),
             }).ToList();
 
-        private static MirBinaryOperator BinaryOperator(
-            HirBinaryOperator @operator) => @operator switch
+        private static MirBinaryOperator MirBinaryOperatorOf(
+            HirBinaryOperator hirOperator) => hirOperator switch
         {
             HirBinaryOperator.Add => MirBinaryOperator.Add,
             HirBinaryOperator.Subtract => MirBinaryOperator.Subtract,
@@ -1977,65 +2500,80 @@ internal static class QoraMirLowering
             HirBinaryOperator.GreaterThan => MirBinaryOperator.Greater,
             HirBinaryOperator.GreaterThanOrEqual => MirBinaryOperator.GreaterOrEqual,
             _ => throw new InvalidOperationException(
-                $"QINTERNAL: unsupported binary operator `{@operator}` reached MIR lowering"),
+                $"QINTERNAL: unsupported binary operator `{hirOperator}` "
+                + "reached MIR lowering"),
         };
 
-        private static MirType CommonNumericType(
-            MirType left,
-            MirType right,
-            bool comparison)
+        private static MirType CommonMirNumericType(
+            MirType mirLeftType,
+            MirType mirRightType,
+            bool isComparison)
         {
-            if (left.IsArray || right.IsArray)
+            if (mirLeftType.IsArray || mirRightType.IsArray)
+            {
                 throw new InvalidOperationException(
                     "QINTERNAL: an array reached a scalar MIR binary instruction");
-            if (left == right)
-            {
-                if (!comparison && left.ElementType == QType.Bit)
-                    return MirType.Scalar(QType.Int);
-                return left;
             }
-            if (left.ElementType == QType.Float || right.ElementType == QType.Float)
+            if (mirLeftType == mirRightType)
+            {
+                if (!isComparison
+                    && mirLeftType.ElementType == QType.Bit)
+                {
+                    return MirType.Scalar(QType.Int);
+                }
+                return mirLeftType;
+            }
+            if (mirLeftType.ElementType == QType.Float
+                || mirRightType.ElementType == QType.Float)
+            {
                 return MirType.Scalar(QType.Float);
-            if (left.ElementType == QType.Angle || right.ElementType == QType.Angle)
+            }
+            if (mirLeftType.ElementType == QType.Angle
+                || mirRightType.ElementType == QType.Angle)
+            {
                 return MirType.Scalar(QType.Angle);
+            }
             return MirType.Scalar(QType.Int);
         }
 
-        private static bool IsBuiltinLiteral(string name) =>
-            name is "true" or "false" or "pi" or "tau" or "euler";
+        private static bool IsBuiltinLiteralName(
+            string sourceLiteralName) =>
+            sourceLiteralName
+                is "true" or "false" or "pi" or "tau" or "euler";
 
-        private static QType LiteralType(string text) =>
-            text is "true" or "false"
+        private static QType QTypeOfLiteralText(string literalText) =>
+            literalText is "true" or "false"
                 ? QType.Bit
-                : text is "pi" or "tau" or "euler" || text.Contains('.')
+                : literalText is "pi" or "tau" or "euler"
+                    || literalText.Contains('.')
                     ? QType.Float
                     : QType.Int;
 
-        private MirOriginRef SourceOf(HirNode node) =>
-            _origins.Hir(
-                _callable.Id,
-                node.Id);
+        private MirOriginId MirOriginFor(HirNode hirNode) =>
+            _mirOriginTableBuilder.Hir(hirNode.Id);
 
-        private InvalidOperationException Internal(string message) =>
-            new($"QINTERNAL: MIR lowering of `{_callable.Name}` failed: {message}");
+        private InvalidOperationException MirLoweringError(string message) =>
+            new($"QINTERNAL: MIR lowering of `{_hirCallable.Name}` failed: {message}");
 
         private sealed record LoopQubitPhiBinding(
-            MirQubitPhi Phi,
-            IReadOnlyList<SymbolId> Symbols);
+            MirQubitPhi MirQubitPhi,
+            IReadOnlyList<SymbolId> HirSymbolIds);
 
-        private sealed class BlockBuilder
+        private sealed class MirBlockBuilder
         {
             public MirBlockId Id { get; }
-            public List<MirBlockArgument> Arguments { get; } = new();
+            public List<MirValueId> Arguments { get; } = new();
             public List<MirQubitPhi> QubitPhis { get; } = new();
             public List<MirInstruction> Instructions { get; } = new();
             public MirTerminator? Terminator { get; set; }
-            public MirOriginRef Origin { get; }
+            public MirOriginId Origin { get; }
 
-            public BlockBuilder(MirBlockId id, MirOriginRef origin)
+            public MirBlockBuilder(
+                MirBlockId mirBlockId,
+                MirOriginId mirOrigin)
             {
-                Id = id;
-                Origin = origin;
+                Id = mirBlockId;
+                Origin = mirOrigin;
             }
 
             public MirBlock Build() => new(
@@ -2046,81 +2584,93 @@ internal static class QoraMirLowering
                 Origin,
                 QubitPhis);
 
-            public void ReplacePhi(MirQubitPhi phi)
+            public void ReplaceQubitPhi(MirQubitPhi mirQubitPhi)
             {
-                var index = QubitPhis.FindIndex(existing => existing.Key == phi.Key);
-                if (index < 0)
+                var mirQubitPhiIndex = QubitPhis.FindIndex(
+                    existing => existing.Key == mirQubitPhi.Key);
+                if (mirQubitPhiIndex < 0)
                 {
                     throw new InvalidOperationException(
-                        $"QINTERNAL: block {Id} does not contain qubit Phi {phi.Key}");
+                        $"QINTERNAL: block {Id} does not contain qubit Phi "
+                        + mirQubitPhi.Key);
                 }
 
-                QubitPhis[index] = phi;
+                QubitPhis[mirQubitPhiIndex] = mirQubitPhi;
             }
         }
 
-        private sealed class FlowState
+        private sealed class LoweringFlowState
         {
             // These are lifetime frames, not name-resolution scopes. HIR has already resolved every use to
             // a SymbolId; the frames only identify states that must disappear when a lexical block exits.
-            private readonly List<HashSet<SymbolId>> _lifetimeFrames;
-            public Dictionary<SymbolId, MirValueId> Values { get; }
-            public Dictionary<SymbolId, MirStorageId> Storages { get; }
-            public Dictionary<SymbolId, MirQubit> Qubits { get; }
+            private readonly List<HashSet<SymbolId>>
+                _hirSymbolLifetimeFrames;
+            public Dictionary<SymbolId, MirValueId>
+                CurrentMirValueByHirSymbolId { get; }
+            public Dictionary<SymbolId, MirQubit>
+                CurrentMirQubitByHirSymbolId { get; }
 
-            public FlowState()
+            public LoweringFlowState()
             {
-                _lifetimeFrames = new List<HashSet<SymbolId>>
+                _hirSymbolLifetimeFrames = new List<HashSet<SymbolId>>
                 {
                     new(),
                 };
-                Values = new();
-                Storages = new();
-                Qubits = new();
+                CurrentMirValueByHirSymbolId = new();
+                CurrentMirQubitByHirSymbolId = new();
             }
 
-            private FlowState(
-                List<HashSet<SymbolId>> scopes,
-                Dictionary<SymbolId, MirValueId> values,
-                Dictionary<SymbolId, MirStorageId> storages,
-                Dictionary<SymbolId, MirQubit> qubits)
+            private LoweringFlowState(
+                List<HashSet<SymbolId>> hirSymbolLifetimeFrames,
+                Dictionary<SymbolId, MirValueId>
+                    currentMirValueByHirSymbolId,
+                Dictionary<SymbolId, MirQubit>
+                    currentMirQubitByHirSymbolId)
             {
-                _lifetimeFrames = scopes;
-                Values = values;
-                Storages = storages;
-                Qubits = qubits;
+                _hirSymbolLifetimeFrames = hirSymbolLifetimeFrames;
+                CurrentMirValueByHirSymbolId =
+                    currentMirValueByHirSymbolId;
+                CurrentMirQubitByHirSymbolId =
+                    currentMirQubitByHirSymbolId;
             }
 
-            public FlowState Clone() => new(
-                _lifetimeFrames
-                    .Select(scope => new HashSet<SymbolId>(scope))
+            public LoweringFlowState Clone() => new(
+                _hirSymbolLifetimeFrames
+                    .Select(frame => new HashSet<SymbolId>(frame))
                     .ToList(),
-                new Dictionary<SymbolId, MirValueId>(Values),
-                new Dictionary<SymbolId, MirStorageId>(Storages),
-                new Dictionary<SymbolId, MirQubit>(Qubits));
+                new Dictionary<SymbolId, MirValueId>(
+                    CurrentMirValueByHirSymbolId),
+                new Dictionary<SymbolId, MirQubit>(
+                    CurrentMirQubitByHirSymbolId));
 
-            public void PushScope() =>
-                _lifetimeFrames.Add(new HashSet<SymbolId>());
+            public void PushHirSymbolLifetimeFrame() =>
+                _hirSymbolLifetimeFrames.Add(new HashSet<SymbolId>());
 
-            public void PopScope()
+            public void PopHirSymbolLifetimeFrame()
             {
-                if (_lifetimeFrames.Count == 1)
-                    throw new InvalidOperationException("QINTERNAL: cannot pop the MIR root lexical scope");
-                var removed = _lifetimeFrames[^1];
-                _lifetimeFrames.RemoveAt(_lifetimeFrames.Count - 1);
-                foreach (var symbol in removed)
+                if (_hirSymbolLifetimeFrames.Count == 1)
                 {
-                    Values.Remove(symbol);
-                    Storages.Remove(symbol);
-                    Qubits.Remove(symbol);
+                    throw new InvalidOperationException(
+                        "QINTERNAL: cannot pop the MIR root lexical scope");
+                }
+                var removedHirSymbolIds = _hirSymbolLifetimeFrames[^1];
+                _hirSymbolLifetimeFrames.RemoveAt(
+                    _hirSymbolLifetimeFrames.Count - 1);
+                foreach (var hirSymbolId in removedHirSymbolIds)
+                {
+                    CurrentMirValueByHirSymbolId.Remove(hirSymbolId);
+                    CurrentMirQubitByHirSymbolId.Remove(hirSymbolId);
                 }
             }
 
-            public void Declare(SymbolId symbol)
+            public void TrackDeclaredHirSymbol(SymbolId hirSymbolId)
             {
-                if (!_lifetimeFrames[^1].Add(symbol))
+                if (!_hirSymbolLifetimeFrames[^1].Add(hirSymbolId))
+                {
                     throw new InvalidOperationException(
-                        $"QINTERNAL: semantic symbol {symbol} was declared twice in one MIR scope");
+                        $"QINTERNAL: semantic symbol {hirSymbolId} "
+                        + "was declared twice in one MIR scope");
+                }
             }
         }
     }

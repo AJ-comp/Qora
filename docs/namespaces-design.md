@@ -197,6 +197,9 @@ Qora.LanguageServices (opt-in)
   Every newly appearing node must have exactly one classification. MIR lowering does not translate
   semantic identities across this lineage: `HirCompilation.ToMir()` consumes only the canonical
   `EffectAnalysis` artifact, whose `Source` and `Model` belong to the same exact final HIR snapshot.
+  That HIR artifact carries only the formal-qubit `ParamModified` set needed to create MIR qubit
+  versions; it does not duplicate qubit histories, effects, or cleanup-safety facts. The resulting
+  MIR snapshot and its revision-bound analyses are authoritative for those facts.
   A structural rewrite must publish validation and effect facts for its new snapshot before MIR can
   consume it. Publishing that final effect artifact seals the HIR pipeline against later rewrites,
   aliases, and semantic passes. Target renaming therefore never mutates source semantics, and a
@@ -279,7 +282,7 @@ New semantic codes:
    module merge precede measurement lowering and resolution; resolver errors still preempt validation,
    specialization, analysis, MIR, and target work. `MirOpenQasmLowering` later encodes FQN dots as `_` (`MyLib.Bell` →
    `MyLib_Bell`) and appends more `_` only on real emitted-name collisions; stages
-   (`ast`/`ir`/`symbols`/`uncompute`/`mir`/`mirEffects`) show source/FQN identities, while only the
+   (`ast`/`ir`/`symbols`/`mir`/`mirEffects`) show source/FQN identities, while only the
    OpenQASM target artifact contains mangled names.
 3. **Multi-file** — DONE: `SourceGraphLoader` prepares the complete immutable source graph before
    `ModuleLoader.cs` merges it for resolution. `import "gates_lib.qor";`,

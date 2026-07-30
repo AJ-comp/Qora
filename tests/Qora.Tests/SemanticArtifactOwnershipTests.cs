@@ -24,7 +24,6 @@ public sealed class SemanticArtifactOwnershipTests
         Assert.Same(analyzed, mir.LoweringSource);
         Assert.Equal(0, mir.Id.Revision);
         Assert.Equal(MirStage.Lowered, mir.Stage);
-        Assert.Null(mir.Parent);
         Assert.Single(mir.Program.Callables);
     }
 
@@ -208,7 +207,7 @@ public sealed class SemanticArtifactOwnershipTests
         var error = Assert.Throws<InvalidOperationException>(
             unfinishedEffects.SealEffectAnalysisArtifact);
 
-        Assert.Contains("coherent summary", error.Message);
+        Assert.Contains("one summary for every source callable", error.Message);
     }
 
     [Fact]

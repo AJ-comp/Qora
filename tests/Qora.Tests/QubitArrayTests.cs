@@ -105,7 +105,7 @@ public class QubitArrayTests
     {
         var result = Compile("operation Main(){ use work=Qubit[3]; for i in 0..work.Count-1 { X(work[i]); } }");
 
-        var entry = result.Targets.OpenQasm!.Program.EntryPoint.Body;
+        var entry = result.Targets.OpenQasm!.Program.EntryBody;
         var statements = MirQasmTestModel.Statements(entry).ToArray();
         Assert.Contains(
             statements.OfType<MirQasmQubitDeclarationStatement>(),

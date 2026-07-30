@@ -15,9 +15,6 @@ namespace Qora.LanguageServices;
 /// </summary>
 public sealed class MirSemanticIndex
 {
-    private readonly FrozenDictionary<SymbolId, Symbol> _symbols;
-    private readonly FrozenDictionary<MirCallableId, MirCallable> _callables;
-    private readonly FrozenDictionary<HirNodeId, HirCallable> _hirCallables;
     private readonly FrozenDictionary<HirNodeId, MirCallableId> _callablesByHirDeclaration;
     private readonly FrozenDictionary<SymbolId, IReadOnlyList<MirCallableId>> _callablesBySymbol;
     private readonly FrozenDictionary<MirCallableId, IReadOnlyList<SymbolId>> _symbolsByCallable;
@@ -39,12 +36,10 @@ public sealed class MirSemanticIndex
         ArgumentNullException.ThrowIfNull(callablesBySymbol);
         ArgumentNullException.ThrowIfNull(byCallable);
 
-        CompilationId = compilation.Id;
-        CompilationRevision = compilation.Revision;
-        if (hirArtifact.Id.Source.CompilationId != CompilationId
-            || hirArtifact.Id.Source.CompilationRevision != CompilationRevision
-            || mir.Id.CompilationId != CompilationId
-            || mir.Id.CompilationRevision != CompilationRevision
+        if (hirArtifact.Id.Source.CompilationId != compilation.Id
+            || hirArtifact.Id.Source.CompilationRevision != compilation.Revision
+            || mir.Id.CompilationId != compilation.Id
+            || mir.Id.CompilationRevision != compilation.Revision
             || mir.LoweredFrom != hirArtifact.SourceId)
         {
             throw new ArgumentException(
@@ -55,18 +50,18 @@ public sealed class MirSemanticIndex
             callablesByHirDeclaration.ToFrozenDictionary();
         _callablesBySymbol = FreezeNested(callablesBySymbol);
         _byCallable = byCallable.ToFrozenDictionary();
-        _symbols = hirArtifact.Model.ScopeGraph?.Symbols.ToFrozenDictionary()
+        _ = hirArtifact.Model.ScopeGraph
             ?? throw new ArgumentException(
                 "The semantic index requires a sealed HIR scope graph.",
                 nameof(hirArtifact));
-        _callables = mir.Program.Callables.ToFrozenDictionary(callable => callable.Id);
-        _hirCallables =
-            hirArtifact.Program.Callables.ToFrozenDictionary(callable => callable.Id);
         _symbolsByCallable = Reverse(_callablesBySymbol);
         _callableIndexes = Array.AsReadOnly(
             mir.Program.Callables.Select(callable => _byCallable[callable.Id]).ToArray());
 
-        if (!_callables.Keys.ToHashSet().SetEquals(_byCallable.Keys))
+        var callableIds = mir.Program.Callables
+            .Select(callable => callable.Id)
+            .ToHashSet();
+        if (!callableIds.SetEquals(_byCallable.Keys))
         {
             throw new ArgumentException(
                 "The callable indexes do not exactly cover the completed MIR program.",
@@ -74,8 +69,9 @@ public sealed class MirSemanticIndex
         }
     }
 
-    public CompilationId CompilationId { get; }
-    public CompilationRevision CompilationRevision { get; }
+    public CompilationId CompilationId => Mir.Id.CompilationId;
+    public CompilationRevision CompilationRevision =>
+        Mir.Id.CompilationRevision;
     public HirSemanticArtifact HirArtifact { get; }
     public HirSemanticArtifactId HirArtifactId => HirArtifact.Id;
     public MirSnapshot Mir { get; }
@@ -104,7 +100,7 @@ public sealed class MirSemanticIndex
                 declaration.Id,
                 "The HIR callable was not lowered into this MIR snapshot.");
         }
-        return _callables[callable];
+        return Mir.Program.RequireCallable(callable);
     }
 
     public IReadOnlyList<MirCallable> CallablesFor(Symbol symbol)
@@ -113,7 +109,7 @@ public sealed class MirSemanticIndex
         return Array.AsReadOnly(
             (_callablesBySymbol.GetValueOrDefault(symbol.Id)
                 ?? Array.Empty<MirCallableId>())
-            .Select(callable => _callables[callable])
+            .Select(callableId => Mir.Program.RequireCallable(callableId))
             .ToArray());
     }
 
@@ -123,7 +119,7 @@ public sealed class MirSemanticIndex
         return Array.AsReadOnly(
             (_symbolsByCallable.GetValueOrDefault(callable.Id)
                 ?? Array.Empty<SymbolId>())
-            .Select(symbol => _symbols[symbol])
+            .Select(symbolId => RequireSymbol(symbolId))
             .ToArray());
     }
 
@@ -136,8 +132,7 @@ public sealed class MirSemanticIndex
     private void RequireSymbol(Symbol symbol)
     {
         ArgumentNullException.ThrowIfNull(symbol);
-        if (!_symbols.TryGetValue(symbol.Id, out var owned)
-            || !ReferenceEquals(owned, symbol))
+        if (!ReferenceEquals(Graph.FindSymbol(symbol.Id), symbol))
         {
             throw new ArgumentException(
                 "The symbol does not belong to this HIR semantic artifact.",
@@ -148,8 +143,7 @@ public sealed class MirSemanticIndex
     private void RequireCallable(MirCallable callable)
     {
         ArgumentNullException.ThrowIfNull(callable);
-        if (!_callables.TryGetValue(callable.Id, out var owned)
-            || !ReferenceEquals(owned, callable))
+        if (!Mir.Program.ContainsCallable(callable))
         {
             throw new ArgumentException(
                 "The callable does not belong to this MIR snapshot.",
@@ -160,14 +154,25 @@ public sealed class MirSemanticIndex
     private void RequireHirCallable(HirCallable callable)
     {
         ArgumentNullException.ThrowIfNull(callable);
-        if (!_hirCallables.TryGetValue(callable.Id, out var owned)
-            || !ReferenceEquals(owned, callable))
+        if (!ReferenceEquals(
+                HirArtifact.Source.Structure.FindNode(callable.Id),
+                callable))
         {
             throw new ArgumentException(
                 "The callable does not belong to this HIR artifact.",
                 nameof(callable));
         }
     }
+
+    private HirScopeGraph Graph =>
+        HirArtifact.Model.ScopeGraph
+        ?? throw new InvalidOperationException(
+            "The semantic index has no sealed HIR scope graph.");
+
+    private Symbol RequireSymbol(SymbolId symbol) =>
+        Graph.FindSymbol(symbol)
+        ?? throw new InvalidOperationException(
+            $"HIR symbol {symbol} no longer belongs to the semantic artifact.");
 
     private static FrozenDictionary<TKey, IReadOnlyList<TValue>> FreezeNested<TKey, TValue>(
         IReadOnlyDictionary<TKey, IReadOnlyList<TValue>> source)
@@ -185,7 +190,11 @@ public sealed class MirSemanticIndex
             foreach (var callable in callables)
             {
                 if (!reverse.TryGetValue(callable, out var symbols))
-                    reverse.Add(callable, symbols = new HashSet<SymbolId>());
+                {
+                    symbols = new HashSet<SymbolId>();
+                    reverse.Add(callable, symbols);
+                }
+
                 symbols.Add(symbol);
             }
         }
@@ -202,10 +211,8 @@ public sealed class MirSemanticIndex
 /// </summary>
 public sealed class MirCallableSemanticIndex
 {
-    private readonly FrozenDictionary<SymbolId, Symbol> _symbols;
-    private readonly FrozenDictionary<MirValueId, MirValue> _values;
-    private readonly FrozenDictionary<MirStorageId, MirArrayStorage> _storages;
-    private readonly FrozenDictionary<MirQubitKey, MirQubit> _qubits;
+    private readonly HirScopeGraph _graph;
+    private readonly FrozenSet<SymbolId> _symbolIds;
     private readonly FrozenDictionary<SymbolId, IReadOnlyList<MirValueId>> _valuesBySymbol;
     private readonly FrozenDictionary<MirValueId, IReadOnlyList<SymbolId>> _symbolsByValue;
     private readonly FrozenDictionary<SymbolId, IReadOnlyList<MirStorageId>> _storagesBySymbol;
@@ -233,16 +240,8 @@ public sealed class MirCallableSemanticIndex
         ArgumentNullException.ThrowIfNull(symbols);
         ArgumentNullException.ThrowIfNull(unreachableSymbols);
 
-        var symbolIds = symbols.ToHashSet();
-        _symbols = symbolIds.ToFrozenDictionary(
-            symbol => symbol,
-            symbol => graph.FindSymbol(symbol)
-                ?? throw new ArgumentException(
-                    $"HIR symbol {symbol} does not belong to the semantic scope graph.",
-                    nameof(symbols)));
-        _values = callable.Values.ToFrozenDictionary(value => value.Id);
-        _storages = callable.Storages.ToFrozenDictionary(storage => storage.Id);
-        _qubits = callable.Qubits.ToFrozenDictionary(qubit => qubit.Key);
+        _graph = graph;
+        _symbolIds = symbols.ToFrozenSet();
 
         _valuesBySymbol = FreezeNested(valuesBySymbol);
         _symbolsByValue = FreezeNested(symbolsByValue);
@@ -252,11 +251,14 @@ public sealed class MirCallableSemanticIndex
         _symbolsByQubit = FreezeNested(symbolsByQubit);
         _unreachableSymbols = unreachableSymbols.ToFrozenSet();
         _symbolList = Array.AsReadOnly(
-            _symbols.Values.OrderBy(symbol => symbol.Id.Value).ToArray());
+            _symbolIds
+                .OrderBy(symbol => symbol.Value)
+                .Select(ResolveSymbol)
+                .ToArray());
         _unreachableSymbolList = Array.AsReadOnly(
             _unreachableSymbols
                 .OrderBy(symbol => symbol.Value)
-                .Select(symbol => _symbols[symbol])
+                .Select(ResolveSymbol)
                 .ToArray());
     }
 
@@ -273,7 +275,7 @@ public sealed class MirCallableSemanticIndex
         return Array.AsReadOnly(
             (_valuesBySymbol.GetValueOrDefault(symbol.Id)
                 ?? Array.Empty<MirValueId>())
-            .Select(value => _values[value])
+            .Select(valueId => Callable.RequireValue(valueId))
             .ToArray());
     }
 
@@ -291,7 +293,7 @@ public sealed class MirCallableSemanticIndex
         return Array.AsReadOnly(
             (_storagesBySymbol.GetValueOrDefault(symbol.Id)
                 ?? Array.Empty<MirStorageId>())
-            .Select(storage => _storages[storage])
+            .Select(storageId => Callable.RequireStorage(storageId))
             .ToArray());
     }
 
@@ -309,7 +311,7 @@ public sealed class MirCallableSemanticIndex
         return Array.AsReadOnly(
             (_qubitsBySymbol.GetValueOrDefault(symbol.Id)
                 ?? Array.Empty<MirQubitKey>())
-            .Select(qubit => _qubits[qubit])
+            .Select(qubitKey => Callable.RequireQubit(qubitKey))
             .ToArray());
     }
 
@@ -337,13 +339,26 @@ public sealed class MirCallableSemanticIndex
         SymbolsFor(qubit).Count == 0;
 
     private IReadOnlyList<Symbol> ResolveSymbols(IEnumerable<SymbolId> symbols) =>
-        Array.AsReadOnly(symbols.Select(symbol => _symbols[symbol]).ToArray());
+        Array.AsReadOnly(symbols.Select(ResolveSymbol).ToArray());
+
+    private Symbol ResolveSymbol(SymbolId symbol)
+    {
+        if (!_symbolIds.Contains(symbol))
+        {
+            throw new InvalidOperationException(
+                $"HIR symbol {symbol} does not belong to MIR callable {Callable.Id}.");
+        }
+
+        return _graph.FindSymbol(symbol)
+            ?? throw new InvalidOperationException(
+                $"HIR symbol {symbol} no longer belongs to the semantic scope graph.");
+    }
 
     private void RequireSymbol(Symbol symbol)
     {
         ArgumentNullException.ThrowIfNull(symbol);
-        if (!_symbols.TryGetValue(symbol.Id, out var owned)
-            || !ReferenceEquals(owned, symbol))
+        if (!_symbolIds.Contains(symbol.Id)
+            || !ReferenceEquals(_graph.FindSymbol(symbol.Id), symbol))
         {
             throw new ArgumentException(
                 $"The symbol does not belong to MIR callable {Callable.Id}.",
@@ -354,8 +369,7 @@ public sealed class MirCallableSemanticIndex
     private void RequireValue(MirValue value)
     {
         ArgumentNullException.ThrowIfNull(value);
-        if (!_values.TryGetValue(value.Id, out var owned)
-            || !ReferenceEquals(owned, value))
+        if (!Callable.ContainsValue(value))
         {
             throw new ArgumentException(
                 $"The value does not belong to MIR callable {Callable.Id}.",
@@ -366,8 +380,7 @@ public sealed class MirCallableSemanticIndex
     private void RequireStorage(MirArrayStorage storage)
     {
         ArgumentNullException.ThrowIfNull(storage);
-        if (!_storages.TryGetValue(storage.Id, out var owned)
-            || !ReferenceEquals(owned, storage))
+        if (!Callable.ContainsStorage(storage))
         {
             throw new ArgumentException(
                 $"The storage does not belong to MIR callable {Callable.Id}.",
@@ -378,8 +391,7 @@ public sealed class MirCallableSemanticIndex
     private void RequireQubit(MirQubit qubit)
     {
         ArgumentNullException.ThrowIfNull(qubit);
-        if (!_qubits.TryGetValue(qubit.Key, out var owned)
-            || !ReferenceEquals(owned, qubit))
+        if (!Callable.ContainsQubit(qubit))
         {
             throw new ArgumentException(
                 $"The qubit does not belong to MIR callable {Callable.Id}.",

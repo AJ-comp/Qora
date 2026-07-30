@@ -48,20 +48,6 @@ public readonly record struct MirQasmDeclarationId
     public override string ToString() => $"oqd{Value}";
 }
 
-/// <summary>Target-owned statement identity, local to one callable or entry body.</summary>
-public readonly record struct MirQasmStatementId
-{
-    public MirQasmStatementId(int value)
-    {
-        if (value < 0)
-            throw new ArgumentOutOfRangeException(nameof(value), value, "a target statement ID cannot be negative");
-        Value = value;
-    }
-
-    public int Value { get; }
-    public override string ToString() => $"oqs{Value}";
-}
-
 public enum MirQasmScalarKind
 {
     Int,
@@ -365,23 +351,17 @@ public enum MirQasmQuantumModifier
     Controlled,
 }
 
-public abstract record MirQasmStatement
-{
-    protected MirQasmStatement(MirQasmStatementId id) => Id = id;
-    public MirQasmStatementId Id { get; }
-}
+public abstract record MirQasmStatement;
 
 /// <summary>A scalar or bit/register declaration. Qubit and general-array declarations have distinct nodes.</summary>
 public sealed record MirQasmValueDeclarationStatement : MirQasmStatement
 {
     public MirQasmValueDeclarationStatement(
-        MirQasmStatementId id,
         MirQasmDeclarationId declaration,
         string emittedName,
         MirQasmType type,
         MirQasmExpression? initializer = null,
         bool isConst = false)
-        : base(id)
     {
         if (type is not (MirQasmScalarType or MirQasmBitType))
             throw new ArgumentException(
@@ -404,12 +384,10 @@ public sealed record MirQasmValueDeclarationStatement : MirQasmStatement
 public sealed record MirQasmArrayDeclarationStatement : MirQasmStatement
 {
     public MirQasmArrayDeclarationStatement(
-        MirQasmStatementId id,
         MirQasmDeclarationId declaration,
         string emittedName,
         MirQasmArrayType type,
         IEnumerable<MirQasmExpression> elements)
-        : base(id)
     {
         Declaration = declaration;
         EmittedName = MirQasmNames.RequireIdentifier(emittedName, nameof(emittedName));
@@ -435,11 +413,9 @@ public sealed record MirQasmArrayDeclarationStatement : MirQasmStatement
 public sealed record MirQasmQubitDeclarationStatement : MirQasmStatement
 {
     public MirQasmQubitDeclarationStatement(
-        MirQasmStatementId id,
         MirQasmDeclarationId declaration,
         string emittedName,
         MirQasmQubitType type)
-        : base(id)
     {
         Declaration = declaration;
         EmittedName = MirQasmNames.RequireIdentifier(emittedName, nameof(emittedName));
@@ -454,10 +430,8 @@ public sealed record MirQasmQubitDeclarationStatement : MirQasmStatement
 public sealed record MirQasmAssignmentStatement : MirQasmStatement
 {
     public MirQasmAssignmentStatement(
-        MirQasmStatementId id,
         MirQasmExpression target,
         MirQasmExpression value)
-        : base(id)
     {
         Target = target ?? throw new ArgumentNullException(nameof(target));
         Value = value ?? throw new ArgumentNullException(nameof(value));
@@ -470,10 +444,8 @@ public sealed record MirQasmAssignmentStatement : MirQasmStatement
 public sealed record MirQasmMeasurementAssignmentStatement : MirQasmStatement
 {
     public MirQasmMeasurementAssignmentStatement(
-        MirQasmStatementId id,
         MirQasmExpression target,
         MirQasmExpression qubit)
-        : base(id)
     {
         Target = target ?? throw new ArgumentNullException(nameof(target));
         Qubit = qubit ?? throw new ArgumentNullException(nameof(qubit));
@@ -491,12 +463,10 @@ public sealed record MirQasmMeasurementAssignmentStatement : MirQasmStatement
 public sealed record MirQasmQuantumApplyStatement : MirQasmStatement
 {
     public MirQasmQuantumApplyStatement(
-        MirQasmStatementId id,
         MirQasmQuantumTarget target,
         IEnumerable<MirQasmExpression> gateParameters,
         IEnumerable<MirQasmExpression> operands,
         IEnumerable<MirQasmQuantumModifier>? modifiers = null)
-        : base(id)
     {
         Target = target ?? throw new ArgumentNullException(nameof(target));
         GateParameters = MirQasmCollections.Freeze(gateParameters, nameof(gateParameters));
@@ -532,11 +502,9 @@ public sealed record MirQasmQuantumApplyStatement : MirQasmStatement
 public sealed record MirQasmIfStatement : MirQasmStatement
 {
     public MirQasmIfStatement(
-        MirQasmStatementId id,
         MirQasmExpression condition,
         IEnumerable<MirQasmStatement> thenStatements,
         IEnumerable<MirQasmStatement>? elseStatements = null)
-        : base(id)
     {
         Condition = condition ?? throw new ArgumentNullException(nameof(condition));
         Then = MirQasmCollections.Freeze(thenStatements, nameof(thenStatements));
@@ -553,10 +521,8 @@ public sealed record MirQasmIfStatement : MirQasmStatement
 public sealed record MirQasmWhileStatement : MirQasmStatement
 {
     public MirQasmWhileStatement(
-        MirQasmStatementId id,
         MirQasmExpression condition,
         IEnumerable<MirQasmStatement> body)
-        : base(id)
     {
         Condition = condition ?? throw new ArgumentNullException(nameof(condition));
         Body = MirQasmCollections.Freeze(body, nameof(body));
@@ -569,16 +535,15 @@ public sealed record MirQasmWhileStatement : MirQasmStatement
 public sealed record MirQasmReturnStatement : MirQasmStatement
 {
     public MirQasmReturnStatement(
-        MirQasmStatementId id,
         MirQasmExpression? value = null)
-        : base(id) =>
+    {
         Value = value;
+    }
 
     public MirQasmExpression? Value { get; }
 }
 
-public sealed record MirQasmBreakStatement(
-    MirQasmStatementId Id) : MirQasmStatement(Id);
+public sealed record MirQasmBreakStatement : MirQasmStatement;
 
 public enum MirQasmCallableKind
 {
@@ -591,17 +556,10 @@ public sealed record MirQasmCallableDefinition
     public MirQasmCallableDefinition(
         MirQasmCallableId id,
         string emittedName,
-        MirQasmCallableKind kind,
         IEnumerable<MirQasmParameter> parameters,
         MirQasmType? returnType,
         IEnumerable<MirQasmStatement> body)
     {
-        if (!Enum.IsDefined(kind))
-            throw new ArgumentOutOfRangeException(nameof(kind), kind, "unknown target callable kind");
-        if (kind == MirQasmCallableKind.Function && returnType is null)
-            throw new ArgumentException("a target function requires a return type", nameof(returnType));
-        if (kind == MirQasmCallableKind.Operation && returnType is not null)
-            throw new ArgumentException("a target operation cannot carry a return type", nameof(returnType));
         if (returnType is MirQasmQubitType or MirQasmArrayType
             || returnType is MirQasmBitType { IsRegister: true })
         {
@@ -612,7 +570,6 @@ public sealed record MirQasmCallableDefinition
 
         Id = id;
         EmittedName = MirQasmNames.RequireIdentifier(emittedName, nameof(emittedName));
-        Kind = kind;
         Parameters = MirQasmCollections.Freeze(parameters, nameof(parameters));
         ReturnType = returnType;
         Body = MirQasmCollections.Freeze(body, nameof(body));
@@ -620,30 +577,12 @@ public sealed record MirQasmCallableDefinition
 
     public MirQasmCallableId Id { get; }
     public string EmittedName { get; }
-    public MirQasmCallableKind Kind { get; }
+    public MirQasmCallableKind Kind =>
+        ReturnType is null
+            ? MirQasmCallableKind.Operation
+            : MirQasmCallableKind.Function;
     public ImmutableArray<MirQasmParameter> Parameters { get; }
     public MirQasmType? ReturnType { get; }
-    public ImmutableArray<MirQasmStatement> Body { get; }
-}
-
-/// <summary>
-/// The callable selected as the OpenQASM global body. Its name is retained as target metadata but is not
-/// printed as a <c>def</c>.
-/// </summary>
-public sealed record MirQasmEntryPoint
-{
-    public MirQasmEntryPoint(
-        MirQasmCallableId id,
-        string emittedName,
-        IEnumerable<MirQasmStatement> body)
-    {
-        Id = id;
-        EmittedName = MirQasmNames.RequireIdentifier(emittedName, nameof(emittedName));
-        Body = MirQasmCollections.Freeze(body, nameof(body));
-    }
-
-    public MirQasmCallableId Id { get; }
-    public string EmittedName { get; }
     public ImmutableArray<MirQasmStatement> Body { get; }
 }
 
@@ -655,11 +594,11 @@ public sealed record MirQasmEntryPoint
 public sealed class MirOpenQasmTargetProgram
 {
     public MirOpenQasmTargetProgram(
-        MirQasmEntryPoint entryPoint,
+        IEnumerable<MirQasmStatement> entryBody,
         IEnumerable<MirQasmCallableDefinition> definitions,
         IEnumerable<string>? notes = null)
     {
-        EntryPoint = entryPoint ?? throw new ArgumentNullException(nameof(entryPoint));
+        EntryBody = MirQasmCollections.Freeze(entryBody, nameof(entryBody));
         Definitions = MirQasmCollections.Freeze(definitions, nameof(definitions));
         Notes = notes is null
             ? ImmutableArray<string>.Empty
@@ -675,7 +614,7 @@ public sealed class MirOpenQasmTargetProgram
         MirQasmTargetVerifier.VerifyOrThrow(this);
     }
 
-    public MirQasmEntryPoint EntryPoint { get; }
+    public ImmutableArray<MirQasmStatement> EntryBody { get; }
     public ImmutableArray<MirQasmCallableDefinition> Definitions { get; }
     public ImmutableArray<string> Notes { get; }
 }
@@ -725,11 +664,9 @@ internal static class MirQasmTargetVerifier
     {
         var callables = new Dictionary<MirQasmCallableId, MirQasmCallableDefinition>();
         var names = new HashSet<string>(StringComparer.Ordinal);
-        if (!names.Add(program.EntryPoint.EmittedName))
-            throw new ArgumentException("the entry-point name occurs more than once", nameof(program));
         foreach (var definition in program.Definitions)
         {
-            if (definition.Id == program.EntryPoint.Id || !callables.TryAdd(definition.Id, definition))
+            if (!callables.TryAdd(definition.Id, definition))
                 throw new ArgumentException(
                     $"target callable ID {definition.Id} occurs more than once",
                     nameof(program));
@@ -740,11 +677,11 @@ internal static class MirQasmTargetVerifier
         }
 
         VerifyBody(
-            program.EntryPoint.EmittedName,
+            "<entry>",
             MirQasmCallableKind.Operation,
             allowReturn: false,
             Array.Empty<MirQasmParameter>(),
-            program.EntryPoint.Body,
+            program.EntryBody,
             callables);
         foreach (var definition in program.Definitions)
             VerifyBody(
@@ -755,7 +692,7 @@ internal static class MirQasmTargetVerifier
                 definition.Body,
                 callables);
 
-        var entryNames = DeclaredNames(program.EntryPoint.Body);
+        var entryNames = DeclaredNames(program.EntryBody);
         foreach (var definition in program.Definitions)
             if (entryNames.Contains(definition.EmittedName))
                 throw new ArgumentException(
@@ -783,7 +720,6 @@ internal static class MirQasmTargetVerifier
 
         var declarations = new Dictionary<MirQasmDeclarationId, string>();
         var declarationNames = new HashSet<string>(parameterNames, StringComparer.Ordinal);
-        var statementIds = new HashSet<MirQasmStatementId>();
         CollectDeclarations(body);
         VerifyStatements(body, loopDepth: 0);
         return;
@@ -792,9 +728,6 @@ internal static class MirQasmTargetVerifier
         {
             foreach (var statement in statements)
             {
-                if (!statementIds.Add(statement.Id))
-                    throw Invalid(callableName, $"statement ID {statement.Id} occurs more than once");
-
                 switch (statement)
                 {
                     case MirQasmValueDeclarationStatement declaration:

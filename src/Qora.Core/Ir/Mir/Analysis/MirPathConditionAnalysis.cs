@@ -9,8 +9,7 @@ namespace Qora.Ir.Mir.Analysis;
 public sealed record MirPathPredicate(
     MirBlockId Controller,
     MirValueId Condition,
-    bool ExpectedValue,
-    MirBlockId TakenSuccessor);
+    bool ExpectedValue);
 
 /// <summary>
 /// The shape of an exact block-execution condition. <see cref="All"/> and <see cref="Any"/> are
@@ -56,7 +55,6 @@ public sealed class MirPathCondition
                 .OrderBy(item => item.Controller.Value)
                 .ThenBy(item => item.Condition.Value)
                 .ThenBy(item => item.ExpectedValue)
-                .ThenBy(item => item.TakenSuccessor.Value)
                 .ToArray());
         Key = key;
     }
@@ -95,7 +93,7 @@ public sealed class MirPathCondition
             MirPathConditionKind.Predicate,
             predicate,
             Array.Empty<MirPathCondition>(),
-            $"p:{predicate.Condition.Value}:{predicate.ExpectedValue}:{predicate.Controller.Value}:{predicate.TakenSuccessor.Value}");
+            $"p:{predicate.Condition.Value}:{predicate.ExpectedValue}:{predicate.Controller.Value}");
     }
 
     internal static MirPathCondition And(params MirPathCondition[] conditions) =>
@@ -165,37 +163,22 @@ public enum MirExecutionMultiplicity
 /// </summary>
 public sealed class MirPathConditionSnapshot
 {
-    private readonly MirProgram _sourceProgram;
-    private readonly MirCallable _sourceCallable;
     private readonly MirControlFlowSnapshot _cfg;
     private readonly FrozenDictionary<MirBlockId, MirPathCondition> _conditions;
-    private readonly FrozenDictionary<MirBlockId, MirExecutionMultiplicity> _multiplicity;
 
     internal MirPathConditionSnapshot(
-        MirProgram sourceProgram,
-        MirCallable sourceCallable,
         MirControlFlowSnapshot cfg,
-        IReadOnlyDictionary<MirBlockId, MirPathCondition> conditions,
-        IReadOnlyDictionary<MirBlockId, MirExecutionMultiplicity> multiplicity)
+        IReadOnlyDictionary<MirBlockId, MirPathCondition> conditions)
     {
-        _sourceProgram = sourceProgram;
-        _sourceCallable = sourceCallable;
         _cfg = cfg;
-        SnapshotId = sourceProgram.SnapshotId;
-        Callable = sourceCallable.Id;
         _conditions = conditions.ToFrozenDictionary();
-        _multiplicity = multiplicity.ToFrozenDictionary();
     }
 
-    public MirSnapshotId SnapshotId { get; }
-    public MirCallableId Callable { get; }
-    internal MirControlFlowSnapshot ControlFlow => _cfg;
+    public MirSnapshotId SnapshotId => _cfg.SnapshotId;
+    public MirCallableId Callable => _cfg.Callable;
 
     internal bool IsFor(MirProgram program, MirCallableId callable) =>
-        ReferenceEquals(_sourceProgram, program)
-        && ReferenceEquals(_sourceCallable, program.FindCallable(callable))
-        && SnapshotId == program.SnapshotId
-        && Callable == callable;
+        _cfg.IsFor(program, callable);
 
     internal void EnsureFor(MirProgram program, MirCallableId callable)
     {
@@ -214,12 +197,9 @@ public sealed class MirPathConditionSnapshot
                 $"block {block} does not belong to callable {Callable}");
 
     public MirExecutionMultiplicity MultiplicityOf(MirBlockId block) =>
-        _multiplicity.TryGetValue(block, out var multiplicity)
-            ? multiplicity
-            : throw new ArgumentOutOfRangeException(
-                nameof(block),
-                block,
-                $"block {block} does not belong to callable {Callable}");
+        _cfg.IsReachable(block) && _cfg.IsInCycle(block)
+            ? MirExecutionMultiplicity.LoopCarried
+            : MirExecutionMultiplicity.Single;
 
 }
 
@@ -257,7 +237,6 @@ internal static class MirPathConditionAnalysis
         MirControlFlowSnapshot cfg)
     {
         cfg.EnsureFor(program, callable.Id);
-        var blocks = callable.Blocks.ToDictionary(block => block.Id);
         var reachable = callable.Blocks
             .Where(block => cfg.IsReachable(block.Id))
             .Select(block => block.Id)
@@ -314,7 +293,7 @@ internal static class MirPathConditionAnalysis
 
             foreach (var (successor, edgeCondition) in Edges(
                          blockId,
-                         blocks[blockId].Terminator))
+                         callable.RequireBlock(blockId).Terminator))
             {
                 if (!reachable.Contains(successor)
                     || backEdges.Contains((blockId, successor)))
@@ -330,17 +309,9 @@ internal static class MirPathConditionAnalysis
                 throw new InvalidOperationException(
                     $"QINTERNAL: reachable block {block} in `{callable.Name}` has no acyclic entry path");
 
-        var multiplicity = callable.Blocks.ToDictionary(
-            block => block.Id,
-            block => cfg.IsReachable(block.Id) && cfg.IsInCycle(block.Id)
-                ? MirExecutionMultiplicity.LoopCarried
-                : MirExecutionMultiplicity.Single);
         return new MirPathConditionSnapshot(
-            program,
-            callable,
             cfg,
-            conditions,
-            multiplicity);
+            conditions);
     }
 
     private static IEnumerable<(MirBlockId Successor, MirPathCondition Condition)> Edges(
@@ -359,15 +330,13 @@ internal static class MirPathConditionAnalysis
                     MirPathCondition.Test(new MirPathPredicate(
                         controller,
                         branch.Condition,
-                        ExpectedValue: true,
-                        branch.TrueTarget)));
+                        ExpectedValue: true)));
                 yield return (
                     branch.FalseTarget,
                     MirPathCondition.Test(new MirPathPredicate(
                         controller,
                         branch.Condition,
-                        ExpectedValue: false,
-                        branch.FalseTarget)));
+                        ExpectedValue: false)));
                 break;
         }
     }

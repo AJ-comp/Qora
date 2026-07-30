@@ -31,12 +31,12 @@ public abstract record DiagnosticOrigin
 
     public sealed record Mir(
         MirSnapshotId Snapshot,
-        MirOriginRef? Location = null) : DiagnosticOrigin;
+        MirOriginId? Location = null) : DiagnosticOrigin;
 
     public sealed record Target(
         TargetBackend Backend,
         MirSnapshotId Input,
-        MirOriginRef? Location = null) : DiagnosticOrigin;
+        MirOriginId? Location = null) : DiagnosticOrigin;
 }
 
 public enum TargetBackend

@@ -85,7 +85,6 @@ public sealed class MirQasmEmitterTests
         var definition = new MirQasmCallableDefinition(
             new MirQasmCallableId(0),
             "array_contract",
-            MirQasmCallableKind.Operation,
             new[]
             {
                 new MirQasmParameter(
@@ -103,13 +102,10 @@ public sealed class MirQasmEmitterTests
             returnType: null,
             new MirQasmStatement[]
             {
-                new MirQasmReturnStatement(new MirQasmStatementId(0)),
+                new MirQasmReturnStatement(),
             });
         var program = new MirOpenQasmTargetProgram(
-            new MirQasmEntryPoint(
-                new MirQasmCallableId(1),
-                "entry_final",
-                Array.Empty<MirQasmStatement>()),
+            Array.Empty<MirQasmStatement>(),
             new[] { definition });
 
         var text = MirQasmEmitter.Emit(program);
@@ -125,10 +121,7 @@ public sealed class MirQasmEmitterTests
     public void TargetProgramCarriesNoMirSnapshotIdentity()
     {
         var program = new MirOpenQasmTargetProgram(
-            new MirQasmEntryPoint(
-                new MirQasmCallableId(0),
-                "entry_final",
-                Array.Empty<MirQasmStatement>()),
+            Array.Empty<MirQasmStatement>(),
             Array.Empty<MirQasmCallableDefinition>());
 
         Assert.Equal(
@@ -152,29 +145,24 @@ public sealed class MirQasmEmitterTests
         var statements = new List<MirQasmStatement>();
         var notes = new List<string> { "first" };
         var definitions = new List<MirQasmCallableDefinition>();
-        var entry = new MirQasmEntryPoint(
-            new MirQasmCallableId(0),
-            "entry_final",
-            statements);
 
         var program = new MirOpenQasmTargetProgram(
-            entry,
+            statements,
             definitions,
             notes);
 
         statements.Add(
-            new MirQasmBreakStatement(new MirQasmStatementId(0)));
+            new MirQasmBreakStatement());
         notes.Add("second");
         definitions.Add(
             new MirQasmCallableDefinition(
                 new MirQasmCallableId(1),
                 "late_definition",
-                MirQasmCallableKind.Operation,
                 Array.Empty<MirQasmParameter>(),
                 returnType: null,
                 Array.Empty<MirQasmStatement>()));
 
-        Assert.Empty(program.EntryPoint.Body);
+        Assert.Empty(program.EntryBody);
         Assert.Equal(new[] { "first" }, program.Notes);
         Assert.Empty(program.Definitions);
     }
@@ -182,23 +170,19 @@ public sealed class MirQasmEmitterTests
     [Fact]
     public void RejectsMissingTypedBindingReferences()
     {
-        var entry = new MirQasmEntryPoint(
-            new MirQasmCallableId(0),
-            "entry_final",
-            new MirQasmStatement[]
-            {
-                new MirQasmValueDeclarationStatement(
-                    new MirQasmStatementId(0),
-                    new MirQasmDeclarationId(0),
-                    "value_final",
-                    Int,
-                    new MirQasmDeclarationReferenceExpression(
-                        new MirQasmDeclarationId(99))),
-            });
+        var entryBody = new MirQasmStatement[]
+        {
+            new MirQasmValueDeclarationStatement(
+                new MirQasmDeclarationId(0),
+                "value_final",
+                Int,
+                new MirQasmDeclarationReferenceExpression(
+                    new MirQasmDeclarationId(99))),
+        };
 
         var error = Assert.Throws<ArgumentException>(
             () => new MirOpenQasmTargetProgram(
-                entry,
+                entryBody,
                 Array.Empty<MirQasmCallableDefinition>()));
 
         Assert.Contains("missing declaration oqd99", error.Message);
@@ -209,7 +193,6 @@ public sealed class MirQasmEmitterTests
     {
         var error = Assert.Throws<ArgumentException>(
             () => new MirQasmQuantumApplyStatement(
-                new MirQasmStatementId(0),
                 new MirQasmUserQuantumTarget(new MirQasmCallableId(1)),
                 Array.Empty<MirQasmExpression>(),
                 Array.Empty<MirQasmExpression>(),
@@ -226,10 +209,7 @@ public sealed class MirQasmEmitterTests
         var first = FunctionReturningCall(firstId, "first_final", secondId);
         var second = FunctionReturningCall(secondId, "second_final", firstId);
         var program = new MirOpenQasmTargetProgram(
-            new MirQasmEntryPoint(
-                new MirQasmCallableId(2),
-                "entry_final",
-                Array.Empty<MirQasmStatement>()),
+            Array.Empty<MirQasmStatement>(),
             new[] { first, second });
 
         var error = Assert.Throws<InvalidOperationException>(
@@ -247,13 +227,11 @@ public sealed class MirQasmEmitterTests
         new(
             id,
             name,
-            MirQasmCallableKind.Function,
             Array.Empty<MirQasmParameter>(),
             Int,
             new MirQasmStatement[]
             {
                 new MirQasmReturnStatement(
-                    new MirQasmStatementId(0),
                     new MirQasmFunctionCallExpression(
                         new MirQasmUserFunctionTarget(callee),
                         Array.Empty<MirQasmExpression>())),
@@ -264,8 +242,6 @@ public sealed class MirQasmEmitterTests
         var helperId = new MirQasmCallableId(0);
         var workerId = new MirQasmCallableId(1);
         var callerId = new MirQasmCallableId(2);
-        var entryId = new MirQasmCallableId(3);
-
         var helperParameter = new MirQasmParameter(
             new MirQasmParameterId(0),
             "source_value",
@@ -273,13 +249,11 @@ public sealed class MirQasmEmitterTests
         var helper = new MirQasmCallableDefinition(
             helperId,
             "z_helper",
-            MirQasmCallableKind.Function,
             new[] { helperParameter },
             Int,
             new MirQasmStatement[]
             {
                 new MirQasmReturnStatement(
-                    new MirQasmStatementId(0),
                     new MirQasmBinaryExpression(
                         MirQasmBinaryOperator.Add,
                         new MirQasmParameterReferenceExpression(
@@ -294,13 +268,11 @@ public sealed class MirQasmEmitterTests
         var worker = new MirQasmCallableDefinition(
             workerId,
             "a_worker",
-            MirQasmCallableKind.Operation,
             new[] { workerParameter },
             returnType: null,
             new MirQasmStatement[]
             {
                 new MirQasmQuantumApplyStatement(
-                    new MirQasmStatementId(0),
                     new MirQasmBuiltinGateTarget("rx"),
                     new MirQasmExpression[]
                     {
@@ -327,13 +299,11 @@ public sealed class MirQasmEmitterTests
         var caller = new MirQasmCallableDefinition(
             callerId,
             "m_caller",
-            MirQasmCallableKind.Operation,
             new[] { callerTarget, callerCount },
             returnType: null,
             new MirQasmStatement[]
             {
                 new MirQasmValueDeclarationStatement(
-                    new MirQasmStatementId(0),
                     new MirQasmDeclarationId(0),
                     "next_result",
                     Int,
@@ -345,7 +315,6 @@ public sealed class MirQasmEmitterTests
                                 callerCount.Id),
                         })),
                 new MirQasmQuantumApplyStatement(
-                    new MirQasmStatementId(1),
                     new MirQasmUserQuantumTarget(workerId),
                     Array.Empty<MirQasmExpression>(),
                     new MirQasmExpression[]
@@ -353,7 +322,7 @@ public sealed class MirQasmEmitterTests
                         new MirQasmParameterReferenceExpression(
                             callerTarget.Id),
                     }),
-                new MirQasmReturnStatement(new MirQasmStatementId(2)),
+                new MirQasmReturnStatement(),
             });
 
         var q = new MirQasmDeclarationId(0);
@@ -363,17 +332,14 @@ public sealed class MirQasmEmitterTests
         var body = new MirQasmStatement[]
         {
             new MirQasmQubitDeclarationStatement(
-                new MirQasmStatementId(0),
                 q,
                 "q_final",
                 new MirQasmQubitType(2)),
             new MirQasmValueDeclarationStatement(
-                new MirQasmStatementId(1),
                 measured,
                 "measured_final",
                 new MirQasmBitType()),
             new MirQasmArrayDeclarationStatement(
-                new MirQasmStatementId(2),
                 values,
                 "values_final",
                 new MirQasmArrayType(Int, length: 2),
@@ -383,7 +349,6 @@ public sealed class MirQasmEmitterTests
                     new MirQasmLiteralExpression("2"),
                 }),
             new MirQasmValueDeclarationStatement(
-                new MirQasmStatementId(3),
                 index,
                 "index_final",
                 Int,
@@ -400,17 +365,15 @@ public sealed class MirQasmEmitterTests
                     new MirQasmUnsignedCastExpression(
                         width: 2,
                         new MirQasmLiteralExpression("\"01\"")))),
-            ValueDeclaration(4, 4, "bool_final", MirQasmScalarKind.Bool),
-            ValueDeclaration(5, 5, "uint_final", MirQasmScalarKind.UInt),
-            ValueDeclaration(6, 6, "float_final", MirQasmScalarKind.Float),
-            ValueDeclaration(7, 7, "angle_final", MirQasmScalarKind.Angle),
+            ValueDeclaration(4, "bool_final", MirQasmScalarKind.Bool),
+            ValueDeclaration(5, "uint_final", MirQasmScalarKind.UInt),
+            ValueDeclaration(6, "float_final", MirQasmScalarKind.Float),
+            ValueDeclaration(7, "angle_final", MirQasmScalarKind.Angle),
             new MirQasmValueDeclarationStatement(
-                new MirQasmStatementId(8),
                 new MirQasmDeclarationId(8),
                 "bits_final",
                 new MirQasmBitType(3)),
             new MirQasmAssignmentStatement(
-                new MirQasmStatementId(9),
                 new MirQasmIndexExpression(
                     new MirQasmDeclarationReferenceExpression(values),
                     new MirQasmDeclarationReferenceExpression(index)),
@@ -418,13 +381,11 @@ public sealed class MirQasmEmitterTests
                     MirQasmUnaryOperator.Negate,
                     new MirQasmDeclarationReferenceExpression(index))),
             new MirQasmMeasurementAssignmentStatement(
-                new MirQasmStatementId(10),
                 new MirQasmDeclarationReferenceExpression(measured),
                 new MirQasmIndexExpression(
                     new MirQasmDeclarationReferenceExpression(q),
                     new MirQasmLiteralExpression("0"))),
             new MirQasmQuantumApplyStatement(
-                new MirQasmStatementId(11),
                 new MirQasmBuiltinGateTarget("x"),
                 Array.Empty<MirQasmExpression>(),
                 new MirQasmExpression[]
@@ -442,7 +403,6 @@ public sealed class MirQasmEmitterTests
                     MirQasmQuantumModifier.Controlled,
                 }),
             new MirQasmIfStatement(
-                new MirQasmStatementId(12),
                 new MirQasmBinaryExpression(
                     MirQasmBinaryOperator.Equal,
                     new MirQasmDeclarationReferenceExpression(measured),
@@ -450,7 +410,6 @@ public sealed class MirQasmEmitterTests
                 new MirQasmStatement[]
                 {
                     new MirQasmQuantumApplyStatement(
-                        new MirQasmStatementId(13),
                         new MirQasmUserQuantumTarget(callerId),
                         Array.Empty<MirQasmExpression>(),
                         new MirQasmExpression[]
@@ -464,7 +423,6 @@ public sealed class MirQasmEmitterTests
                 new MirQasmStatement[]
                 {
                     new MirQasmWhileStatement(
-                        new MirQasmStatementId(14),
                         new MirQasmBinaryExpression(
                             MirQasmBinaryOperator.Less,
                             new MirQasmDeclarationReferenceExpression(index),
@@ -472,32 +430,28 @@ public sealed class MirQasmEmitterTests
                         new MirQasmStatement[]
                         {
                             new MirQasmAssignmentStatement(
-                                new MirQasmStatementId(15),
                                 new MirQasmDeclarationReferenceExpression(index),
                                 new MirQasmBinaryExpression(
                                     MirQasmBinaryOperator.Add,
                                     new MirQasmDeclarationReferenceExpression(index),
                                     new MirQasmLiteralExpression("1"))),
-                            new MirQasmBreakStatement(
-                                new MirQasmStatementId(16)),
+                            new MirQasmBreakStatement(),
                         }),
                 }),
         };
 
         return new MirOpenQasmTargetProgram(
-            new MirQasmEntryPoint(entryId, "entry_final", body),
+            body,
             // Caller deliberately appears first; typed dependencies determine serialization order.
             new[] { caller, helper, worker },
             new[] { "emitted only from the immutable target tree" });
     }
 
     private static MirQasmValueDeclarationStatement ValueDeclaration(
-        int statement,
         int declaration,
         string name,
         MirQasmScalarKind kind) =>
         new(
-            new MirQasmStatementId(statement),
             new MirQasmDeclarationId(declaration),
             name,
             new MirQasmScalarType(kind));

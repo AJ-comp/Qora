@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using Qora;
 using Qora.Compiler;
+using Qora.Ir.Mir;
 using Qora.Ir.Mir.Analysis;
 
 // Two modes:
@@ -26,10 +27,18 @@ if (args.Contains("--json"))
         var positional = new List<string>();
         for (var i = 0; i < args.Length; i++)
         {
-            if (args[i] == "--base-dir" && i + 1 < args.Length) baseDir = args[++i];
+            if (args[i] == "--base-dir" && i + 1 < args.Length)
+            {
+                baseDir = args[++i];
+            }
             else if (args[i] == "--source-path" && i + 1 < args.Length)
+            {
                 stdinSourcePath = Path.GetFullPath(args[++i]);
-            else positional.Add(args[i]);
+            }
+            else
+            {
+                positional.Add(args[i]);
+            }
         }
 
         // The first non-flag argument, if any, is a source file; otherwise read the whole of stdin.
@@ -58,6 +67,26 @@ if (args.Contains("--json"))
         var resolvedValidation = compilation.Hir.ResolvedValidation;
         var mir = compilation.Mir;
         var openQasm = compilation.Targets.OpenQasm;
+        var diagnostics = compilation.Diagnostics
+            .Select(diagnostic =>
+            {
+                var document = DiagnosticSource(diagnostic);
+                var path = document is null
+                    ? null
+                    : compilation.Sources.RequireDocument(document.Value).Path;
+
+                return new
+                {
+                    message = diagnostic.Error.Message,
+                    code = diagnostic.Error.Code,
+                    start = diagnostic.Error.Start,
+                    end = diagnostic.Error.End,
+                    document = document?.ToString(),
+                    path,
+                };
+            })
+            .ToArray();
+
         if (args.Contains("--stages"))
         {
             // Each view consumes one exact, revision-bound stage. A missing stage stays empty instead of
@@ -66,17 +95,7 @@ if (args.Contains("--json"))
             {
                 success = compilation.Succeeded,
                 qasm = openQasm?.Text ?? string.Empty,
-                errors = compilation.Diagnostics.Select(d => new
-                {
-                    message = d.Error.Message,
-                    code = d.Error.Code,
-                    start = d.Error.Start,
-                    end = d.Error.End,
-                    document = DiagnosticSource(d)?.ToString(),
-                    path = DiagnosticSource(d) is { } document
-                        ? compilation.Sources.RequireDocument(document).Path
-                        : null,
-                }),
+                errors = diagnostics,
                 ast = compilation.Sources.EntrySyntax.AstText,
                 ir = resolved is null
                     ? string.Empty
@@ -98,17 +117,7 @@ if (args.Contains("--json"))
             {
                 success = compilation.Succeeded,
                 qasm = openQasm?.Text ?? string.Empty,
-                errors = compilation.Diagnostics.Select(d => new
-                {
-                    message = d.Error.Message,
-                    code = d.Error.Code,
-                    start = d.Error.Start,
-                    end = d.Error.End,
-                    document = DiagnosticSource(d)?.ToString(),
-                    path = DiagnosticSource(d) is { } document
-                        ? compilation.Sources.RequireDocument(document).Path
-                        : null,
-                }),
+                errors = diagnostics,
             }));
         }
     }
@@ -184,9 +193,14 @@ static string FormatMirEffects(MirEffectSnapshot effects)
 
     foreach (var effect in effects.Effects)
     {
-        var target = effect.Target is null
-            ? effect.Kind.ToString().ToLowerInvariant()
-            : effect.Target.DisplayName;
+        var instruction = effects.RequireInstruction(effect.Site);
+        var target = instruction switch
+        {
+            MirQuantumApply apply => apply.Target.DisplayName,
+            MirMeasure => "measure",
+            _ => throw new InvalidOperationException(
+                $"Effect site {effect.Site} does not point to a quantum instruction."),
+        };
         var qubits = effect.Qubits.Count == 0
             ? "none"
             : string.Join(
@@ -201,7 +215,7 @@ static string FormatMirEffects(MirEffectSnapshot effects)
                     $"%{witness.Value}:{witness.Role}"));
 
         text.AppendLine(
-            $"@{effect.Site.Callable}/{effect.Site.Block}/%{effect.Site.Instruction.Instruction}: "
+            $"@{effect.Site}: "
             + $"{target}; qubits [{qubits}]; witnesses [{witnesses}]");
     }
 

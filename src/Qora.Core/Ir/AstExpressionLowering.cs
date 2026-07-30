@@ -479,15 +479,18 @@ internal static class AstExpressionLowering
         }
 
         var callee = LowerQualifiedNameToHir(calleeSyntax, session);
-        var arguments = argumentSyntax
-            .Select(item =>
-            {
-                var expression = item.ToHirExpression(session);
-                return session.Argument(
-                    expression,
-                    span: SpanOf(item, session));
-            })
-            .ToArray();
+        var arguments = new HirArgument[argumentSyntax.Length];
+        for (var index = 0; index < argumentSyntax.Length; index++)
+        {
+            var argumentNode = argumentSyntax[index];
+            var expression = argumentNode.ToHirExpression(session);
+            var argumentSpan = SpanOf(argumentNode, session);
+
+            arguments[index] = session.Argument(
+                expression,
+                span: argumentSpan);
+        }
+
         return session.Call(
             callee,
             arguments,

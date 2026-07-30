@@ -30,9 +30,9 @@ public static class MirQasmEmitter
             writer.EmitDefinition(definition, text);
         }
 
-        if (program.EntryPoint.Body.Length > 0)
+        if (program.EntryBody.Length > 0)
             text.AppendLine();
-        writer.EmitEntry(program.EntryPoint, text);
+        writer.EmitEntry(program.EntryBody, text);
         return text.ToString().TrimEnd();
     }
 
@@ -203,13 +203,13 @@ public static class MirQasmEmitter
         }
 
         public void EmitEntry(
-            MirQasmEntryPoint entry,
+            IReadOnlyList<MirQasmStatement> body,
             StringBuilder text)
         {
             var bindings = BindingNames.For(
                 Array.Empty<MirQasmParameter>(),
-                entry.Body);
-            EmitStatements(entry.Body, text, indent: 0, bindings);
+                body);
+            EmitStatements(body, text, indent: 0, bindings);
         }
 
         private void EmitStatements(

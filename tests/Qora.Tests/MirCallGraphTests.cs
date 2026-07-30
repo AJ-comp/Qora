@@ -50,7 +50,7 @@ public sealed class MirCallGraphTests
 
         var pure = Assert.Single(
             graph.Calls,
-            call => call.Kind == MirCallKind.PureCall);
+            call => call.Callee == increment.Id);
         Assert.Equal(main.Id, pure.Caller);
         Assert.Equal(increment.Id, pure.Callee);
         var pureInstruction = Assert.IsType<MirPureCall>(
@@ -62,7 +62,7 @@ public sealed class MirCallGraphTests
 
         var quantum = Assert.Single(
             graph.Calls,
-            call => call.Kind == MirCallKind.QuantumApply);
+            call => call.Callee == applyX.Id);
         Assert.Equal(main.Id, quantum.Caller);
         Assert.Equal(applyX.Id, quantum.Callee);
         var quantumInstruction = Assert.IsType<MirQuantumApply>(
@@ -72,20 +72,9 @@ public sealed class MirCallGraphTests
             Assert.IsType<MirUserCallableTarget>(quantumInstruction.Target).Callable);
         AssertCallLocation(main, quantum, quantumInstruction);
 
-        Assert.Equal(
-            new[] { increment.Id, applyX.Id }
-                .OrderBy(callable => callable.Value),
-            graph.CalleesOf(main));
-        Assert.Equal(
-            new[] { increment.Id },
-            graph.CalleesOf(main.Id, MirCallKind.PureCall));
-        Assert.Equal(
-            new[] { applyX.Id },
-            graph.CalleesOf(main.Id, MirCallKind.QuantumApply));
+        Assert.Equal(2, graph.CallsFrom(main).Count);
         Assert.Empty(graph.CallsFrom(increment));
         Assert.Empty(graph.CallsFrom(applyX));
-        Assert.Single(graph.CallsTo(increment));
-        Assert.Single(graph.CallsTo(applyX));
     }
 
     [Fact]
@@ -114,13 +103,10 @@ public sealed class MirCallGraphTests
         Assert.Equal(firstMain.Id, secondMain.Id);
         Assert.False(second.Program.ContainsCallable(firstMain));
         Assert.Throws<ArgumentException>(() => graph.CallsFrom(firstMain));
-        Assert.Throws<ArgumentException>(() => graph.CallsTo(firstMain));
-        Assert.Throws<ArgumentException>(() => graph.CalleesOf(firstMain));
         Assert.Throws<InvalidOperationException>(
             () => graph.EnsureFor(first.Program));
 
         Assert.Single(graph.CallsFrom(secondMain));
-        Assert.Single(graph.CalleesOf(secondMain));
     }
 
     private static void AssertCallLocation(
@@ -131,7 +117,6 @@ public sealed class MirCallGraphTests
         Assert.Equal(caller.Id, call.Instruction.Callable);
         var location =
             caller.RequireInstructionLocation(call.Instruction.Instruction);
-        Assert.Equal(call.Block, location.Block.Id);
         Assert.Same(instruction, location.Block.Instructions[location.Index]);
     }
 }

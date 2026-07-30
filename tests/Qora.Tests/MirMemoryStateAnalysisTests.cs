@@ -177,19 +177,26 @@ public sealed class MirMemoryStateAnalysisTests
 
         Assert.Equal(2, inputs.Length);
         Assert.Equal(2, outputs.Length);
+        var unavailableInputs = inputs
+            .Select(input => analysis.CheckAtTerminator(input, exit.Id))
+            .ToArray();
         Assert.All(
-            inputs,
-            input => Assert.Equal(
+            unavailableInputs,
+            availability => Assert.Equal(
                 MirMemoryStateAvailabilityKind.Clobbered,
-                analysis.CheckAtTerminator(input, exit.Id).Kind));
+                availability.Kind));
         Assert.All(
             outputs,
             output => Assert.True(
                 analysis.CheckAtTerminator(output, exit.Id).IsAvailable));
         Assert.Equal(
-            2,
-            analysis.Mutations.Count(
-                mutation => mutation.Instruction == call.Id));
+            new int?[] { 0, 1 },
+            unavailableInputs
+                .SelectMany(availability => availability.ClobberingMutations)
+                .Where(mutation => mutation.Instruction == call.Id)
+                .Select(mutation => mutation.OperandIndex)
+                .OrderBy(index => index)
+                .ToArray());
     }
 
     [Fact]
@@ -239,10 +246,11 @@ public sealed class MirMemoryStateAnalysisTests
                 .OfType<MirArrayStore>());
         var merge = Assert.Single(
             main.Blocks,
-            block => block.Arguments.Any(argument => argument.Type.IsArray));
+            block => block.Arguments.Any(
+                argument => main.RequireValue(argument).Type.IsArray));
         var argumentIndex = merge.Arguments
             .Select((argument, index) => (argument, index))
-            .Single(item => item.argument.Type.IsArray)
+            .Single(item => main.RequireValue(item.argument).Type.IsArray)
             .index;
         var storeBlock = Assert.Single(
             main.Blocks,
@@ -287,12 +295,13 @@ public sealed class MirMemoryStateAnalysisTests
         var main = Callable(program, "Main");
         var header = Assert.Single(
             main.Blocks,
-            block => block.Arguments.Any(argument => argument.Type.IsArray));
+            block => block.Arguments.Any(
+                argument => main.RequireValue(argument).Type.IsArray));
         var argumentIndex = header.Arguments
             .Select((argument, index) => (argument, index))
-            .Single(item => item.argument.Type.IsArray)
+            .Single(item => main.RequireValue(item.argument).Type.IsArray)
             .index;
-        var headerState = header.Arguments[argumentIndex].Value;
+        var headerState = header.Arguments[argumentIndex];
         var cfg = MirControlFlowAnalysis.Analyze(program, main.Id);
         var backedge = Assert.Single(
             main.Blocks,
@@ -347,7 +356,6 @@ public sealed class MirMemoryStateAnalysisTests
         var rewrittenCallable = new MirCallable(
             callable.Id,
             callable.Name,
-            callable.Kind,
             callable.ReturnType,
             callable.Parameters,
             callable.EntryBlock,

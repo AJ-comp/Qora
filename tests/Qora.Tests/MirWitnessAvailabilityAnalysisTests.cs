@@ -148,7 +148,8 @@ public sealed class MirWitnessAvailabilityAnalysisTests
         var effect = Assert.Single(
             effects.Effects,
             candidate => candidate.Site.Callable == main.Id
-                && candidate.Target?.DisplayName == "X");
+                && effects.RequireInstruction(candidate.Site)
+                    is MirQuantumApply { Target.DisplayName: "X" });
         var analysis = MirWitnessAvailabilityAnalysis.Analyze(
             program,
             effects,

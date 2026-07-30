@@ -243,9 +243,9 @@
       <tr><td class="k">통합 HIR 2</td><td><code>Resolver</code></td><td>short name → FQN + callable <code>HirNodeId</code>인 <code>CalleeId</code></td><td><code>HirScopeGraph</code> 기반 이름 해소</td></tr>
       <tr><td class="k">semantic 1</td><td><code>QoraValidator</code></td><td>resolved HIR → validation <code>HirSemanticArtifact</code>가 소유하는 Accepted/Rejected outcome</td><td>모델·상태·진단을 exact snapshot의 하나의 권위 결과로 발행</td></tr>
       <tr><td class="k">통합 HIR 3</td><td><code>Monomorphizer</code></td><td>resolved HIR → size-specialized HIR</td><td>실제 rewrite가 없으면 기존 snapshot alias</td></tr>
-      <tr><td class="k">semantic 2</td><td><code>EffectAnalysis</code></td><td>exact accepted specialized validation artifact → effect-analysis artifact</td><td>같은 snapshot의 <code>ValidationBasis</code>를 명시하며 새 HIR stage 없음</td></tr>
+      <tr><td class="k">semantic 2</td><td><code>EffectAnalysis</code></td><td>exact accepted specialized validation artifact → effect-analysis artifact (추가 effect data는 callable별 formal-qubit <code>ParamModified</code>)</td><td>MIR 큐빗 버전을 만드는 데 필요한 정보만 보존하며 큐빗 이력·안전성 판단을 HIR에 중복하지 않음</td></tr>
       <tr><td class="k">MIR lowering</td><td><code>QoraMirLowering</code></td><td><code>HirCompilation.EffectAnalysis</code>의 exact source·model → <code>MirSnapshot</code></td><td>최종 artifact 하나만 소비하며 typed SSA/CFG, <code>LoweringSource</code>, program-owned <code>Origins</code>를 생성하고 요청된 경우에만 language-service trace를 발행</td></tr>
-      <tr><td class="k">MIR 분석</td><td><code>MirAnalysisStore</code></td><td>verified MIR → CFG·효과 등 revision-bound 분석</td><td>공유 의존성을 snapshot 안에서 재사용</td></tr>
+      <tr><td class="k">MIR 분석</td><td><code>MirAnalysisStore</code></td><td>verified MIR → 버전 있는 큐빗·CFG·효과 등 revision-bound 분석</td><td>양자 효과와 후속 분석의 권위 자료를 exact MIR snapshot 안에서 계산하고 재사용</td></tr>
       <tr><td class="k">MIR 역연산</td><td><code>MirAdjointMaterializer</code></td><td>MIR-only inverse request → synthesized inverse callable + materialized <code>MirSnapshot</code></td><td>Qora source와 HIR에는 Adjoint 표현이 없으며 snapshot revision·parent·origin을 보존</td></tr>
       <tr><td class="k">target lowering</td><td><code>QasmBackend</code> / <code>MirOpenQasmLowering</code></td><td>exact materialized <code>MirSnapshot</code> → <code>MirOpenQasmTargetProgram</code></td><td>backend가 HIR로 되돌아가지 않으며 artifact가 target model을 받아 text를 파생</td></tr>
     </table>
@@ -301,7 +301,7 @@
       <tr><td class="k"><code>Hir.SemanticArtifacts</code></td><td><code>HirSemanticArtifactId → artifact</code></td><td>구조 identity와 분석 phase의 정확한 결합</td></tr>
       <tr><td class="k"><code>Hir.ResolvedValidation</code></td><td>resolved HIR의 accepted 또는 rejected validation artifact</td><td>scope·symbol·type·bounds 사실과 exact <code>ValidationOutcome</code></td></tr>
       <tr><td class="k"><code>Hir.SpecializedValidation</code></td><td>specialized HIR의 validation artifact</td><td>specialization이 alias면 resolved artifact와 같은 exact object를 재사용</td></tr>
-      <tr><td class="k"><code>Hir.EffectAnalysis</code></td><td>accepted validation에서만 생성되는 effect-analysis artifact</td><td>큐빗 사실과 exact <code>ValidationBasis</code></td></tr>
+      <tr><td class="k"><code>Hir.EffectAnalysis</code></td><td>accepted validation에서만 생성되는 effect-analysis artifact</td><td>callable별 formal-qubit <code>ParamModified</code>와 exact <code>ValidationBasis</code></td></tr>
     </table>
   </div>
 
@@ -317,6 +317,8 @@
     <code>HirSemanticModel</code>은 자신이 분석한 exact HIR의 scope graph와 의미 사실만 담습니다.<br>
     <code>HirSemanticArtifact.Diagnostics</code>는 자신이 소유한 <code>ValidationOutcome.Diagnostics</code>의 뷰이며, <code>CompilationDiagnostic</code>은 여기에 stage와 origin을 붙여 투영할 뿐 별도의 validation 결과를 유지하지 않습니다.<br>
     effect-analysis artifact는 같은 snapshot의 exact accepted validation artifact를 <code>ValidationBasis</code>로 명시하고 동일한 validation outcome을 공유합니다.<br>
+    이 artifact가 추가로 보존하는 effect summary는 <code>QoraMirLowering</code>이 큐빗 버전을 만들 때 필요한 formal qubit의 <code>ParamModified</code> 집합뿐입니다.<br>
+    큐빗 버전·양자 효과·후속 분석의 권위 자료는 MIR이 생성된 뒤 exact <code>MirSnapshot</code>과 <code>MirAnalysisStore</code>가 소유합니다.<br>
     후속 구조 패스의 관계는 <code>HirCompilation.Lineage</code>가 직접 소유하며, 이를 다시 감싸는 별도 aggregate 링크 장부는 없습니다.<br>
     반면에 MIR lowering은 이 lineage로 semantic node Id를 번역하지 않습니다.<br>
     <code>HirCompilation.ToMir()</code>는 최종 <code>EffectAnalysis</code> artifact만 선택하며, 그 artifact의 <code>Source</code>와 <code>Model</code>은 같은 exact specialized HIR snapshot에 고정됩니다.<br>
@@ -370,8 +372,9 @@
   </div>
 
   <p>
-    HIR의 <code>EffectAnalysis</code>와 MIR의 <code>Mir.Analyses.Effects</code>는 같은 이름의 중복 결과가 아닙니다.<br>
-    전자는 source-shaped HIR에서 자동 uncomputation 판단에 필요한 semantic event와 summary를 만들고, 후자는 SSA/CFG에서 실행 경로와 storage 상태를 포함한 MIR 수준 사실을 만듭니다.
+    HIR의 <code>EffectAnalysis</code> artifact는 양자 분석의 권위 자료가 아닙니다.<br>
+    여기에는 lowering 중 어떤 호출 operand 뒤에 새 <code>MirQubitAfterInstruction</code>을 만들어야 하는지 판단하는 데 필요한 <code>ParamModified</code>만 남습니다.<br>
+    반면에 버전 있는 큐빗 정의, 명령별 양자 효과, 고전 witness·경로·메모리 상태와 앞으로 추가할 cleanup 판단은 exact <code>MirSnapshot</code>과 <code>MirAnalysisStore</code>에서만 파생합니다.
   </p>
 
   <h2 id="s6">6. Core 소유 정보와 IDE 인덱스</h2>
@@ -398,7 +401,7 @@
   <div class="callout good">
     <span class="h">일반 컴파일 경로</span>
     language-service trace를 요청하지 않으면 <code>MirSemanticIndex</code>와 symbol 양방향 맵은 생성되지 않습니다.<br>
-    효과 분석, adjoint materialization, OpenQASM lowering은 Core MIR 구조와 <code>Origins</code>만 소비하며, 향후 automatic uncomputation도 같은 경계를 따릅니다.
+    MIR 효과 분석, adjoint materialization, OpenQASM lowering은 Core MIR 구조와 <code>Origins</code>만 소비하며, 향후 automatic uncomputation도 같은 경계를 따릅니다.
   </div>
 
   <h2 id="s7">7. target artifact backend map</h2>

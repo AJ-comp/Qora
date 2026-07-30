@@ -37,39 +37,25 @@ public sealed record MirScalarValueAvailability(
 /// </summary>
 public sealed class MirScalarValueAvailabilitySnapshot
 {
-    private readonly MirProgram _sourceProgram;
     private readonly MirCallable _callable;
     private readonly MirControlFlowSnapshot _cfg;
     private readonly MirMemoryStateSnapshot _memory;
-    private readonly IReadOnlyDictionary<MirInstructionId, MirInstruction> _instructions;
 
     internal MirScalarValueAvailabilitySnapshot(
-        MirProgram sourceProgram,
         MirCallable callable,
         MirControlFlowSnapshot cfg,
         MirMemoryStateSnapshot memory)
     {
-        _sourceProgram = sourceProgram;
         _callable = callable;
         _cfg = cfg;
         _memory = memory;
-        _instructions = callable.Blocks
-            .SelectMany(block => block.Instructions)
-            .ToDictionary(instruction => instruction.Id);
-        SnapshotId = sourceProgram.SnapshotId;
-        Callable = callable.Id;
     }
 
-    public MirSnapshotId SnapshotId { get; }
-    public MirCallableId Callable { get; }
-    internal MirControlFlowSnapshot ControlFlow => _cfg;
-    internal MirMemoryStateSnapshot MemoryState => _memory;
+    public MirSnapshotId SnapshotId => _cfg.SnapshotId;
+    public MirCallableId Callable => _cfg.Callable;
 
     internal bool IsFor(MirProgram program, MirCallableId callable) =>
-        ReferenceEquals(_sourceProgram, program)
-        && ReferenceEquals(_callable, program.FindCallable(callable))
-        && SnapshotId == program.SnapshotId
-        && Callable == callable;
+        _cfg.IsFor(program, callable);
 
     public MirScalarValueAvailability CheckBeforeInstruction(
         MirValueId value,
@@ -117,9 +103,9 @@ public sealed class MirScalarValueAvailabilitySnapshot
                         MirScalarValueAvailabilityKind.Available,
                         Array.Empty<MirInstructionId>()));
                 if (currentValue.Definition.Kind != MirValueDefinitionKind.InstructionResult
-                    || currentValue.Definition.Instruction is not MirInstructionId instructionId
-                    || !_instructions.TryGetValue(instructionId, out var instruction))
+                    || currentValue.Definition.Instruction is not MirInstructionId instructionId)
                     return Cache(Unavailable(current));
+                var instruction = _callable.RequireInstruction(instructionId);
 
                 var dependencies = new List<MirInstructionId>();
                 foreach (var input in instruction.InputValues)
@@ -216,7 +202,6 @@ internal static class MirScalarValueAvailabilityAnalysis
         cfg.EnsureFor(program, callable.Id);
         memory.EnsureFor(program, callable.Id);
         return new MirScalarValueAvailabilitySnapshot(
-            program,
             callable,
             cfg,
             memory);

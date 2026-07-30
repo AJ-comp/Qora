@@ -2,22 +2,13 @@ using System.Collections.Frozen;
 
 namespace Qora.Ir.Mir.Analysis;
 
-/// <summary>The MIR instruction kind which creates one user-callable edge.</summary>
-public enum MirCallKind
-{
-    PureCall,
-    QuantumApply,
-}
-
 /// <summary>
 /// One policy-free user-callable edge. The owning <see cref="MirCallGraph"/> supplies the exact snapshot;
 /// block and instruction identities are local to <see cref="Caller"/>.
 /// </summary>
 public readonly record struct MirCallSite(
     MirInstructionSite Instruction,
-    MirBlockId Block,
-    MirCallableId Callee,
-    MirCallKind Kind)
+    MirCallableId Callee)
 {
     public MirCallableId Caller => Instruction.Callable;
 }
@@ -30,7 +21,6 @@ public sealed class MirCallGraph
 {
     private readonly MirProgram _program;
     private readonly FrozenDictionary<MirCallableId, IReadOnlyList<MirCallSite>> _callsFrom;
-    private readonly FrozenDictionary<MirCallableId, IReadOnlyList<MirCallSite>> _callsTo;
 
     internal MirCallGraph(
         MirProgram program,
@@ -41,7 +31,6 @@ public sealed class MirCallGraph
 
         Calls = MirCollections.Freeze(calls);
         _callsFrom = GroupBy(Calls, call => call.Caller);
-        _callsTo = GroupBy(Calls, call => call.Callee);
     }
 
     public MirSnapshotId SnapshotId => _program.SnapshotId;
@@ -66,31 +55,6 @@ public sealed class MirCallGraph
 
     public IReadOnlyList<MirCallSite> CallsFrom(MirCallable caller) =>
         CallsFrom(_program.RequireCallable(caller).Id);
-
-    public IReadOnlyList<MirCallSite> CallsTo(MirCallableId callee)
-    {
-        _program.RequireCallable(callee);
-        return _callsTo.GetValueOrDefault(callee)
-            ?? Array.Empty<MirCallSite>();
-    }
-
-    public IReadOnlyList<MirCallSite> CallsTo(MirCallable callee) =>
-        CallsTo(_program.RequireCallable(callee).Id);
-
-    public IReadOnlyList<MirCallableId> CalleesOf(
-        MirCallableId caller,
-        MirCallKind? kind = null) =>
-        MirCollections.Freeze(
-            CallsFrom(caller)
-                .Where(call => kind is null || call.Kind == kind)
-                .Select(call => call.Callee)
-                .Distinct()
-                .OrderBy(callee => callee.Value));
-
-    public IReadOnlyList<MirCallableId> CalleesOf(
-        MirCallable caller,
-        MirCallKind? kind = null) =>
-        CalleesOf(_program.RequireCallable(caller).Id, kind);
 
     private static FrozenDictionary<MirCallableId, IReadOnlyList<MirCallSite>> GroupBy(
         IEnumerable<MirCallSite> calls,
@@ -121,13 +85,13 @@ internal static class MirCallGraphAnalysis
                         {
                             Target: MirUserCallableTarget target,
                         } pure =>
-                            (target.Callable, MirCallKind.PureCall, pure.Id),
+                            (target.Callable, pure.Id),
                         MirQuantumApply
                         {
                             Target: MirUserCallableTarget target,
                         } quantum =>
-                            (target.Callable, MirCallKind.QuantumApply, quantum.Id),
-                        _ => ((MirCallableId Callable, MirCallKind Kind, MirInstructionId Instruction)?)null,
+                            (target.Callable, quantum.Id),
+                        _ => ((MirCallableId Callable, MirInstructionId Instruction)?)null,
                     };
                     if (edge is not { } resolved)
                         continue;
@@ -136,9 +100,7 @@ internal static class MirCallGraphAnalysis
                     calls.Add(
                         new MirCallSite(
                             new MirInstructionSite(caller.Id, resolved.Instruction),
-                            block.Id,
-                            resolved.Callable,
-                            resolved.Kind));
+                            resolved.Callable));
                 }
             }
         }

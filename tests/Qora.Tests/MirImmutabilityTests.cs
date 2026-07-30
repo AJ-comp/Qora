@@ -53,7 +53,6 @@ public sealed class MirImmutabilityTests
         var clonedCallable = new MirCallable(
             originalCallable.Id,
             originalCallable.Name,
-            originalCallable.Kind,
             originalCallable.ReturnType,
             parameters,
             originalCallable.EntryBlock,
@@ -71,9 +70,9 @@ public sealed class MirImmutabilityTests
         QoraMirVerifier.VerifyOrThrow(program);
         var effects = MirEffectAnalysis.Analyze(program);
         var cfg = MirControlFlowAnalysis.Analyze(program, clonedCallable.Id);
-        var effectSite = new MirEffectSite(
-            new MirInstructionSite(clonedCallable.Id, clonedApply.Id),
-            clonedBlock.Id);
+        var effectSite = new MirInstructionSite(
+            clonedCallable.Id,
+            clonedApply.Id);
 
         callables.Clear();
         parameters.Clear();
@@ -105,7 +104,7 @@ public sealed class MirImmutabilityTests
         Assert.Single(effects.Effects);
 
         cfg.EnsureFor(program, clonedCallable.Id);
-        Assert.Contains(clonedBlock.Id, cfg.Blocks);
+        Assert.True(clonedCallable.ContainsBlock(clonedBlock.Id));
         Assert.Equal(
             clonedApply.Id,
             cfg.PointBeforeInstruction(clonedApply.Id).Instruction);
@@ -122,9 +121,7 @@ public sealed class MirImmutabilityTests
             new MirInstructionId(0),
             new MirValueId(1),
             new MirStorageId(0),
-            QType.Int,
             MirArrayInitialization.ExplicitElements,
-            Length: 1,
             elements,
             source);
 
@@ -183,7 +180,6 @@ public sealed class MirImmutabilityTests
         };
         var provenance = new MirStorageProvenance(storages, IsComplete: true);
 
-        var functors = new List<MirFunctor> { MirFunctor.Controlled };
         var qubits = new List<MirQubitOperandEffect>
         {
             new(
@@ -193,27 +189,15 @@ public sealed class MirImmutabilityTests
         };
         var witnesses = new List<MirClassicalWitness>();
         var arrays = new List<MirArrayStateOperand>();
-        var results = new List<MirValueId>
-        {
-            new(0),
-        };
         var effect = new MirQuantumInstructionEffect(
-            new MirEffectSite(
-                context.InstructionSite(callable, new MirInstructionId(0)),
-                new MirBlockId(0)),
-            MirQuantumInstructionKind.Apply,
-            new MirEffectBuiltinGateTarget("X"),
-            functors,
+            context.InstructionSite(callable, new MirInstructionId(0)),
             qubits,
             witnesses,
             arrays,
             MirPathCondition.Always,
             MirExecutionMultiplicity.Single,
-            results,
-            Array.Empty<MirQubitKey>(),
             IsIrreversible: false,
-            TransfersOwnership: false,
-            source);
+            TransfersOwnership: false);
 
         var formalQubits = new List<MirFormalQubitEffect>
         {
@@ -228,31 +212,25 @@ public sealed class MirImmutabilityTests
             TransfersOwnership: false);
 
         storages.Clear();
-        functors.Clear();
         qubits.Clear();
         witnesses.Add(new MirClassicalWitness(
             new MirValueId(1),
-            MirType.Scalar(QType.Int),
             MirClassicalWitnessRole.CallOperand,
             OperandIndex: 0));
         arrays.Add(new MirArrayStateOperand(
             OperandIndex: 0,
             new MirValueId(0),
             OutputState: null,
-            MirType.Array(QType.Int),
             QOwnershipMode.Borrowed,
             QAccessMode.ReadOnly,
             provenance));
-        results.Clear();
         formalQubits.Clear();
 
         Assert.Single(provenance.PossibleStorages);
-        Assert.Single(effect.Functors);
         Assert.Single(effect.Qubits);
         Assert.Empty(effect.ClassicalWitnesses);
         Assert.Empty(effect.ArrayStates);
         Assert.True(effect.PathCondition.IsAlways);
-        Assert.Single(effect.Results);
         Assert.Single(summary.FormalQubits);
     }
 

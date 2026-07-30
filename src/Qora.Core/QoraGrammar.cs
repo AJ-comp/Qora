@@ -6,7 +6,7 @@ using Janglim.FrontEnd.RegularGrammar;
 namespace Qora;
 
 /// <summary>
-/// Qora v0.34 — a Q#/C#-flavored quantum language on the Janglim engine.
+/// Qora v0.35.0 — a Q#/C#-flavored quantum language on the Janglim engine.
 ///
 ///   operation Bell(q: Qubit[]) {        // a subroutine, with trailing-type parameters (name: T)
 ///       H(q[0]);
