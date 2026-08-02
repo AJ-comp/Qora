@@ -9,7 +9,7 @@ namespace Qora.Ir.Mir.Analysis;
 internal sealed class MirControlRegionException : InvalidOperationException
 {
     internal MirControlRegionException(
-        MirOriginId origin,
+        MirOrigin origin,
         string detail)
         : base($"MIR cannot be represented as structured control flow: {detail}")
     {
@@ -17,7 +17,7 @@ internal sealed class MirControlRegionException : InvalidOperationException
         Detail = detail;
     }
 
-    public MirOriginId Origin { get; }
+    public MirOrigin Origin { get; }
     public string Detail { get; }
 }
 
@@ -55,7 +55,7 @@ internal sealed class MirNaturalLoopRegion
 }
 
 /// <summary>
-/// Immutable structured-region facts for one callable in one exact MIR revision. This object does not
+/// Immutable structured-region facts for one callable in one exact MIR program. This object does not
 /// copy instructions or expressions. It only classifies the canonical CFG's natural-loop boundaries;
 /// SESE condition joins are queried from the exact dominance/post-dominance snapshot while lowering.
 /// </summary>
@@ -72,7 +72,6 @@ public sealed class MirControlRegionSnapshot
         _loopsByHeader = loops.ToFrozenDictionary(loop => loop.Header);
     }
 
-    public MirSnapshotId SnapshotId => _controlFlow.SnapshotId;
     public MirCallableId Callable => _controlFlow.Callable;
     internal bool HasNaturalLoops => _loopsByHeader.Count != 0;
 

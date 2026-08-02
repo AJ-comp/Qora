@@ -1,5 +1,6 @@
 using Qora.Ir;
 using Qora.Ir.Mir;
+using Qora.Ir.Mir.Analysis;
 using Qora.Ir.Passes;
 
 namespace Qora.Compiler;
@@ -164,6 +165,42 @@ public static class QoraCompiler
                 validation.Source);
         }
 
+        bool AddInvalidMirBoundsDiagnostics(MirSnapshot snapshot)
+        {
+            var foundInvalidAccess = false;
+            var diagnosedSourceSpans = new HashSet<SourceSpan>();
+            var diagnosedUnmappedHirNodes = new HashSet<HirNodeId>();
+
+            foreach (var callable in snapshot.Program.Callables)
+            {
+                var bounds = snapshot.Analyses.Bounds(callable);
+                foreach (var result in bounds.Results)
+                {
+                    if (result.Classification != MirBoundsClassification.Invalid)
+                        continue;
+
+                    var origin = bounds.OriginFor(result);
+                    var sourceOrigin = origin.SourceHirOrigin;
+                    var isFirstSourceOccurrence = sourceOrigin.Span is { } span
+                        ? diagnosedSourceSpans.Add(span)
+                        : diagnosedUnmappedHirNodes.Add(sourceOrigin.HirNodeId);
+                    if (!isFirstSourceOccurrence)
+                        continue;
+
+                    diagnostics.Add(new CompilationDiagnostic(
+                        CompilationStage.MirAnalysis,
+                        new QoraError(
+                            $"in `{callable.Name}`: this indexed access is provably outside its valid bounds",
+                            "QSEM016",
+                            sourceOrigin.Span),
+                        new DiagnosticOrigin.Mir(snapshot, origin)));
+                    foundInvalidAccess = true;
+                }
+            }
+
+            return foundInvalidAccess;
+        }
+
         if (!syntax.Succeeded)
         {
             AddSourceDiagnostics(
@@ -303,24 +340,27 @@ public static class QoraCompiler
                 instrumentation?.MirLowering);
 
             // MIR analyses run on the canonical lowered graph before any internal inverse request can
-            // be injected. The future cleanup scheduler will consume these revision-bound facts, mark
-            // exact MIR call sites, and then hand the resulting snapshot to the materializer below.
+            // be injected. The future cleanup scheduler will consume facts bound to this exact program,
+            // mark exact MIR call sites, and then hand the resulting snapshot to the materializer below.
             _ = mir.Analyses.Effects;
             var materialization = MirAdjointMaterializer.Run(mir);
             if (!materialization.Succeeded)
             {
                 foreach (var error in materialization.Errors)
                 {
-                    var span = mir.Origins.ResolveHir(error.Origin).Span;
+                    var span = error.Origin.SourceHirOrigin.Span;
                     diagnostics.Add(
                         new CompilationDiagnostic(
                             CompilationStage.MirLowering,
                             new QoraError(error.Message, error.Code, span),
-                            new DiagnosticOrigin.Mir(mir.Id, error.Origin)));
+                            new DiagnosticOrigin.Mir(mir, error.Origin)));
                 }
                 return Finish();
             }
             mir = materialization.Snapshot;
+
+            if (AddInvalidMirBoundsDiagnostics(mir))
+                return Finish();
         }
 
         if (!options.OutputPlan.Requests(TargetBackend.OpenQasm))
@@ -340,7 +380,7 @@ public static class QoraCompiler
                         diagnostic.Error,
                         new DiagnosticOrigin.Target(
                             TargetBackend.OpenQasm,
-                            targetMir.Id,
+                            targetMir,
                             diagnostic.Location)));
             }
             return Finish();

@@ -159,7 +159,7 @@ public enum MirExecutionMultiplicity
 }
 
 /// <summary>
-/// Exact block-execution conditions and multiplicity facts for one callable in one immutable MIR revision.
+/// Exact block-execution conditions and multiplicity facts for one callable in one immutable MIR program.
 /// </summary>
 public sealed class MirPathConditionSnapshot
 {
@@ -174,7 +174,6 @@ public sealed class MirPathConditionSnapshot
         _conditions = conditions.ToFrozenDictionary();
     }
 
-    public MirSnapshotId SnapshotId => _cfg.SnapshotId;
     public MirCallableId Callable => _cfg.Callable;
 
     internal bool IsFor(MirProgram program, MirCallableId callable) =>
@@ -184,8 +183,8 @@ public sealed class MirPathConditionSnapshot
     {
         if (!IsFor(program, callable))
             throw new InvalidOperationException(
-                $"MIR path-condition snapshot belongs to {Callable} in snapshot {SnapshotId}; " +
-                $"reanalyze {callable} in snapshot {program.SnapshotId}");
+                $"the MIR path-condition analysis does not belong to callable {callable} "
+                + $"in the requested MIR program; it was created for callable {Callable}");
     }
 
     public MirPathCondition ConditionFor(MirBlockId block) =>

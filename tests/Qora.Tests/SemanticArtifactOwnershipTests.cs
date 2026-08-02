@@ -19,10 +19,8 @@ public sealed class SemanticArtifactOwnershipTests
 
         var mir = compilation.Hir.ToMir();
 
-        Assert.Equal(analyzed.SourceId, mir.LoweredFrom);
         Assert.Same(analyzed.Source, mir.LoweringSource.Source);
         Assert.Same(analyzed, mir.LoweringSource);
-        Assert.Equal(0, mir.Id.Revision);
         Assert.Equal(MirStage.Lowered, mir.Stage);
         Assert.Single(mir.Program.Callables);
     }
@@ -134,7 +132,6 @@ public sealed class SemanticArtifactOwnershipTests
 
         var mir = owner.ToMir();
 
-        Assert.Equal(finalEffect.SourceId, mir.LoweredFrom);
         Assert.Same(finalEffect.Source, mir.LoweringSource.Source);
         Assert.Same(finalEffect, mir.LoweringSource);
     }

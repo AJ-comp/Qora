@@ -115,15 +115,6 @@ public sealed class CompilationArchitectureTests
         Assert.NotNull(analyzed.Model.FindOpEffects(main.Id));
 
         Assert.Throws<InvalidOperationException>(
-            () => validated.Model.AddUnprovenIndex(
-                new UnprovenIndex(
-                    main.Id,
-                    main.Name,
-                    "xs",
-                    "i",
-                    LoopBound: null,
-                    Span: null)));
-        Assert.Throws<InvalidOperationException>(
             () => EffectAnalysis.Run(analyzed.Program, analyzed.Model));
     }
 
@@ -184,7 +175,9 @@ public sealed class CompilationArchitectureTests
                 Assert.Equal(second.Id, snapshot.Id.CompilationId);
                 Assert.Equal(second.Revision, snapshot.Id.CompilationRevision);
             });
-        Assert.Equal(second.Revision, second.Mir!.Id.CompilationRevision);
+        Assert.Same(
+            second.Hir.EffectAnalysis,
+            Assert.IsType<MirSnapshot>(second.Mir).LoweringSource);
         Assert.Equal(
             first.Sources.Entry.DocumentId,
             second.Sources.Entry.DocumentId);
@@ -212,7 +205,7 @@ public sealed class CompilationArchitectureTests
         Assert.Equal(root.Revision, left.ParentRevision);
         Assert.Equal(root.Revision, right.ParentRevision);
         Assert.NotEqual(left.Sources.Entry, right.Sources.Entry);
-        Assert.NotEqual(left.Mir!.Id, right.Mir!.Id);
+        Assert.NotSame(left.Mir, right.Mir);
         Assert.NotEqual(
             left.Hir.Snapshots.Select(snapshot => snapshot.Id),
             right.Hir.Snapshots.Select(snapshot => snapshot.Id));
@@ -422,8 +415,8 @@ public sealed class CompilationArchitectureTests
         var analyzed = Assert.IsType<HirSemanticArtifact>(compilation.Hir.EffectAnalysis);
         var mir = Assert.IsType<MirSnapshot>(compilation.Mir);
         var target = Assert.IsType<OpenQasmArtifact>(compilation.Targets.OpenQasm);
-        Assert.Equal(analyzed.SourceId, mir.LoweredFrom);
-        Assert.Equal(mir.Id, target.Source);
+        Assert.Same(analyzed, mir.LoweringSource);
+        Assert.Same(mir, target.Source);
     }
 
     [Fact]
@@ -445,9 +438,9 @@ public sealed class CompilationArchitectureTests
             property => property.PropertyType.Name.Contains(
                 "SemanticIndex",
                 StringComparison.Ordinal));
-        Assert.Equal(
-            compilation.Hir.EffectAnalysis!.SourceId,
-            mir.LoweredFrom);
+        Assert.Same(
+            compilation.Hir.EffectAnalysis,
+            mir.LoweringSource);
     }
 
     [Fact]
@@ -527,6 +520,95 @@ public sealed class CompilationArchitectureTests
     }
 
     [Fact]
+    public void CompilationRejectsMirOwnedByAnotherFinalHirArtifact()
+    {
+        var mirOnly = new CompilationOutputPlan(
+            produceMir: true,
+            Array.Empty<TargetBackend>());
+        var options = new CompilationOptions(outputPlan: mirOnly);
+        var source = QoraCompiler.Compile(
+            "operation Main() { use q = Qubit[1]; X(q[0]); }",
+            options);
+        var unrelated = QoraCompiler.Compile(
+            "operation Main() { use q = Qubit[1]; X(q[0]); }",
+            options);
+        var unrelatedMir = Assert.IsType<MirSnapshot>(unrelated.Mir);
+
+        Assert.Throws<ArgumentException>(
+            () => new Compilation(
+                source.Id,
+                source.Revision,
+                source.Session,
+                source.ParentRevision,
+                source.Options,
+                source.Sources,
+                source.Hir,
+                unrelatedMir,
+                new TargetArtifactSet(Array.Empty<ITargetArtifact>()),
+                Array.Empty<CompilationDiagnostic>()));
+    }
+
+    [Fact]
+    public void CompilationRejectsTargetArtifactProducedFromAnotherMir()
+    {
+        var source = QoraCompiler.Compile(
+            "operation Main() { use q = Qubit[1]; X(q[0]); }");
+        var unrelated = QoraCompiler.Compile(
+            "operation Main() { use q = Qubit[1]; X(q[0]); }");
+        var unrelatedArtifact = Assert.IsType<OpenQasmArtifact>(
+            unrelated.Targets.OpenQasm);
+
+        Assert.Throws<ArgumentException>(
+            () => new Compilation(
+                source.Id,
+                source.Revision,
+                source.Session,
+                source.ParentRevision,
+                source.Options,
+                source.Sources,
+                source.Hir,
+                source.Mir,
+                new TargetArtifactSet(new[] { unrelatedArtifact }),
+                Array.Empty<CompilationDiagnostic>()));
+    }
+
+    [Fact]
+    public void MirDiagnosticsRequireTheExactCanonicalMirSnapshot()
+    {
+        var mirOnly = new CompilationOutputPlan(
+            produceMir: true,
+            Array.Empty<TargetBackend>());
+        var options = new CompilationOptions(outputPlan: mirOnly);
+        var source = QoraCompiler.Compile(
+            "operation Main() { use q = Qubit[1]; X(q[0]); }",
+            options);
+        var unrelated = QoraCompiler.Compile(
+            "operation Main() { use q = Qubit[1]; X(q[0]); }",
+            options);
+        var sourceMir = Assert.IsType<MirSnapshot>(source.Mir);
+        var unrelatedMir = Assert.IsType<MirSnapshot>(unrelated.Mir);
+
+        Assert.Throws<ArgumentException>(
+            () => new Compilation(
+                source.Id,
+                source.Revision,
+                source.Session,
+                source.ParentRevision,
+                source.Options,
+                source.Sources,
+                source.Hir,
+                sourceMir,
+                new TargetArtifactSet(Array.Empty<ITargetArtifact>()),
+                new[]
+                {
+                    new CompilationDiagnostic(
+                        CompilationStage.MirLowering,
+                        new QoraError("MIR diagnostic", "QTEST"),
+                        new DiagnosticOrigin.Mir(unrelatedMir)),
+                }));
+    }
+
+    [Fact]
     public void TargetDiagnosticsRequireTheExactCanonicalMirInput()
     {
         var source = QoraCompiler.Compile(
@@ -534,7 +616,7 @@ public sealed class CompilationArchitectureTests
         Assert.True(source.Succeeded);
         var mir = Assert.IsType<MirSnapshot>(source.Mir);
 
-        Compilation WithTargetDiagnostic(MirSnapshotId input) =>
+        Compilation WithTargetDiagnostic(MirSnapshot input) =>
             new(
                 source.Id,
                 source.Revision,
@@ -555,18 +637,17 @@ public sealed class CompilationArchitectureTests
                             input)),
                 });
 
-        var fromMir = WithTargetDiagnostic(mir.Id);
+        var fromMir = WithTargetDiagnostic(mir);
         Assert.False(fromMir.Succeeded);
 
-        var staleMir = new MirSnapshotId(
-            source.Id,
-            source.Revision,
-            mir.Id.Revision + 1);
+        var unrelated = QoraCompiler.Compile(
+            "operation Main() { use q = Qubit[1]; X(q[0]); }");
+        var staleMir = Assert.IsType<MirSnapshot>(unrelated.Mir);
         Assert.Throws<ArgumentException>(
             () => WithTargetDiagnostic(staleMir));
     }
 
     private sealed record StubTargetArtifact(
         TargetBackend Backend,
-        MirSnapshotId Source) : ITargetArtifact;
+        MirSnapshot Source) : ITargetArtifact;
 }

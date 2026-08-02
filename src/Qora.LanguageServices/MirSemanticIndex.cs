@@ -36,14 +36,16 @@ public sealed class MirSemanticIndex
         ArgumentNullException.ThrowIfNull(callablesBySymbol);
         ArgumentNullException.ThrowIfNull(byCallable);
 
-        if (hirArtifact.Id.Source.CompilationId != compilation.Id
-            || hirArtifact.Id.Source.CompilationRevision != compilation.Revision
-            || mir.Id.CompilationId != compilation.Id
-            || mir.Id.CompilationRevision != compilation.Revision
-            || mir.LoweredFrom != hirArtifact.SourceId)
+        if (!ReferenceEquals(
+                compilation.Hir.EffectAnalysis,
+                hirArtifact)
+            || !ReferenceEquals(
+                compilation.Mir,
+                mir))
         {
             throw new ArgumentException(
-                "The semantic index inputs do not belong to one compilation revision.");
+                "The semantic index inputs are not the exact final HIR and MIR "
+                + "owned by the Compilation.");
         }
 
         _callablesByHirDeclaration =
@@ -55,27 +57,37 @@ public sealed class MirSemanticIndex
                 "The semantic index requires a sealed HIR scope graph.",
                 nameof(hirArtifact));
         _symbolsByCallable = Reverse(_callablesBySymbol);
-        _callableIndexes = Array.AsReadOnly(
-            mir.Program.Callables.Select(callable => _byCallable[callable.Id]).ToArray());
 
-        var callableIds = mir.Program.Callables
-            .Select(callable => callable.Id)
-            .ToHashSet();
-        if (!callableIds.SetEquals(_byCallable.Keys))
+        if (_byCallable.Count != mir.Program.Callables.Count)
         {
             throw new ArgumentException(
                 "The callable indexes do not exactly cover the completed MIR program.",
                 nameof(byCallable));
         }
+
+        var callableIndexes =
+            new List<MirCallableSemanticIndex>(mir.Program.Callables.Count);
+        foreach (var callable in mir.Program.Callables)
+        {
+            if (!_byCallable.TryGetValue(callable.Id, out var callableIndex)
+                || callableIndex is null
+                || !ReferenceEquals(callableIndex.Callable, callable))
+            {
+                throw new ArgumentException(
+                    $"The semantic index for MIR callable {callable.Id} does not own "
+                    + "the exact callable object from the completed MIR program.",
+                    nameof(byCallable));
+            }
+
+            callableIndexes.Add(callableIndex);
+        }
+
+        _callableIndexes = Array.AsReadOnly(callableIndexes.ToArray());
     }
 
-    public CompilationId CompilationId => Mir.Id.CompilationId;
-    public CompilationRevision CompilationRevision =>
-        Mir.Id.CompilationRevision;
     public HirSemanticArtifact HirArtifact { get; }
     public HirSemanticArtifactId HirArtifactId => HirArtifact.Id;
     public MirSnapshot Mir { get; }
-    public MirSnapshotId MirSnapshotId => Mir.Id;
 
     /// <summary>Every completed MIR callable with its source-query scope.</summary>
     public IReadOnlyList<MirCallableSemanticIndex> Callables => _callableIndexes;

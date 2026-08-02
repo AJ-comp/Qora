@@ -6,7 +6,7 @@ using Janglim.FrontEnd.RegularGrammar;
 namespace Qora;
 
 /// <summary>
-/// Qora v0.35.0 — a Q#/C#-flavored quantum language on the Janglim engine.
+/// Qora v0.36.0 — a Q#/C#-flavored quantum language on the Janglim engine.
 ///
 ///   operation Bell(q: Qubit[]) {        // a subroutine, with trailing-type parameters (name: T)
 ///       H(q[0]);
@@ -116,9 +116,10 @@ namespace Qora;
 /// untyped declaration also preserves facts such as <c>true</c> being <c>bit</c> and an angle-valued name
 /// remaining <c>angle</c> through OpenQASM emission.
 /// An index is now the same complete expression tree used everywhere else: <c>xs[idx()]</c>,
-/// <c>q[i + 1]</c>, and nested indexed reads all parse. The shared semantic path requires one scalar
-/// <c>int</c>, validates calls inside the index, and records an unresolved in-bounds proof as model data.
-/// The OpenQASM policy pass — not the common bounds walk — turns that final fact into QSEM030.
+/// <c>q[i + 1]</c>, and nested indexed reads all parse. HIR validation requires one scalar <c>int</c>,
+/// validates calls inside the index, and rejects definite structural or bounds errors. MIR then classifies
+/// every surviving indexed access as proven, invalid, or unproven. The OpenQASM policy pass turns only the
+/// final MIR unproven results into QSEM030.
 /// Callable parameters are read-only borrows by default. An operation spells mutable borrowing as
 /// <c>var values: int[]</c> / <c>Update(var values)</c>, ownership transfer as <c>move values</c>, and both
 /// axes as <c>move var values</c>.

@@ -131,29 +131,22 @@ public enum MirCallableKind
 
 /// <summary>
 /// The immutable SSA/CFG payload of one exact MIR snapshot. Construction stays inside the compiler
-/// pipeline so external callers cannot attach a different program to an existing snapshot identity.
+/// pipeline so external callers cannot attach a different program to an existing snapshot.
 /// </summary>
 public sealed class MirProgram
 {
     private readonly FrozenDictionary<MirCallableId, MirCallable> _callables;
 
     internal MirProgram(
-        MirSnapshotId snapshotId,
-        MirOriginTable origins,
         MirCallableId entryPoint,
         IEnumerable<MirCallable> callables)
     {
-        ArgumentNullException.ThrowIfNull(origins);
         ArgumentNullException.ThrowIfNull(callables);
-        SnapshotId = snapshotId;
-        Origins = origins;
         Callables = MirCollections.Freeze(callables);
         _callables = IndexCallables(Callables);
         EntryPoint = entryPoint;
     }
 
-    public MirSnapshotId SnapshotId { get; }
-    public MirOriginTable Origins { get; }
     public MirCallableId EntryPoint { get; }
     public IReadOnlyList<MirCallable> Callables { get; }
 
@@ -171,7 +164,7 @@ public sealed class MirProgram
             : throw new ArgumentOutOfRangeException(
                 nameof(id),
                 id,
-                $"callable {id} does not belong to MIR program {SnapshotId}");
+                $"callable {id} does not belong to this MIR program");
 
     public MirCallable RequireCallable(MirCallable callable)
     {
@@ -179,7 +172,7 @@ public sealed class MirProgram
         return ContainsCallable(callable)
             ? callable
             : throw new ArgumentException(
-                $"callable {callable.Id} is not the exact object owned by MIR program {SnapshotId}",
+                $"callable {callable.Id} is not the exact object owned by this MIR program",
                 nameof(callable));
     }
 
@@ -257,7 +250,7 @@ public sealed class MirCallable
         IReadOnlyList<MirBlock> blocks,
         IReadOnlyList<MirValue> values,
         IReadOnlyList<MirArrayStorage> storages,
-        MirOriginId origin)
+        MirOrigin origin)
     {
         Id = id;
         Name = name;
@@ -293,7 +286,7 @@ public sealed class MirCallable
     public IReadOnlyList<MirValue> Values { get; }
     public IReadOnlyList<MirArrayStorage> Storages { get; }
     public IReadOnlyList<MirQubit> Qubits { get; }
-    public MirOriginId Origin { get; }
+    public MirOrigin Origin { get; }
 
     public bool ContainsBlock(MirBlockId id) =>
         _blocks.ContainsKey(id);
@@ -748,7 +741,8 @@ public sealed record MirClassicalParameter(
     MirValueId Value,
     MirStorageId? Storage = null,
     QOwnershipMode Ownership = QOwnershipMode.Borrowed,
-    QAccessMode Access = QAccessMode.ReadOnly)
+    QAccessMode Access = QAccessMode.ReadOnly,
+    int MinimumLength = 0)
     : IMirParameter;
 
 public enum MirValueDefinitionKind
@@ -809,7 +803,7 @@ public sealed record MirValue(
     MirValueId Id,
     MirType Type,
     MirValueDefinition Definition,
-    MirOriginId Origin);
+    MirOrigin Origin);
 
 public enum MirArrayStorageKind
 {
@@ -847,7 +841,7 @@ public enum MirStorageAliasMode
 public sealed record MirArrayStorage(
     MirStorageId Id,
     string Name,
-    MirOriginId Origin);
+    MirOrigin Origin);
 
 /// <summary>
 /// One exact MIR version of a qubit binding. <see cref="Id"/> remains stable while
@@ -858,7 +852,7 @@ public abstract record MirQubit
     internal MirQubit(
         MirQubitId id,
         MirQubitVersion version,
-        MirOriginId origin)
+        MirOrigin origin)
     {
         Id = id;
         Version = version;
@@ -867,7 +861,7 @@ public abstract record MirQubit
 
     public MirQubitId Id { get; }
     public MirQubitVersion Version { get; }
-    public MirOriginId Origin { get; }
+    public MirOrigin Origin { get; }
     public MirQubitKey Key => new(Id, Version);
 }
 
@@ -880,7 +874,7 @@ public sealed record MirQubitParameter : MirQubit, IMirParameter
         bool isArray,
         int? length,
         QOwnershipMode ownership,
-        MirOriginId origin)
+        MirOrigin origin)
         : base(id, new MirQubitVersion(0), origin)
     {
         Name = name;
@@ -902,7 +896,7 @@ public sealed record MirQubitFromUse : MirQubit
         MirQubitId id,
         string name,
         int length,
-        MirOriginId origin)
+        MirOrigin origin)
         : base(id, new MirQubitVersion(0), origin)
     {
         Name = name;
@@ -923,7 +917,7 @@ public sealed record MirQubitAfterInstruction : MirQubit
     internal MirQubitAfterInstruction(
         MirQubitId id,
         MirQubitVersion version,
-        MirOriginId origin)
+        MirOrigin origin)
         : base(id, version, origin)
     {
     }
@@ -966,7 +960,7 @@ public sealed record MirQubitPhi : MirQubit
         MirQubitId id,
         MirQubitVersion version,
         IReadOnlyList<MirQubitPhiInput> inputs,
-        MirOriginId origin)
+        MirOrigin origin)
         : base(id, version, origin)
     {
         _inputs = MirCollections.Freeze(inputs);
@@ -985,19 +979,28 @@ public sealed record MirQubitPhi : MirQubit
 /// </summary>
 public readonly record struct MirQubitAccess
 {
-    internal MirQubitAccess(MirQubit qubit, MirValueId? index = null)
-        : this(qubit.Key, index)
+    internal MirQubitAccess(
+        MirQubit qubit,
+        MirValueId? index = null,
+        MirOrigin? origin = null)
+        : this(qubit.Key, index, origin ?? qubit.Origin)
     {
     }
 
-    internal MirQubitAccess(MirQubitKey qubit, MirValueId? index = null)
+    internal MirQubitAccess(
+        MirQubitKey qubit,
+        MirValueId? index,
+        MirOrigin origin)
     {
+        ArgumentNullException.ThrowIfNull(origin);
         Qubit = qubit;
         Index = index;
+        Origin = origin;
     }
 
     public MirQubitKey Qubit { get; }
     public MirValueId? Index { get; }
+    public MirOrigin Origin { get; }
 }
 
 /// <summary>A CFG block. Block arguments are SSA Phi results; each incoming edge supplies their values.</summary>
@@ -1006,7 +1009,7 @@ public sealed record MirBlock(
     IReadOnlyList<MirValueId> Arguments,
     IReadOnlyList<MirInstruction> Instructions,
     MirTerminator Terminator,
-    MirOriginId Origin,
+    MirOrigin Origin,
     IReadOnlyList<MirQubitPhi>? QubitPhis = null)
 {
     private IReadOnlyList<MirValueId> _arguments = MirCollections.Freeze(Arguments);
@@ -1143,7 +1146,7 @@ public sealed record MirMutableArrayResult(
 /// </summary>
 public abstract record MirInstruction(
     MirInstructionId Id,
-    MirOriginId Origin)
+    MirOrigin Origin)
 {
     public abstract IReadOnlyList<MirValueId> InputValues { get; }
     public abstract IReadOnlyList<MirValueId> ResultValues { get; }
@@ -1154,7 +1157,7 @@ public sealed record MirConstant(
     MirInstructionId Id,
     MirValueId Result,
     string Text,
-    MirOriginId Origin)
+    MirOrigin Origin)
     : MirInstruction(Id, Origin)
 {
     public override IReadOnlyList<MirValueId> InputValues => Array.Empty<MirValueId>();
@@ -1166,7 +1169,7 @@ public sealed record MirUnary(
     MirValueId Result,
     MirUnaryOperator Operator,
     MirValueId Operand,
-    MirOriginId Origin)
+    MirOrigin Origin)
     : MirInstruction(Id, Origin)
 {
     public override IReadOnlyList<MirValueId> InputValues => new[] { Operand };
@@ -1179,7 +1182,7 @@ public sealed record MirBinary(
     MirBinaryOperator Operator,
     MirValueId Left,
     MirValueId Right,
-    MirOriginId Origin)
+    MirOrigin Origin)
     : MirInstruction(Id, Origin)
 {
     public override IReadOnlyList<MirValueId> InputValues => new[] { Left, Right };
@@ -1190,7 +1193,7 @@ public sealed record MirConvert(
     MirInstructionId Id,
     MirValueId Result,
     MirValueId Operand,
-    MirOriginId Origin)
+    MirOrigin Origin)
     : MirInstruction(Id, Origin)
 {
     public override IReadOnlyList<MirValueId> InputValues => new[] { Operand };
@@ -1203,7 +1206,7 @@ public sealed record MirArrayCreate(
     MirStorageId Storage,
     MirArrayInitialization Initialization,
     IReadOnlyList<MirValueId> Elements,
-    MirOriginId Origin)
+    MirOrigin Origin)
     : MirInstruction(Id, Origin)
 {
     private IReadOnlyList<MirValueId> _elements = MirCollections.Freeze(Elements);
@@ -1222,7 +1225,7 @@ public sealed record MirArrayLength(
     MirInstructionId Id,
     MirValueId Result,
     MirValueId Array,
-    MirOriginId Origin)
+    MirOrigin Origin)
     : MirInstruction(Id, Origin)
 {
     public override IReadOnlyList<MirValueId> InputValues => new[] { Array };
@@ -1234,7 +1237,7 @@ public sealed record MirArrayLoad(
     MirValueId Result,
     MirValueId Array,
     MirValueId Index,
-    MirOriginId Origin)
+    MirOrigin Origin)
     : MirInstruction(Id, Origin)
 {
     public override IReadOnlyList<MirValueId> InputValues => new[] { Array, Index };
@@ -1247,7 +1250,7 @@ public sealed record MirArrayStore(
     MirValueId Array,
     MirValueId Index,
     MirValueId Value,
-    MirOriginId Origin)
+    MirOrigin Origin)
     : MirInstruction(Id, Origin)
 {
     public override IReadOnlyList<MirValueId> InputValues => new[] { Array, Index, Value };
@@ -1259,7 +1262,7 @@ public sealed record MirPureCall(
     MirValueId Result,
     MirCallTarget Target,
     IReadOnlyList<MirCallOperand> Operands,
-    MirOriginId Origin)
+    MirOrigin Origin)
     : MirInstruction(Id, Origin)
 {
     private IReadOnlyList<MirCallOperand> _operands = MirCollections.Freeze(Operands);
@@ -1284,7 +1287,7 @@ public sealed record MirQubitAllocate : MirInstruction
     internal MirQubitAllocate(
         MirInstructionId id,
         MirQubitFromUse result,
-        MirOriginId origin)
+        MirOrigin origin)
         : base(id, origin)
     {
         Result = result;
@@ -1310,7 +1313,7 @@ public sealed record MirQuantumApply : MirInstruction
         IReadOnlyList<MirQubitAfterInstruction> qubitResults,
         IReadOnlyList<MirMutableArrayResult> mutableArrayResults,
         IReadOnlyList<MirFunctor> functors,
-        MirOriginId origin)
+        MirOrigin origin)
         : base(id, origin)
     {
         Target = target;
@@ -1343,7 +1346,7 @@ public sealed record MirMeasure : MirInstruction
         MirValueId result,
         MirQubitAccess qubit,
         MirQubitAfterInstruction qubitResult,
-        MirOriginId origin)
+        MirOrigin origin)
         : base(id, origin)
     {
         Result = result;
@@ -1364,7 +1367,7 @@ public sealed record MirMeasure : MirInstruction
 
 /// <summary>Common terminator contract. Edge and return operands participate in normal SSA use checks.</summary>
 public abstract record MirTerminator(
-    MirOriginId Origin)
+    MirOrigin Origin)
 {
     public abstract IReadOnlyList<MirValueId> InputValues { get; }
     public abstract IReadOnlyList<MirBlockId> Successors { get; }
@@ -1373,7 +1376,7 @@ public abstract record MirTerminator(
 public sealed record MirJump(
     MirBlockId Target,
     IReadOnlyList<MirValueId> Arguments,
-    MirOriginId Origin)
+    MirOrigin Origin)
     : MirTerminator(Origin)
 {
     private IReadOnlyList<MirValueId> _arguments = MirCollections.Freeze(Arguments);
@@ -1394,7 +1397,7 @@ public sealed record MirBranch(
     IReadOnlyList<MirValueId> TrueArguments,
     MirBlockId FalseTarget,
     IReadOnlyList<MirValueId> FalseArguments,
-    MirOriginId Origin)
+    MirOrigin Origin)
     : MirTerminator(Origin)
 {
     private IReadOnlyList<MirValueId> _trueArguments = MirCollections.Freeze(TrueArguments);
@@ -1420,7 +1423,7 @@ public sealed record MirBranch(
 
 public sealed record MirReturn(
     MirValueId? Value,
-    MirOriginId Origin)
+    MirOrigin Origin)
     : MirTerminator(Origin)
 {
     public override IReadOnlyList<MirValueId> InputValues =>
@@ -1430,7 +1433,7 @@ public sealed record MirReturn(
 }
 
 public sealed record MirUnreachable(
-    MirOriginId Origin)
+    MirOrigin Origin)
     : MirTerminator(Origin)
 {
     public override IReadOnlyList<MirValueId> InputValues => Array.Empty<MirValueId>();

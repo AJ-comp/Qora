@@ -146,10 +146,11 @@ QoraCompiler.Compile
        │       ├─ Validation
        │       └─ EffectAnalysis
        ├─ Mir (optional typed SSA/CFG snapshot)
-       │   ├─ LoweringSource + program-owned Origins
-       │   └─ Structure + revision-bound analyses
+       │   ├─ exact LoweringSource + program-owned Origins
+       │   ├─ MirStage + optional exact TransformationSource
+       │   └─ Structure + analyses bound to the exact MirProgram
        ├─ Diagnostics
-       │   └─ typed Source / HIR / MIR / Target(backend, HIR-or-MIR input) origin
+       │   └─ typed Source / HIR / MIR / Target(backend, exact MIR input) origin
        └─ Targets.Artifacts[TargetBackend]
            └─ OpenQasmArtifact
                ├─ exact materialized MirSnapshot
@@ -199,7 +200,7 @@ Qora.LanguageServices (opt-in)
   `EffectAnalysis` artifact, whose `Source` and `Model` belong to the same exact final HIR snapshot.
   That HIR artifact carries only the formal-qubit `ParamModified` set needed to create MIR qubit
   versions; it does not duplicate qubit histories, effects, or cleanup-safety facts. The resulting
-  MIR snapshot and its revision-bound analyses are authoritative for those facts.
+  exact MIR snapshot and the analyses bound to its exact `MirProgram` are authoritative for those facts.
   A structural rewrite must publish validation and effect facts for its new snapshot before MIR can
   consume it. Publishing that final effect artifact seals the HIR pipeline against later rewrites,
   aliases, and semantic passes. Target renaming therefore never mutates source semantics, and a
@@ -238,10 +239,10 @@ Qora.LanguageServices (opt-in)
   view is `Targets.OpenQasm`. `OpenQasmArtifact.Source` identifies the exact materialized
   `MirSnapshot` consumed by this backend. `QasmBackend` accepts only that exact MIR snapshot, and
   `OpenQasmArtifact.Text` is emitted from the typed target program rather than supplied as a second
-  authority. Target diagnostics record `TargetDiagnosticInput.Mir`, so provenance follows the
-  backend's real input domain without reaching back into HIR.
+  authority. Target diagnostics retain the backend and exact `MirSnapshot` input, so provenance
+  follows the backend's real input domain without reaching back into HIR.
 - Core retains only the MIR provenance needed by compilation: `MirSnapshot.LoweringSource` identifies
-  the exact final HIR artifact and `MirSnapshot.Origins` resolves MIR origins to HIR/source locations.
+  the exact final HIR artifact and each MIR entity directly owns a `MirOrigin` rooted at its HIR/source location.
   It does not retain always-on HIR-symbol-to-MIR-entity maps. When tooling requests those queries,
   `Qora.LanguageServices.MirSemanticIndex` collects an opt-in lowering trace and builds
   callable-scoped `SymbolId ↔ MirValueId/MirStorageId/MirQubitKey` indexes. Ordinary compilation and

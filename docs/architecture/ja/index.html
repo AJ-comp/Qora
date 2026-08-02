@@ -465,26 +465,28 @@ v1 = add v0, 1
 return</code></pre>
 
   <p>
-    結果は revision identity を持つ不変の <code>MirSnapshot</code> です。
-    origin table と typed cross-stage link が MIR callable、値、storage、量子ビット資源を HIR の
-    元要素へ結びつけるか、compiler temporary として明示します。
+    結果は <code>MirStage.Lowered</code> の正確な不変 <code>MirSnapshot</code> オブジェクトです。
+    実際に消費した final HIR は <code>LoweringSource</code> に、MIR の source provenance は
+    program-owned <code>Origins</code> に保持されます。Compilation identity は
+    <code>LoweringSource</code> にだけあり、MIR へ複製されません。
   </p>
 
   <h2 id="s8"><span class="n">8</span>MIR 解析と内部逆演算の実体化</h2>
 
-  <p class="stagehead">パス: revision-bound MIR analyses → <code>MirAdjointMaterializer</code></p>
+  <p class="stagehead">パス: exact <code>MirProgram</code> に対する analyses → <code>MirAdjointMaterializer</code></p>
 
   <p>
     制御フロー、effect、alias、memory state、path condition、control region の各解析は、
-    自分が説明する正確な MIR revision だけを消費します。結果を HIR に複製せず、
-    グラフが変わった後に以前の revision の事実を再利用することもありません。
+    自分が説明する正確な <code>MirProgram</code> オブジェクトにだけ結び付けられます。
+    結果を HIR に複製せず、新しい program を持つ snapshot に以前の事実を再利用しません。
   </p>
 
   <p>
     逆演算要求も MIR にだけ存在します。コンパイラ内部 scheduler が正確な
     <code>MirQuantumApply</code> に <code>MirFunctor.Adjoint</code> を付けると、
     <code>MirAdjointMaterializer</code> が逆方向の MIR callable を合成し、要求を typed callable target
-    へ書き換え、正確な parent と rebased origin を持つ新しい snapshot を発行します。
+    へ書き換え、以前の snapshot を exact <code>TransformationSource</code> として持つ
+    新しい snapshot を発行します。
     Qora ソースと HIR には <code>Adjoint</code>、逆演算マーカー、conjugation node がありません。
   </p>
 
@@ -530,7 +532,7 @@ MirQuantumApply(Target = __qora_inverse_..., Functors = [])</code></pre>
       <tr><td>Validate</td><td><code>QoraValidator</code> + <code>SymbolTableBuilder</code></td><td>IR → シンボルテーブル + すべての意味エラー（出力を止める固いゲート）</td></tr>
       <tr><td>Monomorphize</td><td><code>Monomorphizer</code></td><td><code>Qubit[]</code> の呼び出し → 呼び出しサイズごとの内部コピー、変化した場合に再検証</td></tr>
       <tr><td>Lower MIR</td><td><code>QoraMirLowering</code></td><td>検証済み HIR + 意味情報 → 測定を評価位置で lower した typed SSA/CFG <code>MirSnapshot</code></td></tr>
-      <tr><td>Analyze MIR</td><td><code>MirAnalysisStore</code></td><td>exact MIR revision → control-flow、effect、alias、memory、path facts</td></tr>
+      <tr><td>Analyze MIR</td><td><code>MirAnalysisStore</code></td><td>exact <code>MirProgram</code> → control-flow、effect、alias、memory、path facts</td></tr>
       <tr><td>Materialize</td><td><code>MirAdjointMaterializer</code></td><td>MIR-only inverse request → 合成された inverse MIR callable</td></tr>
       <tr><td>Target-lower</td><td><code>MirOpenQasmLowering</code></td><td>materialized MIR → typed <code>MirOpenQasmTargetProgram</code></td></tr>
       <tr><td>Emit</td><td><code>MirQasmEmitter</code></td><td>typed target model → OpenQASM 3 テキスト</td></tr>
@@ -547,7 +549,8 @@ MirQuantumApply(Target = __qora_inverse_..., Functors = [])</code></pre>
   <div class="call why">
     <span class="h">この先が向かう場所 — 自動アンコンピュテーション</span>
     Silq 流の自動アンコンピュテーション — <strong>一時的な量子ビットがもう不要になる地点を見つけ、その逆演算を
-    自動的に注入する</strong> — ための境界は MIR にあります。Scheduler は revision-bound SSA/CFG facts を
+    自動的に注入する</strong> — ための境界は MIR にあります。Scheduler は exact
+    <code>MirProgram</code> に結び付いた SSA/CFG facts を
     消費して global cleanup order を求め、正確な MIR instruction に inverse request を注入します。
     <code>MirAdjointMaterializer</code> と typed target path はすでにこの表現を消費します。条件、loop、
     alias、classical witness stability、複数 ancilla の競合は、該当ケースを有効にする前に証明が必要です。

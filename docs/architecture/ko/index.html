@@ -462,22 +462,23 @@ v1 = add v0, 1
 return</code></pre>
 
   <p>
-    결과는 revision identity를 가진 불변 <code>MirSnapshot</code>이에요.<br>
-    origin table과 typed cross-stage link가 MIR callable, 값, storage, 큐비트 자원을 HIR의 원본과 연결하거나 compiler temporary로 명시하므로, backend가 MIR identity의 출처를 이름으로 추측할 필요가 없어요.
+    결과는 <code>MirStage.Lowered</code> 상태의 정확한 불변 <code>MirSnapshot</code> 객체예요.<br>
+    이 객체는 실제로 소비한 final HIR을 <code>LoweringSource</code>로, MIR의 source provenance를 program-owned <code>Origins</code>로 보존해요.<br>
+    컴파일 identity는 <code>LoweringSource</code>에만 있고 MIR에 다시 복사하지 않으므로, backend는 이름이나 중복 ID로 MIR의 출처를 추측할 필요가 없어요.
   </p>
 
   <h2 id="s8"><span class="n">8</span>MIR 분석과 내부 역연산 실체화</h2>
 
-  <p class="stagehead">패스: revision-bound MIR 분석 → <code>MirAdjointMaterializer</code></p>
+  <p class="stagehead">패스: exact <code>MirProgram</code> 분석 → <code>MirAdjointMaterializer</code></p>
 
   <p>
-    제어 흐름, 효과, 별칭, 메모리 상태, 경로 조건, 제어 영역 분석은 자신이 설명하는 정확한 MIR revision만 소비해요.<br>
-    분석 결과를 HIR에 복사하지 않으며, 그래프가 바뀐 뒤 이전 revision의 사실을 재사용하지도 않아요.
+    제어 흐름, 효과, 별칭, 메모리 상태, 경로 조건, 제어 영역 분석은 자신이 설명하는 정확한 <code>MirProgram</code> 객체에만 묶여요.<br>
+    분석 결과를 HIR에 복사하지 않으며, 새 프로그램을 가진 snapshot에 이전 프로그램의 사실을 재사용하지도 않아요.
   </p>
 
   <p>
     역연산 요청도 오직 MIR에만 존재해요.<br>
-    컴파일러 내부 scheduler가 정확한 <code>MirQuantumApply</code> 하나에 <code>MirFunctor.Adjoint</code>를 붙이면, <code>MirAdjointMaterializer</code>가 필요한 역방향 MIR callable을 합성하고 요청을 typed callable target으로 바꾼 뒤 정확한 parent와 rebased origin을 가진 새 snapshot을 발행해요.<br>
+    컴파일러 내부 scheduler가 정확한 <code>MirQuantumApply</code> 하나에 <code>MirFunctor.Adjoint</code>를 붙이면, <code>MirAdjointMaterializer</code>가 필요한 역방향 MIR callable을 합성하고 요청을 typed callable target으로 바꾼 뒤 이전 snapshot을 exact <code>TransformationSource</code>로 가진 새 snapshot을 발행해요.<br>
     Qora 소스와 HIR에는 <code>Adjoint</code>, 역연산 표식, conjugation node가 없어요.
   </p>
 
@@ -520,7 +521,7 @@ MirQuantumApply(Target = __qora_inverse_..., Functors = [])</code></pre>
       <tr><td>Validate</td><td><code>QoraValidator</code> + <code>SymbolTableBuilder</code></td><td>IR → 심볼 테이블 + 모든 의미 오류 (방출을 막는 단단한 게이트)</td></tr>
       <tr><td>Monomorphize</td><td><code>Monomorphizer</code></td><td><code>Qubit[]</code> 호출 → 호출 크기별 내부 복사본, 바뀐 경우 재검증</td></tr>
       <tr><td>Lower MIR</td><td><code>QoraMirLowering</code></td><td>검증된 HIR + 의미 정보 → 측정을 평가 위치에서 lower한 typed SSA/CFG <code>MirSnapshot</code></td></tr>
-      <tr><td>Analyze MIR</td><td><code>MirAnalysisStore</code></td><td>exact MIR revision → 제어 흐름·효과·별칭·메모리·경로 정보</td></tr>
+      <tr><td>Analyze MIR</td><td><code>MirAnalysisStore</code></td><td>exact <code>MirProgram</code> → 제어 흐름·효과·별칭·메모리·경로 정보</td></tr>
       <tr><td>Materialize</td><td><code>MirAdjointMaterializer</code></td><td>MIR-only inverse request → 합성된 inverse MIR callable</td></tr>
       <tr><td>Target-lower</td><td><code>MirOpenQasmLowering</code></td><td>materialized MIR → typed <code>MirOpenQasmTargetProgram</code></td></tr>
       <tr><td>Emit</td><td><code>MirQasmEmitter</code></td><td>typed target model → OpenQASM 3 텍스트</td></tr>
@@ -538,7 +539,7 @@ MirQuantumApply(Target = __qora_inverse_..., Functors = [])</code></pre>
     <span class="h">이것이 향하는 곳 — 자동 언컴퓨테이션</span>
     Silq식 자동 언컴퓨테이션 — <strong>임시 큐비트가 더 이상 필요 없어지는 지점을 찾아 그 역연산을 자동으로
     주입하는 것</strong> — 을 위한 단계 경계는 이제 MIR에 있어요.<br>
-    scheduler는 revision-bound SSA/CFG 사실을 소비해 전역 cleanup 순서를 구하고, 정확한 MIR instruction에 inverse request를 주입하게 될 거예요.<br>
+    scheduler는 exact <code>MirProgram</code>에 묶인 SSA/CFG 사실을 소비해 전역 cleanup 순서를 구하고, 정확한 MIR instruction에 inverse request를 주입하게 될 거예요.<br>
     <code>MirAdjointMaterializer</code>와 typed target 경로는 이미 이 표현을 소비해요.<br>
     다만 조건문·반복문·별칭·고전 witness 안정성·여러 ancilla 사이의 충돌은 scheduler가 해당 사례를 허용하기 전에 명시적으로 증명해야 해요.
   </div>

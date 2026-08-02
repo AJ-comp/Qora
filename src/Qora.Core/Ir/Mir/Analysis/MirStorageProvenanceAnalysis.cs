@@ -4,7 +4,7 @@ using System.Collections.ObjectModel;
 namespace Qora.Ir.Mir.Analysis;
 
 /// <summary>
-/// Storage provenance for every classical array-state SSA value in one callable and MIR revision.
+/// Storage provenance for every classical array-state SSA value in one callable and MIR program.
 /// The result names all symbolic storage regions which can reach a state through stores, mutable-call
 /// transitions, and memory Phi arguments. It does not by itself prove that different regions are
 /// disjoint; consumers must pass the result through <see cref="MirStorageAliasAnalysis"/>.
@@ -25,7 +25,6 @@ public sealed class MirStorageProvenanceSnapshot
         _provenance = provenance.ToFrozenDictionary();
     }
 
-    public MirSnapshotId SnapshotId => _sourceProgram.SnapshotId;
     public MirCallableId Callable => _sourceCallable.Id;
 
     internal bool IsFor(MirProgram program, MirCallableId callable) =>
@@ -36,8 +35,8 @@ public sealed class MirStorageProvenanceSnapshot
     {
         if (!IsFor(program, callable))
             throw new InvalidOperationException(
-                $"MIR storage-provenance snapshot belongs to {Callable} in snapshot {SnapshotId}; " +
-                $"reanalyze {callable} in snapshot {program.SnapshotId}");
+                $"the MIR storage-provenance analysis does not belong to callable {callable} "
+                + $"in the requested MIR program; it was created for callable {Callable}");
     }
 
     public MirStorageProvenance ProvenanceOf(MirValueId value) =>

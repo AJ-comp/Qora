@@ -1,4 +1,7 @@
+using Qora.Compiler;
 using Qora.Ir;
+using Qora.Ir.Mir;
+using Qora.Ir.Mir.Analysis;
 using Qora.Ir.Passes;
 
 namespace Qora.Tests;
@@ -556,10 +559,9 @@ public class BoundsProofTests
     public void RejectsALoopStartingAtAProvablyNegativeIndexAsProvenWrong() =>
         Compiler.Rejects("operation Main(){ use q=Qubit[1]; var a: int[] = [1,2,3]; for i in 0-1..2 { a[i]=1; } H(q[0]); }", "QSEM016");
 
-    /// <summary>When the FROM bound is the one that never settles, the recorded data (and so the QSEM030
-    /// message) must blame From — not the innocent To.</summary>
+    /// <summary>When a loop bound never settles, MIR owns one exact unproven result for the indexed access.</summary>
     [Fact]
-    public void BlamesTheFromBoundWhenItIsTheOneThatFailedToSettle()
+    public void RecordsTheUnprovenLoopAccessAtItsExactMirOrigin()
     {
         var r = Compiler.Compile("""
             operation Main() {
@@ -572,8 +574,9 @@ public class BoundsProofTests
             }
             """);
         Assert.False(r.Succeeded);
-        var u = Assert.Single(r.Hir.SpecializedValidation!.Model.UnprovenIndexes);
-        Assert.Equal("m", u.LoopBound);
+        var fact = Assert.Single(UnprovenMirBoundsResults(r));
+        Assert.Equal(MirBoundsClassification.Unproven, fact.Result.Classification);
+        Assert.Equal("a[i]", TextAt(r, fact.Origin));
     }
 
     // --- a measurement into a NON-bit array-literal element is a type error (QSEM017), like every other
@@ -603,7 +606,7 @@ public class BoundsProofTests
         Assert.Single(r.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(), e => e.Code == "QSEM016");
     }
 
-    /// <summary>An unproven measure index records ONE UnprovenIndexes entry, not two.</summary>
+    /// <summary>An unproven measure index creates one MIR bounds result, not two.</summary>
     [Fact]
     public void RecordsASingleUnprovenEntryForAnUnprovenMeasureTarget()
     {
@@ -616,7 +619,9 @@ public class BoundsProofTests
             operation Main() { use r = Qubit[3]; Foo(r); }
             """);
         Assert.False(r.Succeeded);
-        Assert.Single(r.Hir.SpecializedValidation!.Model.UnprovenIndexes);
+        var fact = Assert.Single(UnprovenMirBoundsResults(r));
+        Assert.Equal(MirBoundsClassification.Unproven, fact.Result.Classification);
+        Assert.Equal("q[n]", TextAt(r, fact.Origin));
     }
 
     /// <summary>A measurement in a while condition remains one canonical HIR access site. MIR places that
@@ -629,8 +634,8 @@ public class BoundsProofTests
         Assert.Single(r.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(), e => e.Code == "QSEM016");
     }
 
-    /// <summary>For an unproven measured index, the semantic model preserves the one canonical HIR access
-    /// site and the OpenQASM policy reports one QSEM030 for that exact site.</summary>
+    /// <summary>For an unproven measured index, MIR preserves the one canonical source access and the
+    /// OpenQASM policy reports one QSEM030 for that exact site.</summary>
     [Fact]
     public void RecordsOneCanonicalUnprovenMeasureSiteAndOneDiagnostic()
     {
@@ -643,7 +648,9 @@ public class BoundsProofTests
             operation Main() { use r = Qubit[3]; Foo(r); }
             """);
         Assert.False(r.Succeeded);
-        Assert.Single(r.Hir.SpecializedValidation!.Model.UnprovenIndexes);
+        var fact = Assert.Single(UnprovenMirBoundsResults(r));
+        Assert.Equal(MirBoundsClassification.Unproven, fact.Result.Classification);
+        Assert.Equal("q[n]", TextAt(r, fact.Origin));
         Assert.Single(r.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(), error => error.Code == "QSEM030");
     }
 
@@ -1066,11 +1073,11 @@ public class BoundsProofTests
     public void AcceptsAnEmptyLoopBoundedByANegativeConst() =>
         Compiler.Accepts("operation Main(){ use q=Qubit[1]; var a: int[] = [1,2,3]; const k: int = 0 - 3; for i in 0..k { a[i]=1; } H(q[0]); }");
 
-    /// <summary>The boundary of value knowledge: a `var` is NOT tracked — its statically-obvious initial
-    /// value is still no proof (constant propagation is deliberately not implemented; declare it const).</summary>
+    /// <summary>MIR SSA tracks the exact current value of a local variable, so an unchanged static
+    /// initializer is sufficient to prove this access.</summary>
     [Fact]
-    public void RejectsAVarIndexEvenWithAStaticInitializer() =>
-        Compiler.Rejects("operation Main(){ use q=Qubit[1]; var a: int[] = [1,2,3]; var n: int = 1; a[n]=1; H(q[0]); }", "QSEM030");
+    public void AcceptsAVarIndexWithAStaticInitializer() =>
+        Compiler.Accepts("operation Main(){ use q=Qubit[1]; var a: int[] = [1,2,3]; var n: int = 1; a[n]=1; H(q[0]); }");
 
     /// <summary>A const index on a classical-array PARAMETER raises the call-site floor like a literal.</summary>
     [Fact]
@@ -1165,8 +1172,8 @@ public class BoundsProofTests
             }
             """, "QSEM030");
 
-    /// <summary>A declaration shadowing the guarded name is a NEW variable — the outer guard proved someone
-    /// else. Identity keying rejects this without any special-case invalidation.</summary>
+    /// <summary>A declaration shadowing the guarded name is a new SSA value. The outer proof does not apply,
+    /// and the inner constant value proves the access invalid.</summary>
     [Fact]
     public void RejectsADeclarationShadowingAGuardedNameFromInheritingItsProof() =>
         Compiler.Rejects("""
@@ -1182,10 +1189,10 @@ public class BoundsProofTests
                 }
                 H(q[1]);
             }
-            """, "QSEM030");
+            """, "QSEM016");
 
-    /// <summary>A declaration shadowing a LOOP variable severs the loop's proof the same way — the inner
-    /// symbol has no loop fact, whatever its name.</summary>
+    /// <summary>A declaration shadowing a loop variable is likewise a new SSA value, whose constant value
+    /// proves this access invalid independently of the loop range.</summary>
     [Fact]
     public void RejectsADeclarationShadowingALoopVariableFromInheritingItsRange() =>
         Compiler.Rejects("""
@@ -1198,7 +1205,7 @@ public class BoundsProofTests
                 }
                 H(q[0]);
             }
-            """, "QSEM030");
+            """, "QSEM016");
 
     /// <summary>Precision, not just soundness: mutating a shadowed INNER variable invalidates the inner
     /// symbol only — the outer guarded variable keeps its proof (the name-keyed wipe used to kill it).</summary>
@@ -1581,12 +1588,11 @@ public class BoundsProofTests
         Assert.Equal(6L, contract!["x"]);
     }
 
-    // --- the failed proof is recorded as DATA (HirSemanticModel.UnprovenIndexes), and each QSEM030 is DERIVED
-    //     from an entry: the fact is target-independent, only its disposition is per-backend (the OpenQASM
-    //     path rejects; a future QIR backend reads the same list as its runtime-check insertion plan) ---
+    // --- the failed proof is derived from final MIR, and each QSEM030 comes from one Unproven result:
+    //     the fact is target-independent while its disposition remains per-backend ---
 
     [Fact]
-    public void RecordsEachUnprovenAccessOnTheSemanticModel()
+    public void RecordsEachUnprovenAccessOnMir()
     {
         var r = Compiler.Compile("""
             operation Main() {
@@ -1600,12 +1606,21 @@ public class BoundsProofTests
             }
             """);
         Assert.False(r.Succeeded);
-        var specialized = Assert.IsType<HirSnapshot>(r.Hir.Specialized);
-        Assert.Collection(r.Hir.SpecializedValidation!.Model.UnprovenIndexes,
-            u => Assert.Equal(("Main", "a", "n", null), (u.Op, u.Array, u.Index, u.LoopBound)),
-            u => Assert.Equal(("Main", "a", "i", "a . Count - n"), (u.Op, u.Array, u.Index, u.LoopBound)));   // bound text as the IR stores it (tokenizer-spaced)
+        var facts = UnprovenMirBoundsResults(r)
+            .OrderBy(fact => fact.Origin.Span!.Value.Start)
+            .ToArray();
+        Assert.Collection(
+            facts,
+            fact => Assert.Equal("a[n]", TextAt(r, fact.Origin)),
+            fact => Assert.Equal("a[i]", TextAt(r, fact.Origin)));
+        Assert.All(
+            facts,
+            fact => Assert.Equal(
+                MirBoundsClassification.Unproven,
+                fact.Result.Classification));
+        Assert.NotEqual(facts[0].Origin.HirNodeId, facts[1].Origin.HirNodeId);
         Assert.Equal(
-            r.Hir.SpecializedValidation.Model.UnprovenIndexes.Count,
+            facts.Length,
             r.Diagnostics.Count(diagnostic => diagnostic.Error.Code == "QSEM030"));
     }
 
@@ -1780,5 +1795,38 @@ public class BoundsProofTests
             }
             """);
         Assert.True(r.Succeeded, string.Join(" | ", r.Diagnostics.Select(diagnostic => diagnostic.Error).ToList().Select(e => $"{e.Code}: {e.Message}")));
+    }
+
+    private static IReadOnlyList<(MirBoundsResult Result, MirHirOrigin Origin)> UnprovenMirBoundsResults(
+        Compilation compilation)
+    {
+        var mir = Assert.IsType<MirSnapshot>(compilation.Mir);
+        var results = new List<(MirBoundsResult Result, MirHirOrigin Origin)>();
+        foreach (var callable in mir.Program.Callables)
+        {
+            var bounds = mir.Analyses.Bounds(callable);
+            foreach (var result in bounds.Results)
+            {
+                if (result.Classification == MirBoundsClassification.Unproven)
+                {
+                    results.Add((
+                        result,
+                        bounds.OriginFor(result).SourceHirOrigin));
+                }
+            }
+        }
+
+        return results;
+    }
+
+    private static string TextAt(
+        Compilation compilation,
+        MirHirOrigin origin)
+    {
+        var span = Assert.IsType<SourceSpan>(origin.Span);
+        var document = Assert.Single(
+            compilation.Sources.Documents,
+            candidate => candidate.Ref == span.Document);
+        return document.Text[span.Start..span.End];
     }
 }

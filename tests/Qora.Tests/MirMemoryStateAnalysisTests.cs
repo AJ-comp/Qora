@@ -368,8 +368,6 @@ public sealed class MirMemoryStateAnalysisTests
             callable.Storages,
             callable.Origin);
         return new MirProgram(
-            program.SnapshotId,
-            program.Origins,
             program.EntryPoint,
             program.Callables
                 .Select(candidate => candidate.Id == callable.Id

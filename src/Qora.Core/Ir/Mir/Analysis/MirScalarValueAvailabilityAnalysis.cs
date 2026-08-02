@@ -51,7 +51,6 @@ public sealed class MirScalarValueAvailabilitySnapshot
         _memory = memory;
     }
 
-    public MirSnapshotId SnapshotId => _cfg.SnapshotId;
     public MirCallableId Callable => _cfg.Callable;
 
     internal bool IsFor(MirProgram program, MirCallableId callable) =>

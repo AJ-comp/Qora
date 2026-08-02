@@ -9,7 +9,7 @@ namespace Qora.Ir.Mir.Analysis;
 /// </summary>
 public sealed class MirAnalysisStore
 {
-    private readonly MirSnapshot _snapshot;
+    private readonly MirProgram _program;
     private readonly ConcurrentDictionary<MirCallableId, Lazy<MirControlFlowSnapshot>> _controlFlow =
         new();
     private readonly ConcurrentDictionary<MirCallableId, Lazy<MirControlRegionSnapshot>> _controlRegions =
@@ -24,12 +24,13 @@ public sealed class MirAnalysisStore
         _scalarAvailability = new();
     private readonly ConcurrentDictionary<MirCallableId, Lazy<MirWitnessAvailabilitySnapshot>>
         _witnessAvailability = new();
+    private readonly ConcurrentDictionary<MirCallableId, Lazy<MirBoundsSnapshot>> _bounds = new();
     private readonly Lazy<MirEffectSnapshot> _effects;
     private readonly Lazy<MirCallGraph> _callGraph;
 
-    internal MirAnalysisStore(MirSnapshot snapshot)
+    internal MirAnalysisStore(MirProgram program)
     {
-        _snapshot = snapshot ?? throw new ArgumentNullException(nameof(snapshot));
+        _program = program ?? throw new ArgumentNullException(nameof(program));
         _callGraph = NewLazy(
             () => MirCallGraphAnalysis.AnalyzeVerified(Program));
         _effects = NewLazy(
@@ -40,7 +41,6 @@ public sealed class MirAnalysisStore
                 callable => PathConditions(callable)));
     }
 
-    public MirSnapshotId SnapshotId => _snapshot.Id;
     public MirEffectSnapshot Effects => _effects.Value;
     public MirCallGraph CallGraph => _callGraph.Value;
 
@@ -152,7 +152,24 @@ public sealed class MirAnalysisStore
                     ScalarAvailability(source)))).Value;
     }
 
-    private MirProgram Program => _snapshot.Program;
+    public MirBoundsSnapshot Bounds(MirCallableId callable) =>
+        Bounds(Program.RequireCallable(callable));
+
+    public MirBoundsSnapshot Bounds(MirCallable callable)
+    {
+        var source = Program.RequireCallable(callable);
+        return _bounds.GetOrAdd(
+            source.Id,
+            _ => NewLazy(
+                () => MirBoundsAnalysis.AnalyzeVerified(
+                    Program,
+                    source,
+                    ControlFlow(source),
+                    PathConditions(source),
+                    StorageProvenance(source)))).Value;
+    }
+
+    private MirProgram Program => _program;
 
     private static Lazy<T> NewLazy<T>(Func<T> factory) =>
         new(factory, LazyThreadSafetyMode.ExecutionAndPublication);

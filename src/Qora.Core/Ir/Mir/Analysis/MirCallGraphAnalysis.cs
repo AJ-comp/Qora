@@ -33,7 +33,6 @@ public sealed class MirCallGraph
         _callsFrom = GroupBy(Calls, call => call.Caller);
     }
 
-    public MirSnapshotId SnapshotId => _program.SnapshotId;
     public IReadOnlyList<MirCallSite> Calls { get; }
 
     internal void EnsureFor(MirProgram program)
@@ -42,7 +41,8 @@ public sealed class MirCallGraph
         if (!ReferenceEquals(_program, program))
         {
             throw new InvalidOperationException(
-                $"MIR call graph belongs to {SnapshotId}; rebuild it for {program.SnapshotId}");
+                "the MIR call graph belongs to a different MIR program instance; "
+                + "rebuild it for the requested program");
         }
     }
 

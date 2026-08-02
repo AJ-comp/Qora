@@ -52,7 +52,7 @@ public sealed class MirControlFlowAnalysisTests
     [Fact]
     public void ParameterIsCallableWideEvenInAnUnreachableBlock()
     {
-        var context = MirTestContext.Create(mirRevision: 3);
+        var context = MirTestContext.Create();
         var source = context.Origin();
         var parameter = new MirClassicalParameter(
             "input",
@@ -91,7 +91,7 @@ public sealed class MirControlFlowAnalysisTests
     [Fact]
     public void MultipleExitsAndANonTerminatingLoopDoNotCreateFalsePostDominance()
     {
-        var context = MirTestContext.Create(mirRevision: 5);
+        var context = MirTestContext.Create();
         var source = context.Origin();
         var condition = new MirConstant(
             I(0),
@@ -139,7 +139,7 @@ public sealed class MirControlFlowAnalysisTests
     [Fact]
     public void LoopFixedPointFindsBackedgeDominanceAndExitPostDominance()
     {
-        var context = MirTestContext.Create(mirRevision: 9);
+        var context = MirTestContext.Create();
         var source = context.Origin();
         var condition = new MirConstant(
             I(0),
@@ -193,8 +193,6 @@ public sealed class MirControlFlowAnalysisTests
         first.EnsureFor(program, callable.Id);
 
         var copy = new MirProgram(
-            program.SnapshotId,
-            program.Origins,
             program.EntryPoint,
             program.Callables.ToArray());
         Assert.False(first.IsFor(copy, callable.Id));
@@ -205,7 +203,7 @@ public sealed class MirControlFlowAnalysisTests
 
     private static MirProgram DiamondProgram()
     {
-        var context = MirTestContext.Create(mirRevision: 7);
+        var context = MirTestContext.Create();
         var source = context.Origin();
         var condition = new MirConstant(
             I(0),
@@ -274,7 +272,7 @@ public sealed class MirControlFlowAnalysisTests
         return context.Program(callable.Id, new[] { callable });
     }
 
-    private static MirCallable EmptyEntry(MirCallableId id, MirOriginId source)
+    private static MirCallable EmptyEntry(MirCallableId id, MirOrigin source)
     {
         var entryBlock = B(0);
         return new MirCallable(

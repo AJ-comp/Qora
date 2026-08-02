@@ -29,23 +29,6 @@ public sealed record OpEffectSummary(
     }
 }
 
-/// <summary>An indexed access whose in-bounds proof FAILED (rung B′): the bound never settles to a value at
-/// compile time, so the access is neither proven safe nor proven wrong. Recorded by <see cref="QoraValidator"/>
-/// as DATA, not as a diagnostic — the verdict is target-independent, only its disposition differs per backend.
-/// The OpenQASM backend derives QSEM030 because an unproven access cannot ship. <see cref="UnprovenIndex.Site"/>
-/// is the exact <see cref="HirIndexExpression.Id"/> that HIR-to-MIR lowering translates into an
-/// instruction reference;
-/// diagnostic strings are never used as rewrite keys. <see cref="UnprovenIndex.LoopBound"/> is the
-/// undetermined loop upper bound when <see cref="UnprovenIndex.Index"/> is a
-/// <c>for</c> variable, and null for any other runtime index expression.</summary>
-public sealed record UnprovenIndex(
-    HirNodeId Site,
-    string Op,
-    string Array,
-    string Index,
-    string? LoopBound,
-    SourceSpan? Span);
-
 /// <summary>One outstanding "re-check after monomorphization" PROMISE (the deferral ledger): a size-dependent
 /// judgement the validator postponed because <see cref="Array"/> is a parameter whose length only
 /// specialization can supply (<see cref="HirParameter.NeedsMonoSizing"/>). On the pipeline that runs the
@@ -80,8 +63,6 @@ public sealed class HirSemanticModel
     /// </summary>
     private sealed class ValidationFacts
     {
-        internal readonly List<UnprovenIndex> UnprovenIndexes = new();
-        internal readonly HashSet<HirNodeId> UnprovenIndexSites = new();
         internal readonly List<DeferredSizeCheck> DeferredSizeChecks = new();
         internal readonly Dictionary<HirNodeId, bool> WillBeRecheckedByCallable = new();
         internal readonly Dictionary<HirNodeId, IReadOnlyDictionary<string, long>>
@@ -324,43 +305,6 @@ public sealed class HirSemanticModel
         _validation.ScopeGraph = scopeGraph;
     }
 
-    /// <summary>Record one unproven indexed access (rung B′) — produced by <see cref="QoraValidator"/> during
-    /// the bounds-proof walk, add-only like every other fact. The backend decides the disposition; the
-    /// OpenQASM path derives source-distinct QSEM030 diagnostics from this list.</summary>
-    internal void AddUnprovenIndex(UnprovenIndex access)
-    {
-        ArgumentNullException.ThrowIfNull(access);
-        RequireValidationOpen();
-
-        if (_sourceSnapshot is { } snapshot
-            && snapshot.Structure.FindNode(access.Site)
-                is not HirIndexExpression)
-        {
-            throw new ArgumentException(
-                $"unproven index site {access.Site} is not a HirIndexExpression "
-                + "of this model's exact HIR snapshot",
-                nameof(access));
-        }
-
-        if (!_validation.UnprovenIndexSites.Add(access.Site))
-        {
-            throw new InvalidOperationException(
-                $"QINTERNAL: HIR index expression {access.Site} was recorded more than once");
-        }
-
-        _validation.UnprovenIndexes.Add(access);
-    }
-
-    /// <summary>
-    /// Returns the exact HIR index-expression identity when that expression has an unproven bounds fact.
-    /// Node identity is the only lookup authority; no statement/object-reference side map exists.
-    /// </summary>
-    internal HirNodeId? UnprovenIndexSite(
-        HirNodeId indexExpressionId) =>
-        _validation.UnprovenIndexSites.Contains(indexExpressionId)
-            ? indexExpressionId
-            : null;
-
     /// <summary>Record an operation's array-argument CONTRACT (rung B′/P4): the minimum length each of its
     /// classical-array parameters requires, settled after call-graph propagation. Single producer
     /// (<see cref="QoraValidator"/>, once per validation), add-only like every other fact.</summary>
@@ -382,13 +326,6 @@ public sealed class HirSemanticModel
     public IReadOnlyDictionary<string, long>? RequiredArgLengths(
         HirNodeId opId) =>
         _validation.RequiredArgLengthsByCallable.TryGetValue(opId, out var needs) ? needs : null;
-
-    /// <summary>Every indexed access this validation could not prove in bounds, in walk order — empty when
-    /// the whole program is proven. Non-empty NEVER coexists with a successful OpenQASM compile because its
-    /// target-policy pass derives QSEM030. Each entry's semantic site identity is translated to an exact
-    /// MIR instruction reference during lowering.</summary>
-    public IReadOnlyList<UnprovenIndex> UnprovenIndexes =>
-        HirCollections.Freeze(_validation.UnprovenIndexes);
 
     /// <summary>The deferral ledger (see <see cref="DeferredSizeCheck"/>): the size-dependent judgements
     /// THIS validation postponed to the post-monomorphization re-check, in walk order. On a SUCCESSFUL

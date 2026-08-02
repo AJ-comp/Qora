@@ -2,6 +2,19 @@
 
 All notable changes to the Qora Language extension.
 
+## 0.29.0
+
+- Bundles the **Qora v0.36.0** compiler with MIR-native array and qubit bounds analysis across SSA values,
+  CFG paths, Phi inputs, loop ranges, storage provenance, and callable minimum-length contracts.
+- QSEM016 now comes from target-independent MIR invalidity, while the OpenQASM backend alone reports
+  QSEM030 for accesses that remain unproven. Size-specialized clones of one source access produce one
+  source diagnostic instead of repeated errors.
+- Statically initialized indexes are proved or rejected precisely, while contradictory paths, shadowed
+  bindings, nested indexes, and multiple indexed operands retain the correct independent result.
+- MIR origins are stored directly on their entities, and transformed snapshots enforce preserved, fresh,
+  and never-recycled identities without the former origin table or mutable transformation helper.
+- Qora source syntax and extension UI behavior are unchanged.
+
 ## 0.28.0
 
 - Bundles the **Qora v0.35.0** compiler, the first language release using the three-component

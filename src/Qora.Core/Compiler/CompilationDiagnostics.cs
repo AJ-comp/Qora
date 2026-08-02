@@ -12,6 +12,7 @@ public enum CompilationStage
     HirValidation,
     HirAnalysis,
     MirLowering,
+    MirAnalysis,
     OpenQasm,
 }
 
@@ -30,13 +31,13 @@ public abstract record DiagnosticOrigin
     public sealed record Hir(HirSnapshotId Snapshot) : DiagnosticOrigin;
 
     public sealed record Mir(
-        MirSnapshotId Snapshot,
-        MirOriginId? Location = null) : DiagnosticOrigin;
+        MirSnapshot Snapshot,
+        MirOrigin? Location = null) : DiagnosticOrigin;
 
     public sealed record Target(
         TargetBackend Backend,
-        MirSnapshotId Input,
-        MirOriginId? Location = null) : DiagnosticOrigin;
+        MirSnapshot Input,
+        MirOrigin? Location = null) : DiagnosticOrigin;
 }
 
 public enum TargetBackend

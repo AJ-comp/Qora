@@ -1,4 +1,5 @@
 using System.Text;
+using Qora.Compiler;
 using Qora.Ir.Mir.Analysis;
 
 namespace Qora.Ir.Mir;
@@ -9,7 +10,7 @@ internal sealed record MirVerificationError(
     MirCallableId? Callable = null,
     MirBlockId? Block = null,
     MirInstructionId? Instruction = null,
-    MirOriginId? Origin = null)
+    MirOrigin? Origin = null)
 {
     public override string ToString()
     {
@@ -30,7 +31,9 @@ internal sealed record MirVerificationError(
 /// </summary>
 internal static class QoraMirVerifier
 {
-    public static IReadOnlyList<MirVerificationError> Verify(MirProgram? program)
+    public static IReadOnlyList<MirVerificationError> Verify(
+        MirProgram? program,
+        HirSnapshot? loweringSource = null)
     {
         if (program is null)
             return new[]
@@ -38,12 +41,14 @@ internal static class QoraMirVerifier
                 new MirVerificationError("MIR000", "the MIR program is null"),
             };
 
-        return new Verifier(program).Run();
+        return new Verifier(program, loweringSource).Run();
     }
 
-    public static void VerifyOrThrow(MirProgram program)
+    public static void VerifyOrThrow(
+        MirProgram program,
+        HirSnapshot? loweringSource = null)
     {
-        var errors = Verify(program);
+        var errors = Verify(program, loweringSource);
         if (errors.Count == 0) return;
 
         var message = new StringBuilder("QINTERNAL: invalid Qora MIR");
@@ -54,24 +59,22 @@ internal static class QoraMirVerifier
     private sealed class Verifier
     {
         private readonly MirProgram _program;
+        private readonly HirSnapshot? _loweringSource;
         private readonly List<MirVerificationError> _errors = new();
         private readonly Dictionary<MirCallableId, MirCallable> _callables = new();
         private readonly Dictionary<object, MirCallableId> _entityOwners =
             new(ReferenceEqualityComparer.Instance);
 
-        public Verifier(MirProgram program)
+        public Verifier(
+            MirProgram program,
+            HirSnapshot? loweringSource)
         {
             _program = program;
+            _loweringSource = loweringSource;
         }
 
         public IReadOnlyList<MirVerificationError> Run()
         {
-            if (_program.Origins is null)
-            {
-                Add("MIR006", "program origin table is null");
-                return _errors;
-            }
-
             if (_program.Callables is null)
             {
                 Add("MIR002", "program callable collection is null");
@@ -228,13 +231,25 @@ internal static class QoraMirVerifier
             {
                 CheckOrigin(block.Origin, $"block {block.Id}", callable, block);
                 foreach (var instruction in block.Instructions)
-                    if (instruction is not null)
+                {
+                    if (instruction is null) continue;
+
+                    CheckOrigin(
+                        instruction.Origin,
+                        $"instruction {instruction.Id}",
+                        callable,
+                        block,
+                        instruction);
+                    foreach (var access in instruction.QubitAccesses)
+                    {
                         CheckOrigin(
-                            instruction.Origin,
-                            $"instruction {instruction.Id}",
+                            access.Origin,
+                            $"qubit access in instruction {instruction.Id}",
                             callable,
                             block,
                             instruction);
+                    }
+                }
                 if (block.Terminator is { } terminator)
                     CheckOrigin(
                         terminator.Origin,
@@ -440,6 +455,7 @@ internal static class QoraMirVerifier
             var cfg = MirControlFlowAnalysis.AnalyzeUnchecked(_program, callable);
             var provenance = MirStorageProvenanceAnalysis.AnalyzeUnchecked(_program, callable);
             VerifyExclusiveCallOperands(callable, values, provenance);
+            VerifyArrayCallMinimumLengths(callable, values, provenance);
             VerifyCurrentArrayStates(callable, blocks, values, cfg);
             VerifyCurrentQubitStates(callable, blocks, cfg);
         }
@@ -507,6 +523,90 @@ internal static class QoraMirVerifier
             static bool RequiresExclusiveActual(MirClassicalCallOperand operand) =>
                 operand.Access == QAccessMode.Mutable
                 || operand.Ownership == QOwnershipMode.Moved;
+        }
+
+        private void VerifyArrayCallMinimumLengths(
+            MirCallable caller,
+            IReadOnlyDictionary<MirValueId, MirValue> values,
+            MirStorageProvenanceSnapshot provenance)
+        {
+            foreach (var block in caller.Blocks)
+            {
+                foreach (var instruction in block.Instructions)
+                {
+                    var (target, operands) = instruction switch
+                    {
+                        MirPureCall call => (call.Target, call.Operands),
+                        MirQuantumApply apply => (apply.Target, apply.Operands),
+                        _ => (null, null),
+                    };
+                    if (target is not MirUserCallableTarget userTarget
+                        || operands is null
+                        || !_callables.TryGetValue(userTarget.Callable, out var callee))
+                        continue;
+
+                    var operandCount = Math.Min(operands.Count, callee.Parameters.Count);
+                    for (var index = 0; index < operandCount; index++)
+                    {
+                        if (operands[index] is not MirClassicalCallOperand actual
+                            || callee.Parameters[index] is not MirClassicalParameter expected
+                            || expected.MinimumLength <= 0
+                            || !values.TryGetValue(actual.Value, out var actualValue)
+                            || !actualValue.Type.IsArray
+                            || callee.FindValue(expected.Value) is not { Type.IsArray: true } expectedValue
+                            || expectedValue.Type.KnownLength is int expectedLength
+                                && expected.MinimumLength > expectedLength)
+                            continue;
+
+                        var actualMinimumLength = GuaranteedMinimumArrayLength(
+                            caller,
+                            actualValue,
+                            provenance);
+                        if (actualMinimumLength >= expected.MinimumLength)
+                            continue;
+
+                        Add(
+                            "MIR152",
+                            $"array call operand {index} guarantees length at least {actualMinimumLength}, "
+                            + $"but parameter `{expected.Name}` requires at least {expected.MinimumLength}",
+                            caller,
+                            block,
+                            instruction);
+                    }
+                }
+            }
+        }
+
+        private static int GuaranteedMinimumArrayLength(
+            MirCallable caller,
+            MirValue value,
+            MirStorageProvenanceSnapshot provenance)
+        {
+            if (value.Type.KnownLength is int knownLength)
+                return knownLength;
+
+            var possibleStorages = provenance.ProvenanceOf(value.Id);
+            if (!possibleStorages.IsComplete || possibleStorages.PossibleStorages.Count == 0)
+                return 0;
+
+            var guaranteedMinimumLength = int.MaxValue;
+            foreach (var storageId in possibleStorages.PossibleStorages)
+            {
+                var storage = caller.RequireStorage(storageId);
+                var storageMinimumLength = caller.StorageKindOf(storage) switch
+                {
+                    MirArrayStorageKind.Parameter =>
+                        ((MirClassicalParameter)caller.Parameters[
+                            caller.StorageParameterIndexOf(storage)]).MinimumLength,
+                    MirArrayStorageKind.Local => caller.StorageTypeOf(storage).KnownLength ?? 0,
+                    _ => 0,
+                };
+                guaranteedMinimumLength = Math.Min(
+                    guaranteedMinimumLength,
+                    storageMinimumLength);
+            }
+
+            return guaranteedMinimumLength;
         }
 
         /// <summary>
@@ -813,7 +913,7 @@ internal static class QoraMirVerifier
                 string role,
                 MirBlock block,
                 MirInstruction? instruction,
-                MirOriginId origin)
+                MirOrigin origin)
             {
                 if (!state.TryGetValue(actual.Id, out var expected))
                 {
@@ -968,12 +1068,30 @@ internal static class QoraMirVerifier
                                     Add("MIR025",
                                         $"array parameter `{classical.Name}` references missing storage {storageId}",
                                         callable);
+                                if (classical.MinimumLength < 0
+                                    || (value.Type.KnownLength is int knownLength
+                                        && classical.MinimumLength > knownLength))
+                                {
+                                    Add(
+                                        "MIR151",
+                                        $"array parameter `{classical.Name}` has invalid minimum length "
+                                        + classical.MinimumLength,
+                                        callable);
+                                }
                             }
                             else if (classical.Storage is not null)
                             {
                                 Add(
                                     "MIR027",
                                     $"scalar parameter `{classical.Name}` carries an array storage identity",
+                                    callable);
+                            }
+                            else if (classical.MinimumLength != 0)
+                            {
+                                Add(
+                                    "MIR151",
+                                    $"scalar parameter `{classical.Name}` carries minimum array length "
+                                    + classical.MinimumLength,
                                     callable);
                             }
                         }
@@ -1327,7 +1445,7 @@ internal static class QoraMirVerifier
             IReadOnlyDictionary<MirBlockId, MirBlock> blocks,
             IReadOnlyDictionary<MirValueId, MirValue> values,
             string edge,
-            MirOriginId source)
+            MirOrigin source)
         {
             if (!blocks.TryGetValue(targetId, out var target)) return;
             if (arguments.Count != target.Arguments.Count)
@@ -1415,7 +1533,7 @@ internal static class QoraMirVerifier
             IReadOnlyDictionary<MirInstructionId, (MirBlock Block, int Index, MirInstruction Instruction)> instructions,
             IReadOnlyDictionary<MirBlockId, HashSet<MirBlockId>> dominators,
             MirInstructionId? instruction,
-            MirOriginId source)
+            MirOrigin source)
         {
             foreach (var operand in operands)
             {
@@ -1575,7 +1693,7 @@ internal static class QoraMirVerifier
                 MirQubitKey qubit,
                 MirBlock useBlock,
                 int useIndex,
-                MirOriginId source,
+                MirOrigin source,
                 string role)
             {
                 if (!definitions.TryGetValue(qubit, out var definition))
@@ -2305,17 +2423,46 @@ internal static class QoraMirVerifier
         }
 
         private void CheckOrigin(
-            MirOriginId origin,
+            MirOrigin? origin,
             string role,
             MirCallable? callable = null,
             MirBlock? block = null,
             MirInstruction? instruction = null)
         {
-            if (!_program.Origins.Contains(origin))
+            if (origin is null)
             {
                 Add(
                     "MIR006",
-                    $"{role} refers to missing origin {origin}",
+                    $"{role} has no origin",
+                    callable,
+                    block,
+                    instruction);
+                return;
+            }
+
+            if (_loweringSource is null)
+                return;
+
+            var source = origin.SourceHirOrigin;
+            if (!_loweringSource.Structure.Contains(source.HirNodeId))
+            {
+                Add(
+                    "MIR006",
+                    $"{role} refers to HIR node {source.HirNodeId} outside the exact lowering source",
+                    callable,
+                    block,
+                    instruction,
+                    origin);
+                return;
+            }
+
+            var expectedSpan = _loweringSource.SourceMap.Find(source.HirNodeId);
+            if (source.Span != expectedSpan)
+            {
+                Add(
+                    "MIR006",
+                    $"{role} origin span {source.Span?.ToString() ?? "<none>"} does not match "
+                    + $"HIR node {source.HirNodeId} span {expectedSpan?.ToString() ?? "<none>"}",
                     callable,
                     block,
                     instruction,
@@ -2329,7 +2476,7 @@ internal static class QoraMirVerifier
             MirCallable? callable = null,
             MirBlock? block = null,
             MirInstruction? instruction = null,
-            MirOriginId? source = null) =>
+            MirOrigin? source = null) =>
             _errors.Add(new MirVerificationError(
                 code,
                 message,

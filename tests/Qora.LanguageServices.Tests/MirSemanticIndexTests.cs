@@ -293,13 +293,54 @@ public sealed class MirSemanticIndexTests
         var firstSymbol = Symbol(firstIndex, "value");
 
         Assert.Equal(first.Compilation.Id, second.Compilation.Id);
-        Assert.NotEqual(firstIndex.CompilationRevision, secondIndex.CompilationRevision);
+        Assert.NotEqual(first.Compilation.Revision, second.Compilation.Revision);
         Assert.Equal(firstCallable.Id, secondCallable.Id);
         Assert.Same(first.Compilation.Mir, firstIndex.Mir);
         Assert.Same(second.Compilation.Mir, secondIndex.Mir);
+        Assert.Throws<ArgumentException>(
+            () => new LanguageServiceCompilation(
+                second.Compilation,
+                firstIndex));
         Assert.Throws<ArgumentException>(() => secondIndex.Callable(firstCallable));
         Assert.Throws<ArgumentException>(
             () => secondIndex.Callable(secondCallable).ValuesFor(firstSymbol));
+    }
+
+    [Fact]
+    public void RootIndexRejectsACallableIndexFromAnotherMirProgram()
+    {
+        var first = Compile("operation Main() { }");
+        var second = Compile("operation Main() { }");
+        var firstIndex = Assert.IsType<MirSemanticIndex>(first.MirSemanticIndex);
+        var secondIndex = Assert.IsType<MirSemanticIndex>(second.MirSemanticIndex);
+        var firstCallable = Assert.Single(firstIndex.Mir.Program.Callables);
+        var secondCallable = Assert.Single(secondIndex.Mir.Program.Callables);
+        Assert.Equal(firstCallable.Id, secondCallable.Id);
+        Assert.NotSame(firstCallable, secondCallable);
+
+        var detachedCallableIndex = new MirCallableSemanticIndex(
+            secondIndex.HirArtifact.Model.ScopeGraph!,
+            firstCallable,
+            Array.Empty<SymbolId>(),
+            EmptyLinks<SymbolId, MirValueId>(),
+            EmptyLinks<MirValueId, SymbolId>(),
+            EmptyLinks<SymbolId, MirStorageId>(),
+            EmptyLinks<MirStorageId, SymbolId>(),
+            EmptyLinks<SymbolId, MirQubitKey>(),
+            EmptyLinks<MirQubitKey, SymbolId>(),
+            Array.Empty<SymbolId>());
+
+        Assert.Throws<ArgumentException>(
+            () => new MirSemanticIndex(
+                second.Compilation,
+                secondIndex.HirArtifact,
+                secondIndex.Mir,
+                new Dictionary<HirNodeId, MirCallableId>(),
+                EmptyLinks<SymbolId, MirCallableId>(),
+                new Dictionary<MirCallableId, MirCallableSemanticIndex>
+                {
+                    [secondCallable.Id] = detachedCallableIndex,
+                }));
     }
 
     [Fact]
@@ -349,6 +390,10 @@ public sealed class MirSemanticIndexTests
             .Where(symbol => symbol.SourceName == name)
             .OrderBy(symbol => symbol.Id.Value)
             .ToArray();
+
+    private static Dictionary<TKey, IReadOnlyList<TValue>> EmptyLinks<TKey, TValue>()
+        where TKey : notnull =>
+        new();
 
     private sealed class DroppingValueTrace(IMirLoweringTraceSink inner)
         : IMirLoweringTraceSink

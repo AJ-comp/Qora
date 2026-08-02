@@ -17,6 +17,41 @@ emitted as **OpenQASM 3.0**.
 > named there may have been retired by a later release; the newest release notes and current architecture
 > documents define the present pipeline.
 
+## 0.36.0 — 2026-08-03
+
+### Changed
+- **Bounds safety is now derived from the completed SSA/CFG MIR.** `MirBoundsAnalysis` classifies every
+  classical-array and qubit index as proven, invalid, or unproven from constants, `.Count`, Phi inputs,
+  loop ranges, path conditions, storage provenance, and parameter minimum-length contracts. QSEM016 is
+  therefore a target-independent MIR diagnostic, while OpenQASM alone turns unproven accesses into
+  QSEM030 because that target has no portable runtime bounds trap.
+- **MIR provenance is attached directly to the entity it describes.** Callables, blocks, instructions,
+  values, storage, and qubit versions retain an exact HIR or compiler-generated `MirOrigin` without an
+  origin-ID table. Diagnostics and target artifacts likewise retain the exact owning `MirSnapshot`
+  instead of rebuilding snapshot-qualified references.
+- **MIR transformations now enforce identity continuity.** Existing callable-local identities retain
+  their exact origins, genuinely new entities require generated origins, and an identity deleted by an
+  earlier transformation cannot be recycled. Adjoint generation remains free to create a fresh callable
+  with its own independent local identity spaces.
+
+### Fixed
+- **Array call contracts are closed inside MIR.** The verifier rejects a known or provenance-derived
+  array length that is smaller than the callee's required minimum, preventing a malformed transformation
+  from turning an out-of-range access into a false proven result.
+- **Path-sensitive bounds diagnostics are both sound and non-duplicating.** Contradictory conjunctions,
+  including short-circuit SSA joins, are recognized as unreachable without hiding nearby feasible errors.
+  Multiple size specializations of one source access now report one QSEM016 or QSEM030 at that source
+  occurrence while retaining every per-specialization MIR analysis fact.
+- **Static, shadowed, and nested indexes keep their exact meaning.** SSA constants prove safe local indexes
+  and reject static out-of-range values with QSEM016 instead of QSEM030. Shadowed bindings cannot inherit
+  another array's proof, while nested and multi-operand accesses retain their independent source locations.
+
+### Removed
+- The HIR `UnprovenIndex` ledger, copied `MirBoundsObligation` list, public `MirSnapshotId` revision layer,
+  `MirOriginId` and origin table, and the mutable `MirSnapshotTransformation` helper. Their surviving
+  responsibilities now come from the exact MIR graph, direct ownership, and verified immutable snapshot
+  transitions.
+
 ## 0.35.0 — 2026-07-31
 
 ### Changed

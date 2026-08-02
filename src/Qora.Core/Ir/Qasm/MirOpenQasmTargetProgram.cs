@@ -588,7 +588,7 @@ public sealed record MirQasmCallableDefinition
 
 /// <summary>
 /// Immutable, fully legalized OpenQASM target AST produced from MIR. It intentionally carries no
-/// MIR snapshot identity: the compiler artifact owns the exact source snapshot, while this model owns only
+/// MIR source ownership: the compiler artifact owns the exact source snapshot, while this model owns only
 /// target identities, final names, final types, and serialization structure.
 /// </summary>
 public sealed class MirOpenQasmTargetProgram

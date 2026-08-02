@@ -11,7 +11,7 @@ internal static class QasmBackend
 {
     internal sealed record Diagnostic(
         QoraError Error,
-        MirOriginId? Location);
+        MirOrigin? Location);
 
     internal sealed class Result
     {
@@ -43,8 +43,8 @@ internal static class QasmBackend
     }
 
     /// <summary>
-    /// Lowers materialized MIR to OpenQASM. Unresolved bounds obligations are rejected before target
-    /// structure recovery, so every diagnostic still resolves through the exact MIR origin table.
+    /// Lowers materialized MIR to OpenQASM. Unproven MIR bounds results are rejected before target
+    /// structure recovery, so every diagnostic still resolves through its exact MIR origin.
     /// </summary>
     public static Result Run(MirSnapshot source)
     {
@@ -53,11 +53,7 @@ internal static class QasmBackend
 
         var boundsErrors = OpenQasmBoundsValidation.Run(source);
         if (boundsErrors.Count > 0)
-        {
-            return Result.Failed(
-                source,
-                boundsErrors.Select(error => new Diagnostic(error, null)).ToArray());
-        }
+            return Result.Failed(source, boundsErrors);
 
         var lowering = MirOpenQasmLowering.Lower(source);
         if (!lowering.Success)
@@ -67,8 +63,8 @@ internal static class QasmBackend
                     new QoraError(
                         error.Message,
                         error.Code,
-                        error.Origin is MirOriginId origin
-                            ? source.Origins.ResolveHir(origin).Span
+                        error.Origin is MirOrigin origin
+                            ? origin.SourceHirOrigin.Span
                             : null),
                     error.Origin))
                 .ToArray();

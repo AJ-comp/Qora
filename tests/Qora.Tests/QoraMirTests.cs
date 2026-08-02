@@ -347,8 +347,6 @@ public sealed class QoraMirTests
 
         var error = Assert.Throws<ArgumentException>(
             () => new MirProgram(
-                snapshot.Program.SnapshotId,
-                snapshot.Program.Origins,
                 snapshot.Program.EntryPoint,
                 new[] { callable, callable }));
 
@@ -423,8 +421,8 @@ public sealed class QoraMirTests
         Assert.NotEqual(declaration.Id, OriginNode(load.Origin));
         Assert.NotEqual(declaration.Id, OriginNode(call.Origin));
 
-        HirNodeId OriginNode(MirOriginId origin) =>
-            snapshot.Origins.ResolveHir(origin).HirNodeId!.Value;
+        HirNodeId OriginNode(MirOrigin origin) =>
+            origin.SourceHirOrigin.HirNodeId;
     }
 
     [Fact]
@@ -744,8 +742,6 @@ public sealed class QoraMirTests
                         : block)
                 .ToArray());
         var malformed = new MirProgram(
-            program.SnapshotId,
-            program.Origins,
             program.EntryPoint,
             new[] { malformedCallable });
 
@@ -786,8 +782,6 @@ public sealed class QoraMirTests
                         : block)
                 .ToArray());
         var malformed = new MirProgram(
-            program.SnapshotId,
-            program.Origins,
             program.EntryPoint,
             new[] { malformedCallable });
 
@@ -840,8 +834,6 @@ public sealed class QoraMirTests
                 })
                 .ToArray());
         var branchLocal = new MirProgram(
-            program.SnapshotId,
-            program.Origins,
             program.EntryPoint,
             new[] { malformedCallable });
 
@@ -849,7 +841,7 @@ public sealed class QoraMirTests
     }
 
     [Fact]
-    public void EffectSnapshotRejectsAnotherProgramInstanceAndRevision()
+    public void EffectSnapshotRejectsEveryOtherProgramInstance()
     {
         var (program, effects) = CompileMir("""
             operation Main() {
@@ -861,13 +853,11 @@ public sealed class QoraMirTests
         Assert.True(effects.IsFor(program));
         effects.EnsureFor(program);
 
-        var sameRevisionCopy = new MirProgram(
-            program.SnapshotId,
-            program.Origins,
+        var detachedProgramCopy = new MirProgram(
             program.EntryPoint,
             program.Callables.ToArray());
-        Assert.False(effects.IsFor(sameRevisionCopy));
-        Assert.Throws<InvalidOperationException>(() => effects.EnsureFor(sameRevisionCopy));
+        Assert.False(effects.IsFor(detachedProgramCopy));
+        Assert.Throws<InvalidOperationException>(() => effects.EnsureFor(detachedProgramCopy));
 
         var (otherSnapshot, _) = CompileMir("""
             operation Main() {
@@ -1005,8 +995,6 @@ public sealed class QoraMirTests
             callable,
             entryBlock: new MirBlockId(int.MaxValue));
         var malformed = new MirProgram(
-            program.SnapshotId,
-            program.Origins,
             program.EntryPoint,
             new[] { malformedCallable });
 
@@ -1034,8 +1022,6 @@ public sealed class QoraMirTests
             callable,
             blocks: new[] { malformedEntry });
         var malformed = new MirProgram(
-            program.SnapshotId,
-            program.Origins,
             program.EntryPoint,
             new[] { malformedCallable });
 
@@ -1050,8 +1036,6 @@ public sealed class QoraMirTests
     {
         var (program, _) = CompileMir("operation Main() {}");
         var malformed = new MirProgram(
-            program.SnapshotId,
-            program.Origins,
             new MirCallableId(int.MaxValue),
             program.Callables);
 
@@ -1075,8 +1059,6 @@ public sealed class QoraMirTests
             program.Callables,
             callable => callable.Name == "Value");
         var malformed = new MirProgram(
-            program.SnapshotId,
-            program.Origins,
             function.Id,
             program.Callables);
 
@@ -1097,8 +1079,6 @@ public sealed class QoraMirTests
             program.Callables,
             callable => callable.Name == "Worker");
         var malformed = new MirProgram(
-            program.SnapshotId,
-            program.Origins,
             worker.Id,
             program.Callables);
 
@@ -1137,8 +1117,6 @@ public sealed class QoraMirTests
             callable,
             blocks: new[] { malformedBlock });
         var malformed = new MirProgram(
-            program.SnapshotId,
-            program.Origins,
             program.EntryPoint,
             new[] { malformedCallable });
 
@@ -1179,8 +1157,6 @@ public sealed class QoraMirTests
                     .ToArray(),
             };
             return new MirProgram(
-                program.SnapshotId,
-                program.Origins,
                 program.EntryPoint,
                 new[]
                 {
@@ -1260,8 +1236,6 @@ public sealed class QoraMirTests
             .ToArray();
         var rewritten = CopyCallable(callable, blocks: blocks);
         return new MirProgram(
-            program.SnapshotId,
-            program.Origins,
             program.EntryPoint,
             program.Callables
                 .Select(candidate =>

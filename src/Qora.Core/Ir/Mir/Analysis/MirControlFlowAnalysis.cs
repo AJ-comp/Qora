@@ -47,8 +47,8 @@ public sealed class MirProgramPoint
 
 /// <summary>
 /// Immutable control-flow, dominance, and SSA-availability facts for one callable in one exact MIR
-/// program revision. A MIR rewrite creates a new program, so callers must rebuild this snapshot before
-/// using any old block, instruction, or value identity as a scheduling fact.
+/// program object. A MIR rewrite creates a new program, so callers must rebuild this analysis before
+/// using any old block, instruction, or value as a scheduling fact.
 /// </summary>
 public sealed class MirControlFlowSnapshot
 {
@@ -121,7 +121,6 @@ public sealed class MirControlFlowSnapshot
                 instruction: null));
     }
 
-    public MirSnapshotId SnapshotId => _sourceProgram.SnapshotId;
     public MirCallableId Callable => _sourceCallable.Id;
     public MirBlockId EntryBlock => _sourceCallable.EntryBlock;
     public IReadOnlyList<MirBlockId> ReachableBlocks { get; }
@@ -134,8 +133,8 @@ public sealed class MirControlFlowSnapshot
     {
         if (!IsFor(program, callable))
             throw new InvalidOperationException(
-                $"MIR control-flow snapshot belongs to {Callable} in snapshot {SnapshotId}; " +
-                $"reanalyze {callable} in snapshot {program.SnapshotId}");
+                $"the MIR control-flow analysis does not belong to callable {callable} "
+                + $"in the requested MIR program; it was created for callable {Callable}");
     }
 
     public bool IsReachable(MirBlockId block)

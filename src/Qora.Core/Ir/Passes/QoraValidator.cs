@@ -5,8 +5,7 @@ namespace Qora.Ir.Passes;
 /// <summary>
 /// The semantic-validation pass ("lap 0"): one full walk over the whole IR that returns EVERY violation it
 /// finds (collect-all, no early stop). Some historical rules still encode constraints shared with the
-/// current OpenQASM target; bounds proof now has an explicit fact/policy boundary: this pass records an
-/// unproven indexed access in <see cref="HirSemanticModel.UnprovenIndexes"/> without deciding its target policy.
+/// current OpenQASM target; final unresolved-bounds analysis belongs to MIR.
 ///
 /// Rules (codes are stable identifiers for editor tooling):
 /// <list type="bullet">
@@ -68,12 +67,9 @@ namespace Qora.Ir.Passes;
 ///         value. Raised by <see cref="SymbolTableBuilder"/> when an expression identifier resolves — up the
 ///         scope chain to the program-level table — to an operation symbol.</item>
 ///   <item><b>QSEM029</b> — an invalid array shape, initializer, whole-array assignment, or member access.</item>
-///   <item><b>QSEM030</b> is deliberately NOT emitted here. A failed in-bounds proof is recorded as
-///         <see cref="UnprovenIndex"/> data; the OpenQASM backend turns final unresolved facts into QSEM030.
-///         HIR-to-MIR lowering translates each fact's semantic site identity into a typed indexed-access
-///         reference. A runtime-capable backend still needs a checked-access lowering and failure policy
-///         before it can handle this category differently. An index proven OUT of range remains QSEM016
-///         here.</item>
+///   <item><b>QSEM030</b> is deliberately NOT emitted here. MIR classifies final unresolved indexed
+///         accesses, and each backend decides how to dispose of them. An index proven OUT of range remains
+///         QSEM016 here.</item>
 ///   <item><b>QSEM031</b> — an expression or nested-block structure deeper than the compiler's recursion
 ///         limit (only ever machine-generated). Rejected up front so pathological depth is a clean
 ///         diagnostic, not an uncatchable stack overflow.</item>
@@ -155,7 +151,6 @@ internal static class QoraValidator
     {
         model = null;
         var errors = new List<QoraError>();
-        var unproven = new List<UnprovenIndex>();   // rung B′ data: accesses whose bounds proof never settled
         var deferred = new List<DeferredSizeCheck>();   // rung B′ data: verdicts postponed to the post-mono re-check
         if (program is null) return errors;
 
@@ -195,7 +190,7 @@ internal static class QoraValidator
         // separate pass: each classical-array parameter's minimum required length (produced by
         // CheckIndexedAccess from the SAME folded bound its verdict used — one calculator, so the floor can
         // never disagree with the prover) and every call's array arguments (produced by CheckCall). The
-        // floor check is DERIVED from both after the walk — same discipline as UnprovenIndexes.
+        // floor check is DERIVED from both after the walk.
         var needsByOp =
             new Dictionary<HirNodeId, Dictionary<string, long>>();
         var calls = new List<ArrayCallFact>();
@@ -393,7 +388,6 @@ internal static class QoraValidator
                 opById,
                 scopeGraph,
                 errors,
-                unproven,
                 deferred,
                 opNeeds,
                 new ArrayFloorSink(op.Id, calls),
@@ -471,18 +465,6 @@ internal static class QoraValidator
         foreach (var (opId, needs) in needsByOp)
             if (needs.Count > 0)
                 model.SetRequiredArgLengths(opId, needs);
-
-        // Rung B′ fact publication. The walk above RECORDS unproven accesses as target-independent data;
-        // it does not turn them into diagnostics. OpenQASM rejects the final list because it has no runtime
-        // failure channel. HIR-to-MIR lowering translates every semantic site into a typed instruction,
-        // access-kind, and operand-ordinal reference. A future checked-access backend must still define
-        // runtime failure and dynamic-alias policies.
-        // Preserve every visited access site in walk order. A lowering may produce two value-equal entries
-        // from one source span (for example the pre-loop and back-edge copies of a measured while condition);
-        // collapsing them here would discard backend work. OpenQASM de-duplicates only the user-facing
-        // diagnostics it derives.
-        foreach (var access in unproven)
-            model.AddUnprovenIndex(access);
 
         // The deferral ledger — recorded during the walk, model DATA afterwards. No diagnostic is derived
         // here: a deferral is a promise, not a failure. On today's pipeline the post-monomorphization
@@ -596,7 +578,6 @@ internal static class QoraValidator
         IReadOnlyDictionary<HirNodeId, HirCallable> OpById,
         HirScopeGraph ScopeGraph,
         List<QoraError> Errors,
-        List<UnprovenIndex> Unproven,
         List<DeferredSizeCheck> Deferred,
         Dictionary<string, long> ParamNeeds,
         ArrayFloorSink Floors,
@@ -1577,9 +1558,8 @@ internal static class QoraValidator
                     g.Span,
                     g.Id);
 
-        // A proven bad index is QSEM016 here; an otherwise valid but unproven index is only recorded for
-        // target policy (OpenQASM later turns that ledger entry into QSEM030). The latter does not invalidate
-        // the language-level call or cancel an ownership transfer: a checked-access backend may execute it.
+        // A proven bad index is QSEM016 here. An otherwise valid but unproven index does not invalidate the
+        // language-level call or cancel an ownership transfer; MIR performs the final classification.
         foreach (var argument in g.Call.Arguments)
             CheckExpressionIndexes(
                 argument.Expression,
@@ -2155,7 +2135,7 @@ internal static class QoraValidator
         return found.Values.ToList();
     }
 
-    private static IndexCheckResult CheckExpressionIndexes(
+    private static IndexValidationResult CheckExpressionIndexes(
         HirExpression? expression,
         Scope scope,
         string opName,
@@ -2167,7 +2147,7 @@ internal static class QoraValidator
         switch (expression)
         {
             case null:
-                return IndexCheckResult.Proven;
+                return IndexValidationResult.Valid;
             case HirIndexExpression
                 {
                     Receiver: HirNameExpression receiver,
@@ -2182,25 +2162,24 @@ internal static class QoraValidator
                 var indexed = CheckIndexedAccess(
                     receiver.Name,
                     access.Index,
-                    access,
                     scope,
                     opName,
                     ctx,
                     span,
                     bounds,
                     nested);
-                var result = MergeIndexResults(nested, indexed);
+                var result = MergeIndexValidationResults(nested, indexed);
                 if (!qubitValueAllowed
                     && scope.Lookup(receiver.Name) is { Type: QType.Qubit })
                 {
                     Add(ctx.Errors, "QSEM026", $"in `{opName}`: `{HirExpressions.Render(access)}` is a qubit and cannot be used as a classical value", span);
-                    return IndexCheckResult.Invalid;
+                    return IndexValidationResult.Invalid;
                 }
                 return result;
             // A measurement's target index must be bounds-checked here too — a measurement NESTED in an
             // array-literal initializer (`var r: bit[] = [M(q[3])]`) reaches this recursion, whereas the declaration
             // handler's measurement branch only fires for a DIRECT `M(...)` value.
-            // An ELEMENT measurement (`M(q[i])`) must have a provably in-range index.
+            // An ELEMENT measurement (`M(q[i])`) follows the same index-validation path.
             case HirMeasurementExpression
                 {
                     Target: HirIndexExpression
@@ -2215,7 +2194,7 @@ internal static class QoraValidator
                     ctx,
                     span,
                     bounds);
-                return MergeIndexResults(
+                return MergeIndexValidationResults(
                     measuredNested,
                     CheckQubitIndex(
                         measured,
@@ -2240,10 +2219,10 @@ internal static class QoraValidator
                     else if (measuredSym.IsArray)
                         Add(ctx.Errors, "QSEM006", $"in `{opName}`: `M({measuredName})` measures a whole qubit register into one `bit`; measure a single qubit instead (`M({measuredName}[i])`)", span);
                 }
-                return IndexCheckResult.Proven;
+                return IndexValidationResult.Valid;
             case HirCallExpression call:
             {
-                var callResult = IndexCheckResult.Proven;
+                var callResult = IndexValidationResult.Valid;
                 foreach (var argument in call.Arguments)
                 {
                     var argumentResult = CheckExpressionIndexes(
@@ -2254,7 +2233,7 @@ internal static class QoraValidator
                         span,
                         bounds,
                         IsQubitLike(argument, scope));
-                    callResult = MergeIndexResults(
+                    callResult = MergeIndexValidationResults(
                         callResult,
                         argumentResult);
                 }
@@ -2262,11 +2241,11 @@ internal static class QoraValidator
                 return callResult;
             }
             default:
-                var aggregate = IndexCheckResult.Proven;
+                var aggregate = IndexValidationResult.Valid;
                 foreach (var child in expression.Children())
                 {
                     if (child is HirExpression childExpression)
-                        aggregate = MergeIndexResults(
+                        aggregate = MergeIndexValidationResults(
                             aggregate,
                             CheckExpressionIndexes(
                                 childExpression,
@@ -2276,7 +2255,7 @@ internal static class QoraValidator
                                 span,
                                 bounds));
                     else if (child is HirArgument argument)
-                        aggregate = MergeIndexResults(
+                        aggregate = MergeIndexValidationResults(
                             aggregate,
                             CheckExpressionIndexes(
                                 argument.Expression,
@@ -2291,17 +2270,22 @@ internal static class QoraValidator
         }
     }
 
-    /// <summary>The disposition of an indexed expression after common semantic validation. A parent index
-    /// stops only on <see cref="Invalid"/>: an inner <see cref="Unproven"/> access remains a real target-
-    /// policy fact, but does not make the value expression itself malformed.</summary>
-    private enum IndexCheckResult { Proven, Unproven, Invalid }
+    /// <summary>
+    /// Whether an indexed expression is valid at the HIR boundary. Bounds that HIR cannot settle remain
+    /// valid here and are classified from the final SSA/CFG form by MIR.
+    /// </summary>
+    private enum IndexValidationResult
+    {
+        Valid,
+        Invalid,
+    }
 
-    private static IndexCheckResult MergeIndexResults(IndexCheckResult left, IndexCheckResult right) =>
-        left == IndexCheckResult.Invalid || right == IndexCheckResult.Invalid
-            ? IndexCheckResult.Invalid
-            : left == IndexCheckResult.Unproven || right == IndexCheckResult.Unproven
-                ? IndexCheckResult.Unproven
-                : IndexCheckResult.Proven;
+    private static IndexValidationResult MergeIndexValidationResults(
+        IndexValidationResult left,
+        IndexValidationResult right) =>
+        left == IndexValidationResult.Invalid || right == IndexValidationResult.Invalid
+            ? IndexValidationResult.Invalid
+            : IndexValidationResult.Valid;
 
     private enum DirectLengthIndexResult { AlwaysInBounds, LengthDependent, AlwaysOutOfBounds }
 
@@ -2378,7 +2362,8 @@ internal static class QoraValidator
     /// the tree — not a text regex — finds each <c>base[index]</c> structurally, wherever it is nested, and
     /// returns the combined disposition so an enclosing index can stop after a proven-invalid child.</summary>
     /// <summary>
-    /// An array/register index must be PROVABLY in bounds (rung B'). Proof paths: P1 a literal within a
+    /// HIR rejects an array/register index only when it is provably invalid and otherwise preserves the
+    /// facts needed by later stages. Its proof paths are: P1 a literal within a
     /// known length; P2 a loop variable ranging <c>0..a.Count-1</c>; P3 a loop variable with a constant
     /// upper bound K (equivalent to the literal access <c>a[K]</c>); P4 a call-site minimum-length floor for
     /// a classical-array parameter — recorded HERE as data from the same folded value the verdict used
@@ -2387,26 +2372,23 @@ internal static class QoraValidator
     /// outranks another — and they are consulted before any wrongness verdict: QSEM016 ("PROVEN out of
     /// bounds") carries the premise that the access actually executes at the offending index, which an
     /// enclosing guard falsifies. Only when no safety proof exists is wrongness judged (QSEM016); failing
-    /// both records an <see cref="UnprovenIndex"/>, which OpenQASM later disposes as QSEM030.
+    /// both leaves the access unproven for MIR to classify from its final SSA/CFG form.
     /// </summary>
-    private static IndexCheckResult CheckIndexedAccess(
+    private static IndexValidationResult CheckIndexedAccess(
         string name,
         HirExpression indexExpression,
-        HirIndexExpression exactSite,
         Scope scope,
         string opName,
         Ctx ctx,
         SourceSpan? span,
         BoundsCtx bounds = default,
-        IndexCheckResult nestedResult = IndexCheckResult.Proven)
+        IndexValidationResult nestedResult = IndexValidationResult.Valid)
     {
         var errors = ctx.Errors;
-        var unproven = ctx.Unproven;
         var deferred = ctx.Deferred;
         var paramNeeds = ctx.ParamNeeds;
         var index = HirExpressions.Render(indexExpression);
         var errorStart = errors.Count;
-        var unprovenStart = unproven.Count;
 
         // The index is a full expression in EVERY owning context (read, write, gate, measurement). Its
         // independent contracts are all checked before any early exit: nested accesses, function calls,
@@ -2427,7 +2409,8 @@ internal static class QoraValidator
 
         // An index must produce one scalar int. This checks the WHOLE expression, so a function returning
         // float/bit/angle or an indexed array value receives the same common type error as a bare variable
-        // of that type. An unresolved expression already owns a QSEM005/007/025; do not cascade QSEM030.
+        // of that type. An unresolved expression already owns a QSEM005/007/025; do not add a secondary
+        // index diagnostic.
         var indexType =
             ExpressionTypes.TypeOf(indexExpression, scope, ctx.OpById);
         var indexTypeValid = indexType is { Type: QType.Int, IsArray: false };
@@ -2444,19 +2427,13 @@ internal static class QoraValidator
             || !symbol.IsArray
             || !callsValid
             || !indexTypeValid
-            || nestedResult == IndexCheckResult.Invalid)
-            return IndexCheckResult.Invalid;
+            || nestedResult == IndexValidationResult.Invalid)
+            return IndexValidationResult.Invalid;
 
-        IndexCheckResult Result(IndexCheckResult own = IndexCheckResult.Proven)
-        {
-            if (own == IndexCheckResult.Invalid || errors.Count > errorStart)
-                return IndexCheckResult.Invalid;
-            if (own == IndexCheckResult.Unproven
-                || nestedResult == IndexCheckResult.Unproven
-                || unproven.Count > unprovenStart)
-                return IndexCheckResult.Unproven;
-            return IndexCheckResult.Proven;
-        }
+        IndexValidationResult FinishIndexValidation() =>
+            errors.Count > errorStart
+                ? IndexValidationResult.Invalid
+                : IndexValidationResult.Valid;
 
         // The index name resolved ONCE, through the scope chain, to the variable it actually denotes HERE.
         // Every fact lookup below keys on this symbol — a same-named variable elsewhere is a different key.
@@ -2497,9 +2474,7 @@ internal static class QoraValidator
                 RequireArgLength(numLit.Value);
             else if (length is null)
                 Defer($"literal index {numLit.Value} awaits `{name}`'s specialized size");
-            return Result(length is null && symbol.Type == QType.Qubit
-                ? IndexCheckResult.Unproven
-                : IndexCheckResult.Proven);
+            return FinishIndexValidation();
         }
         if (indexExpression is HirLiteralExpression)
         {
@@ -2509,9 +2484,7 @@ internal static class QoraValidator
                 RequireArgLength(long.MaxValue);
             else
                 Defer($"literal index `{index}` awaits `{name}`'s specialized size");
-            return Result(length is null && symbol.Type == QType.Qubit
-                ? IndexCheckResult.Unproven
-                : IndexCheckResult.Proven);
+            return FinishIndexValidation();
         }
 
         // P5 FIRST — safety proofs are alternatives, and a guard is sufficient ON ITS OWN: the access only
@@ -2521,7 +2494,7 @@ internal static class QoraValidator
         // judged when no safety proof exists; asking in the other order rejected the clamp idiom
         // `for i in 0..5 { if (0 <= i && i < a.Count) { a[i] } }` as "PROVEN out of bounds" (it never is)
         // and recorded a P4 floor for an access whose guard makes ANY argument length safe.
-        if (bounds.Guarded(idxSym, symbol, length)) return Result();
+        if (bounds.Guarded(idxSym, symbol, length)) return FinishIndexValidation();
 
         // A ByConst guard `index < K` on a MONO-SIZED parameter (the Symbol.MonoSized stamp — the
         // monomorphizer's own trigger, copied once from HirParameter.NeedsMonoSizing) can't be confirmed
@@ -2532,7 +2505,7 @@ internal static class QoraValidator
         if (length is null && symbol.MonoSized && bounds.HasConstGuard(idxSym))
         {
             Defer($"const guard on `{index}` awaits `{name}`'s specialized size");
-            return Result(IndexCheckResult.Unproven);
+            return FinishIndexValidation();
         }
 
         // P1 extended — a non-literal index that FOLDS to a definite value (a const name) IS the literal
@@ -2549,9 +2522,7 @@ internal static class QoraValidator
                 RequireArgLength(idxVal.Value);
             else if (length is null)
                 Defer($"index `{index}` (= {idxVal.Value}) awaits `{name}`'s specialized size");
-            return Result(length is null && symbol.Type == QType.Qubit
-                ? IndexCheckResult.Unproven
-                : IndexCheckResult.Proven);   // in range, or a Qubit[] parameter (post-mono re-check)
+            return FinishIndexValidation();
         }
 
         // A direct access relative to the SAME array's unknown length is classified over the whole legal
@@ -2565,12 +2536,12 @@ internal static class QoraValidator
             switch (ClassifyDirectLengthIndex(direct.Coeff, direct.Offset))
             {
                 case DirectLengthIndexResult.AlwaysInBounds:
-                    return Result();
+                    return FinishIndexValidation();
                 case DirectLengthIndexResult.AlwaysOutOfBounds:
                     Add(errors, "QSEM016",
                         $"in `{opName}`: index `{name}[{index}]` cannot be in range for any valid length of `{name}` (valid: 0..{name}.Count-1)",
                         span);
-                    return Result();
+                    return FinishIndexValidation();
             }
         }
 
@@ -2580,7 +2551,7 @@ internal static class QoraValidator
         if (BoundFolder.DefersToUnsizedQubit(foldedIndex, scope))
         {
             Defer($"index `{index}` has a `.Count`-relative value, awaits specialized qubit-array sizes");
-            return Result(IndexCheckResult.Unproven);
+            return FinishIndexValidation();
         }
 
         // The index is a LOOP VARIABLE: judge it by the loop's bounds — folded AT THE HEADER (see the for
@@ -2597,7 +2568,7 @@ internal static class QoraValidator
             {
                 if (settled.Value >= neg.Value)
                     Add(errors, "QSEM016", $"in `{opName}`: `{name}[{index}]` starts at index {neg.Value} (loop `{index} in {from}..{to}`) — negative, out of range for any array", span);
-                return Result();
+                return FinishIndexValidation();
             }
 
             if (fact.FromB is BoundNum { Value: >= 0 } f)
@@ -2619,9 +2590,7 @@ internal static class QoraValidator
                             else if (length is null)
                                 Defer($"loop `{index} in {from}..{to}` reaches index {t.Value}, awaits `{name}`'s specialized size");
                         }
-                        return Result(length is null && symbol.Type == QType.Qubit && t.Value >= f.Value
-                            ? IndexCheckResult.Unproven
-                            : IndexCheckResult.Proven);   // in range, empty, or a Qubit[] parameter (post-mono re-check)
+                        return FinishIndexValidation();
 
                     // P2 generalized — a SAME-array bound `Count + C` is judged for ANY length:
                     //   C <= -1 → max index <= Count-1: safe however long the array turns out to be
@@ -2629,9 +2598,9 @@ internal static class QoraValidator
                     case ArrayLengthBound c when c.IsOverflowFree
                                                        && c.ArraySymbolId == symbol.Id
                                                        && c.Coeff == 1:
-                        if (c.Offset <= -1) return Result();
+                        if (c.Offset <= -1) return FinishIndexValidation();
                         Add(errors, "QSEM016", $"in `{opName}`: `{name}[{index}]` reaches index `{to}` — at or past `{name}.Count`, out of range for any length (valid: 0..{name}.Count-1)", span);
-                        return Result();
+                        return FinishIndexValidation();
 
                     // `k*Count + C` with k >= 2, C >= -1 exceeds Count-1 for every length >= 1.
                     case ArrayLengthBound c when c.IsOverflowFree
@@ -2639,7 +2608,7 @@ internal static class QoraValidator
                                                        && c.Coeff >= 2
                                                        && c.Offset >= -1:
                         Add(errors, "QSEM016", $"in `{opName}`: `{name}[{index}]` reaches index `{to}`, out of range for any length of `{name}`", span);
-                        return Result();
+                        return FinishIndexValidation();
                 }
             }
 
@@ -2648,50 +2617,33 @@ internal static class QoraValidator
             if (fact.DefersToMono)
             {
                 Defer($"loop `{index} in {from}..{to}` has a `.Count`-relative bound, awaits the specialized size");
-                return Result(IndexCheckResult.Unproven);
+                return FinishIndexValidation();
             }
-            // otherwise the bound does not settle → unproven → rejection below
+            // otherwise the bound does not settle; MIR classifies the final SSA value
         }
 
-        // No proof exists. Recorded as DATA, not as a diagnostic — the failed proof is target-independent;
-        // the OpenQASM policy pass later derives QSEM030 from <see cref="HirSemanticModel.UnprovenIndexes"/>.
-        // A future runtime-capable backend will consume the typed site identity after it defines checked
-        // access lowering and runtime-failure semantics.
-        // Blame the bound that actually failed to settle: when From never folded, naming To would accuse
-        // the wrong bound (and the fix hint would send the user to the wrong place).
-        string? unresolvedBound = null;
-        if (inLoop)
-            unresolvedBound = fact.FromB is null ? from : to;
-
-        unproven.Add(
-            new UnprovenIndex(
-                exactSite.Id,
-                opName,
-                name,
-                index,
-                unresolvedBound,
-                span));
-        return Result(IndexCheckResult.Unproven);
+        // No HIR proof exists, but the expression is valid at this boundary. MIR derives the final bounds
+        // classification from its SSA/CFG representation.
+        return FinishIndexValidation();
     }
 
     /// <summary>Validate and bounds-check the full index expression of one measurement target.</summary>
-    private static IndexCheckResult CheckQubitIndex(
+    private static IndexValidationResult CheckQubitIndex(
         HirIndexExpression access,
         Scope scope,
         string opName,
         Ctx ctx,
         SourceSpan? span,
         BoundsCtx bounds = default,
-        IndexCheckResult nestedResult = IndexCheckResult.Proven)
+        IndexValidationResult nestedResult = IndexValidationResult.Valid)
     {
         if (access.Receiver is not HirNameExpression receiver
             || scope.Lookup(receiver.Name) is not { } resolved)
-            return IndexCheckResult.Invalid;
+            return IndexValidationResult.Invalid;
 
         var result = CheckIndexedAccess(
             receiver.Name,
             access.Index,
-            access,
             scope,
             opName,
             ctx,
@@ -2701,7 +2653,7 @@ internal static class QoraValidator
         if (resolved.Type != QType.Qubit)
         {
             Add(ctx.Errors, "QSEM006", $"in `{opName}`: measurement target `{HirExpressions.Render(access)}` is not a qubit", span);
-            return IndexCheckResult.Invalid;
+            return IndexValidationResult.Invalid;
         }
         return result;
     }

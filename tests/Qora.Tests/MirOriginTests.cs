@@ -6,7 +6,7 @@ namespace Qora.Tests;
 public sealed class MirOriginTests
 {
     [Fact]
-    public void ReplayPreservesOriginValuesAndAppendsAfterTheReplayedTable()
+    public void GeneratedOriginSharesItsParentAndPreservesTheRootHirSource()
     {
         var source = CompileMir(
             """
@@ -15,49 +15,67 @@ public sealed class MirOriginTests
                 H(q[0]);
             }
             """);
-        Assert.NotEmpty(source.Origins.Origins);
+        var main = Assert.Single(source.Program.Callables);
+        var gate = Assert.Single(
+            main.Blocks
+                .SelectMany(block => block.Instructions)
+                .OfType<MirQuantumApply>());
+        var root = gate.Origin.SourceHirOrigin;
+        var generated = new MirGeneratedOrigin(
+            gate.Origin,
+            "first generated step");
+        var nested = new MirGeneratedOrigin(
+            generated,
+            "second generated step");
 
-        var firstBuilder = new MirOriginTableBuilder(
-            source.LoweringSource.Source);
-        firstBuilder.Replay(source.Origins);
-
-        var firstParent = new MirOriginId(0);
-        var synthesized = firstBuilder.Synthesized(
-            firstParent,
-            "origin replay test");
-        Assert.Equal(source.Origins.Origins.Count, synthesized.Value);
-        var expanded = firstBuilder.Build();
-
-        var secondBuilder = new MirOriginTableBuilder(
-            source.LoweringSource.Source);
-        secondBuilder.Replay(expanded);
-        var replayed = secondBuilder.Build();
-
-        Assert.Equal(expanded.Origins.Count, replayed.Origins.Count);
-        for (var index = 0; index < expanded.Origins.Count; index++)
-        {
-            var expected = expanded.Origins[index];
-            var actual = replayed.Origins[index];
-
-            Assert.Equal(expected.HirNodeId, actual.HirNodeId);
-            Assert.Equal(expected.Span, actual.Span);
-            Assert.Equal(expected.SynthesisReason, actual.SynthesisReason);
-            Assert.Equal(expected.Parent?.Value, actual.Parent?.Value);
-        }
-
-        var replayedSynthesized = secondBuilder.Synthesized(
-            firstParent,
-            "origin replay test");
-        Assert.Equal(synthesized.Value, replayedSynthesized.Value);
-
-        var appended = secondBuilder.Synthesized(
-            replayedSynthesized,
-            "appended after replay");
-        Assert.Equal(expanded.Origins.Count, appended.Value);
+        Assert.Same(gate.Origin, generated.Parent);
+        Assert.Same(generated, nested.Parent);
+        Assert.Same(root, generated.SourceHirOrigin);
+        Assert.Same(root, nested.SourceHirOrigin);
+        Assert.Equal(root.HirNodeId, nested.SourceHirOrigin.HirNodeId);
+        Assert.Equal(root.Span, nested.SourceHirOrigin.Span);
+        Assert.NotNull(root.Span);
     }
 
     [Fact]
-    public void TransformationPreservesExistingOriginIdsAndRejectsMissingParents()
+    public void OriginFormattingDoesNotPrintTheComputedSourceOrigin()
+    {
+        var source = CompileMir(
+            """
+            operation Main() {
+                use q = Qubit[1];
+                H(q[0]);
+            }
+            """);
+        var main = Assert.Single(source.Program.Callables);
+        var gate = Assert.Single(
+            main.Blocks
+                .SelectMany(block => block.Instructions)
+                .OfType<MirQuantumApply>());
+        var root = gate.Origin.SourceHirOrigin;
+        var generated = new MirGeneratedOrigin(root, "generated test step");
+        var qubitAccess = Assert.Single(
+            gate.Operands
+                .OfType<MirQubitCallOperand>())
+            .Qubit;
+
+        var rootText = root.ToString();
+        var generatedText = generated.ToString();
+        var accessText = qubitAccess.ToString();
+
+        Assert.Contains(nameof(MirHirOrigin.HirNodeId), rootText);
+        Assert.Contains(nameof(MirHirOrigin.Span), rootText);
+        Assert.Contains("generated test step", generatedText);
+        Assert.Contains(nameof(MirQubitAccess.Origin), accessText);
+        Assert.DoesNotContain(nameof(MirOrigin.SourceHirOrigin), rootText);
+        Assert.DoesNotContain(nameof(MirOrigin.SourceHirOrigin), generatedText);
+        Assert.DoesNotContain(nameof(MirOrigin.SourceHirOrigin), accessText);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void GeneratedOriginRejectsAnEmptyReason(string reason)
     {
         var source = CompileMir(
             """
@@ -66,22 +84,66 @@ public sealed class MirOriginTests
                 X(q[0]);
             }
             """);
-        var transformation = new MirSnapshotTransformation(source);
-        var replayed = transformation.BuildOrigins();
+        var parent = Assert.Single(source.Program.Callables).Origin;
 
-        for (var value = 0; value < source.Origins.Origins.Count; value++)
-        {
-            var originId = new MirOriginId(value);
+        Assert.Throws<ArgumentException>(
+            () => new MirGeneratedOrigin(parent, reason));
+    }
 
-            Assert.Equal(
-                source.Origins.Require(originId),
-                replayed.Require(originId));
-        }
+    [Fact]
+    public void MaterializedAdjointKeepsTheOriginalCallableAndInstructionOriginChains()
+    {
+        var source = CompileMir(
+            """
+            operation Worker(q: Qubit) {
+                X(q);
+            }
 
-        Assert.Throws<ArgumentOutOfRangeException>(
-            () => transformation.Synthesize(
-                new MirOriginId(source.Origins.Origins.Count),
-                "missing parent"));
+            operation Main() {
+                use q = Qubit[1];
+                Worker(q[0]);
+            }
+            """);
+        var worker = Assert.Single(
+            source.Program.Callables,
+            callable => callable.Name == "Worker");
+        var main = Assert.Single(
+            source.Program.Callables,
+            callable => callable.Name == "Main");
+        var request = Assert.Single(
+            main.Blocks
+                .SelectMany(block => block.Instructions)
+                .OfType<MirQuantumApply>(),
+            instruction => instruction.Target is MirUserCallableTarget target
+                && target.Callable == worker.Id);
+        var requestSite = new MirInstructionSite(main.Id, request.Id);
+        var injected = MirAdjointMaterializer.InjectRequests(
+            source,
+            new[] { requestSite });
+        var result = MirAdjointMaterializer.Run(injected);
+        var output = Assert.IsType<MirSnapshot>(result.Output);
+        var inverse = output.Program.RequireCallable(result.Inverses[worker.Id]);
+
+        var callableOrigin = Assert.IsType<MirGeneratedOrigin>(inverse.Origin);
+        Assert.Same(worker.Origin, callableOrigin.Parent);
+        Assert.Same(
+            worker.Origin.SourceHirOrigin,
+            callableOrigin.SourceHirOrigin);
+
+        var originalGate = Assert.Single(
+            worker.Blocks
+                .SelectMany(block => block.Instructions)
+                .OfType<MirQuantumApply>());
+        var inverseGate = Assert.Single(
+            inverse.Blocks
+                .SelectMany(block => block.Instructions)
+                .OfType<MirQuantumApply>());
+        var instructionOrigin = Assert.IsType<MirGeneratedOrigin>(
+            inverseGate.Origin);
+        Assert.Same(originalGate.Origin, instructionOrigin.Parent);
+        Assert.Same(
+            originalGate.Origin.SourceHirOrigin,
+            instructionOrigin.SourceHirOrigin);
     }
 
     private static MirSnapshot CompileMir(string source)

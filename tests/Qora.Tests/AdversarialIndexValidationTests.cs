@@ -1,3 +1,8 @@
+using Qora.Compiler;
+using Qora.Ir;
+using Qora.Ir.Mir;
+using Qora.Ir.Mir.Analysis;
+
 namespace Qora.Tests;
 
 /// <summary>
@@ -42,7 +47,6 @@ public class AdversarialIndexValidationTests
         var error = Assert.Single(compiled.Diagnostics.Select(diagnostic => diagnostic.Error).ToList());
         Assert.Equal("QSEM016", error.Code);
         Assert.DoesNotContain(compiled.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(), candidate => candidate.Code == "QSEM030");
-        Assert.Empty(compiled.Hir.ResolvedValidation!.Model.UnprovenIndexes);
     }
 
     [Fact]
@@ -60,7 +64,6 @@ public class AdversarialIndexValidationTests
         Assert.Equal("QSEM016", error.Code);
         Assert.Contains("ys[99]", error.Message);
         Assert.DoesNotContain(compiled.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(), candidate => candidate.Code == "QSEM030");
-        Assert.Empty(compiled.Hir.ResolvedValidation!.Model.UnprovenIndexes);
     }
 
     [Fact]
@@ -95,10 +98,22 @@ public class AdversarialIndexValidationTests
         Assert.False(compiled.Succeeded);
         Assert.Equal(2, compiled.Diagnostics.Select(diagnostic => diagnostic.Error).ToList().Count(error => error.Code == "QSEM030"));
         Assert.DoesNotContain(compiled.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(), error => error.Code == "QSEM016");
+        var bounds = BoundsResults(compiled)
+            .OrderBy(fact => TextAt(compiled, fact.Origin))
+            .ToArray();
         Assert.Collection(
-            compiled.Hir.SpecializedValidation!.Model.UnprovenIndexes.OrderBy(fact => fact.Array),
-            fact => Assert.Equal(("xs", "ys [ n ]"), (fact.Array, fact.Index)),
-            fact => Assert.Equal(("ys", "n"), (fact.Array, fact.Index)));
+            bounds,
+            fact =>
+            {
+                Assert.Equal(MirBoundsClassification.Unproven, fact.Result.Classification);
+                Assert.Equal("xs[ys[n]]", TextAt(compiled, fact.Origin));
+            },
+            fact =>
+            {
+                Assert.Equal(MirBoundsClassification.Unproven, fact.Result.Classification);
+                Assert.Equal("ys[n]", TextAt(compiled, fact.Origin));
+            });
+        Assert.NotEqual(bounds[0].Origin.HirNodeId, bounds[1].Origin.HirNodeId);
     }
 
     [Theory]
@@ -122,7 +137,6 @@ public class AdversarialIndexValidationTests
         var error = Assert.Single(compiled.Diagnostics.Select(diagnostic => diagnostic.Error).ToList());
         Assert.Equal("QSEM016", error.Code);
         Assert.Contains("ys[99]", error.Message);
-        Assert.Empty(compiled.Hir.ResolvedValidation!.Model.UnprovenIndexes);
     }
 
     [Theory]
@@ -143,7 +157,6 @@ public class AdversarialIndexValidationTests
         var error = Assert.Single(compiled.Diagnostics.Select(diagnostic => diagnostic.Error).ToList());
         Assert.Equal("QSEM016", error.Code);
         Assert.Contains("ys[99]", error.Message);
-        Assert.Empty(compiled.Hir.ResolvedValidation!.Model.UnprovenIndexes);
     }
 
     [Fact]
@@ -168,9 +181,17 @@ public class AdversarialIndexValidationTests
         Assert.False(compiled.Succeeded);
         Assert.Equal(2, compiled.Diagnostics.Select(diagnostic => diagnostic.Error).ToList().Count(error => error.Code == "QSEM030"));
         Assert.DoesNotContain(compiled.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(), error => error.Code == "QSEM016");
+        var bounds = BoundsResults(compiled)
+            .OrderBy(fact => TextAt(compiled, fact.Origin))
+            .ToArray();
         Assert.Equal(
-            ["xs", "ys"],
-            compiled.Hir.SpecializedValidation!.Model.UnprovenIndexes.Select(fact => fact.Array).Order().ToArray());
+            ["xs[pass(ys[n])]", "ys[n]"],
+            bounds.Select(fact => TextAt(compiled, fact.Origin)).ToArray());
+        Assert.All(
+            bounds,
+            fact => Assert.Equal(
+                MirBoundsClassification.Unproven,
+                fact.Result.Classification));
     }
 
     [Fact]
@@ -212,7 +233,9 @@ public class AdversarialIndexValidationTests
 
         var error = Assert.Single(compiled.Diagnostics.Select(diagnostic => diagnostic.Error).ToList());
         Assert.Equal("QSEM030", error.Code);
-        Assert.Single(compiled.Hir.SpecializedValidation!.Model.UnprovenIndexes);
+        var fact = Assert.Single(BoundsResults(compiled));
+        Assert.Equal(MirBoundsClassification.Unproven, fact.Result.Classification);
+        Assert.Equal("xs[last]", TextAt(compiled, fact.Origin));
     }
 
     [Theory]
@@ -237,7 +260,6 @@ public class AdversarialIndexValidationTests
 
         var error = Assert.Single(compiled.Diagnostics.Select(diagnostic => diagnostic.Error).ToList());
         Assert.Equal("QSEM016", error.Code);
-        Assert.Empty(compiled.Hir.ResolvedValidation!.Model.UnprovenIndexes);
     }
 
     [Theory]
@@ -263,7 +285,9 @@ public class AdversarialIndexValidationTests
 
         var error = Assert.Single(compiled.Diagnostics.Select(diagnostic => diagnostic.Error).ToList());
         Assert.Equal("QSEM030", error.Code);
-        Assert.Single(compiled.Hir.SpecializedValidation!.Model.UnprovenIndexes);
+        var fact = Assert.Single(BoundsResults(compiled));
+        Assert.Equal(MirBoundsClassification.Unproven, fact.Result.Classification);
+        Assert.Equal($"xs[{index}]", TextAt(compiled, fact.Origin));
     }
 
     [Fact]
@@ -343,7 +367,6 @@ public class AdversarialIndexValidationTests
         Assert.Contains(compiled.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(),
             error => error.Code == "QSEM007" && error.Message.Contains("missing"));
         Assert.DoesNotContain(compiled.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(), error => error.Code == "QSEM030");
-        Assert.Empty(compiled.Hir.ResolvedValidation!.Model.UnprovenIndexes);
     }
 
     [Fact]
@@ -363,7 +386,6 @@ public class AdversarialIndexValidationTests
         Assert.Contains(compiled.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(),
             error => error.Code == "QSEM016" && error.Message.Contains("value") && error.Message.Contains("scalar"));
         Assert.DoesNotContain(compiled.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(), error => error.Code == "QSEM030");
-        Assert.Empty(compiled.Hir.ResolvedValidation!.Model.UnprovenIndexes);
     }
 
     [Fact]
@@ -383,7 +405,6 @@ public class AdversarialIndexValidationTests
         Assert.Contains(compiled.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(),
             error => error.Code == "QSEM016" && error.Message.Contains("classical integer index"));
         Assert.DoesNotContain(compiled.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(), error => error.Code == "QSEM030");
-        Assert.Empty(compiled.Hir.ResolvedValidation!.Model.UnprovenIndexes);
     }
 
     [Theory]
@@ -405,7 +426,9 @@ public class AdversarialIndexValidationTests
 
         var error = Assert.Single(compiled.Diagnostics.Select(diagnostic => diagnostic.Error).ToList());
         Assert.Equal("QSEM030", error.Code);
-        Assert.Single(compiled.Hir.SpecializedValidation!.Model.UnprovenIndexes);
+        var fact = Assert.Single(BoundsResults(compiled));
+        Assert.Equal(MirBoundsClassification.Unproven, fact.Result.Classification);
+        Assert.Equal($"xs[{index}]", TextAt(compiled, fact.Origin));
         Assert.Null(compiled.Targets.OpenQasm);
     }
 
@@ -427,7 +450,148 @@ public class AdversarialIndexValidationTests
 
         var error = Assert.Single(compiled.Diagnostics.Select(diagnostic => diagnostic.Error).ToList());
         Assert.Equal("QSEM030", error.Code);
-        Assert.Single(compiled.Hir.SpecializedValidation!.Model.UnprovenIndexes);
+        var fact = Assert.Single(BoundsResults(compiled));
+        Assert.Equal(MirBoundsClassification.Unproven, fact.Result.Classification);
+        Assert.Equal("xs[last]", TextAt(compiled, fact.Origin));
         Assert.Null(compiled.Targets.OpenQasm);
+    }
+
+    [Fact]
+    public void TreatsAnIndexInsideAContradictoryConjunctionAsUnreachable()
+    {
+        var compiled = Compiler.Compile("""
+            function chooseIndex(): int {
+                return 0;
+            }
+
+            operation Main() {
+                var values: int[] = [10];
+                var index: int = chooseIndex();
+                if (index < 0 && index >= 0) {
+                    var invalid: int = 9;
+                    var value: int = values[invalid];
+                }
+            }
+            """);
+
+        Assert.True(compiled.Succeeded);
+        Assert.Empty(compiled.Diagnostics.Select(diagnostic => diagnostic.Error).ToList());
+        var fact = Assert.Single(BoundsResults(compiled));
+        Assert.Equal(MirBoundsClassification.Proven, fact.Result.Classification);
+    }
+
+    [Fact]
+    public void DoesNotTreatANarrowButFeasibleConjunctionAsUnreachable()
+    {
+        var compiled = Compiler.Compile("""
+            function chooseIndex(): int {
+                return 0;
+            }
+
+            operation Main() {
+                var values: int[] = [10];
+                var index: int = chooseIndex();
+                if (index < 1 && index >= 0) {
+                    var invalid: int = 9;
+                    var value: int = values[invalid];
+                }
+            }
+            """);
+
+        var error = Assert.Single(
+            compiled.Diagnostics.Select(diagnostic => diagnostic.Error),
+            candidate => candidate.Code == "QSEM016");
+        Assert.Equal("QSEM016", error.Code);
+        var fact = Assert.Single(BoundsResults(compiled));
+        Assert.Equal(MirBoundsClassification.Invalid, fact.Result.Classification);
+    }
+
+    [Fact]
+    public void ReportsOneUnprovenDiagnosticForAllSizeSpecializationsOfOneSourceAccess()
+    {
+        var compiled = Compiler.Compile("""
+            function chooseIndex(): int {
+                return 0;
+            }
+
+            operation Work(q: Qubit[]) {
+                H(q[chooseIndex()]);
+            }
+
+            operation Main() {
+                use one = Qubit[1];
+                use two = Qubit[2];
+                Work(one);
+                Work(two);
+            }
+            """);
+
+        var errors = compiled.Diagnostics
+            .Select(diagnostic => diagnostic.Error)
+            .Where(error => error.Code == "QSEM030")
+            .ToArray();
+        Assert.Single(errors);
+        Assert.Equal(
+            2,
+            BoundsResults(compiled).Count(fact =>
+                fact.Result.Classification == MirBoundsClassification.Unproven));
+    }
+
+    [Fact]
+    public void ReportsOneInvalidDiagnosticForAllSizeSpecializationsOfOneSourceAccess()
+    {
+        var compiled = Compiler.Compile("""
+            operation Work(q: Qubit[]) {
+                var index: int = 5;
+                H(q[index]);
+            }
+
+            operation Main() {
+                use one = Qubit[1];
+                use two = Qubit[2];
+                Work(one);
+                Work(two);
+            }
+            """);
+
+        var errors = compiled.Diagnostics
+            .Select(diagnostic => diagnostic.Error)
+            .Where(error => error.Code == "QSEM016")
+            .ToArray();
+        Assert.Single(errors);
+        Assert.Equal(
+            2,
+            BoundsResults(compiled).Count(fact =>
+                fact.Result.Classification == MirBoundsClassification.Invalid));
+    }
+
+    private static IReadOnlyList<(MirBoundsResult Result, MirHirOrigin Origin)> BoundsResults(
+        Compilation compilation)
+    {
+        var mir = Assert.IsType<MirSnapshot>(compilation.Mir);
+        var results = new List<(MirBoundsResult Result, MirHirOrigin Origin)>();
+        foreach (var callable in mir.Program.Callables)
+        {
+            var bounds = mir.Analyses.Bounds(callable);
+            foreach (var result in bounds.Results)
+            {
+                results.Add((
+                    result,
+                    bounds.OriginFor(result).SourceHirOrigin));
+            }
+        }
+
+        return results;
+    }
+
+    private static string TextAt(
+        Compilation compilation,
+        MirHirOrigin origin)
+    {
+        var span = Assert.IsType<SourceSpan>(origin.Span);
+        var document = Assert.Single(
+            compilation.Sources.Documents,
+            candidate => candidate.Ref == span.Document);
+        return document.Text[span.Start..span.End];
     }
 }

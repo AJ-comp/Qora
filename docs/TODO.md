@@ -116,7 +116,7 @@ declared at `Main` top level and lowers to OpenQASM general arrays. (clean)
   `MirInstructionSite` by attaching `MirFunctor.Adjoint` to its `MirQuantumApply`, and `Run` synthesizes
   the required inverse MIR callable before rewriting the request to a typed call. Qora source and HIR
   contain no inverse marker or HIR-side inversion machinery. Rung ④ must therefore compute a global LIFO cleanup
-  schedule, inject requests into a new MIR revision, and pass that exact snapshot to the materializer.
+  schedule, inject requests into a new MIR snapshot, and pass that exact object to the materializer.
   The current materializer deliberately accepts only the straight-line unitary subset; branch CFGs,
   measurement, mutation, local allocation, recursion, and unstable witnesses must remain explicit
   blockers until their inverse semantics are implemented.
@@ -124,17 +124,18 @@ declared at `Main` top level and lowers to OpenQASM general arrays. (clean)
 ## Auto-uncompute — registered data gaps (from the requirements cross-check, 2026-07-11)
 
 MIR already provides versioned qubits, instruction effects, CFG/path conditions, memory state, and
-classical-witness availability. The cleanup scheduler and injector must consume those exact
-revision-bound facts; HIR keeps no parallel qubit history or cleanup verdict. The remaining gaps are:
+classical-witness availability. The cleanup scheduler and injector must consume the facts owned by
+that exact MIR program; HIR keeps no parallel qubit history or cleanup verdict. The remaining gaps are:
 
 - **#11 — conditional cleanup placement.** MIR already records path-condition SSA leaves and witness
   availability. A scheduler that injects `if (r==1) { inverse }` must reconstruct the matching guard at
   the chosen cleanup site, prove every required value is still available there, and reject unavailable
   or loop-carried predicates. This is scheduler work, not a missing HIR event stream.
 - **#14 — post-injection re-analysis.** The cleanup scheduler consumes analyses bound to one exact
-  `MirSnapshotId`. Rung ④ must publish the injected program as a new
-  `MirStage.InverseRequestsInjected` snapshot, record its exact parent and rebased origins, and recompute
-  every invalidated MIR analysis rather than reusing facts from the pre-injection revision. Successful
+  `MirProgram` owned by one `MirSnapshot`. Rung ④ must publish the injected program as a new
+  `MirStage.InverseRequestsInjected` snapshot, retain the exact previous snapshot as
+  `TransformationSource`, replay its origins, and recompute every invalidated MIR analysis rather than
+  reusing facts from the previous program. Successful
   materialization then publishes the next `MirStage.AdjointsMaterialized` snapshot.
 - **#16 — cleanup-candidate conditions coupled to FUTURE features** (2026-07-11 literature
   cross-check: Silq PLDI'20, Q#, Unqomp PLDI'21/Reqomp, Twist POPL'22, Quipper, Bennett'73, Gidney'18 —
@@ -186,8 +187,8 @@ revision-bound facts; HIR keeps no parallel qubit history or cleanup verdict. Th
   immutable `MirProgram` and owning `MirCallable`; program-wide sites carry only the callable ID and
   callable-local entity ID because the owning snapshot is already fixed by the analysis or transformation.
   HIR lineage lives directly in `HirCompilation.Lineage`, outside `HirSemanticModel`;
-  `MirSnapshot.LoweringSource` and `MirSnapshot.Origins` retain only the HIR basis and source
-  provenance required by Core. OpenQASM emitted names live only in
+  `MirSnapshot.LoweringSource` retains the HIR basis, while each MIR entity directly owns the
+  immutable `MirOrigin` provenance required by Core. OpenQASM emitted names live only in
   `OpenQasmSymbolMap`. Source names remain lookup/diagnostic data at the edge; they are never analysis
   identity.
 - **#19 — bind calls to their callee by node reference, not by name — ✅ SHIPPED (2026-07-14; unified
@@ -233,9 +234,9 @@ revision-bound facts; HIR keeps no parallel qubit history or cleanup verdict. Th
   Target results live in the backend-keyed `TargetArtifactSet.Artifacts` map. `QasmBackend` consumes the
   exact materialized `MirSnapshot` and produces `MirOpenQasmTargetProgram`; `OpenQasmArtifact.Text` is
   derived from that model. The artifact records the exact MIR source it consumed, and the backend never
-  reaches back into HIR. Target diagnostics likewise carry the backend plus a typed MIR input identity.
+  reaches back into HIR. Target diagnostics likewise carry the backend plus the exact MIR input object.
   The CLI renders `--stages` from this completed aggregate without rerunning passes.
-  The revision-bound Core model is the input to optional language-service queries and future
+  The immutable Core model is the input to optional language-service queries and future
   incremental compilation, but IDE indexes are not compiler-owned facts. Document dependency
   invalidation, snapshot reuse, and separate compilation are **not implemented yet** and must not be
   described as unnecessary.
@@ -246,10 +247,11 @@ Updated 2026-07-27. The module system, typed functions and returns, expression c
 types, effect analysis, ownership contracts, MIR, and immutable compilation snapshots have landed.
 The main dependent track is now **automatic uncomputation**: the injector must consume the existing
 effect/liveness facts, insert identity-bound internal inverse requests, preserve the scope-exit |0⟩ guarantee, and
-publish a new MIR snapshot with the correct parent, origins, and invalidated analyses rather than mutate an
+publish a new MIR snapshot with the previous object as its exact `TransformationSource`, directly shared
+immutable origins, and freshly computed analyses rather than mutate an
 earlier snapshot. Local allocation lowering
 depends on that guarantee. Incremental invalidation and IDE query indexes should extend the existing
-document identities, exact lowering source, origin table, and source maps. IDE-only symbol-to-MIR
+document identities, exact lowering source, direct MIR origins, and source maps. IDE-only symbol-to-MIR
 lookups belong to the opt-in `Qora.LanguageServices.MirSemanticIndex`; they must not become a second
 mutable ledger of semantic facts inside Core. `bool`, automatic controlled-operation generation, and the target-erased
 `Result` / `Pauli` abstractions remain later language work.

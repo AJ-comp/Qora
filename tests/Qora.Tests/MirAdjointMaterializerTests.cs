@@ -1,6 +1,7 @@
 using Qora.Compiler;
 using Qora.Ir;
 using Qora.Ir.Mir;
+using Qora.Ir.Mir.Analysis;
 
 namespace Qora.Tests;
 
@@ -32,7 +33,7 @@ public sealed class MirAdjointMaterializerTests
         Assert.NotSame(source, injected);
         Assert.Equal(MirStage.Lowered, source.Stage);
         Assert.Equal(MirStage.InverseRequestsInjected, injected.Stage);
-        Assert.Equal(source.Id.Revision + 1, injected.Id.Revision);
+        Assert.Same(source, injected.TransformationSource);
         Assert.Empty(sourceCall.Functors);
         Assert.Equal(
             new[] { MirFunctor.Adjoint },
@@ -50,7 +51,7 @@ public sealed class MirAdjointMaterializerTests
         Assert.True(result.Changed);
         var output = Assert.IsType<MirSnapshot>(result.Output);
         Assert.Equal(MirStage.AdjointsMaterialized, output.Stage);
-        Assert.Equal(injected.Id.Revision + 1, output.Id.Revision);
+        Assert.Same(injected, output.TransformationSource);
         Assert.Same(injected, result.Source);
         Assert.Same(output, result.Snapshot);
 
@@ -88,8 +89,8 @@ public sealed class MirAdjointMaterializerTests
             Assert.Single(inverseGates[1].QubitResults).Version.Value);
         MirAdjointMaterializer.VerifyMaterialized(output);
 
-        var originalOrigin = source.Origins.ResolveHir(worker.Origin);
-        var inverseOrigin = output.Origins.ResolveHir(inverse.Origin);
+        var originalOrigin = worker.Origin.SourceHirOrigin;
+        var inverseOrigin = inverse.Origin.SourceHirOrigin;
         Assert.Equal(originalOrigin.HirNodeId, inverseOrigin.HirNodeId);
         Assert.Equal(originalOrigin.Span, inverseOrigin.Span);
         Assert.NotNull(inverseOrigin.Span);
@@ -121,6 +122,49 @@ public sealed class MirAdjointMaterializerTests
             gate => Assert.Equal(
                 new[] { MirQasmQuantumModifier.Inverse },
                 gate.Modifiers));
+    }
+
+    [Fact]
+    public void MaterializationResultRejectsForeignSourceAndCallableIds()
+    {
+        const string sourceText =
+            """
+            operation Worker(q: Qubit) {
+                X(q);
+            }
+
+            operation Main() {
+                use q = Qubit[1];
+                Worker(q[0]);
+            }
+            """;
+        var unrelatedSource = RequireMir(CompileMir(sourceText));
+        var source = RequireMir(CompileMir(sourceText));
+        var worker = RequireCallable(source, "Worker");
+        var sourceCall = Assert.Single(UserCalls(source, "Main", worker.Id));
+        var injected = MirAdjointMaterializer.InjectRequests(
+            source,
+            new[] { Instruction(source, "Main", sourceCall) });
+        var valid = MirAdjointMaterializer.Run(injected);
+        var output = Assert.IsType<MirSnapshot>(valid.Output);
+
+        Assert.Throws<ArgumentException>(
+            () => new MirAdjointMaterializationResult(
+                unrelatedSource,
+                output,
+                valid.Inverses,
+                Array.Empty<MirAdjointMaterializationError>()));
+
+        var inverse = Assert.Single(valid.Inverses).Value;
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => new MirAdjointMaterializationResult(
+                injected,
+                output,
+                new Dictionary<MirCallableId, MirCallableId>
+                {
+                    [new MirCallableId(int.MaxValue)] = inverse,
+                },
+                Array.Empty<MirAdjointMaterializationError>()));
     }
 
     [Fact]
@@ -301,8 +345,10 @@ public sealed class MirAdjointMaterializerTests
                 StringComparison.Ordinal));
         Assert.Equal("MIRADJ001", error.Code);
         Assert.Equal(branchy.Id, error.Callable);
-        Assert.True(injected.Origins.Contains(error.Origin));
-        var resolved = injected.Origins.ResolveHir(error.Origin);
+        Assert.Same(
+            branchy.Origin.SourceHirOrigin,
+            error.Origin.SourceHirOrigin);
+        var resolved = error.Origin.SourceHirOrigin;
         var span = Assert.IsType<SourceSpan>(resolved.Span);
         Assert.Contains(
             "Branchy",
@@ -341,51 +387,71 @@ public sealed class MirAdjointMaterializerTests
                 "measurement is not unitary",
                 StringComparison.Ordinal));
         Assert.Equal(read.Id, error.Callable);
-        var resolved = injected.Origins.ResolveHir(error.Origin);
+        var resolved = error.Origin.SourceHirOrigin;
         var span = Assert.IsType<SourceSpan>(resolved.Span);
         Assert.Contains("M(q)", TextAt(compilation, span), StringComparison.Ordinal);
     }
 
     [Fact]
-    public void BoundsObligationsSurviveBothTransformations()
+    public void BoundsAnalysisRecomputesTheSameSourceFactAcrossBothTransformations()
     {
-        var source = RequireMir(
-            CompileMir(
-                """
-                function idx(): int {
-                    return 0;
-                }
+        var compilation = CompileMir(
+            """
+            function idx(): int {
+                return 0;
+            }
 
-                operation Worker(q: Qubit, xs: int[]) {
-                    var value: int = xs[idx()];
-                    X(q);
-                }
+            operation Worker(q: Qubit, xs: int[]) {
+                var value: int = xs[idx()];
+                X(q);
+            }
 
-                operation Main() {
-                    use q = Qubit[1];
-                    var xs: int[] = [1];
-                    Worker(q[0], xs);
-                }
-                """));
-        var obligation = Assert.Single(source.UnprovenBounds);
+            operation Main() {
+                use q = Qubit[1];
+                var xs: int[] = [1];
+                Worker(q[0], xs);
+            }
+            """);
+        var source = RequireMir(compilation);
         var worker = RequireCallable(source, "Worker");
+        var sourceBounds = source.Analyses.Bounds(worker);
+        var sourceFact = Assert.Single(
+            sourceBounds.Results,
+            result => result.Classification == MirBoundsClassification.Unproven);
+        var sourceOrigin = sourceBounds.OriginFor(sourceFact).SourceHirOrigin;
         var request = Assert.Single(UserCalls(source, "Main", worker.Id));
         var injected = MirAdjointMaterializer.InjectRequests(
             source,
             new[] { Instruction(source, "Main", request) });
         var result = MirAdjointMaterializer.Run(injected);
         var output = Assert.IsType<MirSnapshot>(result.Output);
-        var injectedObligation = Assert.Single(
-            injected.UnprovenBounds);
-        Assert.Equal(obligation, injectedObligation);
-        Assert.Equal(obligation, Assert.Single(output.UnprovenBounds));
-        Assert.Equal("Worker", obligation.Operation);
-        Assert.Equal("xs", obligation.Aggregate);
-        Assert.Equal("idx()", obligation.Index);
-        Assert.Null(obligation.LoopBound);
-        Assert.NotNull(obligation.Span);
-        Assert.Equal(source.Id.Revision + 1, injected.Id.Revision);
-        Assert.Equal(injected.Id.Revision + 1, output.Id.Revision);
+        var injectedWorker = RequireCallable(injected, "Worker");
+        var injectedBounds = injected.Analyses.Bounds(injectedWorker);
+        var injectedFact = Assert.Single(
+            injectedBounds.Results,
+            candidate => candidate.Classification == MirBoundsClassification.Unproven);
+        var injectedOrigin = injectedBounds.OriginFor(injectedFact).SourceHirOrigin;
+        var outputWorker = RequireCallable(output, "Worker");
+        var outputBounds = output.Analyses.Bounds(outputWorker);
+        var outputFact = Assert.Single(
+            outputBounds.Results,
+            candidate => candidate.Classification == MirBoundsClassification.Unproven);
+        var outputOrigin = outputBounds.OriginFor(outputFact).SourceHirOrigin;
+
+        Assert.NotSame(sourceBounds, injectedBounds);
+        Assert.NotSame(injectedBounds, outputBounds);
+        Assert.Equal(sourceFact.Classification, injectedFact.Classification);
+        Assert.Equal(sourceFact.Classification, outputFact.Classification);
+        Assert.Equal(sourceOrigin.HirNodeId, injectedOrigin.HirNodeId);
+        Assert.Equal(sourceOrigin.HirNodeId, outputOrigin.HirNodeId);
+        Assert.Equal(sourceOrigin.Span, injectedOrigin.Span);
+        Assert.Equal(sourceOrigin.Span, outputOrigin.Span);
+        var sourceSpan = Assert.IsType<SourceSpan>(sourceOrigin.Span);
+        Assert.Equal("xs[idx()]", TextAt(compilation, sourceSpan));
+        Assert.Equal(MirStage.InverseRequestsInjected, injected.Stage);
+        Assert.Equal(MirStage.AdjointsMaterialized, output.Stage);
+        Assert.Same(source, injected.TransformationSource);
+        Assert.Same(injected, output.TransformationSource);
         Assert.Same(
             injected,
             MirAdjointMaterializer.InjectRequests(
@@ -394,36 +460,51 @@ public sealed class MirAdjointMaterializerTests
     }
 
     [Fact]
-    public void BoundsObligationsRetainEachIndexedOperand()
+    public void BoundsAnalysisRetainsEachIndexedOperand()
     {
-        var source = RequireMir(
-            CompileMir(
-                """
-                function idx(): int {
-                    return 0;
-                }
+        var compilation = CompileMir(
+            """
+            function idx(): int {
+                return 0;
+            }
 
-                operation Main() {
-                    use left = Qubit[2];
-                    use right = Qubit[2];
-                    CNOT(left[idx()], right[idx()]);
-                }
-                """));
+            operation Main() {
+                use left = Qubit[2];
+                use right = Qubit[2];
+                CNOT(left[idx()], right[idx()]);
+            }
+            """);
+        var source = RequireMir(compilation);
 
-        var obligations = source.UnprovenBounds.ToArray();
-        Assert.Equal(2, obligations.Length);
+        var main = RequireCallable(source, "Main");
+        var bounds = source.Analyses.Bounds(main);
+        var facts = bounds.Results
+            .Where(result => result.Classification == MirBoundsClassification.Unproven)
+            .OrderBy(result => result.Site.OperandIndex)
+            .ToArray();
+        Assert.Equal(2, facts.Length);
         Assert.Equal(
-            new[] { "left", "right" },
-            obligations.Select(obligation => obligation.Aggregate));
+            new[] { 0, 1 },
+            facts.Select(fact => fact.Site.OperandIndex));
         Assert.All(
-            obligations,
-            obligation =>
+            facts,
+            fact =>
             {
-                Assert.Equal("Main", obligation.Operation);
-                Assert.Equal("idx()", obligation.Index);
-                Assert.Null(obligation.LoopBound);
-                Assert.NotNull(obligation.Span);
+                Assert.Equal(MirBoundsClassification.Unproven, fact.Classification);
+                Assert.Equal(2, fact.KnownLength);
+                Assert.NotNull(bounds.OriginFor(fact).SourceHirOrigin.Span);
             });
+        var origins = facts
+            .Select(fact => bounds.OriginFor(fact).SourceHirOrigin)
+            .ToArray();
+        Assert.NotEqual(origins[0].HirNodeId, origins[1].HirNodeId);
+        Assert.NotEqual(origins[0].Span, origins[1].Span);
+        Assert.Equal(
+            new[] { "left[idx()]", "right[idx()]" },
+            origins.Select(origin =>
+                TextAt(
+                    compilation,
+                    Assert.IsType<SourceSpan>(origin.Span))));
     }
 
     [Fact]

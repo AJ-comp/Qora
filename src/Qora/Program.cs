@@ -176,7 +176,7 @@ else
 static string FormatMirEffects(MirEffectSnapshot effects)
 {
     var text = new StringBuilder();
-    text.AppendLine($"mir effects snapshot {effects.SnapshotId}");
+    text.AppendLine("mir effects");
 
     foreach (var summary in effects.CallableSummaries)
     {

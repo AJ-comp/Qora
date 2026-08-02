@@ -20,9 +20,7 @@ public sealed class LanguageServiceCompilation
             || !ReferenceEquals(compilation.Mir, mirSemanticIndex.Mir)
             || !ReferenceEquals(
                 compilation.Hir.EffectAnalysis,
-                mirSemanticIndex.HirArtifact)
-            || compilation.Id != mirSemanticIndex.CompilationId
-            || compilation.Revision != mirSemanticIndex.CompilationRevision)
+                mirSemanticIndex.HirArtifact))
         {
             throw new ArgumentException(
                 "A language-service index must belong to its exact compiler snapshot.",

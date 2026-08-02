@@ -63,8 +63,6 @@ public sealed class MirImmutabilityTests
 
         var callables = new List<MirCallable> { clonedCallable };
         var program = new MirProgram(
-            compiled.SnapshotId,
-            compiled.Origins,
             compiled.EntryPoint,
             callables);
         QoraMirVerifier.VerifyOrThrow(program);

@@ -34,8 +34,7 @@ public sealed class OpenQasmTargetInvariantTests
         var artifact = Assert.IsType<OpenQasmArtifact>(
             compilation.Targets.OpenQasm);
 
-        Assert.Same(source, artifact.SourceSnapshot);
-        Assert.Equal(source.Id, artifact.Source);
+        Assert.Same(source, artifact.Source);
         Assert.Equal(MirQasmEmitter.Emit(artifact.Program), artifact.Text);
 
         var constructor = Assert.Single(

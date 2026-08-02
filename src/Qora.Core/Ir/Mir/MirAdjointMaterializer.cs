@@ -8,11 +8,12 @@ public sealed record MirAdjointMaterializationError(
     string Code,
     string Message,
     MirCallableId Callable,
-    MirOriginId Origin);
+    MirOrigin Origin);
 
 /// <summary>
 /// The result of one MIR-only adjoint materialization pass. A snapshot without internal callable-inverse
-/// requests is returned unchanged; a changed result owns the immediately following snapshot revision.
+/// requests is returned unchanged; a changed result owns the next supported MIR stage and retains its
+/// exact source snapshot.
 /// </summary>
 public sealed class MirAdjointMaterializationResult
 {
@@ -23,9 +24,50 @@ public sealed class MirAdjointMaterializationResult
         IReadOnlyList<MirAdjointMaterializationError> errors)
     {
         Source = source ?? throw new ArgumentNullException(nameof(source));
+        ArgumentNullException.ThrowIfNull(inverses);
+        ArgumentNullException.ThrowIfNull(errors);
         Output = output;
         Inverses = inverses.ToFrozenDictionary();
         Errors = Array.AsReadOnly(errors.ToArray());
+
+        if (Output is null)
+        {
+            if (Inverses.Count != 0)
+            {
+                throw new ArgumentException(
+                    "An unchanged or failed adjoint materialization cannot publish inverse callables.",
+                    nameof(inverses));
+            }
+        }
+        else
+        {
+            if (Errors.Count != 0)
+            {
+                throw new ArgumentException(
+                    "A failed adjoint materialization cannot publish an output snapshot.",
+                    nameof(errors));
+            }
+            if (Output.Stage != MirStage.AdjointsMaterialized
+                || !ReferenceEquals(Output.TransformationSource, Source))
+            {
+                throw new ArgumentException(
+                    "The materialized output must be the exact adjoint stage transformed from Source.",
+                    nameof(output));
+            }
+
+            foreach (var (sourceCallable, inverseCallable) in Inverses)
+            {
+                _ = Source.Program.RequireCallable(sourceCallable);
+                _ = Output.Program.RequireCallable(inverseCallable);
+            }
+        }
+
+        foreach (var error in Errors)
+        {
+            ArgumentNullException.ThrowIfNull(error);
+            _ = Source.Program.RequireCallable(error.Callable);
+            ArgumentNullException.ThrowIfNull(error.Origin);
+        }
     }
 
     public MirSnapshot Source { get; }
@@ -231,7 +273,6 @@ public static class MirAdjointMaterializer
                 + $"the supplied snapshot is already {source.Stage}");
         }
 
-        var transformation = new MirSnapshotTransformation(source);
         var changed = false;
         var callables =
             new List<MirCallable>(source.Program.Callables.Count);
@@ -280,18 +321,13 @@ public static class MirAdjointMaterializer
         if (!changed)
             return source;
 
-        var origins = transformation.BuildOrigins();
         var program = new MirProgram(
-            transformation.Target,
-            origins,
             source.Program.EntryPoint,
             callables);
-        return new MirSnapshot(
+        return MirSnapshot.CreateTransformed(
             program,
-            source.LoweringSource,
             MirStage.InverseRequestsInjected,
-            source,
-            source.UnprovenBounds);
+            source);
     }
 
     private sealed class Planner
@@ -338,7 +374,6 @@ public static class MirAdjointMaterializer
                 inverseIds.Add(originalId, inverseId);
             }
 
-            var transformation = new MirSnapshotTransformation(_source);
             var rewritten = new List<MirCallable>(
                 _source.Program.Callables.Count + _required.Count);
             foreach (var callable in _source.Program.Callables)
@@ -354,23 +389,17 @@ public static class MirAdjointMaterializer
                 var inverseCallable = CreateInverseCallable(
                     _source.Program.RequireCallable(original),
                     inverseIds[original],
-                    inverseIds,
-                    transformation);
+                    inverseIds);
                 rewritten.Add(inverseCallable);
             }
 
-            var origins = transformation.BuildOrigins();
             var program = new MirProgram(
-                transformation.Target,
-                origins,
                 _source.Program.EntryPoint,
                 rewritten);
-            var output = new MirSnapshot(
+            var output = MirSnapshot.CreateTransformed(
                 program,
-                _source.LoweringSource,
                 MirStage.AdjointsMaterialized,
-                _source,
-                _source.UnprovenBounds);
+                _source);
             VerifyMaterialized(output);
 
             return new MirAdjointMaterializationResult(
@@ -525,7 +554,7 @@ public static class MirAdjointMaterializer
 
         private void Error(
             MirCallable callable,
-            MirOriginId origin,
+            MirOrigin origin,
             string message) =>
             _errors.Add(
                 new MirAdjointMaterializationError(
@@ -602,8 +631,7 @@ public static class MirAdjointMaterializer
         private static MirCallable CreateInverseCallable(
             MirCallable original,
             MirCallableId inverseId,
-            IReadOnlyDictionary<MirCallableId, MirCallableId> inverseIds,
-            MirSnapshotTransformation transformation)
+            IReadOnlyDictionary<MirCallableId, MirCallableId> inverseIds)
         {
             var originalBlock = original.Blocks[0];
             var qubitVersions = new InverseQubitVersions(
@@ -616,7 +644,7 @@ public static class MirAdjointMaterializer
                 if (instruction is MirQuantumApply)
                     continue;
 
-                var origin = transformation.Synthesize(
+                var origin = new MirGeneratedOrigin(
                     instruction.Origin,
                     $"classical witness for inverse of {original.Id}");
                 var classicalWitness = CloneInstruction(
@@ -635,7 +663,6 @@ public static class MirAdjointMaterializer
                 var inverseApply = InvertApply(
                     apply,
                     inverseIds,
-                    transformation,
                     qubitVersions);
                 instructions.Add(inverseApply);
             }
@@ -644,14 +671,14 @@ public static class MirAdjointMaterializer
                 original,
                 inverseId,
                 $"__qora_inverse_{original.Id.Value}_{original.Name}",
-                transformation.Synthesize(
+                new MirGeneratedOrigin(
                     original.Origin,
                     $"inverse callable of {original.Id}"),
                 instructionTransform: _ => throw new InvalidOperationException(
                     "inverse instructions are supplied explicitly"),
                 replacementInstructions: instructions,
                 originForRole: (origin, role) =>
-                    transformation.Synthesize(
+                    new MirGeneratedOrigin(
                         origin,
                         $"inverse {role} of {original.Id}"));
         }
@@ -659,7 +686,6 @@ public static class MirAdjointMaterializer
         private static MirQuantumApply InvertApply(
             MirQuantumApply apply,
             IReadOnlyDictionary<MirCallableId, MirCallableId> inverseIds,
-            MirSnapshotTransformation transformation,
             InverseQubitVersions qubitVersions)
         {
             var toggledAdjoint = !HasAdjoint(apply.Functors);
@@ -685,7 +711,7 @@ public static class MirAdjointMaterializer
             if (target is MirBuiltinGateTarget && toggledAdjoint)
                 functors.Insert(0, MirFunctor.Adjoint);
 
-            var origin = transformation.Synthesize(
+            var origin = new MirGeneratedOrigin(
                 apply.Origin,
                 $"inverse quantum instruction {apply.Id}");
             var operands = qubitVersions.RewriteOperands(apply.Operands);
@@ -705,7 +731,7 @@ public static class MirAdjointMaterializer
             IReadOnlyList<MirFunctor> functors,
             IReadOnlyList<MirCallOperand> operands,
             IReadOnlyList<MirQubitAfterInstruction> qubitResults,
-            MirOriginId origin) =>
+            MirOrigin origin) =>
             new(
                 source.Id,
                 target,
@@ -717,7 +743,7 @@ public static class MirAdjointMaterializer
 
         private static IReadOnlyList<MirQubitAfterInstruction> CloneQubitResults(
             IReadOnlyList<MirQubitAfterInstruction> results,
-            Func<MirOriginId, MirOriginId> origin) =>
+            Func<MirOrigin, MirOrigin> origin) =>
             results
                 .Select(result => new MirQubitAfterInstruction(
                     result.Id,
@@ -770,7 +796,10 @@ public static class MirAdjointMaterializer
                     }
 
                     rewritten[index] = new MirQubitCallOperand(
-                        new MirQubitAccess(current, qubit.Qubit.Index),
+                        new MirQubitAccess(
+                            current,
+                            qubit.Qubit.Index,
+                            qubit.Qubit.Origin),
                         qubit.Ownership,
                         qubit.Access);
                 }
@@ -780,7 +809,7 @@ public static class MirAdjointMaterializer
 
             public IReadOnlyList<MirQubitAfterInstruction> CreateResults(
                 IReadOnlyList<MirQubitAfterInstruction> forwardResults,
-                MirOriginId origin)
+                MirOrigin origin)
             {
                 var results = new List<MirQubitAfterInstruction>(forwardResults.Count);
                 var written = new HashSet<MirQubitId>();
@@ -818,13 +847,13 @@ public static class MirAdjointMaterializer
             MirCallable source,
             MirCallableId id,
             string name,
-            MirOriginId origin,
+            MirOrigin origin,
             Func<MirInstruction, MirInstruction> instructionTransform,
             IReadOnlyList<MirInstruction>? replacementInstructions = null,
-            Func<MirOriginId, string, MirOriginId>? originForRole = null)
+            Func<MirOrigin, string, MirOrigin>? originForRole = null)
         {
-            MirOriginId OriginForRole(
-                MirOriginId sourceOrigin,
+            MirOrigin OriginForRole(
+                MirOrigin sourceOrigin,
                 string role) =>
                 originForRole is null
                     ? sourceOrigin
@@ -949,8 +978,8 @@ public static class MirAdjointMaterializer
 
         internal static MirInstruction CloneInstruction(
             MirInstruction instruction,
-            MirOriginId origin,
-            Func<MirOriginId, MirOriginId>? qubitOrigin = null)
+            MirOrigin origin,
+            Func<MirOrigin, MirOrigin>? qubitOrigin = null)
         {
             qubitOrigin ??= _ => origin;
             return instruction switch
@@ -995,7 +1024,7 @@ public static class MirAdjointMaterializer
 
         private static MirTerminator CloneTerminator(
             MirTerminator terminator,
-            MirOriginId origin) =>
+            MirOrigin origin) =>
             terminator switch
             {
                 MirJump value => value with { Origin = origin },

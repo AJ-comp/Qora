@@ -23,8 +23,7 @@ public static class MirPrinter
 
         public string Print()
         {
-            _text.AppendLine(
-                $"mir snapshot {_program.SnapshotId} entry @{_program.EntryPoint}");
+            _text.AppendLine($"mir program entry @{_program.EntryPoint}");
             foreach (var callable in _program.Callables.OrderBy(callable => callable.Id.Value))
             {
                 _text.AppendLine();
@@ -150,7 +149,10 @@ public static class MirPrinter
         {
             MirClassicalParameter classical =>
                 $"{Mode(classical.Ownership, classical.Access)}{Value(classical.Value)} {classical.Name}: {TypeOf(classical.Value)}"
-                + (classical.Storage is MirStorageId storage ? $" storage ${storage}" : string.Empty),
+                + (classical.Storage is MirStorageId storage ? $" storage ${storage}" : string.Empty)
+                + (classical.MinimumLength > 0
+                    ? $" minimum-length {classical.MinimumLength}"
+                    : string.Empty),
 
             MirQubitParameter qubit =>
                 $"{Mode(qubit.Ownership, QAccessMode.ReadOnly)}{Qubit(qubit.Key)} {qubit.Name}: "
@@ -297,20 +299,17 @@ public static class MirPrinter
                 _ => string.Empty,
             };
 
-        private string Origin(MirOriginId id)
+        private static string Origin(MirOrigin origin)
         {
-            var origin = _program.Origins.Require(id);
-            var hir = _program.Origins.ResolveHir(id);
-            var node = hir.HirNodeId is HirNodeId nodeId
-                ? $"node={nodeId}"
-                : "node=?";
+            var hir = origin.SourceHirOrigin;
+            var node = $"node={hir.HirNodeId}";
             var span = hir.Span is SourceSpan location
                 ? $",span={location}"
                 : string.Empty;
-            var synthesized = origin.Parent is not null
-                ? $",synth={origin.SynthesisReason}"
+            var synthesized = origin is MirGeneratedOrigin generated
+                ? $",synth={generated.Reason}"
                 : string.Empty;
-            return $"@{id}:hir({node}{span}{synthesized})";
+            return $"@hir({node}{span}{synthesized})";
         }
     }
 }

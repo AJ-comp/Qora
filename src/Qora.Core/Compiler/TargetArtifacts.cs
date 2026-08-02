@@ -11,7 +11,7 @@ namespace Qora.Compiler;
 public interface ITargetArtifact
 {
     TargetBackend Backend { get; }
-    MirSnapshotId Source { get; }
+    MirSnapshot Source { get; }
 }
 
 /// <summary>
@@ -27,7 +27,7 @@ public sealed class OpenQasmArtifact : ITargetArtifact
             throw new ArgumentException(
                 "An OpenQASM artifact requires one successful backend result.",
                 nameof(result));
-        SourceSnapshot = result.Source;
+        Source = result.Source;
         Program = result.Target
             ?? throw new ArgumentException(
                 "A successful OpenQASM backend result has no target program.",
@@ -35,8 +35,7 @@ public sealed class OpenQasmArtifact : ITargetArtifact
         Text = MirQasmEmitter.Emit(Program);
     }
 
-    internal MirSnapshot SourceSnapshot { get; }
-    public MirSnapshotId Source => SourceSnapshot.Id;
+    public MirSnapshot Source { get; }
     public MirOpenQasmTargetProgram Program { get; }
     public string Text { get; }
     public TargetBackend Backend => TargetBackend.OpenQasm;
@@ -51,7 +50,7 @@ public sealed class TargetArtifactSet
     {
         ArgumentNullException.ThrowIfNull(artifacts);
         var byBackend = new Dictionary<TargetBackend, ITargetArtifact>();
-        MirSnapshotId? sharedSource = null;
+        MirSnapshot? sharedSource = null;
         foreach (var artifact in artifacts)
         {
             ArgumentNullException.ThrowIfNull(artifact);
@@ -59,13 +58,18 @@ public sealed class TargetArtifactSet
                 throw new ArgumentException(
                     $"Target artifact declares unknown backend {artifact.Backend}.",
                     nameof(artifacts));
-            if (sharedSource is { } expected && artifact.Source != expected)
+            var source = artifact.Source
+                ?? throw new ArgumentException(
+                    $"Target artifact {artifact.Backend} has no MIR source.",
+                    nameof(artifacts));
+            if (sharedSource is { } expected
+                && !ReferenceEquals(source, expected))
             {
                 throw new ArgumentException(
-                    $"Target artifacts cannot mix MIR sources {expected} and {artifact.Source}.",
+                    "Target artifacts cannot mix different MIR source objects.",
                     nameof(artifacts));
             }
-            sharedSource ??= artifact.Source;
+            sharedSource ??= source;
             if (artifact.Backend == TargetBackend.OpenQasm
                 && artifact is not OpenQasmArtifact)
             {

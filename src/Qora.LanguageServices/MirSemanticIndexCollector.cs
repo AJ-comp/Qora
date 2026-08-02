@@ -405,14 +405,16 @@ internal sealed class MirSemanticIndexCollector : IMirLoweringTraceSink
             throw new InvalidOperationException(
                 "A MIR semantic index requires an accepted final HIR effect-analysis artifact.");
         }
-        if (hirArtifact.SourceId.CompilationId != compilation.Id
-            || hirArtifact.SourceId.CompilationRevision != compilation.Revision
-            || mir.Id.CompilationId != compilation.Id
-            || mir.Id.CompilationRevision != compilation.Revision
-            || mir.LoweredFrom != hirArtifact.SourceId)
+        if (!ReferenceEquals(
+                compilation.Hir.EffectAnalysis,
+                hirArtifact)
+            || !ReferenceEquals(
+                compilation.Mir,
+                mir))
         {
             throw new InvalidOperationException(
-                "The completed HIR and MIR do not belong to the same Compilation revision.");
+                "The completed HIR and MIR are not the exact artifacts "
+                + "owned by the Compilation.");
         }
     }
 

@@ -7,7 +7,7 @@ namespace Qora.Ir;
 internal sealed record MirOpenQasmLoweringError(
     string Code,
     string Message,
-    MirOriginId? Origin);
+    MirOrigin? Origin);
 
 internal sealed class MirOpenQasmLoweringResult
 {
@@ -1774,7 +1774,7 @@ internal static class MirOpenQasmLowering
         public MirOpenQasmUnsupportedException(
             string code,
             string message,
-            MirOriginId origin)
+            MirOrigin origin)
             : base(message)
         {
             Code = code;
@@ -1782,7 +1782,7 @@ internal static class MirOpenQasmLowering
         }
 
         public string Code { get; }
-        public MirOriginId Origin { get; }
+        public MirOrigin Origin { get; }
     }
 
     private readonly record struct HiddenStorageKey(

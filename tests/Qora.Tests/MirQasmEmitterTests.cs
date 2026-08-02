@@ -118,7 +118,7 @@ public sealed class MirQasmEmitterTests
     }
 
     [Fact]
-    public void TargetProgramCarriesNoMirSnapshotIdentity()
+    public void TargetProgramCarriesNoMirSnapshotOwnership()
     {
         var program = new MirOpenQasmTargetProgram(
             Array.Empty<MirQasmStatement>(),
@@ -130,13 +130,13 @@ public sealed class MirQasmEmitterTests
             MirQasmEmitter.Emit(program).ReplaceLineEndings("\n"));
         Assert.DoesNotContain(
             typeof(MirOpenQasmTargetProgram).GetProperties(),
-            property => property.PropertyType == typeof(MirSnapshotId));
+            property => property.PropertyType == typeof(MirSnapshot));
         Assert.DoesNotContain(
             typeof(MirOpenQasmTargetProgram).GetFields(
                 System.Reflection.BindingFlags.Instance
                 | System.Reflection.BindingFlags.Public
                 | System.Reflection.BindingFlags.NonPublic),
-            field => field.FieldType == typeof(MirSnapshotId));
+            field => field.FieldType == typeof(MirSnapshot));
     }
 
     [Fact]

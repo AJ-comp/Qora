@@ -469,31 +469,33 @@ v1 = add v0, 1
 return</code></pre>
 
   <p>
-    The result is one immutable, revision-qualified <code>MirSnapshot</code>. Core retains the exact
-    <code>LoweringSource</code> and the program-owned <code>Origins</code> required for diagnostics,
+    The result is one exact immutable <code>MirSnapshot</code> at <code>MirStage.Lowered</code>. Core retains
+    the exact <code>LoweringSource</code> and the program-owned <code>Origins</code> required for diagnostics,
     transformation provenance, and backend errors; it does not retain an always-on
     HIR-symbol-to-MIR-entity query index. When editor tooling requests those relationships,
     <code>Qora.LanguageServices.MirSemanticIndex</code> collects an opt-in lowering trace and builds
     callable-scoped symbol, value, storage, and qubit maps above the compiler IR layer. Backends consume
-    MIR directly and never depend on that language-service index.
+    MIR directly and never depend on that language-service index. Compilation identity remains in the
+    exact <code>LoweringSource</code>; MIR does not copy it.
   </p>
 
   <h2 id="s8"><span class="n">8</span>Analyze MIR and materialize internal inverses</h2>
 
-  <p class="stagehead">passes: revision-bound MIR analyses → <code>MirAdjointMaterializer</code></p>
+  <p class="stagehead">passes: analyses for the exact <code>MirProgram</code> → <code>MirAdjointMaterializer</code></p>
 
   <p>
-    Control-flow, effect, alias, memory-state, path-condition, and control-region analyses all consume
-    the exact MIR revision they describe. Their results are not copied into HIR and cannot be reused
-    against a changed graph.
+    Control-flow, effect, alias, memory-state, path-condition, and control-region analyses are all bound
+    to the exact <code>MirProgram</code> object they describe. Their results are not copied into HIR and
+    cannot be reused against a snapshot that owns a new program.
   </p>
 
   <p>
     Inverse requests also belong exclusively to MIR. A compiler-internal scheduler may mark one exact
     <code>MirQuantumApply</code> with <code>MirFunctor.Adjoint</code>. The
     <code>MirAdjointMaterializer</code> then synthesizes the required inverse MIR callable, rewrites the
-    request to a typed callable target, and publishes a new snapshot with an exact parent and rebased
-    origins. Qora source and HIR contain no <code>Adjoint</code>, inverse marker, or conjugation node.
+    request to a typed callable target, and publishes a new snapshot whose exact
+    <code>TransformationSource</code> is the previous snapshot. Qora source and HIR contain no
+    <code>Adjoint</code>, inverse marker, or conjugation node.
   </p>
 
 <pre><code>MirQuantumApply(Target = Prepare, Functors = [MirFunctor.Adjoint])
@@ -538,7 +540,7 @@ MirQuantumApply(Target = __qora_inverse_..., Functors = [])</code></pre>
       <tr><td>Validate</td><td><code>QoraValidator</code> + <code>SymbolTableBuilder</code></td><td>IR → symbol tables + every semantic error (a hard gate on emission)</td></tr>
       <tr><td>Monomorphize</td><td><code>Monomorphizer</code></td><td><code>Qubit[]</code> calls → call-size-specific internal copies, then re-validate if changed</td></tr>
       <tr><td>Lower MIR</td><td><code>QoraMirLowering</code></td><td>accepted HIR + semantic facts → typed SSA/CFG <code>MirSnapshot</code>, with measurements lowered at their evaluation points</td></tr>
-      <tr><td>Analyze MIR</td><td><code>MirAnalysisStore</code></td><td>exact MIR revision → control-flow, effects, alias, memory, and path facts</td></tr>
+      <tr><td>Analyze MIR</td><td><code>MirAnalysisStore</code></td><td>exact <code>MirProgram</code> → control-flow, effects, alias, memory, and path facts</td></tr>
       <tr><td>Materialize</td><td><code>MirAdjointMaterializer</code></td><td>MIR-only inverse requests → synthesized inverse MIR callables</td></tr>
       <tr><td>Target-lower</td><td><code>MirOpenQasmLowering</code></td><td>materialized MIR → typed <code>MirOpenQasmTargetProgram</code></td></tr>
       <tr><td>Emit</td><td><code>MirQasmEmitter</code></td><td>typed target model → OpenQASM 3 text</td></tr>
@@ -556,8 +558,9 @@ MirQuantumApply(Target = __qora_inverse_..., Functors = [])</code></pre>
     <span class="h">Where this is heading — automatic uncomputation</span>
     Silq-style automatic uncomputation — <strong>finding where a temporary qubit is no longer needed and
     injecting its inverse automatically</strong> — now has the correct stage boundary. The scheduler will
-    consume revision-bound SSA/CFG facts, find a global cleanup order, and inject exact MIR instruction
-    requests. <code>MirAdjointMaterializer</code> and the typed target path already consume that representation.
+    consume SSA/CFG facts bound to one exact <code>MirProgram</code>, find a global cleanup order, and
+    inject exact MIR instruction requests. <code>MirAdjointMaterializer</code> and the typed target path
+    already consume that representation.
     Conditions, loops, aliases, classical-witness stability, and conflicts between several ancillas still need
     explicit proofs before the scheduler can enable those cases.
   </div>

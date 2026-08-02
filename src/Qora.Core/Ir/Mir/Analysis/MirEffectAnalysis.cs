@@ -458,9 +458,9 @@ internal sealed class MirFormalQubitEffectQuery
 }
 
 /// <summary>
-/// Immutable analysis data tied to one exact MIR program revision. A transformed program must be analyzed
-/// again; this prevents a cleanup pass from accidentally consuming instruction/value identities from a
-/// stale snapshot.
+/// Immutable analysis data tied to one exact MIR program object. A transformed program must be analyzed
+/// again; this prevents a cleanup pass from accidentally consuming instructions or values from a stale
+/// program.
 /// </summary>
 public sealed class MirEffectSnapshot
 {
@@ -480,7 +480,6 @@ public sealed class MirEffectSnapshot
         _summaryByCallable = CallableSummaries.ToFrozenDictionary(summary => summary.Callable);
     }
 
-    public MirSnapshotId SnapshotId => _sourceProgram.SnapshotId;
     public IReadOnlyList<MirQuantumInstructionEffect> Effects { get; }
     public IReadOnlyList<MirCallableEffectSummary> CallableSummaries { get; }
 
@@ -491,8 +490,8 @@ public sealed class MirEffectSnapshot
     {
         if (!IsFor(program))
             throw new InvalidOperationException(
-                $"MIR effect snapshot belongs to {SnapshotId} of a different program instance; " +
-                $"reanalyze snapshot {program.SnapshotId} before consuming it");
+                "the MIR effect analysis belongs to a different MIR program instance; "
+                + "reanalyze the requested program before consuming it");
     }
 
     public MirQuantumInstructionEffect? EffectAt(MirInstructionSite site)
@@ -500,7 +499,7 @@ public sealed class MirEffectSnapshot
 
     /// <summary>
     /// Returns the canonical MIR instruction described by an effect site. The instruction stays owned by
-    /// the exact immutable program revision from which this snapshot was analyzed.
+    /// the exact immutable program object from which this snapshot was analyzed.
     /// </summary>
     public MirInstruction RequireInstruction(MirInstructionSite site) =>
         _sourceProgram.RequireInstruction(site);

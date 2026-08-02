@@ -90,11 +90,10 @@ public sealed class Compilation
 
         foreach (var artifact in targets.Artifacts.Values)
         {
-            if (mir is null || artifact.Source != mir.Id)
+            if (mir is null || !ReferenceEquals(artifact.Source, mir))
             {
                 throw new ArgumentException(
-                    $"{artifact.Backend} source {artifact.Source} is not this Compilation's canonical "
-                    + "MIR snapshot.",
+                    $"{artifact.Backend} source is not this Compilation's canonical MIR snapshot.",
                     nameof(targets));
             }
         }
@@ -170,13 +169,6 @@ public sealed class Compilation
 
         if (mir is not null)
         {
-            if (mir.Id.CompilationId != id
-                || mir.Id.CompilationRevision != revision)
-            {
-                throw new ArgumentException(
-                    "MIR belongs to a different Compilation snapshot.",
-                    nameof(mir));
-            }
             if (!ReferenceEquals(
                     mir.LoweringSource,
                     hir.EffectAnalysis))
@@ -184,18 +176,6 @@ public sealed class Compilation
                 throw new ArgumentException(
                     "MIR must consume this Compilation's canonical final HIR effect artifact.",
                     nameof(mir));
-            }
-        }
-
-        if (targets.OpenQasm is { } openQasm)
-        {
-            if (mir is null
-                || !ReferenceEquals(mir, openQasm.SourceSnapshot)
-                || openQasm.Source != mir.Id)
-            {
-                throw new ArgumentException(
-                    $"OpenQASM source {openQasm.Source} is not this Compilation's exact MIR snapshot.",
-                    nameof(targets));
             }
         }
 
@@ -228,6 +208,8 @@ public sealed class Compilation
                 CompilationStage.MirLowering =>
                     diagnostic.Origin is DiagnosticOrigin.Hir
                     or DiagnosticOrigin.Mir,
+                CompilationStage.MirAnalysis =>
+                    diagnostic.Origin is DiagnosticOrigin.Mir,
                 CompilationStage.OpenQasm =>
                     diagnostic.Origin is DiagnosticOrigin.Target,
                 _ => false,
@@ -265,12 +247,12 @@ public sealed class Compilation
                     break;
 
                 case DiagnosticOrigin.Mir source:
-                    if (mir is null || source.Snapshot != mir.Id)
+                    if (mir is null || !ReferenceEquals(source.Snapshot, mir))
                         throw new ArgumentException(
-                            $"Diagnostic source {source.Snapshot} is not this Compilation's MIR snapshot.",
+                            "Diagnostic source is not this Compilation's MIR snapshot.",
                             nameof(diagnostics));
                     if (source.Location is { } location)
-                        _ = mir.Origins.Require(location);
+                        ValidateMirDiagnosticOrigin(mir, location, nameof(diagnostics));
                     break;
 
                 case DiagnosticOrigin.Target source:
@@ -286,14 +268,14 @@ public sealed class Compilation
                             $"Diagnostic was produced by unsolicited target backend {source.Backend}.",
                             nameof(diagnostics));
                     }
-                    if (mir is null || source.Input != mir.Id)
+                    if (mir is null || !ReferenceEquals(source.Input, mir))
                     {
                         throw new ArgumentException(
-                            $"Diagnostic target MIR input {source.Input} is not owned by this Compilation.",
+                            "Diagnostic target MIR input is not owned by this Compilation.",
                             nameof(diagnostics));
                     }
                     if (source.Location is { } targetLocation)
-                        _ = mir.Origins.Require(targetLocation);
+                        ValidateMirDiagnosticOrigin(mir, targetLocation, nameof(diagnostics));
                     break;
 
                 default:
@@ -304,6 +286,30 @@ public sealed class Compilation
         }
 
         VerifyValidationDiagnosticProjection(hir, _diagnostics);
+    }
+
+    private static void ValidateMirDiagnosticOrigin(
+        MirSnapshot mir,
+        MirOrigin origin,
+        string parameterName)
+    {
+        var hirOrigin = origin.SourceHirOrigin;
+        var hirSource = mir.LoweringSource.Source;
+        if (!hirSource.Structure.Contains(hirOrigin.HirNodeId))
+        {
+            throw new ArgumentException(
+                $"Diagnostic MIR origin refers to HIR node {hirOrigin.HirNodeId} outside "
+                + "the exact lowering source.",
+                parameterName);
+        }
+
+        var expectedSpan = hirSource.SourceMap.Find(hirOrigin.HirNodeId);
+        if (hirOrigin.Span != expectedSpan)
+        {
+            throw new ArgumentException(
+                $"Diagnostic MIR origin span does not match HIR node {hirOrigin.HirNodeId}.",
+                parameterName);
+        }
     }
 
     public CompilationId Id { get; }

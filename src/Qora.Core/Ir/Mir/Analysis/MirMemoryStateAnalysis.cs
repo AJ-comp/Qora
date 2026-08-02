@@ -81,7 +81,6 @@ public sealed class MirMemoryStateSnapshot
                 group => MirCollections.Freeze(group));
     }
 
-    public MirSnapshotId SnapshotId => _cfg.SnapshotId;
     public MirCallableId Callable => _cfg.Callable;
 
     public MirMemoryStateAvailability CheckBeforeInstruction(
@@ -123,8 +122,8 @@ public sealed class MirMemoryStateSnapshot
     {
         if (!IsFor(program, callable))
             throw new InvalidOperationException(
-                $"MIR memory-state snapshot belongs to {Callable} in snapshot {SnapshotId}; " +
-                $"reanalyze {callable} in snapshot {program.SnapshotId}");
+                $"the MIR memory-state analysis does not belong to callable {callable} "
+                + $"in the requested MIR program; it was created for callable {Callable}");
     }
 
     public MirMemoryStateAvailability Check(

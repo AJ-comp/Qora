@@ -70,7 +70,6 @@ public sealed class MirWitnessAvailabilitySnapshot
         _scalars = scalars;
     }
 
-    public MirSnapshotId SnapshotId => _cfg.SnapshotId;
     public MirCallableId Callable => _cfg.Callable;
 
     internal bool IsFor(
@@ -87,8 +86,8 @@ public sealed class MirWitnessAvailabilitySnapshot
     {
         if (!IsFor(program, effects, callable))
             throw new InvalidOperationException(
-                $"MIR witness snapshot belongs to {Callable} in snapshot {SnapshotId}; " +
-                $"reanalyze {callable} in snapshot {program.SnapshotId}");
+                $"the MIR witness analysis does not belong to callable {callable} "
+                + "and the supplied dependency analyses");
     }
 
     public MirWitnessAvailability CheckBeforeInstruction(
@@ -219,7 +218,7 @@ internal static class MirWitnessAvailabilityAnalysis
         if (!scalars.IsFor(program, callable.Id))
             throw new InvalidOperationException(
                 $"MIR scalar-availability snapshot does not belong to {callable.Id} " +
-                $"in snapshot {program.SnapshotId}");
+                "in the requested MIR program");
 
         return new MirWitnessAvailabilitySnapshot(
             effects,

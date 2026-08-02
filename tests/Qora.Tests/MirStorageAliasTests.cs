@@ -167,8 +167,6 @@ public sealed class MirStorageAliasTests
             originalCall.Origin);
         var malformedMain = ReplaceInstruction(main, aliasedCall);
         var malformedProgram = new MirProgram(
-            program.SnapshotId,
-            program.Origins,
             program.EntryPoint,
             program.Callables
                 .Select(callable => callable.Id == main.Id

@@ -3,7 +3,7 @@ namespace Qora.Ir;
 /// <summary>The compiler version stamped into emitted target artifacts.</summary>
 public static class QoraVersion
 {
-    public const string Value = "0.35.0";
+    public const string Value = "0.36.0";
 }
 
 public enum QType

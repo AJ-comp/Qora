@@ -376,19 +376,9 @@ public sealed class HirImmutabilityTests
     {
         var hir = new HirTestFactory();
         var callable = hir.Callable("F");
-        var firstIndex = hir.Index("xs", 0);
-        var secondIndex = hir.Index("ys", 0);
         var validation = new HirSemanticModel();
         var required = new Dictionary<string, long> { ["xs"] = 2 };
         validation.SetRequiredArgLengths(callable.Id, required);
-        validation.AddUnprovenIndex(
-            new UnprovenIndex(
-                firstIndex.Id,
-                "F",
-                "xs",
-                "i",
-                null,
-                null));
         validation.AddDeferredSizeCheck(new DeferredSizeCheck("F", "xs", "xs[i]", "size", null));
         required["xs"] = 99;
         required["ys"] = 1;
@@ -398,15 +388,6 @@ public sealed class HirImmutabilityTests
         Assert.Equal(2, needs["xs"]);
         Assert.False(needs.ContainsKey("ys"));
         AssertDictionaryCannotRemove(needs, "xs");
-        AssertCannotAdd(
-            validation.UnprovenIndexes,
-            new UnprovenIndex(
-                secondIndex.Id,
-                "Injected",
-                "ys",
-                "0",
-                null,
-                null));
         AssertCannotAdd(
             validation.DeferredSizeChecks,
             new DeferredSizeCheck("Injected", "ys", "ys[0]", "mutation", null));
