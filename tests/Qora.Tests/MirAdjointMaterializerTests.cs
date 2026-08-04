@@ -33,7 +33,7 @@ public sealed class MirAdjointMaterializerTests
         Assert.NotSame(source, injected);
         Assert.Equal(MirStage.Lowered, source.Stage);
         Assert.Equal(MirStage.InverseRequestsInjected, injected.Stage);
-        Assert.Same(source, injected.TransformationSource);
+        Assert.Same(source, injected.PreviousSnapshot);
         Assert.Empty(sourceCall.Functors);
         Assert.Equal(
             new[] { MirFunctor.Adjoint },
@@ -51,7 +51,7 @@ public sealed class MirAdjointMaterializerTests
         Assert.True(result.Changed);
         var output = Assert.IsType<MirSnapshot>(result.Output);
         Assert.Equal(MirStage.AdjointsMaterialized, output.Stage);
-        Assert.Same(injected, output.TransformationSource);
+        Assert.Same(injected, output.PreviousSnapshot);
         Assert.Same(injected, result.Source);
         Assert.Same(output, result.Snapshot);
 
@@ -450,8 +450,8 @@ public sealed class MirAdjointMaterializerTests
         Assert.Equal("xs[idx()]", TextAt(compilation, sourceSpan));
         Assert.Equal(MirStage.InverseRequestsInjected, injected.Stage);
         Assert.Equal(MirStage.AdjointsMaterialized, output.Stage);
-        Assert.Same(source, injected.TransformationSource);
-        Assert.Same(injected, output.TransformationSource);
+        Assert.Same(source, injected.PreviousSnapshot);
+        Assert.Same(injected, output.PreviousSnapshot);
         Assert.Same(
             injected,
             MirAdjointMaterializer.InjectRequests(

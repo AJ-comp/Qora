@@ -6,24 +6,23 @@ using Janglim.FrontEnd.RegularGrammar;
 namespace Qora;
 
 /// <summary>
-/// Qora v0.36.0 — a Q#/C#-flavored quantum language on the Janglim engine.
+/// Qora v0.37.0 — a Q#/C#-flavored quantum language on the Janglim engine.
 ///
 ///   operation Bell(q: Qubit[]) {        // a subroutine, with trailing-type parameters (name: T)
 ///       H(q[0]);
 ///       Controlled X(q[0], q[1]);       // add a control -> ctrl @ x  (CNOT)
 ///   }
 ///
-///   operation Main() {                  // the entry point -> OpenQASM top-level
+///   operation Main() {                  // the Qora program entry root
 ///       use q = Qubit[2];
 ///       Bell(q);                        // call (whole register) — or Bell(q[0], q[1])
 ///       var r: bit = M(q[0]);
 ///       if (r == 1) { Z(q[1]); } else { S(q[1]); }           // if/else
 ///   }
 ///
-/// Calls and gate applications share one surface form (<c>qualified.name(args…)</c>); the emitter tells them
-/// apart through the typed callable identity recorded by resolution; target emission never guesses by
-/// spelling. The operation named <c>Main</c>
-/// is the entry (its body becomes the QASM top-level); every other operation becomes a <c>def</c>.
+/// Calls and gate applications share one surface form (<c>qualified.name(args…)</c>). Semantic resolution
+/// distinguishes them and records one typed callable identity before HIR is finalized; later stages never
+/// guess by spelling. The operation named <c>Main</c> is the Qora program's entry root.
 ///
 /// v0.8 added: the single-gate modifier <c>Controlled G(...)</c> (-> OpenQASM <c>ctrl @</c>),
 /// richer conditions (== != &lt; &lt;= &gt; &gt;= &amp;&amp; || !),
@@ -58,20 +57,22 @@ namespace Qora;
 /// <c>use q = Qubit[N]</c> for allocation. It also adds one-dimensional <c>int[]</c>, <c>float[]</c>,
 /// <c>bit[]</c>, and <c>angle[]</c> values: explicit literals, zero-initialized <c>new T[N]</c>, indexed
 /// reads/writes, <c>.Count</c>, and mutable array parameters lowered to OpenQASM 3 general arrays.
-/// v0.22 proves every array/register index in bounds at compile time (rung B′): a literal within a known
+/// v0.22 introduced compile-time array/register bounds proofs (rung B′): a literal within a known
 /// length, a loop over <c>0..a.Count-1</c>, a constant-bounded loop, a call-site minimum-length floor for a
-/// classical-array parameter, or a guard <c>if (0 &lt;= n &amp;&amp; n &lt; a.Count)</c> proves it; an index that
-/// cannot be proven is <c>QSEM030</c> (OpenQASM 3 has no runtime bounds check). Expressions are parsed to a
-/// tree (<c>Ir/AstExpressionLowering.cs</c>) once at lowering, and every consumer reads that tree rather than re-parsing
-/// text. A name used before its own-scope declaration is <c>QSEM025</c> (point-of-declaration scoping).
+/// classical-array parameter, or a guard <c>if (0 &lt;= n &amp;&amp; n &lt; a.Count)</c> proves it). HIR rejects a
+/// definitely invalid index and leaves unresolved safety to MIR classification; only a backend policy that
+/// requires static proof reports <c>QSEM030</c>. Expressions are parsed to a tree
+/// (<c>Ir/AstExpressionLowering.cs</c>) during AST-to-HIR lowering, and every later consumer reads that tree
+/// rather than re-parsing text. A name used before its own-scope declaration is <c>QSEM025</c>
+/// (point-of-declaration scoping).
 /// v0.23 lets array locals live anywhere a scalar does — helper operations, loops, branches. OpenQASM
 /// wants arrays at global scope and hides mutable globals from defs, so the backend's
 /// MIR-to-OpenQASM lowering threads a def-local classical array as a hidden
 /// <c>mutable array[T, #dim = 1]</c> reference parameter backed by a global (the declaration site becomes
 /// per-entry element-wise re-initialization; a nested <c>bit[]</c> hoists to its scope top). <c>bit[]</c>
-/// parameters are length-specialized per call site like <c>Qubit[]</c> and emit as <c>bit[N]</c>; writing
-/// to a <c>bit[]</c> parameter is <c>QSEM032</c> (bit registers pass by value — a write would be
-/// silently invisible to the caller).
+/// parameters are length-specialized per call site like <c>Qubit[]</c>. Mutable classical-array contracts
+/// apply uniformly to <c>bit[]</c>; a target that cannot preserve that contract rejects it during target
+/// lowering.
 /// v0.24 hardens the v0.23 hoisting: every minted name is a collision-proof internal placeholder
 /// that target name allocation prettifies, so no minted name can shadow a user variable, and a
 /// measurement-in-condition temp can no longer mask a user's undeclared <c>__mN</c> (its <c>QSEM025</c>).
@@ -92,10 +93,12 @@ namespace Qora;
 /// v0.27 makes a WHOLE <c>bit[]</c> register a CONTAINER OF BITS rather than a number. A bit pattern carries
 /// no sign, so it has no numeric value on its own — the same <c>"10"</c> reads 2 unsigned and −2 in two's
 /// complement — and the language no longer picks one silently: every numeric use of a whole register
-/// (<c>var n: int = f</c>, <c>f + 1</c>, <c>if (f)</c>, <c>f == 1</c>) is <c>QSEM036</c>, as is comparing
-/// registers of different widths or ordering them. What stays legal needs no numeric reading: <c>f[i]</c>,
-/// <c>f.Count</c>, passing the register as an argument, and <c>f == g</c> between equal widths (which emits
-/// bare — OpenQASM compares bit patterns). The one explicit reading is the built-in <c>AsInt(f)</c>, which
+/// (<c>var n: int = f</c>, <c>f + 1</c>, <c>if (f)</c>, <c>f == 1</c>) is <c>QSEM036</c>, as is ordering
+/// registers. What stays legal needs no numeric reading: <c>f[i]</c>, <c>f.Count</c>, passing the register as
+/// an argument, and structural <c>f == g</c>/<c>f != g</c>. More generally, <c>==</c>/<c>!=</c> compares
+/// classical arrays structurally when their element types match: different lengths are legal and unequal,
+/// while equal lengths compare corresponding elements. The one explicit reading of a whole <c>bit[]</c> is
+/// the built-in <c>AsInt(f)</c>, which
 /// lowers to the width-qualified unsigned cast <c>uint[N](f)</c> (the spec allows <c>bit[n]</c> →
 /// <c>uint[m]</c> only when <c>n == m</c>). Scalar <c>bit</c> is untouched: the spec makes it interchangeable
 /// with <c>bool</c>, so it IS a value.
@@ -118,14 +121,18 @@ namespace Qora;
 /// An index is now the same complete expression tree used everywhere else: <c>xs[idx()]</c>,
 /// <c>q[i + 1]</c>, and nested indexed reads all parse. HIR validation requires one scalar <c>int</c>,
 /// validates calls inside the index, and rejects definite structural or bounds errors. MIR then classifies
-/// every surviving indexed access as proven, invalid, or unproven. The OpenQASM policy pass turns only the
-/// final MIR unproven results into QSEM030.
+/// every surviving indexed access as proven, invalid, or unproven. HIR never turns an unproven result into
+/// <c>QSEM030</c>; that diagnostic belongs to a backend policy that requires compile-time bounds proof.
 /// Callable parameters are read-only borrows by default. An operation spells mutable borrowing as
 /// <c>var values: int[]</c> / <c>Update(var values)</c>, ownership transfer as <c>move values</c>, and both
 /// axes as <c>move var values</c>.
-/// Mutable access is limited to reference-capable classical arrays, while read-only ownership transfer also
-/// accepts whole bit/qubit arrays and whole qubit bindings. Functions stay borrowed and read-only.
+/// Mutable access is available to every classical array, including <c>bit[]</c>, while read-only ownership
+/// transfer also accepts whole bit/qubit arrays and whole qubit bindings. HIR and MIR preserve this Qora
+/// contract; a backend that cannot represent it rejects the program during target lowering. Functions stay
+/// borrowed and read-only.
 /// User function and operation calls now validate scalar arguments against each declared parameter type.
+/// HIR also validates condition, loop-range, and operator operand types and records every approved implicit
+/// scalar conversion. MIR consumes those exact approvals instead of choosing source-language conversions.
 /// Array-bound facts follow stable symbol identity through shadowing, and direct affine <c>.Count</c>
 /// indexes receive an exact all-length verdict or defer to size specialization. Nested index validation
 /// preserves independent root errors while suppressing only derivative failed-proof diagnostics.
@@ -151,7 +158,7 @@ public class QoraGrammar : Grammar
     public Terminal Repeat { get; } = new Terminal(TokenType.Keyword, "repeat", false);
     public Terminal Until { get; } = new Terminal(TokenType.Keyword, "until", false);
 
-    // else stays in the AST (meaning=true) so the emitter can split the then-branch from the else-branch.
+    // else stays in the AST (meaning=true) so AST-to-HIR lowering can split the two branches.
     public Terminal Else { get; } = new Terminal(TokenType.Keyword, "else", "else", true, false);
 
     // The Controlled modifier stays in the AST so the gate name that follows can be distinguished from it.
@@ -173,14 +180,13 @@ public class QoraGrammar : Grammar
     public Terminal LineComment { get; } = new Terminal(TokenType.SpecialToken.Comment, "//.*$", false, true);
 
     // --- identifier + numbers (meaning=true -> kept in AST). Float must out-length Num so the lexer's
-    //     longest-match picks "0.5" as one Float (not Num "0" + ".5"); `pi` is just an identifier the
-    //     emitter passes through (OpenQASM has a built-in pi). ---
+    //     longest-match picks "0.5" as one Float (not Num "0" + ".5"); `pi` is a reserved Qora value. ---
     public Terminal Ident { get; } = new Terminal(TokenType.Identifier, "[_a-zA-Z][_a-zA-Z0-9]*", "ident", true, true);
     public Terminal Float { get; } = new Terminal(TokenType.Literal.Digit10, "[0-9]+\\.[0-9]+", "float", true, true);
     public Terminal Num { get; } = new Terminal(TokenType.Literal.Digit10, "[0-9]+", "num", true, true);
 
-    // --- punctuation / operators. Arithmetic (+ - * /) and now the comparison/boolean operators are
-    //     meaning=true so they survive into the AST and get emitted verbatim (OpenQASM re-parses precedence). ---
+    // --- punctuation / operators. Arithmetic (+ - * /) and comparison/boolean operators are
+    //     meaning=true so HIR expression lowering can recover their precedence from the AST tokens. ---
     public Terminal LParen { get; } = new Terminal(TokenType.Operator.PairOpen, "(", false);
     public Terminal RParen { get; } = new Terminal(TokenType.Operator.PairClose, ")", false);
     public Terminal LBrace { get; } = new Terminal(TokenType.Operator.PairOpen, "{", false);
@@ -394,9 +400,8 @@ public class QoraGrammar : Grammar
         arrayLiteral.AddItem(LBracket + expr + (Comma + expr).ZeroOrMore() + RBracket, ArrayLiteralM);
         arrayNew.AddItem(New + typeName + LBracket + Num + RBracket, ArrayNewM);
 
-        // condition: a flat boolean expression joined by comparison/boolean operators. Flat on purpose —
-        // the tokens emit in order and OpenQASM re-parses with its own precedence, so "a == 1 && b == 0"
-        // comes out as (a==1) && (b==0) without needing inner parens.
+        // condition: the parser retains a flat operator sequence. AST-to-HIR lowering reduces that sequence
+        // with Qora's precedence rules, so the resulting HIR and every later stage see one explicit tree.
         condition.AddItem(condAtom + ((Eq | Neq | Le | Ge | Lt | Gt | And | Or) + condAtom).ZeroOrMore(), ConditionM);
         condAtom.AddItem(expr);
         condAtom.AddItem(Not + expr);

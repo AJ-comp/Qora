@@ -7,18 +7,42 @@ namespace Qora.Ir.Mir;
 // be renumbered after deletion or partial transformation. Program-wide sites pair a callable identity
 // with one owner-local identity, while every entity retains an owner-local origin for diagnostics
 // and derivation. No MIR pass resolves a value, block, or resource by source spelling.
-public readonly record struct MirCallableId(int Value)
+public readonly record struct MirCallableId
 {
+    internal MirCallableId(int value)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(value);
+        Value = value;
+    }
+
+    public int Value { get; }
+
     public override string ToString() => $"c{Value}";
 }
 
-public readonly record struct MirBlockId(int Value)
+public readonly record struct MirBlockId
 {
+    internal MirBlockId(int value)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(value);
+        Value = value;
+    }
+
+    public int Value { get; }
+
     public override string ToString() => $"b{Value}";
 }
 
-public readonly record struct MirInstructionId(int Value)
+public readonly record struct MirInstructionId
 {
+    internal MirInstructionId(int value)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(value);
+        Value = value;
+    }
+
+    public int Value { get; }
+
     public override string ToString() => $"i{Value}";
 }
 
@@ -33,14 +57,26 @@ public readonly record struct MirInstructionSite(
     public override string ToString() => $"{Callable}/{Instruction}";
 }
 
-public readonly record struct MirValueId(int Value)
+public readonly record struct MirValueId
 {
+    internal MirValueId(int value)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(value);
+        Value = value;
+    }
+
+    public int Value { get; }
+
     public override string ToString() => $"v{Value}";
 }
 
 public readonly record struct MirQubitId
 {
-    internal MirQubitId(int value) => Value = value;
+    internal MirQubitId(int value)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(value);
+        Value = value;
+    }
 
     public int Value { get; }
 
@@ -49,7 +85,11 @@ public readonly record struct MirQubitId
 
 public readonly record struct MirQubitVersion
 {
-    internal MirQubitVersion(int value) => Value = value;
+    internal MirQubitVersion(int value)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(value);
+        Value = value;
+    }
 
     public int Value { get; }
 
@@ -73,8 +113,16 @@ public readonly record struct MirQubitKey
     public override string ToString() => $"{Id}.{Version}";
 }
 
-public readonly record struct MirStorageId(int Value)
+public readonly record struct MirStorageId
 {
+    internal MirStorageId(int value)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(value);
+        Value = value;
+    }
+
+    public int Value { get; }
+
     public override string ToString() => $"s{Value}";
 }
 
@@ -130,24 +178,50 @@ public enum MirCallableKind
 }
 
 /// <summary>
-/// The immutable SSA/CFG payload of one exact MIR snapshot. Construction stays inside the compiler
-/// pipeline so external callers cannot attach a different program to an existing snapshot.
+/// The immutable SSA/CFG payload of one exact MIR snapshot. Its exact parameterless operation entry
+/// callable is always owned by <see cref="Callables"/>. Construction stays inside the compiler pipeline
+/// so external callers cannot attach a different program to an existing snapshot.
 /// </summary>
 public sealed class MirProgram
 {
     private readonly FrozenDictionary<MirCallableId, MirCallable> _callables;
 
     internal MirProgram(
-        MirCallableId entryPoint,
+        MirCallable entryPoint,
         IEnumerable<MirCallable> callables)
     {
+        ArgumentNullException.ThrowIfNull(entryPoint);
         ArgumentNullException.ThrowIfNull(callables);
+
         Callables = MirCollections.Freeze(callables);
         _callables = IndexCallables(Callables);
+
+        if (!_callables.TryGetValue(entryPoint.Id, out var ownedEntryPoint)
+            || !ReferenceEquals(ownedEntryPoint, entryPoint))
+        {
+            throw new ArgumentException(
+                $"entry callable {entryPoint.Id} must be the exact object owned by this MIR program",
+                nameof(entryPoint));
+        }
+
+        if (entryPoint.Kind != MirCallableKind.Operation)
+        {
+            throw new ArgumentException(
+                "the MIR entry callable must be an operation",
+                nameof(entryPoint));
+        }
+
+        if (entryPoint.Parameters.Count != 0)
+        {
+            throw new ArgumentException(
+                "the MIR entry callable must not declare parameters",
+                nameof(entryPoint));
+        }
+
         EntryPoint = entryPoint;
     }
 
-    public MirCallableId EntryPoint { get; }
+    public MirCallable EntryPoint { get; }
     public IReadOnlyList<MirCallable> Callables { get; }
 
     public bool ContainsCallable(MirCallableId id) =>
@@ -200,14 +274,11 @@ public sealed class MirProgram
         var indexed = new Dictionary<MirCallableId, MirCallable>();
         foreach (var callable in callables)
         {
-            if (callable is not null)
+            if (!indexed.TryAdd(callable.Id, callable))
             {
-                if (!indexed.TryAdd(callable.Id, callable))
-                {
-                    throw new ArgumentException(
-                        $"callable identity {callable.Id} is declared more than once",
-                        nameof(callables));
-                }
+                throw new ArgumentException(
+                    $"callable identity {callable.Id} is declared more than once",
+                    nameof(callables));
             }
         }
         return indexed.ToFrozenDictionary();
@@ -246,30 +317,41 @@ public sealed class MirCallable
         string name,
         MirType? returnType,
         IReadOnlyList<IMirParameter> parameters,
-        MirBlockId entryBlock,
+        MirBlock entryBlock,
         IReadOnlyList<MirBlock> blocks,
         IReadOnlyList<MirValue> values,
         IReadOnlyList<MirArrayStorage> storages,
         MirOrigin origin)
     {
+        ArgumentNullException.ThrowIfNull(entryBlock);
+
         Id = id;
         Name = name;
         ReturnType = returnType;
         Parameters = MirCollections.Freeze(parameters);
-        EntryBlock = entryBlock;
         Blocks = MirCollections.Freeze(blocks);
         Values = MirCollections.Freeze(values);
         Storages = MirCollections.Freeze(storages);
+        _blocks = IndexUnique(Blocks, block => block.Id, nameof(blocks), "block");
+
+        if (!_blocks.TryGetValue(entryBlock.Id, out var ownedEntryBlock)
+            || !ReferenceEquals(ownedEntryBlock, entryBlock))
+        {
+            throw new ArgumentException(
+                $"entry block {entryBlock.Id} must be the exact object owned by this MIR callable",
+                nameof(entryBlock));
+        }
+
+        EntryBlock = entryBlock;
         Qubits = CollectQubits(Parameters, Blocks);
-        _blocks = IndexFirst(Blocks, block => block.Id);
         _instructions = IndexInstructions(Blocks);
-        _values = IndexFirst(Values, value => value.Id);
-        _storages = IndexFirst(Storages, storage => storage.Id);
+        _values = IndexUnique(Values, value => value.Id, nameof(values), "SSA value");
+        _storages = IndexUnique(Storages, storage => storage.Id, nameof(storages), "array storage");
         _parameterStorageDefinitions =
             IndexParameterStorageDefinitions(Parameters);
         _localStorageDefinitions =
             IndexLocalStorageDefinitions(Blocks);
-        _qubits = IndexFirst(Qubits, qubit => qubit.Key);
+        _qubits = IndexUnique(Qubits, qubit => qubit.Key, nameof(Qubits), "qubit version");
         Origin = origin;
     }
 
@@ -281,7 +363,7 @@ public sealed class MirCallable
             : MirCallableKind.Function;
     public MirType? ReturnType { get; }
     public IReadOnlyList<IMirParameter> Parameters { get; }
-    public MirBlockId EntryBlock { get; }
+    public MirBlock EntryBlock { get; }
     public IReadOnlyList<MirBlock> Blocks { get; }
     public IReadOnlyList<MirValue> Values { get; }
     public IReadOnlyList<MirArrayStorage> Storages { get; }
@@ -593,17 +675,24 @@ public sealed class MirCallable
         return MirCollections.Freeze(qubits);
     }
 
-    private static FrozenDictionary<TKey, TValue> IndexFirst<TKey, TValue>(
+    private static FrozenDictionary<TKey, TValue> IndexUnique<TKey, TValue>(
         IEnumerable<TValue> values,
-        Func<TValue, TKey> key)
+        Func<TValue, TKey> key,
+        string parameterName,
+        string entityName)
         where TKey : notnull
         where TValue : class
     {
         var indexed = new Dictionary<TKey, TValue>();
         foreach (var value in values)
         {
-            if (value is not null)
-                indexed.TryAdd(key(value), value);
+            var identity = key(value);
+            if (!indexed.TryAdd(identity, value))
+            {
+                throw new ArgumentException(
+                    $"{entityName} identity {identity} is declared more than once",
+                    parameterName);
+            }
         }
         return indexed.ToFrozenDictionary();
     }
@@ -619,13 +708,15 @@ public sealed class MirCallable
                 (MirInstruction Instruction, MirBlock Block, int Index)>();
         foreach (var block in blocks)
         {
-            if (block is null)
-                continue;
             for (var index = 0; index < block.Instructions.Count; index++)
             {
                 var instruction = block.Instructions[index];
-                if (instruction is not null)
-                    indexed.TryAdd(instruction.Id, (instruction, block, index));
+                if (!indexed.TryAdd(instruction.Id, (instruction, block, index)))
+                {
+                    throw new ArgumentException(
+                        $"instruction identity {instruction.Id} is declared more than once",
+                        nameof(blocks));
+                }
             }
         }
         return indexed.ToFrozenDictionary();
@@ -868,7 +959,7 @@ public abstract record MirQubit
 /// <summary>The first MIR version of a qubit supplied through a callable parameter.</summary>
 public sealed record MirQubitParameter : MirQubit, IMirParameter
 {
-    internal MirQubitParameter(
+    private MirQubitParameter(
         MirQubitId id,
         string name,
         bool isArray,
@@ -887,6 +978,37 @@ public sealed record MirQubitParameter : MirQubit, IMirParameter
     public bool IsArray { get; }
     public int? Length { get; }
     public QOwnershipMode Ownership { get; }
+
+    internal static MirQubitParameter Single(
+        MirQubitId id,
+        string name,
+        QOwnershipMode ownership,
+        MirOrigin origin) =>
+        new(id, name, isArray: false, length: null, ownership, origin);
+
+    internal static MirQubitParameter Array(
+        MirQubitId id,
+        string name,
+        int? length,
+        QOwnershipMode ownership,
+        MirOrigin origin)
+    {
+        if (length is < 1)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(length),
+                length,
+                "a known qubit-array parameter length must be positive");
+        }
+
+        return new MirQubitParameter(
+            id,
+            name,
+            isArray: true,
+            length,
+            ownership,
+            origin);
+    }
 }
 
 /// <summary>The first, clean MIR version of a local qubit binding created by a Qora use statement.</summary>
@@ -899,6 +1021,14 @@ public sealed record MirQubitFromUse : MirQubit
         MirOrigin origin)
         : base(id, new MirQubitVersion(0), origin)
     {
+        if (length < 1)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(length),
+                length,
+                "a local qubit-array length must be positive");
+        }
+
         Name = name;
         Length = length;
     }
@@ -920,6 +1050,13 @@ public sealed record MirQubitAfterInstruction : MirQubit
         MirOrigin origin)
         : base(id, version, origin)
     {
+        if (version.Value == 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(version),
+                version,
+                "an instruction-produced qubit version must be positive");
+        }
     }
 }
 
@@ -963,6 +1100,14 @@ public sealed record MirQubitPhi : MirQubit
         MirOrigin origin)
         : base(id, version, origin)
     {
+        if (version.Value == 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(version),
+                version,
+                "a qubit Phi version must be positive");
+        }
+
         _inputs = MirCollections.Freeze(inputs);
     }
 

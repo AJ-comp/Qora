@@ -105,14 +105,12 @@ public class OwnershipParameterTests
             """);
     }
 
-    [Theory]
-    [InlineData("bit")]
-    [InlineData("Qubit")]
-    public void MutableBorrowRejectsUnsupportedShapes(string type)
+    [Fact]
+    public void MutableBorrowRejectsQubitArrays()
     {
         Compiler.RejectsExactly(
-            $$"""
-            operation Bad(var value: {{type}}[]) {}
+            """
+            operation Bad(var value: Qubit[]) {}
             operation Main() {}
             """,
             "QSEM038");
@@ -797,7 +795,7 @@ public class OwnershipParameterTests
     }
 
     [Fact]
-    public void BitArrayCanMoveReadOnlyButNeverMoveMutable()
+    public void BitArrayCanMoveReadOnly()
     {
         Compiler.Accepts("""
             operation Consume(move flags: bit[]) {}
@@ -807,10 +805,6 @@ public class OwnershipParameterTests
             }
             """);
 
-        Compiler.RejectsExactly("""
-            operation Bad(move var flags: bit[]) {}
-            operation Main() {}
-            """, "QSEM038");
     }
 
     [Fact]

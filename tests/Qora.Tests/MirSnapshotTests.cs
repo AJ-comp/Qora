@@ -31,7 +31,7 @@ public sealed class MirSnapshotTests
     }
 
     [Fact]
-    public void SnapshotOwnershipComesFromItsExactHirAndTransformationSources()
+    public void SnapshotOwnershipComesFromExactHirAndPreviousSnapshot()
     {
         var hir = HirFixtureFor(
             "First",
@@ -47,8 +47,8 @@ public sealed class MirSnapshotTests
             hir.FinalHir);
 
         Assert.Equal(MirStage.Lowered, snapshot.Stage);
-        Assert.Null(snapshot.TransformationSource);
-        Assert.Same(hir.FinalHir, snapshot.LoweringSource);
+        Assert.Null(snapshot.PreviousSnapshot);
+        Assert.Same(hir.FinalHir, snapshot.HirArtifact);
         Assert.Same(program, snapshot.Program);
 
         var transformedProgram = CopyProgram(program);
@@ -58,8 +58,8 @@ public sealed class MirSnapshotTests
             snapshot);
 
         Assert.Equal(MirStage.InverseRequestsInjected, transformed.Stage);
-        Assert.Same(snapshot, transformed.TransformationSource);
-        Assert.Same(snapshot.LoweringSource, transformed.LoweringSource);
+        Assert.Same(snapshot, transformed.PreviousSnapshot);
+        Assert.Same(snapshot.HirArtifact, transformed.HirArtifact);
         Assert.Same(transformedProgram, transformed.Program);
         Assert.Same(
             snapshot.Program.RequireCallable(new MirCallableId(0)).Origin,
@@ -93,7 +93,7 @@ public sealed class MirSnapshotTests
             entityKind);
         QoraMirVerifier.VerifyOrThrow(
             transformedProgram,
-            source.LoweringSource.Source);
+            source.HirArtifact.Source);
 
         var error = Assert.Throws<ArgumentException>(
             () => MirSnapshot.CreateTransformed(
@@ -117,11 +117,11 @@ public sealed class MirSnapshotTests
                 sourceCallable.Origin,
                 "replacement callable"));
         var transformedProgram = new MirProgram(
-            source.Program.EntryPoint,
+            reboundCallable,
             new[] { reboundCallable });
         QoraMirVerifier.VerifyOrThrow(
             transformedProgram,
-            source.LoweringSource.Source);
+            source.HirArtifact.Source);
 
         var error = Assert.Throws<ArgumentException>(
             () => MirSnapshot.CreateTransformed(
@@ -140,7 +140,7 @@ public sealed class MirSnapshotTests
         var retainedCallable = source.Program.RequireCallable(new MirCallableId(0));
         var deletedCallable = source.Program.RequireCallable(new MirCallableId(1));
         var deletionProgram = new MirProgram(
-            retainedCallable.Id,
+            retainedCallable,
             new[] { retainedCallable });
         var afterDeletion = MirSnapshot.CreateTransformed(
             deletionProgram,
@@ -152,11 +152,11 @@ public sealed class MirSnapshotTests
                 deletedCallable.Origin,
                 "replacement after deletion"));
         var reuseProgram = new MirProgram(
-            retainedCallable.Id,
+            retainedCallable,
             new[] { retainedCallable, replacement });
         QoraMirVerifier.VerifyOrThrow(
             reuseProgram,
-            source.LoweringSource.Source);
+            source.HirArtifact.Source);
 
         var error = Assert.Throws<ArgumentException>(
             () => MirSnapshot.CreateTransformed(
@@ -204,8 +204,8 @@ public sealed class MirSnapshotTests
         var materialized = MirAdjointMaterializer.Run(injected);
         var output = Assert.IsType<MirSnapshot>(materialized.Output);
 
-        Assert.Same(source, injected.TransformationSource);
-        Assert.Same(injected, output.TransformationSource);
+        Assert.Same(source, injected.PreviousSnapshot);
+        Assert.Same(injected, output.PreviousSnapshot);
         Assert.All(
             source.Program.Callables,
             callable => Assert.True(output.Program.ContainsCallable(callable.Id)));
@@ -249,7 +249,7 @@ public sealed class MirSnapshotTests
             () => firstCallable.RequireInstruction(secondInstruction));
         Assert.Throws<ArgumentException>(() => firstCallable.RequireValue(secondValue));
 
-        var hirStructure = snapshot.LoweringSource.Source.Structure;
+        var hirStructure = snapshot.HirArtifact.Source.Structure;
         var firstHirCallable = hirStructure.RequireOwningCallable(
             firstBlock.Origin.SourceHirOrigin.HirNodeId);
         var secondHirCallable = hirStructure.RequireOwningCallable(
@@ -333,12 +333,12 @@ public sealed class MirSnapshotTests
 
         Assert.Equal(
             firstCompilation.Id,
-            first.LoweringSource.SourceId.CompilationId);
+            first.HirArtifact.SourceId.CompilationId);
         Assert.Equal(
             secondCompilation.Revision,
-            second.LoweringSource.SourceId.CompilationRevision);
-        Assert.NotSame(first.LoweringSource, second.LoweringSource);
-        Assert.NotSame(first.LoweringSource, unrelated.LoweringSource);
+            second.HirArtifact.SourceId.CompilationRevision);
+        Assert.NotSame(first.HirArtifact, second.HirArtifact);
+        Assert.NotSame(first.HirArtifact, unrelated.HirArtifact);
 
         var firstCallable = Assert.Single(first.Program.Callables);
         var secondCallable = Assert.Single(second.Program.Callables);
@@ -403,11 +403,11 @@ public sealed class MirSnapshotTests
             () => first.Analyses.Effects.EnsureFor(second.Program));
 
         Assert.Equal(
-            first.LoweringSource.Source.SourceMap.Find(
+            first.HirArtifact.Source.SourceMap.Find(
                 firstInstruction.Origin.SourceHirOrigin.HirNodeId),
             firstInstruction.Origin.SourceHirOrigin.Span);
         Assert.Equal(
-            second.LoweringSource.Source.SourceMap.Find(
+            second.HirArtifact.Source.SourceMap.Find(
                 secondInstruction.Origin.SourceHirOrigin.HirNodeId),
             secondInstruction.Origin.SourceHirOrigin.Span);
     }
@@ -470,7 +470,7 @@ public sealed class MirSnapshotTests
             "Main",
             returnType: null,
             Array.Empty<IMirParameter>(),
-            blockId,
+            block,
             new[] { block },
             new[]
             {
@@ -488,7 +488,7 @@ public sealed class MirSnapshotTests
             new[] { new MirArrayStorage(storageId, "values", origin) },
             origin);
         var program = new MirProgram(
-            callable.Id,
+            callable,
             new[] { callable });
         return MirSnapshot.CreateLowered(
             program,
@@ -510,7 +510,7 @@ public sealed class MirSnapshotTests
                     callable,
                     id: new MirCallableId(1));
                 return new MirProgram(
-                    renumbered.Id,
+                    renumbered,
                     new[] { renumbered });
             }
 
@@ -520,7 +520,7 @@ public sealed class MirSnapshotTests
                 return ProgramWith(
                     CopyCallable(
                         callable,
-                        entryBlock: renumbered.Id,
+                        entryBlock: renumbered,
                         blocks: new[] { renumbered }));
             }
 
@@ -607,27 +607,32 @@ public sealed class MirSnapshotTests
 
     private static MirProgram ProgramWith(MirCallable callable) =>
         new(
-            callable.Id,
+            callable,
             new[] { callable });
 
     private static MirCallable CopyCallable(
         MirCallable source,
         MirCallableId? id = null,
-        MirBlockId? entryBlock = null,
+        MirBlock? entryBlock = null,
         IReadOnlyList<MirBlock>? blocks = null,
         IReadOnlyList<MirValue>? values = null,
         IReadOnlyList<MirArrayStorage>? storages = null,
-        MirOrigin? origin = null) =>
-        new(
+        MirOrigin? origin = null)
+    {
+        var copiedBlocks = blocks ?? source.Blocks;
+        var copiedEntryBlock = entryBlock
+            ?? copiedBlocks.Single(block => block.Id == source.EntryBlock.Id);
+        return new MirCallable(
             id ?? source.Id,
             source.Name,
             source.ReturnType,
             source.Parameters,
-            entryBlock ?? source.EntryBlock,
-            blocks ?? source.Blocks,
+            copiedEntryBlock,
+            copiedBlocks,
             values ?? source.Values,
             storages ?? source.Storages,
             origin ?? source.Origin);
+    }
 
     private static MirSnapshot Snapshot(
         MirProgram program,
@@ -693,13 +698,9 @@ public sealed class MirSnapshotTests
         var secondOrigin = new MirHirOrigin(
             secondHirCallable,
             finalHir.Source.SourceMap.Find(secondHirCallable));
-        return context.Program(
-            new MirCallableId(0),
-            new[]
-            {
-                Callable(new MirCallableId(0), firstOrigin, "First", "10"),
-                Callable(new MirCallableId(1), secondOrigin, "Second", "20"),
-            });
+        var firstCallable = Callable(new MirCallableId(0), firstOrigin, "First", "10");
+        var secondCallable = Callable(new MirCallableId(1), secondOrigin, "Second", "20");
+        return context.Program(firstCallable, new[] { firstCallable, secondCallable });
     }
 
     private static MirCallable Callable(
@@ -733,7 +734,7 @@ public sealed class MirSnapshotTests
             name,
             returnType: null,
             Array.Empty<IMirParameter>(),
-            blockId,
+            block,
             new[] { block },
             new[] { value },
             Array.Empty<MirArrayStorage>(),

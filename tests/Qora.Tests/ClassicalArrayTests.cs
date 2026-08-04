@@ -1,4 +1,6 @@
+using Qora.Compiler;
 using Qora.Ir;
+using Qora.Ir.Mir;
 
 namespace Qora.Tests;
 
@@ -545,7 +547,7 @@ public class ClassicalArrayTests
     // −2 in two's complement (both verified on the Braket oracle). Rather than pick one silently, every
     // numeric use of a whole register is rejected and `AsInt(f)` is the one way to ask for a reading. What a
     // register may still do without any numeric interpretation: be indexed (`f[0]`), report `.Count`, be
-    // passed as an argument, and be compared to another register OF THE SAME WIDTH.
+    // passed as an argument, and be structurally compared to another register of the same element type.
 
     /// <summary>Every position that would read a whole register AS A NUMBER is a compile error — the rule is
     /// on the VALUE, not on a list of syntactic positions, so assignment, arithmetic, a bare truth condition
@@ -660,15 +662,133 @@ public class ClassicalArrayTests
             expression => expression is MirQasmUnsignedCastExpression);
     }
 
-    /// <summary>Different widths are never equal in OpenQASM whatever bits they hold — `bit[2] "10"` and
-    /// `bit[3] "010"` both read as 2 yet compare unequal — so the comparison is rejected instead of silently
-    /// answering "different".</summary>
-    [Fact]
-    public void RejectsComparingRegistersOfDifferentWidths()
+    /// <summary>Structural array equality compares lengths before elements, so different-width registers
+    /// have a constant result without asking OpenQASM to compare incompatible register types.</summary>
+    [Theory]
+    [InlineData("==", "0")]
+    [InlineData("!=", "1")]
+    public void DifferentWidthRegistersFoldTheirStructuralComparison(
+        string comparison,
+        string expectedResult)
     {
-        var r = Compiler.Compile("operation Main(){ use q=Qubit[1]; var f: bit[] = new bit[2]; var g: bit[] = new bit[3]; if (f == g) { X(q[0]); } }");
+        var r = Compiler.Compile($"operation Main(){{ use q=Qubit[1]; var f: bit[] = new bit[2]; var g: bit[] = new bit[3]; if (f {comparison} g) {{ X(q[0]); }} }}");
+        Assert.True(r.Succeeded, Explain(r));
+
+        var body = r.Targets.OpenQasm!.Program.EntryBody;
+        var branch = Assert.Single(TargetStatements(body).OfType<MirQasmIfStatement>());
+        Assert.True(
+            body.DependsOn(
+                branch.Condition,
+                expression =>
+                    expression is MirQasmLiteralExpression { Text: var text }
+                    && text == expectedResult));
+    }
+
+    [Theory]
+    [InlineData("==", MirQasmBinaryOperator.LogicalAnd, MirQasmBinaryOperator.Equal)]
+    [InlineData("!=", MirQasmBinaryOperator.LogicalOr, MirQasmBinaryOperator.NotEqual)]
+    public void EqualLengthGeneralArraysLowerToElementwiseStructuralComparison(
+        string comparison,
+        MirQasmBinaryOperator expectedCombination,
+        MirQasmBinaryOperator expectedElementComparison)
+    {
+        var r = Compiler.Compile($"operation Main(){{ use q=Qubit[1]; var xs: int[] = [1, 2]; var ys: int[] = [1, 3]; if (xs {comparison} ys) {{ X(q[0]); }} }}");
+        Assert.True(r.Succeeded, Explain(r));
+
+        var body = r.Targets.OpenQasm!.Program.EntryBody;
+        var branch = Assert.Single(TargetStatements(body).OfType<MirQasmIfStatement>());
+        var dependencies = body.DependencyClosure(branch.Condition).ToArray();
+        Assert.Contains(
+            dependencies,
+            expression => expression is MirQasmBinaryExpression
+            {
+                Operator: var combination,
+            } && combination == expectedCombination);
+        Assert.Equal(
+            2,
+            dependencies.Count(
+                expression => expression is MirQasmBinaryExpression
+                {
+                    Operator: var elementComparison,
+                    Left: MirQasmIndexExpression,
+                    Right: MirQasmIndexExpression,
+                } && elementComparison == expectedElementComparison));
+    }
+
+    [Theory]
+    [InlineData("==", "0")]
+    [InlineData("!=", "1")]
+    public void DifferentLengthGeneralArraysFoldTheirStructuralComparison(
+        string comparison,
+        string expectedResult)
+    {
+        var r = Compiler.Compile($"operation Main(){{ use q=Qubit[1]; var xs: int[] = [1]; var ys: int[] = [1, 2]; if (xs {comparison} ys) {{ X(q[0]); }} }}");
+        Assert.True(r.Succeeded, Explain(r));
+
+        var body = r.Targets.OpenQasm!.Program.EntryBody;
+        var branch = Assert.Single(TargetStatements(body).OfType<MirQasmIfStatement>());
+        Assert.True(
+            body.DependsOn(
+                branch.Condition,
+                expression =>
+                    expression is MirQasmLiteralExpression { Text: var text }
+                    && text == expectedResult));
+    }
+
+    [Fact]
+    public void DynamicGeneralArrayComparisonIsCanonicalMirButUnsupportedOpenQasm()
+    {
+        const string source = "operation Compare(xs: int[], ys: int[]){ if (xs == ys) {} } operation Main(){ var xs: int[] = [1]; var ys: int[] = [1]; Compare(xs, ys); }";
+        var r = Compiler.Compile(source);
+
         Assert.False(r.Succeeded);
-        Assert.Contains(r.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(), e => e.Code == "QSEM036");
+        Assert.NotNull(r.Mir);
+        Assert.Null(r.Targets.OpenQasm);
+        var diagnostic = Assert.Single(
+            r.Diagnostics,
+            diagnostic =>
+                diagnostic.Stage == CompilationStage.OpenQasm
+                && diagnostic.Error.Code == "QASM002");
+        AssertTargetDiagnosticSpan(r, diagnostic, source, "xs == ys");
+        Assert.Contains(
+            r.Mir!.Program.Callables
+                .SelectMany(callable => callable.Blocks)
+                .SelectMany(block => block.Instructions),
+            instruction => instruction is MirBinary
+            {
+                Operator: MirBinaryOperator.Equal,
+            });
+    }
+
+    [Fact]
+    public void MaximumSupportedFixedArrayComparisonStillLowersToOpenQasm()
+    {
+        var r = Compiler.Compile("operation Main(){ var xs: int[] = new int[4096]; var ys: int[] = new int[4096]; if (xs == ys) {} }");
+
+        Assert.True(r.Succeeded, Explain(r));
+        Assert.NotNull(r.Targets.OpenQasm);
+    }
+
+    [Fact]
+    public void OversizedFixedArrayComparisonStopsBeforeElementwiseExpansion()
+    {
+        const string source = "operation Main(){ var xs: int[] = new int[4097]; var ys: int[] = new int[4097]; if (xs == ys) {} }";
+        var r = Compiler.Compile(source);
+
+        Assert.False(r.Succeeded);
+        Assert.NotNull(r.Mir);
+        Assert.Null(r.Targets.OpenQasm);
+        var diagnostic = Assert.Single(
+            r.Diagnostics,
+            candidate =>
+                candidate.Stage == CompilationStage.OpenQasm
+                && candidate.Error.Code == "QASM002");
+        Assert.Contains("4097 elements", diagnostic.Error.Message);
+        Assert.Contains("limited to 4096 elements", diagnostic.Error.Message);
+        AssertTargetDiagnosticSpan(r, diagnostic, source, "xs == ys");
+        Assert.DoesNotContain(
+            r.Diagnostics,
+            candidate => candidate.Stage is not CompilationStage.OpenQasm);
     }
 
     /// <summary>ORDERING between registers is rejected even at equal width: the target compares `&lt;`/`&gt;`
@@ -1279,18 +1399,16 @@ public class ClassicalArrayTests
                         expression is MirQasmLiteralExpression { Text: "1" }));
     }
 
-    /// <summary>A bit[] parameter is READ-ONLY: its QASM form is a by-value register, so a write would
-    /// silently never reach the caller — rejected loudly instead (int[] passes by mutable reference; the
-    /// asymmetry is OpenQASM's, and the ban keeps it unobservable at the Qora surface).</summary>
+    /// <summary>A plain bit[] parameter is read-only under the same Qora contract as every other
+    /// classical-array parameter. Caller-visible mutation requires an explicit <c>var</c> contract.</summary>
     [Theory]
     [InlineData("operation Zero(f: bit[], q: Qubit){ f[0] = 0; H(q); }\noperation Main(){ use q=Qubit[1]; var f: bit[] = new bit[1]; Zero(f, q[0]); }")]
     [InlineData("operation Store(f: bit[], qs: Qubit[]){ f[0] = M(qs[0]); }\noperation Main(){ use q=Qubit[1]; var f: bit[] = new bit[1]; Store(f, q); }")]
     public void RejectsWritingToABitArrayParameter(string source) =>
-        Compiler.Rejects(source, "QSEM032");
+        Compiler.Rejects(source, "QSEM038");
 
-    /// <summary>bit[] parameters are read-only by-value registers (QSEM032), so the MUTABLE-array rules
-    /// must not apply to them: the same register may feed two bit[] slots (reads cannot conflict), and a
-    /// const array is a perfectly fine argument.</summary>
+    /// <summary>Two read-only parameters may share one bit[] binding, and a const array remains a valid
+    /// read-only argument.</summary>
     [Fact]
     public void DuplicateBitArrayArgumentsAreAcceptedReadsCannotConflict()
     {
@@ -2104,6 +2222,20 @@ public class ClassicalArrayTests
         MirQasmCallableId id) =>
         Assert.Single(
             program.Definitions.Where(definition => definition.Id == id));
+
+    private static void AssertTargetDiagnosticSpan(
+        Compilation compilation,
+        CompilationDiagnostic diagnostic,
+        string source,
+        string expectedText)
+    {
+        var targetOrigin = Assert.IsType<DiagnosticOrigin.Target>(diagnostic.Origin);
+        Assert.Same(compilation.Mir, targetOrigin.Input);
+        var location = Assert.IsType<MirHirOrigin>(targetOrigin.Location);
+        var span = Assert.IsType<SourceSpan>(location.Span);
+        Assert.Equal(expectedText, source[span.Start..span.End]);
+        Assert.Equal((span.Start, span.End), (diagnostic.Error.Start, diagnostic.Error.End));
+    }
 
     private static string Explain(Compilation result) =>
         string.Join(

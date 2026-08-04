@@ -176,7 +176,6 @@ internal static class MirScalarValueAvailabilityAnalysis
         MirCallableId callableId)
     {
         ArgumentNullException.ThrowIfNull(program);
-        QoraMirVerifier.VerifyOrThrow(program);
         var callable = program.FindCallable(callableId)
             ?? throw new ArgumentOutOfRangeException(
                 nameof(callableId),

@@ -132,7 +132,6 @@ internal static class MirBoundsAnalysis
         MirCallableId callableId)
     {
         ArgumentNullException.ThrowIfNull(program);
-        QoraMirVerifier.VerifyOrThrow(program);
 
         var callable = program.FindCallable(callableId)
             ?? throw new ArgumentOutOfRangeException(
@@ -492,6 +491,11 @@ internal static class MirBoundsAnalysis
 
                 if (instruction is not MirBinary binary || !IsComparison(binary.Operator))
                     return null;
+                if (_callable.RequireValue(binary.Left).Type.IsArray
+                    || _callable.RequireValue(binary.Right).Type.IsArray)
+                {
+                    return null;
+                }
 
                 var left = ExpressionsOf(binary.Left);
                 var right = ExpressionsOf(binary.Right);
@@ -716,6 +720,12 @@ internal static class MirBoundsAnalysis
             bool expected,
             IReadOnlyList<LinearConstraint> targets)
         {
+            if (_callable.RequireValue(comparison.Left).Type.IsArray
+                || _callable.RequireValue(comparison.Right).Type.IsArray)
+            {
+                return Proof.Unknown;
+            }
+
             var leftAlternatives = ExpressionsOf(comparison.Left);
             var rightAlternatives = ExpressionsOf(comparison.Right);
             var hasFeasiblePair = false;

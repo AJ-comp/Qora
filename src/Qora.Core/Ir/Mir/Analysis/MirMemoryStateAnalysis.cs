@@ -212,7 +212,7 @@ public sealed class MirMemoryStateSnapshot
                     continue;
 
                 FlowFact incoming;
-                if (block.Id == _callable.EntryBlock)
+                if (block.Id == _callable.EntryBlock.Id)
                 {
                     incoming = new FlowFact(parameterDefinition);
                 }
@@ -275,7 +275,7 @@ public sealed class MirMemoryStateSnapshot
     private MirBlockId? DefinitionBlock(MirValue value) =>
         value.Definition.Kind switch
         {
-            MirValueDefinitionKind.Parameter => _callable.EntryBlock,
+            MirValueDefinitionKind.Parameter => _callable.EntryBlock.Id,
             MirValueDefinitionKind.BlockArgument => value.Definition.Block,
             MirValueDefinitionKind.InstructionResult
                 when value.Definition.Instruction is MirInstructionId instruction =>
@@ -353,7 +353,6 @@ internal static class MirMemoryStateAnalysis
         MirCallableId callableId)
     {
         ArgumentNullException.ThrowIfNull(program);
-        QoraMirVerifier.VerifyOrThrow(program);
 
         var callable = program.FindCallable(callableId)
             ?? throw new ArgumentOutOfRangeException(
@@ -364,8 +363,8 @@ internal static class MirMemoryStateAnalysis
     }
 
     /// <summary>
-    /// Builds memory-state facts after structural MIR verification. The verifier uses this form for
-    /// memory-Phi and call-alias contracts, avoiding a recursive Verify → Analyze → Verify cycle.
+    /// Builds memory-state facts after structural MIR verification. The verifier and canonical analysis
+    /// store use this form for memory-Phi and call-alias contracts without starting verification again.
     /// </summary>
     internal static MirMemoryStateSnapshot AnalyzeUnchecked(
         MirProgram program,

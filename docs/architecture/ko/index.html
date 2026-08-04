@@ -393,26 +393,34 @@ v4 = v3 == v2;
   <p class="stagehead">in: 해소된 IR &nbsp;·&nbsp; out: 오류 목록 (또는 없음) &nbsp;·&nbsp; 패스: <code>QoraValidator</code> + <code>SymbolTableBuilder</code></p>
 
   <p>
-    검증은 한 가지 질문에 답하는 패스입니다: <strong>이 프로그램은 OpenQASM이 표현할 수 있는 의미인가?</strong>
-    IR 전체를 한 번 순회하며 <strong>모든 위반을 수집</strong>합니다(첫 오류에서 멈추지 않음). 그 결과는 단단한
-    게이트입니다: <strong>오류가 하나라도 있으면 OpenQASM은 전혀 생성되지 않습니다</strong> — 그래서 깨진
-    프로그램이 조용히 "성공한 척"하며 틀린 회로를 돌려주는 일은 결코 없습니다. 이때 검증기는 통합 심볼 테이블도
-    만들어요. 파라미터, 레지스터, 측정 비트, 변수, 상수, 루프 변수가 어느 스코프에 사는지 기록하고,
-    각 이름이 어디에서 사용되는지도 함께 모읍니다. 모든 규칙에는 안정된 코드
-    (<code>QSEM001</code>–<code>QSEM025</code>)가 있어 에디터가 물결선을 붙일 수 있습니다. 그중 몇 가지:
+    검증은 한 가지 질문에 답해요: <strong>이름·타입·스코프·호출 및 소유권 계약이 서로 맞는 올바른 Qora
+    프로그램인가?</strong><br>
+    OpenQASM이나 다른 backend가 이 프로그램을 표현할 수 있는지는 여기서 판단하지 않아요.<br>
+    HIR 전체를 한 번 순회하며 첫 오류에서 멈추지 않고 <strong>모든 위반을 수집</strong>해요.<br>
+    이때 검증기는 통합 심볼 테이블도 만들어요. 파라미터, 레지스터, 측정 비트, 변수, 상수, 루프 변수가 어느
+    스코프에 사는지 기록하고, 각 이름이 어디에서 사용되는지도 함께 모아요.<br>
+    모든 규칙에는 안정된 <code>QSEM</code> 코드가 있어 에디터가 물결선을 붙일 수 있어요. 그중 몇 가지를 보면:
   </p>
 
   <div class="panel">
     <table class="amp">
       <tr><th>코드</th><th>거부하는 것</th></tr>
-      <tr><td><code>QSEM002</code></td><td>유저 op에 대한 <code>Controlled Foo</code>(OpenQASM에는 def용 <code>ctrl @</code>가 없음)</td></tr>
+      <tr><td><code>QSEM002</code></td><td><code>Foo</code>가 <code>Qora.Intrinsic</code>에 속하지 않은 <code>Controlled Foo</code> — 소스 문법의 <code>Controlled</code>는 intrinsic에만 사용</td></tr>
       <tr><td><code>QSEM006</code></td><td>시그니처와 맞지 않는 인자의 호출 — 개수, 종류(큐비트 vs 각도), 또는 레지스터 크기</td></tr>
       <tr><td><code>QSEM007</code></td><td>알 수 없는 게이트/연산 이름("혹시 …?" 힌트 포함)</td></tr>
-      <tr><td><code>QSEM011</code></td><td>재귀 호출(OpenQASM def는 재귀 불가)</td></tr>
+      <tr><td><code>QSEM011</code></td><td>callable graph의 순환 — Qora 호출 그래프는 비순환이어야 함</td></tr>
       <tr><td><code>QSEM016</code></td><td>레지스터 범위를 벗어난 리터럴 큐비트 인덱스</td></tr>
       <tr><td><code>QSEM025</code></td><td>스코프 안에서 해소되지 않는 식별자 — 알 수 없는 이름 또는 선언 전에 사용된 고전 이름</td></tr>
     </table>
   </div>
+
+  <p>
+    지역 바인딩은 선언된 지점부터 해당 lexical scope의 끝까지 보이며, 선언보다 먼저 사용하면 <code>QSEM025</code>예요.<br>
+    <code>use</code> 선언도 같은 이름 규칙을 따르지만, 할당 자체는 별도의 언어 계약에 따라 entry operation의 최상위에서만 가능해요.<br>
+    순수 함수 호출은 일반 고전 값이므로 배열 리터럴의 원소와 <code>for</code> 범위의 경계에서도 사용할 수 있어요.<br>
+    원소 타입이 같은 고전 배열은 구조적 <code>==</code>와 <code>!=</code>를 지원해요. 길이가 다르면 같지 않고, 길이가 같으면
+    각 원소를 비교해요.
+  </p>
 
   <div class="call why">
     <span class="h">왜 변환 패스들보다 먼저 검증하나?</span>
@@ -463,8 +471,8 @@ return</code></pre>
 
   <p>
     결과는 <code>MirStage.Lowered</code> 상태의 정확한 불변 <code>MirSnapshot</code> 객체예요.<br>
-    이 객체는 실제로 소비한 final HIR을 <code>LoweringSource</code>로, MIR의 source provenance를 program-owned <code>Origins</code>로 보존해요.<br>
-    컴파일 identity는 <code>LoweringSource</code>에만 있고 MIR에 다시 복사하지 않으므로, backend는 이름이나 중복 ID로 MIR의 출처를 추측할 필요가 없어요.
+    이 객체는 실제로 소비한 final HIR을 <code>HirArtifact</code>로, MIR의 source provenance를 program-owned <code>Origins</code>로 보존해요.<br>
+    컴파일 identity는 <code>HirArtifact</code>에만 있고 MIR에 다시 복사하지 않으므로, backend는 이름이나 중복 ID로 MIR의 출처를 추측할 필요가 없어요.
   </p>
 
   <h2 id="s8"><span class="n">8</span>MIR 분석과 내부 역연산 실체화</h2>
@@ -478,7 +486,7 @@ return</code></pre>
 
   <p>
     역연산 요청도 오직 MIR에만 존재해요.<br>
-    컴파일러 내부 scheduler가 정확한 <code>MirQuantumApply</code> 하나에 <code>MirFunctor.Adjoint</code>를 붙이면, <code>MirAdjointMaterializer</code>가 필요한 역방향 MIR callable을 합성하고 요청을 typed callable target으로 바꾼 뒤 이전 snapshot을 exact <code>TransformationSource</code>로 가진 새 snapshot을 발행해요.<br>
+    컴파일러 내부 scheduler가 정확한 <code>MirQuantumApply</code> 하나에 <code>MirFunctor.Adjoint</code>를 붙이면, <code>MirAdjointMaterializer</code>가 필요한 역방향 MIR callable을 합성하고 요청을 typed callable target으로 바꾼 뒤 바로 이전 MIR snapshot을 exact <code>PreviousSnapshot</code>으로 가진 새 snapshot을 발행해요.<br>
     Qora 소스와 HIR에는 <code>Adjoint</code>, 역연산 표식, conjugation node가 없어요.
   </p>
 
@@ -501,6 +509,16 @@ MirQuantumApply(Target = __qora_inverse_..., Functors = [])</code></pre>
     OpenQASM backend는 정확한 materialized MIR snapshot을 소비해요.<br>
     CFG에서 구조화된 <code>if</code>, <code>while</code>, loop exit를 복원하고, SSA 값과 phi edge를 typed target declaration과 assignment로 바꾸며, 충돌 없는 OpenQASM 이름도 이 단계에서 정해요.<br>
     결과인 <code>MirOpenQasmTargetProgram</code>은 target type, callable, declaration, statement와 target-local identity를 소유하고, HIR을 두 번째 권위 저장소로 들고 있지 않아요.
+  </p>
+
+  <p>
+    올바른 Qora 프로그램을 OpenQASM이 표현할 수 있는지 묻는 첫 단계가 바로 여기예요.<br>
+    고전 배열 등가 비교에서 알려진 길이가 다르면 상수 결과로 lowering하고, 같은 길이의 일반 배열은 원소별 비교로 lowering해요.<br>
+    동적 길이의 일반 배열 비교는 현재 OpenQASM backend가 표현할 수 없어 <code>QASM002</code>를 내요.<br>
+    또한 가변 빌림인 <code>var bit[]</code> 파라미터는 HIR과 MIR에서 올바르지만, 값으로 전달되는 bit register로는 호출자에게
+    쓰기 결과를 되돌려줄 수 없어 현재 OpenQASM target이 <code>QASM002</code>를 내요.<br>
+    반면 가변 이전인 <code>move var bit[]</code>는 지원해요. 소유권을 소비한다는 계약과 <code>bit[N]</code> 값을 target callable에
+    전달하는 방식이 서로 맞기 때문이에요.
   </p>
 
   <p>

@@ -217,6 +217,18 @@ public sealed class MirBoundsAnalysisTests
         var loadInstructionId = new MirInstructionId(3);
         var arrayType = MirType.Array(QType.Int);
         var intType = MirType.Scalar(QType.Int);
+        var workerEntryBlock = new MirBlock(
+            entryBlockId,
+            Array.Empty<MirValueId>(),
+            Array.Empty<MirInstruction>(),
+            new MirBranch(
+                conditionValueId,
+                trueBlockId,
+                Array.Empty<MirValueId>(),
+                falseBlockId,
+                Array.Empty<MirValueId>(),
+                origin),
+            origin);
 
         var callable = new MirCallable(
             callableId,
@@ -236,21 +248,10 @@ public sealed class MirBoundsAnalysisTests
                     MinimumLength: 1),
                 new MirClassicalParameter("condition", conditionValueId),
             },
-            entryBlock: entryBlockId,
+            entryBlock: workerEntryBlock,
             blocks: new[]
             {
-                new MirBlock(
-                    entryBlockId,
-                    Array.Empty<MirValueId>(),
-                    Array.Empty<MirInstruction>(),
-                    new MirBranch(
-                        conditionValueId,
-                        trueBlockId,
-                        Array.Empty<MirValueId>(),
-                        falseBlockId,
-                        Array.Empty<MirValueId>(),
-                        origin),
-                    origin),
+                workerEntryBlock,
                 new MirBlock(
                     trueBlockId,
                     Array.Empty<MirValueId>(),
@@ -351,25 +352,23 @@ public sealed class MirBoundsAnalysisTests
                 new MirArrayStorage(secondStorageId, "second", origin),
             },
             origin);
+        var mainEntryBlock = new MirBlock(
+            entryBlockId,
+            Array.Empty<MirValueId>(),
+            Array.Empty<MirInstruction>(),
+            new MirReturn(null, origin),
+            origin);
         var entryCallable = new MirCallable(
             entryCallableId,
             "Main",
             returnType: null,
             parameters: Array.Empty<IMirParameter>(),
-            entryBlock: entryBlockId,
-            blocks: new[]
-            {
-                new MirBlock(
-                    entryBlockId,
-                    Array.Empty<MirValueId>(),
-                    Array.Empty<MirInstruction>(),
-                    new MirReturn(null, origin),
-                    origin),
-            },
+            entryBlock: mainEntryBlock,
+            blocks: new[] { mainEntryBlock },
             values: Array.Empty<MirValue>(),
             storages: Array.Empty<MirArrayStorage>(),
             origin);
-        var program = context.Program(entryCallableId, new[] { callable, entryCallable });
+        var program = context.Program(entryCallable, new[] { callable, entryCallable });
 
         var result = Assert.Single(MirBoundsAnalysis.Analyze(program, callableId).Results);
 
@@ -612,6 +611,7 @@ public sealed class MirBoundsAnalysisTests
         MirInstruction replacement)
     {
         var blocks = new List<MirBlock>(callable.Blocks.Count);
+        MirBlock? rewrittenEntryBlock = null;
         foreach (var block in callable.Blocks)
         {
             var instructions = block.Instructions
@@ -619,7 +619,11 @@ public sealed class MirBoundsAnalysisTests
                     ? replacement
                     : instruction)
                 .ToArray();
-            blocks.Add(block with { Instructions = instructions });
+            var rewrittenBlock = block with { Instructions = instructions };
+            blocks.Add(rewrittenBlock);
+
+            if (ReferenceEquals(block, callable.EntryBlock))
+                rewrittenEntryBlock = rewrittenBlock;
         }
 
         var rewrittenCallable = new MirCallable(
@@ -627,17 +631,21 @@ public sealed class MirBoundsAnalysisTests
             callable.Name,
             callable.ReturnType,
             callable.Parameters,
-            callable.EntryBlock,
+            rewrittenEntryBlock
+                ?? throw new InvalidOperationException(
+                    "MIR rewrite dropped the callable entry block"),
             blocks,
             callable.Values,
             callable.Storages,
             callable.Origin);
-        return new MirProgram(
-            program.EntryPoint,
-            program.Callables
-                .Select(candidate => candidate.Id == callable.Id
-                    ? rewrittenCallable
-                    : candidate)
-                .ToArray());
+        var rewrittenCallables = program.Callables
+            .Select(candidate => candidate.Id == callable.Id
+                ? rewrittenCallable
+                : candidate)
+            .ToArray();
+        var rewrittenEntryPoint = ReferenceEquals(program.EntryPoint, callable)
+            ? rewrittenCallable
+            : program.EntryPoint;
+        return new MirProgram(rewrittenEntryPoint, rewrittenCallables);
     }
 }

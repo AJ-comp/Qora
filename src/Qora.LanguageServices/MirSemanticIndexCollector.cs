@@ -92,14 +92,26 @@ internal sealed class MirSemanticIndexCollector : IMirLoweringTraceSink
         ValidateOwners(compilation, hirArtifact, mir);
 
         var completedCallables = mir.Program.Callables;
+        var completedCallablesByIdentityValue =
+            new Dictionary<int, MirCallable>(completedCallables.Count);
+        foreach (var completedCallable in completedCallables)
+            completedCallablesByIdentityValue.Add(completedCallable.Id.Value, completedCallable);
+
         var callablesByDeclaration =
             new Dictionary<HirNodeId, MirCallableId>(
                 hirArtifact.Program.Callables.Count);
         var callables = new BiMultiMap<SymbolId, MirCallableId>();
         foreach (var hirCallable in hirArtifact.Program.Callables)
         {
-            var mirCallableId = new MirCallableId(hirCallable.Id.Value);
-            _ = mir.Program.RequireCallable(mirCallableId);
+            if (!completedCallablesByIdentityValue.TryGetValue(
+                    hirCallable.Id.Value,
+                    out var matchingCallable))
+            {
+                throw new InvalidOperationException(
+                    $"The completed MIR has no callable matching HIR callable {hirCallable.Id}.");
+            }
+
+            var mirCallableId = matchingCallable.Id;
 
             var symbol = graph.FindDeclaration(hirCallable.Id)
                 ?? throw new InvalidOperationException(

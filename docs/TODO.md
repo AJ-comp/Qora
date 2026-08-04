@@ -133,8 +133,8 @@ that exact MIR program; HIR keeps no parallel qubit history or cleanup verdict. 
   or loop-carried predicates. This is scheduler work, not a missing HIR event stream.
 - **#14 — post-injection re-analysis.** The cleanup scheduler consumes analyses bound to one exact
   `MirProgram` owned by one `MirSnapshot`. Rung ④ must publish the injected program as a new
-  `MirStage.InverseRequestsInjected` snapshot, retain the exact previous snapshot as
-  `TransformationSource`, replay its origins, and recompute every invalidated MIR analysis rather than
+  `MirStage.InverseRequestsInjected` snapshot, retain the exact immediately preceding MIR snapshot as
+  `PreviousSnapshot`, replay its origins, and recompute every invalidated MIR analysis rather than
   reusing facts from the previous program. Successful
   materialization then publishes the next `MirStage.AdjointsMaterialized` snapshot.
 - **#16 — cleanup-candidate conditions coupled to FUTURE features** (2026-07-11 literature
@@ -187,7 +187,7 @@ that exact MIR program; HIR keeps no parallel qubit history or cleanup verdict. 
   immutable `MirProgram` and owning `MirCallable`; program-wide sites carry only the callable ID and
   callable-local entity ID because the owning snapshot is already fixed by the analysis or transformation.
   HIR lineage lives directly in `HirCompilation.Lineage`, outside `HirSemanticModel`;
-  `MirSnapshot.LoweringSource` retains the HIR basis, while each MIR entity directly owns the
+  `MirSnapshot.HirArtifact` retains the HIR basis, while each MIR entity directly owns the
   immutable `MirOrigin` provenance required by Core. OpenQASM emitted names live only in
   `OpenQasmSymbolMap`. Source names remain lookup/diagnostic data at the edge; they are never analysis
   identity.
@@ -224,7 +224,7 @@ that exact MIR program; HIR keeps no parallel qubit history or cleanup verdict. 
   classified exactly once as an identity-preserving `NodeDerivation`, provenance-only `NodeSynthesis`,
   or source `HirNodeIntroduction`. Analysis never creates a fake structural HIR stage, and canonical
   milestones cannot move backwards.
-  `MirSnapshot` owns its exact `LoweringSource`, program-owned `Origins`, and lazily cached analysis
+  `MirSnapshot` owns its exact `HirArtifact`, program-owned `Origins`, and lazily cached analysis
   store. `MirProgram` owns callable lookup, while each `MirCallable` owns its local block, instruction,
   value, storage, and qubit lookup; shared dependencies such as CFG are reused within that snapshot. Core does
   not retain an always-on HIR-symbol-to-MIR-entity index. `Qora.LanguageServices.MirSemanticIndex`
@@ -247,11 +247,11 @@ Updated 2026-07-27. The module system, typed functions and returns, expression c
 types, effect analysis, ownership contracts, MIR, and immutable compilation snapshots have landed.
 The main dependent track is now **automatic uncomputation**: the injector must consume the existing
 effect/liveness facts, insert identity-bound internal inverse requests, preserve the scope-exit |0⟩ guarantee, and
-publish a new MIR snapshot with the previous object as its exact `TransformationSource`, directly shared
-immutable origins, and freshly computed analyses rather than mutate an
+publish a new MIR snapshot with the immediately preceding MIR snapshot as its exact
+`PreviousSnapshot`, directly shared immutable origins, and freshly computed analyses rather than mutate an
 earlier snapshot. Local allocation lowering
 depends on that guarantee. Incremental invalidation and IDE query indexes should extend the existing
-document identities, exact lowering source, direct MIR origins, and source maps. IDE-only symbol-to-MIR
+document identities, the exact HIR artifact, direct MIR origins, and source maps. IDE-only symbol-to-MIR
 lookups belong to the opt-in `Qora.LanguageServices.MirSemanticIndex`; they must not become a second
 mutable ledger of semantic facts inside Core. `bool`, automatic controlled-operation generation, and the target-erased
 `Result` / `Pauli` abstractions remain later language work.

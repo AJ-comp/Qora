@@ -460,6 +460,7 @@ public sealed class HirSemanticArtifact
     public HirSemanticModel Model { get; }
     public HirValidationOutcome ValidationOutcome { get; }
     public bool IsAccepted => ValidationOutcome.IsAccepted;
+    public bool IsReadyForMirLowering => Phase == HirSemanticPhase.EffectAnalysis && IsAccepted;
     public IReadOnlyList<QoraError> Diagnostics => ValidationOutcome.Diagnostics;
 
     /// <summary>

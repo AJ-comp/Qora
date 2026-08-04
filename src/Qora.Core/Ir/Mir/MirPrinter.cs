@@ -23,7 +23,7 @@ public static class MirPrinter
 
         public string Print()
         {
-            _text.AppendLine($"mir program entry @{_program.EntryPoint}");
+            _text.AppendLine($"mir program entry @{_program.EntryPoint.Id}");
             foreach (var callable in _program.Callables.OrderBy(callable => callable.Id.Value))
             {
                 _text.AppendLine();
@@ -40,7 +40,7 @@ public static class MirPrinter
             var returns = callable.ReturnType is { } returnType ? $" -> {returnType}" : string.Empty;
             _text.AppendLine(
                 $"{kind} @{callable.Id} {callable.Name}({string.Join(", ", callable.Parameters.Select(Parameter))}){returns} {Origin(callable.Origin)}");
-            _text.AppendLine($"  entry {Block(callable.EntryBlock)}");
+            _text.AppendLine($"  entry {Block(callable.EntryBlock.Id)}");
 
             foreach (var storage in callable.Storages.OrderBy(storage => storage.Id.Value))
             {

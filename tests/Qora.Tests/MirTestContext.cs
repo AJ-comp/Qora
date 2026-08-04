@@ -21,7 +21,7 @@ internal sealed class MirTestContext
             span: null);
 
     public MirProgram Program(
-        MirCallableId entryPoint,
+        MirCallable entryPoint,
         IEnumerable<MirCallable> callables) =>
         new(
             entryPoint,

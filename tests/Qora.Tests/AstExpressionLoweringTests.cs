@@ -144,9 +144,8 @@ public class AstExpressionLoweringTests
     [Fact]
     public void ParsesRelationalAboveEquality()
     {
-        // n == 1 < 2  ==  n == (1 < 2) — the SAME C-style ladder OpenQASM applies when it re-parses the
-        // emitted tokens; folding both comparison families at one level once made the tree claim
-        // (n == 1) < 2 while the executed QASM computed the other grouping.
+        // n == 1 < 2  ==  n == (1 < 2). Folding both comparison families at one level once made HIR claim
+        // (n == 1) < 2, so later consumers could disagree about one source expression.
         var eq = Assert.IsType<HirBinaryExpression>(
             ConditionTree("n == 1 < 2"));
         Assert.Equal(HirBinaryOperator.Equal, eq.Operator);

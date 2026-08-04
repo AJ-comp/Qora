@@ -17,6 +17,59 @@ emitted as **OpenQASM 3.0**.
 > named there may have been retired by a later release; the newest release notes and current architecture
 > documents define the present pipeline.
 
+## 0.37.0 — 2026-08-04
+
+### Changed
+- **HIR now owns every source-language type decision before MIR lowering.** Conditions, loop bounds, unary
+  and binary operators, callable arguments, assignments, and returns are checked against target-independent
+  Qora contracts. Each accepted implicit scalar conversion is recorded against its exact HIR expression,
+  and MIR emits only those approved conversions instead of selecting a common type again.
+- **Classical-array equality is structural Qora semantics.** `==` and `!=` accept arrays with the same
+  element type even when their known lengths differ; length remains analysis metadata rather than a distinct
+  source type. OpenQASM lowers unequal known lengths to a constant result, compares equal-width `bit[]`
+  values directly, and expands same-length general arrays element by element. Dynamic general-array
+  comparisons and fixed comparisons above 4,096 elements report QASM002 at target lowering.
+- **Mutable `bit[]` contracts are now backend-independent.** Operations may declare and call both
+  `var bit[]` and `move var bit[]`; functions remain borrowed and read-only. OpenQASM reports QASM002 only
+  for borrowed mutable `var bit[]`, whose caller-visible writes cannot cross its value-passed bit-register
+  parameter, while `move var bit[]` lowers as a mutable value owned by the callee.
+- **All local bindings now follow point-of-declaration lexical scope.** A `use` binding becomes visible only
+  at its declaration and lowers to a MIR allocation at that exact source position. Measurement results may
+  shadow enclosing bindings in nested scopes, while same-scope duplicates remain QSEM015. The existing rule
+  that `use` is allowed only in the entry operation's top-level body is unchanged.
+- **Pure function calls are accepted consistently in value-expression positions.** Array-literal elements
+  and either bound of a `for` range may call a pure function; each range bound must still produce exactly one
+  `int` value, and measurements remain invalid there.
+- **MIR ownership invariants are enforced at construction.** Programs and callables retain their exact owned
+  entry callable and entry block objects; collections reject null or duplicate entities, MIR identities
+  reject negative values, and qubit constructors enforce valid initial, instruction-result, Phi, and array
+  shapes. Snapshot analyses consume the already verified published program instead of rerunning structural
+  verification independently.
+
+### Fixed
+- **Invalid expression shapes now fail in HIR with QSEM041 instead of leaking into MIR or target lowering.**
+  Non-integral conditions or range bounds, scalar operators applied to arrays, mixed array/scalar
+  comparisons, and array equality across different element types receive one owning diagnostic without
+  cascades. Qubit-valued misuse continues to use its existing QSEM026/QSEM006 diagnostics.
+- **Type, bounds, ownership, and alias checks use the exact symbol already bound to each HIR name node.** A
+  later shadowing declaration can no longer change the meaning of an earlier initializer, loop bound, guard,
+  call argument, or indexed access when validation revisits the completed scope graph.
+- **OpenQASM capability diagnostics now retain the exact failing MIR origin.** Unsupported parameters,
+  conversions, array aliases, dynamic widths, array comparisons, entry calls, and unmaterialized modifiers
+  point to the responsible source expression or declaration instead of only the enclosing callable.
+- **Array comparisons no longer enter scalar bounds reasoning.** MIR bounds analysis treats structural
+  array equality as an opaque boolean fact rather than attempting to derive scalar linear constraints from
+  array operands.
+
+### Removed
+- QSEM032 and the language-level ban on writing through a `bit[]` parameter. Backend representability is now
+  decided only during target lowering.
+- The pre-seeding and lowering-time hoisting of every `use` declaration, together with OpenQASM-specific
+  measurement-name collision rules in the HIR symbol table.
+- MIR's independent common-numeric-type selection, detached entry-point and entry-block ID contracts,
+  redundant verifier checks for constructor-prohibited states, and repeated verifier invocations from
+  individual MIR analyses.
+
 ## 0.36.0 — 2026-08-03
 
 ### Changed
@@ -90,7 +143,7 @@ emitted as **OpenQASM 3.0**.
   intrinsic callables. MIR lowering consumes those bindings directly instead of rebuilding a second
   string-keyed name scope.
 - **The HIR-to-MIR boundary now accepts only the final canonical HIR artifact.** Effect analysis seals the
-  HIR pipeline, and a `MirSnapshot` retains that exact accepted artifact as its lowering source. Invalid
+  HIR pipeline, and a `MirSnapshot` retains that exact accepted artifact as its `HirArtifact`. Invalid
   combinations of a later HIR tree with an earlier semantic model can no longer be constructed or repaired
   through lineage translation.
 - **MIR structure is owned where its identities are meaningful.** `MirProgram` owns callable lookup, while

@@ -122,7 +122,7 @@ public sealed class MirControlFlowSnapshot
     }
 
     public MirCallableId Callable => _sourceCallable.Id;
-    public MirBlockId EntryBlock => _sourceCallable.EntryBlock;
+    public MirBlockId EntryBlock => _sourceCallable.EntryBlock.Id;
     public IReadOnlyList<MirBlockId> ReachableBlocks { get; }
 
     internal bool IsFor(MirProgram program, MirCallableId callable) =>
@@ -286,7 +286,6 @@ internal static class MirControlFlowAnalysis
         MirCallableId callableId)
     {
         ArgumentNullException.ThrowIfNull(program);
-        QoraMirVerifier.VerifyOrThrow(program);
 
         var callable = program.FindCallable(callableId)
             ?? throw new ArgumentOutOfRangeException(
@@ -298,8 +297,8 @@ internal static class MirControlFlowAnalysis
 
     /// <summary>
     /// Builds CFG facts after the structural verifier has already established that all referenced
-    /// blocks, edges, values, and instruction identities exist. This entry point lets the verifier's
-    /// second phase validate graph-wide contracts without recursively invoking itself.
+    /// blocks, edges, values, and instruction identities exist. The verifier and canonical analysis
+    /// store use this entry point without starting verification again.
     /// </summary>
     internal static MirControlFlowSnapshot AnalyzeUnchecked(
         MirProgram program,
@@ -323,7 +322,7 @@ internal static class MirControlFlowAnalysis
             pair => (IReadOnlyList<MirBlockId>)Array.AsReadOnly(
                 pair.Value.OrderBy(id => id.Value).ToArray()));
 
-        var reachable = ReachableFrom(callable.EntryBlock, successors);
+        var reachable = ReachableFrom(callable.EntryBlock.Id, successors);
         var reachableFrom = successors.Keys.ToDictionary(
             block => block,
             block => ReachableFrom(block, successors));
@@ -332,7 +331,7 @@ internal static class MirControlFlowAnalysis
             .ToHashSet();
         var canReachExit = ReachableFrom(exits, predecessors);
         var dominators = ComputeDominators(
-            callable.EntryBlock,
+            callable.EntryBlock.Id,
             successors.Keys,
             reachable,
             predecessors);

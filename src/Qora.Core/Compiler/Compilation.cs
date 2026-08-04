@@ -170,7 +170,7 @@ public sealed class Compilation
         if (mir is not null)
         {
             if (!ReferenceEquals(
-                    mir.LoweringSource,
+                    mir.HirArtifact,
                     hir.EffectAnalysis))
             {
                 throw new ArgumentException(
@@ -294,16 +294,16 @@ public sealed class Compilation
         string parameterName)
     {
         var hirOrigin = origin.SourceHirOrigin;
-        var hirSource = mir.LoweringSource.Source;
-        if (!hirSource.Structure.Contains(hirOrigin.HirNodeId))
+        var hirSnapshot = mir.HirArtifact.Source;
+        if (!hirSnapshot.Structure.Contains(hirOrigin.HirNodeId))
         {
             throw new ArgumentException(
                 $"Diagnostic MIR origin refers to HIR node {hirOrigin.HirNodeId} outside "
-                + "the exact lowering source.",
+                + "the exact HIR artifact.",
                 parameterName);
         }
 
-        var expectedSpan = hirSource.SourceMap.Find(hirOrigin.HirNodeId);
+        var expectedSpan = hirSnapshot.SourceMap.Find(hirOrigin.HirNodeId);
         if (hirOrigin.Span != expectedSpan)
         {
             throw new ArgumentException(

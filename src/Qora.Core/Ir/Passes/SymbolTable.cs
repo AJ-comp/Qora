@@ -139,18 +139,15 @@ public sealed class Symbol
 }
 
 /// <summary>
-/// Builds the per-operation scope tree (the unified symbol table) and, while building, reports the
-/// declaration collisions the emitted OpenQASM cannot tolerate (QSEM015). One traversal produces
-/// everything: the scope tree, each symbol's kind/type/const value, and each symbol's use sites.
+/// Builds the per-operation scope tree (the unified symbol table) and reports declarations that collide
+/// within one Qora lexical scope (QSEM015). One traversal produces the scope tree, each symbol's
+/// kind/type/const value, and each symbol's use sites.
 ///
 /// Scope shape: <c>use</c> registers + parameters seed the ROOT; measure bits, ordinary classical
 /// declarations and loop variables are block-scoped (declared in program order during the walk). A
 /// <c>for</c> is two scopes — the loop variable's scope, then the body as its child (so the body may shadow
 /// the loop variable). Same-scope re-declaration is an error (QSEM015); nested shadowing is allowed
-/// (C++/Q#/Silq-style — only a collision within the SAME scope is rejected). One exception ties to
-/// emission: a measure bit is block-scoped for VISIBILITY, but its declaration is HOISTED to a flat
-/// top-level <c>bit r;</c> when emitting OpenQASM, so it may not shadow an enclosing register / parameter /
-/// measure bit (those hoist to the same scope) even though it may shadow a block-local classical.
+/// (C++/Q#/Silq-style — only a collision within the SAME scope is rejected).
 /// </summary>
 internal static class SymbolTableBuilder
 {
@@ -348,9 +345,9 @@ internal static class SymbolTableBuilder
         }
 
         // THE single insertion door. EVERY declared name — parameters, `use` registers, measure bits, vars,
-        // consts, loop vars — is added through here, into the scope the caller chose (root for the hoisted
-        // ones, the current block for the rest). Insertion goes via Scope.TryAdd whose backing dictionary is
-        // private, so NO path can bypass the same-scope duplicate rule: a collision anywhere is QSEM015.
+        // consts, loop vars — is added through here, into the lexical scope the caller chose. Insertion goes
+        // via Scope.TryAdd whose backing dictionary is private, so NO path can bypass the same-scope
+        // duplicate rule: a collision anywhere is QSEM015.
         void Declare(Scope target, Symbol sym)
         {
             if (target.TryAdd(sym)) return;
@@ -360,10 +357,8 @@ internal static class SymbolTableBuilder
                 : $"in `{opName}`: `{sym.SourceName}` is declared as both a {KindLabel(existing.Kind)} and a {KindLabel(sym.Kind)} in the same scope; rename one", sym.DeclSpan);
         }
 
-        // Parameters + the HOISTED `use` registers share one emitted top-level scope, so they seed the ROOT
-        // — BEFORE the walk, so a register may be forward-referenced. Routing them through Declare means a
-        // duplicate among them (two `use q`, or `use q` colliding with a param) is caught as QSEM015 instead
-        // of silently overwriting. Measure bits are NOT here — they are block-scoped (declared in the walk).
+        // Parameters exist before the callable body starts, so they seed the root scope before the walk.
+        // Every statement declaration, including `use`, is bound later at its lexical declaration point.
         foreach (var p in op.Parameters)
             Declare(root, scopeGraph.CreateSymbol(root.Id, p.Name, SymbolKind.Parameter, p.Type, declSpan: p.Span,
                 registerSize: p.Type == QType.Qubit ? p.RegisterSize : null,
@@ -377,47 +372,11 @@ internal static class SymbolTableBuilder
                 parameterAccess: p.Access,
                 monoSized: p.NeedsMonoSizing));
 
-        void SeedRegisters(IReadOnlyList<HirStatement> statements)
-        {
-            foreach (var statement in statements)
-                switch (statement)
-                {
-                    case HirQubitDeclarationStatement declaration:
-                        Declare(
-                            root,
-                            scopeGraph.CreateSymbol(
-                                root.Id,
-                                declaration.Name,
-                                SymbolKind.Register,
-                                QType.Qubit,
-                                declSpan: declaration.Span,
-                                registerSize: declaration.Size,
-                                isArray: true,
-                                declarationNodeId: declaration.Id));
-                        break;
-                    case HirIfStatement conditional:
-                        SeedRegisters(conditional.Then);
-                        SeedRegisters(conditional.Else);
-                        break;
-                    case HirForStatement loop:
-                        SeedRegisters(loop.Body);
-                        break;
-                    case HirWhileStatement loop:
-                        SeedRegisters(loop.Body);
-                        break;
-                    case HirRepeatStatement repeat:
-                        SeedRegisters(repeat.Body);
-                        break;
-                }
-        }
-        SeedRegisters(op.Body);
-
         // Resolve a referenced name. Found → record a use (tagged with the using statement's node Id). Not
-        // found → it is neither a hoisted name (registers/measure bits seed the root) nor an in-scope
-        // classical, so it is an unknown name OR a classical used before its declaration: QSEM025.
+        // found → it is neither a parameter nor an earlier declaration in the current lexical scope chain,
+        // so it is an unknown name or a name used before its declaration: QSEM025.
         // Expression literals (pi/tau/euler/true/false) are legitimate non-symbols and never error.
         HirNodeId? currentStatementId = null;   // set by Walk to the statement being visited
-        var measureBits = new List<(string Name, SourceSpan? Span)>();   // every measure bit, for the post-walk top-level collision check
         var reported036 = new HashSet<SourceSpan?>();   // one diagnostic per document-qualified statement span
         void AddStatementError(string code, string message, SourceSpan? span)
         {
@@ -429,7 +388,7 @@ internal static class SymbolTableBuilder
 
         // A WHOLE `bit[]` register, if that is what this node denotes. The discriminator is IsArray, NOT Type:
         // a scalar measure bit and a bit register are both QType.Bit, and the scalar one is untouched by the
-        // register rule (OpenQASM makes scalar `bit` interchangeable with `bool`, so it IS a value).
+        // register rule because it is an ordinary scalar Qora value.
         Symbol? WholeBitRegister(Scope scope, HirExpression? expression) =>
             expression is HirNameExpression name
             && scope.Lookup(name.Name) is { Type: QType.Bit, IsArray: true } symbol
@@ -564,20 +523,15 @@ internal static class SymbolTableBuilder
                     RecordExpr(scope, unary.Operand, detail, span, classicalOnly);
                     return;
                 case HirBinaryExpression binary:
-                    // Register-to-register comparison is the ONE whole-register operation that needs no
-                    // numeric reading: it matches bit patterns. OpenQASM defines it only for equal widths —
-                    // `bit[2] "10"` and `bit[3] "010"` are NOT equal there even though both read as 2 — so
-                    // unequal widths are rejected rather than silently answering "different". ORDERING
-                    // (`<`/`>`) is deliberately excluded: the target compares those NUMERICALLY, ignoring
-                    // width, so `f == g` and `f < g` would disagree about the same pair. Ordering is a
-                    // numeric question and must be asked with an explicit conversion on both sides.
-                    if (WholeBitRegister(scope, binary.Left) is { } lhs
-                        && WholeBitRegister(scope, binary.Right) is { } rhs
-                        && binary.Operator is HirBinaryOperator.Equal or HirBinaryOperator.NotEqual)
+                    // Equality compares whole arrays structurally. A bit-array operand therefore remains a
+                    // container of bits here and needs no numeric interpretation; differing lengths simply
+                    // make equality false and inequality true. Ordering still requires scalar operands.
+                    var comparesArrays = binary.Operator is
+                            HirBinaryOperator.Equal or HirBinaryOperator.NotEqual
+                        && ExpressionTypes.TypeOf(binary.Left, scope, opById) is { IsArray: true }
+                        && ExpressionTypes.TypeOf(binary.Right, scope, opById) is { IsArray: true };
+                    if (comparesArrays)
                     {
-                        if (lhs.ArrayLength is int ln && rhs.ArrayLength is int rn && ln != rn
-                            && reported036.Add(span))
-                            AddStatementError("QSEM036", $"in `{opName}`: `{HirExpressions.Render(binary.Left)}` is `bit[{ln}]` and `{HirExpressions.Render(binary.Right)}` is `bit[{rn}]` — registers of different widths are never equal, whatever bits they hold; compare equal-width registers, or compare their values with `{QoraGates.BitsAsInt}(…)` on both sides", span);
                         RecordExpr(scope, binary.Left, detail, span, classicalOnly, registerOk: true);
                         RecordExpr(scope, binary.Right, detail, span, classicalOnly, registerOk: true);
                         return;
@@ -653,8 +607,8 @@ internal static class SymbolTableBuilder
         // order lies after the block began and before this declaration), then that use bound to the outer
         // value — but the completed scope dictionary the validator later reads would resolve the same name
         // to this later local, so the two passes would disagree (an out-of-bounds index folded to the wrong
-        // value, or a duplicate qubit missed). Point-of-declaration scoping (which the emitted OpenQASM
-        // follows) means a name may not be used before its declaration in its own scope: reject it here.
+        // value, or a duplicate qubit missed). Qora's point-of-declaration rule means a name may not be used
+        // before its declaration in its own scope: reject it here.
         IReadOnlyList<UseSite> UsesBeforeShadow(Scope scope, string name, int scopeStart) =>
             scope.Lookup(name) is { Kind: not SymbolKind.Callable } outer
                 ? outer.Uses.Where(use => use.Order > scopeStart && use.Order < order).ToList()
@@ -717,6 +671,24 @@ internal static class SymbolTableBuilder
                 currentStatementId = statement.Id;
                 switch (statement)
                 {
+                    case HirQubitDeclarationStatement declaration:
+                        ReportUsesBeforeShadow(
+                            scope,
+                            declaration.Name,
+                            scopeStart,
+                            declaration.Span);
+                        Declare(
+                            scope,
+                            scopeGraph.CreateSymbol(
+                                scope.Id,
+                                declaration.Name,
+                                SymbolKind.Register,
+                                QType.Qubit,
+                                declSpan: declaration.Span,
+                                registerSize: declaration.Size,
+                                isArray: true,
+                                declarationNodeId: declaration.Id));
+                        break;
                     case HirCallStatement callStatement:
                         // an operation CALL (not a built-in gate) records a use on the callee's operation
                         // symbol — its "used-where", accumulated across every caller. A user call must carry
@@ -746,31 +718,14 @@ internal static class SymbolTableBuilder
                             scope,
                             measurement.Target,
                             declaration.Span);
-                        // The measure bit is BLOCK-SCOPED like var/const for VISIBILITY: declared into the
-                        // CURRENT scope in program order, so referencing it before this line is QSEM025.
-                        // But its DECLARATION is HOISTED at emission to one flat top-level `bit r;` (OpenQASM
-                        // importers reject local classical declarations), together with `use` registers and
-                        // parameters. So while it may shadow a block-local classical, it must NOT reuse the
-                        // name of an ENCLOSING register / parameter / measure bit — those flatten to the same
-                        // emitted scope and would collide. (Same-scope dups: Declare. Disjoint sibling blocks
-                        // may reuse a name — they dedup into one emitted bit and never coexist.)
-                        if (scope.ParentScope?.Lookup(declaration.Name) is
-                            {
-                                Kind: SymbolKind.Register
-                                    or SymbolKind.Parameter
-                                    or SymbolKind.MeasureBit,
-                            } enclosing)
-                            Add(
-                                errors,
-                                "QSEM015",
-                                $"in `{opName}`: measure bit `{declaration.Name}` reuses the name of an enclosing {KindLabel(enclosing.Kind)}; a measured result is emitted as one top-level `bit {declaration.Name};`, so its name must be unique across the operation's registers, parameters and measure bits — rename one",
-                                declaration.Span);
+                        // A measurement result follows the same point-of-declaration lexical scope as any
+                        // other classical binding. Same-scope duplicates are rejected by Declare; nested
+                        // bindings have distinct symbol identities and may shadow one another.
                         ReportUsesBeforeShadow(
                             scope,
                             declaration.Name,
                             scopeStart,
                             declaration.Span);
-                        measureBits.Add((declaration.Name, declaration.Span));
                         Declare(
                             scope,
                             scopeGraph.CreateSymbol(
@@ -1087,17 +1042,6 @@ internal static class SymbolTableBuilder
         }
 
         Walk(op.Body, root);
-
-        // QSEM015 — a measure bit HOISTS to a flat top-level `bit r;` at emission, so it shares the emitted
-        // top-level namespace with root-scope classicals (const/var/array), which also emit there. A same
-        // name in both is a duplicate top-level declaration OpenQASM 3 rejects — and target name allocation, keying by
-        // source name, would emit both under one name rather than renaming. Checked HERE, against the
-        // COMPLETED root scope, so it fires regardless of whether the classical is declared before or after
-        // the measure bit's block. (Enclosing register/parameter/measure-bit collisions are caught inline
-        // during the walk; a BLOCK-local classical stays in its own emitted scope and does not collide.)
-        foreach (var (mbName, mbSpan) in measureBits)
-            if (root.LookupLocal(mbName) is { Kind: SymbolKind.Const or SymbolKind.Var } top)
-                Add(errors, "QSEM015", $"in `{opName}`: measure bit `{mbName}` reuses the name of the top-level {KindLabel(top.Kind)} `{mbName}`; a measured result hoists to `bit {mbName};` at the top level, so its name must be unique there — rename one", mbSpan);
 
         // QSEM013 — every declared name is checked here, so no declaration site can bypass the
         // reserved-expression-name rule.

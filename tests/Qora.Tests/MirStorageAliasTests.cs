@@ -166,13 +166,15 @@ public sealed class MirStorageAliasTests
             originalCall.Functors,
             originalCall.Origin);
         var malformedMain = ReplaceInstruction(main, aliasedCall);
-        var malformedProgram = new MirProgram(
-            program.EntryPoint,
-            program.Callables
-                .Select(callable => callable.Id == main.Id
-                    ? malformedMain
-                    : callable)
-                .ToArray());
+        var malformedCallables = program.Callables
+            .Select(callable => callable.Id == main.Id
+                ? malformedMain
+                : callable)
+            .ToArray();
+        var malformedEntryPoint = ReferenceEquals(program.EntryPoint, main)
+            ? malformedMain
+            : program.EntryPoint;
+        var malformedProgram = new MirProgram(malformedEntryPoint, malformedCallables);
 
         var error = Assert.Single(
             QoraMirVerifier.Verify(malformedProgram),
@@ -230,15 +232,20 @@ public sealed class MirStorageAliasTests
     private static MirCallable RebuildCallable(
         MirCallable source,
         IReadOnlyList<MirBlock>? blocks = null,
-        IReadOnlyList<MirArrayStorage>? storages = null) =>
-        new(
+        IReadOnlyList<MirArrayStorage>? storages = null)
+    {
+        var rebuiltBlocks = blocks ?? source.Blocks;
+        var rebuiltEntryBlock = rebuiltBlocks.Single(
+            block => block.Id == source.EntryBlock.Id);
+        return new MirCallable(
             source.Id,
             source.Name,
             source.ReturnType,
             source.Parameters,
-            source.EntryBlock,
-            blocks ?? source.Blocks,
+            rebuiltEntryBlock,
+            rebuiltBlocks,
             source.Values,
             storages ?? source.Storages,
             source.Origin);
+    }
 }

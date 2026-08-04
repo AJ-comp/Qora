@@ -146,8 +146,8 @@ QoraCompiler.Compile
        │       ├─ Validation
        │       └─ EffectAnalysis
        ├─ Mir (optional typed SSA/CFG snapshot)
-       │   ├─ exact LoweringSource + program-owned Origins
-       │   ├─ MirStage + optional exact TransformationSource
+       │   ├─ exact HirArtifact + program-owned Origins
+       │   ├─ MirStage + optional exact PreviousSnapshot
        │   └─ Structure + analyses bound to the exact MirProgram
        ├─ Diagnostics
        │   └─ typed Source / HIR / MIR / Target(backend, exact MIR input) origin
@@ -241,7 +241,7 @@ Qora.LanguageServices (opt-in)
   `OpenQasmArtifact.Text` is emitted from the typed target program rather than supplied as a second
   authority. Target diagnostics retain the backend and exact `MirSnapshot` input, so provenance
   follows the backend's real input domain without reaching back into HIR.
-- Core retains only the MIR provenance needed by compilation: `MirSnapshot.LoweringSource` identifies
+- Core retains only the MIR provenance needed by compilation: `MirSnapshot.HirArtifact` identifies
   the exact final HIR artifact and each MIR entity directly owns a `MirOrigin` rooted at its HIR/source location.
   It does not retain always-on HIR-symbol-to-MIR-entity maps. When tooling requests those queries,
   `Qora.LanguageServices.MirSemanticIndex` collects an opt-in lowering trace and builds

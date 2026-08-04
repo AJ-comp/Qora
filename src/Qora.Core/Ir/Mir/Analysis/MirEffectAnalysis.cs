@@ -539,7 +539,6 @@ internal static class MirEffectAnalysis
     internal static MirEffectSnapshot Analyze(MirProgram program)
     {
         ArgumentNullException.ThrowIfNull(program);
-        QoraMirVerifier.VerifyOrThrow(program);
         var callGraph = MirCallGraphAnalysis.AnalyzeVerified(program);
         return new Analyzer(
             program,

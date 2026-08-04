@@ -6,7 +6,8 @@ namespace Qora.Ir.Passes;
 /// </summary>
 internal readonly record struct QValueShape(
     QType Type,
-    bool IsArray)
+    bool IsArray,
+    int? KnownLength = null)
 {
     public override string ToString() =>
         Type.ToString().ToLowerInvariant()
@@ -44,6 +45,19 @@ internal static class ExpressionTypes
         HirExpression? expression,
         Scope scope,
         IReadOnlyDictionary<HirNodeId, HirCallable> callableById) =>
+        TypeOf(expression, scope, semanticModel: null, callableById);
+
+    internal static QValueShape? TypeOf(
+        HirExpression? expression,
+        HirSemanticModel semanticModel,
+        IReadOnlyDictionary<HirNodeId, HirCallable> callableById) =>
+        TypeOf(expression, scope: null, semanticModel, callableById);
+
+    private static QValueShape? TypeOf(
+        HirExpression? expression,
+        Scope? scope,
+        HirSemanticModel? semanticModel,
+        IReadOnlyDictionary<HirNodeId, HirCallable> callableById) =>
         expression switch
         {
             null or HirMissingExpression =>
@@ -53,10 +67,13 @@ internal static class ExpressionTypes
                 new QValueShape(QType.Bit, IsArray: false),
 
             HirArrayCreationExpression allocation =>
-                new QValueShape(allocation.ElementType, IsArray: true),
+                new QValueShape(
+                    allocation.ElementType,
+                    IsArray: true,
+                    allocation.Length),
 
             HirArrayLiteralExpression literal =>
-                ArrayTypeOf(literal, scope, callableById),
+                ArrayTypeOf(literal, scope, semanticModel, callableById),
 
             HirIntegerLiteralExpression =>
                 new QValueShape(QType.Int, IsArray: false),
@@ -65,23 +82,23 @@ internal static class ExpressionTypes
                 LiteralType(literal.Text),
 
             HirNameExpression name =>
-                NameType(name.Name, scope),
+                NameType(name, scope, semanticModel),
 
             HirMemberAccessExpression
             {
                 Receiver: { } receiver,
                 MemberName: "Count",
-            } when TypeOf(receiver, scope, callableById) is { IsArray: true } =>
+            } when TypeOf(receiver, scope, semanticModel, callableById) is { IsArray: true } =>
                 new QValueShape(QType.Int, IsArray: false),
 
             HirUnaryExpression unary =>
-                UnaryType(unary, scope, callableById),
+                UnaryType(unary, scope, semanticModel, callableById),
 
             HirBinaryExpression binary =>
-                BinaryType(binary, scope, callableById),
+                BinaryType(binary, scope, semanticModel, callableById),
 
             HirIndexExpression index
-                when TypeOf(index.Receiver, scope, callableById) is
+                when TypeOf(index.Receiver, scope, semanticModel, callableById) is
                 {
                     IsArray: true,
                 } array =>
@@ -138,24 +155,56 @@ internal static class ExpressionTypes
         };
     }
 
-    private static QValueShape? NameType(
-        string name,
-        Scope scope)
+    /// <summary>
+    /// The scalar operand type used by arithmetic and comparison operators. This is source-language
+    /// typing, not a MIR lowering decision. Arithmetic on two bits promotes them to <c>int</c>; a
+    /// comparison may compare two bits directly.
+    /// </summary>
+    internal static QType CommonScalarOperandType(
+        QType left,
+        QType right,
+        bool isComparison)
     {
-        if (name is "pi" or "tau" or "euler")
+        if (left == QType.Qubit || right == QType.Qubit)
+            throw new ArgumentException("a classical operator cannot consume a qubit");
+        if (left == right)
+            return !isComparison && left == QType.Bit
+                ? QType.Int
+                : left;
+        if (left == QType.Float || right == QType.Float)
+            return QType.Float;
+        if (left == QType.Angle || right == QType.Angle)
+            return QType.Angle;
+        return QType.Int;
+    }
+
+    private static QValueShape? NameType(
+        HirNameExpression name,
+        Scope? scope,
+        HirSemanticModel? semanticModel)
+    {
+        if (name.Name is "pi" or "tau" or "euler")
             return new QValueShape(QType.Float, IsArray: false);
-        if (name is "true" or "false")
+        if (name.Name is "true" or "false")
             return new QValueShape(QType.Bit, IsArray: false);
 
-        return scope.Lookup(name) is
+        var symbol = semanticModel is null
+            ? scope!.Lookup(name.Name)
+            : semanticModel.FindReferencedSymbol(name.Id);
+        return symbol is
         {
             Type: { } type,
-        } symbol
-            ? new QValueShape(type, symbol.IsArray)
+        }
+            ? new QValueShape(
+                type,
+                symbol.IsArray,
+                type == QType.Qubit
+                    ? symbol.RegisterSize
+                    : symbol.ArrayLength)
             : null;
     }
 
-    private static QValueShape LiteralType(string text) =>
+    internal static QValueShape LiteralType(string text) =>
         text is "true" or "false"
             ? new QValueShape(QType.Bit, IsArray: false)
             : text is "pi" or "tau" or "euler"
@@ -165,12 +214,14 @@ internal static class ExpressionTypes
 
     private static QValueShape? UnaryType(
         HirUnaryExpression unary,
-        Scope scope,
+        Scope? scope,
+        HirSemanticModel? semanticModel,
         IReadOnlyDictionary<HirNodeId, HirCallable> callableById)
     {
         var operand = TypeOf(
             unary.Operand,
             scope,
+            semanticModel,
             callableById);
         if (operand is not { } scalar)
             return null;
@@ -188,19 +239,30 @@ internal static class ExpressionTypes
 
     private static QValueShape? BinaryType(
         HirBinaryExpression binary,
-        Scope scope,
+        Scope? scope,
+        HirSemanticModel? semanticModel,
         IReadOnlyDictionary<HirNodeId, HirCallable> callableById)
     {
-        var left = TypeOf(binary.Left, scope, callableById);
-        var right = TypeOf(binary.Right, scope, callableById);
+        var left = TypeOf(binary.Left, scope, semanticModel, callableById);
+        var right = TypeOf(binary.Right, scope, semanticModel, callableById);
         if (left is not { } lhs || right is not { } rhs)
             return null;
 
-        // Preserve the offending shape so the boundary diagnostic can report array-vs-scalar.
-        if (lhs.IsArray)
-            return lhs;
-        if (rhs.IsArray)
-            return rhs;
+        if (lhs.IsArray || rhs.IsArray)
+        {
+            if (binary.Operator is
+                    HirBinaryOperator.Equal or HirBinaryOperator.NotEqual
+                && lhs.IsArray
+                && rhs.IsArray
+                && lhs.Type != QType.Qubit
+                && lhs.Type == rhs.Type)
+            {
+                return new QValueShape(QType.Bit, IsArray: false);
+            }
+
+            // Preserve the offending shape so the boundary diagnostic can report array-vs-scalar.
+            return lhs.IsArray ? lhs : rhs;
+        }
         if (lhs.Type == QType.Qubit || rhs.Type == QType.Qubit)
             return null;
 
@@ -217,23 +279,24 @@ internal static class ExpressionTypes
             return new QValueShape(QType.Bit, IsArray: false);
         }
 
-        if (lhs.Type == QType.Float || rhs.Type == QType.Float)
-            return new QValueShape(QType.Float, IsArray: false);
-        if (lhs.Type == QType.Angle || rhs.Type == QType.Angle)
-            return new QValueShape(QType.Angle, IsArray: false);
-
-        return new QValueShape(QType.Int, IsArray: false);
+        return new QValueShape(
+            CommonScalarOperandType(
+                lhs.Type,
+                rhs.Type,
+                isComparison: false),
+            IsArray: false);
     }
 
     private static QValueShape? ArrayTypeOf(
         HirArrayLiteralExpression literal,
-        Scope scope,
+        Scope? scope,
+        HirSemanticModel? semanticModel,
         IReadOnlyDictionary<HirNodeId, HirCallable> callableById)
     {
         QType? elementType = null;
         foreach (var element in literal.Elements)
         {
-            if (TypeOf(element, scope, callableById) is not
+            if (TypeOf(element, scope, semanticModel, callableById) is not
                 {
                     IsArray: false,
                 } elementShape)
@@ -251,7 +314,10 @@ internal static class ExpressionTypes
         }
 
         return elementType is { } type
-            ? new QValueShape(type, IsArray: true)
+            ? new QValueShape(
+                type,
+                IsArray: true,
+                literal.Elements.Count)
             : null;
     }
 
@@ -263,10 +329,9 @@ internal static class ExpressionTypes
             return left;
         if (left == QType.Qubit || right == QType.Qubit)
             return null;
-        if (left == QType.Float || right == QType.Float)
-            return QType.Float;
-        if (left == QType.Angle || right == QType.Angle)
-            return QType.Angle;
-        return QType.Int;
+        return CommonScalarOperandType(
+            left,
+            right,
+            isComparison: false);
     }
 }

@@ -178,7 +178,6 @@ internal static class MirWitnessAvailabilityAnalysis
     {
         ArgumentNullException.ThrowIfNull(program);
         ArgumentNullException.ThrowIfNull(effects);
-        QoraMirVerifier.VerifyOrThrow(program);
         effects.EnsureFor(program);
 
         var callable = program.FindCallable(callableId)

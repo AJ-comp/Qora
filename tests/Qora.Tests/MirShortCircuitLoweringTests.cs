@@ -18,7 +18,7 @@ public sealed class MirShortCircuitLoweringTests
             }
             """);
 
-        var entry = Assert.IsType<MirBlock>(main.FindBlock(main.EntryBlock));
+        var entry = main.EntryBlock;
         var branch = Assert.IsType<MirBranch>(entry.Terminator);
         Assert.Empty(entry.Instructions.OfType<MirPureCall>());
 
@@ -44,7 +44,7 @@ public sealed class MirShortCircuitLoweringTests
             }
             """);
 
-        var entry = Assert.IsType<MirBlock>(main.FindBlock(main.EntryBlock));
+        var entry = main.EntryBlock;
         var branch = Assert.IsType<MirBranch>(entry.Terminator);
         Assert.Empty(entry.Instructions.OfType<MirPureCall>());
 
@@ -69,7 +69,7 @@ public sealed class MirShortCircuitLoweringTests
             }
             """);
 
-        var entry = Assert.IsType<MirBlock>(main.FindBlock(main.EntryBlock));
+        var entry = main.EntryBlock;
         Assert.Empty(entry.Instructions.OfType<MirArrayLoad>());
         var loadBlock = Assert.Single(
             main.Blocks,
@@ -78,7 +78,7 @@ public sealed class MirShortCircuitLoweringTests
         var cfg = Qora.Ir.Mir.Analysis.MirControlFlowAnalysis.Analyze(
             program,
             main.Id);
-        Assert.False(cfg.Dominates(loadBlock.Id, main.EntryBlock));
+        Assert.False(cfg.Dominates(loadBlock.Id, main.EntryBlock.Id));
         Assert.Contains(
             main.Blocks
                 .Where(block => block.Terminator is MirBranch),

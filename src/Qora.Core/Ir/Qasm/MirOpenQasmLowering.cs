@@ -79,15 +79,8 @@ internal static class MirOpenQasmLowering
         public ProgramLowerer(MirSnapshot source)
         {
             _source = source;
-            var entry = source.Program.RequireCallable(source.Program.EntryPoint);
-            if (entry.Kind != MirCallableKind.Operation)
-            {
-                throw Internal(
-                    $"MIR entry point {source.Program.EntryPoint} is not an operation");
-            }
-
             var orderedCallables = source.Program.Callables
-                .Where(callable => callable.Id != source.Program.EntryPoint)
+                .Where(callable => callable.Id != source.Program.EntryPoint.Id)
                 .OrderBy(callable => callable.Id.Value)
                 .ToArray();
             var targetCallables =
@@ -109,8 +102,7 @@ internal static class MirOpenQasmLowering
 
         public MirOpenQasmTargetProgram Lower()
         {
-            var entrySource =
-                _source.Program.RequireCallable(_source.Program.EntryPoint);
+            var entrySource = _source.Program.EntryPoint;
             var entryLowerer = new CallableLowerer(
                 _source,
                 entrySource,
@@ -122,7 +114,7 @@ internal static class MirOpenQasmLowering
             var definitions = new List<MirQasmCallableDefinition>(
                 _source.Program.Callables.Count - 1);
             var definitionSources = _source.Program.Callables
-                .Where(callable => callable.Id != _source.Program.EntryPoint)
+                .Where(callable => callable.Id != _source.Program.EntryPoint.Id)
                 .OrderBy(callable => callable.Id.Value);
             foreach (var callable in definitionSources)
             {
@@ -161,6 +153,8 @@ internal static class MirOpenQasmLowering
 
     private sealed class CallableLowerer
     {
+        private const int MaxExpandedArrayComparisonElements = 4096;
+
         private readonly MirProgram _program;
         private readonly MirCallable _callable;
         private readonly IReadOnlyDictionary<MirCallableId, MirQasmCallableId> _targetCallables;
@@ -201,7 +195,7 @@ internal static class MirOpenQasmLowering
             _regions = snapshot.Analyses.ControlRegions(callable);
             _storageProvenance = snapshot.Analyses.StorageProvenance(callable);
 
-            var targetReserved = callable.Id == _program.EntryPoint
+            var targetReserved = callable.Id == _program.EntryPoint.Id
                 ? QoraGates.QasmReserved
                 : QoraGates.QasmKeywords;
             var reserved = new HashSet<string>(
@@ -213,14 +207,14 @@ internal static class MirOpenQasmLowering
 
         public IReadOnlyList<MirQasmStatement> LowerEntry()
         {
-            if (_callable.Id != _program.EntryPoint)
+            if (_callable.Id != _program.EntryPoint.Id)
                 throw Internal("a definition lowerer was asked for an entry point");
             return LowerBody();
         }
 
         public MirQasmCallableDefinition LowerDefinition()
         {
-            if (_callable.Id == _program.EntryPoint)
+            if (_callable.Id == _program.EntryPoint.Id)
                 throw Internal("the entry lowerer was asked for a definition");
             var body = LowerBody();
             return new MirQasmCallableDefinition(
@@ -235,9 +229,11 @@ internal static class MirOpenQasmLowering
 
         private IReadOnlyList<MirQasmStatement> LowerBody()
         {
+            RejectOversizedArrayComparisonExpansions();
+
             var flow = new List<MirQasmStatement>();
             var outcome = EmitPath(
-                _callable.EntryBlock,
+                _callable.EntryBlock.Id,
                 stop: null,
                 regionLoop: null,
                 breakableLoop: null,
@@ -270,6 +266,41 @@ internal static class MirOpenQasmLowering
             return _prologue.Concat(flow).ToArray();
         }
 
+        private void RejectOversizedArrayComparisonExpansions()
+        {
+            foreach (var blockId in _controlFlow.ReachableBlocks)
+            {
+                var block = _callable.RequireBlock(blockId);
+                foreach (var instruction in block.Instructions)
+                {
+                    if (instruction is not MirBinary binary
+                        || binary.Operator is not (
+                            MirBinaryOperator.Equal or MirBinaryOperator.NotEqual))
+                    {
+                        continue;
+                    }
+
+                    var leftType = _callable.RequireValue(binary.Left).Type;
+                    var rightType = _callable.RequireValue(binary.Right).Type;
+                    if (!leftType.IsArray
+                        || !rightType.IsArray
+                        || leftType.ElementType == QType.Bit
+                        || leftType.KnownLength is not int leftLength
+                        || rightType.KnownLength != leftLength
+                        || leftLength <= MaxExpandedArrayComparisonElements)
+                    {
+                        continue;
+                    }
+
+                    throw Unsupported(
+                        $"array comparison {binary.Id} has {leftLength} elements; "
+                        + "OpenQASM elementwise comparison expansion is limited to "
+                        + $"{MaxExpandedArrayComparisonElements} elements",
+                        binary.Origin);
+                }
+            }
+        }
+
         private void PrepareBindings()
         {
             PrepareOriginalParameters();
@@ -294,6 +325,15 @@ internal static class MirOpenQasmLowering
                     {
                         var classicalType =
                             _callable.RequireValue(classical.Value).Type;
+                        if (classicalType is { IsArray: true, ElementType: QType.Bit }
+                            && classical.Ownership == QOwnershipMode.Borrowed
+                            && classical.Access == QAccessMode.Mutable)
+                        {
+                            throw Unsupported(
+                                $"mutable bit-array parameter `{classical.Name}` requires caller-visible writes, " +
+                                "but OpenQASM bit-register parameters are passed by value",
+                                _callable.RequireValue(classical.Value).Origin);
+                        }
                         var targetType = TargetType(
                             classicalType,
                             declaration: false);
@@ -330,7 +370,8 @@ internal static class MirOpenQasmLowering
                         var count = qubit.IsArray
                             ? qubit.Length
                               ?? throw Unsupported(
-                                  $"qubit-array parameter `{qubit.Name}` has unknown target width")
+                                  $"qubit-array parameter `{qubit.Name}` has unknown target width",
+                                  qubit.Origin)
                             : 1;
                         _parameters.Add(
                             new MirQasmParameter(
@@ -361,7 +402,7 @@ internal static class MirOpenQasmLowering
                 var storageType = storageOwner.StorageTypeOf(storage);
                 var targetType = RequireGeneralArrayType(storageType, storage.Name);
                 MirQasmExpression place;
-                if (_callable.Id == _program.EntryPoint)
+                if (_callable.Id == _program.EntryPoint.Id)
                 {
                     var declaration = NextDeclaration();
                     var name = _names.Fresh(
@@ -423,7 +464,8 @@ internal static class MirOpenQasmLowering
 
                 var width = storageType.KnownLength
                     ?? throw Unsupported(
-                        $"bit-array storage `{storage.Name}` has unknown target width");
+                        $"bit-array storage `{storage.Name}` has unknown target width",
+                        storage.Origin);
                 var declaration = NextDeclaration();
                 var name = _names.Fresh(
                     Identifier.Sanitize(storage.Name, $"bits_{storage.Id.Value}"));
@@ -1062,13 +1104,7 @@ internal static class MirOpenQasmLowering
                         break;
 
                     case MirBinary binary:
-                        Assign(
-                            binary.Result,
-                            new MirQasmBinaryExpression(
-                                BinaryOperator(binary.Operator),
-                                ValueExpression(binary.Left),
-                                ValueExpression(binary.Right)),
-                            output);
+                        EmitBinary(binary, output);
                         break;
 
                     case MirConvert convert:
@@ -1076,7 +1112,8 @@ internal static class MirOpenQasmLowering
                             convert.Result,
                             ConvertExpression(
                                 _callable.RequireValue(convert.Result).Type,
-                                ValueExpression(convert.Operand)),
+                                ValueExpression(convert.Operand),
+                                convert.Origin),
                             output);
                         break;
 
@@ -1094,7 +1131,8 @@ internal static class MirOpenQasmLowering
                                     System.Globalization.CultureInfo.InvariantCulture))
                             : arrayType.ElementType == QType.Bit
                                 ? throw Unsupported(
-                                    "a dynamic-width bit register has no OpenQASM sizeof form")
+                                    "a dynamic-width bit register has no OpenQASM sizeof form",
+                                    length.Origin)
                                 : new MirQasmSizeOfExpression(
                                     ValueExpression(length.Array));
                         Assign(length.Result, expression, output);
@@ -1117,7 +1155,11 @@ internal static class MirOpenQasmLowering
                                     ValueExpression(store.Array),
                                     ValueExpression(store.Index)),
                                 ValueExpression(store.Value)));
-                        RequireSameArrayPlace(store.Array, store.Result, "array.store");
+                        RequireSameArrayPlace(
+                            store.Array,
+                            store.Result,
+                            "array.store",
+                            store.Origin);
                         break;
 
                     case MirPureCall call:
@@ -1150,7 +1192,8 @@ internal static class MirOpenQasmLowering
                             RequireSameArrayPlace(
                                 input.Value,
                                 result.Result,
-                                "mutable call result");
+                                "mutable call result",
+                                apply.Origin);
                         }
                         break;
 
@@ -1209,8 +1252,12 @@ internal static class MirOpenQasmLowering
             {
                 case MirUserCallableTarget user:
                     RequireUserCall(user.Callable, MirCallableKind.Function, "pure call");
-                    if (user.Callable == _program.EntryPoint)
-                        throw Unsupported("the MIR entry point cannot be called as a function");
+                    if (user.Callable == _program.EntryPoint.Id)
+                    {
+                        throw Unsupported(
+                            "the MIR entry point cannot be called as a function",
+                            call.Origin);
+                    }
                     arguments.AddRange(HiddenArgumentsFor(user.Callable));
                     return new MirQasmFunctionCallExpression(
                         new MirQasmUserFunctionTarget(TargetCallable(user.Callable)),
@@ -1226,7 +1273,8 @@ internal static class MirOpenQasmLowering
                         .Type
                         .KnownLength
                         ?? throw Unsupported(
-                            $"`{name}` requires a fixed-width bit register");
+                            $"`{name}` requires a fixed-width bit register",
+                            call.Origin);
                     return new MirQasmUnsignedCastExpression(
                         width,
                         ValueExpression(operand.Value));
@@ -1259,10 +1307,15 @@ internal static class MirOpenQasmLowering
                         var modifiers = string.Join(", ", apply.Functors);
                         throw Unsupported(
                             $"user callable {user.Callable} still carries unmaterialized modifier(s): " +
-                            modifiers);
+                            modifiers,
+                            apply.Origin);
                     }
-                    if (user.Callable == _program.EntryPoint)
-                        throw Unsupported("the MIR entry point cannot be called");
+                    if (user.Callable == _program.EntryPoint.Id)
+                    {
+                        throw Unsupported(
+                            "the MIR entry point cannot be called",
+                            apply.Origin);
+                    }
                     allArguments.AddRange(HiddenArgumentsFor(user.Callable));
                     return new MirQasmQuantumApplyStatement(
                         new MirQasmUserQuantumTarget(TargetCallable(user.Callable)),
@@ -1272,7 +1325,11 @@ internal static class MirOpenQasmLowering
                 case MirBuiltinGateTarget builtin:
                 {
                     if (!QoraGates.Gates.TryGetValue(builtin.Name, out var gate))
-                        throw Unsupported($"unknown OpenQASM built-in gate `{builtin.Name}`");
+                    {
+                        throw Unsupported(
+                            $"unknown OpenQASM built-in gate `{builtin.Name}`",
+                            apply.Origin);
+                    }
                     var gateParameters = new List<MirQasmExpression>();
                     var operands = new List<MirQasmExpression>();
                     for (var index = 0; index < apply.Operands.Count; index++)
@@ -1341,7 +1398,8 @@ internal static class MirOpenQasmLowering
                     RequireSameArrayPlace(
                         arguments[index],
                         destination,
-                        $"edge {source}->{target}");
+                        $"edge {source}->{target}",
+                        _callable.RequireBlock(source).Terminator.Origin);
                     continue;
                 }
 
@@ -1383,9 +1441,125 @@ internal static class MirOpenQasmLowering
                     ValueExpression(result),
                     value));
 
+        private void EmitBinary(
+            MirBinary binary,
+            List<MirQasmStatement> output)
+        {
+            var leftType = _callable.RequireValue(binary.Left).Type;
+            var rightType = _callable.RequireValue(binary.Right).Type;
+            if (!leftType.IsArray && !rightType.IsArray)
+            {
+                Assign(
+                    binary.Result,
+                    new MirQasmBinaryExpression(
+                        BinaryOperator(binary.Operator),
+                        ValueExpression(binary.Left),
+                        ValueExpression(binary.Right)),
+                    output);
+                return;
+            }
+
+            if (!leftType.IsArray
+                || !rightType.IsArray
+                || leftType.ElementType != rightType.ElementType
+                || binary.Operator is not (
+                    MirBinaryOperator.Equal or MirBinaryOperator.NotEqual))
+            {
+                throw Internal(
+                    $"invalid MIR array comparison {binary.Operator} "
+                    + $"between {leftType} and {rightType}");
+            }
+
+            if (leftType.KnownLength is not int leftLength
+                || rightType.KnownLength is not int rightLength)
+            {
+                throw Unsupported(
+                    $"array comparison {binary.Id} requires fixed operand lengths",
+                    binary.Origin);
+            }
+
+            if (leftLength != rightLength)
+            {
+                var result = binary.Operator == MirBinaryOperator.Equal ? "0" : "1";
+                Assign(binary.Result, new MirQasmLiteralExpression(result), output);
+                return;
+            }
+
+            var left = ValueExpression(binary.Left);
+            var right = ValueExpression(binary.Right);
+            if (leftType.ElementType == QType.Bit)
+            {
+                Assign(
+                    binary.Result,
+                    new MirQasmBinaryExpression(
+                        BinaryOperator(binary.Operator),
+                        left,
+                        right),
+                    output);
+                return;
+            }
+
+            if (leftLength > MaxExpandedArrayComparisonElements)
+            {
+                throw Unsupported(
+                    $"array comparison {binary.Id} has {leftLength} elements; "
+                    + "OpenQASM elementwise comparison expansion is limited to "
+                    + $"{MaxExpandedArrayComparisonElements} elements",
+                    binary.Origin);
+            }
+
+            Assign(
+                binary.Result,
+                FixedArrayComparisonExpression(
+                    binary.Operator,
+                    left,
+                    right,
+                    leftLength),
+                output);
+        }
+
+        private static MirQasmExpression FixedArrayComparisonExpression(
+            MirBinaryOperator comparison,
+            MirQasmExpression left,
+            MirQasmExpression right,
+            int length)
+        {
+            if (length == 0)
+            {
+                return new MirQasmLiteralExpression(
+                    comparison == MirBinaryOperator.Equal ? "1" : "0");
+            }
+
+            var elementComparison = BinaryOperator(comparison);
+            var combination = comparison == MirBinaryOperator.Equal
+                ? MirQasmBinaryOperator.LogicalAnd
+                : MirQasmBinaryOperator.LogicalOr;
+            MirQasmExpression result = CompareElement(0);
+            for (var index = 1; index < length; index++)
+            {
+                result = new MirQasmBinaryExpression(
+                    combination,
+                    result,
+                    CompareElement(index));
+            }
+            return result;
+
+            MirQasmExpression CompareElement(int index)
+            {
+                var literalIndex = new MirQasmLiteralExpression(
+                    index.ToString(
+                        System.Globalization.CultureInfo.InvariantCulture));
+                return new MirQasmBinaryExpression(
+                    elementComparison,
+                    new MirQasmIndexExpression(left, literalIndex),
+                    new MirQasmIndexExpression(right, literalIndex));
+            }
+        }
+
         private MirQasmExpression ValueExpression(MirValueId value)
         {
-            var type = _callable.RequireValue(value).Type;
+            var mirValue = _callable.RequireValue(value);
+            var type = mirValue.Type;
             if (!type.IsArray)
             {
                 return _scalarValues.TryGetValue(value, out var scalar)
@@ -1399,7 +1573,8 @@ internal static class MirOpenQasmLowering
             {
                 throw Unsupported(
                     $"array SSA value {value} has " +
-                    $"{(provenance.IsComplete ? "ambiguous" : "incomplete")} storage provenance");
+                    $"{(provenance.IsComplete ? "ambiguous" : "incomplete")} storage provenance",
+                    mirValue.Origin);
             }
             var storage = provenance.PossibleStorages[0];
             return _storagePlaces.TryGetValue(storage, out var place)
@@ -1472,14 +1647,16 @@ internal static class MirOpenQasmLowering
         private void RequireSameArrayPlace(
             MirValueId left,
             MirValueId right,
-            string role)
+            string role,
+            MirOrigin origin)
         {
             var leftPlace = ValueExpression(left);
             var rightPlace = ValueExpression(right);
             if (leftPlace != rightPlace)
             {
                 throw Unsupported(
-                    $"{role} would require a dynamic OpenQASM array alias");
+                    $"{role} would require a dynamic OpenQASM array alias",
+                    origin);
             }
         }
 
@@ -1498,10 +1675,15 @@ internal static class MirOpenQasmLowering
 
         private MirQasmExpression ConvertExpression(
             MirType target,
-            MirQasmExpression operand)
+            MirQasmExpression operand,
+            MirOrigin origin)
         {
             if (target.IsArray)
-                throw Unsupported($"OpenQASM cannot convert a value to `{target}`");
+            {
+                throw Unsupported(
+                    $"OpenQASM cannot convert a value to `{target}`",
+                    origin);
+            }
             var name = target.ElementType switch
             {
                 QType.Int => "int",
@@ -1509,7 +1691,8 @@ internal static class MirOpenQasmLowering
                 QType.Angle => "angle",
                 QType.Bit => "bit",
                 _ => throw Unsupported(
-                    $"OpenQASM cannot convert a classical value to `{target.ElementType}`"),
+                    $"OpenQASM cannot convert a classical value to `{target.ElementType}`",
+                    origin),
             };
             return new MirQasmFunctionCallExpression(
                 new MirQasmBuiltinFunctionTarget(name),
@@ -1566,11 +1749,13 @@ internal static class MirOpenQasmLowering
                 $"MIR control flow cannot be structured for OpenQASM: {detail}",
                 _callable.Origin);
 
-        private MirOpenQasmUnsupportedException Unsupported(string detail) =>
+        private MirOpenQasmUnsupportedException Unsupported(
+            string detail,
+            MirOrigin origin) =>
             new(
                 "QASM002",
                 $"callable `{_callable.Name}` cannot be lowered to OpenQASM: {detail}",
-                _callable.Origin);
+                origin);
     }
 
     private sealed class HiddenArrayPlan

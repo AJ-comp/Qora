@@ -22,6 +22,9 @@ public class FunctionTests
     // parameters of every classical type; a zero-parameter function; a function used inside another expression:
     [InlineData("function pick(a: int, b: int): int { return a + b; }\noperation Main(){ use q=Qubit[1]; var k: int = pick(1, 2) + 3; }")]
     [InlineData("function angleOf(k: int): angle { return pi / k; }\noperation Main(){ use q=Qubit[1]; Rz(angleOf(4), q[0]); }")]
+    // array elements and range bounds are ordinary value-expression positions:
+    [InlineData("function one(): int { return 1; }\noperation Main(){ var values: int[] = [one(), 2]; }")]
+    [InlineData("function end(): int { return 2; }\noperation Main(){ use q=Qubit[1]; for i in 0..end(){ H(q[0]); } }")]
     // a function whose every path returns (if/else both return):
     [InlineData("function sign(x: int): int { if(x == 0){ return 0; } else { return 1; } }\noperation Main(){ use q=Qubit[1]; var k: int = sign(2); }")]
     public void AcceptsFunctionUses(string source) => Compiler.Accepts(source);

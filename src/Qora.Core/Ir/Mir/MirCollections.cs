@@ -13,8 +13,20 @@ internal static class MirCollections
     public static IReadOnlyList<T> Freeze<T>(IEnumerable<T> source)
     {
         ArgumentNullException.ThrowIfNull(source);
-        return source is ImmutableArray<T> { IsDefault: false } immutable
+        var frozen = source is ImmutableArray<T> { IsDefault: false } immutable
             ? immutable
             : ImmutableArray.CreateRange(source);
+
+        foreach (var item in frozen)
+        {
+            if (item is null)
+            {
+                throw new ArgumentException(
+                    "MIR collections cannot contain null elements",
+                    nameof(source));
+            }
+        }
+
+        return frozen;
     }
 }

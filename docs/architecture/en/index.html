@@ -397,26 +397,35 @@ v4 = v3 == v2;
   <p class="stagehead">in: resolved IR &nbsp;·&nbsp; out: a list of errors (or none) &nbsp;·&nbsp; pass: <code>QoraValidator</code> + <code>SymbolTableBuilder</code></p>
 
   <p>
-    Validation is the pass that answers one question: <strong>does this program mean something OpenQASM can
-    express?</strong> It walks the whole IR once and <strong>collects every violation</strong> (no stopping at
-    the first). The result is a hard gate: <strong>one error and no OpenQASM is produced at all</strong>, so a
-    broken program can never quietly "succeed" and hand back a wrong circuit. During this pass the validator
-    also builds the unified symbol table: parameters, registers, measurement bits, variables, constants, and
-    loop variables are placed into scopes, and each use site is recorded. Every rule has a stable code
-    (<code>QSEM001</code>–<code>QSEM025</code>) so the editor can attach a squiggle. A few of them:
+    Validation answers one question: <strong>is this a well-formed Qora program whose names, types, scopes,
+    and callable and ownership contracts agree?</strong> It never asks whether OpenQASM or another backend can
+    represent the program. It walks the whole HIR and <strong>collects every violation</strong> rather than
+    stopping at the first. During this pass the validator also builds the unified symbol table: parameters,
+    registers, measurement bits, variables, constants, and loop variables are placed into scopes, and each
+    use site is recorded. Every rule has a stable <code>QSEM</code> code so the editor can attach a squiggle.
+    A few of them:
   </p>
 
   <div class="panel">
     <table class="amp">
       <tr><th>Code</th><th>Rejects</th></tr>
-      <tr><td><code>QSEM002</code></td><td><code>Controlled Foo</code> on a user op (OpenQASM has no <code>ctrl @</code> for a def)</td></tr>
+      <tr><td><code>QSEM002</code></td><td><code>Controlled Foo</code> when <code>Foo</code> is not in <code>Qora.Intrinsic</code>; source-level <code>Controlled</code> is intrinsic-only</td></tr>
       <tr><td><code>QSEM006</code></td><td>a call whose arguments do not match the signature — count, kind (qubit vs angle), or register size</td></tr>
       <tr><td><code>QSEM007</code></td><td>an unknown gate or operation name (with a "did you mean …?" hint)</td></tr>
-      <tr><td><code>QSEM011</code></td><td>recursive calls (OpenQASM defs cannot recurse)</td></tr>
+      <tr><td><code>QSEM011</code></td><td>a cycle in the callable graph; Qora requires an acyclic call graph</td></tr>
       <tr><td><code>QSEM016</code></td><td>a literal qubit index outside its register's range</td></tr>
       <tr><td><code>QSEM025</code></td><td>an identifier that does not resolve in scope — an unknown name or a classical name used before declaration</td></tr>
     </table>
   </div>
+
+  <p>
+    Local bindings become visible at their declaration point and remain visible through the rest of their
+    lexical scope; a use before that point is <code>QSEM025</code>. A <code>use</code> declaration follows the same
+    name-binding rule, while its separate allocation contract still restricts it to the entry operation's
+    top level. Pure function calls are ordinary classical values, so they are valid in array literal elements
+    and <code>for</code> range bounds. Classical arrays with the same element type support structural
+    <code>==</code> and <code>!=</code>: unequal lengths compare unequal, while equal lengths compare elements.
+  </p>
 
   <div class="call why">
     <span class="h">Why validate before the transforming passes?</span>
@@ -470,13 +479,13 @@ return</code></pre>
 
   <p>
     The result is one exact immutable <code>MirSnapshot</code> at <code>MirStage.Lowered</code>. Core retains
-    the exact <code>LoweringSource</code> and the program-owned <code>Origins</code> required for diagnostics,
+    the exact <code>HirArtifact</code> and the program-owned <code>Origins</code> required for diagnostics,
     transformation provenance, and backend errors; it does not retain an always-on
     HIR-symbol-to-MIR-entity query index. When editor tooling requests those relationships,
     <code>Qora.LanguageServices.MirSemanticIndex</code> collects an opt-in lowering trace and builds
     callable-scoped symbol, value, storage, and qubit maps above the compiler IR layer. Backends consume
     MIR directly and never depend on that language-service index. Compilation identity remains in the
-    exact <code>LoweringSource</code>; MIR does not copy it.
+    exact <code>HirArtifact</code>; MIR does not copy it.
   </p>
 
   <h2 id="s8"><span class="n">8</span>Analyze MIR and materialize internal inverses</h2>
@@ -494,7 +503,7 @@ return</code></pre>
     <code>MirQuantumApply</code> with <code>MirFunctor.Adjoint</code>. The
     <code>MirAdjointMaterializer</code> then synthesizes the required inverse MIR callable, rewrites the
     request to a typed callable target, and publishes a new snapshot whose exact
-    <code>TransformationSource</code> is the previous snapshot. Qora source and HIR contain no
+    <code>PreviousSnapshot</code> is the immediately preceding MIR snapshot. Qora source and HIR contain no
     <code>Adjoint</code>, inverse marker, or conjugation node.
   </p>
 
@@ -520,6 +529,17 @@ MirQuantumApply(Target = __qora_inverse_..., Functors = [])</code></pre>
     typed target declarations and assignments, and assigns collision-free OpenQASM names. The resulting
     <code>MirOpenQasmTargetProgram</code> owns target types, callables, declarations, statements, and their
     target-local identities; it does not carry HIR as a second source of truth.
+  </p>
+
+  <p>
+    This is the first stage that asks whether OpenQASM can represent a valid Qora program. For classical
+    array equality, known unequal lengths lower to a constant result and known equal-length general arrays
+    lower to element-by-element comparisons. A dynamically sized general array comparison cannot currently
+    be represented by this backend and reports <code>QASM002</code>. Likewise, borrowed mutable
+    <code>var bit[]</code> parameters are valid in HIR and MIR, but the current OpenQASM target reports
+    <code>QASM002</code> because value-passed bit registers cannot expose writes back to the caller. A moved
+    mutable <code>move var bit[]</code> parameter is supported: consuming ownership agrees with passing the
+    <code>bit[N]</code> value into the target callable.
   </p>
 
   <p>

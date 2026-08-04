@@ -48,7 +48,7 @@ public sealed class MirAdjointMaterializationResult
                     nameof(errors));
             }
             if (Output.Stage != MirStage.AdjointsMaterialized
-                || !ReferenceEquals(Output.TransformationSource, Source))
+                || !ReferenceEquals(Output.PreviousSnapshot, Source))
             {
                 throw new ArgumentException(
                     "The materialized output must be the exact adjoint stage transformed from Source.",
@@ -276,6 +276,7 @@ public static class MirAdjointMaterializer
         var changed = false;
         var callables =
             new List<MirCallable>(source.Program.Callables.Count);
+        MirCallable? rewrittenEntryPoint = null;
         foreach (var callable in source.Program.Callables)
         {
             MirInstruction AddRequestIfSelected(MirInstruction instruction)
@@ -316,13 +317,17 @@ public static class MirAdjointMaterializer
                 callable.Origin,
                 instructionTransform: AddRequestIfSelected);
             callables.Add(rewrittenCallable);
+
+            if (ReferenceEquals(callable, source.Program.EntryPoint))
+                rewrittenEntryPoint = rewrittenCallable;
         }
 
         if (!changed)
             return source;
 
         var program = new MirProgram(
-            source.Program.EntryPoint,
+            rewrittenEntryPoint ?? throw new InvalidOperationException(
+                "QINTERNAL: MIR inverse-request injection dropped the entry point"),
             callables);
         return MirSnapshot.CreateTransformed(
             program,
@@ -376,12 +381,16 @@ public static class MirAdjointMaterializer
 
             var rewritten = new List<MirCallable>(
                 _source.Program.Callables.Count + _required.Count);
+            MirCallable? rewrittenEntryPoint = null;
             foreach (var callable in _source.Program.Callables)
             {
                 var rewrittenCallable = RewriteSourceCallable(
                     callable,
                     inverseIds);
                 rewritten.Add(rewrittenCallable);
+
+                if (ReferenceEquals(callable, _source.Program.EntryPoint))
+                    rewrittenEntryPoint = rewrittenCallable;
             }
 
             foreach (var original in _required.OrderBy(id => id.Value))
@@ -394,7 +403,8 @@ public static class MirAdjointMaterializer
             }
 
             var program = new MirProgram(
-                _source.Program.EntryPoint,
+                rewrittenEntryPoint ?? throw new InvalidOperationException(
+                    "QINTERNAL: MIR adjoint materialization dropped the entry point"),
                 rewritten);
             var output = MirSnapshot.CreateTransformed(
                 program,
@@ -459,7 +469,7 @@ public static class MirAdjointMaterializer
                 valid = false;
             }
             if (callable.Blocks.Count != 1
-                || callable.EntryBlock != callable.Blocks[0].Id
+                || !ReferenceEquals(callable.EntryBlock, callable.Blocks[0])
                 || callable.Blocks[0].Arguments.Count != 0
                 || callable.Blocks[0].Terminator is not MirReturn { Value: null })
             {
@@ -872,15 +882,21 @@ public static class MirAdjointMaterializer
                         break;
 
                     case MirQubitParameter qubit:
-                        clonedParameter = new MirQubitParameter(
-                            qubit.Id,
-                            qubit.Name,
-                            qubit.IsArray,
-                            qubit.Length,
-                            qubit.Ownership,
-                            OriginForRole(
-                                qubit.Origin,
-                                "qubit parameter"));
+                        var clonedQubitOrigin = OriginForRole(
+                            qubit.Origin,
+                            "qubit parameter");
+                        clonedParameter = qubit.IsArray
+                            ? MirQubitParameter.Array(
+                                qubit.Id,
+                                qubit.Name,
+                                qubit.Length,
+                                qubit.Ownership,
+                                clonedQubitOrigin)
+                            : MirQubitParameter.Single(
+                                qubit.Id,
+                                qubit.Name,
+                                qubit.Ownership,
+                                clonedQubitOrigin);
                         break;
 
                     default:
@@ -904,6 +920,7 @@ public static class MirAdjointMaterializer
                 })
                 .ToArray();
             var blocks = new MirBlock[source.Blocks.Count];
+            MirBlock? entryBlock = null;
             for (var blockIndex = 0;
                  blockIndex < source.Blocks.Count;
                  blockIndex++)
@@ -949,7 +966,7 @@ public static class MirAdjointMaterializer
                             "qubit Phi"));
                 }
 
-                blocks[blockIndex] = sourceBlock with
+                var clonedBlock = sourceBlock with
                 {
                     QubitPhis = qubitPhis,
                     Instructions = instructions,
@@ -962,14 +979,20 @@ public static class MirAdjointMaterializer
                         sourceBlock.Origin,
                         "block"),
                 };
+                blocks[blockIndex] = clonedBlock;
+                if (ReferenceEquals(sourceBlock, source.EntryBlock))
+                    entryBlock = clonedBlock;
             }
+
+            if (entryBlock is null)
+                throw new InvalidOperationException("the MIR entry block was not cloned");
 
             return new MirCallable(
                 id,
                 name,
                 source.ReturnType,
                 parameters,
-                source.EntryBlock,
+                entryBlock,
                 blocks,
                 values,
                 storages,

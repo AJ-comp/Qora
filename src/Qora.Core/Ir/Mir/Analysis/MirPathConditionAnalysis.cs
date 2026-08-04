@@ -216,7 +216,6 @@ internal static class MirPathConditionAnalysis
         MirCallableId callableId)
     {
         ArgumentNullException.ThrowIfNull(program);
-        QoraMirVerifier.VerifyOrThrow(program);
 
         var callable = program.FindCallable(callableId)
             ?? throw new ArgumentOutOfRangeException(
@@ -278,13 +277,13 @@ internal static class MirPathConditionAnalysis
         var conditions = callable.Blocks.ToDictionary(
             block => block.Id,
             _ => MirPathCondition.Never);
-        conditions[callable.EntryBlock] = MirPathCondition.Always;
+        conditions[callable.EntryBlock.Id] = MirPathCondition.Always;
 
         foreach (var blockId in topological)
         {
             var condition = conditions[blockId];
-            if (blockId != callable.EntryBlock
-                && cfg.PostDominates(blockId, callable.EntryBlock))
+            if (blockId != callable.EntryBlock.Id
+                && cfg.PostDominates(blockId, callable.EntryBlock.Id))
             {
                 condition = MirPathCondition.Always;
                 conditions[blockId] = condition;

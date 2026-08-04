@@ -351,10 +351,9 @@ public class MutableParameterTests
     }
 
     [Theory]
-    [InlineData("bit[]")]
     [InlineData("Qubit")]
     [InlineData("Qubit[]")]
-    public void BackendUnsupportedMutableShapesAreRejected(string type)
+    public void MutableQubitShapesAreRejected(string type)
     {
         Compiler.RejectsExactly(
             $"operation Bad(var value: {type}) {{}}\noperation Main() {{}}",

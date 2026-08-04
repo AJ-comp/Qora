@@ -396,26 +396,34 @@ v4 = v3 == v2;
   <p class="stagehead">in: 解決済み IR &nbsp;·&nbsp; out: エラーの一覧（またはなし） &nbsp;·&nbsp; パス: <code>QoraValidator</code> + <code>SymbolTableBuilder</code></p>
 
   <p>
-    検証は 1 つの問いに答えるパスです: <strong>このプログラムは OpenQASM が表現できる意味か?</strong> IR 全体を
-    一度走査し、<strong>すべての違反を集めます</strong>（最初のエラーで止まらない）。その結果は固いゲートです:
-    <strong>エラーが 1 つでもあれば OpenQASM はまったく生成されません</strong> — だから壊れたプログラムが静かに
-    「成功したふり」をして誤った回路を返すことは決してありません。この段階で検証器は統合シンボルテーブルも作ります。
+    検証は 1 つの問いに答えます: <strong>名前・型・スコープ・呼び出しと所有権の契約が
+    整合した、正しい Qora プログラムか?</strong> OpenQASM や他の backend が表現できるかはここでは
+    判定しません。HIR 全体を一度走査し、最初のエラーで止まらず<strong>すべての違反を集めます</strong>。
+    この段階で検証器は統合シンボルテーブルも作ります。
     パラメータ、レジスタ、測定ビット、変数、定数、ループ変数がどのスコープに属するかを記録し、
-    各名前がどこで使われたかも集めます。すべての規則には安定したコード
-    （<code>QSEM001</code>〜<code>QSEM025</code>）があり、エディタが波線を付けられます。そのいくつか:
+    各名前がどこで使われたかも集めます。すべての規則には安定した <code>QSEM</code> コードがあり、
+    エディタが波線を付けられます。そのいくつか:
   </p>
 
   <div class="panel">
     <table class="amp">
       <tr><th>コード</th><th>拒否するもの</th></tr>
-      <tr><td><code>QSEM002</code></td><td>ユーザ op への <code>Controlled Foo</code>（OpenQASM に def 用の <code>ctrl @</code> はない）</td></tr>
+      <tr><td><code>QSEM002</code></td><td><code>Foo</code> が <code>Qora.Intrinsic</code> に属さない <code>Controlled Foo</code>。ソースの <code>Controlled</code> は intrinsic に限定</td></tr>
       <tr><td><code>QSEM006</code></td><td>シグネチャに合わない引数の呼び出し — 個数、種類（量子ビット vs 角度）、またはレジスタサイズ</td></tr>
       <tr><td><code>QSEM007</code></td><td>未知のゲート/演算名（「もしかして …?」ヒント付き）</td></tr>
-      <tr><td><code>QSEM011</code></td><td>再帰呼び出し（OpenQASM の def は再帰できない）</td></tr>
+      <tr><td><code>QSEM011</code></td><td>callable graph 内の循環。Qora の呼び出しグラフは非循環である必要がある</td></tr>
       <tr><td><code>QSEM016</code></td><td>レジスタ範囲を超えるリテラルの量子ビットインデックス</td></tr>
       <tr><td><code>QSEM025</code></td><td>スコープ内で解決できない識別子 — 未知の名前、または宣言前に使われた古典名</td></tr>
     </table>
   </div>
+
+  <p>
+    ローカル束縛は宣言地点からレキシカルスコープの終わりまで可視となり、宣言前の使用は
+    <code>QSEM025</code> です。<code>use</code> 宣言も同じ名前解決規則に従いますが、割り当て自体は別の
+    契約により entry operation のトップレベルに限定されます。純粋関数の呼び出しは通常の古典値なので、
+    配列リテラルの要素と <code>for</code> の範囲境界でも使えます。要素型が同じ古典配列は構造的な
+    <code>==</code> と <code>!=</code> をサポートし、長さが異なれば等しくなく、同じ長さなら各要素を比較します。
+  </p>
 
   <div class="call why">
     <span class="h">なぜ変換パスより先に検証するのか?</span>
@@ -466,9 +474,9 @@ return</code></pre>
 
   <p>
     結果は <code>MirStage.Lowered</code> の正確な不変 <code>MirSnapshot</code> オブジェクトです。
-    実際に消費した final HIR は <code>LoweringSource</code> に、MIR の source provenance は
+    実際に消費した final HIR は <code>HirArtifact</code> に、MIR の source provenance は
     program-owned <code>Origins</code> に保持されます。Compilation identity は
-    <code>LoweringSource</code> にだけあり、MIR へ複製されません。
+    <code>HirArtifact</code> にだけあり、MIR へ複製されません。
   </p>
 
   <h2 id="s8"><span class="n">8</span>MIR 解析と内部逆演算の実体化</h2>
@@ -485,7 +493,7 @@ return</code></pre>
     逆演算要求も MIR にだけ存在します。コンパイラ内部 scheduler が正確な
     <code>MirQuantumApply</code> に <code>MirFunctor.Adjoint</code> を付けると、
     <code>MirAdjointMaterializer</code> が逆方向の MIR callable を合成し、要求を typed callable target
-    へ書き換え、以前の snapshot を exact <code>TransformationSource</code> として持つ
+    へ書き換え、直前の MIR snapshot を exact <code>PreviousSnapshot</code> として持つ
     新しい snapshot を発行します。
     Qora ソースと HIR には <code>Adjoint</code>、逆演算マーカー、conjugation node がありません。
   </p>
@@ -512,6 +520,15 @@ MirQuantumApply(Target = __qora_inverse_..., Functors = [])</code></pre>
     declaration と assignment に変え、衝突しない OpenQASM 名を決めます。結果の
     <code>MirOpenQasmTargetProgram</code> は target type、callable、declaration、statement と
     target-local identity を所有し、HIR を第二の正本として保持しません。
+  </p>
+
+  <p>
+    有効な Qora プログラムを OpenQASM が表現できるかを問うのは、この段階が最初です。古典配列の等値比較では、
+    既知の長さが異なれば定数の結果へ lowering し、同じ既知長の一般配列は要素ごとの比較へ lowering します。
+    動的サイズの一般配列比較は現在の backend では表現できず、<code>QASM002</code> となります。また、可変借用の
+    <code>var bit[]</code> パラメータは HIR と MIR では有効ですが、値渡しの bit register では呼び出し元に書き込みを
+    反映できないため、現在の OpenQASM target は <code>QASM002</code> を報告します。一方、可変移動の
+    <code>move var bit[]</code> はサポートされます。所有権を消費する契約と <code>bit[N]</code> 値の引き渡しが一致するためです。
   </p>
 
   <p>

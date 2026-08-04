@@ -56,9 +56,7 @@ public sealed class CompilationArchitectureTests
 
         Assert.True(compilation.Succeeded);
         var mir = Assert.IsType<MirSnapshot>(compilation.Mir);
-        var entry = Assert.Single(
-            mir.Program.Callables,
-            callable => callable.Id == mir.Program.EntryPoint);
+        var entry = mir.Program.EntryPoint;
         Assert.Equal(MirCallableKind.Operation, entry.Kind);
         Assert.Equal("Foo", entry.Name);
     }
@@ -177,7 +175,7 @@ public sealed class CompilationArchitectureTests
             });
         Assert.Same(
             second.Hir.EffectAnalysis,
-            Assert.IsType<MirSnapshot>(second.Mir).LoweringSource);
+            Assert.IsType<MirSnapshot>(second.Mir).HirArtifact);
         Assert.Equal(
             first.Sources.Entry.DocumentId,
             second.Sources.Entry.DocumentId);
@@ -415,7 +413,7 @@ public sealed class CompilationArchitectureTests
         var analyzed = Assert.IsType<HirSemanticArtifact>(compilation.Hir.EffectAnalysis);
         var mir = Assert.IsType<MirSnapshot>(compilation.Mir);
         var target = Assert.IsType<OpenQasmArtifact>(compilation.Targets.OpenQasm);
-        Assert.Same(analyzed, mir.LoweringSource);
+        Assert.Same(analyzed, mir.HirArtifact);
         Assert.Same(mir, target.Source);
     }
 
@@ -440,7 +438,7 @@ public sealed class CompilationArchitectureTests
                 StringComparison.Ordinal));
         Assert.Same(
             compilation.Hir.EffectAnalysis,
-            mir.LoweringSource);
+            mir.HirArtifact);
     }
 
     [Fact]
@@ -520,7 +518,7 @@ public sealed class CompilationArchitectureTests
     }
 
     [Fact]
-    public void CompilationRejectsMirOwnedByAnotherFinalHirArtifact()
+    public void CompilationRejectsMirOwnedByAnotherHirArtifact()
     {
         var mirOnly = new CompilationOutputPlan(
             produceMir: true,

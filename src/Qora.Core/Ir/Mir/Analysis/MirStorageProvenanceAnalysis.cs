@@ -56,7 +56,6 @@ internal static class MirStorageProvenanceAnalysis
         MirCallableId callableId)
     {
         ArgumentNullException.ThrowIfNull(program);
-        QoraMirVerifier.VerifyOrThrow(program);
 
         var callable = program.FindCallable(callableId)
             ?? throw new ArgumentOutOfRangeException(
@@ -67,8 +66,8 @@ internal static class MirStorageProvenanceAnalysis
     }
 
     /// <summary>
-    /// Resolves provenance after structural MIR validation. Kept separate from <see cref="Analyze"/>
-    /// so graph-wide verifier checks can consume provenance without verifier-analysis recursion.
+    /// Resolves provenance for callers that have already established the required local MIR structure.
+    /// The verifier and the canonical analysis store use this entry point without starting verification again.
     /// </summary>
     internal static MirStorageProvenanceSnapshot AnalyzeUnchecked(
         MirProgram program,

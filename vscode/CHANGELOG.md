@@ -2,6 +2,26 @@
 
 All notable changes to the Qora Language extension.
 
+## 0.30.0
+
+- Bundles the **Qora v0.37.0** compiler, which closes source-language typing in target-independent HIR and
+  records exact implicit conversions for MIR instead of allowing later stages to choose language semantics.
+- Adds structural `==` and `!=` for same-element-type classical arrays. OpenQASM compares fixed arrays
+  directly or element by element, folds unequal known lengths, and reports QASM002 for dynamic general-array
+  comparisons or expansions above 4,096 elements.
+- Applies point-of-declaration lexical scope uniformly to `use`, measurement results, and classical locals.
+  Forward use of a qubit binding is now QSEM025, while nested measurement bindings may shadow enclosing
+  names safely.
+- Accepts pure function calls in array-literal elements and `for` range bounds, and reports the new QSEM041
+  diagnostic for invalid condition, range, scalar-operator, and array-operator type contexts before MIR is
+  produced.
+- Accepts `var bit[]` and `move var bit[]` as Qora operation contracts. The OpenQASM backend reports QASM002
+  for borrowed mutable `var bit[]`, but supports moved mutable `move var bit[]` as a callee-owned value
+  parameter.
+- Includes stricter MIR construction invariants, source-ordered qubit allocation, exact source locations for
+  OpenQASM capability diagnostics, and the removal of redundant verifier and target-specific HIR paths.
+  Extension UI and source highlighting are unchanged.
+
 ## 0.29.0
 
 - Bundles the **Qora v0.36.0** compiler with MIR-native array and qubit bounds analysis across SSA values,

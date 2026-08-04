@@ -1,4 +1,4 @@
-# Qora v0.36.0 — complete language reference for AI assistants
+# Qora v0.37.0 — complete language reference for AI assistants
 
 Qora is a quantum programming language (Q#/C#-flavored syntax) that compiles to OpenQASM 3.
 File extension: `.qor`. This file is the full, authoritative surface spec: everything below is
@@ -20,6 +20,11 @@ VS Code extension: `qora-lang.qora-language` (bundles the compiler; errors as yo
   violations it collects, but a failing stage prevents later stages from running. Located diagnostics
   use a half-open, document-qualified `SourceSpan`, so an imported document's offsets are never
   interpreted as entry-file offsets.
+- HIR validation is backend-independent. It checks Qora name binding, types, lexical scopes, callable
+  contracts, ownership/access contracts, and the language's acyclic call graph; it never asks whether
+  OpenQASM or another backend can encode the accepted program. MIR is backend-independent as well.
+  Backend capability checks begin only when a completed MIR snapshot enters that backend's target
+  lowering, where an otherwise valid feature may produce a target diagnostic such as QASM002.
 - Library API boundary: `QoraParser.Parse` returns a syntax-only `SyntaxSnapshot`; use
   `QoraCompiler.Compile` for semantic analysis, MIR, diagnostics, and target output. The latter returns
   one immutable `Compilation`, whose authoritative owners are `Sources`, `Hir`, optional `Mir`,
@@ -59,15 +64,17 @@ VS Code extension: `qora-lang.qora-language` (bundles the compiler; errors as yo
   classifications. Every node newly appearing after the first snapshot must have exactly one of them.
   Semantic lookup follows only identity-preserving edges; provenance queries may follow synthesis.
   `Compilation.Mir` is a separate typed SSA/CFG snapshot whose analyses are bound to its exact
-  `MirProgram`. Core retains the exact final HIR `LoweringSource`, while every MIR entity directly owns
+  `MirProgram`. Core retains the exact final HIR `HirArtifact`, while every MIR entity directly owns
   the immutable `MirOrigin` required by compilation,
   diagnostics, transformations, and target lowering; it does not own an IDE-oriented symbol-to-MIR
-  index. `Qora.LanguageServices` may opt into a compile-call-scoped lowering trace and publish an
+  index. `QoraMirVerifier` receives only `HirArtifact.Source` as the exact structural `HirSnapshot`
+  used to validate HIR-rooted origins; that verifier input is not another semantic artifact.
+  `Qora.LanguageServices` may opt into a compile-call-scoped lowering trace and publish an
   immutable `MirSemanticIndex` tied to the exact HIR and MIR objects, while ordinary compilation
   allocates no such index. MIR stages are `Lowered -> InverseRequestsInjected -> AdjointsMaterialized`;
-  each transformed snapshot retains its exact predecessor as `TransformationSource` and shares unchanged
+  each transformed snapshot retains the exact immediately preceding MIR snapshot as `PreviousSnapshot` and shares unchanged
   origins directly; generated entities wrap their parent origin with a generation reason. Compilation
-  identity remains in the exact `LoweringSource`; MIR does not copy it.
+  identity remains in the exact `HirArtifact`; MIR does not copy it.
 - `Compilation.Targets.Artifacts` is the authoritative backend-keyed target map;
   `Compilation.Targets.OpenQasm` is the current typed convenience view. The OpenQASM artifact records
   the exact materialized `MirSnapshot` it consumed. The backend never reaches back into HIR or its
@@ -76,6 +83,12 @@ VS Code extension: `qora-lang.qora-language` (bundles the compiler; errors as yo
   target output are absent. `QasmBackend` accepts only an exact `MirSnapshot`, produces a
   `MirOpenQasmTargetProgram`, and `OpenQasmArtifact.Text` is then derived from that target model by the
   pure emitter; emitted text is not an independent authoritative input.
+- OpenQASM target lowering implements structural equality for known-size classical arrays: unequal
+  known lengths become a constant result, and same-size general arrays become elementwise comparisons.
+  A general array comparison whose length remains dynamic reports QASM002. A borrowed mutable
+  `var bit[]` parameter is valid Qora HIR/MIR but reports QASM002 at OpenQASM lowering because a
+  value-passed bit register cannot expose writes back to the caller. A moved mutable `move var bit[]`
+  parameter is supported: ownership consumption agrees with passing the `bit[N]` value.
 - In the emitted QASM, user-defined names pass through unchanged when they are already safe.
   Namespaces flatten dots with `_` (`MyLib.Bell` -> `MyLib_Bell`), and `_` is appended only when
   an emitted identifier would collide with a keyword, stdgates gate, or another emitted name.
@@ -118,23 +131,30 @@ operation Main()                // global namespace; the entry point; takes NO p
   concrete register size before emitting OpenQASM.
 - `int`, `float`, `bit`, `angle` are classical scalar types. Measurement produces a `bit`, which holds
   a 0/1 result.
-- `use name = Qubit[N];` — allocate a register. Entry operation only, not inside loops/branches.
+- `use name = Qubit[N];` — allocate a register. The name becomes visible at this declaration point,
+  and the declaration is allowed only at the entry operation's top level, not inside loops/branches.
 - Classical arrays use `int[]`, `float[]`, `bit[]`, or `angle[]`. Declare them anywhere a scalar
   declaration goes — `Main`, helper operations, loops, branches — either with a non-empty literal
   (`var xs: int[] = [1, 2, 3];`) or a positive literal-sized, zero-initialized allocation
   (`var xs: int[] = new int[3];`); the compiler handles OpenQASM's global-scope rule automatically. Helper
   operations may also receive matching `T[]` parameters. Read/write elements with `xs[i]`, and read
-  the length with `xs.Count`.
+  the length with `xs.Count`. A pure function call is a valid literal element, for example
+  `var xs: int[] = [first(), second()];`.
 - An index is a full expression whose result must be one scalar `int`: `xs[i + 1]`, `xs[idx()]`, and
   `q[choose(k)]` all parse and use ordinary function name/signature/type resolution. OpenQASM emission
   still requires an in-bounds proof. A function result is not currently evaluated at compile time, so
   `xs[idx()]` is QSEM030 unless it is evaluated once into an `int` variable and that variable is guarded,
   for example `var i: int = idx(); if (0 <= i && i < xs.Count) { var x: int = xs[i]; }`.
+- Whole classical arrays support `==` and `!=` only when both operands have the same element type.
+  Equality is structural: different lengths compare unequal, while equal lengths compare every element.
+  Array length is analysis metadata rather than a different Qora source type, so two `int[]` values with
+  known lengths 2 and 3 still have the same source-language type.
 - A WHOLE `bit[]` register is a CONTAINER OF BITS, not a number. A bit pattern carries no sign, so
   the same bits read 2 unsigned and -2 in two's complement; the language will not pick one silently.
   Using a whole register as a number is QSEM036: `var n: int = f;`, `f + 1`, `if (f)`, `f == 1`, and
   ordering (`f < g`). Legal without any numeric reading: `f[i]`, `f.Count`, passing `f` as an argument,
-  and `f == g` / `f != g` between registers OF THE SAME WIDTH (compared as bit patterns, emitted bare).
+  and structural `f == g` / `f != g` between registers. Structural equality compares lengths first, so
+  registers of different widths are unequal without interpreting either register as a number.
   To read a register as a number, write `AsInt(f)` — the one explicit unsigned reading, emitted as the
   width-qualified `uint[N](f)`. A SCALAR `bit` (one measurement result) is unaffected: it is a value, and
   `r == 1` emits as `r == true`.
@@ -150,11 +170,13 @@ operation Main()                // global namespace; the entry point; takes NO p
   | `move var values` | transferred | mutable |
 
   For example, declare `operation Increment(var values: int[])` and call `Increment(var values)`.
-- The supported combinations depend on storage shape. `var` and `move var` require a whole
-  `int[]`/`float[]`/`angle[]`, because those are the caller-visible mutable reference types in the current
-  backend. Read-only `move` accepts any whole array (including `bit[]` and `Qubit[]`) and a whole single
-  `Qubit` binding. Classical scalars are Copy values and reject `move`; mutable bit/qubit parameters reject
-  `var`. Every `function` parameter uses only the default borrowed/read-only contract. Qubit state changes
+- The supported combinations depend on storage shape. `var` and `move var` require a whole classical
+  array (`int[]`, `float[]`, `angle[]`, or `bit[]`). Read-only `move` also accepts `Qubit[]` and a whole
+  single `Qubit` binding. Classical scalars are Copy values and reject `move`, while qubits do not use
+  `var`. Every `function` parameter uses only the default borrowed/read-only contract. The OpenQASM target
+  reports QASM002 only for borrowed mutable `var bit[]`, whose writes must remain caller-visible but cannot
+  cross a value-passed bit-register parameter. Moved mutable `move var bit[]` is supported because the caller
+  has consumed the binding. Qubit state changes
   through gates continue to follow Qora's quantum-state rules, while `move` controls whether the caller may
   use that qubit binding again.
 - A mutable borrow (`var`) requires mutable caller storage, so a `const` array cannot be passed with
@@ -193,8 +215,9 @@ operation Main()                // global namespace; the entry point; takes NO p
   A function may NOT apply a gate, `use` qubits, measure, or call an operation (QSEM033).
 - Because a function is pure, its CALL is a value — usable anywhere in an expression: an initializer
   (`var k: int = two();`), an assignment RHS, a gate argument (`Rx(angleOf(k), q[0])`), a condition
-  (`if (c == g()) { … }`), or another function's body (`return inner(y) + 1;`). An `operation` call has no
-  value (QSEM005); only a function's does.
+  (`if (c == g()) { … }`), an array literal element (`var xs: int[] = [g(), 2];`), a `for` range bound
+  (`for i in 0..end() { … }`), or another function's body (`return inner(y) + 1;`). An `operation` call
+  has no value (QSEM005); only a function's does.
 - Function calls follow the same namespace rules as operation calls. Inside `namespace L`, `two()` first
   searches `L`; `open Other;` makes `Other.two()` available as `two()` when it is the only match; and
   `L.two()` may be written explicitly in any expression position.
@@ -222,7 +245,7 @@ operation Main()                // global namespace; the entry point; takes NO p
 - Gate/operation call: `Name(args);` — qubits as `q` (whole register) or `q[i]`.
 - `if (cond) { } else { }` (else-if allowed). Conditions: == != < <= > >= && || ! over bits/ints.
 - `for i in start..stop { }` — inclusive range; bounds are expressions, so
-  `for i in 0..values.Count-1 { }` is valid.
+  `for i in 0..values.Count-1 { }` and `for i in 0..end() { }` are valid when the bound is one `int`.
 - `while (cond) { }` · `repeat { } until (cond);`
 - Comments: `//` to end of line. (No block comments.)
 
@@ -237,8 +260,8 @@ operation Main()                // global namespace; the entry point; takes NO p
 
 ## Functors
 
-- `Controlled G(ctrl, ...args);` — adds a control qubit (FIRST argument). Built-in gates only,
-  never on user operations (QSEM002).
+- `Controlled G(ctrl, ...args);` — adds a control qubit (FIRST argument). Qora source permits
+  `Controlled` only when `G` resolves to `Qora.Intrinsic`; a user operation is QSEM002.
 - There is no source-level inverse/Adjoint functor, and HIR has no inverse marker or conjugation node.
   An internal MIR scheduler may attach `MirFunctor.Adjoint` only to an exact `MirQuantumApply`;
   `MirAdjointMaterializer` consumes that MIR-only request.
@@ -263,16 +286,22 @@ For an unqualified call inside namespace `A.B`, in order:
   could mean both is QSEM018 — write `L.Rx(...)` or `Qora.Intrinsic.Rx(...)`. Global operations
   may NOT take gate names (QSEM013). Reserved everywhere: `M`, `Measure`, `measure`, `pi`, `tau`,
   `euler`, `AsInt`, and declaring namespace `Qora.Intrinsic`.
+- Local bindings follow point-of-declaration scope: a parameter is visible throughout its callable body,
+  while a local `var`, `const`, `use`, measurement result, or loop variable is visible only from its
+  declaration point through the remainder of its lexical scope. A forward reference is QSEM025.
+  This scope rule does not relax the separate rule that `use` is legal only at the entry operation's top level.
 
 ## Error codes (collect-all within each reached stage; located errors carry a source span)
 
 QSEM001 compiler-generated inverse target not invertible (internal defensive diagnostic)
-QSEM002 Controlled on a user operation        QSEM003 functor on Reset/ResetAll
+QSEM002 Controlled target is not a Qora intrinsic
+QSEM003 functor on Reset/ResetAll
 QSEM004 bare measurement statement            QSEM005 void/measurement call used in an unsupported value position
 QSEM006 wrong argument count/kind/type for a call
 QSEM007 unknown gate/operation name           QSEM008 duplicate global callable name
 QSEM009 calling the entry operation           QSEM010 entry operation has parameters
-QSEM011 recursive callable calls              QSEM012 `use` outside the entry operation's top level
+QSEM011 cycle in Qora's required-acyclic callable graph
+QSEM012 `use` outside the entry operation's top level
 QSEM013 name shadows a built-in where qualification cannot disambiguate
 QSEM014 same qubit (or overlapping register/element) twice in one gate; overlapping exclusive storage access
 QSEM015 duplicate declared names in one operation
@@ -290,15 +319,17 @@ QSEM028 operation name used as a value
 QSEM029 invalid array shape, initializer, member, or whole-array assignment
 QSEM030 OpenQASM target cannot emit an index whose in-bounds proof remains unresolved
 QSEM031 expression or nested-block structure exceeds the compiler depth limit
-QSEM032 write to a `bit[]` parameter (OpenQASM passes bit registers by value)
 QSEM033 impure function body (a gate, `use`, measurement, or operation call inside a function)
 QSEM034 a qubit in a function signature (function parameters/return are classical)
 QSEM035 `return` outside a function (an operation is void), or a function has a path that returns nothing
-QSEM036 a whole `bit[]` register used as a number, compared across widths, or ordered (use `AsInt(f)`)
+QSEM036 a whole `bit[]` register used as a number or ordered (use `AsInt(f)`)
 QSEM037 incompatible function return/result type, or a whole classical array used as one scalar
 QSEM038 invalid ownership/access contract (unsupported shape, marker mismatch, or read-only mutation)
 QSEM039 use of a caller binding after its ownership was transferred with `move`
 QSEM040 the program contains no callable at all, or contains functions but no runnable operation
+QSEM041 expression type is invalid for its HIR context (condition, range bound, scalar operator, or array operator)
+QASM002 OpenQASM cannot represent a valid MIR feature, including a dynamic general-array comparison or
+        caller-visible mutation through borrowed mutable `var bit[]` (moved `move var bit[]` is supported)
 
 ## CLI contract (for tooling/agents)
 
@@ -316,7 +347,7 @@ qora --json [file] [--stages] [--base-dir <dir>] [--source-path <path>]
   original/FQN source names unmangled. These views are read from the same completed immutable
   `Compilation`; the CLI does not rerun compiler passes to reconstruct them. A stage not reached
   because of an earlier error is returned as an empty string.
-- Emitted QASM starts with `// generated by Qora v0.36.0`.
+- Emitted QASM starts with `// generated by Qora v0.37.0`.
 
 ## Executing programs
 

@@ -16,14 +16,26 @@ internal sealed record ArrayLengthBound(
     bool IsOverflowFree = true) : Bound;
 
 /// <summary>
-/// The canonical compile-time integer folder over the unified HIR expression tree. Names resolve through
-/// the lexical scope, so const values and symbolic array lengths retain their declaration identity.
+/// The canonical compile-time integer folder over the unified HIR expression tree. Symbol-table construction
+/// resolves names through its point-in-time lexical scope; completed HIR validation uses each name node's
+/// authoritative semantic binding.
 /// </summary>
 internal static class BoundFolder
 {
     internal static Bound? Fold(
         HirExpression? expression,
         Scope scope) =>
+        Fold(expression, scope, semanticModel: null);
+
+    internal static Bound? Fold(
+        HirExpression? expression,
+        HirSemanticModel semanticModel) =>
+        Fold(expression, scope: null, semanticModel);
+
+    private static Bound? Fold(
+        HirExpression? expression,
+        Scope? scope,
+        HirSemanticModel? semanticModel) =>
         expression switch
         {
             HirIntegerLiteralExpression integer =>
@@ -35,7 +47,7 @@ internal static class BoundFolder
                 Receiver: HirNameExpression array,
                 MemberName: "Count",
             } =>
-                scope.Lookup(array.Name) is { IsArray: true } symbol
+                ReferencedSymbol(array, scope, semanticModel) is { IsArray: true } symbol
                     ? (symbol.Type == QType.Qubit
                         ? symbol.RegisterSize
                         : symbol.ArrayLength) is int length
@@ -45,7 +57,7 @@ internal static class BoundFolder
 
             // A const reads the value folded at its declaration. It may itself retain a symbolic Count.
             HirNameExpression name =>
-                scope.Lookup(name.Name) is
+                ReferencedSymbol(name, scope, semanticModel) is
                     {
                         IsConst: true,
                         FoldedBound: { } folded,
@@ -60,7 +72,7 @@ internal static class BoundFolder
                 Apply(
                     new BoundNum(0),
                     HirBinaryOperator.Subtract,
-                    Fold(unary.Operand, scope)),
+                    Fold(unary.Operand, scope, semanticModel)),
 
             HirBinaryExpression binary
                 when binary.Operator is
@@ -69,12 +81,20 @@ internal static class BoundFolder
                     or HirBinaryOperator.Multiply
                     or HirBinaryOperator.Divide =>
                 Apply(
-                    Fold(binary.Left, scope),
+                    Fold(binary.Left, scope, semanticModel),
                     binary.Operator,
-                    Fold(binary.Right, scope)),
+                    Fold(binary.Right, scope, semanticModel)),
 
             _ => null,
         };
+
+    private static Symbol? ReferencedSymbol(
+        HirNameExpression name,
+        Scope? scope,
+        HirSemanticModel? semanticModel) =>
+        semanticModel is null
+            ? scope!.Lookup(name.Name)
+            : semanticModel.FindReferencedSymbol(name.Id);
 
     private static Bound? Apply(
         Bound? left,

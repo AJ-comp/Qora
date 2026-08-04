@@ -35,11 +35,10 @@ public sealed record OpEffectSummary(
 /// specialize/re-validate pair, every entry is resolved there or MOOTED there — an uncalled generic op is
 /// DROPPED by the Monomorphizer, so its promises die with the op (no size ever exists to judge against;
 /// the code is never emitted) — so the FINAL model's ledger is empty and
-/// the list means "promises still outstanding". A future backend that SKIPS the pair (full QIR: dynamic
-/// arrays) reads this ledger as its work list, wrapping each site in a runtime bounds check — without it,
-/// the postponed judgements would silently evaporate on any no-specialization path. (Deferred ALIASING
-/// precision — QSEM014's post-mono domain re-check — is NOT ledgered yet: a no-pair backend must decide
-/// its own distinctness policy before it can dispose of those.)</summary>
+/// the list means "promises still outstanding". Any pipeline that deliberately preserves dynamic array
+/// lengths must explicitly consume these obligations; otherwise the postponed judgements would silently
+/// disappear. Deferred aliasing precision (QSEM014's post-specialization domain re-check) is not ledgered
+/// here.</summary>
 public sealed record DeferredSizeCheck(string Op, string Array, string Access, string Reason, SourceSpan? Span);
 
 /// <summary>
@@ -67,6 +66,7 @@ public sealed class HirSemanticModel
         internal readonly Dictionary<HirNodeId, bool> WillBeRecheckedByCallable = new();
         internal readonly Dictionary<HirNodeId, IReadOnlyDictionary<string, long>>
             RequiredArgLengthsByCallable = new();
+        internal readonly Dictionary<HirNodeId, QType> ImplicitConversionTargets = new();
         internal HirScopeGraph? ScopeGraph;
         internal HirValidationOutcome? Outcome;
         internal bool ProducerCompleted;
@@ -379,6 +379,36 @@ public sealed class HirSemanticModel
             throw new System.InvalidOperationException(
                 $"QINTERNAL: op {opId} already has an effect summary — re-analysis would silently replace add-only facts");
     }
+
+    /// <summary>
+    /// Records the exact scalar target approved for one HIR expression. Repeating the same fact is
+    /// harmless; assigning two contextual targets to one expression is an invalid HIR tree.
+    /// </summary>
+    internal void RecordImplicitConversion(
+        HirNodeId expressionId,
+        QType targetType)
+    {
+        RequireValidationOpen();
+        if (!Enum.IsDefined(targetType) || targetType == QType.Qubit)
+            throw new ArgumentOutOfRangeException(
+                nameof(targetType),
+                targetType,
+                "an implicit HIR conversion requires a classical scalar target");
+        if (_validation.ImplicitConversionTargets.TryGetValue(expressionId, out var existingTarget))
+        {
+            if (existingTarget == targetType) return;
+            throw new InvalidOperationException(
+                $"QINTERNAL: expression {expressionId} has conflicting implicit conversions to {existingTarget} and {targetType}");
+        }
+
+        _validation.ImplicitConversionTargets.Add(expressionId, targetType);
+    }
+
+    /// <summary>The scalar target HIR approved for this expression, or null when no conversion is needed.</summary>
+    internal QType? FindImplicitConversionTarget(HirNodeId expressionId) =>
+        _validation.ImplicitConversionTargets.TryGetValue(expressionId, out var type)
+            ? type
+            : null;
 
     /// <summary>The symbol declared by this node in this exact HIR generation, if any.</summary>
     public Symbol? FindSymbol(HirNodeId nodeId) =>

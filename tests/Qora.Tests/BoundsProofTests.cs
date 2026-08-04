@@ -998,31 +998,30 @@ public class BoundsProofTests
     public void AcceptsASameOperandGateInsideAProvablyEmptyLoop() =>
         Compiler.Accepts("operation Main(){ use q=Qubit[3]; for i in 5..3 { CNOT(q[i], q[i]); } H(q[0]); }");
 
-    // --- a measure bit HOISTS to a flat top-level `bit r;`, so it shares the emitted top-level namespace
-    //     with a root-scope const/var of the same name — a duplicate top-level declaration, rejected ---
+    // --- Measurement results follow ordinary lexical scope. Target name allocation keeps shadowed
+    //     declarations distinct when a backend needs a flatter output namespace. ---
 
     [Fact]
-    public void RejectsAMeasureBitReusingARootLevelConstName() =>
-        Compiler.Rejects("""
+    public void AcceptsAMeasureBitShadowingARootLevelConst() =>
+        Compiler.Accepts("""
             operation Main() {
                 use q = Qubit[3];
                 const m: int = 1;
                 if (true) { var m: bit = M(q[0]); }
             }
-            """, "QSEM015");
+            """);
 
     [Fact]
-    public void RejectsAMeasureBitReusingARootLevelVarName() =>
-        Compiler.Rejects("""
+    public void AcceptsAMeasureBitShadowingARootLevelVar() =>
+        Compiler.Accepts("""
             operation Main() {
                 use q = Qubit[2];
                 var m: int = 7;
                 if (true) { var m: bit = M(q[0]); }
             }
-            """, "QSEM015");
+            """);
 
-    /// <summary>A BLOCK-local classical stays in its own emitted scope and does not collide with a hoisted
-    /// top-level measure bit — accepted.</summary>
+    /// <summary>Disjoint blocks may independently bind the same source name.</summary>
     [Fact]
     public void AcceptsAMeasureBitAlongsideADisjointBlockLocalConstOfTheSameName() =>
         Compiler.Accepts("""

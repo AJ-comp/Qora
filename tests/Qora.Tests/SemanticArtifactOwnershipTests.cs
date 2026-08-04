@@ -19,8 +19,8 @@ public sealed class SemanticArtifactOwnershipTests
 
         var mir = compilation.Hir.ToMir();
 
-        Assert.Same(analyzed.Source, mir.LoweringSource.Source);
-        Assert.Same(analyzed, mir.LoweringSource);
+        Assert.Same(analyzed.Source, mir.HirArtifact.Source);
+        Assert.Same(analyzed, mir.HirArtifact);
         Assert.Equal(MirStage.Lowered, mir.Stage);
         Assert.Single(mir.Program.Callables);
     }
@@ -132,8 +132,8 @@ public sealed class SemanticArtifactOwnershipTests
 
         var mir = owner.ToMir();
 
-        Assert.Same(finalEffect.Source, mir.LoweringSource.Source);
-        Assert.Same(finalEffect, mir.LoweringSource);
+        Assert.Same(finalEffect.Source, mir.HirArtifact.Source);
+        Assert.Same(finalEffect, mir.HirArtifact);
     }
 
     [Fact]
@@ -154,7 +154,7 @@ public sealed class SemanticArtifactOwnershipTests
         var owner = builder.Build();
 
         Assert.Same(finalEffect, owner.EffectAnalysis);
-        Assert.Same(finalEffect.Source, owner.ToMir().LoweringSource.Source);
+        Assert.Same(finalEffect.Source, owner.ToMir().HirArtifact.Source);
 
         var rewriteError = Assert.Throws<InvalidOperationException>(
             () => builder.BeginRewrite(specialized, "late-pass"));
@@ -221,6 +221,8 @@ public sealed class SemanticArtifactOwnershipTests
             compilation.Hir.EffectAnalysis);
 
         Assert.True(validation.IsAccepted);
+        Assert.False(validation.IsReadyForMirLowering);
+        Assert.True(effects.IsReadyForMirLowering);
         Assert.Equal(validation.Id, effects.ValidationBasis);
         Assert.Same(validation, effects.ValidationBasisArtifact);
     }

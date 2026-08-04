@@ -186,7 +186,7 @@ public sealed class MirPathConditionAnalysisTests
 
         // X executes either through the direct true edge (a), or through the false edge followed by
         // b's true edge (!a && b). A flat conjunction used to report no guard, which was false-safe.
-        Assert.False(cfg.PostDominates(site.Block, callable.EntryBlock));
+        Assert.False(cfg.PostDominates(site.Block, callable.EntryBlock.Id));
         var condition = paths.ConditionFor(site.Block);
         Assert.Equal(MirPathConditionKind.Any, condition.Kind);
         Assert.Equal(2, condition.Terms.Count);
@@ -216,21 +216,19 @@ public sealed class MirPathConditionAnalysisTests
         var callableId = new MirCallableId(0);
         var a = new MirValueId(0);
         var b = new MirValueId(1);
-        var qubit = new MirQubitParameter(
+        var qubit = MirQubitParameter.Single(
             new MirQubitId(0),
             "q",
-            isArray: false,
-            length: null,
             QOwnershipMode.Borrowed,
             source);
         var qubitResult = new MirQubitAfterInstruction(
             qubit.Id,
             new MirQubitVersion(1),
             source);
-        var entry = new MirBlockId(0);
-        var testB = new MirBlockId(1);
-        var bypass = new MirBlockId(2);
-        var effect = new MirBlockId(3);
+        var entryId = new MirBlockId(0);
+        var testBId = new MirBlockId(1);
+        var bypassId = new MirBlockId(2);
+        var effectId = new MirBlockId(3);
         var apply = new MirQuantumApply(
             new MirInstructionId(0),
             new MirBuiltinGateTarget("X"),
@@ -243,100 +241,95 @@ public sealed class MirPathConditionAnalysisTests
             Array.Empty<MirFunctor>(),
             source);
         var entryPointId = new MirCallableId(1);
-        var entryPointBlock = new MirBlockId(0);
-
-        return context.Program(
-            entryPointId,
-            new[]
+        var entryBlock = new MirBlock(
+            entryId,
+            Array.Empty<MirValueId>(),
+            Array.Empty<MirInstruction>(),
+            new MirBranch(
+                a,
+                effectId,
+                Array.Empty<MirValueId>(),
+                testBId,
+                Array.Empty<MirValueId>(),
+                source),
+            source);
+        var testBBlock = new MirBlock(
+            testBId,
+            Array.Empty<MirValueId>(),
+            Array.Empty<MirInstruction>(),
+            new MirBranch(
+                b,
+                effectId,
+                Array.Empty<MirValueId>(),
+                bypassId,
+                Array.Empty<MirValueId>(),
+                source),
+            source);
+        var bypassBlock = new MirBlock(
+            bypassId,
+            Array.Empty<MirValueId>(),
+            Array.Empty<MirInstruction>(),
+            new MirReturn(Value: null, source),
+            source);
+        var effectBlock = new MirBlock(
+            effectId,
+            Array.Empty<MirValueId>(),
+            new MirInstruction[] { apply },
+            new MirReturn(Value: null, source),
+            source);
+        var tailMergeBlocks = new[]
+        {
+            entryBlock,
+            testBBlock,
+            bypassBlock,
+            effectBlock,
+        };
+        var tailMerge = new MirCallable(
+            callableId,
+            name: "TailMerge",
+            returnType: null,
+            parameters: new IMirParameter[]
             {
-                new MirCallable(
-                    callableId,
-                    name: "TailMerge",
-                    returnType: null,
-                    parameters: new IMirParameter[]
-                    {
-                        new MirClassicalParameter(
-                            "a",
-                            a),
-                        new MirClassicalParameter(
-                            "b",
-                            b),
-                        qubit,
-                    },
-                    entryBlock: entry,
-                    blocks: new[]
-                    {
-                        new MirBlock(
-                            entry,
-                            Array.Empty<MirValueId>(),
-                            Array.Empty<MirInstruction>(),
-                            new MirBranch(
-                                a,
-                                effect,
-                                Array.Empty<MirValueId>(),
-                                testB,
-                                Array.Empty<MirValueId>(),
-                                source),
-                            source),
-                        new MirBlock(
-                            testB,
-                            Array.Empty<MirValueId>(),
-                            Array.Empty<MirInstruction>(),
-                            new MirBranch(
-                                b,
-                                effect,
-                                Array.Empty<MirValueId>(),
-                                bypass,
-                                Array.Empty<MirValueId>(),
-                                source),
-                            source),
-                        new MirBlock(
-                            bypass,
-                            Array.Empty<MirValueId>(),
-                            Array.Empty<MirInstruction>(),
-                            new MirReturn(Value: null, source),
-                            source),
-                        new MirBlock(
-                            effect,
-                            Array.Empty<MirValueId>(),
-                            new MirInstruction[] { apply },
-                            new MirReturn(Value: null, source),
-                            source),
-                    },
-                    values: new[]
-                    {
-                        new MirValue(
-                            a,
-                            MirType.Scalar(QType.Bit),
-                            MirValueDefinition.ParameterAt(0),
-                            Origin: source),
-                        new MirValue(
-                            b,
-                            MirType.Scalar(QType.Bit),
-                            MirValueDefinition.ParameterAt(1),
-                            Origin: source),
-                    },
-                    storages: Array.Empty<MirArrayStorage>(),
-                    source),
-                new MirCallable(
-                    entryPointId,
-                    name: "Main",
-                    returnType: null,
-                    parameters: Array.Empty<IMirParameter>(),
-                    entryBlock: entryPointBlock,
-                    blocks: new[]
-                    {
-                        new MirBlock(
-                            entryPointBlock,
-                            Array.Empty<MirValueId>(),
-                            Array.Empty<MirInstruction>(),
-                            new MirReturn(Value: null, source),
-                            source),
-                    },
-                    values: Array.Empty<MirValue>(),
-                    storages: Array.Empty<MirArrayStorage>(),
-                    source),
-            });
+                new MirClassicalParameter("a", a),
+                new MirClassicalParameter("b", b),
+                qubit,
+            },
+            entryBlock: entryBlock,
+            blocks: tailMergeBlocks,
+            values: new[]
+            {
+                new MirValue(
+                    a,
+                    MirType.Scalar(QType.Bit),
+                    MirValueDefinition.ParameterAt(0),
+                    Origin: source),
+                new MirValue(
+                    b,
+                    MirType.Scalar(QType.Bit),
+                    MirValueDefinition.ParameterAt(1),
+                    Origin: source),
+            },
+            storages: Array.Empty<MirArrayStorage>(),
+            source);
+        var mainEntryBlock = new MirBlock(
+            new MirBlockId(0),
+            Array.Empty<MirValueId>(),
+            Array.Empty<MirInstruction>(),
+            new MirReturn(Value: null, source),
+            source);
+        var main = new MirCallable(
+            entryPointId,
+            name: "Main",
+            returnType: null,
+            parameters: Array.Empty<IMirParameter>(),
+            entryBlock: mainEntryBlock,
+            blocks: new[] { mainEntryBlock },
+            values: Array.Empty<MirValue>(),
+            storages: Array.Empty<MirArrayStorage>(),
+            source);
+
+        var callables = new[] { tailMerge, main };
+        return context.Program(main, callables);
     }
 
     private static MirProgram CompileMir(string source)

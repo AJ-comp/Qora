@@ -26,53 +26,109 @@ internal static class QoraMirLowering
     {
         ArgumentNullException.ThrowIfNull(hirCompilation);
 
-        var finalHirArtifact = hirCompilation.EffectAnalysis
+        var hirArtifact = hirCompilation.EffectAnalysis
             ?? throw new InvalidOperationException(
                 "MIR lowering requires the compilation's final effect-analyzed HIR");
-        return LowerFinalHirArtifact(finalHirArtifact, traceSink);
+        return LowerHirArtifact(hirArtifact, traceSink);
     }
 
-    private static MirSnapshot LowerFinalHirArtifact(
-        HirSemanticArtifact finalHirArtifact,
+    /// <summary>
+    /// Lowers every callable in the final semantically analyzed HIR into MIR and creates the initial MIR snapshot.
+    /// 의미 분석이 끝난 최종 HIR의 모든 callable을 MIR로 변환하고 최초 MIR snapshot을 만듭니다.
+    /// </summary>
+    /// <example>
+    /// <code>
+    /// operation Main() {
+    ///     var xs: int[] = [10, 20];
+    ///     var i: int = 0;
+    ///     var value: int = xs[i];
+    /// }
+    ///
+    /// HIR Main = h42
+    /// MIR Main = c42
+    /// </code>
+    /// </example>
+    private static MirSnapshot LowerHirArtifact(
+        HirSemanticArtifact hirArtifact,
         IMirLoweringTraceSink? traceSink)
     {
-        ArgumentNullException.ThrowIfNull(finalHirArtifact);
+        // hirArtifact
+        // ├─ Source.Program.Callables = [Main(h42)]
+        // └─ Model
+        //    ├─ Main declaration → Main symbol
+        //    ├─ xs use           → xs symbol
+        //    └─ i use            → i symbol
+        ArgumentNullException.ThrowIfNull(hirArtifact);
 
-        var hirSnapshot = finalHirArtifact.Source;
+        // hirArtifact.Source
+        // └─ hirSnapshot
+        //    └─ Program
+        //       └─ Main(h42)
+        //          ├─ xs = [10, 20]
+        //          ├─ i = 0
+        //          └─ value = xs[i]
+        var hirSnapshot = hirArtifact.Source;
+
         var hirProgram = hirSnapshot.Program;
-        var mirCallables =
-            new List<MirCallable>(hirProgram.Callables.Count);
+
+        // hirProgram.EntryCallable = Main(h42)
+        var hirEntryCallable = hirProgram.EntryCallable
+            ?? throw new InvalidOperationException(
+                "validated HIR must contain an operation before MIR lowering");
+
+        var mirCallables = new List<MirCallable>();
+        MirCallable? mirEntryCallable = null;
 
         foreach (var hirCallable in hirProgram.Callables)
         {
             var mirCallableLowerer = new HirCallableToMirLowerer(
-                hirCallable,
-                finalHirArtifact,
+                hirCallable,        // Main(h42)
+                hirArtifact,
                 traceSink);
-            var mirCallable =
-                mirCallableLowerer.LowerToMirCallable();
 
+            // Main(h42)
+            //     ↓ LowerToMirCallable()
+            // Main(c42)
+            // └─ Blocks / Instructions / SSA Values
+            //    └─ xs[i] → MirArrayLoad
+            var mirCallable = mirCallableLowerer.LowerToMirCallable();
+
+            // mirCallables: [] → [Main(c42)]
             mirCallables.Add(mirCallable);
+
+            // hirCallable      = Main(h42)
+            // hirEntryCallable = Main(h42), the exact same HIR object
+            //     ↓
+            // mirEntryCallable = Main(c42), the exact lowered MIR object
+            if (ReferenceEquals(hirCallable, hirEntryCallable))
+                mirEntryCallable = mirCallable;
         }
 
-        var hirEntryCallable = hirProgram.EntryCallable
-            ?? throw new InvalidOperationException(
-                "validated HIR must contain an operation before MIR lowering");
-        var mirEntryCallableId =
-            new MirCallableId(hirEntryCallable.Id.Value);
+        // mirProgram
+        // ├─ EntryPoint = Main(c42), the exact object in Callables
+        // └─ Callables
+        //    └─ Main(c42)
         var mirProgram = new MirProgram(
-            mirEntryCallableId,
+            mirEntryCallable
+                ?? throw new InvalidOperationException(
+                    "validated HIR entry callable must be lowered into MIR"),
             mirCallables);
-        return MirSnapshot.CreateLowered(
-            mirProgram,
-            finalHirArtifact);
+
+        // Result:
+        //
+        // MirSnapshot
+        // ├─ Stage          = Lowered
+        // ├─ Program        = mirProgram
+        // ├─ HirArtifact    = hirArtifact
+        // └─ Analyses       = new MirAnalysisStore(mirProgram)
+        return MirSnapshot.CreateLowered(mirProgram, hirArtifact);
     }
 
     private sealed class HirCallableToMirLowerer
     {
         private readonly HirCallable _hirCallable;
         private readonly MirCallableId _mirCallableId;
-        private readonly HirSemanticArtifact _finalHirArtifact;
+        private readonly HirSemanticArtifact _hirArtifact;
         private readonly IMirLoweringTraceSink? _traceSink;
         private readonly List<MirBlockBuilder> _mirBlockBuilders = new();
         private readonly List<MirValue> _mirValues = new();
@@ -89,11 +145,11 @@ internal static class QoraMirLowering
 
         public HirCallableToMirLowerer(
             HirCallable hirCallable,
-            HirSemanticArtifact finalHirArtifact,
+            HirSemanticArtifact hirArtifact,
             IMirLoweringTraceSink? traceSink)
         {
             _hirCallable = hirCallable;
-            _finalHirArtifact = finalHirArtifact;
+            _hirArtifact = hirArtifact;
             _mirCallableId =
                 new MirCallableId(hirCallable.Id.Value);
             _traceSink = traceSink;
@@ -105,17 +161,16 @@ internal static class QoraMirLowering
             var hirCallableSymbol = RequireHirDeclarationSymbol(
                 _hirCallable.Id,
                 $"callable `{_hirCallable.Name}`");
-            var hirScopeGraph = _finalHirArtifact.Model.ScopeGraph
+            var hirScopeGraph = _hirArtifact.Model.ScopeGraph
                 ?? throw MirLoweringError(
                     "the final HIR semantic model has no scope graph");
             var qualifiedSourceCallableName =
                 hirScopeGraph.QualifiedName(hirCallableSymbol);
 
-            var mirEntryBlock = CreateMirBlock(mirCallableOrigin);
-            _currentMirBlockBuilder = mirEntryBlock;
+            var mirEntryBlockBuilder = CreateMirBlock(mirCallableOrigin);
+            _currentMirBlockBuilder = mirEntryBlockBuilder;
 
             LowerParameters();
-            HoistQubitAllocations(_hirCallable.Body.Statements);
             LowerStatements(_hirCallable.Body.Statements);
 
             if (_currentMirBlockBuilder is not null)
@@ -132,9 +187,19 @@ internal static class QoraMirLowering
                             "implicit operation return")));
             }
 
-            var mirBlocks = _mirBlockBuilders
-                .Select(blockBuilder => blockBuilder.Build())
-                .ToList();
+            var mirBlocks = new List<MirBlock>(_mirBlockBuilders.Count);
+            MirBlock? mirEntryBlock = null;
+            foreach (var mirBlockBuilder in _mirBlockBuilders)
+            {
+                var mirBlock = mirBlockBuilder.Build();
+                mirBlocks.Add(mirBlock);
+                if (ReferenceEquals(mirBlockBuilder, mirEntryBlockBuilder))
+                    mirEntryBlock = mirBlock;
+            }
+
+            if (mirEntryBlock is null)
+                throw MirLoweringError("the MIR entry block was not emitted");
+
             return new MirCallable(
                 _mirCallableId,
                 qualifiedSourceCallableName,
@@ -142,7 +207,7 @@ internal static class QoraMirLowering
                     ? MirType.Scalar(returns)
                     : null,
                 _mirParameters,
-                mirEntryBlock.Id,
+                mirEntryBlock,
                 mirBlocks,
                 _mirValues,
                 _mirArrayStorages,
@@ -152,7 +217,7 @@ internal static class QoraMirLowering
         private void LowerParameters()
         {
             var requiredArrayLengths =
-                _finalHirArtifact.Model.RequiredArgLengths(_hirCallable.Id);
+                _hirArtifact.Model.RequiredArgLengths(_hirCallable.Id);
 
             for (var hirParameterIndex = 0;
                  hirParameterIndex < _hirCallable.Parameters.Count;
@@ -168,14 +233,18 @@ internal static class QoraMirLowering
                 if (hirParameter.Type == QType.Qubit)
                 {
                     var mirQubitId = AllocateMirQubitId();
-                    var isQubitRegister = hirParameter.IsArray;
-                    var mirQubitParameter = new MirQubitParameter(
-                        mirQubitId,
-                        hirParameter.Name,
-                        isQubitRegister,
-                        isQubitRegister ? hirParameter.RegisterSize : null,
-                        hirParameter.Ownership,
-                        mirParameterOrigin);
+                    var mirQubitParameter = hirParameter.IsArray
+                        ? MirQubitParameter.Array(
+                            mirQubitId,
+                            hirParameter.Name,
+                            hirParameter.RegisterSize,
+                            hirParameter.Ownership,
+                            mirParameterOrigin)
+                        : MirQubitParameter.Single(
+                            mirQubitId,
+                            hirParameter.Name,
+                            hirParameter.Ownership,
+                            mirParameterOrigin);
                     RegisterInitialMirQubit(
                         hirParameterSymbol.Id,
                         mirQubitParameter);
@@ -236,36 +305,6 @@ internal static class QoraMirLowering
             }
         }
 
-        private void HoistQubitAllocations(IReadOnlyList<HirStatement> hirStatements)
-        {
-            foreach (var hirQubitDeclaration in
-                     hirStatements.OfType<HirQubitDeclarationStatement>())
-            {
-                var hirQubitSymbol = RequireHirDeclarationSymbol(
-                    hirQubitDeclaration.Id,
-                    $"qubit allocation `{hirQubitDeclaration.Name}`");
-                _currentFlowState.TrackDeclaredHirSymbol(hirQubitSymbol.Id);
-                var mirAllocationInstructionId = AllocateMirInstructionId();
-                var mirQubitId = AllocateMirQubitId();
-                var mirOrigin = MirOriginFor(hirQubitDeclaration);
-                var mirAllocatedQubit = new MirQubitFromUse(
-                    mirQubitId,
-                    hirQubitDeclaration.Name,
-                    hirQubitDeclaration.Size,
-                    mirOrigin);
-                RegisterInitialMirQubit(
-                    hirQubitSymbol.Id,
-                    mirAllocatedQubit);
-                EmitMirInstruction(new MirQubitAllocate(
-                    mirAllocationInstructionId,
-                    mirAllocatedQubit,
-                    mirOrigin));
-                _currentFlowState.CurrentMirQubitByHirSymbolId[
-                        hirQubitSymbol.Id] =
-                    mirAllocatedQubit;
-            }
-        }
-
         private void LowerStatements(IReadOnlyList<HirStatement> hirStatements)
         {
             for (var hirStatementIndex = 0;
@@ -292,7 +331,7 @@ internal static class QoraMirLowering
             if (_traceSink is null)
                 return;
 
-            if (_finalHirArtifact.Model.FindSymbol(hirStatement.Id)
+            if (_hirArtifact.Model.FindSymbol(hirStatement.Id)
                 is { } hirDeclaredSymbol)
                 _traceSink.MarkUnreachable(hirDeclaredSymbol.Id);
 
@@ -323,8 +362,8 @@ internal static class QoraMirLowering
         {
             switch (hirStatement)
             {
-                case HirQubitDeclarationStatement:
-                    // Local qubits are allocated once in the callable entry block.
+                case HirQubitDeclarationStatement hirQubitDeclaration:
+                    LowerQubitDeclaration(hirQubitDeclaration);
                     return;
 
                 case HirVariableDeclarationStatement hirDeclaration:
@@ -363,6 +402,29 @@ internal static class QoraMirLowering
                     throw MirLoweringError(
                         $"unsupported HIR statement {hirStatement.GetType().Name}");
             }
+        }
+
+        private void LowerQubitDeclaration(
+            HirQubitDeclarationStatement hirQubitDeclaration)
+        {
+            var hirQubitSymbol = RequireHirDeclarationSymbol(
+                hirQubitDeclaration.Id,
+                $"qubit allocation `{hirQubitDeclaration.Name}`");
+            _currentFlowState.TrackDeclaredHirSymbol(hirQubitSymbol.Id);
+
+            var mirOrigin = MirOriginFor(hirQubitDeclaration);
+            var mirAllocatedQubit = new MirQubitFromUse(
+                AllocateMirQubitId(),
+                hirQubitDeclaration.Name,
+                hirQubitDeclaration.Size,
+                mirOrigin);
+            RegisterInitialMirQubit(hirQubitSymbol.Id, mirAllocatedQubit);
+            EmitMirInstruction(new MirQubitAllocate(
+                AllocateMirInstructionId(),
+                mirAllocatedQubit,
+                mirOrigin));
+            _currentFlowState.CurrentMirQubitByHirSymbolId[hirQubitSymbol.Id] =
+                mirAllocatedQubit;
         }
 
         private void LowerDeclaration(HirVariableDeclarationStatement hirDeclaration)
@@ -671,10 +733,7 @@ internal static class QoraMirLowering
                         hirParameter.Type,
                         hirParameter.RegisterSize)
                     : MirType.Scalar(hirParameter.Type);
-                mirArgumentValueId = EnsureCallType(
-                    mirArgumentValueId,
-                    expectedMirArgumentType,
-                    MirOriginFor(hirArgument.Expression));
+                RequireCallType(mirArgumentValueId, expectedMirArgumentType);
                 mirCallOperands.Add(new MirClassicalCallOperand(
                     mirArgumentValueId,
                     hirArgument.Ownership,
@@ -757,10 +816,7 @@ internal static class QoraMirLowering
                             hirParameter.Type,
                             hirParameter.RegisterSize)
                         : MirType.Scalar(hirParameter.Type);
-                    mirArgumentValueId = EnsureCallType(
-                        mirArgumentValueId,
-                        expectedMirArgumentType,
-                        MirOriginFor(hirArgumentExpression));
+                    RequireCallType(mirArgumentValueId, expectedMirArgumentType);
                 }
                 mirCallOperands.Add(
                     new MirClassicalCallOperand(
@@ -1285,6 +1341,12 @@ internal static class QoraMirLowering
 
         private MirValueId LowerExpression(HirExpression hirExpression)
         {
+            var mirValueId = LowerExpressionValue(hirExpression);
+            return ApplyApprovedImplicitConversion(hirExpression, mirValueId);
+        }
+
+        private MirValueId LowerExpressionValue(HirExpression hirExpression)
+        {
             // Expression lowering owns its provenance boundary. Callers cannot substitute a surrounding
             // statement origin, so every emitted MIR term remains queryable by the exact HIR expression ID.
             var mirOrigin = MirOriginFor(hirExpression);
@@ -1300,14 +1362,14 @@ internal static class QoraMirLowering
 
                 case HirLiteralExpression hirLiteral:
                     return EmitConstant(
-                        QTypeOfLiteralText(hirLiteral.Text),
+                        ExpressionTypes.LiteralType(hirLiteral.Text).Type,
                         hirLiteral.Text,
                         mirOrigin);
 
                 case HirNameExpression hirName
                     when IsBuiltinLiteralName(hirName.Name):
                     return EmitConstant(
-                        QTypeOfLiteralText(hirName.Name),
+                        ExpressionTypes.LiteralType(hirName.Name).Type,
                         hirName.Name,
                         mirOrigin);
 
@@ -1333,10 +1395,10 @@ internal static class QoraMirLowering
                     var mirOperandValueId = LowerExpression(hirUnary.Operand);
                     if (hirUnary.Operator == HirUnaryOperator.LogicalNot)
                     {
-                        mirOperandValueId = EnsureType(
+                        RequireExactMirType(
+                            hirUnary.Operand,
                             mirOperandValueId,
-                            MirType.Scalar(QType.Bit),
-                            mirOrigin);
+                            MirType.Scalar(QType.Bit));
                         return EmitUnary(
                             MirUnaryOperator.LogicalNot,
                             mirOperandValueId,
@@ -1350,21 +1412,14 @@ internal static class QoraMirLowering
                     }
 
                     var mirOperandType = MirTypeOf(mirOperandValueId);
-                    var mirResultType = mirOperandType.ElementType == QType.Bit
-                        ? MirType.Scalar(QType.Int)
-                        : mirOperandType;
                     if (mirOperandType.ElementType == QType.Bit)
-                    {
-                        mirOperandValueId = EnsureType(
-                            mirOperandValueId,
-                            mirResultType,
-                            mirOrigin);
-                    }
+                        throw MirLoweringError(
+                            "validated bit negation reached MIR without its approved int conversion");
 
                     return EmitUnary(
                         MirUnaryOperator.Negate,
                         mirOperandValueId,
-                        mirResultType,
+                        mirOperandType,
                         mirOrigin);
                 }
 
@@ -1387,7 +1442,10 @@ internal static class QoraMirLowering
                         if (mirBinaryOperator is not (
                                 MirBinaryOperator.Equal
                                 or MirBinaryOperator.NotEqual)
-                            || mirLeftType != mirRightType)
+                            || !mirLeftType.IsArray
+                            || !mirRightType.IsArray
+                            || mirLeftType.ElementType
+                            != mirRightType.ElementType)
                         {
                             throw MirLoweringError(
                                 "validated array comparison has incompatible "
@@ -1406,18 +1464,13 @@ internal static class QoraMirLowering
                         MirBinaryOperator.Equal or MirBinaryOperator.NotEqual
                         or MirBinaryOperator.Less or MirBinaryOperator.LessOrEqual
                         or MirBinaryOperator.Greater or MirBinaryOperator.GreaterOrEqual;
-                    var mirOperandType = CommonMirNumericType(
-                        mirLeftType,
-                        mirRightType,
-                        isComparison);
-                    mirLeftValueId = EnsureType(
-                        mirLeftValueId,
-                        mirOperandType,
-                        mirOrigin);
-                    mirRightValueId = EnsureType(
-                        mirRightValueId,
-                        mirOperandType,
-                        mirOrigin);
+                    if (mirLeftType != mirRightType)
+                    {
+                        throw MirLoweringError(
+                            "validated scalar operator reached MIR with incompatible "
+                            + $"operands {mirLeftType} and {mirRightType}");
+                    }
+                    var mirOperandType = mirLeftType;
                     var mirResultType = isComparison
                         ? MirType.Scalar(QType.Bit)
                         : mirOperandType;
@@ -1579,11 +1632,12 @@ internal static class QoraMirLowering
 
         private MirValueId LowerExpressionAs(
             HirExpression hirExpression,
-            MirType expectedMirType) =>
-            EnsureType(
-                LowerExpression(hirExpression),
-                expectedMirType,
-                MirOriginFor(hirExpression));
+            MirType expectedMirType)
+        {
+            var mirValueId = LowerExpression(hirExpression);
+            RequireExactMirType(hirExpression, mirValueId, expectedMirType);
+            return mirValueId;
+        }
 
         /// <summary>
         /// Lowers logical conjunction/disjunction as control flow so the right operand is evaluated
@@ -1807,14 +1861,13 @@ internal static class QoraMirLowering
             return mirResultValueId;
         }
 
-        private MirValueId EnsureCallType(
+        private void RequireCallType(
             MirValueId mirValueId,
-            MirType expectedMirType,
-            MirOrigin mirOrigin)
+            MirType expectedMirType)
         {
             var actualMirType = MirTypeOf(mirValueId);
             if (actualMirType == expectedMirType)
-                return mirValueId;
+                return;
             if (actualMirType.IsArray
                 && expectedMirType.IsArray
                 && actualMirType.ElementType == expectedMirType.ElementType
@@ -1822,25 +1875,34 @@ internal static class QoraMirLowering
                     || actualMirType.KnownLength
                     == expectedMirType.KnownLength))
             {
-                return mirValueId;
+                return;
             }
-            return EnsureType(mirValueId, expectedMirType, mirOrigin);
+            throw MirLoweringError(
+                $"validated call argument has type {actualMirType}, expected {expectedMirType}");
         }
 
-        private MirValueId EnsureType(
-            MirValueId mirValueId,
-            MirType expectedMirType,
-            MirOrigin mirOrigin)
+        private MirValueId ApplyApprovedImplicitConversion(
+            HirExpression hirExpression,
+            MirValueId mirValueId)
         {
-            var actualMirType = MirTypeOf(mirValueId);
-            if (actualMirType == expectedMirType)
+            var targetType = _hirArtifact.Model.FindImplicitConversionTarget(hirExpression.Id);
+            if (targetType is null)
                 return mirValueId;
-            if (actualMirType.IsArray || expectedMirType.IsArray)
+
+            var actualMirType = MirTypeOf(mirValueId);
+            var expectedMirType = MirType.Scalar(targetType.Value);
+            if (actualMirType == expectedMirType)
             {
                 throw MirLoweringError(
-                    $"MIR lowering cannot convert {actualMirType} "
-                    + $"to {expectedMirType}");
+                    $"HIR recorded a redundant conversion of expression {hirExpression.Id} to {expectedMirType}");
             }
+            if (actualMirType.IsArray)
+            {
+                throw MirLoweringError(
+                    $"HIR approved an array conversion of expression {hirExpression.Id} from {actualMirType} to {expectedMirType}");
+            }
+
+            var mirOrigin = MirOriginFor(hirExpression);
             var mirInstructionId = AllocateMirInstructionId();
             var mirResultValueId = AddInstructionResult(
                 mirInstructionId,
@@ -1853,6 +1915,19 @@ internal static class QoraMirLowering
                 mirValueId,
                 mirOrigin));
             return mirResultValueId;
+        }
+
+        private void RequireExactMirType(
+            HirExpression hirExpression,
+            MirValueId mirValueId,
+            MirType expectedMirType)
+        {
+            var actualMirType = MirTypeOf(mirValueId);
+            if (actualMirType == expectedMirType)
+                return;
+
+            throw MirLoweringError(
+                $"validated expression {hirExpression.Id} has MIR type {actualMirType}, expected {expectedMirType}");
         }
 
         private MirValueId AddInstructionResult(
@@ -2010,7 +2085,7 @@ internal static class QoraMirLowering
             HirCallable hirUserOperation)
         {
             var hirOperationEffects =
-                _finalHirArtifact.Model.FindOpEffects(hirUserOperation.Id)
+                _hirArtifact.Model.FindOpEffects(hirUserOperation.Id)
                 ?? throw MirLoweringError(
                     $"callable `{hirUserOperation.Name}` "
                     + "has no HIR effect summary");
@@ -2417,21 +2492,21 @@ internal static class QoraMirLowering
         private Symbol RequireHirDeclarationSymbol(
             HirNodeId hirDeclarationNodeId,
             string diagnosticRole) =>
-            _finalHirArtifact.Model.FindSymbol(hirDeclarationNodeId)
+            _hirArtifact.Model.FindSymbol(hirDeclarationNodeId)
             ?? throw MirLoweringError(
                 $"{diagnosticRole} has no semantic symbol");
 
         private SymbolId SymbolIdOf(
             HirNameExpression hirNameReference,
             string diagnosticRole) =>
-            _finalHirArtifact.Model
+            _hirArtifact.Model
                 .FindReferencedSymbol(hirNameReference.Id)?.Id
             ?? throw MirLoweringError(
                 $"{diagnosticRole} has no semantic binding");
 
         private Symbol RequireHirCallTargetSymbol(
             HirCallExpression hirCall) =>
-            _finalHirArtifact.Model
+            _hirArtifact.Model
                 .FindReferencedSymbol(hirCall.Callee.Id)
             ?? throw MirLoweringError(
                 $"call target `{hirCall.Name}` has no semantic binding");
@@ -2451,7 +2526,7 @@ internal static class QoraMirLowering
                 ?? throw MirLoweringError(
                     $"callable symbol `{semanticCallTargetSymbol.SourceName}` "
                     + "has no declaration node");
-            return _finalHirArtifact.Source.Structure
+            return _hirArtifact.Source.Structure
                 .FindNode(hirDeclarationNodeId)
                 as HirCallable
                 ?? throw MirLoweringError(
@@ -2500,54 +2575,14 @@ internal static class QoraMirLowering
                 + "reached MIR lowering"),
         };
 
-        private static MirType CommonMirNumericType(
-            MirType mirLeftType,
-            MirType mirRightType,
-            bool isComparison)
-        {
-            if (mirLeftType.IsArray || mirRightType.IsArray)
-            {
-                throw new InvalidOperationException(
-                    "QINTERNAL: an array reached a scalar MIR binary instruction");
-            }
-            if (mirLeftType == mirRightType)
-            {
-                if (!isComparison
-                    && mirLeftType.ElementType == QType.Bit)
-                {
-                    return MirType.Scalar(QType.Int);
-                }
-                return mirLeftType;
-            }
-            if (mirLeftType.ElementType == QType.Float
-                || mirRightType.ElementType == QType.Float)
-            {
-                return MirType.Scalar(QType.Float);
-            }
-            if (mirLeftType.ElementType == QType.Angle
-                || mirRightType.ElementType == QType.Angle)
-            {
-                return MirType.Scalar(QType.Angle);
-            }
-            return MirType.Scalar(QType.Int);
-        }
-
         private static bool IsBuiltinLiteralName(
             string sourceLiteralName) =>
             sourceLiteralName
                 is "true" or "false" or "pi" or "tau" or "euler";
 
-        private static QType QTypeOfLiteralText(string literalText) =>
-            literalText is "true" or "false"
-                ? QType.Bit
-                : literalText is "pi" or "tau" or "euler"
-                    || literalText.Contains('.')
-                    ? QType.Float
-                    : QType.Int;
-
         private MirOrigin MirOriginFor(HirNode hirNode)
         {
-            var sourceSpan = _finalHirArtifact.Source.SourceMap.Find(hirNode.Id);
+            var sourceSpan = _hirArtifact.Source.SourceMap.Find(hirNode.Id);
 
             return new MirHirOrigin(hirNode.Id, sourceSpan);
         }

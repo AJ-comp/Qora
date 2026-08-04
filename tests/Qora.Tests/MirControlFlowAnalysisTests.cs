@@ -62,16 +62,21 @@ public sealed class MirControlFlowAnalysisTests
             MirType.Scalar(QType.Int),
             MirValueDefinition.ParameterAt(0),
             source);
+        var entryBlock = new MirBlock(
+            B(0),
+            Array.Empty<MirValueId>(),
+            Array.Empty<MirInstruction>(),
+            new MirReturn(null, source),
+            source);
         var callable = new MirCallable(
             C(0),
             "ParameterScope",
             returnType: null,
             parameters: new IMirParameter[] { parameter },
-            entryBlock: B(0),
+            entryBlock: entryBlock,
             blocks: new[]
             {
-                new MirBlock(B(0), Array.Empty<MirValueId>(), Array.Empty<MirInstruction>(),
-                    new MirReturn(null, source), source),
+                entryBlock,
                 new MirBlock(B(1), Array.Empty<MirValueId>(), Array.Empty<MirInstruction>(),
                     new MirReturn(null, source), source),
             },
@@ -80,7 +85,7 @@ public sealed class MirControlFlowAnalysisTests
             source);
         var entryPoint = EmptyEntry(C(1), source);
         var program = context.Program(
-            entryPoint.Id,
+            entryPoint,
             new[] { callable, entryPoint });
         var cfg = MirControlFlowAnalysis.Analyze(program, callable.Id);
 
@@ -98,17 +103,27 @@ public sealed class MirControlFlowAnalysisTests
             V(0),
             "1",
             source);
+        var entryBlock = new MirBlock(
+            B(0),
+            Array.Empty<MirValueId>(),
+            new MirInstruction[] { condition },
+            new MirBranch(
+                V(0),
+                B(1),
+                Array.Empty<MirValueId>(),
+                B(2),
+                Array.Empty<MirValueId>(),
+                source),
+            source);
         var callable = new MirCallable(
             C(0),
             "MixedExits",
             returnType: null,
             parameters: Array.Empty<IMirParameter>(),
-            entryBlock: B(0),
+            entryBlock: entryBlock,
             blocks: new[]
             {
-                new MirBlock(B(0), Array.Empty<MirValueId>(), new MirInstruction[] { condition },
-                    new MirBranch(V(0), B(1), Array.Empty<MirValueId>(),
-                        B(2), Array.Empty<MirValueId>(), source), source),
+                entryBlock,
                 new MirBlock(B(1), Array.Empty<MirValueId>(), Array.Empty<MirInstruction>(),
                     new MirReturn(null, source), source),
                 new MirBlock(B(2), Array.Empty<MirValueId>(), Array.Empty<MirInstruction>(),
@@ -127,7 +142,7 @@ public sealed class MirControlFlowAnalysisTests
             },
             storages: Array.Empty<MirArrayStorage>(),
             source);
-        var program = context.Program(callable.Id, new[] { callable });
+        var program = context.Program(callable, new[] { callable });
         var cfg = MirControlFlowAnalysis.Analyze(program, callable.Id);
 
         Assert.True(cfg.PostDominates(B(4), B(4)));
@@ -146,16 +161,21 @@ public sealed class MirControlFlowAnalysisTests
             V(0),
             "1",
             source);
+        var entryBlock = new MirBlock(
+            B(0),
+            Array.Empty<MirValueId>(),
+            new MirInstruction[] { condition },
+            new MirJump(B(1), Array.Empty<MirValueId>(), source),
+            source);
         var callable = new MirCallable(
             C(0),
             "Loop",
             returnType: null,
             parameters: Array.Empty<IMirParameter>(),
-            entryBlock: B(0),
+            entryBlock: entryBlock,
             blocks: new[]
             {
-                new MirBlock(B(0), Array.Empty<MirValueId>(), new MirInstruction[] { condition },
-                    new MirJump(B(1), Array.Empty<MirValueId>(), source), source),
+                entryBlock,
                 new MirBlock(B(1), Array.Empty<MirValueId>(), Array.Empty<MirInstruction>(),
                     new MirBranch(V(0), B(2), Array.Empty<MirValueId>(),
                         B(3), Array.Empty<MirValueId>(), source), source),
@@ -172,7 +192,7 @@ public sealed class MirControlFlowAnalysisTests
             },
             storages: Array.Empty<MirArrayStorage>(),
             source);
-        var program = context.Program(callable.Id, new[] { callable });
+        var program = context.Program(callable, new[] { callable });
         var cfg = MirControlFlowAnalysis.Analyze(program, callable.Id);
 
         Assert.True(cfg.Dominates(B(1), B(2)));
@@ -225,18 +245,28 @@ public sealed class MirControlFlowAnalysisTests
             V(4),
             "30",
             source);
+        var entryBlock = new MirBlock(
+            B(0),
+            Array.Empty<MirValueId>(),
+            new MirInstruction[] { condition },
+            new MirBranch(
+                V(0),
+                B(1),
+                Array.Empty<MirValueId>(),
+                B(2),
+                Array.Empty<MirValueId>(),
+                source),
+            source);
 
         var callable = new MirCallable(
             C(0),
             "Diamond",
             returnType: null,
             parameters: Array.Empty<IMirParameter>(),
-            entryBlock: B(0),
+            entryBlock: entryBlock,
             blocks: new[]
             {
-                new MirBlock(B(0), Array.Empty<MirValueId>(), new MirInstruction[] { condition },
-                    new MirBranch(V(0), B(1), Array.Empty<MirValueId>(),
-                        B(2), Array.Empty<MirValueId>(), source), source),
+                entryBlock,
                 new MirBlock(B(1), Array.Empty<MirValueId>(), new MirInstruction[] { left },
                     new MirJump(B(3), new[] { V(1) }, source), source),
                 new MirBlock(B(2), Array.Empty<MirValueId>(), new MirInstruction[] { right },
@@ -269,27 +299,24 @@ public sealed class MirControlFlowAnalysisTests
             },
             storages: Array.Empty<MirArrayStorage>(),
             source);
-        return context.Program(callable.Id, new[] { callable });
+        return context.Program(callable, new[] { callable });
     }
 
     private static MirCallable EmptyEntry(MirCallableId id, MirOrigin source)
     {
-        var entryBlock = B(0);
+        var entryBlock = new MirBlock(
+            B(0),
+            Array.Empty<MirValueId>(),
+            Array.Empty<MirInstruction>(),
+            new MirReturn(null, source),
+            source);
         return new MirCallable(
             id,
             "Main",
             returnType: null,
             parameters: Array.Empty<IMirParameter>(),
             entryBlock: entryBlock,
-            blocks: new[]
-            {
-                new MirBlock(
-                    entryBlock,
-                    Array.Empty<MirValueId>(),
-                    Array.Empty<MirInstruction>(),
-                    new MirReturn(null, source),
-                    source),
-            },
+            blocks: new[] { entryBlock },
             values: Array.Empty<MirValue>(),
             storages: Array.Empty<MirArrayStorage>(),
             source);

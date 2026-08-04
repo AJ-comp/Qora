@@ -353,26 +353,32 @@ public sealed class MirMemoryStateAnalysisTests
         MirCallable callable,
         MirBlock replacement)
     {
+        var rewrittenBlocks = callable.Blocks
+            .Select(block => block.Id == replacement.Id
+                ? replacement
+                : block)
+            .ToArray();
+        var rewrittenEntryBlock = Assert.Single(
+            rewrittenBlocks,
+            block => block.Id == callable.EntryBlock.Id);
         var rewrittenCallable = new MirCallable(
             callable.Id,
             callable.Name,
             callable.ReturnType,
             callable.Parameters,
-            callable.EntryBlock,
-            callable.Blocks
-                .Select(block => block.Id == replacement.Id
-                    ? replacement
-                    : block)
-                .ToArray(),
+            rewrittenEntryBlock,
+            rewrittenBlocks,
             callable.Values,
             callable.Storages,
             callable.Origin);
-        return new MirProgram(
-            program.EntryPoint,
-            program.Callables
-                .Select(candidate => candidate.Id == callable.Id
-                    ? rewrittenCallable
-                    : candidate)
-                .ToArray());
+        var rewrittenCallables = program.Callables
+            .Select(candidate => candidate.Id == callable.Id
+                ? rewrittenCallable
+                : candidate)
+            .ToArray();
+        var rewrittenEntryPoint = ReferenceEquals(program.EntryPoint, callable)
+            ? rewrittenCallable
+            : program.EntryPoint;
+        return new MirProgram(rewrittenEntryPoint, rewrittenCallables);
     }
 }

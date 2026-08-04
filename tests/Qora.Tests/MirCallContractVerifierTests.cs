@@ -18,7 +18,7 @@ public sealed class MirCallContractVerifierTests
             context,
             new MirCallableId(1),
             callee.Id);
-        var program = context.Program(entry.Id, new[] { callee, entry });
+        var program = context.Program(entry, new[] { callee, entry });
 
         var error = Assert.Single(
             QoraMirVerifier.Verify(program),
@@ -44,7 +44,7 @@ public sealed class MirCallContractVerifierTests
             minimumLength: 2);
         var entry = EmptyEntryOperation(context, new MirCallableId(2));
         var program = context.Program(
-            entry.Id,
+            entry,
             new[] { callee, forwarder, entry });
 
         var error = Assert.Single(
@@ -65,6 +65,12 @@ public sealed class MirCallContractVerifierTests
         var entryBlockId = new MirBlockId(0);
         var parameterValueId = new MirValueId(0);
         var parameterStorageId = new MirStorageId(0);
+        var entryBlock = new MirBlock(
+            entryBlockId,
+            Array.Empty<MirValueId>(),
+            Array.Empty<MirInstruction>(),
+            new MirReturn(null, origin),
+            origin);
 
         return new MirCallable(
             callableId,
@@ -78,16 +84,8 @@ public sealed class MirCallContractVerifierTests
                     parameterStorageId,
                     MinimumLength: minimumLength),
             },
-            entryBlock: entryBlockId,
-            blocks: new[]
-            {
-                new MirBlock(
-                    entryBlockId,
-                    Array.Empty<MirValueId>(),
-                    Array.Empty<MirInstruction>(),
-                    new MirReturn(null, origin),
-                    origin),
-            },
+            entryBlock: entryBlock,
+            blocks: new[] { entryBlock },
             values: new[]
             {
                 new MirValue(
@@ -118,44 +116,42 @@ public sealed class MirCallContractVerifierTests
         var secondConstantId = new MirInstructionId(1);
         var arrayCreateId = new MirInstructionId(2);
         var callId = new MirInstructionId(3);
+        var entryBlock = new MirBlock(
+            entryBlockId,
+            Array.Empty<MirValueId>(),
+            new MirInstruction[]
+            {
+                new MirConstant(firstConstantId, firstElementId, "10", origin),
+                new MirConstant(secondConstantId, secondElementId, "20", origin),
+                new MirArrayCreate(
+                    arrayCreateId,
+                    arrayValueId,
+                    storageId,
+                    MirArrayInitialization.ExplicitElements,
+                    new[] { firstElementId, secondElementId },
+                    origin),
+                new MirQuantumApply(
+                    callId,
+                    new MirUserCallableTarget(calleeId),
+                    new MirCallOperand[]
+                    {
+                        new MirClassicalCallOperand(arrayValueId),
+                    },
+                    Array.Empty<MirQubitAfterInstruction>(),
+                    Array.Empty<MirMutableArrayResult>(),
+                    Array.Empty<MirFunctor>(),
+                    origin),
+            },
+            new MirReturn(null, origin),
+            origin);
 
         return new MirCallable(
             callableId,
             "Main",
             returnType: null,
             parameters: Array.Empty<IMirParameter>(),
-            entryBlock: entryBlockId,
-            blocks: new[]
-            {
-                new MirBlock(
-                    entryBlockId,
-                    Array.Empty<MirValueId>(),
-                    new MirInstruction[]
-                    {
-                        new MirConstant(firstConstantId, firstElementId, "10", origin),
-                        new MirConstant(secondConstantId, secondElementId, "20", origin),
-                        new MirArrayCreate(
-                            arrayCreateId,
-                            arrayValueId,
-                            storageId,
-                            MirArrayInitialization.ExplicitElements,
-                            new[] { firstElementId, secondElementId },
-                            origin),
-                        new MirQuantumApply(
-                            callId,
-                            new MirUserCallableTarget(calleeId),
-                            new MirCallOperand[]
-                            {
-                                new MirClassicalCallOperand(arrayValueId),
-                            },
-                            Array.Empty<MirQubitAfterInstruction>(),
-                            Array.Empty<MirMutableArrayResult>(),
-                            Array.Empty<MirFunctor>(),
-                            origin),
-                    },
-                    new MirReturn(null, origin),
-                    origin),
-            },
+            entryBlock: entryBlock,
+            blocks: new[] { entryBlock },
             values: new[]
             {
                 new MirValue(
@@ -192,6 +188,25 @@ public sealed class MirCallContractVerifierTests
         var parameterValueId = new MirValueId(0);
         var parameterStorageId = new MirStorageId(0);
         var callId = new MirInstructionId(0);
+        var entryBlock = new MirBlock(
+            entryBlockId,
+            Array.Empty<MirValueId>(),
+            new MirInstruction[]
+            {
+                new MirQuantumApply(
+                    callId,
+                    new MirUserCallableTarget(calleeId),
+                    new MirCallOperand[]
+                    {
+                        new MirClassicalCallOperand(parameterValueId),
+                    },
+                    Array.Empty<MirQubitAfterInstruction>(),
+                    Array.Empty<MirMutableArrayResult>(),
+                    Array.Empty<MirFunctor>(),
+                    origin),
+            },
+            new MirReturn(null, origin),
+            origin);
 
         return new MirCallable(
             callableId,
@@ -205,29 +220,8 @@ public sealed class MirCallContractVerifierTests
                     parameterStorageId,
                     MinimumLength: minimumLength),
             },
-            entryBlock: entryBlockId,
-            blocks: new[]
-            {
-                new MirBlock(
-                    entryBlockId,
-                    Array.Empty<MirValueId>(),
-                    new MirInstruction[]
-                    {
-                        new MirQuantumApply(
-                            callId,
-                            new MirUserCallableTarget(calleeId),
-                            new MirCallOperand[]
-                            {
-                                new MirClassicalCallOperand(parameterValueId),
-                            },
-                            Array.Empty<MirQubitAfterInstruction>(),
-                            Array.Empty<MirMutableArrayResult>(),
-                            Array.Empty<MirFunctor>(),
-                            origin),
-                    },
-                    new MirReturn(null, origin),
-                    origin),
-            },
+            entryBlock: entryBlock,
+            blocks: new[] { entryBlock },
             values: new[]
             {
                 new MirValue(
@@ -249,22 +243,20 @@ public sealed class MirCallContractVerifierTests
     {
         var origin = context.Origin();
         var entryBlockId = new MirBlockId(0);
+        var entryBlock = new MirBlock(
+            entryBlockId,
+            Array.Empty<MirValueId>(),
+            Array.Empty<MirInstruction>(),
+            new MirReturn(null, origin),
+            origin);
 
         return new MirCallable(
             callableId,
             "Main",
             returnType: null,
             parameters: Array.Empty<IMirParameter>(),
-            entryBlock: entryBlockId,
-            blocks: new[]
-            {
-                new MirBlock(
-                    entryBlockId,
-                    Array.Empty<MirValueId>(),
-                    Array.Empty<MirInstruction>(),
-                    new MirReturn(null, origin),
-                    origin),
-            },
+            entryBlock: entryBlock,
+            blocks: new[] { entryBlock },
             values: Array.Empty<MirValue>(),
             storages: Array.Empty<MirArrayStorage>(),
             origin);

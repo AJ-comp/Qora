@@ -23,67 +23,64 @@ public sealed class MirSnapshot
 {
     internal static MirSnapshot CreateLowered(
         MirProgram program,
-        HirSemanticArtifact loweringSource) =>
+        HirSemanticArtifact hirArtifact) =>
         new(
             program,
-            loweringSource,
+            hirArtifact,
             MirStage.Lowered,
-            transformationSource: null);
+            previousSnapshot: null);
 
     internal static MirSnapshot CreateTransformed(
         MirProgram program,
         MirStage stage,
-        MirSnapshot transformationSource)
+        MirSnapshot previousSnapshot)
     {
         ArgumentNullException.ThrowIfNull(program);
-        ArgumentNullException.ThrowIfNull(transformationSource);
-        if (ReferenceEquals(program, transformationSource.Program))
+        ArgumentNullException.ThrowIfNull(previousSnapshot);
+        if (ReferenceEquals(program, previousSnapshot.Program))
         {
             throw new ArgumentException(
                 "A transformed MIR snapshot requires a newly constructed MIR program.",
                 nameof(program));
         }
-        if (!IsDirectStageSuccessor(transformationSource.Stage, stage))
+        if (!IsDirectStageSuccessor(previousSnapshot.Stage, stage))
         {
             throw new ArgumentException(
-                $"MIR stage {stage} cannot directly follow {transformationSource.Stage}; "
+                $"MIR stage {stage} cannot directly follow {previousSnapshot.Stage}; "
                 + "inverse requests must be injected before their adjoints are materialized",
                 nameof(stage));
         }
 
-        VerifyIdentityContinuity(program, transformationSource);
+        VerifyIdentityContinuity(program, previousSnapshot);
 
         return new MirSnapshot(
             program,
-            transformationSource.LoweringSource,
+            previousSnapshot.HirArtifact,
             stage,
-            transformationSource);
+            previousSnapshot);
     }
 
     private MirSnapshot(
         MirProgram program,
-        HirSemanticArtifact loweringSource,
+        HirSemanticArtifact hirArtifact,
         MirStage stage,
-        MirSnapshot? transformationSource)
+        MirSnapshot? previousSnapshot)
     {
         ArgumentNullException.ThrowIfNull(program);
-        ArgumentNullException.ThrowIfNull(loweringSource);
+        ArgumentNullException.ThrowIfNull(hirArtifact);
 
-        if (loweringSource.Phase != HirSemanticPhase.EffectAnalysis
-            || !loweringSource.IsAccepted)
+        if (!hirArtifact.IsReadyForMirLowering)
         {
             throw new ArgumentException(
-                "MIR lowering requires an accepted final HIR effect-analysis artifact.",
-                nameof(loweringSource));
+                "MIR lowering requires a HIR artifact ready for MIR lowering.",
+                nameof(hirArtifact));
         }
-        if (!Enum.IsDefined(stage))
-            throw new ArgumentOutOfRangeException(nameof(stage), stage, "unknown MIR stage");
-        QoraMirVerifier.VerifyOrThrow(program, loweringSource.Source);
+        QoraMirVerifier.VerifyOrThrow(program, hirArtifact.Source);
 
         Stage = stage;
         Program = program;
-        LoweringSource = loweringSource;
-        TransformationSource = transformationSource;
+        HirArtifact = hirArtifact;
+        PreviousSnapshot = previousSnapshot;
         Analyses = new MirAnalysisStore(program);
     }
 
@@ -99,11 +96,11 @@ public sealed class MirSnapshot
 
     private static void VerifyIdentityContinuity(
         MirProgram transformedProgram,
-        MirSnapshot transformationSource)
+        MirSnapshot previousSnapshot)
     {
-        var sourceCallables = transformationSource.Program.Callables.ToDictionary(
+        var sourceCallables = previousSnapshot.Program.Callables.ToDictionary(
             callable => callable.Id);
-        var historicalCallableIds = HistoricalSnapshots(transformationSource)
+        var historicalCallableIds = HistoricalSnapshots(previousSnapshot)
             .SelectMany(snapshot => snapshot.Program.Callables)
             .Select(callable => callable.Id)
             .ToHashSet();
@@ -130,16 +127,16 @@ public sealed class MirSnapshot
             VerifyCallableIdentityContinuity(
                 transformedCallable,
                 sourceCallable,
-                transformationSource);
+                previousSnapshot);
         }
     }
 
     private static void VerifyCallableIdentityContinuity(
         MirCallable transformedCallable,
         MirCallable sourceCallable,
-        MirSnapshot transformationSource)
+        MirSnapshot previousSnapshot)
     {
-        var historicalCallables = HistoricalSnapshots(transformationSource)
+        var historicalCallables = HistoricalSnapshots(previousSnapshot)
             .Select(snapshot => snapshot.Program.FindCallable(transformedCallable.Id))
             .Where(callable => callable is not null)
             .Cast<MirCallable>()
@@ -282,7 +279,7 @@ public sealed class MirSnapshot
     {
         for (MirSnapshot? current = source;
              current is not null;
-             current = current.TransformationSource)
+             current = current.PreviousSnapshot)
         {
             yield return current;
         }
@@ -290,7 +287,7 @@ public sealed class MirSnapshot
 
     public MirStage Stage { get; }
     public MirProgram Program { get; }
-    public MirSnapshot? TransformationSource { get; }
-    internal HirSemanticArtifact LoweringSource { get; }
+    public MirSnapshot? PreviousSnapshot { get; }
+    internal HirSemanticArtifact HirArtifact { get; }
     public MirAnalysisStore Analyses { get; }
 }

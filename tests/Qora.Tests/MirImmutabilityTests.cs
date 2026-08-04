@@ -48,6 +48,9 @@ public sealed class MirImmutabilityTests
         var blocks = originalCallable.Blocks
             .Select(block => block.Id == originalBlock.Id ? clonedBlock : block)
             .ToList();
+        var entryBlock = Assert.Single(
+            blocks,
+            block => block.Id == originalCallable.EntryBlock.Id);
         var values = originalCallable.Values.ToList();
         var storages = originalCallable.Storages.ToList();
         var clonedCallable = new MirCallable(
@@ -55,16 +58,14 @@ public sealed class MirImmutabilityTests
             originalCallable.Name,
             originalCallable.ReturnType,
             parameters,
-            originalCallable.EntryBlock,
+            entryBlock,
             blocks,
             values,
             storages,
             originalCallable.Origin);
 
         var callables = new List<MirCallable> { clonedCallable };
-        var program = new MirProgram(
-            compiled.EntryPoint,
-            callables);
+        var program = new MirProgram(clonedCallable, callables);
         QoraMirVerifier.VerifyOrThrow(program);
         var effects = MirEffectAnalysis.Analyze(program);
         var cfg = MirControlFlowAnalysis.Analyze(program, clonedCallable.Id);
@@ -165,11 +166,9 @@ public sealed class MirImmutabilityTests
         var context = MirTestContext.Create();
         var source = context.Origin();
         var callable = new MirCallableId(0);
-        var qubit = new MirQubitParameter(
+        var qubit = MirQubitParameter.Single(
             new MirQubitId(0),
             "q",
-            isArray: false,
-            length: null,
             QOwnershipMode.Borrowed,
             source);
         var storages = new List<MirStorageId>
