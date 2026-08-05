@@ -1,5 +1,4 @@
 using System.Collections.Frozen;
-using System.Collections.ObjectModel;
 
 namespace Qora.Ir.Mir.Analysis;
 
@@ -128,10 +127,8 @@ internal static class MirStorageProvenanceAnalysis
             Walk(value);
             if (storages.Count == 0) complete = false;
             var result = new MirStorageProvenance(
-                new ReadOnlyCollection<MirStorageId>(
-                    storages
-                        .OrderBy(storage => storage.Value)
-                        .ToArray()),
+                MirCollections.Freeze(
+                    storages.OrderBy(storage => storage.Value)),
                 complete);
             _cache.Add(value, result);
             return result;
@@ -143,23 +140,24 @@ internal static class MirStorageProvenanceAnalysis
 
             foreach (var parameter in _callable.Parameters.OfType<MirClassicalParameter>())
             {
-                var parameterValue = _callable.RequireValue(parameter.Value);
+                var parameterValue = parameter.Value;
                 if (!parameterValue.Type.IsArray) continue;
-                if (parameter.Storage is MirStorageId storage)
-                    _seeds[parameter.Value] = storage;
+                if (parameter.Storage is MirArrayStorage storage)
+                    _seeds[parameterValue.Id] = storage.Id;
                 else
-                    _unknownRoots.Add(parameter.Value);
+                    _unknownRoots.Add(parameterValue.Id);
             }
 
             foreach (var value in _callable.Values.Where(value => value.Type.IsArray))
             {
                 if (_seeds.ContainsKey(value.Id)) continue;
-                switch (value.Definition.Kind)
+                var definition = _callable.DefinitionOf(value);
+                switch (definition.Kind)
                 {
                     case MirValueDefinitionKind.BlockArgument
-                        when value.Definition.Block is MirBlockId block:
+                        when definition.Block is MirBlockId block:
                         if (incoming.TryGetValue(
-                                (block, value.Definition.Index),
+                                (block, definition.Index),
                                 out var arguments)
                             && arguments.Count != 0)
                             _dependencies[value.Id] = arguments;
@@ -168,7 +166,7 @@ internal static class MirStorageProvenanceAnalysis
                         break;
 
                     case MirValueDefinitionKind.InstructionResult
-                        when value.Definition.Instruction is MirInstructionId instructionId:
+                        when definition.Instruction is MirInstructionId instructionId:
                         AddInstructionDefinition(
                             value.Id,
                             _callable.RequireInstruction(instructionId));
@@ -189,19 +187,19 @@ internal static class MirStorageProvenanceAnalysis
         {
             switch (instruction)
             {
-                case MirArrayCreate create when create.Result == result:
-                    _seeds[result] = create.Storage;
+                case MirArrayCreate create when create.Result.Id == result:
+                    _seeds[result] = create.Storage.Id;
                     break;
-                case MirArrayStore store when store.Result == result:
+                case MirArrayStore store when store.Result.Id == result:
                     _dependencies[result] = new List<MirValueId> { store.Array };
                     break;
-                case MirConvert convert when convert.Result == result:
+                case MirConvert convert when convert.Result.Id == result:
                     _dependencies[result] = new List<MirValueId> { convert.Operand };
                     break;
                 case MirQuantumApply apply:
                 {
                     var transition = apply.MutableArrayResults
-                        .FirstOrDefault(candidate => candidate.Result == result);
+                        .FirstOrDefault(candidate => candidate.Result.Id == result);
                     if (transition is not null
                         && transition.OperandIndex >= 0
                         && transition.OperandIndex < apply.Operands.Count

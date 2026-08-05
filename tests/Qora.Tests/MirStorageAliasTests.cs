@@ -26,7 +26,7 @@ public sealed class MirStorageAliasTests
         var formalStorages = observe.Parameters
             .OfType<MirClassicalParameter>()
             .Where(parameter => parameter.Storage is not null)
-            .Select(parameter => observe.RequireStorage(parameter.Storage!.Value))
+            .Select(parameter => observe.RequireStorage(parameter.Storage!))
             .ToArray();
         Assert.Equal(2, formalStorages.Length);
         Assert.NotEqual(formalStorages[0].Id, formalStorages[1].Id);
@@ -158,7 +158,10 @@ public sealed class MirStorageAliasTests
             originalCall.Target,
             originalCall.Operands
                 .Select((operand, index) => index == 1
-                    ? second with { Value = first.Value }
+                    ? new MirClassicalCallOperand(
+                        first.Value,
+                        second.Ownership,
+                        second.Access)
                     : operand)
                 .ToArray(),
             originalCall.QubitResults,
@@ -194,7 +197,7 @@ public sealed class MirStorageAliasTests
     {
         var parameter = Assert.IsType<MirClassicalParameter>(
             callable.Parameters[parameterIndex]);
-        var storage = Assert.IsType<MirStorageId>(parameter.Storage);
+        var storage = Assert.IsType<MirArrayStorage>(parameter.Storage);
         return callable.RequireStorage(storage);
     }
 
@@ -231,8 +234,7 @@ public sealed class MirStorageAliasTests
 
     private static MirCallable RebuildCallable(
         MirCallable source,
-        IReadOnlyList<MirBlock>? blocks = null,
-        IReadOnlyList<MirArrayStorage>? storages = null)
+        IReadOnlyList<MirBlock>? blocks = null)
     {
         var rebuiltBlocks = blocks ?? source.Blocks;
         var rebuiltEntryBlock = rebuiltBlocks.Single(
@@ -244,8 +246,6 @@ public sealed class MirStorageAliasTests
             source.Parameters,
             rebuiltEntryBlock,
             rebuiltBlocks,
-            source.Values,
-            storages ?? source.Storages,
             source.Origin);
     }
 }

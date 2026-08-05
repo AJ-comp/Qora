@@ -39,7 +39,6 @@ public readonly record struct MirIndexedAccessSite
 
 public sealed record MirBoundsResult(
     MirIndexedAccessSite Site,
-    MirValueId Index,
     int? KnownLength,
     MirBoundsClassification Classification);
 
@@ -49,17 +48,14 @@ public sealed record MirBoundsResult(
 /// </summary>
 public sealed class MirBoundsSnapshot
 {
-    private readonly MirProgram _sourceProgram;
-    private readonly MirCallable _sourceCallable;
+    private readonly MirControlFlowSnapshot _cfg;
     private readonly FrozenDictionary<MirIndexedAccessSite, MirBoundsResult> _resultsBySite;
 
     internal MirBoundsSnapshot(
-        MirProgram sourceProgram,
-        MirCallable sourceCallable,
+        MirControlFlowSnapshot cfg,
         IReadOnlyList<MirBoundsResult> results)
     {
-        _sourceProgram = sourceProgram;
-        _sourceCallable = sourceCallable;
+        _cfg = cfg;
         Results = MirCollections.Freeze(results);
 
         var indexed = new Dictionary<MirIndexedAccessSite, MirBoundsResult>();
@@ -74,22 +70,8 @@ public sealed class MirBoundsSnapshot
         _resultsBySite = indexed.ToFrozenDictionary();
     }
 
-    public MirCallableId Callable => _sourceCallable.Id;
+    public MirCallableId Callable => _cfg.Callable;
     public IReadOnlyList<MirBoundsResult> Results { get; }
-
-    internal bool IsFor(MirProgram program, MirCallableId callable) =>
-        ReferenceEquals(_sourceProgram, program)
-        && ReferenceEquals(_sourceCallable, program.FindCallable(callable));
-
-    internal void EnsureFor(MirProgram program, MirCallableId callable)
-    {
-        if (!IsFor(program, callable))
-        {
-            throw new InvalidOperationException(
-                $"the MIR bounds analysis does not belong to callable {callable} "
-                + $"in the requested MIR program; it was created for callable {Callable}");
-        }
-    }
 
     public MirBoundsResult ResultFor(MirIndexedAccessSite site) =>
         _resultsBySite.TryGetValue(site, out var result)
@@ -110,7 +92,7 @@ public sealed class MirBoundsSnapshot
                 nameof(result));
         }
 
-        var instruction = _sourceCallable.RequireInstruction(
+        var instruction = _cfg.SourceCallable.RequireInstruction(
             result.Site.Instruction.Instruction);
         if (instruction is MirArrayLoad or MirArrayStore)
             return instruction.Origin;
@@ -139,24 +121,23 @@ internal static class MirBoundsAnalysis
                 callableId,
                 $"callable {callableId} does not belong to the MIR program");
         var cfg = MirControlFlowAnalysis.AnalyzeUnchecked(program, callable);
-        var paths = MirPathConditionAnalysis.AnalyzeVerified(program, callable, cfg);
+        var paths = MirPathConditionAnalysis.AnalyzeVerified(cfg);
         var storage = MirStorageProvenanceAnalysis.AnalyzeUnchecked(program, callable);
-        return AnalyzeVerified(program, callable, cfg, paths, storage);
+        return AnalyzeVerified(paths, storage);
     }
 
     internal static MirBoundsSnapshot AnalyzeVerified(
-        MirProgram program,
-        MirCallable callable,
-        MirControlFlowSnapshot cfg,
         MirPathConditionSnapshot paths,
         MirStorageProvenanceSnapshot storage)
     {
-        cfg.EnsureFor(program, callable.Id);
-        paths.EnsureFor(program, callable.Id);
-        storage.EnsureFor(program, callable.Id);
+        ArgumentNullException.ThrowIfNull(paths);
+        ArgumentNullException.ThrowIfNull(storage);
+        var cfg = paths.ControlFlow;
+        var callable = cfg.SourceCallable;
+        storage.EnsureFor(cfg.SourceProgram, callable.Id);
 
         var analyzer = new Analyzer(callable, cfg, paths, storage);
-        return new MirBoundsSnapshot(program, callable, analyzer.Analyze());
+        return new MirBoundsSnapshot(cfg, analyzer.Analyze());
     }
 
     private sealed class Analyzer
@@ -187,8 +168,8 @@ internal static class MirBoundsAnalysis
             _incoming = BuildIncomingValues(callable);
             foreach (var parameter in callable.Parameters.OfType<MirClassicalParameter>())
             {
-                if (parameter.Storage is MirStorageId storageId)
-                    _minimumLengthByStorage[storageId] = parameter.MinimumLength;
+                if (parameter.Storage is MirArrayStorage parameterStorage)
+                    _minimumLengthByStorage[parameterStorage.Id] = parameter.MinimumLength;
             }
         }
 
@@ -201,27 +182,23 @@ internal static class MirBoundsAnalysis
                 {
                     if (instruction is MirArrayLoad load)
                     {
-                        results.Add(ClassifyClassicalAccess(block, load.Id, load.Array, load.Index));
+                        results.Add(ClassifyClassicalAccess(load));
                     }
                     else if (instruction is MirArrayStore store)
                     {
-                        results.Add(ClassifyClassicalAccess(block, store.Id, store.Array, store.Index));
+                        results.Add(ClassifyClassicalAccess(store));
                     }
 
                     for (var operandIndex = 0;
                          operandIndex < instruction.QubitAccesses.Count;
                          operandIndex++)
                     {
-                        var access = instruction.QubitAccesses[operandIndex];
-                        if (access.Index is not MirValueId index)
+                        if (instruction.QubitAccesses[operandIndex].Index is null)
                             continue;
 
                         results.Add(ClassifyQubitAccess(
-                            block,
-                            instruction.Id,
-                            operandIndex,
-                            access,
-                            index));
+                            instruction,
+                            operandIndex));
                     }
                 }
             }
@@ -229,34 +206,33 @@ internal static class MirBoundsAnalysis
             return results;
         }
 
-        private MirBoundsResult ClassifyClassicalAccess(
-            MirBlock block,
-            MirInstructionId instruction,
-            MirValueId array,
-            MirValueId index)
+        private MirBoundsResult ClassifyClassicalAccess(MirInstruction instruction)
         {
+            var array = instruction switch
+            {
+                MirArrayLoad load => load.Array,
+                MirArrayStore store => store.Array,
+                _ => throw new ArgumentException(
+                    $"instruction {instruction.Id} is not a classical indexed access",
+                    nameof(instruction)),
+            };
             var arrayType = _callable.RequireValue(array).Type;
             var knownLength = arrayType.KnownLength;
             var length = knownLength is int concrete
                 ? LinearExpression.Constant(concrete)
                 : ArrayLengthExpression(array);
             return Classify(
-                block,
-                new MirIndexedAccessSite(
-                    new MirInstructionSite(_callable.Id, instruction),
-                    operandIndex: 0),
-                index,
+                instruction,
+                operandIndex: 0,
                 length,
                 knownLength);
         }
 
         private MirBoundsResult ClassifyQubitAccess(
-            MirBlock block,
-            MirInstructionId instruction,
-            int operandIndex,
-            MirQubitAccess access,
-            MirValueId index)
+            MirInstruction instruction,
+            int operandIndex)
         {
+            var access = instruction.QubitAccesses[operandIndex];
             var knownLength = QubitLength(access.Qubit.Id);
             var length = knownLength is int concrete
                 ? LinearExpression.Constant(concrete)
@@ -264,37 +240,36 @@ internal static class MirBoundsAnalysis
                     LengthIdentityFor($"qubit:{access.Qubit.Id.Value}"),
                     minimumLength: 0);
             return Classify(
-                block,
-                new MirIndexedAccessSite(
-                    new MirInstructionSite(_callable.Id, instruction),
-                    operandIndex),
-                index,
+                instruction,
+                operandIndex,
                 length,
                 knownLength);
         }
 
         private MirBoundsResult Classify(
-            MirBlock block,
-            MirIndexedAccessSite site,
-            MirValueId index,
+            MirInstruction instruction,
+            int operandIndex,
             LinearExpression length,
             int? knownLength)
         {
-            if (!_cfg.IsReachable(block.Id))
+            var site = new MirIndexedAccessSite(
+                new MirInstructionSite(_callable.Id, instruction.Id),
+                operandIndex);
+            var index = IndexedValueOf(instruction, operandIndex);
+            var blockId = _callable.RequireInstructionLocation(instruction.Id).Block.Id;
+            if (!_cfg.IsReachable(blockId))
             {
                 return new MirBoundsResult(
                     site,
-                    index,
                     knownLength,
                     MirBoundsClassification.Proven);
             }
 
-            var path = _paths.ConditionFor(block.Id);
+            var path = _paths.ConditionFor(blockId);
             if (Prove(path, Array.Empty<LinearConstraint>()) == Proof.Impossible)
             {
                 return new MirBoundsResult(
                     site,
-                    index,
                     knownLength,
                     MirBoundsClassification.Proven);
             }
@@ -303,7 +278,6 @@ internal static class MirBoundsAnalysis
             {
                 return new MirBoundsResult(
                     site,
-                    index,
                     knownLength,
                     MirBoundsClassification.Invalid);
             }
@@ -311,7 +285,7 @@ internal static class MirBoundsAnalysis
             var alternatives = ExpressionsOf(index);
             var classifications = new List<MirBoundsClassification>(alternatives.Count);
             foreach (var expression in alternatives)
-                classifications.Add(ClassifyExpression(block.Id, expression, length));
+                classifications.Add(ClassifyExpression(blockId, expression, length));
 
             MirBoundsClassification classification;
             if (classifications.All(result => result == MirBoundsClassification.Proven))
@@ -321,8 +295,21 @@ internal static class MirBoundsAnalysis
             else
                 classification = MirBoundsClassification.Unproven;
 
-            return new MirBoundsResult(site, index, knownLength, classification);
+            return new MirBoundsResult(site, knownLength, classification);
         }
+
+        private static MirValueId IndexedValueOf(
+            MirInstruction instruction,
+            int operandIndex) =>
+            instruction switch
+            {
+                MirArrayLoad load when operandIndex == 0 => load.Index,
+                MirArrayStore store when operandIndex == 0 => store.Index,
+                _ when instruction.QubitAccesses[operandIndex].Index is MirValueId index => index,
+                _ => throw new ArgumentException(
+                    $"instruction {instruction.Id} operand {operandIndex} is not indexed",
+                    nameof(operandIndex)),
+            };
 
         private MirBoundsClassification ClassifyExpression(
             MirBlockId block,
@@ -463,9 +450,9 @@ internal static class MirBoundsAnalysis
 
             try
             {
-                var definition = _callable.RequireValue(value);
-                if (definition.Definition.Kind != MirValueDefinitionKind.InstructionResult
-                    || definition.Definition.Instruction is not MirInstructionId instructionId)
+                var definition = _callable.DefinitionOf(value);
+                if (definition.Kind != MirValueDefinitionKind.InstructionResult
+                    || definition.Instruction is not MirInstructionId instructionId)
                     return null;
 
                 var instruction = _callable.RequireInstruction(instructionId);
@@ -562,19 +549,19 @@ internal static class MirBoundsAnalysis
 
             try
             {
-                var definition = _callable.RequireValue(value);
-                if (definition.Definition.Kind == MirValueDefinitionKind.BlockArgument
-                    && definition.Definition.Block is MirBlockId block)
+                var definition = _callable.DefinitionOf(value);
+                if (definition.Kind == MirValueDefinitionKind.BlockArgument
+                    && definition.Block is MirBlockId block)
                 {
                     return ProveBlockArgumentTruth(
-                        definition,
                         block,
+                        definition.Index,
                         expected,
                         targets);
                 }
 
-                if (definition.Definition.Kind != MirValueDefinitionKind.InstructionResult
-                    || definition.Definition.Instruction is not MirInstructionId instructionId)
+                if (definition.Kind != MirValueDefinitionKind.InstructionResult
+                    || definition.Instruction is not MirInstructionId instructionId)
                     return Proof.Unknown;
 
                 var instruction = _callable.RequireInstruction(instructionId);
@@ -605,13 +592,13 @@ internal static class MirBoundsAnalysis
         }
 
         private Proof ProveBlockArgumentTruth(
-            MirValue definition,
             MirBlockId block,
+            int argumentIndex,
             bool expected,
             IReadOnlyList<LinearConstraint> targets)
         {
             if (!_incoming.TryGetValue(
-                    (block, definition.Definition.Index),
+                    (block, argumentIndex),
                     out var incomingValues))
                 return Proof.Unknown;
 
@@ -772,11 +759,14 @@ internal static class MirBoundsAnalysis
             IReadOnlyList<LinearExpression> result;
             try
             {
-                var definition = _callable.RequireValue(value);
-                result = definition.Definition.Kind switch
+                var mirValue = _callable.RequireValue(value);
+                var definition = _callable.DefinitionOf(mirValue);
+                result = definition.Kind switch
                 {
-                    MirValueDefinitionKind.BlockArgument => BlockArgumentExpressions(definition),
-                    MirValueDefinitionKind.InstructionResult => InstructionExpressions(definition),
+                    MirValueDefinitionKind.BlockArgument =>
+                        BlockArgumentExpressions(mirValue, definition),
+                    MirValueDefinitionKind.InstructionResult =>
+                        InstructionExpressions(mirValue, definition),
                     _ => new[] { LinearExpression.Scalar(value) },
                 };
             }
@@ -790,11 +780,13 @@ internal static class MirBoundsAnalysis
             return result;
         }
 
-        private IReadOnlyList<LinearExpression> BlockArgumentExpressions(MirValue value)
+        private IReadOnlyList<LinearExpression> BlockArgumentExpressions(
+            MirValue value,
+            MirValueDefinition definition)
         {
-            if (value.Definition.Block is not MirBlockId block
+            if (definition.Block is not MirBlockId block
                 || !_incoming.TryGetValue(
-                    (block, value.Definition.Index),
+                    (block, definition.Index),
                     out var incomingValues))
                 return new[] { LinearExpression.Scalar(value.Id) };
 
@@ -867,7 +859,7 @@ internal static class MirBoundsAnalysis
 
             try
             {
-                var definition = _callable.RequireValue(value).Definition;
+                var definition = _callable.DefinitionOf(value);
                 if (definition.Kind != MirValueDefinitionKind.BlockArgument
                     || definition.Block is not MirBlockId block
                     || !_incoming.TryGetValue(
@@ -939,7 +931,7 @@ internal static class MirBoundsAnalysis
             if (value == phi)
                 return true;
 
-            var definition = _callable.RequireValue(value).Definition;
+            var definition = _callable.DefinitionOf(value);
             if (definition.Kind != MirValueDefinitionKind.InstructionResult
                 || definition.Instruction is not MirInstructionId instructionId
                 || _callable.RequireInstruction(instructionId) is not MirBinary binary)
@@ -977,7 +969,7 @@ internal static class MirBoundsAnalysis
             if (!_cfg.Dominates(branch.TrueTarget, backedgeSource)
                 || _cfg.Dominates(branch.FalseTarget, backedgeSource))
                 return false;
-            var conditionDefinition = _callable.RequireValue(branch.Condition).Definition;
+            var conditionDefinition = _callable.DefinitionOf(branch.Condition);
             if (conditionDefinition.Kind != MirValueDefinitionKind.InstructionResult
                 || conditionDefinition.Instruction is not MirInstructionId conditionInstruction
                 || _callable.RequireInstruction(conditionInstruction) is not MirBinary comparison)
@@ -1024,9 +1016,9 @@ internal static class MirBoundsAnalysis
 
             try
             {
-                var definition = _callable.RequireValue(value);
-                if (definition.Definition.Kind != MirValueDefinitionKind.InstructionResult
-                    || definition.Definition.Instruction is not MirInstructionId instructionId)
+                var definition = _callable.DefinitionOf(value);
+                if (definition.Kind != MirValueDefinitionKind.InstructionResult
+                    || definition.Instruction is not MirInstructionId instructionId)
                 {
                     result = default;
                     return false;
@@ -1076,9 +1068,11 @@ internal static class MirBoundsAnalysis
         private static bool FitsInt64(BigInteger value) =>
             value >= long.MinValue && value <= long.MaxValue;
 
-        private IReadOnlyList<LinearExpression> InstructionExpressions(MirValue value)
+        private IReadOnlyList<LinearExpression> InstructionExpressions(
+            MirValue value,
+            MirValueDefinition definition)
         {
-            if (value.Definition.Instruction is not MirInstructionId instructionId)
+            if (definition.Instruction is not MirInstructionId instructionId)
                 return new[] { LinearExpression.Scalar(value.Id) };
             var instruction = _callable.RequireInstruction(instructionId);
 
@@ -1249,7 +1243,7 @@ internal static class MirBoundsAnalysis
         {
             foreach (var parameter in _callable.Parameters.OfType<MirClassicalParameter>())
             {
-                if (parameter.Value == array)
+                if (parameter.Value.Id == array)
                     return parameter.MinimumLength;
             }
             return 0;

@@ -37,40 +37,33 @@ public sealed record MirScalarValueAvailability(
 /// </summary>
 public sealed class MirScalarValueAvailabilitySnapshot
 {
-    private readonly MirCallable _callable;
-    private readonly MirControlFlowSnapshot _cfg;
     private readonly MirMemoryStateSnapshot _memory;
 
-    internal MirScalarValueAvailabilitySnapshot(
-        MirCallable callable,
-        MirControlFlowSnapshot cfg,
-        MirMemoryStateSnapshot memory)
+    internal MirScalarValueAvailabilitySnapshot(MirMemoryStateSnapshot memory)
     {
-        _callable = callable;
-        _cfg = cfg;
         _memory = memory;
     }
 
-    public MirCallableId Callable => _cfg.Callable;
-
-    internal bool IsFor(MirProgram program, MirCallableId callable) =>
-        _cfg.IsFor(program, callable);
+    public MirCallableId Callable => _memory.Callable;
+    internal MirControlFlowSnapshot ControlFlow => _memory.ControlFlow;
+    internal MirMemoryStateSnapshot MemoryState => _memory;
+    private MirCallable SourceCallable => ControlFlow.SourceCallable;
 
     public MirScalarValueAvailability CheckBeforeInstruction(
         MirValueId value,
         MirInstructionId instruction) =>
-        Check(value, _cfg.PointBeforeInstruction(instruction));
+        Check(value, ControlFlow.PointBeforeInstruction(instruction));
 
     public MirScalarValueAvailability CheckAtTerminator(
         MirValueId value,
         MirBlockId block) =>
-        Check(value, _cfg.TerminatorPoint(block));
+        Check(value, ControlFlow.TerminatorPoint(block));
 
     internal MirScalarValueAvailability Check(
         MirValueId value,
         MirProgramPoint point)
     {
-        var definition = _callable.FindValue(value)
+        var definition = SourceCallable.FindValue(value)
             ?? throw new ArgumentOutOfRangeException(
                 nameof(value),
                 value,
@@ -93,31 +86,29 @@ public sealed class MirScalarValueAvailabilitySnapshot
 
             try
             {
-                var currentValue = _callable.FindValue(current);
+                var currentValue = SourceCallable.FindValue(current);
                 if (currentValue is null || currentValue.Type.IsArray)
                     return Cache(Unavailable(current));
-                if (_cfg.IsValueAvailableAt(current, point))
+                if (ControlFlow.IsValueAvailableAt(current, point))
                     return Cache(new MirScalarValueAvailability(
                         current,
                         MirScalarValueAvailabilityKind.Available,
                         Array.Empty<MirInstructionId>()));
-                if (currentValue.Definition.Kind != MirValueDefinitionKind.InstructionResult
-                    || currentValue.Definition.Instruction is not MirInstructionId instructionId)
+                var definition = SourceCallable.DefinitionOf(currentValue);
+                if (definition.Kind != MirValueDefinitionKind.InstructionResult
+                    || definition.Instruction is not MirInstructionId instructionId)
                     return Cache(Unavailable(current));
-                var instruction = _callable.RequireInstruction(instructionId);
+                var instruction = SourceCallable.RequireInstruction(instructionId);
 
                 var dependencies = new List<MirInstructionId>();
                 foreach (var input in instruction.InputValues)
                 {
-                    var inputValue = _callable.FindValue(input);
+                    var inputValue = SourceCallable.FindValue(input);
                     if (inputValue is null)
                         return Cache(Unavailable(current));
                     if (inputValue.Type.IsArray)
                     {
-                        var memory = _memory.CheckAtLocation(
-                            input,
-                            point.Block,
-                            point.InstructionIndex);
+                        var memory = _memory.Check(input, point);
                         if (!memory.IsAvailable)
                             return Cache(Unavailable(current));
                         continue;
@@ -136,9 +127,7 @@ public sealed class MirScalarValueAvailabilitySnapshot
                 return Cache(new MirScalarValueAvailability(
                     current,
                     MirScalarValueAvailabilityKind.Rematerializable,
-                    dependencies
-                        .Distinct()
-                        .ToArray()));
+                    MirCollections.Freeze(dependencies.Distinct())));
             }
             finally
             {
@@ -171,37 +160,13 @@ public sealed class MirScalarValueAvailabilitySnapshot
 
 internal static class MirScalarValueAvailabilityAnalysis
 {
-    internal static MirScalarValueAvailabilitySnapshot Analyze(
-        MirProgram program,
-        MirCallableId callableId)
-    {
-        ArgumentNullException.ThrowIfNull(program);
-        var callable = program.FindCallable(callableId)
-            ?? throw new ArgumentOutOfRangeException(
-                nameof(callableId),
-                callableId,
-                $"callable {callableId} does not belong to the MIR program");
-        return AnalyzeVerified(
-            program,
-            callable,
-            MirControlFlowAnalysis.Analyze(program, callableId),
-            MirMemoryStateAnalysis.Analyze(program, callableId));
-    }
-
     /// <summary>
     /// Builds scalar-availability queries from analysis dependencies owned by the same verified snapshot.
     /// </summary>
     internal static MirScalarValueAvailabilitySnapshot AnalyzeVerified(
-        MirProgram program,
-        MirCallable callable,
-        MirControlFlowSnapshot cfg,
         MirMemoryStateSnapshot memory)
     {
-        cfg.EnsureFor(program, callable.Id);
-        memory.EnsureFor(program, callable.Id);
-        return new MirScalarValueAvailabilitySnapshot(
-            callable,
-            cfg,
-            memory);
+        ArgumentNullException.ThrowIfNull(memory);
+        return new MirScalarValueAvailabilitySnapshot(memory);
     }
 }

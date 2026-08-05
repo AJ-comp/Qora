@@ -92,13 +92,14 @@ public sealed class QoraMirTests
                 && target.Callable == flipIf.Id);
         var mergedInput = Assert.IsType<MirClassicalCallOperand>(call.Operands[0]).Value;
         var mergedValue = Assert.IsType<MirValue>(main.FindValue(mergedInput));
+        var mergedDefinition = main.DefinitionOf(mergedValue);
 
-        Assert.Equal(MirValueDefinitionKind.BlockArgument, mergedValue.Definition.Kind);
-        var mergeBlockId = Assert.IsType<MirBlockId>(mergedValue.Definition.Block);
+        Assert.Equal(MirValueDefinitionKind.BlockArgument, mergedDefinition.Kind);
+        var mergeBlockId = Assert.IsType<MirBlockId>(mergedDefinition.Block);
         var mergeBlock = Assert.IsType<MirBlock>(main.FindBlock(mergeBlockId));
         var blockArgument = Assert.Single(
             mergeBlock.Arguments,
-            argument => argument == mergedInput);
+            argument => argument.Id == mergedInput);
         var incoming = IncomingArguments(main, mergeBlock.Id);
         Assert.Equal(2, incoming.Count);
         Assert.All(incoming, arguments => Assert.Equal(mergeBlock.Arguments.Count, arguments.Count));
@@ -106,8 +107,8 @@ public sealed class QoraMirTests
         Assert.Equal(
             2,
             incoming.Select(arguments => arguments[argumentIndex]).Distinct().Count());
-        static int blockArgumentIndex(MirBlock block, MirValueId argument) =>
-            block.Arguments.ToList().FindIndex(candidate => candidate == argument);
+        static int blockArgumentIndex(MirBlock block, MirValue argument) =>
+            block.Arguments.ToList().FindIndex(candidate => candidate.Id == argument.Id);
     }
 
     [Fact]
@@ -157,26 +158,26 @@ public sealed class QoraMirTests
             main.Blocks.SelectMany(block => block.Instructions).OfType<MirArrayCreate>());
         var store = Assert.Single(
             main.Blocks.SelectMany(block => block.Instructions).OfType<MirArrayStore>());
-        Assert.Equal(create.Result, store.Array);
-        Assert.NotEqual(store.Array, store.Result);
+        Assert.Equal(create.Result.Id, store.Array);
+        Assert.NotEqual(store.Array, store.Result.Id);
 
         var call = Assert.Single(
             main.Blocks.SelectMany(block => block.Instructions).OfType<MirQuantumApply>(),
             instruction => instruction.Target is MirUserCallableTarget target
                 && target.Callable == touch.Id);
         var inputState = Assert.IsType<MirClassicalCallOperand>(call.Operands[0]).Value;
-        Assert.Equal(store.Result, inputState);
+        Assert.Equal(store.Result.Id, inputState);
         var transition = Assert.Single(call.MutableArrayResults);
         Assert.Equal(0, transition.OperandIndex);
-        Assert.NotEqual(inputState, transition.Result);
+        Assert.NotEqual(inputState, transition.Result.Id);
 
         var arrayEffect = Assert.Single(
             EffectFor(effects, main.Id, call.Id).ArrayStates);
         Assert.Equal(inputState, arrayEffect.InputState);
-        Assert.Equal(transition.Result, arrayEffect.OutputState);
+        Assert.Equal(transition.Result.Id, arrayEffect.OutputState);
         Assert.True(arrayEffect.Storage.IsComplete);
         Assert.Equal(
-            new[] { create.Storage },
+            new[] { create.Storage.Id },
             arrayEffect.Storage.PossibleStorages);
     }
 
@@ -343,12 +344,20 @@ public sealed class QoraMirTests
     public void MirIdentityConstructionRejectsNegativeValuesImmediately()
     {
         Assert.Throws<ArgumentOutOfRangeException>(() => new MirCallableId(-1));
-        Assert.Throws<ArgumentOutOfRangeException>(() => new MirBlockId(-1));
         Assert.Throws<ArgumentOutOfRangeException>(() => new MirInstructionId(-1));
         Assert.Throws<ArgumentOutOfRangeException>(() => new MirValueId(-1));
         Assert.Throws<ArgumentOutOfRangeException>(() => new MirStorageId(-1));
         Assert.Throws<ArgumentOutOfRangeException>(() => new MirQubitId(-1));
         Assert.Throws<ArgumentOutOfRangeException>(() => new MirQubitVersion(-1));
+    }
+
+    [Fact]
+    public void MirBlockIdAllocatorAssignsSequentialNonNegativeValues()
+    {
+        var allocator = new MirBlockId.Allocator();
+
+        Assert.Equal(0, allocator.Allocate().Value);
+        Assert.Equal(1, allocator.Allocate().Value);
     }
 
     [Fact]
@@ -394,13 +403,505 @@ public sealed class QoraMirTests
     public void MirQubitPhiConstructionRejectsVersionZeroImmediately()
     {
         var context = MirTestContext.Create();
+        var qubit = MirQubitParameter.Single(
+            new MirQubitId(0),
+            "target",
+            QOwnershipMode.Borrowed,
+            context.Origin());
+        var input = new MirQubitPhiInput(
+            new MirControlFlowEdge(MirTestContext.BlockId(0), successorOrdinal: 0),
+            qubit);
 
         Assert.Throws<ArgumentOutOfRangeException>(
             () => new MirQubitPhi(
-                new MirQubitId(0),
                 new MirQubitVersion(0),
+                new[] { input },
+                context.Origin()));
+
+        Assert.Throws<ArgumentException>(
+            () => new MirQubitPhi(
+                new MirQubitVersion(1),
                 Array.Empty<MirQubitPhiInput>(),
                 context.Origin()));
+    }
+
+    [Fact]
+    public void MirQubitPhiAndBlockConstructionRejectInvalidPhiShapesImmediately()
+    {
+        var (program, _) = CompileMir("""
+            operation Main() {
+                use target = Qubit[1];
+                if (1 == 1) {
+                    X(target[0]);
+                } else {
+                    H(target[0]);
+                }
+                Z(target[0]);
+            }
+            """);
+        var callable = Assert.Single(program.Callables);
+        var merge = Assert.Single(callable.Blocks, block => block.QubitPhis.Count != 0);
+        var phi = Assert.Single(merge.QubitPhis);
+
+        Assert.Throws<ArgumentException>(() => phi with
+        {
+            Inputs = Array.Empty<MirQubitPhiInput>(),
+        });
+
+        Assert.Throws<ArgumentException>(() => phi with
+        {
+            Inputs = phi.Inputs.Append(phi.Inputs[0]).ToArray(),
+        });
+
+        var firstInput = phi.Inputs[0];
+        var differentQubit = MirQubitParameter.Single(
+            new MirQubitId(phi.Id.Value + 1),
+            "different",
+            QOwnershipMode.Borrowed,
+            phi.Origin);
+        Assert.Throws<ArgumentException>(() => phi with
+        {
+            Inputs = phi.Inputs
+                .Select((input, index) => index == 0
+                    ? new MirQubitPhiInput(input.Edge, differentQubit)
+                    : input)
+                .ToArray(),
+        });
+
+        var secondPhi = new MirQubitPhi(
+            new MirQubitVersion(phi.Version.Value + 1),
+            phi.Inputs,
+            phi.Origin);
+        Assert.Throws<ArgumentException>(() => merge with
+        {
+            QubitPhis = new[] { phi, secondPhi },
+        });
+    }
+
+    [Fact]
+    public void QuantumApplyConstructionRejectsInvalidQubitResultsImmediately()
+    {
+        var (program, _) = CompileMir("""
+            operation Main() {
+                use control = Qubit[1];
+                use target = Qubit[1];
+                CNOT(control[0], target[0]);
+            }
+            """);
+        var callable = Assert.Single(program.Callables);
+        var apply = Assert.Single(
+            callable.Blocks.SelectMany(block => block.Instructions).OfType<MirQuantumApply>());
+        var result = Assert.Single(apply.QubitResults);
+
+        Assert.Throws<ArgumentException>(() => new MirQuantumApply(
+            apply.Id,
+            apply.Target,
+            apply.Operands,
+            new[] { result, result },
+            apply.MutableArrayResults,
+            apply.Functors,
+            apply.Origin));
+
+        var unrelatedResult = new MirQubitAfterInstruction(
+            new MirQubitId(callable.Qubits.Max(qubit => qubit.Id.Value) + 1),
+            new MirQubitVersion(1),
+            apply.Origin);
+        Assert.Throws<ArgumentException>(() => new MirQuantumApply(
+            apply.Id,
+            apply.Target,
+            apply.Operands,
+            new[] { unrelatedResult },
+            apply.MutableArrayResults,
+            apply.Functors,
+            apply.Origin));
+    }
+
+    [Fact]
+    public void QuantumApplyConstructionRejectsInvalidMutableArrayResultsImmediately()
+    {
+        var (program, _) = CompileMir("""
+            operation Touch(var values: int[], target: Qubit) {
+                values[0] = 1;
+                X(target);
+            }
+
+            operation Main() {
+                use target = Qubit[1];
+                var values: int[] = [0];
+                Touch(var values, target[0]);
+            }
+            """);
+        var main = Callable(program, "Main");
+        var apply = Assert.Single(
+            main.Blocks.SelectMany(block => block.Instructions).OfType<MirQuantumApply>());
+        var result = Assert.Single(apply.MutableArrayResults);
+        var scalarResult = main.Blocks
+            .SelectMany(block => block.Instructions)
+            .OfType<MirConstant>()
+            .First()
+            .Result;
+
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => new MirMutableArrayResult(-1, result.Result));
+        Assert.Throws<ArgumentException>(
+            () => new MirMutableArrayResult(0, scalarResult));
+        Assert.Throws<ArgumentException>(() => new MirQuantumApply(
+            apply.Id,
+            apply.Target,
+            apply.Operands,
+            apply.QubitResults,
+            new[] { result, result },
+            apply.Functors,
+            apply.Origin));
+
+        var missingOperand = new MirMutableArrayResult(
+            apply.Operands.Count,
+            result.Result);
+        Assert.Throws<ArgumentException>(() => new MirQuantumApply(
+            apply.Id,
+            apply.Target,
+            apply.Operands,
+            apply.QubitResults,
+            new[] { missingOperand },
+            apply.Functors,
+            apply.Origin));
+
+        var qubitOperandIndex = apply.Operands
+            .Select((operand, index) => (operand, index))
+            .Single(item => item.operand is MirQubitCallOperand)
+            .index;
+        var nonClassicalOperand = new MirMutableArrayResult(
+            qubitOperandIndex,
+            result.Result);
+        Assert.Throws<ArgumentException>(() => new MirQuantumApply(
+            apply.Id,
+            apply.Target,
+            apply.Operands,
+            apply.QubitResults,
+            new[] { nonClassicalOperand },
+            apply.Functors,
+            apply.Origin));
+
+        var mutableOperand = Assert.IsType<MirClassicalCallOperand>(
+            apply.Operands[result.OperandIndex]);
+        var readOnlyOperands = apply.Operands.ToArray();
+        readOnlyOperands[result.OperandIndex] = new MirClassicalCallOperand(
+            mutableOperand.Value,
+            mutableOperand.Ownership,
+            QAccessMode.ReadOnly);
+        Assert.Throws<ArgumentException>(() => new MirQuantumApply(
+            apply.Id,
+            apply.Target,
+            readOnlyOperands,
+            apply.QubitResults,
+            apply.MutableArrayResults,
+            apply.Functors,
+            apply.Origin));
+
+        Assert.Throws<ArgumentException>(() => new MirQuantumApply(
+            apply.Id,
+            new MirBuiltinGateTarget("X"),
+            apply.Operands,
+            apply.QubitResults,
+            apply.MutableArrayResults,
+            apply.Functors,
+            apply.Origin));
+    }
+
+    [Fact]
+    public void MeasureConstructionRejectsInvalidResultsImmediately()
+    {
+        var (program, _) = CompileMir("""
+            operation Main() {
+                use target = Qubit[1];
+                var measured: bit = M(target[0]);
+            }
+            """);
+        var callable = Assert.Single(program.Callables);
+        var measure = Assert.Single(
+            callable.Blocks.SelectMany(block => block.Instructions).OfType<MirMeasure>());
+        var nonBitResult = new MirValue(
+            new MirValueId(callable.Values.Max(value => value.Id.Value) + 1),
+            MirType.Scalar(QType.Int),
+            measure.Result.Origin);
+
+        Assert.Throws<ArgumentException>(() => new MirMeasure(
+            measure.Id,
+            nonBitResult,
+            measure.Qubit,
+            measure.QubitResult,
+            measure.Origin));
+
+        var unrelatedQubitResult = new MirQubitAfterInstruction(
+            new MirQubitId(callable.Qubits.Max(qubit => qubit.Id.Value) + 1),
+            new MirQubitVersion(1),
+            measure.QubitResult.Origin);
+        Assert.Throws<ArgumentException>(() => new MirMeasure(
+            measure.Id,
+            measure.Result,
+            measure.Qubit,
+            unrelatedQubitResult,
+            measure.Origin));
+        Assert.Throws<ArgumentNullException>(() => new MirMeasure(
+            measure.Id,
+            measure.Result,
+            null!,
+            measure.QubitResult,
+            measure.Origin));
+    }
+
+    [Fact]
+    public void ArrayCreateConstructionRejectsInvalidLocalShapeImmediately()
+    {
+        var (program, _) = CompileMir("""
+            operation Main() {
+                var values: int[] = [1];
+            }
+            """);
+        var callable = Assert.Single(program.Callables);
+        var instructions = callable.Blocks.SelectMany(block => block.Instructions).ToArray();
+        var create = Assert.Single(instructions.OfType<MirArrayCreate>());
+        var scalarResult = Assert.Single(instructions.OfType<MirConstant>()).Result;
+
+        Assert.Throws<ArgumentException>(() => new MirArrayCreate(
+            create.Id,
+            scalarResult,
+            create.Storage,
+            create.Initialization,
+            create.Elements,
+            create.Origin));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new MirArrayCreate(
+            create.Id,
+            create.Result,
+            create.Storage,
+            (MirArrayInitialization)int.MaxValue,
+            create.Elements,
+            create.Origin));
+        Assert.Throws<ArgumentException>(() => new MirArrayCreate(
+            create.Id,
+            create.Result,
+            create.Storage,
+            MirArrayInitialization.ExplicitElements,
+            Array.Empty<MirValueId>(),
+            create.Origin));
+        Assert.Throws<ArgumentException>(() => new MirArrayCreate(
+            create.Id,
+            create.Result,
+            create.Storage,
+            MirArrayInitialization.ZeroInitialized,
+            create.Elements,
+            create.Origin));
+    }
+
+    [Fact]
+    public void ClassicalInstructionConstructionRejectsInvalidLocalResultShapesImmediately()
+    {
+        var context = MirTestContext.Create();
+        var origin = context.Origin();
+        var integer = new MirValue(
+            new MirValueId(0),
+            MirType.Scalar(QType.Int),
+            origin);
+        var bit = new MirValue(
+            new MirValueId(1),
+            MirType.Scalar(QType.Bit),
+            origin);
+        var array = new MirValue(
+            new MirValueId(2),
+            MirType.Array(QType.Int, knownLength: 1),
+            origin);
+
+        Assert.Throws<ArgumentException>(
+            () => new MirConstant(new MirInstructionId(0), array, "[1]", origin));
+        Assert.Throws<ArgumentException>(() => new MirUnary(
+            new MirInstructionId(1),
+            integer,
+            MirUnaryOperator.LogicalNot,
+            bit.Id,
+            origin));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new MirUnary(
+            new MirInstructionId(2),
+            integer,
+            (MirUnaryOperator)int.MaxValue,
+            integer.Id,
+            origin));
+        Assert.Throws<ArgumentException>(() => new MirBinary(
+            new MirInstructionId(3),
+            integer,
+            MirBinaryOperator.Equal,
+            integer.Id,
+            integer.Id,
+            origin));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new MirBinary(
+            new MirInstructionId(4),
+            integer,
+            (MirBinaryOperator)int.MaxValue,
+            integer.Id,
+            integer.Id,
+            origin));
+        Assert.Throws<ArgumentException>(() => new MirConvert(
+            new MirInstructionId(5),
+            array,
+            integer.Id,
+            origin));
+        Assert.Throws<ArgumentException>(() => new MirArrayLength(
+            new MirInstructionId(6),
+            bit,
+            array.Id,
+            origin));
+        Assert.Throws<ArgumentException>(() => new MirArrayLoad(
+            new MirInstructionId(7),
+            array,
+            array.Id,
+            integer.Id,
+            origin));
+        Assert.Throws<ArgumentException>(() => new MirArrayStore(
+            new MirInstructionId(8),
+            integer,
+            array.Id,
+            integer.Id,
+            integer.Id,
+            origin));
+    }
+
+    [Fact]
+    public void VerifierRejectsANegateResultWhoseTypeDiffersFromItsOperand()
+    {
+        var (program, _) = CompileMir("""
+            operation Main() {
+                var value: int = 1;
+                var negated: int = -value;
+            }
+            """);
+        var callable = Assert.Single(program.Callables);
+        var unary = Assert.Single(
+            callable.Blocks
+                .SelectMany(block => block.Instructions)
+                .OfType<MirUnary>());
+        var wrongResult = new MirValue(
+            unary.Result.Id,
+            MirType.Scalar(QType.Float),
+            unary.Result.Origin);
+        var malformedUnary = new MirUnary(
+            unary.Id,
+            wrongResult,
+            unary.Operator,
+            unary.Operand,
+            unary.Origin);
+        var malformed = ReplaceInstruction(program, callable, malformedUnary);
+
+        var error = Assert.Single(
+            QoraMirVerifier.Verify(malformed),
+            candidate => candidate.Code == "MIR075");
+
+        Assert.Contains("expected its operand type", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void VerifierRejectsAnArithmeticResultWhoseTypeDiffersFromItsOperands()
+    {
+        var (program, _) = CompileMir("""
+            operation Main() {
+                var left: int = 1;
+                var right: int = 2;
+                var sum: int = left + right;
+            }
+            """);
+        var callable = Assert.Single(program.Callables);
+        var binary = Assert.Single(
+            callable.Blocks
+                .SelectMany(block => block.Instructions)
+                .OfType<MirBinary>(),
+            instruction => instruction.Operator == MirBinaryOperator.Add);
+        var wrongResult = new MirValue(
+            binary.Result.Id,
+            MirType.Scalar(QType.Float),
+            binary.Result.Origin);
+        var malformedBinary = new MirBinary(
+            binary.Id,
+            wrongResult,
+            binary.Operator,
+            binary.Left,
+            binary.Right,
+            binary.Origin);
+        var malformed = ReplaceInstruction(program, callable, malformedBinary);
+
+        var error = Assert.Single(
+            QoraMirVerifier.Verify(malformed),
+            candidate => candidate.Code == "MIR076");
+
+        Assert.Contains("expected its operand type", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void MirEntityConstructionRejectsNullOriginsImmediately()
+    {
+        var context = MirTestContext.Create();
+        var origin = context.Origin();
+        var value = new MirValue(
+            new MirValueId(0),
+            MirType.Scalar(QType.Int),
+            origin);
+
+        Assert.Throws<ArgumentNullException>(
+            () => new MirConstant(new MirInstructionId(0), value, "0", null!));
+        Assert.Throws<ArgumentNullException>(() => new MirReturn(null, null!));
+        Assert.Throws<ArgumentNullException>(() => new MirQubitCallOperand(null!));
+        Assert.Throws<ArgumentNullException>(() => new MirQubitFromUse(
+            new MirQubitId(0),
+            "target",
+            length: 1,
+            null!));
+
+        var block = new MirBlock(
+            MirTestContext.BlockId(0),
+            Array.Empty<MirValue>(),
+            Array.Empty<MirInstruction>(),
+            new MirReturn(null, origin),
+            origin);
+        Assert.Throws<ArgumentNullException>(() => block with { Origin = null! });
+    }
+
+    [Fact]
+    public void MirCallContractsRejectUnknownOwnershipAndAccessModesImmediately()
+    {
+        var context = MirTestContext.Create();
+        var origin = context.Origin();
+        var value = new MirValue(
+            new MirValueId(0),
+            MirType.Scalar(QType.Int),
+            origin);
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => new MirClassicalCallOperand(
+            value.Id,
+            (QOwnershipMode)int.MaxValue,
+            QAccessMode.ReadOnly));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new MirClassicalCallOperand(
+            value.Id,
+            QOwnershipMode.Borrowed,
+            (QAccessMode)int.MaxValue));
+        Assert.Throws<ArgumentOutOfRangeException>(() => MirClassicalParameter.Scalar(
+            "value",
+            value,
+            (QOwnershipMode)int.MaxValue));
+        Assert.Throws<ArgumentOutOfRangeException>(() => MirClassicalParameter.Scalar(
+            "value",
+            value,
+            access: (QAccessMode)int.MaxValue));
+        Assert.Throws<ArgumentOutOfRangeException>(() => MirQubitParameter.Single(
+            new MirQubitId(0),
+            "target",
+            (QOwnershipMode)int.MaxValue,
+            origin));
+
+        var qubit = MirQubitParameter.Single(
+            new MirQubitId(1),
+            "target",
+            QOwnershipMode.Borrowed,
+            origin);
+        Assert.Throws<ArgumentOutOfRangeException>(() => new MirQubitCallOperand(
+            new MirQubitAccess(qubit),
+            access: (QAccessMode)int.MaxValue));
     }
 
     [Fact]
@@ -450,6 +951,75 @@ public sealed class QoraMirTests
     }
 
     [Fact]
+    public void MirCallableConstructionRejectsInvalidCallableContractsImmediately()
+    {
+        var snapshot = CompileSnapshot(
+            "function Value(input: int): int { return input; } operation Main() {}");
+        var function = Callable(snapshot.Program, "Value");
+        var parameter = Assert.Single(
+            function.Parameters.OfType<MirClassicalParameter>());
+
+        Assert.Throws<ArgumentException>(
+            () => CopyCallable(function, name: " "));
+        AssertInvalidParameter(
+            MirClassicalParameter.Scalar(
+                parameter.Name,
+                parameter.Value,
+                parameter.Ownership,
+                QAccessMode.Mutable),
+            "borrowed and read-only");
+        AssertInvalidParameter(
+            MirClassicalParameter.Scalar(
+                parameter.Name,
+                parameter.Value,
+                QOwnershipMode.Moved,
+                parameter.Access),
+            "borrowed and read-only");
+        AssertInvalidParameter(
+            MirQubitParameter.Single(
+                new MirQubitId(0),
+                "q",
+                QOwnershipMode.Borrowed,
+                function.Origin),
+            "cannot be a qubit");
+        AssertInvalidParameter(
+            new UnknownMirParameter("unknown"),
+            "unsupported MIR parameter type");
+
+        void AssertInvalidParameter(
+            IMirParameter invalidParameter,
+            string expectedMessage)
+        {
+            var error = Assert.Throws<ArgumentException>(
+                () => CopyCallable(
+                    function,
+                    parameters: new[] { invalidParameter }));
+            Assert.Contains(
+                expectedMessage,
+                error.Message,
+                StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public void MirBlockConstructionRejectsANullTerminatorImmediately()
+    {
+        var snapshot = CompileSnapshot("operation Main() {}");
+        var block = snapshot.Program.EntryPoint.EntryBlock;
+
+        Assert.Throws<ArgumentNullException>(
+            () => new MirBlock(
+                block.Id,
+                block.Arguments,
+                block.Instructions,
+                null!,
+                block.Origin,
+                block.QubitPhis));
+        Assert.Throws<ArgumentNullException>(
+            () => block with { Terminator = null! });
+    }
+
+    [Fact]
     public void MirCallableConstructionRejectsDuplicateBlockIdsImmediately()
     {
         var snapshot = CompileSnapshot("operation Main() {}");
@@ -491,12 +1061,22 @@ public sealed class QoraMirTests
     {
         var snapshot = CompileSnapshot("function Value(): int { return 1; } operation Main() {}");
         var callable = Callable(snapshot.Program, "Value");
-        var value = Assert.Single(callable.Values);
+        var entryBlock = callable.EntryBlock;
+        var instruction = Assert.Single(entryBlock.Instructions);
+        var duplicateInstruction = instruction with
+        {
+            Id = new MirInstructionId(instruction.Id.Value + 1),
+        };
+        var duplicateEntryBlock = entryBlock with
+        {
+            Instructions = new[] { instruction, duplicateInstruction },
+        };
 
         var error = Assert.Throws<ArgumentException>(
             () => CopyCallable(
                 callable,
-                values: new[] { value, value }));
+                entryBlock: duplicateEntryBlock,
+                blocks: new[] { duplicateEntryBlock }));
 
         Assert.Contains("SSA value identity", error.Message, StringComparison.Ordinal);
     }
@@ -506,14 +1086,191 @@ public sealed class QoraMirTests
     {
         var snapshot = CompileSnapshot("operation Main() { var values: int[] = [1]; }");
         var callable = snapshot.Program.EntryPoint;
-        var storage = Assert.Single(callable.Storages);
+        var entryBlock = callable.EntryBlock;
+        var allocation = Assert.Single(entryBlock.Instructions.OfType<MirArrayCreate>());
+        var duplicateResult = new MirValue(
+            new MirValueId(callable.Values.Max(value => value.Id.Value) + 1),
+            allocation.Result.Type,
+            allocation.Result.Origin);
+        var duplicateAllocation = allocation with
+        {
+            Id = new MirInstructionId(
+                entryBlock.Instructions.Max(instruction => instruction.Id.Value) + 1),
+            Result = duplicateResult,
+        };
+        var duplicateEntryBlock = entryBlock with
+        {
+            Instructions = entryBlock.Instructions.Append(duplicateAllocation).ToArray(),
+        };
 
         var error = Assert.Throws<ArgumentException>(
             () => CopyCallable(
                 callable,
-                storages: new[] { storage, storage }));
+                entryBlock: duplicateEntryBlock,
+                blocks: new[] { duplicateEntryBlock }));
 
         Assert.Contains("array storage identity", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void MirCallableDerivesValuesAndStoragesFromTheirDefinitionSites()
+    {
+        var snapshot = CompileSnapshot("""
+            function Choose(condition: int, input: int[]): int {
+                var local: int[] = [1];
+                var result: int = 0;
+                if (condition > 0) {
+                    result = input[0];
+                }
+                return result;
+            }
+
+            operation Main() {}
+            """);
+        var callable = Callable(snapshot.Program, "Choose");
+
+        var definingValues = callable.Parameters
+            .OfType<MirClassicalParameter>()
+            .Select(parameter => parameter.Value)
+            .Concat(callable.Blocks.SelectMany(block => block.Arguments))
+            .Concat(callable.Blocks
+                .SelectMany(block => block.Instructions)
+                .SelectMany(instruction => instruction.Results))
+            .ToArray();
+        var definingStorages = callable.Parameters
+            .OfType<MirClassicalParameter>()
+            .Where(parameter => parameter.Storage is not null)
+            .Select(parameter => parameter.Storage!)
+            .Concat(callable.Blocks
+                .SelectMany(block => block.Instructions)
+                .OfType<MirArrayCreate>()
+                .Select(allocation => allocation.Storage))
+            .ToArray();
+
+        Assert.Contains(callable.Blocks, block => block.Arguments.Count > 0);
+        Assert.Equal(2, definingStorages.Length);
+        Assert.Equal(definingValues.Length, callable.Values.Count);
+        Assert.All(
+            definingValues,
+            expected => Assert.Contains(
+                callable.Values,
+                actual => ReferenceEquals(actual, expected)));
+        Assert.Equal(definingStorages.Length, callable.Storages.Count);
+        Assert.All(
+            definingStorages,
+            expected => Assert.Contains(
+                callable.Storages,
+                actual => ReferenceEquals(actual, expected)));
+    }
+
+    [Fact]
+    public void MirProgramConstructionRejectsEntitiesSharedByDifferentCallables()
+    {
+        var snapshot = CompileSnapshot("""
+            operation First(input: int[], q: Qubit) {
+                X(q);
+                var values: int[] = [1];
+            }
+
+            operation Second(input: int[], q: Qubit) {
+                X(q);
+                var values: int[] = [2];
+            }
+
+            operation Main() {}
+            """);
+        var first = Callable(snapshot.Program, "First");
+        var second = Callable(snapshot.Program, "Second");
+        var firstParameter = Assert.Single(first.Parameters.OfType<MirClassicalParameter>());
+        var firstApply = Assert.Single(
+            first.Blocks.SelectMany(block => block.Instructions).OfType<MirQuantumApply>());
+        var secondApply = Assert.Single(
+            second.Blocks.SelectMany(block => block.Instructions).OfType<MirQuantumApply>());
+        var firstAllocation = Assert.Single(
+            first.Blocks.SelectMany(block => block.Instructions).OfType<MirArrayCreate>());
+        var secondAllocation = Assert.Single(
+            second.Blocks.SelectMany(block => block.Instructions).OfType<MirArrayCreate>());
+
+        AssertRejected(
+            CopyCallable(
+                second,
+                parameters: new IMirParameter[]
+                {
+                    firstParameter,
+                    Assert.Single(second.Parameters.OfType<MirQubitParameter>()),
+                }),
+            "parameter");
+        AssertRejected(
+            CopyCallable(
+                second,
+                entryBlock: first.EntryBlock,
+                blocks: new[] { first.EntryBlock }),
+            "block");
+        AssertRejected(
+            ReplaceInstruction(second, secondAllocation, firstAllocation),
+            "instruction");
+        AssertRejected(
+            ReplaceInstruction(
+                second,
+                secondAllocation,
+                secondAllocation with { Result = firstAllocation.Result }),
+            "SSA value");
+        AssertRejected(
+            ReplaceInstruction(
+                second,
+                secondAllocation,
+                secondAllocation with { Storage = firstAllocation.Storage }),
+            "array storage");
+        AssertRejected(
+            ReplaceInstruction(
+                second,
+                secondApply,
+                new MirQuantumApply(
+                    secondApply.Id,
+                    secondApply.Target,
+                    secondApply.Operands,
+                    new[] { Assert.Single(firstApply.QubitResults) },
+                    secondApply.MutableArrayResults,
+                    secondApply.Functors,
+                    secondApply.Origin)),
+            "qubit version");
+
+        void AssertRejected(
+            MirCallable rewrittenSecond,
+            string role)
+        {
+            var callables = snapshot.Program.Callables
+                .Select(callable => ReferenceEquals(callable, second)
+                    ? rewrittenSecond
+                    : callable)
+                .ToArray();
+            var error = Assert.Throws<ArgumentException>(
+                () => new MirProgram(snapshot.Program.EntryPoint, callables));
+            Assert.Contains(
+                $"{role} object is owned by both",
+                error.Message,
+                StringComparison.Ordinal);
+        }
+
+        static MirCallable ReplaceInstruction(
+            MirCallable callable,
+            MirInstruction original,
+            MirInstruction replacement)
+        {
+            var blocks = callable.Blocks
+                .Select(block => block.Instructions.Contains(original)
+                    ? block with
+                    {
+                        Instructions = block.Instructions
+                            .Select(instruction => ReferenceEquals(instruction, original)
+                                ? replacement
+                                : instruction)
+                            .ToArray(),
+                    }
+                    : block)
+                .ToArray();
+            return CopyCallable(callable, blocks: blocks);
+        }
     }
 
     [Fact]
@@ -613,20 +1370,18 @@ public sealed class QoraMirTests
         var operand = Assert.IsType<MirClassicalCallOperand>(
             Assert.Single(call.Operands));
 
-        Assert.Equal(load.Result, operand.Value);
+        Assert.Equal(load.Result.Id, operand.Value);
         Assert.Equal(loadExpression.Id, OriginNode(load.Origin));
         Assert.Equal(callExpression.Id, OriginNode(call.Origin));
         Assert.Equal(indexExpression.Id, OriginNode(index.Origin));
         Assert.Equal(
             loadExpression.Id,
             OriginNode(
-                Assert.IsType<MirValue>(
-                    main.FindValue(load.Result)).Origin));
+                load.Result.Origin));
         Assert.Equal(
             callExpression.Id,
             OriginNode(
-                Assert.IsType<MirValue>(
-                    main.FindValue(call.Result)).Origin));
+                call.Result.Origin));
         Assert.NotEqual(declaration.Id, OriginNode(load.Origin));
         Assert.NotEqual(declaration.Id, OriginNode(call.Origin));
 
@@ -934,7 +1689,7 @@ public sealed class QoraMirTests
             Inputs = phi.Inputs
                 .Select((input, index) =>
                     index == 0
-                        ? new MirQubitPhiInput(input.Edge, seed.Key)
+                        ? new MirQubitPhiInput(input.Edge, seed)
                         : input)
                 .ToArray(),
         };
@@ -1210,7 +1965,7 @@ public sealed class QoraMirTests
     }
 
     [Fact]
-    public void VerifierRejectsAnEntryBlockWithAPredecessor()
+    public void MirCallableConstructionRejectsAnEntryBlockWithAPredecessor()
     {
         var (program, _) = CompileMir("operation Main() {}");
         var callable = Assert.Single(program.Callables);
@@ -1222,18 +1977,148 @@ public sealed class QoraMirTests
                 Array.Empty<MirValueId>(),
                 entry.Terminator.Origin),
         };
-        var malformedCallable = CopyCallable(
-            callable,
-            entryBlock: malformedEntry,
-            blocks: new[] { malformedEntry });
-        var malformed = new MirProgram(
-            malformedCallable,
-            new[] { malformedCallable });
+        var error = Assert.Throws<ArgumentException>(
+            () => CopyCallable(
+                callable,
+                entryBlock: malformedEntry,
+                blocks: new[] { malformedEntry }));
 
-        var error = Assert.Single(
-            QoraMirVerifier.Verify(malformed),
-            candidate => candidate.Code == "MIR147");
         Assert.Contains("unique CFG root", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void MirCallableConstructionRejectsAControlFlowTargetItDoesNotOwn()
+    {
+        var (program, _) = CompileMir("operation Main() {}");
+        var callable = Assert.Single(program.Callables);
+        var entry = Assert.Single(callable.Blocks);
+        var missingTarget = MirTestContext.BlockId(entry.Id.Value + 1);
+        var malformedEntry = entry with
+        {
+            Terminator = new MirJump(
+                missingTarget,
+                Array.Empty<MirValueId>(),
+                entry.Terminator.Origin),
+        };
+
+        var error = Assert.Throws<ArgumentException>(
+            () => CopyCallable(
+                callable,
+                entryBlock: malformedEntry,
+                blocks: new[] { malformedEntry }));
+
+        Assert.Contains("does not belong", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void MirCallableConstructionRejectsTheWrongNumberOfEdgeArguments()
+    {
+        var (program, _) = CompileMir("operation Main() {}");
+        var callable = Assert.Single(program.Callables);
+        var originalEntry = Assert.Single(callable.Blocks);
+        var targetArgument = new MirValue(
+            new MirValueId(0),
+            MirType.Scalar(QType.Int),
+            originalEntry.Origin);
+        var target = new MirBlock(
+            MirTestContext.BlockId(originalEntry.Id.Value + 1),
+            new[] { targetArgument },
+            Array.Empty<MirInstruction>(),
+            new MirReturn(null, originalEntry.Terminator.Origin),
+            originalEntry.Origin);
+        var entry = originalEntry with
+        {
+            Terminator = new MirJump(
+                target.Id,
+                Array.Empty<MirValueId>(),
+                originalEntry.Terminator.Origin),
+        };
+
+        var error = Assert.Throws<ArgumentException>(
+            () => CopyCallable(
+                callable,
+                entryBlock: entry,
+                blocks: new[] { entry, target }));
+
+        Assert.Contains("supplies 0 value(s)", error.Message, StringComparison.Ordinal);
+        Assert.Contains("expects 1", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void MirCallableConstructionRejectsAnUnknownEdgeArgument()
+    {
+        var (program, _) = CompileMir("operation Main() {}");
+        var callable = Assert.Single(program.Callables);
+        var originalEntry = Assert.Single(callable.Blocks);
+        var targetArgument = new MirValue(
+            new MirValueId(0),
+            MirType.Scalar(QType.Int),
+            originalEntry.Origin);
+        var target = new MirBlock(
+            MirTestContext.BlockId(originalEntry.Id.Value + 1),
+            new[] { targetArgument },
+            Array.Empty<MirInstruction>(),
+            new MirReturn(null, originalEntry.Terminator.Origin),
+            originalEntry.Origin);
+        var entry = originalEntry with
+        {
+            Terminator = new MirJump(
+                target.Id,
+                new[] { new MirValueId(1) },
+                originalEntry.Terminator.Origin),
+        };
+
+        var error = Assert.Throws<ArgumentException>(
+            () => CopyCallable(
+                callable,
+                entryBlock: entry,
+                blocks: new[] { entry, target }));
+
+        Assert.Contains("does not belong", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void MirCallableConstructionRejectsAnEdgeArgumentWithTheWrongType()
+    {
+        var (program, _) = CompileMir("operation Main() {}");
+        var callable = Assert.Single(program.Callables);
+        var originalEntry = Assert.Single(callable.Blocks);
+        var suppliedValue = new MirValue(
+            new MirValueId(0),
+            MirType.Scalar(QType.Bit),
+            originalEntry.Origin);
+        var suppliedValueDefinition = new MirConstant(
+            new MirInstructionId(0),
+            suppliedValue,
+            "1",
+            originalEntry.Origin);
+        var targetArgument = new MirValue(
+            new MirValueId(1),
+            MirType.Scalar(QType.Int),
+            originalEntry.Origin);
+        var target = new MirBlock(
+            MirTestContext.BlockId(originalEntry.Id.Value + 1),
+            new[] { targetArgument },
+            Array.Empty<MirInstruction>(),
+            new MirReturn(null, originalEntry.Terminator.Origin),
+            originalEntry.Origin);
+        var entry = originalEntry with
+        {
+            Instructions = new MirInstruction[] { suppliedValueDefinition },
+            Terminator = new MirJump(
+                target.Id,
+                new[] { suppliedValue.Id },
+                originalEntry.Terminator.Origin),
+        };
+
+        var error = Assert.Throws<ArgumentException>(
+            () => CopyCallable(
+                callable,
+                entryBlock: entry,
+                blocks: new[] { entry, target }));
+
+        Assert.Contains("is bit", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("expects int", error.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -1288,7 +2173,7 @@ public sealed class QoraMirTests
     }
 
     [Fact]
-    public void VerifierRejectsAnyFunctorOnANonUnitaryBuiltin()
+    public void QuantumApplyConstructionRejectsAnyFunctorOnANonUnitaryBuiltin()
     {
         var (program, _) = CompileMir(
             """
@@ -1301,28 +2186,10 @@ public sealed class QoraMirTests
         var block = Assert.Single(callable.Blocks);
         var reset = Assert.Single(
             block.Instructions.OfType<MirQuantumApply>());
-        var malformedReset = CopyApplyWithFunctors(
-            reset,
-            new[] { MirFunctor.Adjoint });
-        var malformedBlock = block with
-        {
-            Instructions = block.Instructions
-                .Select(instruction =>
-                    instruction.Id == reset.Id
-                        ? malformedReset
-                        : instruction)
-                .ToArray(),
-        };
-        var malformedCallable = CopyCallable(
-            callable,
-            blocks: new[] { malformedBlock });
-        var malformed = new MirProgram(
-            malformedCallable,
-            new[] { malformedCallable });
-
-        var error = Assert.Single(
-            QoraMirVerifier.Verify(malformed),
-            candidate => candidate.Code == "MIR139");
+        var error = Assert.Throws<ArgumentException>(
+            () => CopyApplyWithFunctors(
+                reset,
+                new[] { MirFunctor.Adjoint }));
         Assert.Contains(
             "non-unitary",
             error.Message,
@@ -1330,7 +2197,7 @@ public sealed class QoraMirTests
     }
 
     [Fact]
-    public void VerifierRejectsUnknownAndNonCanonicalFunctorLists()
+    public void QuantumApplyConstructionRejectsUnknownAndNonCanonicalFunctorLists()
     {
         var (program, _) = CompileMir(
             """
@@ -1344,48 +2211,117 @@ public sealed class QoraMirTests
         var apply = Assert.Single(
             block.Instructions.OfType<MirQuantumApply>());
 
-        MirProgram WithFunctors(params MirFunctor[] functors)
-        {
-            var rewrittenApply = CopyApplyWithFunctors(apply, functors);
-            var rewrittenBlock = block with
-            {
-                Instructions = block.Instructions
-                    .Select(instruction =>
-                        instruction.Id == apply.Id
-                            ? rewrittenApply
-                            : instruction)
-                    .ToArray(),
-            };
-            var rewrittenCallable = CopyCallable(
-                callable,
-                blocks: new[] { rewrittenBlock });
-            return new MirProgram(
-                rewrittenCallable,
-                new[] { rewrittenCallable });
-        }
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => CopyApplyWithFunctors(
+                apply,
+                new[] { (MirFunctor)int.MaxValue }));
+        Assert.Throws<ArgumentException>(
+            () => CopyApplyWithFunctors(
+                apply,
+                new[] { MirFunctor.Adjoint, MirFunctor.Adjoint }));
+        Assert.Throws<ArgumentException>(
+            () => CopyApplyWithFunctors(
+                apply,
+                new[] { MirFunctor.Controlled, MirFunctor.Controlled }));
+        Assert.Throws<ArgumentException>(
+            () => CopyApplyWithFunctors(
+                apply,
+                new[] { MirFunctor.Controlled, MirFunctor.Adjoint }));
+    }
 
-        Assert.Contains(
-            QoraMirVerifier.Verify(
-                WithFunctors((MirFunctor)int.MaxValue)),
-            error => error.Code == "MIR140");
-        Assert.Contains(
-            QoraMirVerifier.Verify(
-                WithFunctors(
-                    MirFunctor.Adjoint,
-                    MirFunctor.Adjoint)),
-            error => error.Code == "MIR141");
-        Assert.Contains(
-            QoraMirVerifier.Verify(
-                WithFunctors(
-                    MirFunctor.Controlled,
-                    MirFunctor.Controlled)),
-            error => error.Code == "MIR141");
-        Assert.Contains(
-            QoraMirVerifier.Verify(
-                WithFunctors(
-                    MirFunctor.Controlled,
-                    MirFunctor.Adjoint)),
-            error => error.Code == "MIR141");
+    [Fact]
+    public void BuiltinTargetConstructionRejectsUnknownNamesImmediately()
+    {
+        Assert.Throws<ArgumentException>(
+            () => new MirBuiltinGateTarget("MissingGate"));
+        Assert.Throws<ArgumentException>(
+            () => new MirBuiltinFunctionTarget("MissingFunction"));
+    }
+
+    [Fact]
+    public void PureCallConstructionRejectsInvalidLocalContractsImmediately()
+    {
+        var (program, _) = CompileMir("""
+            operation Main() {
+                var bits: bit[] = new bit[2];
+                var result: int = AsInt(bits);
+            }
+            """);
+        var callable = Assert.Single(program.Callables);
+        var call = Assert.Single(
+            callable.Blocks.SelectMany(block => block.Instructions).OfType<MirPureCall>());
+
+        Assert.Throws<ArgumentException>(() => new MirPureCall(
+            call.Id,
+            call.Result,
+            new MirBuiltinGateTarget("X"),
+            call.Operands,
+            call.Origin));
+        Assert.Throws<ArgumentException>(() => new MirPureCall(
+            call.Id,
+            call.Result,
+            call.Target,
+            call.Operands.Append(call.Operands[0]).ToArray(),
+            call.Origin));
+
+        var context = MirTestContext.Create();
+        var qubit = MirQubitParameter.Single(
+            new MirQubitId(0),
+            "target",
+            QOwnershipMode.Borrowed,
+            context.Origin());
+        var qubitOperand = new MirQubitCallOperand(new MirQubitAccess(qubit));
+        Assert.Throws<ArgumentException>(() => new MirPureCall(
+            call.Id,
+            call.Result,
+            call.Target,
+            new MirCallOperand[] { qubitOperand },
+            call.Origin));
+
+        var wrongResult = new MirValue(
+            new MirValueId(callable.Values.Max(value => value.Id.Value) + 1),
+            MirType.Scalar(QType.Bit),
+            call.Result.Origin);
+        Assert.Throws<ArgumentException>(() => new MirPureCall(
+            call.Id,
+            wrongResult,
+            call.Target,
+            call.Operands,
+            call.Origin));
+    }
+
+    [Fact]
+    public void BuiltinQuantumApplyConstructionRejectsInvalidOperandShapeImmediately()
+    {
+        var (program, _) = CompileMir("""
+            operation Main() {
+                use target = Qubit[1];
+                X(target[0]);
+            }
+            """);
+        var callable = Assert.Single(program.Callables);
+        var apply = Assert.Single(
+            callable.Blocks.SelectMany(block => block.Instructions).OfType<MirQuantumApply>());
+
+        Assert.Throws<ArgumentException>(() => new MirQuantumApply(
+            apply.Id,
+            apply.Target,
+            Array.Empty<MirCallOperand>(),
+            apply.QubitResults,
+            apply.MutableArrayResults,
+            apply.Functors,
+            apply.Origin));
+        Assert.Throws<ArgumentException>(() => new MirQuantumApply(
+            apply.Id,
+            apply.Target,
+            new MirCallOperand[]
+            {
+                new MirClassicalCallOperand(new MirValueId(0)),
+            },
+            apply.QubitResults,
+            apply.MutableArrayResults,
+            apply.Functors,
+            apply.Origin));
     }
 
     private static MirCallable CopyCallable(
@@ -1393,23 +2329,22 @@ public sealed class QoraMirTests
         MirBlock? entryBlock = null,
         IReadOnlyList<MirBlock>? blocks = null,
         IReadOnlyList<IMirParameter>? parameters = null,
-        IReadOnlyList<MirValue>? values = null,
-        IReadOnlyList<MirArrayStorage>? storages = null)
+        string? name = null)
     {
         var copiedBlocks = blocks ?? source.Blocks;
         var copiedEntryBlock = entryBlock
             ?? copiedBlocks.Single(block => block.Id == source.EntryBlock.Id);
         return new MirCallable(
             source.Id,
-            source.Name,
+            name ?? source.Name,
             source.ReturnType,
             parameters ?? source.Parameters,
             copiedEntryBlock,
             copiedBlocks,
-            values ?? source.Values,
-            storages ?? source.Storages,
             source.Origin);
     }
+
+    private sealed record UnknownMirParameter(string Name) : IMirParameter;
 
     private static MirQuantumApply CopyApplyWithFunctors(
         MirQuantumApply source,
@@ -1523,7 +2458,7 @@ public sealed class QoraMirTests
             backedge.Arguments,
             value =>
             {
-                var definition = callable.RequireValue(value).Definition;
+                var definition = callable.DefinitionOf(value);
                 if (definition.Instruction is not MirInstructionId instruction)
                     return false;
 

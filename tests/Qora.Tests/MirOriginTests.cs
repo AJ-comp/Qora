@@ -1,10 +1,51 @@
 using Qora.Compiler;
+using Qora.Ir;
 using Qora.Ir.Mir;
 
 namespace Qora.Tests;
 
 public sealed class MirOriginTests
 {
+    [Fact]
+    public void HirOriginUsesTheExactNodeOwnedByItsSemanticArtifact()
+    {
+        var first = CompileMir("operation Main() { }");
+        var second = CompileMir("operation Main() { }");
+        var firstArtifact = first.HirArtifact;
+        var firstSourceNode = Assert.IsType<HirCallable>(
+            firstArtifact.Source.Program.EntryCallable);
+        var secondSourceNode = Assert.IsType<HirCallable>(
+            second.HirArtifact.Source.Program.EntryCallable);
+
+        Assert.Equal(firstSourceNode.Id, secondSourceNode.Id);
+
+        var origin = MirOrigin.FromHirNode(firstArtifact, firstSourceNode);
+
+        Assert.Same(firstArtifact, origin.HirArtifact);
+        Assert.Equal(firstSourceNode.Id, origin.HirNodeId);
+        Assert.Equal(
+            firstArtifact.Source.SourceMap.Find(firstSourceNode.Id),
+            origin.Span);
+        Assert.Throws<ArgumentException>(
+            () => MirOrigin.FromHirNode(firstArtifact, secondSourceNode));
+    }
+
+    [Fact]
+    public void DiagnosticOriginRejectsALocationFromAnotherHirArtifact()
+    {
+        var source = CompileMir("operation Main() { }");
+        var unrelated = CompileMir("operation Main() { }");
+        var unrelatedLocation = unrelated.Program.EntryPoint.Origin;
+
+        Assert.Throws<ArgumentException>(
+            () => new DiagnosticOrigin.Mir(source, unrelatedLocation));
+        Assert.Throws<ArgumentException>(
+            () => new DiagnosticOrigin.Target(
+                TargetBackend.OpenQasm,
+                source,
+                unrelatedLocation));
+    }
+
     [Fact]
     public void GeneratedOriginSharesItsParentAndPreservesTheRootHirSource()
     {
@@ -21,10 +62,10 @@ public sealed class MirOriginTests
                 .SelectMany(block => block.Instructions)
                 .OfType<MirQuantumApply>());
         var root = gate.Origin.SourceHirOrigin;
-        var generated = new MirGeneratedOrigin(
+        var generated = MirOrigin.GeneratedFrom(
             gate.Origin,
             "first generated step");
-        var nested = new MirGeneratedOrigin(
+        var nested = MirOrigin.GeneratedFrom(
             generated,
             "second generated step");
 
@@ -53,7 +94,7 @@ public sealed class MirOriginTests
                 .SelectMany(block => block.Instructions)
                 .OfType<MirQuantumApply>());
         var root = gate.Origin.SourceHirOrigin;
-        var generated = new MirGeneratedOrigin(root, "generated test step");
+        var generated = MirOrigin.GeneratedFrom(root, "generated test step");
         var qubitAccess = Assert.Single(
             gate.Operands
                 .OfType<MirQubitCallOperand>())
@@ -87,7 +128,7 @@ public sealed class MirOriginTests
         var parent = Assert.Single(source.Program.Callables).Origin;
 
         Assert.Throws<ArgumentException>(
-            () => new MirGeneratedOrigin(parent, reason));
+            () => MirOrigin.GeneratedFrom(parent, reason));
     }
 
     [Fact]

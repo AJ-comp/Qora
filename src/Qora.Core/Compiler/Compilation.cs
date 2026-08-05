@@ -251,8 +251,6 @@ public sealed class Compilation
                         throw new ArgumentException(
                             "Diagnostic source is not this Compilation's MIR snapshot.",
                             nameof(diagnostics));
-                    if (source.Location is { } location)
-                        ValidateMirDiagnosticOrigin(mir, location, nameof(diagnostics));
                     break;
 
                 case DiagnosticOrigin.Target source:
@@ -274,8 +272,6 @@ public sealed class Compilation
                             "Diagnostic target MIR input is not owned by this Compilation.",
                             nameof(diagnostics));
                     }
-                    if (source.Location is { } targetLocation)
-                        ValidateMirDiagnosticOrigin(mir, targetLocation, nameof(diagnostics));
                     break;
 
                 default:
@@ -286,30 +282,6 @@ public sealed class Compilation
         }
 
         VerifyValidationDiagnosticProjection(hir, _diagnostics);
-    }
-
-    private static void ValidateMirDiagnosticOrigin(
-        MirSnapshot mir,
-        MirOrigin origin,
-        string parameterName)
-    {
-        var hirOrigin = origin.SourceHirOrigin;
-        var hirSnapshot = mir.HirArtifact.Source;
-        if (!hirSnapshot.Structure.Contains(hirOrigin.HirNodeId))
-        {
-            throw new ArgumentException(
-                $"Diagnostic MIR origin refers to HIR node {hirOrigin.HirNodeId} outside "
-                + "the exact HIR artifact.",
-                parameterName);
-        }
-
-        var expectedSpan = hirSnapshot.SourceMap.Find(hirOrigin.HirNodeId);
-        if (hirOrigin.Span != expectedSpan)
-        {
-            throw new ArgumentException(
-                $"Diagnostic MIR origin span does not match HIR node {hirOrigin.HirNodeId}.",
-                parameterName);
-        }
     }
 
     public CompilationId Id { get; }

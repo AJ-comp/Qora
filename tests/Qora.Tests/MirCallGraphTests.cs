@@ -103,8 +103,6 @@ public sealed class MirCallGraphTests
         Assert.Equal(firstMain.Id, secondMain.Id);
         Assert.False(second.Program.ContainsCallable(firstMain));
         Assert.Throws<ArgumentException>(() => graph.CallsFrom(firstMain));
-        Assert.Throws<InvalidOperationException>(
-            () => graph.EnsureFor(first.Program));
 
         Assert.Single(graph.CallsFrom(secondMain));
     }

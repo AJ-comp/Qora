@@ -13,6 +13,16 @@ public abstract record MirOrigin
     {
     }
 
+    internal static MirHirOrigin FromHirNode(
+        HirSemanticArtifact hirArtifact,
+        HirNode sourceHirNode) =>
+        new(hirArtifact, sourceHirNode);
+
+    internal static MirGeneratedOrigin GeneratedFrom(
+        MirOrigin parentOrigin,
+        string reason) =>
+        new(parentOrigin, reason);
+
     /// <summary>The authoritative HIR source at the root of this generation history.</summary>
     public MirHirOrigin SourceHirOrigin
     {
@@ -35,25 +45,38 @@ public abstract record MirOrigin
 public sealed record MirHirOrigin : MirOrigin
 {
     internal MirHirOrigin(
-        HirNodeId hirNodeId,
-        SourceSpan? span)
+        HirSemanticArtifact hirArtifact,
+        HirNode sourceHirNode)
     {
-        HirNodeId = hirNodeId;
-        Span = span;
+        ArgumentNullException.ThrowIfNull(hirArtifact);
+        ArgumentNullException.ThrowIfNull(sourceHirNode);
+
+        var hirSnapshot = hirArtifact.Source;
+        var ownedHirNode = hirSnapshot.Structure.FindNode(sourceHirNode.Id);
+        if (!ReferenceEquals(ownedHirNode, sourceHirNode))
+        {
+            throw new ArgumentException(
+                "The source HIR node does not belong to this semantic artifact.",
+                nameof(sourceHirNode));
+        }
+
+        HirArtifact = hirArtifact;
+        HirNodeId = sourceHirNode.Id;
     }
 
+    internal HirSemanticArtifact HirArtifact { get; }
     public HirNodeId HirNodeId { get; }
-    public SourceSpan? Span { get; }
+    public SourceSpan? Span => HirArtifact.Source.SourceMap.Find(HirNodeId);
 }
 
 /// <summary>One compiler-generated step whose immutable parent retains the complete earlier history.</summary>
 public sealed record MirGeneratedOrigin : MirOrigin
 {
     internal MirGeneratedOrigin(
-        MirOrigin parent,
+        MirOrigin parentOrigin,
         string reason)
     {
-        ArgumentNullException.ThrowIfNull(parent);
+        ArgumentNullException.ThrowIfNull(parentOrigin);
         if (string.IsNullOrWhiteSpace(reason))
         {
             throw new ArgumentException(
@@ -61,7 +84,7 @@ public sealed record MirGeneratedOrigin : MirOrigin
                 nameof(reason));
         }
 
-        Parent = parent;
+        Parent = parentOrigin;
         Reason = reason;
     }
 

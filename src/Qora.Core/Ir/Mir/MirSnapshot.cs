@@ -21,19 +21,35 @@ public enum MirStage
 /// </summary>
 public sealed class MirSnapshot
 {
-    internal static MirSnapshot CreateLowered(
-        MirProgram program,
-        HirSemanticArtifact hirArtifact) =>
-        new(
-            program,
-            hirArtifact,
-            MirStage.Lowered,
-            previousSnapshot: null);
+    internal static MirSnapshot CreateLowered(MirProgram program) => new(program);
 
     internal static MirSnapshot CreateTransformed(
         MirProgram program,
-        MirStage stage,
-        MirSnapshot previousSnapshot)
+        MirSnapshot previousSnapshot) =>
+        new(program, previousSnapshot);
+
+    private MirSnapshot(MirProgram program)
+    {
+        ArgumentNullException.ThrowIfNull(program);
+
+        var hirArtifact = program.HirArtifact;
+
+        if (!hirArtifact.IsReadyForMirLowering)
+        {
+            throw new ArgumentException(
+                "MIR lowering requires a HIR artifact ready for MIR lowering.",
+                nameof(program));
+        }
+        QoraMirVerifier.VerifyOrThrow(program);
+
+        Stage = MirStage.Lowered;
+        Program = program;
+        HirArtifact = hirArtifact;
+        PreviousSnapshot = null;
+        Analyses = new MirAnalysisStore(program);
+    }
+
+    private MirSnapshot(MirProgram program, MirSnapshot previousSnapshot)
     {
         ArgumentNullException.ThrowIfNull(program);
         ArgumentNullException.ThrowIfNull(previousSnapshot);
@@ -43,56 +59,29 @@ public sealed class MirSnapshot
                 "A transformed MIR snapshot requires a newly constructed MIR program.",
                 nameof(program));
         }
-        if (!IsDirectStageSuccessor(previousSnapshot.Stage, stage))
+
+        if (!ReferenceEquals(program.HirArtifact, previousSnapshot.HirArtifact))
         {
             throw new ArgumentException(
-                $"MIR stage {stage} cannot directly follow {previousSnapshot.Stage}; "
-                + "inverse requests must be injected before their adjoints are materialized",
-                nameof(stage));
+                "A transformed MIR program must retain its source HIR artifact.",
+                nameof(program));
         }
 
+        Stage = previousSnapshot.Stage switch
+        {
+            MirStage.Lowered => MirStage.InverseRequestsInjected,
+            MirStage.InverseRequestsInjected => MirStage.AdjointsMaterialized,
+            _ => throw new InvalidOperationException(
+                $"MIR stage {previousSnapshot.Stage} has no supported successor"),
+        };
         VerifyIdentityContinuity(program, previousSnapshot);
+        QoraMirVerifier.VerifyOrThrow(program);
 
-        return new MirSnapshot(
-            program,
-            previousSnapshot.HirArtifact,
-            stage,
-            previousSnapshot);
-    }
-
-    private MirSnapshot(
-        MirProgram program,
-        HirSemanticArtifact hirArtifact,
-        MirStage stage,
-        MirSnapshot? previousSnapshot)
-    {
-        ArgumentNullException.ThrowIfNull(program);
-        ArgumentNullException.ThrowIfNull(hirArtifact);
-
-        if (!hirArtifact.IsReadyForMirLowering)
-        {
-            throw new ArgumentException(
-                "MIR lowering requires a HIR artifact ready for MIR lowering.",
-                nameof(hirArtifact));
-        }
-        QoraMirVerifier.VerifyOrThrow(program, hirArtifact.Source);
-
-        Stage = stage;
         Program = program;
-        HirArtifact = hirArtifact;
+        HirArtifact = previousSnapshot.HirArtifact;
         PreviousSnapshot = previousSnapshot;
         Analyses = new MirAnalysisStore(program);
     }
-
-    private static bool IsDirectStageSuccessor(
-        MirStage parent,
-        MirStage child) =>
-        (parent, child) switch
-        {
-            (MirStage.Lowered, MirStage.InverseRequestsInjected) => true,
-            (MirStage.InverseRequestsInjected, MirStage.AdjointsMaterialized) => true,
-            _ => false,
-        };
 
     private static void VerifyIdentityContinuity(
         MirProgram transformedProgram,
@@ -145,42 +134,41 @@ public sealed class MirSnapshot
         VerifyCallableLocalIdentities(
             "block",
             transformedCallable,
-            transformedCallable.Blocks,
-            sourceCallable.Blocks,
-            historicalCallables.SelectMany(callable => callable.Blocks),
+            sourceCallable,
+            historicalCallables,
+            callable => callable.Blocks,
             block => block.Id,
             block => block.Origin);
         VerifyCallableLocalIdentities(
             "instruction",
             transformedCallable,
-            transformedCallable.Blocks.SelectMany(block => block.Instructions),
-            sourceCallable.Blocks.SelectMany(block => block.Instructions),
-            historicalCallables.SelectMany(
-                callable => callable.Blocks.SelectMany(block => block.Instructions)),
+            sourceCallable,
+            historicalCallables,
+            callable => callable.Blocks.SelectMany(block => block.Instructions),
             instruction => instruction.Id,
             instruction => instruction.Origin);
         VerifyCallableLocalIdentities(
             "SSA value",
             transformedCallable,
-            transformedCallable.Values,
-            sourceCallable.Values,
-            historicalCallables.SelectMany(callable => callable.Values),
+            sourceCallable,
+            historicalCallables,
+            callable => callable.Values,
             value => value.Id,
             value => value.Origin);
         VerifyCallableLocalIdentities(
             "storage",
             transformedCallable,
-            transformedCallable.Storages,
-            sourceCallable.Storages,
-            historicalCallables.SelectMany(callable => callable.Storages),
+            sourceCallable,
+            historicalCallables,
+            callable => callable.Storages,
             storage => storage.Id,
             storage => storage.Origin);
         VerifyCallableLocalIdentities(
             "qubit version",
             transformedCallable,
-            transformedCallable.Qubits,
-            sourceCallable.Qubits,
-            historicalCallables.SelectMany(callable => callable.Qubits),
+            sourceCallable,
+            historicalCallables,
+            callable => callable.Qubits,
             qubit => qubit.Key,
             qubit => qubit.Origin);
 
@@ -209,17 +197,20 @@ public sealed class MirSnapshot
     private static void VerifyCallableLocalIdentities<TId, TEntity>(
         string entityKind,
         MirCallable transformedCallable,
-        IEnumerable<TEntity> transformedEntities,
-        IEnumerable<TEntity> sourceEntities,
-        IEnumerable<TEntity> historicalEntities,
+        MirCallable sourceCallable,
+        IReadOnlyList<MirCallable> historicalCallables,
+        Func<MirCallable, IEnumerable<TEntity>> entitiesOf,
         Func<TEntity, TId> idOf,
         Func<TEntity, MirOrigin> originOf)
         where TId : notnull
     {
-        var sourceById = sourceEntities.ToDictionary(idOf);
-        var historicalIds = historicalEntities.Select(idOf).ToHashSet();
+        var sourceById = entitiesOf(sourceCallable).ToDictionary(idOf);
+        var historicalIds = historicalCallables
+            .SelectMany(entitiesOf)
+            .Select(idOf)
+            .ToHashSet();
 
-        foreach (var transformedEntity in transformedEntities)
+        foreach (var transformedEntity in entitiesOf(transformedCallable))
         {
             var id = idOf(transformedEntity);
             var origin = originOf(transformedEntity);

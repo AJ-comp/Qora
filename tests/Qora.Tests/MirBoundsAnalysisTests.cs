@@ -53,7 +53,7 @@ public sealed class MirBoundsAnalysisTests
         var load = Assert.Single(Instructions(main).OfType<MirArrayLoad>());
         var index = main.RequireValue(load.Index);
         var indexInstruction = Assert.IsType<MirConstant>(
-            main.RequireInstruction(index.Definition.Instruction!.Value));
+            main.RequireInstruction(main.DefinitionOf(index).Instruction!.Value));
         var rewritten = RewriteInstruction(
             source.Program,
             main,
@@ -78,10 +78,10 @@ public sealed class MirBoundsAnalysisTests
         var load = Assert.Single(Instructions(main).OfType<MirArrayLoad>());
         var subtraction = Assert.IsType<MirBinary>(
             main.RequireInstruction(
-                main.RequireValue(load.Index).Definition.Instruction!.Value));
+                main.DefinitionOf(load.Index).Instruction!.Value));
         var subtrahend = Assert.IsType<MirConstant>(
             main.RequireInstruction(
-                main.RequireValue(subtraction.Right).Definition.Instruction!.Value));
+                main.DefinitionOf(subtraction.Right).Instruction!.Value));
         var rewritten = RewriteInstruction(
             source.Program,
             main,
@@ -154,7 +154,7 @@ public sealed class MirBoundsAnalysisTests
         var load = Assert.Single(Instructions(main).OfType<MirArrayLoad>());
         var index = main.RequireValue(load.Index);
         var indexInstruction = Assert.IsType<MirConstant>(
-            main.RequireInstruction(index.Definition.Instruction!.Value));
+            main.RequireInstruction(main.DefinitionOf(index).Instruction!.Value));
         var rewritten = RewriteInstruction(
             source.Program,
             main,
@@ -196,10 +196,10 @@ public sealed class MirBoundsAnalysisTests
         var origin = context.Origin();
         var callableId = new MirCallableId(0);
         var entryCallableId = new MirCallableId(1);
-        var entryBlockId = new MirBlockId(0);
-        var trueBlockId = new MirBlockId(1);
-        var falseBlockId = new MirBlockId(2);
-        var joinBlockId = new MirBlockId(3);
+        var entryBlockId = MirTestContext.BlockId(0);
+        var trueBlockId = MirTestContext.BlockId(1);
+        var falseBlockId = MirTestContext.BlockId(2);
+        var joinBlockId = MirTestContext.BlockId(3);
         var firstParameterValueId = new MirValueId(0);
         var secondParameterValueId = new MirValueId(1);
         var conditionValueId = new MirValueId(2);
@@ -217,9 +217,23 @@ public sealed class MirBoundsAnalysisTests
         var loadInstructionId = new MirInstructionId(3);
         var arrayType = MirType.Array(QType.Int);
         var intType = MirType.Scalar(QType.Int);
+        var firstStorage = new MirArrayStorage(firstStorageId, "first", origin);
+        var secondStorage = new MirArrayStorage(secondStorageId, "second", origin);
+        var firstParameterValue = new MirValue(firstParameterValueId, arrayType, origin);
+        var secondParameterValue = new MirValue(secondParameterValueId, arrayType, origin);
+        var conditionValue = new MirValue(
+            conditionValueId,
+            MirType.Scalar(QType.Bit),
+            origin);
+        var firstPhiValue = new MirValue(firstPhiValueId, arrayType, origin);
+        var secondPhiValue = new MirValue(secondPhiValueId, arrayType, origin);
+        var lengthValue = new MirValue(lengthValueId, intType, origin);
+        var oneValue = new MirValue(oneValueId, intType, origin);
+        var indexValue = new MirValue(indexValueId, intType, origin);
+        var loadedValue = new MirValue(loadedValueId, intType, origin);
         var workerEntryBlock = new MirBlock(
             entryBlockId,
-            Array.Empty<MirValueId>(),
+            Array.Empty<MirValue>(),
             Array.Empty<MirInstruction>(),
             new MirBranch(
                 conditionValueId,
@@ -236,17 +250,17 @@ public sealed class MirBoundsAnalysisTests
             returnType: null,
             parameters: new IMirParameter[]
             {
-                new MirClassicalParameter(
+                MirClassicalParameter.Array(
                     "first",
-                    firstParameterValueId,
-                    firstStorageId,
-                    MinimumLength: 1),
-                new MirClassicalParameter(
+                    firstParameterValue,
+                    firstStorage,
+                    minimumLength: 1),
+                MirClassicalParameter.Array(
                     "second",
-                    secondParameterValueId,
-                    secondStorageId,
-                    MinimumLength: 1),
-                new MirClassicalParameter("condition", conditionValueId),
+                    secondParameterValue,
+                    secondStorage,
+                    minimumLength: 1),
+                MirClassicalParameter.Scalar("condition", conditionValue),
             },
             entryBlock: workerEntryBlock,
             blocks: new[]
@@ -254,7 +268,7 @@ public sealed class MirBoundsAnalysisTests
                 workerEntryBlock,
                 new MirBlock(
                     trueBlockId,
-                    Array.Empty<MirValueId>(),
+                    Array.Empty<MirValue>(),
                     Array.Empty<MirInstruction>(),
                     new MirJump(
                         joinBlockId,
@@ -263,7 +277,7 @@ public sealed class MirBoundsAnalysisTests
                     origin),
                 new MirBlock(
                     falseBlockId,
-                    Array.Empty<MirValueId>(),
+                    Array.Empty<MirValue>(),
                     Array.Empty<MirInstruction>(),
                     new MirJump(
                         joinBlockId,
@@ -272,25 +286,25 @@ public sealed class MirBoundsAnalysisTests
                     origin),
                 new MirBlock(
                     joinBlockId,
-                    new[] { firstPhiValueId, secondPhiValueId },
+                    new[] { firstPhiValue, secondPhiValue },
                     new MirInstruction[]
                     {
                         new MirArrayLength(
                             lengthInstructionId,
-                            lengthValueId,
+                            lengthValue,
                             firstPhiValueId,
                             origin),
-                        new MirConstant(oneInstructionId, oneValueId, "1", origin),
+                        new MirConstant(oneInstructionId, oneValue, "1", origin),
                         new MirBinary(
                             indexInstructionId,
-                            indexValueId,
+                            indexValue,
                             MirBinaryOperator.Subtract,
                             lengthValueId,
                             oneValueId,
                             origin),
                         new MirArrayLoad(
                             loadInstructionId,
-                            loadedValueId,
+                            loadedValue,
                             secondPhiValueId,
                             indexValueId,
                             origin),
@@ -298,63 +312,10 @@ public sealed class MirBoundsAnalysisTests
                     new MirReturn(null, origin),
                     origin),
             },
-            values: new[]
-            {
-                new MirValue(
-                    firstParameterValueId,
-                    arrayType,
-                    MirValueDefinition.ParameterAt(0),
-                    origin),
-                new MirValue(
-                    secondParameterValueId,
-                    arrayType,
-                    MirValueDefinition.ParameterAt(1),
-                    origin),
-                new MirValue(
-                    conditionValueId,
-                    MirType.Scalar(QType.Bit),
-                    MirValueDefinition.ParameterAt(2),
-                    origin),
-                new MirValue(
-                    firstPhiValueId,
-                    arrayType,
-                    MirValueDefinition.BlockArgumentAt(joinBlockId, 0),
-                    origin),
-                new MirValue(
-                    secondPhiValueId,
-                    arrayType,
-                    MirValueDefinition.BlockArgumentAt(joinBlockId, 1),
-                    origin),
-                new MirValue(
-                    lengthValueId,
-                    intType,
-                    MirValueDefinition.InstructionResultAt(lengthInstructionId),
-                    origin),
-                new MirValue(
-                    oneValueId,
-                    intType,
-                    MirValueDefinition.InstructionResultAt(oneInstructionId),
-                    origin),
-                new MirValue(
-                    indexValueId,
-                    intType,
-                    MirValueDefinition.InstructionResultAt(indexInstructionId),
-                    origin),
-                new MirValue(
-                    loadedValueId,
-                    intType,
-                    MirValueDefinition.InstructionResultAt(loadInstructionId),
-                    origin),
-            },
-            storages: new[]
-            {
-                new MirArrayStorage(firstStorageId, "first", origin),
-                new MirArrayStorage(secondStorageId, "second", origin),
-            },
             origin);
         var mainEntryBlock = new MirBlock(
             entryBlockId,
-            Array.Empty<MirValueId>(),
+            Array.Empty<MirValue>(),
             Array.Empty<MirInstruction>(),
             new MirReturn(null, origin),
             origin);
@@ -365,8 +326,6 @@ public sealed class MirBoundsAnalysisTests
             parameters: Array.Empty<IMirParameter>(),
             entryBlock: mainEntryBlock,
             blocks: new[] { mainEntryBlock },
-            values: Array.Empty<MirValue>(),
-            storages: Array.Empty<MirArrayStorage>(),
             origin);
         var program = context.Program(entryCallable, new[] { callable, entryCallable });
 
@@ -558,7 +517,12 @@ public sealed class MirBoundsAnalysisTests
         var instruction = main.RequireInstruction(result.Site.Instruction.Instruction);
         Assert.Same(instruction.Origin, first.OriginFor(result));
         Assert.Throws<ArgumentException>(
-            () => first.OriginFor(result with { Index = new MirValueId(int.MaxValue) }));
+            () => first.OriginFor(result with
+            {
+                Site = new MirIndexedAccessSite(
+                    result.Site.Instruction,
+                    result.Site.OperandIndex + 1),
+            }));
     }
 
     private static MirSnapshot CompileMir(string source)
@@ -635,8 +599,6 @@ public sealed class MirBoundsAnalysisTests
                 ?? throw new InvalidOperationException(
                     "MIR rewrite dropped the callable entry block"),
             blocks,
-            callable.Values,
-            callable.Storages,
             callable.Origin);
         var rewrittenCallables = program.Callables
             .Select(candidate => candidate.Id == callable.Id

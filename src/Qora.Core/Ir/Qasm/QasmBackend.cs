@@ -11,7 +11,7 @@ internal static class QasmBackend
 {
     internal sealed record Diagnostic(
         QoraError Error,
-        MirOrigin? Location);
+        MirOrigin Location);
 
     internal sealed class Result
     {
@@ -63,9 +63,7 @@ internal static class QasmBackend
                     new QoraError(
                         error.Message,
                         error.Code,
-                        error.Origin is MirOrigin origin
-                            ? origin.SourceHirOrigin.Span
-                            : null),
+                        error.Origin.SourceHirOrigin.Span),
                     error.Origin))
                 .ToArray();
             return Result.Failed(source, errors);

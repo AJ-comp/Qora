@@ -1,4 +1,4 @@
-using Qora.Ir;
+using Qora.Compiler;
 using Qora.Ir.Mir;
 
 namespace Qora.Tests;
@@ -9,16 +9,25 @@ namespace Qora.Tests;
 /// </summary>
 internal sealed class MirTestContext
 {
+    private static readonly Lazy<MirOrigin> SharedOrigin = new(CreateOrigin);
+
     private MirTestContext()
     {
     }
 
     public static MirTestContext Create() => new();
 
-    public MirOrigin Origin(int index = 0) =>
-        new MirHirOrigin(
-            new HirNodeId(index + 1),
-            span: null);
+    public static MirBlockId BlockId(int ordinal)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(ordinal);
+        var allocator = new MirBlockId.Allocator();
+        var blockId = allocator.Allocate();
+        for (var index = 0; index < ordinal; index++)
+            blockId = allocator.Allocate();
+        return blockId;
+    }
+
+    public MirOrigin Origin() => SharedOrigin.Value;
 
     public MirProgram Program(
         MirCallable entryPoint,
@@ -31,4 +40,17 @@ internal sealed class MirTestContext
         MirCallableId callable,
         MirInstructionId instruction) =>
         new(callable, instruction);
+
+    private static MirOrigin CreateOrigin()
+    {
+        var compilation = QoraCompiler.Compile(
+            "operation Main() { }",
+            new CompilationOptions(outputPlan: CompilationOutputPlan.HirOnly));
+        var hirArtifact = compilation.Hir.EffectAnalysis
+            ?? throw new InvalidOperationException("The MIR test origin requires final HIR.");
+        var sourceHirNode = hirArtifact.Source.Program.EntryCallable
+            ?? throw new InvalidOperationException("The MIR test origin requires an entry operation.");
+
+        return MirOrigin.FromHirNode(hirArtifact, sourceHirNode);
+    }
 }

@@ -51,8 +51,6 @@ public sealed class MirImmutabilityTests
         var entryBlock = Assert.Single(
             blocks,
             block => block.Id == originalCallable.EntryBlock.Id);
-        var values = originalCallable.Values.ToList();
-        var storages = originalCallable.Storages.ToList();
         var clonedCallable = new MirCallable(
             originalCallable.Id,
             originalCallable.Name,
@@ -60,8 +58,6 @@ public sealed class MirImmutabilityTests
             parameters,
             entryBlock,
             blocks,
-            values,
-            storages,
             originalCallable.Origin);
 
         var callables = new List<MirCallable> { clonedCallable };
@@ -76,13 +72,16 @@ public sealed class MirImmutabilityTests
         callables.Clear();
         parameters.Clear();
         blocks.Clear();
-        values.Clear();
-        storages.Clear();
         blockArguments.Clear();
         instructions.Clear();
         operands.Clear();
         qubitResults.Clear();
-        mutableArrayResults.Add(new MirMutableArrayResult(0, new MirValueId(int.MaxValue)));
+        mutableArrayResults.Add(new MirMutableArrayResult(
+            0,
+            new MirValue(
+                new MirValueId(int.MaxValue),
+                MirType.Array(QType.Int),
+                originalApply.Origin)));
         functors.Add(MirFunctor.Adjoint);
 
         QoraMirVerifier.VerifyOrThrow(program);
@@ -102,7 +101,6 @@ public sealed class MirImmutabilityTests
         Assert.NotNull(effects.EffectAt(effectSite));
         Assert.Single(effects.Effects);
 
-        cfg.EnsureFor(program, clonedCallable.Id);
         Assert.True(clonedCallable.ContainsBlock(clonedBlock.Id));
         Assert.Equal(
             clonedApply.Id,
@@ -116,10 +114,18 @@ public sealed class MirImmutabilityTests
         var source = context.Origin();
 
         var elements = new List<MirValueId> { new(0) };
+        var arrayResult = new MirValue(
+            new MirValueId(1),
+            MirType.Array(QType.Int, knownLength: 1),
+            source);
+        var storage = new MirArrayStorage(
+            new MirStorageId(0),
+            "values",
+            source);
         var create = new MirArrayCreate(
             new MirInstructionId(0),
-            new MirValueId(1),
-            new MirStorageId(0),
+            arrayResult,
+            storage,
             MirArrayInitialization.ExplicitElements,
             elements,
             source);
@@ -128,22 +134,26 @@ public sealed class MirImmutabilityTests
         {
             new MirClassicalCallOperand(new MirValueId(0)),
         };
+        var callResult = new MirValue(
+            new MirValueId(2),
+            MirType.Scalar(QType.Int),
+            source);
         var pureCall = new MirPureCall(
             new MirInstructionId(1),
-            new MirValueId(2),
+            callResult,
             new MirBuiltinFunctionTarget("AsInt"),
             operands,
             source);
 
         var jumpArguments = new List<MirValueId> { new(0) };
-        var jump = new MirJump(new MirBlockId(1), jumpArguments, source);
+        var jump = new MirJump(MirTestContext.BlockId(1), jumpArguments, source);
         var trueArguments = new List<MirValueId> { new(0) };
         var falseArguments = new List<MirValueId> { new(1) };
         var branch = new MirBranch(
             new MirValueId(2),
-            new MirBlockId(1),
+            MirTestContext.BlockId(1),
             trueArguments,
-            new MirBlockId(2),
+            MirTestContext.BlockId(2),
             falseArguments,
             source);
 

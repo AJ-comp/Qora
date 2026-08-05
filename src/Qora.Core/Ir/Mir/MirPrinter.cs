@@ -5,9 +5,9 @@ namespace Qora.Ir.Mir;
 /// <summary>A deterministic, human-readable MIR rendering intended for stage views and golden tests.</summary>
 public static class MirPrinter
 {
-    public static string Print(MirProgram? program)
+    public static string Print(MirProgram program)
     {
-        if (program is null) return string.Empty;
+        ArgumentNullException.ThrowIfNull(program);
 
         var writer = new Writer(program);
         return writer.Print();
@@ -59,7 +59,7 @@ public static class MirPrinter
                          .ThenBy(qubit => qubit.Version.Value))
             {
                 _text.AppendLine(
-                    $"  qubit {Qubit(qubit.Key)} {QubitDefinition(callable, qubit)} {Origin(qubit.Origin)}");
+                    $"  qubit {Qubit(qubit.Key)} {QubitDefinition(qubit)} {Origin(qubit.Origin)}");
             }
 
             foreach (var block in callable.Blocks.OrderBy(block => block.Id.Value))
@@ -69,7 +69,7 @@ public static class MirPrinter
         private void PrintBlock(MirBlock block)
         {
             var arguments = string.Join(", ", block.Arguments.Select(argument =>
-                $"{Value(argument)}: {TypeOf(argument)}"));
+                $"{Value(argument.Id)}: {TypeOf(argument.Id)}"));
             _text.AppendLine($"  {Block(block.Id)}({arguments}): {Origin(block.Origin)}");
             foreach (var instruction in block.Instructions)
                 _text.AppendLine($"    {Instruction(instruction)} {Origin(instruction.Origin)}");
@@ -79,34 +79,34 @@ public static class MirPrinter
         private string Instruction(MirInstruction instruction) => instruction switch
         {
             MirConstant constant =>
-                $"{Result(constant.Result)} = const {TypeOf(constant.Result)} {constant.Text}",
+                $"{Result(constant.Result.Id)} = const {TypeOf(constant.Result.Id)} {constant.Text}",
 
             MirUnary unary =>
-                $"{Result(unary.Result)} = {Unary(unary.Operator)} {Value(unary.Operand)}",
+                $"{Result(unary.Result.Id)} = {Unary(unary.Operator)} {Value(unary.Operand)}",
 
             MirBinary binary =>
-                $"{Result(binary.Result)} = {Binary(binary.Operator)} {Value(binary.Left)}, {Value(binary.Right)}",
+                $"{Result(binary.Result.Id)} = {Binary(binary.Operator)} {Value(binary.Left)}, {Value(binary.Right)}",
 
             MirConvert convert =>
-                $"{Result(convert.Result)} = convert {Value(convert.Operand)} to {TypeOf(convert.Result)}",
+                $"{Result(convert.Result.Id)} = convert {Value(convert.Operand)} to {TypeOf(convert.Result.Id)}",
 
             MirArrayCreate create =>
-                $"{Result(create.Result)} = array.create ${create.Storage} {TypeOf(create.Result)}"
+                $"{Result(create.Result.Id)} = array.create ${create.Storage.Id} {TypeOf(create.Result.Id)}"
                 + (create.Initialization == MirArrayInitialization.ZeroInitialized
                     ? " zero"
                     : $" {{{string.Join(", ", create.Elements.Select(Value))}}}"),
 
             MirArrayLength length =>
-                $"{Result(length.Result)} = array.length {Value(length.Array)}",
+                $"{Result(length.Result.Id)} = array.length {Value(length.Array)}",
 
             MirArrayLoad load =>
-                $"{Result(load.Result)} = array.load {Value(load.Array)}[{Value(load.Index)}]",
+                $"{Result(load.Result.Id)} = array.load {Value(load.Array)}[{Value(load.Index)}]",
 
             MirArrayStore store =>
-                $"{Result(store.Result)} = array.store {Value(store.Array)}[{Value(store.Index)}], {Value(store.Value)}",
+                $"{Result(store.Result.Id)} = array.store {Value(store.Array)}[{Value(store.Index)}], {Value(store.Value)}",
 
             MirPureCall call =>
-                $"{Result(call.Result)} = call {Target(call.Target)}({string.Join(", ", call.Operands.Select(Operand))})",
+                $"{Result(call.Result.Id)} = call {Target(call.Target)}({string.Join(", ", call.Operands.Select(Operand))})",
 
             MirQubitAllocate allocation =>
                 $"qubit.allocate {Qubit(allocation.Result.Key)}",
@@ -117,7 +117,7 @@ public static class MirPrinter
                 + MutableResults(apply.MutableArrayResults),
 
             MirMeasure measure =>
-                $"({Result(measure.Result)}, {Qubit(measure.QubitResult.Key)})"
+                $"({Result(measure.Result.Id)}, {Qubit(measure.QubitResult.Key)})"
                 + $" = measure {Access(measure.Qubit)}",
 
             _ => $"<{instruction.GetType().Name}>",
@@ -148,8 +148,8 @@ public static class MirPrinter
         private string Parameter(IMirParameter parameter) => parameter switch
         {
             MirClassicalParameter classical =>
-                $"{Mode(classical.Ownership, classical.Access)}{Value(classical.Value)} {classical.Name}: {TypeOf(classical.Value)}"
-                + (classical.Storage is MirStorageId storage ? $" storage ${storage}" : string.Empty)
+                $"{Mode(classical.Ownership, classical.Access)}{Value(classical.Value.Id)} {classical.Name}: {TypeOf(classical.Value.Id)}"
+                + (classical.Storage is { } storage ? $" storage ${storage.Id}" : string.Empty)
                 + (classical.MinimumLength > 0
                     ? $" minimum-length {classical.MinimumLength}"
                     : string.Empty),
@@ -208,16 +208,14 @@ public static class MirPrinter
         {
             var results = apply.QubitResults
                 .Select(result => Qubit(result.Key))
-                .Concat(apply.MutableArrayResults.Select(result => ResultName(result.Result)))
+                .Concat(apply.MutableArrayResults.Select(result => ResultName(result.Result.Id)))
                 .ToArray();
             return results.Length == 0
                 ? string.Empty
                 : $"({string.Join(", ", results)}) = ";
         }
 
-        private static string QubitDefinition(
-            MirCallable callable,
-            MirQubit qubit) => qubit switch
+        private string QubitDefinition(MirQubit qubit) => qubit switch
         {
             MirQubitParameter parameter =>
                 $"{parameter.Name}: {QubitShape(parameter.IsArray, parameter.Length)} [parameter]",
@@ -226,7 +224,7 @@ public static class MirPrinter
             MirQubitAfterInstruction =>
                 "[instruction-result]",
             MirQubitPhi phi =>
-                $"[phi {Block(FindPhiBlock(callable, phi))}"
+                $"[phi {Block(FindPhiBlock(phi))}"
                 + (phi.Inputs.Count == 0
                     ? "]"
                     : $" <- {string.Join(", ", phi.Inputs.Select(input =>
@@ -234,10 +232,10 @@ public static class MirPrinter
             _ => $"[unknown {qubit.GetType().Name}]",
         };
 
-        private static MirBlockId FindPhiBlock(
-            MirCallable callable,
-            MirQubitPhi phi)
+        private MirBlockId FindPhiBlock(MirQubitPhi phi)
         {
+            var callable = _currentCallable
+                ?? throw new InvalidOperationException("no MIR callable is being printed");
             foreach (var block in callable.Blocks)
             {
                 foreach (var candidate in block.QubitPhis)
@@ -261,7 +259,7 @@ public static class MirPrinter
         private static string MutableResults(IReadOnlyList<MirMutableArrayResult> results) =>
             results.Count == 0
                 ? string.Empty
-                : $" mutable [{string.Join(", ", results.Select(result => $"{result.OperandIndex}->{Value(result.Result)}"))}]";
+                : $" mutable [{string.Join(", ", results.Select(result => $"{result.OperandIndex}->{Value(result.Result.Id)}"))}]";
 
         private static string Functors(IReadOnlyList<MirFunctor> functors) =>
             functors.Count == 0

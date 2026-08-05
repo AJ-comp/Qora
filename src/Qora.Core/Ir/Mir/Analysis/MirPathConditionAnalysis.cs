@@ -39,13 +39,12 @@ public sealed class MirPathCondition
     private MirPathCondition(
         MirPathConditionKind kind,
         MirPathPredicate? predicate,
-        IReadOnlyList<MirPathCondition> terms,
-        string key)
+        IReadOnlyList<MirPathCondition> terms)
     {
         Kind = kind;
         Predicate = predicate;
-        _terms = Array.AsReadOnly(terms.ToArray());
-        _predicates = Array.AsReadOnly(
+        _terms = MirCollections.Freeze(terms);
+        _predicates = MirCollections.Freeze(
             terms
                 .SelectMany(term => term.Predicates)
                 .Concat(predicate is null
@@ -54,9 +53,20 @@ public sealed class MirPathCondition
                 .Distinct()
                 .OrderBy(item => item.Controller.Value)
                 .ThenBy(item => item.Condition.Value)
-                .ThenBy(item => item.ExpectedValue)
-                .ToArray());
-        Key = key;
+                .ThenBy(item => item.ExpectedValue));
+        Key = kind switch
+        {
+            MirPathConditionKind.Never => "0",
+            MirPathConditionKind.Always => "1",
+            MirPathConditionKind.Predicate when predicate is not null =>
+                $"p:{predicate.Condition.Value}:{predicate.ExpectedValue}:{predicate.Controller.Value}",
+            MirPathConditionKind.All =>
+                $"&({string.Join(",", terms.Select(term => term.Key))})",
+            MirPathConditionKind.Any =>
+                $"|({string.Join(",", terms.Select(term => term.Key))})",
+            _ => throw new ArgumentException(
+                $"path condition {kind} has an invalid predicate/term shape"),
+        };
     }
 
     public MirPathConditionKind Kind { get; }
@@ -77,14 +87,12 @@ public sealed class MirPathCondition
     public static MirPathCondition Never { get; } = new(
         MirPathConditionKind.Never,
         predicate: null,
-        Array.Empty<MirPathCondition>(),
-        "0");
+        Array.Empty<MirPathCondition>());
 
     public static MirPathCondition Always { get; } = new(
         MirPathConditionKind.Always,
         predicate: null,
-        Array.Empty<MirPathCondition>(),
-        "1");
+        Array.Empty<MirPathCondition>());
 
     internal static MirPathCondition Test(MirPathPredicate predicate)
     {
@@ -92,8 +100,7 @@ public sealed class MirPathCondition
         return new MirPathCondition(
             MirPathConditionKind.Predicate,
             predicate,
-            Array.Empty<MirPathCondition>(),
-            $"p:{predicate.Condition.Value}:{predicate.ExpectedValue}:{predicate.Controller.Value}");
+            Array.Empty<MirPathCondition>());
     }
 
     internal static MirPathCondition And(params MirPathCondition[] conditions) =>
@@ -119,14 +126,13 @@ public sealed class MirPathCondition
             return Always;
 
         var identity = isAll ? Always : Never;
-        var terms = flattened
+        var terms = MirCollections.Freeze(flattened
             .Where(condition => condition != identity)
             .GroupBy(condition => condition.Key, StringComparer.Ordinal)
             .Select(group => group.First())
-            .OrderBy(condition => condition.Key, StringComparer.Ordinal)
-            .ToArray();
-        if (terms.Length == 0) return identity;
-        if (terms.Length == 1) return terms[0];
+            .OrderBy(condition => condition.Key, StringComparer.Ordinal));
+        if (terms.Count == 0) return identity;
+        if (terms.Count == 1) return terms[0];
 
         // One immutable SSA Boolean cannot be both true and false. For conjunction this is impossible;
         // for disjunction the two direct alternatives cover every value and therefore form a tautology.
@@ -142,8 +148,7 @@ public sealed class MirPathCondition
         return new MirPathCondition(
             kind,
             predicate: null,
-            terms,
-            $"{(isAll ? "&" : "|")}({string.Join(",", terms.Select(term => term.Key))})");
+            terms);
     }
 }
 
@@ -175,13 +180,12 @@ public sealed class MirPathConditionSnapshot
     }
 
     public MirCallableId Callable => _cfg.Callable;
-
-    internal bool IsFor(MirProgram program, MirCallableId callable) =>
-        _cfg.IsFor(program, callable);
+    internal MirControlFlowSnapshot ControlFlow => _cfg;
 
     internal void EnsureFor(MirProgram program, MirCallableId callable)
     {
-        if (!IsFor(program, callable))
+        if (!ReferenceEquals(_cfg.SourceProgram, program)
+            || !ReferenceEquals(_cfg.SourceCallable, program.FindCallable(callable)))
             throw new InvalidOperationException(
                 $"the MIR path-condition analysis does not belong to callable {callable} "
                 + $"in the requested MIR program; it was created for callable {Callable}");
@@ -217,24 +221,18 @@ internal static class MirPathConditionAnalysis
     {
         ArgumentNullException.ThrowIfNull(program);
 
-        var callable = program.FindCallable(callableId)
-            ?? throw new ArgumentOutOfRangeException(
-                nameof(callableId),
-                callableId,
-                $"callable {callableId} does not belong to the MIR program");
         var cfg = MirControlFlowAnalysis.Analyze(program, callableId);
-        return AnalyzeVerified(program, callable, cfg);
+        return AnalyzeVerified(cfg);
     }
 
     /// <summary>
     /// Computes path facts from the canonical CFG of an already verified MIR snapshot.
     /// </summary>
     internal static MirPathConditionSnapshot AnalyzeVerified(
-        MirProgram program,
-        MirCallable callable,
         MirControlFlowSnapshot cfg)
     {
-        cfg.EnsureFor(program, callable.Id);
+        ArgumentNullException.ThrowIfNull(cfg);
+        var callable = cfg.SourceCallable;
         var reachable = callable.Blocks
             .Where(block => cfg.IsReachable(block.Id))
             .Select(block => block.Id)

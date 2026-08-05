@@ -1,5 +1,4 @@
 using System.Collections.Frozen;
-using System.Collections.ObjectModel;
 
 namespace Qora.Ir.Mir.Analysis;
 
@@ -11,15 +10,15 @@ namespace Qora.Ir.Mir.Analysis;
 /// </summary>
 public sealed class MirProgramPoint
 {
-    private readonly object _snapshotIdentity;
+    private readonly MirControlFlowSnapshot _owner;
 
     internal MirProgramPoint(
-        object snapshotIdentity,
+        MirControlFlowSnapshot owner,
         MirBlockId block,
         int instructionIndex,
         MirInstructionId? instruction)
     {
-        _snapshotIdentity = snapshotIdentity;
+        _owner = owner;
         Block = block;
         InstructionIndex = instructionIndex;
         Instruction = instruction;
@@ -36,8 +35,8 @@ public sealed class MirProgramPoint
     public bool IsBeforeInstruction => Instruction is not null;
     public bool IsTerminator => Instruction is null;
 
-    internal bool BelongsTo(object snapshotIdentity) =>
-        ReferenceEquals(_snapshotIdentity, snapshotIdentity);
+    internal bool BelongsTo(MirControlFlowSnapshot owner) =>
+        ReferenceEquals(_owner, owner);
 
     public override string ToString() =>
         Instruction is MirInstructionId instruction
@@ -54,7 +53,6 @@ public sealed class MirControlFlowSnapshot
 {
     private readonly MirProgram _sourceProgram;
     private readonly MirCallable _sourceCallable;
-    private readonly object _snapshotIdentity = new();
     private readonly FrozenDictionary<MirBlockId, IReadOnlyList<MirBlockId>> _successors;
     private readonly FrozenDictionary<MirBlockId, IReadOnlyList<MirBlockId>> _predecessors;
     private readonly FrozenDictionary<MirBlockId, FrozenSet<MirBlockId>> _reachableFrom;
@@ -90,7 +88,7 @@ public sealed class MirControlFlowSnapshot
             pair => pair.Value.ToFrozenSet());
         _reachable = reachable.ToFrozenSet();
 
-        ReachableBlocks = ReadOnly(
+        ReachableBlocks = Array.AsReadOnly(
             reachable
                 .OrderBy(id => id.Value)
                 .ToArray());
@@ -105,7 +103,7 @@ public sealed class MirControlFlowSnapshot
                 instructionPoints.Add(
                     instruction.Id,
                     new MirProgramPoint(
-                        _snapshotIdentity,
+                        this,
                         block.Id,
                         index,
                         instruction.Id));
@@ -115,7 +113,7 @@ public sealed class MirControlFlowSnapshot
         _terminatorPoints = sourceCallable.Blocks.ToFrozenDictionary(
             block => block.Id,
             block => new MirProgramPoint(
-                _snapshotIdentity,
+                this,
                 block.Id,
                 block.Instructions.Count,
                 instruction: null));
@@ -124,18 +122,8 @@ public sealed class MirControlFlowSnapshot
     public MirCallableId Callable => _sourceCallable.Id;
     public MirBlockId EntryBlock => _sourceCallable.EntryBlock.Id;
     public IReadOnlyList<MirBlockId> ReachableBlocks { get; }
-
-    internal bool IsFor(MirProgram program, MirCallableId callable) =>
-        ReferenceEquals(_sourceProgram, program)
-        && ReferenceEquals(_sourceCallable, program.FindCallable(callable));
-
-    internal void EnsureFor(MirProgram program, MirCallableId callable)
-    {
-        if (!IsFor(program, callable))
-            throw new InvalidOperationException(
-                $"the MIR control-flow analysis does not belong to callable {callable} "
-                + $"in the requested MIR program; it was created for callable {Callable}");
-    }
+    internal MirProgram SourceProgram => _sourceProgram;
+    internal MirCallable SourceCallable => _sourceCallable;
 
     public bool IsReachable(MirBlockId block)
     {
@@ -218,15 +206,15 @@ public sealed class MirControlFlowSnapshot
     public bool IsValueAvailableAt(MirValueId value, MirProgramPoint point)
     {
         EnsurePoint(point);
-        var definition = _sourceCallable.RequireValue(value);
+        var definition = _sourceCallable.DefinitionOf(value);
 
-        return definition.Definition.Kind switch
+        return definition.Kind switch
         {
             MirValueDefinitionKind.Parameter => true,
             MirValueDefinitionKind.BlockArgument =>
-                IsBlockDefinitionAvailable(definition.Definition.Block, point.Block),
+                IsBlockDefinitionAvailable(definition.Block, point.Block),
             MirValueDefinitionKind.InstructionResult =>
-                IsInstructionDefinitionAvailable(definition.Definition.Instruction, point),
+                IsInstructionDefinitionAvailable(definition.Instruction, point),
             _ => false,
         };
     }
@@ -265,13 +253,10 @@ public sealed class MirControlFlowSnapshot
     private void EnsurePoint(MirProgramPoint? point)
     {
         ArgumentNullException.ThrowIfNull(point);
-        if (!point.BelongsTo(_snapshotIdentity))
+        if (!point.BelongsTo(this))
             throw new InvalidOperationException(
                 "the MIR program point belongs to a different control-flow snapshot");
     }
-
-    private static ReadOnlyCollection<T> ReadOnly<T>(IReadOnlyList<T> items) =>
-        Array.AsReadOnly(items.ToArray());
 
 }
 

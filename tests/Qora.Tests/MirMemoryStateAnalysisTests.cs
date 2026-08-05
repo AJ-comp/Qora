@@ -41,7 +41,7 @@ public sealed class MirMemoryStateAnalysisTests
             store.Id,
             Assert.Single(oldAvailability.ClobberingMutations).Instruction);
 
-        var currentAvailability = analysis.CheckAtTerminator(store.Result, exit.Id);
+        var currentAvailability = analysis.CheckAtTerminator(store.Result.Id, exit.Id);
         Assert.True(currentAvailability.IsAvailable);
     }
 
@@ -132,7 +132,7 @@ public sealed class MirMemoryStateAnalysisTests
             main.Blocks.SelectMany(block => block.Instructions)
                 .OfType<MirQuantumApply>());
         var input = Assert.IsType<MirClassicalCallOperand>(call.Operands[0]).Value;
-        var output = Assert.Single(call.MutableArrayResults).Result;
+        var output = Assert.Single(call.MutableArrayResults).Result.Id;
         var analysis = MirMemoryStateAnalysis.Analyze(program, main.Id);
         var exit = ExitBlock(main);
 
@@ -170,7 +170,7 @@ public sealed class MirMemoryStateAnalysisTests
             .Select(operand => operand.Value)
             .ToArray();
         var outputs = call.MutableArrayResults
-            .Select(result => result.Result)
+            .Select(result => result.Result.Id)
             .ToArray();
         var analysis = MirMemoryStateAnalysis.Analyze(program, main.Id);
         var exit = ExitBlock(main);
@@ -216,7 +216,7 @@ public sealed class MirMemoryStateAnalysisTests
         var headerState = Assert.Single(
             main.Values,
             value => value.Type.IsArray
-                && value.Definition.Kind == MirValueDefinitionKind.BlockArgument);
+                && main.DefinitionOf(value).Kind == MirValueDefinitionKind.BlockArgument);
         var exit = Assert.Single(
             main.Blocks,
             block => block.Terminator is MirReturn);
@@ -247,10 +247,10 @@ public sealed class MirMemoryStateAnalysisTests
         var merge = Assert.Single(
             main.Blocks,
             block => block.Arguments.Any(
-                argument => main.RequireValue(argument).Type.IsArray));
+                argument => argument.Type.IsArray));
         var argumentIndex = merge.Arguments
             .Select((argument, index) => (argument, index))
-            .Single(item => main.RequireValue(item.argument).Type.IsArray)
+            .Single(item => item.argument.Type.IsArray)
             .index;
         var storeBlock = Assert.Single(
             main.Blocks,
@@ -258,7 +258,7 @@ public sealed class MirMemoryStateAnalysisTests
                 instruction => instruction.Id == store.Id));
         var jump = Assert.IsType<MirJump>(storeBlock.Terminator);
         Assert.Equal(merge.Id, jump.Target);
-        Assert.Equal(store.Result, jump.Arguments[argumentIndex]);
+        Assert.Equal(store.Result.Id, jump.Arguments[argumentIndex]);
 
         var staleJump = jump with
         {
@@ -296,10 +296,10 @@ public sealed class MirMemoryStateAnalysisTests
         var header = Assert.Single(
             main.Blocks,
             block => block.Arguments.Any(
-                argument => main.RequireValue(argument).Type.IsArray));
+                argument => argument.Type.IsArray));
         var argumentIndex = header.Arguments
             .Select((argument, index) => (argument, index))
-            .Single(item => main.RequireValue(item.argument).Type.IsArray)
+            .Single(item => item.argument.Type.IsArray)
             .index;
         var headerState = header.Arguments[argumentIndex];
         var cfg = MirControlFlowAnalysis.Analyze(program, main.Id);
@@ -310,13 +310,13 @@ public sealed class MirMemoryStateAnalysisTests
                 && jump.Target == header.Id
                 && cfg.CanReach(header.Id, block.Id));
         var jump = Assert.IsType<MirJump>(backedge.Terminator);
-        Assert.NotEqual(headerState, jump.Arguments[argumentIndex]);
+        Assert.NotEqual(headerState.Id, jump.Arguments[argumentIndex]);
 
         var staleJump = jump with
         {
             Arguments = jump.Arguments
                 .Select((value, index) => index == argumentIndex
-                    ? headerState
+                    ? headerState.Id
                     : value)
                 .ToArray(),
         };
@@ -368,8 +368,6 @@ public sealed class MirMemoryStateAnalysisTests
             callable.Parameters,
             rewrittenEntryBlock,
             rewrittenBlocks,
-            callable.Values,
-            callable.Storages,
             callable.Origin);
         var rewrittenCallables = program.Callables
             .Select(candidate => candidate.Id == callable.Id

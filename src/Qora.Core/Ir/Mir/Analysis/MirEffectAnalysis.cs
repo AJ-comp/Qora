@@ -1,5 +1,4 @@
 using System.Collections.Frozen;
-using System.Collections.ObjectModel;
 
 namespace Qora.Ir.Mir.Analysis;
 
@@ -189,13 +188,10 @@ internal sealed class MirFormalQubitEffectQuery
     private readonly Dictionary<MirCallableId, MirCallableEffectSummary> _summaries = new();
     private readonly HashSet<MirCallableId> _summaryStack = new();
 
-    internal MirFormalQubitEffectQuery(
-        MirProgram program,
-        MirCallGraph callGraph)
+    internal MirFormalQubitEffectQuery(MirCallGraph callGraph)
     {
-        _program = program ?? throw new ArgumentNullException(nameof(program));
         _callGraph = callGraph ?? throw new ArgumentNullException(nameof(callGraph));
-        _callGraph.EnsureFor(program);
+        _program = callGraph.SourceProgram;
     }
 
     internal IReadOnlyList<MirCallableEffectSummary> SummarizeAll()
@@ -204,16 +200,7 @@ internal sealed class MirFormalQubitEffectQuery
             SummaryOf(callable);
         return MirCollections.Freeze(
             _program.Callables
-                .Select(callable => _summaries[callable.Id])
-                .ToArray());
-    }
-
-    internal MirCallableEffectSummary SummaryOf(MirCallableId callable)
-    {
-        if (_program.FindCallable(callable) is not { } definition)
-            throw new InvalidOperationException(
-                $"QINTERNAL: effect query targets missing callable {callable}");
-        return SummaryOf(definition);
+                .Select(callable => _summaries[callable.Id]));
     }
 
     internal MirQubitEffectClassification ClassifyApply(
@@ -222,10 +209,8 @@ internal sealed class MirFormalQubitEffectQuery
     {
         var classified = apply.Target switch
         {
-            MirBuiltinGateTarget builtin =>
-                ClassifyBuiltin(caller, apply, builtin),
-            MirUserCallableTarget user =>
-                ClassifyUserCall(caller, apply, user),
+            MirBuiltinGateTarget => ClassifyBuiltin(caller, apply),
+            MirUserCallableTarget => ClassifyUserCall(caller, apply),
             _ => throw new InvalidOperationException(
                 $"QINTERNAL: quantum apply {apply.Id} uses non-quantum target " +
                 $"`{apply.Target.DisplayName}`"),
@@ -293,7 +278,7 @@ internal sealed class MirFormalQubitEffectQuery
                          .Select(call => call.Callee)
                          .Distinct())
             {
-                SummaryOf(dependency);
+                SummaryOf(_program.RequireCallable(dependency));
             }
 
             var formalQubits = callable.Parameters
@@ -326,12 +311,12 @@ internal sealed class MirFormalQubitEffectQuery
                 }
             }
 
-            var formalEffects = callable.Parameters
-                .OfType<MirQubitParameter>()
-                .Select(parameter => new MirFormalQubitEffect(
-                    parameter.Id,
-                    flagsByQubit[parameter.Id]))
-                .ToArray();
+            var formalEffects = MirCollections.Freeze(
+                callable.Parameters
+                    .OfType<MirQubitParameter>()
+                    .Select(parameter => new MirFormalQubitEffect(
+                        parameter.Id,
+                        flagsByQubit[parameter.Id])));
             complete = new MirCallableEffectSummary(
                 callable.Id,
                 formalEffects,
@@ -351,9 +336,9 @@ internal sealed class MirFormalQubitEffectQuery
 
     private MirQubitEffectClassification ClassifyBuiltin(
         MirCallable callable,
-        MirQuantumApply apply,
-        MirBuiltinGateTarget target)
+        MirQuantumApply apply)
     {
+        var target = (MirBuiltinGateTarget)apply.Target;
         if (!QoraGates.Gates.TryGetValue(target.Name, out var info))
             throw new InvalidOperationException(
                 $"QINTERNAL: quantum apply {apply.Id} targets unknown built-in gate `{target.Name}`");
@@ -407,9 +392,9 @@ internal sealed class MirFormalQubitEffectQuery
 
     private MirQubitEffectClassification ClassifyUserCall(
         MirCallable caller,
-        MirQuantumApply apply,
-        MirUserCallableTarget target)
+        MirQuantumApply apply)
     {
+        var target = (MirUserCallableTarget)apply.Target;
         if (_program.FindCallable(target.Callable) is not { } callee)
             throw new InvalidOperationException(
                 $"QINTERNAL: quantum apply {apply.Id} targets missing callable {target.Callable}");
@@ -521,19 +506,10 @@ internal static class MirEffectAnalysis
     /// The caller must first validate structural references, operand arity and operand kinds.
     /// </summary>
     internal static MirFormalQubitEffectQuery CreateFormalQubitEffectQueryUnchecked(
-        MirProgram program) =>
-        CreateFormalQubitEffectQueryUnchecked(
-            program,
-            MirCallGraphAnalysis.AnalyzeVerified(program));
-
-    internal static MirFormalQubitEffectQuery CreateFormalQubitEffectQueryUnchecked(
-        MirProgram program,
         MirCallGraph callGraph)
     {
-        ArgumentNullException.ThrowIfNull(program);
         ArgumentNullException.ThrowIfNull(callGraph);
-        callGraph.EnsureFor(program);
-        return new MirFormalQubitEffectQuery(program, callGraph);
+        return new MirFormalQubitEffectQuery(callGraph);
     }
 
     internal static MirEffectSnapshot Analyze(MirProgram program)
@@ -541,7 +517,6 @@ internal static class MirEffectAnalysis
         ArgumentNullException.ThrowIfNull(program);
         var callGraph = MirCallGraphAnalysis.AnalyzeVerified(program);
         return new Analyzer(
-            program,
             callGraph,
             callable => MirStorageProvenanceAnalysis.Analyze(program, callable),
             callable => MirPathConditionAnalysis.Analyze(program, callable)).Run();
@@ -551,17 +526,14 @@ internal static class MirEffectAnalysis
     /// Computes effects from dependency providers owned by the same verified MIR snapshot.
     /// </summary>
     internal static MirEffectSnapshot AnalyzeVerified(
-        MirProgram program,
         MirCallGraph callGraph,
         Func<MirCallableId, MirStorageProvenanceSnapshot> storageProvenance,
         Func<MirCallableId, MirPathConditionSnapshot> pathConditions)
     {
-        ArgumentNullException.ThrowIfNull(program);
         ArgumentNullException.ThrowIfNull(callGraph);
         ArgumentNullException.ThrowIfNull(storageProvenance);
         ArgumentNullException.ThrowIfNull(pathConditions);
-        callGraph.EnsureFor(program);
-        return new Analyzer(program, callGraph, storageProvenance, pathConditions).Run();
+        return new Analyzer(callGraph, storageProvenance, pathConditions).Run();
     }
 
     private sealed class Analyzer
@@ -572,13 +544,12 @@ internal static class MirEffectAnalysis
         private readonly Func<MirCallableId, MirPathConditionSnapshot> _pathConditions;
 
         public Analyzer(
-            MirProgram program,
             MirCallGraph callGraph,
             Func<MirCallableId, MirStorageProvenanceSnapshot> storageProvenance,
             Func<MirCallableId, MirPathConditionSnapshot> pathConditions)
         {
-            _program = program;
-            _qubitEffects = CreateFormalQubitEffectQueryUnchecked(program, callGraph);
+            _program = callGraph.SourceProgram;
+            _qubitEffects = CreateFormalQubitEffectQueryUnchecked(callGraph);
             _storageProvenance = storageProvenance;
             _pathConditions = pathConditions;
         }
@@ -605,7 +576,6 @@ internal static class MirEffectAnalysis
                             case MirQuantumApply apply:
                                 effects.Add(DescribeApply(
                                     callable,
-                                    block,
                                     apply,
                                     storage,
                                     paths));
@@ -613,7 +583,6 @@ internal static class MirEffectAnalysis
                             case MirMeasure measure:
                                 effects.Add(DescribeMeasure(
                                     callable,
-                                    block,
                                     measure,
                                     paths));
                                 break;
@@ -627,16 +596,16 @@ internal static class MirEffectAnalysis
 
         private MirQuantumInstructionEffect DescribeApply(
             MirCallable callable,
-            MirBlock block,
             MirQuantumApply apply,
             MirStorageProvenanceSnapshot storage,
             MirPathConditionSnapshot paths)
         {
+            var block = callable.RequireInstructionLocation(apply.Id).Block;
             var classified = _qubitEffects.ClassifyApply(callable, apply);
             var witnesses = new List<MirClassicalWitness>();
             var arrays = new List<MirArrayStateOperand>();
             var mutableResultByOperand = apply.MutableArrayResults
-                .ToDictionary(result => result.OperandIndex, result => result.Result);
+                .ToDictionary(result => result.OperandIndex, result => result.Result.Id);
 
             for (var operandIndex = 0; operandIndex < apply.Operands.Count; operandIndex++)
             {
@@ -683,8 +652,8 @@ internal static class MirEffectAnalysis
             return new MirQuantumInstructionEffect(
                 Site(callable, apply),
                 classified.Effects,
-                ReadOnly(witnesses),
-                ReadOnly(arrays),
+                witnesses,
+                arrays,
                 paths.ConditionFor(block.Id),
                 paths.MultiplicityOf(block.Id),
                 classified.IsIrreversible,
@@ -693,10 +662,10 @@ internal static class MirEffectAnalysis
 
         private MirQuantumInstructionEffect DescribeMeasure(
             MirCallable callable,
-            MirBlock block,
             MirMeasure measure,
             MirPathConditionSnapshot paths)
         {
+            var block = callable.RequireInstructionLocation(measure.Id).Block;
             var classified = _qubitEffects.ClassifyMeasure(callable, measure);
             var witnesses = new List<MirClassicalWitness>();
             if (measure.Qubit.Index is MirValueId index)
@@ -711,7 +680,7 @@ internal static class MirEffectAnalysis
             return new MirQuantumInstructionEffect(
                 Site(callable, measure),
                 Qubits: classified.Effects,
-                ClassicalWitnesses: ReadOnly(witnesses),
+                ClassicalWitnesses: witnesses,
                 ArrayStates: Array.Empty<MirArrayStateOperand>(),
                 PathCondition: paths.ConditionFor(block.Id),
                 ExecutionMultiplicity: paths.MultiplicityOf(block.Id),
@@ -731,11 +700,5 @@ internal static class MirEffectAnalysis
             MirCallable callable,
             MirInstruction instruction) =>
             new(callable.Id, instruction.Id);
-
-        private static ReadOnlyCollection<T> ReadOnly<T>(IReadOnlyList<T> items) =>
-            Array.AsReadOnly(items.ToArray());
     }
-
-    private static ReadOnlyCollection<T> ReadOnly<T>(IReadOnlyList<T> items) =>
-        Array.AsReadOnly(items.ToArray());
 }

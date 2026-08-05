@@ -7,7 +7,7 @@ namespace Qora.Ir;
 internal sealed record MirOpenQasmLoweringError(
     string Code,
     string Message,
-    MirOrigin? Origin);
+    MirOrigin Origin);
 
 internal sealed class MirOpenQasmLoweringResult
 {
@@ -95,9 +95,7 @@ internal static class MirOpenQasmLowering
             }
             _targetCallables = targetCallables;
             _callableNames = AllocateCallableNames(source.Program.Callables);
-            _hiddenArrays = HiddenArrayPlan.Build(
-                source.Analyses.CallGraph,
-                source.Program);
+            _hiddenArrays = HiddenArrayPlan.Build(source);
         }
 
         public MirOpenQasmTargetProgram Lower()
@@ -222,7 +220,7 @@ internal static class MirOpenQasmLowering
                 _callableNames[_callable.Id],
                 _parameters,
                 _callable.ReturnType is MirType returns
-                    ? TargetType(returns, declaration: false)
+                    ? TargetType(returns)
                     : null,
                 body);
         }
@@ -254,10 +252,8 @@ internal static class MirOpenQasmLowering
                     $"{string.Join(", ", missing)}");
             }
 
-            if (_callable.Kind == MirCallableKind.Function)
+            if (_returnStorage is MirQasmDeclarationId returnStorage)
             {
-                var returnStorage = _returnStorage
-                    ?? throw Internal($"function `{_callable.Name}` has no target return storage");
                 flow.Add(
                     new MirQasmReturnStatement(
                         new MirQasmDeclarationReferenceExpression(returnStorage)));
@@ -323,8 +319,7 @@ internal static class MirOpenQasmLowering
                 {
                     case MirClassicalParameter classical:
                     {
-                        var classicalType =
-                            _callable.RequireValue(classical.Value).Type;
+                        var classicalType = classical.Value.Type;
                         if (classicalType is { IsArray: true, ElementType: QType.Bit }
                             && classical.Ownership == QOwnershipMode.Borrowed
                             && classical.Access == QAccessMode.Mutable)
@@ -332,11 +327,9 @@ internal static class MirOpenQasmLowering
                             throw Unsupported(
                                 $"mutable bit-array parameter `{classical.Name}` requires caller-visible writes, " +
                                 "but OpenQASM bit-register parameters are passed by value",
-                                _callable.RequireValue(classical.Value).Origin);
+                                classical.Value.Origin);
                         }
-                        var targetType = TargetType(
-                            classicalType,
-                            declaration: false);
+                        var targetType = TargetType(classicalType);
                         var access = targetType is MirQasmArrayType
                             ? classical.Access == QAccessMode.Mutable
                                 ? MirQasmParameterAccess.Mutable
@@ -351,16 +344,12 @@ internal static class MirOpenQasmLowering
                         var place = new MirQasmParameterReferenceExpression(targetId);
                         if (classicalType.IsArray)
                         {
-                            if (classical.Storage is not MirStorageId storage)
-                            {
-                                throw Internal(
-                                    $"array parameter `{classical.Name}` has no MIR storage identity");
-                            }
-                            _storagePlaces.Add(storage, place);
+                            var storage = classical.Storage!;
+                            _storagePlaces.Add(storage.Id, place);
                         }
                         else
                         {
-                            _scalarValues.Add(classical.Value, place);
+                            _scalarValues.Add(classical.Value.Id, place);
                         }
                         break;
                     }
@@ -397,8 +386,8 @@ internal static class MirOpenQasmLowering
         {
             foreach (var key in _hiddenArrays.RequiredBy(_callable.Id))
             {
-                var storage = _hiddenArrays.RequireStorage(key);
                 var storageOwner = _program.RequireCallable(key.Owner);
+                var storage = storageOwner.RequireStorage(key.Storage);
                 var storageType = storageOwner.StorageTypeOf(storage);
                 var targetType = RequireGeneralArrayType(storageType, storage.Name);
                 MirQasmExpression place;
@@ -516,7 +505,7 @@ internal static class MirOpenQasmLowering
                     new MirQasmValueDeclarationStatement(
                         declaration,
                         name,
-                        TargetType(value.Type, declaration: true)));
+                        TargetType(value.Type)));
                 _scalarValues.Add(
                     value.Id,
                     new MirQasmDeclarationReferenceExpression(declaration));
@@ -529,63 +518,52 @@ internal static class MirOpenQasmLowering
             {
                 switch (block.Terminator)
                 {
-                    case MirJump jump:
-                        PrepareEdge(block.Id, 0, jump.Target, jump.Arguments);
+                    case MirJump:
+                        PrepareEdge(block, 0);
                         break;
-                    case MirBranch branch:
-                        PrepareEdge(
-                            block.Id,
-                            0,
-                            branch.TrueTarget,
-                            branch.TrueArguments);
-                        PrepareEdge(
-                            block.Id,
-                            1,
-                            branch.FalseTarget,
-                            branch.FalseArguments);
+                    case MirBranch:
+                        PrepareEdge(block, 0);
+                        PrepareEdge(block, 1);
                         break;
                 }
             }
         }
 
         private void PrepareEdge(
-            MirBlockId source,
-            int successorOrdinal,
-            MirBlockId target,
-            IReadOnlyList<MirValueId> arguments)
+            MirBlock sourceBlock,
+            int successorOrdinal)
         {
+            var (target, arguments) = EdgeOf(sourceBlock, successorOrdinal);
             var parameters = _callable.RequireBlock(target).Arguments;
             for (var index = 0; index < arguments.Count; index++)
             {
-                var parameterType =
-                    _callable.RequireValue(parameters[index]).Type;
+                var parameterType = parameters[index].Type;
                 if (parameterType.IsArray) continue;
                 var declaration = NextDeclaration();
                 var name = _names.Fresh(
-                    $"edge_{source.Value}_{successorOrdinal}_{index}");
+                    $"edge_{sourceBlock.Id.Value}_{successorOrdinal}_{index}");
                 _prologue.Add(
                     new MirQasmValueDeclarationStatement(
                         declaration,
                         name,
-                        TargetType(parameterType, declaration: true)));
+                        TargetType(parameterType)));
                 _edgeTemporaries.Add(
-                    new EdgeArgumentKey(source, successorOrdinal, index),
+                    new EdgeArgumentKey(sourceBlock.Id, successorOrdinal, index),
                     declaration);
             }
         }
 
         private void PrepareFunctionReturnState()
         {
-            if (_callable.Kind != MirCallableKind.Function) return;
-            if (_callable.ReturnType is not MirType returnType)
-                throw Internal($"function `{_callable.Name}` has no MIR return type");
+            if (_callable.ReturnType is not MirType returnType) return;
 
-            _returnStorage = NextDeclaration();
+            var returnStorage = NextDeclaration();
+            _returnStorage = returnStorage;
             _prologue.Add(
                 new MirQasmValueDeclarationStatement(
-                    _returnStorage.Value,
+                    returnStorage,
                     _names.Fresh("ret"),
-                    TargetType(returnType, declaration: true),
+                    TargetType(returnType),
                     DefaultLiteral(returnType.ElementType)));
 
             // The flag is needed only to propagate a return across one or more target while scopes.
@@ -729,12 +707,7 @@ internal static class MirOpenQasmLowering
                             $"reachable block {current} ends in `unreachable`");
 
                     case MirJump jump:
-                        EmitEdge(
-                            current,
-                            successorOrdinal: 0,
-                            jump.Target,
-                            jump.Arguments,
-                            output);
+                        EmitEdge(block, successorOrdinal: 0, output);
                         if (regionLoop is not null
                             && jump.Target == regionLoop.Header)
                         {
@@ -754,10 +727,9 @@ internal static class MirOpenQasmLowering
                         current = jump.Target;
                         continue;
 
-                    case MirBranch branch:
+                    case MirBranch:
                         return EmitBranch(
-                            current,
-                            branch,
+                            block,
                             stop,
                             regionLoop,
                             breakableLoop,
@@ -771,33 +743,22 @@ internal static class MirOpenQasmLowering
         }
 
         private PathOutcome EmitBranch(
-            MirBlockId source,
-            MirBranch branch,
+            MirBlock sourceBlock,
             MirBlockId? outerStop,
             MirNaturalLoopRegion? regionLoop,
             MirNaturalLoopRegion? breakableLoop,
             List<MirQasmStatement> output)
         {
+            var branch = (MirBranch)sourceBlock.Terminator;
+            var source = sourceBlock.Id;
             var join = FindStructuredJoin(
-                source,
-                branch.TrueTarget,
-                branch.FalseTarget,
+                sourceBlock,
                 outerStop,
                 regionLoop);
             var thenBody = new List<MirQasmStatement>();
             var elseBody = new List<MirQasmStatement>();
-            EmitEdge(
-                source,
-                0,
-                branch.TrueTarget,
-                branch.TrueArguments,
-                thenBody);
-            EmitEdge(
-                source,
-                1,
-                branch.FalseTarget,
-                branch.FalseArguments,
-                elseBody);
+            EmitEdge(sourceBlock, 0, thenBody);
+            EmitEdge(sourceBlock, 1, elseBody);
 
             if (join is MirBlockId merge)
             {
@@ -899,14 +860,14 @@ internal static class MirOpenQasmLowering
         }
 
         private MirBlockId? FindStructuredJoin(
-            MirBlockId branch,
-            MirBlockId trueTarget,
-            MirBlockId falseTarget,
+            MirBlock sourceBlock,
             MirBlockId? outerStop,
             MirNaturalLoopRegion? loop)
         {
+            var branch = (MirBranch)sourceBlock.Terminator;
+            var source = sourceBlock.Id;
             var candidates = _controlFlow.ReachableBlocks
-                .Where(candidate => candidate != branch)
+                .Where(candidate => candidate != source)
                 .Where(candidate => !_emittedBlocks.Contains(candidate))
                 .Where(
                     candidate => loop is null
@@ -914,11 +875,11 @@ internal static class MirOpenQasmLowering
                                  && candidate != loop.Header)
                 .Where(candidate => loop?.NormalExit != candidate)
                 .Where(
-                    candidate => _controlFlow.CanReach(trueTarget, candidate)
-                                 && _controlFlow.CanReach(falseTarget, candidate))
+                    candidate => _controlFlow.CanReach(branch.TrueTarget, candidate)
+                                 && _controlFlow.CanReach(branch.FalseTarget, candidate))
                 .Where(
-                    candidate => _controlFlow.PostDominates(candidate, trueTarget)
-                                 && _controlFlow.PostDominates(candidate, falseTarget))
+                    candidate => _controlFlow.PostDominates(candidate, branch.TrueTarget)
+                                 && _controlFlow.PostDominates(candidate, branch.FalseTarget))
                 .ToArray();
             if (candidates.Length == 0 && _returnDone is not null)
             {
@@ -927,7 +888,7 @@ internal static class MirOpenQasmLowering
                 // The target return_done state guards that continuation, so recover the nearest common
                 // reachable block without weakening CFG authority or duplicating it.
                 candidates = _controlFlow.ReachableBlocks
-                    .Where(candidate => candidate != branch)
+                    .Where(candidate => candidate != source)
                     .Where(candidate => !_emittedBlocks.Contains(candidate))
                     .Where(
                         candidate => loop is null
@@ -935,17 +896,17 @@ internal static class MirOpenQasmLowering
                                      && candidate != loop.Header)
                     .Where(candidate => loop?.NormalExit != candidate)
                     .Where(
-                        candidate => _controlFlow.CanReach(trueTarget, candidate)
-                                     && _controlFlow.CanReach(falseTarget, candidate))
+                        candidate => _controlFlow.CanReach(branch.TrueTarget, candidate)
+                                     && _controlFlow.CanReach(branch.FalseTarget, candidate))
                     .ToArray();
             }
             if (outerStop is MirBlockId stop
                 && !_emittedBlocks.Contains(stop)
                 && (loop is null || loop.Contains(stop))
-                && _controlFlow.CanReach(trueTarget, stop)
-                && _controlFlow.CanReach(falseTarget, stop)
-                && _controlFlow.PostDominates(stop, trueTarget)
-                && _controlFlow.PostDominates(stop, falseTarget))
+                && _controlFlow.CanReach(branch.TrueTarget, stop)
+                && _controlFlow.CanReach(branch.FalseTarget, stop)
+                && _controlFlow.PostDominates(stop, branch.TrueTarget)
+                && _controlFlow.PostDominates(stop, branch.FalseTarget))
             {
                 candidates = candidates.Append(stop).Distinct().ToArray();
             }
@@ -956,8 +917,8 @@ internal static class MirOpenQasmLowering
                     candidate => new
                     {
                         Block = candidate,
-                        TrueDistance = Distance(trueTarget, candidate, loop),
-                        FalseDistance = Distance(falseTarget, candidate, loop),
+                        TrueDistance = Distance(branch.TrueTarget, candidate, loop),
+                        FalseDistance = Distance(branch.FalseTarget, candidate, loop),
                     })
                 .Where(item => item.TrueDistance is not null && item.FalseDistance is not null)
                 .OrderBy(
@@ -1022,24 +983,19 @@ internal static class MirOpenQasmLowering
             MirNaturalLoopRegion? breakableLoop,
             List<MirQasmStatement> output)
         {
-            if (_callable.Kind == MirCallableKind.Operation)
+            if (returned.Value is not MirValueId returnedValue)
             {
-                if (returned.Value is not null)
-                    throw Internal($"operation `{_callable.Name}` returns a MIR value");
                 return new PathOutcome(
                     PathOutcomeKind.Terminated,
                     ContainsReturn: false);
             }
+            if (_returnStorage is not MirQasmDeclarationId returnStorage)
+                throw Internal($"function `{_callable.Name}` has no return storage");
 
-            if (returned.Value is not MirValueId value
-                || _returnStorage is not MirQasmDeclarationId target)
-            {
-                throw Internal($"function `{_callable.Name}` has an invalid MIR return");
-            }
             output.Add(
                 new MirQasmAssignmentStatement(
-                    new MirQasmDeclarationReferenceExpression(target),
-                    ValueExpression(value)));
+                    new MirQasmDeclarationReferenceExpression(returnStorage),
+                    ValueExpression(returnedValue)));
 
             if (_returnDone is MirQasmDeclarationId done)
             {
@@ -1081,14 +1037,14 @@ internal static class MirOpenQasmLowering
                 {
                     case MirConstant constant:
                         Assign(
-                            constant.Result,
+                            constant.Result.Id,
                             new MirQasmLiteralExpression(constant.Text),
                             output);
                         break;
 
                     case MirUnary unary:
                         Assign(
-                            unary.Result,
+                            unary.Result.Id,
                             new MirQasmUnaryExpression(
                                 unary.Operator switch
                                 {
@@ -1109,11 +1065,8 @@ internal static class MirOpenQasmLowering
 
                     case MirConvert convert:
                         Assign(
-                            convert.Result,
-                            ConvertExpression(
-                                _callable.RequireValue(convert.Result).Type,
-                                ValueExpression(convert.Operand),
-                                convert.Origin),
+                            convert.Result.Id,
+                            ConvertExpression(convert),
                             output);
                         break;
 
@@ -1135,13 +1088,13 @@ internal static class MirOpenQasmLowering
                                     length.Origin)
                                 : new MirQasmSizeOfExpression(
                                     ValueExpression(length.Array));
-                        Assign(length.Result, expression, output);
+                        Assign(length.Result.Id, expression, output);
                         break;
                     }
 
                     case MirArrayLoad load:
                         Assign(
-                            load.Result,
+                            load.Result.Id,
                             new MirQasmIndexExpression(
                                 ValueExpression(load.Array),
                                 ValueExpression(load.Index)),
@@ -1157,14 +1110,14 @@ internal static class MirOpenQasmLowering
                                 ValueExpression(store.Value)));
                         RequireSameArrayPlace(
                             store.Array,
-                            store.Result,
+                            store.Result.Id,
                             "array.store",
                             store.Origin);
                         break;
 
                     case MirPureCall call:
                         Assign(
-                            call.Result,
+                            call.Result.Id,
                             PureCallExpression(call),
                             output);
                         break;
@@ -1176,35 +1129,23 @@ internal static class MirOpenQasmLowering
                         break;
 
                     case MirQuantumApply apply:
-                        RequireVersionErasureCompatibility(
-                            apply.QubitAccesses,
-                            apply.QubitResults,
-                            "quantum apply");
                         output.Add(LowerQuantumApply(apply));
                         foreach (var result in apply.MutableArrayResults)
                         {
-                            if (apply.Operands[result.OperandIndex]
-                                is not MirClassicalCallOperand input)
-                            {
-                                throw Internal(
-                                    $"mutable result {result.Result} does not correspond to an array operand");
-                            }
+                            var input = (MirClassicalCallOperand)
+                                apply.Operands[result.OperandIndex];
                             RequireSameArrayPlace(
                                 input.Value,
-                                result.Result,
+                                result.Result.Id,
                                 "mutable call result",
                                 apply.Origin);
                         }
                         break;
 
                     case MirMeasure measure:
-                        RequireVersionErasureCompatibility(
-                            measure.Qubit,
-                            measure.QubitResult,
-                            "measurement");
                         output.Add(
                             new MirQasmMeasurementAssignmentStatement(
-                                ValueExpression(measure.Result),
+                                ValueExpression(measure.Result.Id),
                                 QubitAccessExpression(measure.Qubit)));
                         break;
 
@@ -1219,12 +1160,10 @@ internal static class MirOpenQasmLowering
             MirArrayCreate create,
             List<MirQasmStatement> output)
         {
-            if (!_storagePlaces.TryGetValue(create.Storage, out var storage))
-                throw Internal($"array.create references missing storage {create.Storage}");
-            var arrayType = _callable.RequireValue(create.Result).Type;
-            if (!arrayType.IsArray || arrayType.KnownLength is not int length)
-                throw Internal(
-                    $"array.create result {create.Result} is not a fixed-length array");
+            if (!_storagePlaces.TryGetValue(create.Storage.Id, out var storage))
+                throw Internal($"array.create references missing storage {create.Storage.Id}");
+            var arrayType = create.Result.Type;
+            var length = arrayType.KnownLength!.Value;
 
             for (var index = 0; index < length; index++)
             {
@@ -1240,7 +1179,6 @@ internal static class MirOpenQasmLowering
                                     System.Globalization.CultureInfo.InvariantCulture))),
                         value));
             }
-            RequireSameArrayPlaceByStorage(create.Result, create.Storage, "array.create");
         }
 
         private MirQasmExpression PureCallExpression(MirPureCall call)
@@ -1251,7 +1189,6 @@ internal static class MirOpenQasmLowering
             switch (call.Target)
             {
                 case MirUserCallableTarget user:
-                    RequireUserCall(user.Callable, MirCallableKind.Function, "pure call");
                     if (user.Callable == _program.EntryPoint.Id)
                     {
                         throw Unsupported(
@@ -1266,8 +1203,7 @@ internal static class MirOpenQasmLowering
                 case MirBuiltinFunctionTarget { Name: var name }
                     when name == QoraGates.BitsAsInt:
                 {
-                    if (call.Operands is not [MirClassicalCallOperand operand])
-                        throw Internal($"`{name}` has an invalid MIR operand list");
+                    var operand = (MirClassicalCallOperand)call.Operands[0];
                     var width = _callable
                         .RequireValue(operand.Value)
                         .Type
@@ -1301,7 +1237,6 @@ internal static class MirOpenQasmLowering
             switch (apply.Target)
             {
                 case MirUserCallableTarget user:
-                    RequireUserCall(user.Callable, MirCallableKind.Operation, "quantum call");
                     if (apply.Functors.Count != 0)
                     {
                         var modifiers = string.Join(", ", apply.Functors);
@@ -1378,12 +1313,12 @@ internal static class MirOpenQasmLowering
         }
 
         private void EmitEdge(
-            MirBlockId source,
+            MirBlock sourceBlock,
             int successorOrdinal,
-            MirBlockId target,
-            IReadOnlyList<MirValueId> arguments,
             List<MirQasmStatement> output)
         {
+            var source = sourceBlock.Id;
+            var (target, arguments) = EdgeOf(sourceBlock, successorOrdinal);
             var parameters = _callable.RequireBlock(target).Arguments;
             var scalarTransfers = new List<(
                 MirQasmDeclarationId Temporary,
@@ -1392,14 +1327,14 @@ internal static class MirOpenQasmLowering
             for (var index = 0; index < arguments.Count; index++)
             {
                 var destination = parameters[index];
-                var destinationType = _callable.RequireValue(destination).Type;
+                var destinationType = destination.Type;
                 if (destinationType.IsArray)
                 {
                     RequireSameArrayPlace(
                         arguments[index],
-                        destination,
+                        destination.Id,
                         $"edge {source}->{target}",
-                        _callable.RequireBlock(source).Terminator.Origin);
+                        sourceBlock.Terminator.Origin);
                     continue;
                 }
 
@@ -1408,7 +1343,7 @@ internal static class MirOpenQasmLowering
                     throw Internal($"edge argument {key} has no target temporary");
                 scalarTransfers.Add(
                     (temporary,
-                        ValueExpression(destination),
+                        ValueExpression(destination.Id),
                         ValueExpression(arguments[index])));
             }
 
@@ -1432,6 +1367,23 @@ internal static class MirOpenQasmLowering
             }
         }
 
+        private (MirBlockId Target, IReadOnlyList<MirValueId> Arguments) EdgeOf(
+            MirBlock sourceBlock,
+            int successorOrdinal)
+        {
+            return sourceBlock.Terminator switch
+            {
+                MirJump jump when successorOrdinal == 0 =>
+                    (jump.Target, jump.Arguments),
+                MirBranch branch when successorOrdinal == 0 =>
+                    (branch.TrueTarget, branch.TrueArguments),
+                MirBranch branch when successorOrdinal == 1 =>
+                    (branch.FalseTarget, branch.FalseArguments),
+                _ => throw Internal(
+                    $"block {sourceBlock.Id} has no successor {successorOrdinal}"),
+            };
+        }
+
         private void Assign(
             MirValueId result,
             MirQasmExpression value,
@@ -1450,7 +1402,7 @@ internal static class MirOpenQasmLowering
             if (!leftType.IsArray && !rightType.IsArray)
             {
                 Assign(
-                    binary.Result,
+                    binary.Result.Id,
                     new MirQasmBinaryExpression(
                         BinaryOperator(binary.Operator),
                         ValueExpression(binary.Left),
@@ -1481,7 +1433,7 @@ internal static class MirOpenQasmLowering
             if (leftLength != rightLength)
             {
                 var result = binary.Operator == MirBinaryOperator.Equal ? "0" : "1";
-                Assign(binary.Result, new MirQasmLiteralExpression(result), output);
+                Assign(binary.Result.Id, new MirQasmLiteralExpression(result), output);
                 return;
             }
 
@@ -1490,7 +1442,7 @@ internal static class MirOpenQasmLowering
             if (leftType.ElementType == QType.Bit)
             {
                 Assign(
-                    binary.Result,
+                    binary.Result.Id,
                     new MirQasmBinaryExpression(
                         BinaryOperator(binary.Operator),
                         left,
@@ -1509,7 +1461,7 @@ internal static class MirOpenQasmLowering
             }
 
             Assign(
-                binary.Result,
+                binary.Result.Id,
                 FixedArrayComparisonExpression(
                     binary.Operator,
                     left,
@@ -1610,40 +1562,6 @@ internal static class MirOpenQasmLowering
                     $"unknown MIR call operand {operand.GetType().Name}"),
             };
 
-        private void RequireVersionErasureCompatibility(
-            IReadOnlyList<MirQubitAccess> accesses,
-            IReadOnlyList<MirQubitAfterInstruction> results,
-            string role)
-        {
-            var accessedIds = accesses
-                .Select(access => access.Qubit.Id)
-                .ToHashSet();
-            foreach (var access in accesses)
-                _ = QubitBindingExpression(access.Qubit.Id);
-            foreach (var result in results)
-            {
-                if (!accessedIds.Contains(result.Id))
-                {
-                    throw Internal(
-                        $"{role} produces {result.Key} without accessing qubit {result.Id}");
-                }
-                _ = QubitBindingExpression(result.Id);
-            }
-        }
-
-        private void RequireVersionErasureCompatibility(
-            MirQubitAccess access,
-            MirQubitAfterInstruction result,
-            string role)
-        {
-            if (access.Qubit.Id != result.Id)
-            {
-                throw Internal(
-                    $"{role} changes qubit identity from {access.Qubit} to {result.Key}");
-            }
-            _ = QubitBindingExpression(result.Id);
-        }
-
         private void RequireSameArrayPlace(
             MirValueId left,
             MirValueId right,
@@ -1660,30 +1578,9 @@ internal static class MirOpenQasmLowering
             }
         }
 
-        private void RequireSameArrayPlaceByStorage(
-            MirValueId value,
-            MirStorageId storage,
-            string role)
+        private MirQasmExpression ConvertExpression(MirConvert convert)
         {
-            if (!_storagePlaces.TryGetValue(storage, out var storagePlace)
-                || ValueExpression(value) != storagePlace)
-            {
-                throw Internal(
-                    $"{role} result {value} disagrees with storage {storage}");
-            }
-        }
-
-        private MirQasmExpression ConvertExpression(
-            MirType target,
-            MirQasmExpression operand,
-            MirOrigin origin)
-        {
-            if (target.IsArray)
-            {
-                throw Unsupported(
-                    $"OpenQASM cannot convert a value to `{target}`",
-                    origin);
-            }
+            var target = convert.Result.Type;
             var name = target.ElementType switch
             {
                 QType.Int => "int",
@@ -1692,11 +1589,11 @@ internal static class MirOpenQasmLowering
                 QType.Bit => "bit",
                 _ => throw Unsupported(
                     $"OpenQASM cannot convert a classical value to `{target.ElementType}`",
-                    origin),
+                    convert.Origin),
             };
             return new MirQasmFunctionCallExpression(
                 new MirQasmBuiltinFunctionTarget(name),
-                new[] { operand });
+                new[] { ValueExpression(convert.Operand) });
         }
 
         private static MirQasmBinaryOperator BinaryOperator(
@@ -1718,19 +1615,6 @@ internal static class MirOpenQasmLowering
                 _ => throw Internal(
                     $"unknown MIR binary operator {@operator}"),
             };
-
-        private void RequireUserCall(
-            MirCallableId target,
-            MirCallableKind expected,
-            string role)
-        {
-            var callable = _program.RequireCallable(target);
-            if (callable.Kind != expected)
-            {
-                throw Internal(
-                    $"{role} targets {callable.Kind} `{callable.Name}`, expected {expected}");
-            }
-        }
 
         private MirQasmCallableId TargetCallable(MirCallableId source) =>
             _targetCallables.TryGetValue(source, out var target)
@@ -1762,36 +1646,26 @@ internal static class MirOpenQasmLowering
     {
         private readonly IReadOnlyDictionary<MirCallableId, IReadOnlyList<HiddenStorageKey>>
             _required;
-        private readonly IReadOnlyDictionary<HiddenStorageKey, MirArrayStorage> _storages;
 
         private HiddenArrayPlan(
             IReadOnlyDictionary<MirCallableId, IReadOnlyList<HiddenStorageKey>> required,
-            IReadOnlyDictionary<HiddenStorageKey, MirArrayStorage> storages,
             IReadOnlyList<string> notes)
         {
             _required = required;
-            _storages = storages;
             Notes = notes;
         }
 
         public IReadOnlyList<string> Notes { get; }
 
         public IReadOnlyList<HiddenStorageKey> RequiredBy(MirCallableId callable) =>
-            _required.TryGetValue(callable, out var required)
-                ? required
-                : Array.Empty<HiddenStorageKey>();
+            _required[callable];
 
-        public MirArrayStorage RequireStorage(HiddenStorageKey key) =>
-            _storages.TryGetValue(key, out var storage)
-                ? storage
-                : throw Internal(
-                    $"hidden OpenQASM array key {key.Owner}/{key.Storage} has no storage");
-
-        public static HiddenArrayPlan Build(
-            MirCallGraph callGraph,
-            MirProgram program)
+        public static HiddenArrayPlan Build(MirSnapshot source)
         {
-            var storages = new Dictionary<HiddenStorageKey, MirArrayStorage>();
+            ArgumentNullException.ThrowIfNull(source);
+            var program = source.Program;
+            var callGraph = source.Analyses.CallGraph;
+            var hiddenStorages = new List<HiddenStorageKey>();
             var required = program.Callables.ToDictionary(
                 callable => callable.Id,
                 _ => new HashSet<HiddenStorageKey>());
@@ -1815,12 +1689,9 @@ internal static class MirOpenQasmLowering
                     if (storageType.ElementType == QType.Bit)
                         continue;
                     var key = new HiddenStorageKey(callable.Id, storage.Id);
-                    storages.Add(key, storage);
+                    hiddenStorages.Add(key);
                     required[callable.Id].Add(key);
                 }
-
-                foreach (var target in callees[callable.Id])
-                    _ = program.RequireCallable(target);
             }
 
             var changed = true;
@@ -1846,7 +1717,7 @@ internal static class MirOpenQasmLowering
                         .OrderBy(key => key.Owner.Value)
                         .ThenBy(key => key.Storage.Value)
                         .ToArray()));
-            var notes = storages.Keys
+            var notes = hiddenStorages
                 .OrderBy(key => key.Owner.Value)
                 .ThenBy(key => key.Storage.Value)
                 .Select(
@@ -1857,7 +1728,6 @@ internal static class MirOpenQasmLowering
             return new HiddenArrayPlan(
                 new ReadOnlyDictionary<MirCallableId, IReadOnlyList<HiddenStorageKey>>(
                     frozen),
-                new ReadOnlyDictionary<HiddenStorageKey, MirArrayStorage>(storages),
                 Array.AsReadOnly(notes));
         }
     }
@@ -1903,9 +1773,7 @@ internal static class MirOpenQasmLowering
         }
     }
 
-    private static MirQasmType TargetType(
-        MirType type,
-        bool declaration)
+    private static MirQasmType TargetType(MirType type)
     {
         if (type.IsArray)
         {

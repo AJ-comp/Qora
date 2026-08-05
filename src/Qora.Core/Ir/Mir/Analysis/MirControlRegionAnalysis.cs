@@ -75,13 +75,6 @@ public sealed class MirControlRegionSnapshot
     public MirCallableId Callable => _controlFlow.Callable;
     internal bool HasNaturalLoops => _loopsByHeader.Count != 0;
 
-    internal bool IsFor(
-        MirProgram program,
-        MirCallableId callable,
-        MirControlFlowSnapshot controlFlow) =>
-        ReferenceEquals(_controlFlow, controlFlow)
-        && _controlFlow.IsFor(program, callable);
-
     internal bool TryGetLoop(
         MirBlockId header,
         out MirNaturalLoopRegion? loop) =>
@@ -96,14 +89,10 @@ public sealed class MirControlRegionSnapshot
 internal static class MirControlRegionAnalysis
 {
     internal static MirControlRegionSnapshot AnalyzeVerified(
-        MirProgram program,
-        MirCallable callable,
         MirControlFlowSnapshot controlFlow)
     {
-        ArgumentNullException.ThrowIfNull(program);
-        ArgumentNullException.ThrowIfNull(callable);
         ArgumentNullException.ThrowIfNull(controlFlow);
-        controlFlow.EnsureFor(program, callable.Id);
+        var callable = controlFlow.SourceCallable;
 
         var reachable = controlFlow.ReachableBlocks
             .ToHashSet();

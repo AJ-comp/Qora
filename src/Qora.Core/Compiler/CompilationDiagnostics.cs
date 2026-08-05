@@ -30,14 +30,58 @@ public abstract record DiagnosticOrigin
 
     public sealed record Hir(HirSnapshotId Snapshot) : DiagnosticOrigin;
 
-    public sealed record Mir(
-        MirSnapshot Snapshot,
-        MirOrigin? Location = null) : DiagnosticOrigin;
+    public sealed record Mir : DiagnosticOrigin
+    {
+        public Mir(
+            MirSnapshot snapshot,
+            MirOrigin? location = null)
+        {
+            ArgumentNullException.ThrowIfNull(snapshot);
+            if (location is not null
+                && !ReferenceEquals(
+                    location.SourceHirOrigin.HirArtifact,
+                    snapshot.HirArtifact))
+            {
+                throw new ArgumentException(
+                    "The MIR diagnostic location belongs to another HIR artifact.",
+                    nameof(location));
+            }
 
-    public sealed record Target(
-        TargetBackend Backend,
-        MirSnapshot Input,
-        MirOrigin? Location = null) : DiagnosticOrigin;
+            Snapshot = snapshot;
+            Location = location;
+        }
+
+        public MirSnapshot Snapshot { get; }
+        public MirOrigin? Location { get; }
+    }
+
+    public sealed record Target : DiagnosticOrigin
+    {
+        public Target(
+            TargetBackend backend,
+            MirSnapshot input,
+            MirOrigin? location = null)
+        {
+            ArgumentNullException.ThrowIfNull(input);
+            if (location is not null
+                && !ReferenceEquals(
+                    location.SourceHirOrigin.HirArtifact,
+                    input.HirArtifact))
+            {
+                throw new ArgumentException(
+                    "The target diagnostic location belongs to another HIR artifact.",
+                    nameof(location));
+            }
+
+            Backend = backend;
+            Input = input;
+            Location = location;
+        }
+
+        public TargetBackend Backend { get; }
+        public MirSnapshot Input { get; }
+        public MirOrigin? Location { get; }
+    }
 }
 
 public enum TargetBackend

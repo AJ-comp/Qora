@@ -125,7 +125,7 @@ public sealed class MirAdjointMaterializerTests
     }
 
     [Fact]
-    public void MaterializationResultRejectsForeignSourceAndCallableIds()
+    public void MaterializationResultRejectsForeignCallableIds()
     {
         const string sourceText =
             """
@@ -138,7 +138,6 @@ public sealed class MirAdjointMaterializerTests
                 Worker(q[0]);
             }
             """;
-        var unrelatedSource = RequireMir(CompileMir(sourceText));
         var source = RequireMir(CompileMir(sourceText));
         var worker = RequireCallable(source, "Worker");
         var sourceCall = Assert.Single(UserCalls(source, "Main", worker.Id));
@@ -148,23 +147,14 @@ public sealed class MirAdjointMaterializerTests
         var valid = MirAdjointMaterializer.Run(injected);
         var output = Assert.IsType<MirSnapshot>(valid.Output);
 
-        Assert.Throws<ArgumentException>(
-            () => new MirAdjointMaterializationResult(
-                unrelatedSource,
-                output,
-                valid.Inverses,
-                Array.Empty<MirAdjointMaterializationError>()));
-
         var inverse = Assert.Single(valid.Inverses).Value;
         Assert.Throws<ArgumentOutOfRangeException>(
-            () => new MirAdjointMaterializationResult(
-                injected,
+            () => MirAdjointMaterializationResult.Success(
                 output,
                 new Dictionary<MirCallableId, MirCallableId>
                 {
                     [new MirCallableId(int.MaxValue)] = inverse,
-                },
-                Array.Empty<MirAdjointMaterializationError>()));
+                }));
     }
 
     [Fact]

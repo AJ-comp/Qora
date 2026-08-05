@@ -30,21 +30,15 @@ public sealed class MirCallGraph
         ArgumentNullException.ThrowIfNull(calls);
 
         Calls = MirCollections.Freeze(calls);
-        _callsFrom = GroupBy(Calls, call => call.Caller);
+        _callsFrom = Calls
+            .GroupBy(call => call.Caller)
+            .ToFrozenDictionary(
+                group => group.Key,
+                group => MirCollections.Freeze(group));
     }
 
     public IReadOnlyList<MirCallSite> Calls { get; }
-
-    internal void EnsureFor(MirProgram program)
-    {
-        ArgumentNullException.ThrowIfNull(program);
-        if (!ReferenceEquals(_program, program))
-        {
-            throw new InvalidOperationException(
-                "the MIR call graph belongs to a different MIR program instance; "
-                + "rebuild it for the requested program");
-        }
-    }
+    internal MirProgram SourceProgram => _program;
 
     public IReadOnlyList<MirCallSite> CallsFrom(MirCallableId caller)
     {
@@ -56,14 +50,6 @@ public sealed class MirCallGraph
     public IReadOnlyList<MirCallSite> CallsFrom(MirCallable caller) =>
         CallsFrom(_program.RequireCallable(caller).Id);
 
-    private static FrozenDictionary<MirCallableId, IReadOnlyList<MirCallSite>> GroupBy(
-        IEnumerable<MirCallSite> calls,
-        Func<MirCallSite, MirCallableId> key) =>
-        calls
-            .GroupBy(key)
-            .ToFrozenDictionary(
-                group => group.Key,
-                group => MirCollections.Freeze(group));
 }
 
 internal static class MirCallGraphAnalysis

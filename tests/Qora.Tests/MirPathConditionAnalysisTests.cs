@@ -216,6 +216,8 @@ public sealed class MirPathConditionAnalysisTests
         var callableId = new MirCallableId(0);
         var a = new MirValueId(0);
         var b = new MirValueId(1);
+        var aValue = new MirValue(a, MirType.Scalar(QType.Bit), source);
+        var bValue = new MirValue(b, MirType.Scalar(QType.Bit), source);
         var qubit = MirQubitParameter.Single(
             new MirQubitId(0),
             "q",
@@ -225,10 +227,10 @@ public sealed class MirPathConditionAnalysisTests
             qubit.Id,
             new MirQubitVersion(1),
             source);
-        var entryId = new MirBlockId(0);
-        var testBId = new MirBlockId(1);
-        var bypassId = new MirBlockId(2);
-        var effectId = new MirBlockId(3);
+        var entryId = MirTestContext.BlockId(0);
+        var testBId = MirTestContext.BlockId(1);
+        var bypassId = MirTestContext.BlockId(2);
+        var effectId = MirTestContext.BlockId(3);
         var apply = new MirQuantumApply(
             new MirInstructionId(0),
             new MirBuiltinGateTarget("X"),
@@ -243,7 +245,7 @@ public sealed class MirPathConditionAnalysisTests
         var entryPointId = new MirCallableId(1);
         var entryBlock = new MirBlock(
             entryId,
-            Array.Empty<MirValueId>(),
+            Array.Empty<MirValue>(),
             Array.Empty<MirInstruction>(),
             new MirBranch(
                 a,
@@ -255,7 +257,7 @@ public sealed class MirPathConditionAnalysisTests
             source);
         var testBBlock = new MirBlock(
             testBId,
-            Array.Empty<MirValueId>(),
+            Array.Empty<MirValue>(),
             Array.Empty<MirInstruction>(),
             new MirBranch(
                 b,
@@ -267,13 +269,13 @@ public sealed class MirPathConditionAnalysisTests
             source);
         var bypassBlock = new MirBlock(
             bypassId,
-            Array.Empty<MirValueId>(),
+            Array.Empty<MirValue>(),
             Array.Empty<MirInstruction>(),
             new MirReturn(Value: null, source),
             source);
         var effectBlock = new MirBlock(
             effectId,
-            Array.Empty<MirValueId>(),
+            Array.Empty<MirValue>(),
             new MirInstruction[] { apply },
             new MirReturn(Value: null, source),
             source);
@@ -290,30 +292,16 @@ public sealed class MirPathConditionAnalysisTests
             returnType: null,
             parameters: new IMirParameter[]
             {
-                new MirClassicalParameter("a", a),
-                new MirClassicalParameter("b", b),
+                MirClassicalParameter.Scalar("a", aValue),
+                MirClassicalParameter.Scalar("b", bValue),
                 qubit,
             },
             entryBlock: entryBlock,
             blocks: tailMergeBlocks,
-            values: new[]
-            {
-                new MirValue(
-                    a,
-                    MirType.Scalar(QType.Bit),
-                    MirValueDefinition.ParameterAt(0),
-                    Origin: source),
-                new MirValue(
-                    b,
-                    MirType.Scalar(QType.Bit),
-                    MirValueDefinition.ParameterAt(1),
-                    Origin: source),
-            },
-            storages: Array.Empty<MirArrayStorage>(),
             source);
         var mainEntryBlock = new MirBlock(
-            new MirBlockId(0),
-            Array.Empty<MirValueId>(),
+            MirTestContext.BlockId(0),
+            Array.Empty<MirValue>(),
             Array.Empty<MirInstruction>(),
             new MirReturn(Value: null, source),
             source);
@@ -324,8 +312,6 @@ public sealed class MirPathConditionAnalysisTests
             parameters: Array.Empty<IMirParameter>(),
             entryBlock: mainEntryBlock,
             blocks: new[] { mainEntryBlock },
-            values: Array.Empty<MirValue>(),
-            storages: Array.Empty<MirArrayStorage>(),
             source);
 
         var callables = new[] { tailMerge, main };
