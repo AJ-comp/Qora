@@ -11,7 +11,8 @@ public sealed class MirControlFlowAnalysisTests
     {
         var program = DiamondProgram();
         var callable = Assert.Single(program.Callables);
-        var cfg = MirControlFlowAnalysis.Analyze(program, callable.Id);
+        var analyses = new MirAnalysisStore(program);
+        var cfg = analyses.ControlFlow(callable);
 
         Assert.Equal(new[] { B(1), B(2) }, cfg.SuccessorsOf(B(0)));
         Assert.Equal(new[] { B(1), B(2) }, cfg.PredecessorsOf(B(3)));
@@ -33,7 +34,8 @@ public sealed class MirControlFlowAnalysisTests
     {
         var program = DiamondProgram();
         var callable = Assert.Single(program.Callables);
-        var cfg = MirControlFlowAnalysis.Analyze(program, callable.Id);
+        var analyses = new MirAnalysisStore(program);
+        var cfg = analyses.ControlFlow(callable);
 
         var beforeLeftDefinition = cfg.PointBeforeInstruction(I(1));
         Assert.True(beforeLeftDefinition.IsBeforeInstruction);
@@ -82,7 +84,8 @@ public sealed class MirControlFlowAnalysisTests
         var program = context.Program(
             entryPoint,
             new[] { callable, entryPoint });
-        var cfg = MirControlFlowAnalysis.Analyze(program, callable.Id);
+        var analyses = new MirAnalysisStore(program);
+        var cfg = analyses.ControlFlow(callable);
 
         Assert.False(cfg.IsReachable(B(1)));
         Assert.True(cfg.IsValueAvailableAtTerminator(V(0), B(1)));
@@ -132,7 +135,8 @@ public sealed class MirControlFlowAnalysisTests
             },
             source);
         var program = context.Program(callable, new[] { callable });
-        var cfg = MirControlFlowAnalysis.Analyze(program, callable.Id);
+        var analyses = new MirAnalysisStore(program);
+        var cfg = analyses.ControlFlow(callable);
 
         Assert.True(cfg.PostDominates(B(4), B(4)));
         Assert.False(cfg.PostDominates(B(1), B(0)));
@@ -176,7 +180,8 @@ public sealed class MirControlFlowAnalysisTests
             },
             source);
         var program = context.Program(callable, new[] { callable });
-        var cfg = MirControlFlowAnalysis.Analyze(program, callable.Id);
+        var analyses = new MirAnalysisStore(program);
+        var cfg = analyses.ControlFlow(callable);
 
         Assert.True(cfg.Dominates(B(1), B(2)));
         Assert.True(cfg.PostDominates(B(3), B(1)));
@@ -184,16 +189,15 @@ public sealed class MirControlFlowAnalysisTests
     }
 
     [Fact]
-    public void ProgramPointsRejectOtherControlFlowAnalyses()
+    public void AnalysisStoreCachesControlFlowForTheSameCallable()
     {
         var program = DiamondProgram();
         var callable = Assert.Single(program.Callables);
-        var first = MirControlFlowAnalysis.Analyze(program, callable.Id);
-        var second = MirControlFlowAnalysis.Analyze(program, callable.Id);
-        var firstPoint = first.PointBeforeInstruction(I(1));
+        var analyses = new MirAnalysisStore(program);
+        var first = analyses.ControlFlow(callable);
+        var second = analyses.ControlFlow(callable);
 
-        Assert.Throws<InvalidOperationException>(
-            () => second.IsValueAvailableAt(V(0), firstPoint));
+        Assert.Same(first, second);
     }
 
     private static MirProgram DiamondProgram()

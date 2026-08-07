@@ -8,7 +8,7 @@ public sealed class MirWitnessAvailabilityAnalysisTests
     [Fact]
     public void ScalarReassignmentDoesNotDestroyTheExactForwardValue()
     {
-        var (program, effects) = Compile("""
+        var program = Compile("""
             operation FlipIf(flag: int, target: Qubit) {
                 if (flag == 1) {
                     X(target);
@@ -22,12 +22,11 @@ public sealed class MirWitnessAvailabilityAnalysisTests
                 flag = 0;
             }
             """);
+        var analyses = new MirAnalysisStore(program);
+        var effects = analyses.Effects;
         var main = Callable(program, "Main");
         var effect = EffectOf(effects, main);
-        var analysis = MirWitnessAvailabilityAnalysis.Analyze(
-            program,
-            effects,
-            main.Id);
+        var analysis = analyses.WitnessAvailability(main);
         var result = analysis.CheckAtTerminator(
             effect.Site,
             ExitBlock(main).Id);
@@ -40,7 +39,7 @@ public sealed class MirWitnessAvailabilityAnalysisTests
     [Fact]
     public void ConditionalEffectRetainsItsExactPathBit()
     {
-        var (program, effects) = Compile("""
+        var program = Compile("""
             operation Main() {
                 use q = Qubit[1];
                 var flag: int = 1;
@@ -50,12 +49,11 @@ public sealed class MirWitnessAvailabilityAnalysisTests
                 flag = 0;
             }
             """);
+        var analyses = new MirAnalysisStore(program);
+        var effects = analyses.Effects;
         var main = Callable(program, "Main");
         var effect = EffectOf(effects, main);
-        var analysis = MirWitnessAvailabilityAnalysis.Analyze(
-            program,
-            effects,
-            main.Id);
+        var analysis = analyses.WitnessAvailability(main);
         var result = analysis.CheckAtTerminator(
             effect.Site,
             ExitBlock(main).Id);
@@ -70,7 +68,7 @@ public sealed class MirWitnessAvailabilityAnalysisTests
     [Fact]
     public void ArrayMutationReportsTheExactUnavailableMemoryState()
     {
-        var (program, effects) = Compile("""
+        var program = Compile("""
             operation Observe(values: int[], target: Qubit) {
                 if (values[0] == 1) {
                     X(target);
@@ -84,12 +82,11 @@ public sealed class MirWitnessAvailabilityAnalysisTests
                 values[0] = 2;
             }
             """);
+        var analyses = new MirAnalysisStore(program);
+        var effects = analyses.Effects;
         var main = Callable(program, "Main");
         var effect = EffectOf(effects, main);
-        var analysis = MirWitnessAvailabilityAnalysis.Analyze(
-            program,
-            effects,
-            main.Id);
+        var analysis = analyses.WitnessAvailability(main);
         var result = analysis.CheckAtTerminator(
             effect.Site,
             ExitBlock(main).Id);
@@ -106,7 +103,7 @@ public sealed class MirWitnessAvailabilityAnalysisTests
     [Fact]
     public void LoopEffectRequiresIterationLocalPlacement()
     {
-        var (program, effects) = Compile("""
+        var program = Compile("""
             operation Main() {
                 use q = Qubit[1];
                 var index: int = 0;
@@ -116,12 +113,11 @@ public sealed class MirWitnessAvailabilityAnalysisTests
                 }
             }
             """);
+        var analyses = new MirAnalysisStore(program);
+        var effects = analyses.Effects;
         var main = Callable(program, "Main");
         var effect = EffectOf(effects, main);
-        var analysis = MirWitnessAvailabilityAnalysis.Analyze(
-            program,
-            effects,
-            main.Id);
+        var analysis = analyses.WitnessAvailability(main);
         var result = analysis.CheckAtTerminator(
             effect.Site,
             ExitBlock(main).Id);
@@ -132,7 +128,7 @@ public sealed class MirWitnessAvailabilityAnalysisTests
     [Fact]
     public void MeasurementDependentPathCannotBeRematerializedOutsideItsBranch()
     {
-        var (program, effects) = Compile("""
+        var program = Compile("""
             operation Main() {
                 use q = Qubit[2];
                 var outer: int = 1;
@@ -144,16 +140,15 @@ public sealed class MirWitnessAvailabilityAnalysisTests
                 }
             }
             """);
+        var analyses = new MirAnalysisStore(program);
+        var effects = analyses.Effects;
         var main = Callable(program, "Main");
         var effect = Assert.Single(
             effects.Effects,
             candidate => candidate.Site.Callable == main.Id
                 && effects.RequireInstruction(candidate.Site)
                     is MirQuantumApply { Target.DisplayName: "X" });
-        var analysis = MirWitnessAvailabilityAnalysis.Analyze(
-            program,
-            effects,
-            main.Id);
+        var analysis = analyses.WitnessAvailability(main);
         var result = analysis.CheckAtTerminator(
             effect.Site,
             ExitBlock(main).Id);
@@ -166,7 +161,7 @@ public sealed class MirWitnessAvailabilityAnalysisTests
     [Fact]
     public void UnchangedArrayLoadCanRematerializeABranchCondition()
     {
-        var (program, effects) = Compile("""
+        var program = Compile("""
             operation Main() {
                 use q = Qubit[1];
                 var values: int[] = [1];
@@ -178,12 +173,11 @@ public sealed class MirWitnessAvailabilityAnalysisTests
                 }
             }
             """);
+        var analyses = new MirAnalysisStore(program);
+        var effects = analyses.Effects;
         var main = Callable(program, "Main");
         var effect = EffectOf(effects, main);
-        var analysis = MirWitnessAvailabilityAnalysis.Analyze(
-            program,
-            effects,
-            main.Id);
+        var analysis = analyses.WitnessAvailability(main);
         var result = analysis.CheckAtTerminator(
             effect.Site,
             ExitBlock(main).Id);
@@ -197,15 +191,13 @@ public sealed class MirWitnessAvailabilityAnalysisTests
                     .Any(load => load.Id == instruction));
     }
 
-    private static (MirProgram Program, MirEffectSnapshot Effects) Compile(string source)
+    private static MirProgram Compile(string source)
     {
         var result = Compiler.Compile(source);
         Assert.True(
             result.Succeeded,
             string.Join(" | ", result.Diagnostics.Select(diagnostic => diagnostic.Error).ToList().Select(error => $"{error.Code}: {error.Message}")));
-        return (
-            Assert.IsType<MirProgram>(result.Mir?.Program),
-            Assert.IsType<MirEffectSnapshot>(result.Mir!.Analyses.Effects));
+        return Assert.IsType<MirProgram>(result.Mir?.Program);
     }
 
     private static MirCallable Callable(MirProgram program, string name) =>

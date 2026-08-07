@@ -32,13 +32,6 @@ public sealed class CompilationArchitectureTests
         Assert.Equal("QSEM040", diagnostic.Error.Code);
         Assert.Null(compilation.Mir);
         Assert.Empty(compilation.Targets.Artifacts);
-
-        var hir = new HirTestFactory();
-        var validation = QoraValidator.Validate(
-            hir.PublishProgram(Array.Empty<HirCallable>()),
-            out var model);
-        Assert.Equal("QSEM040", Assert.Single(validation).Code);
-        Assert.Null(model);
     }
 
     [Fact]
@@ -448,13 +441,11 @@ public sealed class CompilationArchitectureTests
             "operation Main() { use q = Qubit[1]; H(q[0]); }");
         var mir = Assert.IsType<MirSnapshot>(compilation.Mir);
         var callable = Assert.Single(mir.Program.Callables);
+        var controlFlow = mir.Analyses.ControlFlow(callable);
+        var memoryState = mir.Analyses.MemoryState(callable);
 
-        Assert.Same(
-            mir.Analyses.ControlFlow(callable),
-            mir.Analyses.ControlFlow(callable.Id));
-        Assert.Same(
-            mir.Analyses.MemoryState(callable),
-            mir.Analyses.MemoryState(callable.Id));
+        Assert.Same(controlFlow, mir.Analyses.ControlFlow(callable));
+        Assert.Same(memoryState, mir.Analyses.MemoryState(callable));
         Assert.Same(mir.Analyses.CallGraph, mir.Analyses.CallGraph);
         Assert.Same(mir.Analyses.Effects, mir.Analyses.Effects);
     }

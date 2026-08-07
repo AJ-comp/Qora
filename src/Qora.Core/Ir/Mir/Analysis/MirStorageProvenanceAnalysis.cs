@@ -3,39 +3,36 @@ using System.Collections.Frozen;
 namespace Qora.Ir.Mir.Analysis;
 
 /// <summary>
-/// Storage provenance for every classical array-state SSA value in one callable and MIR program.
+/// Storage provenance for every classical array-state SSA value in one exact callable object.
 /// The result names all symbolic storage regions which can reach a state through stores, mutable-call
 /// transitions, and memory Phi arguments. It does not by itself prove that different regions are
 /// disjoint; consumers must pass the result through <see cref="MirStorageAliasAnalysis"/>.
 /// </summary>
 public sealed class MirStorageProvenanceSnapshot
 {
-    private readonly MirProgram _sourceProgram;
     private readonly MirCallable _sourceCallable;
     private readonly FrozenDictionary<MirValueId, MirStorageProvenance> _provenance;
 
     internal MirStorageProvenanceSnapshot(
-        MirProgram sourceProgram,
         MirCallable sourceCallable,
         IReadOnlyDictionary<MirValueId, MirStorageProvenance> provenance)
     {
-        _sourceProgram = sourceProgram;
         _sourceCallable = sourceCallable;
         _provenance = provenance.ToFrozenDictionary();
     }
 
     public MirCallableId Callable => _sourceCallable.Id;
 
-    internal bool IsFor(MirProgram program, MirCallableId callable) =>
-        ReferenceEquals(_sourceProgram, program)
-        && ReferenceEquals(_sourceCallable, program.FindCallable(callable));
+    internal bool IsFor(MirCallable callable) =>
+        ReferenceEquals(_sourceCallable, callable);
 
-    internal void EnsureFor(MirProgram program, MirCallableId callable)
+    internal void EnsureFor(MirCallable callable)
     {
-        if (!IsFor(program, callable))
+        ArgumentNullException.ThrowIfNull(callable);
+        if (!IsFor(callable))
             throw new InvalidOperationException(
-                $"the MIR storage-provenance analysis does not belong to callable {callable} "
-                + $"in the requested MIR program; it was created for callable {Callable}");
+                $"the MIR storage-provenance analysis does not belong to callable {callable.Id}; "
+                + $"it was created for callable {Callable}");
     }
 
     public MirStorageProvenance ProvenanceOf(MirValueId value) =>
@@ -50,34 +47,17 @@ public sealed class MirStorageProvenanceSnapshot
 
 internal static class MirStorageProvenanceAnalysis
 {
-    internal static MirStorageProvenanceSnapshot Analyze(
-        MirProgram program,
-        MirCallableId callableId)
-    {
-        ArgumentNullException.ThrowIfNull(program);
-
-        var callable = program.FindCallable(callableId)
-            ?? throw new ArgumentOutOfRangeException(
-                nameof(callableId),
-                callableId,
-                $"callable {callableId} does not belong to the MIR program");
-        return AnalyzeUnchecked(program, callable);
-    }
-
     /// <summary>
     /// Resolves provenance for callers that have already established the required local MIR structure.
     /// The verifier and the canonical analysis store use this entry point without starting verification again.
     /// </summary>
-    internal static MirStorageProvenanceSnapshot AnalyzeUnchecked(
-        MirProgram program,
-        MirCallable callable)
+    internal static MirStorageProvenanceSnapshot AnalyzeUnchecked(MirCallable callable)
     {
         var resolver = new Resolver(callable);
         var provenance = callable.Values
             .Where(value => value.Type.IsArray)
             .ToDictionary(value => value.Id, value => resolver.Resolve(value.Id));
         return new MirStorageProvenanceSnapshot(
-            program,
             callable,
             provenance);
     }
@@ -151,7 +131,7 @@ internal static class MirStorageProvenanceAnalysis
             foreach (var value in _callable.Values.Where(value => value.Type.IsArray))
             {
                 if (_seeds.ContainsKey(value.Id)) continue;
-                var definition = _callable.DefinitionOf(value);
+                var definition = _callable.DefinitionOf(value.Id);
                 switch (definition.Kind)
                 {
                     case MirValueDefinitionKind.BlockArgument

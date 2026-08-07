@@ -1,0 +1,1040 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>11. 고전 값과 SSA 버전 — Qora 컴파일러 개발자 매뉴얼</title>
+<link rel="stylesheet" href="developer.css">
+<script src="developer-syntax.js" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#main-content">본문으로 건너뛰기</a>
+<header class="hero">
+  <div class="tag">Qora · Compiler Developer Manual · Chapter 11</div>
+  <h1>고전 값과 SSA 버전</h1>
+  <p>소스의 각 식이 <code>%v0…%v12</code>와 <code>i0…i15</code>가 되는 실제 순서</p>
+</header>
+
+<main class="wrap" id="main-content">
+  <nav class="chapter-nav" aria-label="장 이동(상단)">
+    <div class="group"><a href="chapter-10.html">← 이전: Callable lowering</a><a href="index.html#chapters">전체 목차</a></div>
+    <div class="group"><a href="chapter-12.html">다음: Storage와 배열 상태 →</a></div>
+  </nav>
+
+  <p class="lead">
+    먼저 SSA를 정의하지 않습니다.<br>
+    <code>return value + 1</code>, 배열 선언과 대입, 조건식, 두 gate의 index가 실제 구현에서 어떤 switch 분기를 선택하고 어떤 값·instruction을 만드는지 끝까지 추적한 뒤, 마지막에 이 표현 방식을 SSA라고 정리합니다.
+  </p>
+
+  <h2 id="source">이번 장에서 값 생성을 추적할 소스</h2>
+
+<pre><code class="language-qora">// HIR callable h6, MIR callable c6
+function Next(value: int): int
+{
+    return value + 1;
+}
+
+// HIR callable h44, MIR callable c44
+operation Work()
+{
+    var values: int[] = [0];
+    use q = Qubit[1];
+    values[0] = Next(values[0]);
+
+    if (values[0] == 1)
+    {
+        X(q[0]);
+    }
+
+    H(q[0]);
+}</code></pre>
+
+  <p>
+    값과 instruction ID는 callable마다 따로 시작합니다.<br>
+    따라서 먼저 <code>Next c6</code>의 <code>%v0…%v2</code>와 <code>i0…i1</code>을 완성하고, 그 lowerer가 끝난 다음 새 <code>Work c44</code> lowerer에서 다시 <code>%v0</code>과 <code>i0</code>부터 시작합니다.
+  </p>
+
+  <h2 id="next-values"><code>return value + 1</code>의 호출 경로</h2>
+
+  <p>
+    이 문장을 만나기 직전에는 10장의 <code>LowerParameters()</code>가 매개변수 <code>value</code>를 이미 등록한 상태입니다.<br>
+    아직 본문 instruction은 하나도 없습니다.
+  </p>
+
+<pre><code class="language-plaintext">Next c6, return 직전
+├─ _currentMirBlockBuilder = b0
+├─ _mirValues = [%v0 : int]
+├─ b0.Instructions = []
+├─ _nextMirInstructionIdValue = 0
+└─ CurrentMirValueByHirSymbolId
+   └─ Symbol(value) -&gt; %v0</code></pre>
+
+  <p>
+    <code>LowerStatement()</code>의 switch는 <code>HirReturnStatement</code> 분기를 선택하여 아래 함수 전체를 호출합니다. <code>_hirCallable.ReturnType</code>은 <code>Int</code>이므로 조건식의 앞쪽 분기가 선택됩니다.
+  </p>
+
+<pre><code class="language-csharp">private void LowerReturn(HirReturnStatement hirReturn)
+{
+    // 예제값: hirReturn.Value = HirBinaryExpression(value + 1), h3
+    var mirOrigin = MirOriginFor(hirReturn);
+    var mirReturnValueId = _hirCallable.ReturnType is { } hirReturnType
+        ? LowerExpressionAs(
+            hirReturn.Value,
+            MirType.Scalar(hirReturnType)) // 예제 expected type = int
+        : LowerExpression(hirReturn.Value);
+
+    // 아래 식 처리가 끝난 뒤 예제값: mirReturnValueId = %v2
+    ReturnFromCurrentMirBlock(mirReturnValueId, mirOrigin);
+}</code></pre>
+
+  <p>
+    호출은 <code>LowerExpressionAs(h3, int)</code>에서 <code>LowerExpression(h3)</code>, 다시 <code>LowerExpressionValue(h3)</code>로 이어집니다.<br>
+    런타임 타입이 <code>HirBinaryExpression</code>이므로 이항식 case가 선택됩니다.
+  </p>
+
+<pre><code class="language-csharp">private MirValueId LowerExpressionAs(
+    HirExpression hirExpression,
+    MirType expectedMirType)
+{
+    // 예제값: hirExpression = value + 1의 h3, expectedMirType = int
+    var mirValueId = LowerExpression(hirExpression);
+    RequireExactMirType(hirExpression, mirValueId, expectedMirType);
+    return mirValueId;
+}
+
+private MirValueId LowerExpression(HirExpression hirExpression)
+{
+    // 예제값: LowerExpressionValue(h3)의 최종 결과 = %v2
+    var mirValueId = LowerExpressionValue(hirExpression);
+
+    // 이 예제의 int 식에는 승인된 암시적 변환이 없으므로 %v2 그대로 반환합니다.
+    return ApplyApprovedImplicitConversion(hirExpression, mirValueId);
+}</code></pre>
+
+  <p>
+    다음 발췌는 <code>LowerExpressionValue()</code>의 switch case만 떼어낸 코드입니다.<br>
+    실제 메서드는 switch에 들어가기 직전 <code>var mirOrigin = MirOriginFor(hirExpression)</code>을 실행하므로, 여기서 아래 <code>mirOrigin</code>은 현재 식 <code>value + 1</code>, 즉 <code>h3</code>에서 만든 Origin입니다.
+  </p>
+
+<pre><code class="language-csharp">// LowerExpressionValue()에서 이 예제가 선택하는 실제 case
+case HirBinaryExpression hirBinary:
+{
+    // 예제값: Operator = Add이므로 short-circuit 분기는 건너뜁니다.
+    if (hirBinary.Operator is
+        HirBinaryOperator.LogicalAnd or HirBinaryOperator.LogicalOr)
+    {
+        return LowerShortCircuit(hirBinary);
+    }
+
+    // 예제값: 왼쪽 value -&gt; %v0
+    var mirLeftValueId = LowerExpression(hirBinary.Left);
+
+    // 예제값: 오른쪽 1 -&gt; i0과 %v1 생성
+    var mirRightValueId = LowerExpression(hirBinary.Right);
+    var mirBinaryOperator =
+        MirBinaryOperatorOf(hirBinary.Operator); // Add
+    var mirLeftType = MirTypeOf(mirLeftValueId);   // int
+    var mirRightType = MirTypeOf(mirRightValueId); // int
+
+    if (mirLeftType.IsArray || mirRightType.IsArray)
+    {
+        // 이 예제에서는 선택되지 않는 배열 비교 경로입니다.
+        if (mirBinaryOperator is not (
+                MirBinaryOperator.Equal
+                or MirBinaryOperator.NotEqual)
+            || !mirLeftType.IsArray
+            || !mirRightType.IsArray
+            || mirLeftType.ElementType
+            != mirRightType.ElementType)
+        {
+            throw MirLoweringError(
+                "validated array comparison has incompatible "
+                + $"operands {mirLeftType} and {mirRightType}");
+        }
+
+        return EmitBinary(
+            mirBinaryOperator,
+            mirLeftValueId,
+            mirRightValueId,
+            mirOrigin);
+    }
+
+    if (mirLeftType != mirRightType)
+    {
+        throw MirLoweringError(
+            "validated scalar operator reached MIR with incompatible "
+            + $"operands {mirLeftType} and {mirRightType}");
+    }
+
+    // 예제 호출: EmitBinary(Add, %v0, %v1, h3의 Origin)
+    return EmitBinary(
+        mirBinaryOperator,
+        mirLeftValueId,
+        mirRightValueId,
+        mirOrigin);
+}</code></pre>
+
+  <p>
+    위 코드는 <code>LowerExpressionValue()</code> 전체가 아니라, 이 소스가 실제로 선택하는 이항식 case 전체입니다.<br>
+    이제 왼쪽, 오른쪽, 결과 순서로 상태가 어떻게 변하는지 확인합니다.
+  </p>
+
+  <h3>왼쪽 이름 <code>value</code>: 새 값 없이 <code>%v0</code> 조회</h3>
+
+  <p>
+    왼쪽 노드의 타입은 <code>HirNameExpression</code>입니다.<br>
+    의미 모델의 <code>SymbolIdOf(value)</code>가 매개변수 선언의 정확한 Symbol을 반환하고, dictionary에서 현재 연결 <code>%v0</code>을 꺼냅니다.<br>
+    이 단계는 이미 존재하는 값을 읽기만 하므로 instruction과 값 ID가 증가하지 않습니다.
+  </p>
+
+<pre><code class="language-csharp">// LowerExpressionValue()의 이름 case
+case HirNameExpression hirName:
+{
+    // 예제값: hirName.Name = "value"
+    var hirSymbolId = SymbolIdOf(
+        hirName,
+        $"classical name `{hirName.Name}`");
+    if (!_currentFlowState.CurrentMirValueByHirSymbolId
+        .TryGetValue(hirSymbolId, out var mirValueId))
+    {
+        throw MirLoweringError(
+            $"name `{hirName.Name}` does not denote a classical SSA value");
+    }
+
+    // 예제 반환값: %v0
+    return mirValueId;
+}</code></pre>
+
+  <h3>오른쪽 리터럴 <code>1</code>: <code>i0</code>과 <code>%v1</code> 생성</h3>
+
+  <p>
+    오른쪽 노드는 <code>HirIntegerLiteralExpression h2</code>이므로 정수 리터럴 case가 <code>EmitConstant(Int, "1", h2의 Origin)</code>을 호출합니다.<br>
+    함수는 instruction ID를 먼저 발급하고 결과값을 만든 뒤, 두 객체를 연결한 <code>MirConstant</code>를 현재 <code>b0</code>에 추가합니다.
+  </p>
+
+<pre><code class="language-csharp">private MirValueId EmitConstant(
+    QType scalarType,
+    string literalText,
+    MirOrigin mirOrigin)
+{
+    // 예제값: 다음 instruction 번호가 0이므로 i0
+    var mirInstructionId = AllocateMirInstructionId();
+
+    // 예제값: scalarType = Int, _mirValues.Count = 1이므로 %v1
+    var mirResultValue = CreateMirValue(
+        MirType.Scalar(scalarType),
+        null,
+        mirOrigin);
+
+    // 예제 생성 객체: MirConstant(i0, %v1, "1", h2의 Origin)
+    EmitMirInstruction(new MirConstant(
+        mirInstructionId,
+        mirResultValue,
+        literalText,
+        mirOrigin));
+    return mirResultValue.Id;
+}</code></pre>
+
+  <h2 id="create-value"><code>CreateMirValue()</code>가 <code>%v1</code>을 발급하는 방식</h2>
+
+  <p>
+    방금 호출된 <code>CreateMirValue()</code>의 전체 구현은 다음과 같습니다.<br>
+    번호의 출처는 별도 전역 카운터가 아니라 현재 lowerer의 <code>_mirValues.Count</code>입니다.
+  </p>
+
+<pre><code class="language-csharp">private MirValue CreateMirValue(
+    MirType mirType,
+    SymbolId? hirSymbolId,
+    MirOrigin mirOrigin)
+{
+    // Next 예제 현재값: _mirValues = [%v0], Count = 1
+    var mirValueId = new MirValueId(_mirValues.Count); // %v1
+    var mirValue = new MirValue(mirValueId, mirType, mirOrigin);
+
+    // [%v0] -&gt; [%v0, %v1]
+    _mirValues.Add(mirValue);
+    if (hirSymbolId is SymbolId sourceHirSymbolId)
+    {
+        _traceSink?.LinkValue(
+            sourceHirSymbolId,
+            _mirCallableId,
+            mirValueId);
+    }
+    return mirValue;
+}</code></pre>
+
+  <p>
+    이 호출에서는 <code>hirSymbolId = null</code>입니다.<br>
+    상수 <code>1</code>은 소스 선언이 아니라 계산 결과이기 때문입니다.<br>
+    <code>_traceSink</code>도 <code>null</code>이므로 선택형 링크 호출은 실행되지 않습니다.<br>
+    함수가 돌아오면 <code>EmitMirInstruction()</code>이 <code>MirConstant i0</code>을 현재 <code>b0.Instructions</code>에 추가합니다.
+  </p>
+
+<pre><code class="language-plaintext">오른쪽 1 처리 직후
+├─ _mirValues = [%v0, %v1]
+├─ b0.Instructions = [i0: %v1 = const int 1]
+└─ _nextMirInstructionIdValue = 1</code></pre>
+
+  <h3>덧셈 결과: <code>i1</code>과 <code>%v2</code> 생성</h3>
+
+  <p>
+    양쪽 결과가 각각 <code>%v0 : int</code>와 <code>%v1 : int</code>로 돌아왔으므로 타입 비교를 통과합니다.<br>
+    이어서 <code>EmitBinary(Add, %v0, %v1, h3의 Origin)</code>이 호출됩니다.
+  </p>
+
+<pre><code class="language-csharp">private MirValueId EmitBinary(
+    MirBinaryOperator mirOperator,
+    MirValueId mirLeftValueId,
+    MirValueId mirRightValueId,
+    MirOrigin mirOrigin)
+{
+    // 예제값: mirOperator = Add, 왼쪽 타입 = int
+    var mirResultType = mirOperator switch
+    {
+        MirBinaryOperator.Equal
+            or MirBinaryOperator.NotEqual
+            or MirBinaryOperator.Less
+            or MirBinaryOperator.LessOrEqual
+            or MirBinaryOperator.Greater
+            or MirBinaryOperator.GreaterOrEqual =&gt;
+            MirType.Scalar(QType.Bit),
+        MirBinaryOperator.Add
+            or MirBinaryOperator.Subtract
+            or MirBinaryOperator.Multiply
+            or MirBinaryOperator.Divide =&gt;
+            MirTypeOf(mirLeftValueId),
+        _ =&gt; throw MirLoweringError(
+            $"unsupported MIR binary operator `{mirOperator}`"),
+    };
+
+    // 예제값: 다음 instruction = i1, 다음 value = %v2
+    var mirInstructionId = AllocateMirInstructionId();
+    var mirResultValue = CreateMirValue(
+        mirResultType,
+        null,
+        mirOrigin);
+    EmitMirInstruction(new MirBinary(
+        mirInstructionId,
+        mirResultValue,
+        mirOperator,
+        mirLeftValueId,
+        mirRightValueId,
+        mirOrigin));
+    return mirResultValue.Id;
+}</code></pre>
+
+  <p>
+    반환된 <code>%v2</code>는 <code>LowerExpressionAs()</code>의 예상 타입 <code>int</code>과 일치합니다.<br>
+    따라서 <code>LowerReturn()</code>은 <code>ReturnFromCurrentMirBlock(%v2, return h4의 Origin)</code>을 호출하고, <code>b0</code>을 <code>return %v2</code>로 닫습니다.
+  </p>
+
+<pre><code class="language-plaintext">Next c6의 완성 결과
+function @c6 Next(%v0 value: int) -&gt; int
+  ^b0():
+    i0: %v1: int = const int 1     // Origin h2
+    i1: %v2: int = add %v0, %v1   // Origin h3
+    return %v2                    // Origin h4</code></pre>
+
+  <h2 id="work-start"><code>Work</code>의 첫 문장: <code>var values = [0]</code></h2>
+
+  <p>
+    <code>Next</code> 변환이 끝난 뒤 둘째 <code>foreach</code> 반복은 새 <code>Work c44</code> lowerer를 만듭니다.<br>
+    매개변수가 없으므로 첫 문장을 만나기 직전의 값·instruction 목록과 두 dictionary는 모두 비어 있습니다.
+  </p>
+
+<pre><code class="language-plaintext">Work c44, 배열 선언 직전
+├─ _currentMirBlockBuilder = b0
+├─ _mirValues = []
+├─ b0.Instructions = []
+├─ 다음 ID = %v0, i0, $s0, q0
+├─ CurrentMirValueByHirSymbolId = {}
+└─ CurrentMirQubitByHirSymbolId = {}</code></pre>
+
+  <p>
+    <code>LowerStatement()</code>은 <code>HirVariableDeclarationStatement</code> 분기를 선택하여 <code>LowerDeclaration()</code>을 호출합니다.<br>
+    아래는 그 함수에서 <code>IsArray = true</code>일 때 이 예제가 끝까지 실행하는 배열 경로입니다.
+  </p>
+
+<pre><code class="language-csharp">// LowerDeclaration()의 배열 경로
+var hirDeclaredSymbol = RequireHirDeclarationSymbol(
+    hirDeclaration.Id,
+    $"declaration `{hirDeclaration.Name}`"); // Symbol(values)
+var mirOrigin = MirOriginFor(hirDeclaration); // Origin h9
+
+if (hirDeclaration.IsArray) // 예제값: true
+{
+    var declaredElementQType = hirDeclaration.Type
+        ?? hirDeclaredSymbol.Type
+        ?? throw MirLoweringError(
+            $"array `{hirDeclaration.Name}` has no element type"); // Int
+    int declaredArrayLength;
+    MirArrayInitialization mirArrayInitialization;
+    List&lt;MirValueId&gt; mirElementValueIds;
+
+    switch (hirDeclaration.Value)
+    {
+        case HirArrayCreationExpression hirArrayCreation:
+            // 이 예제에서는 선택되지 않습니다.
+            declaredArrayLength = hirArrayCreation.Length;
+            mirArrayInitialization = MirArrayInitialization.ZeroInitialized;
+            mirElementValueIds = new List&lt;MirValueId&gt;();
+            break;
+
+        case HirArrayLiteralExpression hirArrayLiteral:
+            // 예제값: Elements = [정수 리터럴 0, h7]
+            declaredArrayLength = hirArrayLiteral.Elements.Count; // 1
+            mirArrayInitialization = MirArrayInitialization.ExplicitElements;
+            mirElementValueIds =
+                new List&lt;MirValueId&gt;(hirArrayLiteral.Elements.Count);
+            foreach (var hirElementExpression in hirArrayLiteral.Elements)
+            {
+                // EmitConstant(Int, "0", h7) -&gt; i0, %v0
+                var mirElementValueId = LowerExpressionAs(
+                    hirElementExpression,
+                    MirType.Scalar(declaredElementQType));
+                mirElementValueIds.Add(mirElementValueId);
+            }
+            break;
+
+        default:
+            throw MirLoweringError(
+                $"validated array `{hirDeclaration.Name}` "
+                + "has a non-array initializer");
+    }
+
+    var mirArrayCreationInstructionId =
+        AllocateMirInstructionId(); // i1
+    var mirArrayStorage = new MirArrayStorage(
+        AllocateMirStorageId(),     // $s0
+        hirDeclaration.Name,
+        mirOrigin);
+    var mirArrayType = MirType.Array(
+        declaredElementQType,
+        declaredArrayLength);       // int[1]
+    var mirArrayValue = CreateMirValue(
+        mirArrayType,
+        hirDeclaredSymbol.Id,
+        mirOrigin);                 // %v1
+    _traceSink?.LinkStorage(
+        hirDeclaredSymbol.Id,
+        _mirCallableId,
+        mirArrayStorage.Id);
+    EmitMirInstruction(new MirArrayCreate(
+        mirArrayCreationInstructionId,
+        mirArrayValue,
+        mirArrayStorage,
+        mirArrayInitialization,
+        mirElementValueIds,
+        mirOrigin));
+    _currentFlowState.TrackDeclaredHirSymbol(hirDeclaredSymbol.Id);
+    _currentFlowState.CurrentMirValueByHirSymbolId[
+            hirDeclaredSymbol.Id] =
+        mirArrayValue.Id;           // Symbol(values) -&gt; %v1
+    return;
+}</code></pre>
+
+  <p>
+    생성 순서는 배열 원소 <code>0</code>, 배열 생성 instruction ID, storage, 배열 결과값 순서입니다.<br>
+    따라서 <code>EmitConstant()</code>이 먼저 <code>i0/%v0</code>을 만들고, 이어서 <code>MirArrayCreate</code>가 <code>i1/%v1/$s0</code>을 연결합니다.<br>
+    다음 소스 문장인 <code>use q = Qubit[1]</code>은 <code>MirQubitAllocate i2</code>와 <code>q0.v0</code>을 만들지만 고전 <code>MirValue</code>는 만들지 않습니다.<br>
+    그래서 다음 고전 값 번호는 그대로 <code>%v2</code>이고 다음 instruction 번호만 <code>i3</code>이 됩니다.
+  </p>
+
+<pre><code class="language-plaintext">use 문까지 처리한 b0
+├─ i0: %v0 = const int 0
+├─ i1: %v1 = array.create $s0 int[1] {%v0}
+├─ i2: qubit.allocate q0.v0
+├─ CurrentMirValueByHirSymbolId[Symbol(values)] = %v1
+└─ CurrentMirQubitByHirSymbolId[Symbol(q)] = q0.v0</code></pre>
+
+  <h2 id="work-assignment"><code>values[0] = Next(values[0])</code>의 정확한 평가 순서</h2>
+
+  <p>
+    대입 직전 현재 배열 상태는 <code>%v1</code>입니다.<br>
+    <code>LowerStatement()</code>이 <code>HirAssignmentStatement</code> 분기를 선택하면 다음 함수 전체가 실행됩니다.<br>
+    앞쪽 단순 이름 대입 분기는 건너뛰고, 뒤쪽 indexed assignment 경로가 선택됩니다.
+  </p>
+
+<pre><code class="language-csharp">private void LowerAssignment(HirAssignmentStatement hirAssignment)
+{
+    // 예제값: hirAssignment = values[0] = Next(values[0]), h20
+    var mirOrigin = MirOriginFor(hirAssignment);
+
+    if (hirAssignment.Target is HirNameExpression hirNameTarget)
+    {
+        // 이 예제의 target은 HirIndexExpression이므로 선택되지 않습니다.
+        var hirTargetSymbolId = SymbolIdOf(
+            hirNameTarget,
+            $"assignment target `{hirNameTarget.Name}`");
+        var mirTargetType =
+            _currentFlowState.CurrentMirValueByHirSymbolId.TryGetValue(
+                hirTargetSymbolId,
+                out var currentMirValueId)
+            ? MirTypeOf(currentMirValueId)
+            : throw MirLoweringError(
+                $"assignment target `{hirNameTarget.Name}` has no SSA state");
+        var mirAssignedValueId = LowerExpressionAs(
+            hirAssignment.Value,
+            mirTargetType);
+        TraceMirValueForHirSymbol(
+            mirAssignedValueId,
+            hirTargetSymbolId);
+        _currentFlowState.CurrentMirValueByHirSymbolId[
+                hirTargetSymbolId] =
+            mirAssignedValueId;
+        return;
+    }
+
+    if (hirAssignment.Target is not HirIndexExpression
+        {
+            Receiver: HirNameExpression hirArrayReceiver,
+        } hirIndexedTarget)
+    {
+        throw MirLoweringError(
+            "unsupported assignment target "
+            + $"`{HirExpressions.Render(hirAssignment.Target)}`");
+    }
+
+    // 예제값: hirArrayReceiver.Name = "values"
+    var hirArraySymbolId = SymbolIdOf(
+        hirArrayReceiver,
+        $"assignment target `{hirArrayReceiver.Name}`");
+    if (!_currentFlowState.CurrentMirValueByHirSymbolId.TryGetValue(
+            hirArraySymbolId,
+            out var currentMirArrayValueId))
+    {
+        throw MirLoweringError(
+            $"indexed assignment target `{hirArrayReceiver.Name}` "
+            + "has no array state");
+    }
+    var mirArrayType = MirTypeOf(currentMirArrayValueId);
+    if (!mirArrayType.IsArray)
+    {
+        throw MirLoweringError(
+            $"indexed assignment target `{hirArrayReceiver.Name}` "
+            + "is not an array");
+    }
+
+    // 예제 호출: 왼쪽 index 0 -&gt; i3, %v2
+    var mirIndexValueId = LowerExpressionAs(
+        hirIndexedTarget.Index,
+        MirType.Scalar(QType.Int));
+
+    // 예제 호출: Next(values[0]) -&gt; i4..i6, %v3..%v5
+    var mirStoredValueId = LowerExpressionAs(
+        hirAssignment.Value,
+        MirType.Scalar(mirArrayType.ElementType));
+    var mirIndexedTargetOrigin = MirOriginFor(hirIndexedTarget);
+
+    // 예제값: i7, 새 배열 상태 %v6
+    var mirArrayStoreInstructionId = AllocateMirInstructionId();
+    var mirUpdatedArrayValue = CreateMirValue(
+        mirArrayType,
+        hirArraySymbolId,
+        mirOrigin);
+    EmitMirInstruction(new MirArrayStore(
+        mirArrayStoreInstructionId,
+        mirUpdatedArrayValue,
+        currentMirArrayValueId, // %v1
+        mirIndexValueId,        // %v2
+        mirStoredValueId,       // %v5
+        mirIndexedTargetOrigin));
+
+    // Symbol(values)의 현재 연결만 %v1에서 %v6으로 바뀝니다.
+    _currentFlowState.CurrentMirValueByHirSymbolId[
+            hirArraySymbolId] =
+        mirUpdatedArrayValue.Id;
+}</code></pre>
+
+  <p>
+    이 함수가 정한 평가 순서가 중요합니다.<br>
+    왼쪽 index를 먼저 내리므로 첫 결과가 <code>i3/%v2</code>입니다.<br>
+    그다음 <code>LowerExpressionAs()</code>가 오른쪽 호출식 <code>Next(values[0]) h19</code> 자체를 내리기 시작합니다.
+  </p>
+
+<pre><code class="language-plaintext">왼쪽 target을 내린 직후
+├─ i3: %v2 = const int 0
+├─ mirIndexValueId = %v2
+└─ 아직 오른쪽 호출의 instruction은 없음</code></pre>
+
+  <p>
+    <code>LowerExpressionValue(h19)</code>는 먼저 <code>MirOriginFor(h19)</code>로 현재 호출식의 Origin을 만든 다음 switch에 들어갑니다.<br>
+    런타임 타입이 <code>HirCallExpression</code>이므로 호출 case가 선택되고, 인수 <code>h17</code>을 처리하기 전에 먼저 <code>LowerPureCall(h19)</code>로 진입합니다.
+  </p>
+
+<pre><code class="language-csharp">// LowerExpressionValue(h19)의 실제 진입부와 선택 case
+private MirValueId LowerExpressionValue(HirExpression hirExpression)
+{
+    // 예제값: hirExpression = Next(values[0]) h19
+    var mirOrigin = MirOriginFor(hirExpression); // Origin h19
+    switch (hirExpression)
+    {
+        // 다른 case는 이 호출에서 선택되지 않습니다.
+        case HirCallExpression hirCall:
+            return LowerPureCall(hirCall);
+    }
+}</code></pre>
+
+  <p>
+    <code>LowerPureCall()</code>은 의미 모델에서 호출 대상을 먼저 찾습니다.<br>
+    이 예제에서 대상 선언은 function <code>Next h6</code>이므로 <code>MirUserCallableTarget(c6)</code>을 만든 다음, operand loop의 <code>LowerExpression(h17)</code>을 호출합니다.<br>
+    아래 발췌는 바로 그 중첩 호출이 시작되는 지점까지입니다.
+  </p>
+
+<pre><code class="language-csharp">// LowerPureCall(h19)의 target 해소와 operand loop 진입
+var semanticCallTargetSymbol = RequireHirCallTargetSymbol(hirCall);
+HirCallable? hirUserFunction = null;
+MirCallTarget mirCallTarget;
+if (semanticCallTargetSymbol.Kind == SymbolKind.BuiltinFunction)
+{
+    // Next는 사용자 callable이므로 이 분기는 선택되지 않습니다.
+    mirCallTarget = new MirBuiltinFunctionTarget(
+        semanticCallTargetSymbol.SourceName);
+}
+else if (semanticCallTargetSymbol.Kind == SymbolKind.Callable)
+{
+    hirUserFunction = RequireHirCallableDeclaration(
+        semanticCallTargetSymbol); // Next h6
+    if (!hirUserFunction.IsFunction)
+    {
+        throw MirLoweringError(
+            $"expression call `{hirCall.Name}` targets an operation");
+    }
+
+    mirCallTarget = new MirUserCallableTarget(
+        new MirCallableId(hirUserFunction.Id.Value)); // c6
+}
+else
+{
+    throw MirLoweringError(
+        $"pure call `{hirCall.Name}` targets semantic symbol kind "
+        + semanticCallTargetSymbol.Kind);
+}
+
+var mirCallOrigin = MirOriginFor(hirCall); // Origin h19
+IReadOnlyList&lt;HirParameter&gt;? hirUserFunctionParameters =
+    hirUserFunction?.Parameters; // [value:int]
+var mirCallOperands =
+    new List&lt;MirCallOperand&gt;(hirCall.Arguments.Count);
+for (var argumentIndex = 0;
+     argumentIndex &lt; hirCall.Arguments.Count;
+     argumentIndex++)
+{
+    // 예제값: argumentIndex = 0, expression = values[0] h17
+    var hirArgumentExpression =
+        hirCall.Arguments[argumentIndex].Expression;
+
+    // 이 호출 안에서 h17의 i4/%v3과 i5/%v4가 생성됩니다.
+    var mirArgumentValueId = LowerExpression(
+        hirArgumentExpression);</code></pre>
+
+  <p>
+    <code>LowerIndexExpression</code>이라고 부르는 index-expression lowering은 바로 이 operand lowering 중에 호출됩니다.<br>
+    다만 현재 구현에는 같은 이름의 별도 helper가 없으며, <code>LowerExpression(h17)</code>이 다시 <code>LowerExpressionValue(h17)</code>로 들어가 <code>HirIndexExpression</code> case를 선택하는 구조입니다.<br>
+    또한 아래 발췌의 <code>mirOrigin</code>은 바깥 호출식 <code>h19</code>의 Origin이 아닙니다. <code>LowerExpressionValue()</code>가 switch 직전에 <code>var mirOrigin = MirOriginFor(hirExpression)</code>을 다시 실행하므로, 현재 인수 식 <code>values[0] h17</code>에서 만든 Origin입니다.
+  </p>
+
+<pre><code class="language-csharp">// LowerExpressionValue(h17)의 indexed classical expression case
+case HirIndexExpression hirIndex:
+{
+    // 예제값: receiver values -&gt; 현재 dictionary의 %v1
+    var mirArrayValueId = LowerExpression(hirIndex.Receiver);
+    var mirArrayType = MirTypeOf(mirArrayValueId); // int[1]
+    if (!mirArrayType.IsArray)
+    {
+        throw MirLoweringError(
+            "an indexed classical expression does not have array type");
+    }
+
+    // 예제값: index 0 -&gt; i4, %v3
+    var mirIndexValueId = LowerExpressionAs(
+        hirIndex.Index,
+        MirType.Scalar(QType.Int));
+    var mirInstructionId = AllocateMirInstructionId(); // i5
+    var mirResultValue = CreateMirValue(
+        MirType.Scalar(mirArrayType.ElementType),
+        null,
+        mirOrigin); // %v4, Origin h17
+    EmitMirInstruction(new MirArrayLoad(
+        mirInstructionId,
+        mirResultValue,
+        mirArrayValueId,
+        mirIndexValueId,
+        mirOrigin));
+    return mirResultValue.Id; // %v4
+}</code></pre>
+
+  <p>
+    <code>HirIndexExpression</code> case는 이름 <code>values</code>에서 <code>%v1</code>을 읽고, index 리터럴을 내려 <code>i4/%v3</code>을 만든 뒤 <code>MirArrayLoad i5/%v4</code>를 방출합니다.<br>
+    반환된 <code>%v4</code>가 이제서야 <code>LowerPureCall()</code>의 <code>mirArgumentValueId</code>에 들어가며, 타입 확인 뒤 operand 목록에 추가됩니다.<br>
+    operand loop가 끝난 다음에만 호출 결과용 <code>i6/%v5</code>가 생성됩니다.
+  </p>
+
+<pre><code class="language-csharp">// LowerPureCall(h19)의 operand loop로 돌아온 뒤
+    if (hirUserFunctionParameters is not null)
+    {
+        var hirParameter =
+            hirUserFunctionParameters[argumentIndex]; // value:int
+        var expectedMirArgumentType =
+            hirParameter.IsArray
+            ? MirType.Array(
+                hirParameter.Type,
+                hirParameter.RegisterSize)
+            : MirType.Scalar(hirParameter.Type); // int
+        RequireCallType(mirArgumentValueId, expectedMirArgumentType);
+    }
+    mirCallOperands.Add(
+        new MirClassicalCallOperand(
+            mirArgumentValueId)); // [%v4]
+}
+
+var mirCallResultType = mirCallTarget switch
+{
+    MirUserCallableTarget
+        when hirUserFunction?.ReturnType
+            is { } hirReturnQType =&gt;
+        MirType.Scalar(hirReturnQType), // int
+    MirBuiltinFunctionTarget mirBuiltinTarget
+        when QoraGates.Functions.TryGetValue(
+            mirBuiltinTarget.Name,
+            out var builtinFunctionSignature) =&gt;
+        MirType.Scalar(builtinFunctionSignature.Returns),
+    _ =&gt; throw MirLoweringError(
+        $"pure target `{mirCallTarget.DisplayName}` has no return type"),
+};
+var mirCallInstructionId = AllocateMirInstructionId(); // i6
+var mirCallResultValue = CreateMirValue(
+    mirCallResultType,
+    null,
+    mirCallOrigin); // %v5
+EmitMirInstruction(new MirPureCall(
+    mirCallInstructionId,
+    mirCallResultValue,
+    mirCallTarget,
+    mirCallOperands,
+    mirCallOrigin));
+return mirCallResultValue.Id; // %v5</code></pre>
+
+<pre><code class="language-plaintext">오른쪽 호출식의 실제 실행 순서
+1. LowerExpressionValue(h19)의 call case 선택
+2. LowerPureCall(h19) 진입, target Next c6 확정
+3. operand loop가 LowerExpression(h17) 호출
+4. h17의 index 0 -&gt; i4, %v3
+5. h17의 array.load %v1[%v3] -&gt; i5, %v4
+6. operand 목록에 %v4 추가
+7. MirPureCall(c6, [%v4]) -&gt; i6, %v5</code></pre>
+
+  <p>
+    현재 구현에는 <code>EmitLoad()</code>이나 <code>EmitPureCall()</code>이라는 별도 메서드가 없습니다.<br>
+    각각 <code>HirIndexExpression</code> case와 <code>LowerPureCall()</code>이 instruction 객체 생성과 방출을 직접 수행합니다.
+  </p>
+
+  <p>
+    오른쪽 결과가 돌아오면 <code>LowerAssignment()</code>이 <code>i7</code>과 <code>%v6</code>을 만들고 <code>MirArrayStore(%v1, %v2, %v5)</code>를 방출합니다.<br>
+    여기에도 <code>EmitStore()</code>이라는 별도 helper는 없습니다.<br>
+    마지막 줄에서 <code>Symbol(values)</code>의 현재 연결이 <code>%v6</code>으로 교체되므로, 이후의 <code>values</code> 사용은 저장 전 <code>%v1</code>이 아니라 저장 후 상태 <code>%v6</code>을 읽습니다.
+  </p>
+
+<pre><code class="language-plaintext">대입 완료
+├─ i7: %v6: int[1] = array.store %v1[%v2], %v5
+├─ _mirValues = [%v0 .. %v6]
+└─ CurrentMirValueByHirSymbolId
+   └─ Symbol(values) -&gt; %v6</code></pre>
+
+  <h2 id="work-condition"><code>if (values[0] == 1)</code>이 <code>%v10</code>을 만드는 순서</h2>
+
+  <p>
+    조건문 직전에는 <code>Symbol(values) → %v6</code>입니다. <code>LowerIf()</code>이 먼저 <code>LowerExpressionAs(hirIf.Condition, bit)</code>을 호출하므로, block을 나누기 전에 조건식의 네 instruction이 현재 <code>b0</code>에 추가됩니다.
+  </p>
+
+<pre><code class="language-plaintext">조건식의 실제 호출 순서
+1. values 이름 조회                  -&gt; %v6, 새 instruction 없음
+2. index 0의 EmitConstant            -&gt; i8,  %v7
+3. new MirArrayLoad(%v6, %v7)        -&gt; i9,  %v8
+4. 오른쪽 1의 EmitConstant           -&gt; i10, %v9
+5. EmitBinary(Equal, %v8, %v9)       -&gt; i11, %v10 : bit
+6. b0.BranchTo(%v10, b1, b2)         -&gt; branch terminator</code></pre>
+
+  <p>
+    이항식 case는 연산자 <code>Equal</code>을 <code>MirBinaryOperator.Equal</code>로 바꾸고, <code>EmitBinary()</code>의 비교 연산 분기가 결과 타입을 <code>bit</code>로 정합니다.<br>
+    반환된 <code>%v10</code>이 예상 타입 <code>bit</code>과 일치하면 <code>LowerIf()</code>은 참 block <code>b1</code>과 거짓 block <code>b2</code>를 만들고 <code>b0</code>을 branch로 닫습니다. <code>MirBranch</code>는 terminator이므로 별도 instruction ID를 소비하지 않습니다.
+  </p>
+
+<pre><code class="language-plaintext">b0의 마지막 고전 계산과 종료
+├─ i8:  %v7  = const int 0
+├─ i9:  %v8  = array.load %v6[%v7]
+├─ i10: %v9  = const int 1
+├─ i11: %v10 = eq %v8, %v9
+└─ branch %v10, b1, b2</code></pre>
+
+  <h2 id="gate-indexes"><code>X(q[0])</code>과 <code>H(q[0])</code>의 마지막 두 값</h2>
+
+  <p>
+    참 block <code>b1</code>에서 <code>LowerStatementCall()</code>은 의미 모델의 호출 대상 종류가 <code>BuiltinGate</code>임을 확인하고 X의 큐비트 인수를 <code>LowerQubitAccess(q[0])</code>로 보냅니다.<br>
+    indexed qubit case는 현재 큐비트 dictionary에서 <code>q0.v0</code>을 꺼내고 index 식 <code>0</code>을 고전식으로 내립니다.<br>
+    따라서 <code>EmitConstant(Int, "0", h28의 Origin)</code>이 <code>i12/%v11</code>을 만든 뒤, X 적용 instruction <code>i13</code>이 <code>q0.v1</code>을 만듭니다.
+  </p>
+
+<pre><code class="language-csharp">private MirQubitAccess LowerQubitAccess(
+    HirExpression hirExpression)
+{
+    switch (hirExpression)
+    {
+        case HirNameExpression hirName:
+        {
+            // 이 예제는 q[0]이므로 scalar-name 분기를 선택하지 않습니다.
+            var hirSymbolId = SymbolIdOf(
+                hirName,
+                $"qubit name `{hirName.Name}`");
+            if (!_currentFlowState.CurrentMirQubitByHirSymbolId
+                .TryGetValue(
+                    hirSymbolId,
+                    out var currentMirQubit))
+            {
+                throw MirLoweringError(
+                    $"name `{hirName.Name}` does not denote a qubit");
+            }
+
+            return new MirQubitAccess(
+                currentMirQubit,
+                origin: MirOriginFor(hirExpression));
+        }
+        case HirIndexExpression
+        {
+            Receiver: HirNameExpression hirReceiverName,
+            Index: { } hirIndex,
+        }:
+        {
+            // X 예제: Symbol(q) -&gt; q0.v0
+            // H 예제: Symbol(q) -&gt; 합류 상태 q0.v2
+            var hirSymbolId = SymbolIdOf(
+                hirReceiverName,
+                $"qubit name `{hirReceiverName.Name}`");
+            if (!_currentFlowState.CurrentMirQubitByHirSymbolId
+                .TryGetValue(
+                    hirSymbolId,
+                    out var currentMirQubit))
+            {
+                throw MirLoweringError(
+                    $"name `{hirReceiverName.Name}` does not denote a qubit");
+            }
+
+            // X: i12/%v11, H: i14/%v12
+            var mirIndexValueId = LowerExpressionAs(
+                hirIndex,
+                MirType.Scalar(QType.Int));
+            return new MirQubitAccess(
+                currentMirQubit,
+                mirIndexValueId,
+                MirOriginFor(hirExpression));
+        }
+        default:
+            throw MirLoweringError(
+                $"`{HirExpressions.Render(hirExpression)}` "
+                + "is not a qubit access");
+    }
+}</code></pre>
+
+  <p>
+    거짓 block <code>b2</code>에서는 새 고전 값이 생기지 않습니다.<br>
+    두 경로는 <code>b3</code>에서 합류하며, 큐비트의 현재 상태만 <code>q0.v2</code>로 합쳐집니다.<br>
+    이어서 <code>H(q[0])</code>이 같은 indexed qubit case를 다시 실행합니다.<br>
+    이번 index <code>0</code>은 별개의 소스 식 <code>h38</code>이므로 새 상수 <code>i14/%v12</code>가 생기고, H 적용 <code>i15</code>이 <code>q0.v3</code>을 만듭니다.
+  </p>
+
+<pre><code class="language-plaintext">b1
+├─ i12: %v11 = const int 0                  // Origin h28
+└─ i13: X(q0.v0[%v11]) -&gt; q0.v1            // site c44/i13
+
+b2
+└─ 고전 값 생성 없음
+
+b3
+├─ q0.v2 = phi(b1의 q0.v1, b2의 q0.v0)
+├─ i14: %v12 = const int 0                  // Origin h38
+├─ i15: H(q0.v2[%v12]) -&gt; q0.v3            // site c44/i15
+└─ implicit return</code></pre>
+
+  <h2 id="all-work-values"><code>Work c44</code>의 모든 값과 instruction</h2>
+
+  <p>
+    지금까지의 작은 호출을 생성 순서로 합치면 다음 표가 됩니다.<br>
+    값 ID는 <code>CreateMirValue()</code> 호출 순서이고, instruction ID는 <code>AllocateMirInstructionId()</code> 호출 순서입니다.
+  </p>
+
+  <div class="panel">
+    <table>
+      <caption><code>Work c44</code>의 고전 값 <code>%v0…%v12</code></caption>
+      <thead><tr><th scope="col">값</th><th scope="col">정의 instruction</th><th scope="col">Origin</th><th scope="col">실제 생성 원인</th></tr></thead>
+      <tbody>
+        <tr><td><code>%v0</code></td><td><code>i0</code></td><td><code>h7</code></td><td><code>[0]</code>의 원소 <code>const int 0</code></td></tr>
+        <tr><td><code>%v1</code></td><td><code>i1</code></td><td><code>h9</code></td><td><code>array.create $s0 {%v0}</code></td></tr>
+        <tr><td><code>%v2</code></td><td><code>i3</code></td><td><code>h12</code></td><td>대입 왼쪽 <code>values[0]</code>의 index</td></tr>
+        <tr><td><code>%v3</code></td><td><code>i4</code></td><td><code>h16</code></td><td>호출 인수 <code>values[0]</code>의 index</td></tr>
+        <tr><td><code>%v4</code></td><td><code>i5</code></td><td><code>h17</code></td><td><code>array.load %v1[%v3]</code></td></tr>
+        <tr><td><code>%v5</code></td><td><code>i6</code></td><td><code>h19</code></td><td><code>call @c6:Next(%v4)</code></td></tr>
+        <tr><td><code>%v6</code></td><td><code>i7</code></td><td><code>h20</code></td><td><code>array.store %v1[%v2], %v5</code>의 새 배열 상태</td></tr>
+        <tr><td><code>%v7</code></td><td><code>i8</code></td><td><code>h22</code></td><td>조건식 <code>values[0]</code>의 index</td></tr>
+        <tr><td><code>%v8</code></td><td><code>i9</code></td><td><code>h23</code></td><td><code>array.load %v6[%v7]</code></td></tr>
+        <tr><td><code>%v9</code></td><td><code>i10</code></td><td><code>h24</code></td><td>조건식 오른쪽 <code>const int 1</code></td></tr>
+        <tr><td><code>%v10</code></td><td><code>i11</code></td><td><code>h25</code></td><td><code>eq %v8, %v9</code></td></tr>
+        <tr><td><code>%v11</code></td><td><code>i12</code></td><td><code>h28</code></td><td><code>X(q[0])</code>의 index</td></tr>
+        <tr><td><code>%v12</code></td><td><code>i14</code></td><td><code>h38</code></td><td><code>H(q[0])</code>의 index</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    첫 표의 Origin은 instruction이 아니라 결과 <code>MirValue</code>의 Origin입니다.<br>
+    특히 <code>%v6</code>은 대입 전체에서 생긴 새 배열 상태이므로 값 Origin이 <code>h20</code>이고, 그 값을 정의하는 <code>MirArrayStore i7</code> 자체의 Origin은 대입 왼쪽 indexed target인 <code>h13</code>입니다.
+  </p>
+
+  <div class="panel">
+    <table>
+      <caption><code>Work c44</code>의 instruction <code>i0…i15</code></caption>
+      <thead><tr><th scope="col">ID</th><th scope="col">block</th><th scope="col">축약 내용</th><th scope="col">결과</th></tr></thead>
+      <tbody>
+        <tr><td><code>i0</code></td><td><code>b0</code></td><td><code>const int 0</code></td><td><code>%v0</code></td></tr>
+        <tr><td><code>i1</code></td><td><code>b0</code></td><td><code>array.create $s0 {%v0}</code></td><td><code>%v1</code></td></tr>
+        <tr><td><code>i2</code></td><td><code>b0</code></td><td><code>qubit.allocate q0.v0</code></td><td><code>q0.v0</code></td></tr>
+        <tr><td><code>i3</code></td><td><code>b0</code></td><td><code>const int 0</code></td><td><code>%v2</code></td></tr>
+        <tr><td><code>i4</code></td><td><code>b0</code></td><td><code>const int 0</code></td><td><code>%v3</code></td></tr>
+        <tr><td><code>i5</code></td><td><code>b0</code></td><td><code>array.load %v1[%v3]</code></td><td><code>%v4</code></td></tr>
+        <tr><td><code>i6</code></td><td><code>b0</code></td><td><code>call @c6:Next(%v4)</code></td><td><code>%v5</code></td></tr>
+        <tr><td><code>i7</code></td><td><code>b0</code></td><td><code>array.store %v1[%v2], %v5</code></td><td><code>%v6</code></td></tr>
+        <tr><td><code>i8</code></td><td><code>b0</code></td><td><code>const int 0</code></td><td><code>%v7</code></td></tr>
+        <tr><td><code>i9</code></td><td><code>b0</code></td><td><code>array.load %v6[%v7]</code></td><td><code>%v8</code></td></tr>
+        <tr><td><code>i10</code></td><td><code>b0</code></td><td><code>const int 1</code></td><td><code>%v9</code></td></tr>
+        <tr><td><code>i11</code></td><td><code>b0</code></td><td><code>eq %v8, %v9</code></td><td><code>%v10</code></td></tr>
+        <tr><td><code>i12</code></td><td><code>b1</code></td><td><code>const int 0</code></td><td><code>%v11</code></td></tr>
+        <tr><td><code>i13</code></td><td><code>b1</code></td><td><code>apply X(q0.v0[%v11])</code></td><td><code>q0.v1</code></td></tr>
+        <tr><td><code>i14</code></td><td><code>b3</code></td><td><code>const int 0</code></td><td><code>%v12</code></td></tr>
+        <tr><td><code>i15</code></td><td><code>b3</code></td><td><code>apply H(q0.v2[%v12])</code></td><td><code>q0.v3</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    <code>i2</code>, <code>i13</code>, <code>i15</code>은 고전 <code>MirValue</code>가 아니라 큐비트 상태를 만듭니다.<br>
+    따라서 instruction은 16개이지만 고전 값은 13개입니다.<br>
+    또한 branch, jump, return은 block의 terminator이므로 <code>i*</code> 번호를 사용하지 않습니다.
+  </p>
+
+  <h2 id="idea">추적 결과에 붙이는 이름: SSA</h2>
+
+  <p>
+    이제 위 실행에 이름을 붙일 수 있습니다.<br>
+    <code>%v1</code>은 처음 만들어진 배열 상태이고 <code>%v6</code>은 store 뒤에 만들어진 새 배열 상태입니다.<br>
+    대입이 발생해도 <code>%v1</code>의 내용을 고치지 않고 새 결과 <code>%v6</code>을 만든 뒤 <code>Symbol(values)</code>의 현재 연결만 바꿨습니다.<br>
+    이처럼 각 값 ID를 한 번만 정의하고, 이후 계산이 그 ID를 입력으로 참조하도록 표현하는 방식을 SSA라고 합니다.
+  </p>
+
+<pre><code class="language-plaintext">소스 이름 하나: values
+├─ 선언 직후 현재값 = %v1
+└─ indexed store 뒤 현재값 = %v6
+
+보존되는 과거
+├─ %v1은 끝까지 최초 배열 상태
+└─ %v6은 끝까지 저장 후 배열 상태</code></pre>
+
+  <h2 id="value-structure"><code>Next c6</code>의 <code>MirValue</code>와 instruction 역할 구분</h2>
+
+  <p>
+    <code>CreateMirValue()</code>이 만든 객체에는 ID, 타입, Origin만 들어 있습니다.<br>
+    계산 방법과 입력은 그 값을 결과로 소유하는 instruction에 들어 있습니다.<br>
+    아래 <code>%v0</code>, <code>%v1</code>, <code>%v2</code>, <code>i1</code>은 모두 <code>Next c6</code>의 지역 ID이며, 같은 번호를 다시 사용하는 <code>Work c44</code>의 값·instruction과는 관계가 없습니다.<br>
+    <code>Next c6</code>에서 <code>%v2</code> 자체는 <code>MirValue(v2, int, Origin h3)</code>이고, <code>i1</code>의 <code>MirBinary</code>가 이 값이 <code>%v0 + %v1</code>의 결과라는 사실을 보관합니다.
+  </p>
+
+<pre><code class="language-plaintext">Next c6
+├─ MirValue %v0 = 매개변수 value
+├─ MirValue %v1 = 리터럴 1의 결과
+├─ MirValue %v2
+│  ├─ Id = v2
+│  ├─ Type = int
+│  └─ Origin = h3
+└─ MirBinary i1
+   ├─ Operator = Add
+   ├─ Left = Next c6의 %v0
+   ├─ Right = Next c6의 %v1
+   └─ Result = Next c6의 MirValue %v2</code></pre>
+
+  <h2 id="symbol-vs-value"><code>SymbolId</code>와 <code>MirValueId</code>의 차이</h2>
+
+  <div class="panel">
+    <table>
+      <caption>같은 <code>values</code> 대입을 두 ID 공간에서 읽기</caption>
+      <thead><tr><th scope="col">ID</th><th scope="col">식별 대상</th><th scope="col">예제</th></tr></thead>
+      <tbody>
+        <tr><td><code>SymbolId</code></td><td>소스 선언 하나</td><td>선언과 모든 사용은 같은 <code>Symbol(values)</code></td></tr>
+        <tr><td><code>MirValueId</code></td><td>특정 시점에 한 번 정의된 계산 결과</td><td>최초 상태 <code>%v1</code>, 저장 후 상태 <code>%v6</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    dictionary의 key는 변하지 않는 <code>Symbol(values)</code>이고 value만 <code>%v1</code>에서 <code>%v6</code>으로 바뀝니다.<br>
+    이 때문에 이후 이름 사용은 소스 문자열을 다시 검색하지 않으면서도 정확한 현재 상태를 얻을 수 있습니다.
+  </p>
+
+  <h2 id="definition">완성된 callable에서 값 정의 위치 조회</h2>
+
+  <p>
+    lowering 중에는 <code>_mirValues</code>와 instruction 목록을 함께 채웁니다. <code>MirCallable</code>이 완성되면 생성자가 매개변수, block argument, instruction 결과를 순회하여 값 정의 위치 인덱스를 만듭니다.<br>
+    소비자는 다음 공개 메서드로 값이 어느 자리에서 정의되었는지 조회합니다.
+  </p>
+
+<pre><code class="language-csharp">public MirValueDefinition DefinitionOf(MirValueId value) =&gt;
+    _valueSites.TryGetValue(value, out var site)
+        ? site.Definition
+        : throw Missing(nameof(value), value, "SSA value");</code></pre>
+
+<pre><code class="language-plaintext">// Next c6의 예제 조회 결과
+DefinitionOf(%v0) = ParameterAt(0)
+DefinitionOf(%v1) = InstructionResultAt(i0, 0)
+DefinitionOf(%v2) = InstructionResultAt(i1, 0)</code></pre>
+
+  <p>
+    <code>InstructionResultAt(i1, 0)</code>의 마지막 0은 <code>i1</code>이 낸 첫 번째 결과라는 뜻입니다.<br>
+    이 인덱스는 값을 복제하여 보관하지 않고 원본 정의의 위치만 가리킵니다.
+  </p>
+
+  <h2 id="no-classical-phi">이 예제의 <code>b3</code>에 고전 Phi가 없는 이유</h2>
+
+  <p>
+    분기 직전 <code>Symbol(values)</code>의 현재값은 <code>%v6</code>입니다.<br>
+    참 경로의 X와 거짓 경로의 빈 본문은 고전 배열을 바꾸지 않으므로 두 경로가 모두 같은 <code>%v6</code>을 가지고 합류합니다.<br>
+    서로 다른 값을 하나로 합칠 필요가 없으므로 <code>b3</code>에 고전 block argument가 생기지 않습니다.
+  </p>
+
+<pre><code class="language-plaintext">분기 전 b0: Symbol(values) -&gt; %v6
+├─ 참 b1:  Symbol(values) -&gt; %v6
+└─ 거짓 b2: Symbol(values) -&gt; %v6
+                  ↓
+합류 b3: Symbol(values) -&gt; %v6  // 고전 Phi 없음</code></pre>
+
+  <p>
+    반면에 큐비트 <code>q</code>는 참 경로에서만 X를 지나므로 <code>q0.v1</code>과 <code>q0.v0</code>을 <code>q0.v2</code>로 합쳐야 합니다.<br>
+    큐비트 버전은 <a href="chapter-13.html">13장</a>, 일반적인 분기 합류는 <a href="chapter-15.html">15장</a>에서 같은 예제를 이어서 다룹니다.
+  </p>
+
+  <div class="callout good">
+    <span class="h">이번 장의 실행 결과</span>
+    <code>Next c6</code>은 매개변수 <code>%v0</code>에서 시작하여 <code>i0/%v1</code>, <code>i1/%v2</code>를 만들고 <code>%v2</code>를 반환합니다.<br>
+    새 lowerer에서 시작한 <code>Work c44</code>은 <code>i0…i15</code>를 소스 평가 순서대로 만들며, 고전 결과는 <code>%v0…%v12</code>입니다.<br>
+    배열 대입 뒤에는 과거 <code>%v1</code>을 고치지 않고 현재 연결만 새 상태 <code>%v6</code>으로 바뀝니다.
+  </div>
+
+  <p>
+    다음 장에서는 <code>%v1</code>과 <code>%v6</code>이 서로 다른 값인데도 같은 저장 장소 <code>$s0</code>의 상태라고 판단할 수 있는 이유를 이어서 추적합니다.
+  </p>
+
+  <nav class="chapter-nav" aria-label="장 이동(하단)">
+    <div class="group"><a href="chapter-10.html">← 이전: Callable lowering</a><a href="index.html#chapters">전체 목차</a></div>
+    <div class="group"><a href="chapter-12.html">다음: Storage와 배열 상태 →</a></div>
+  </nav>
+
+  <footer>Qora 컴파일러 개발자 매뉴얼 · 11장</footer>
+</main>
+</body>
+</html>

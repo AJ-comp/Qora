@@ -87,7 +87,7 @@ public sealed class HirTypeBoundaryTests
         var callable = Assert.Single(mir.Program.Callables);
         Assert.Equal(MirType.Array(QType.Int, 1), callable.RequireValue(comparison.Left).Type);
         Assert.Equal(MirType.Array(QType.Int, 2), callable.RequireValue(comparison.Right).Type);
-        Assert.Equal(MirType.Scalar(QType.Bit), callable.RequireValue(comparison.Result).Type);
+        Assert.Equal(MirType.Scalar(QType.Bit), callable.RequireValue(comparison.Result.Id).Type);
     }
 
     [Fact]
@@ -183,7 +183,7 @@ public sealed class HirTypeBoundaryTests
         var conversions = conversionInstructions
             .Select(conversion => (
                 Source: main.RequireValue(conversion.Operand).Type,
-                Target: main.RequireValue(conversion.Result).Type))
+                Target: main.RequireValue(conversion.Result.Id).Type))
             .ToList();
 
         Assert.Contains((MirType.Scalar(QType.Bit), MirType.Scalar(QType.Int)), conversions);
@@ -197,7 +197,7 @@ public sealed class HirTypeBoundaryTests
         {
             var origin = Assert.IsType<MirHirOrigin>(conversion.Origin);
             var approvedTarget = hirArtifact.Model.FindImplicitConversionTarget(origin.HirNodeId);
-            Assert.Equal(main.RequireValue(conversion.Result).Type.ElementType, approvedTarget);
+            Assert.Equal(main.RequireValue(conversion.Result.Id).Type.ElementType, approvedTarget);
         }
     }
 }

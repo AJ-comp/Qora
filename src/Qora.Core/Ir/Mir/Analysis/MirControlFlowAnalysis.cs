@@ -45,13 +45,12 @@ public sealed class MirProgramPoint
 }
 
 /// <summary>
-/// Immutable control-flow, dominance, and SSA-availability facts for one callable in one exact MIR
-/// program object. A MIR rewrite creates a new program, so callers must rebuild this analysis before
-/// using any old block, instruction, or value as a scheduling fact.
+/// Immutable control-flow, dominance, and SSA-availability facts for one exact callable object. A MIR
+/// rewrite which replaces that callable must rebuild this analysis before using any old block,
+/// instruction, or value as a scheduling fact.
 /// </summary>
 public sealed class MirControlFlowSnapshot
 {
-    private readonly MirProgram _sourceProgram;
     private readonly MirCallable _sourceCallable;
     private readonly FrozenDictionary<MirBlockId, IReadOnlyList<MirBlockId>> _successors;
     private readonly FrozenDictionary<MirBlockId, IReadOnlyList<MirBlockId>> _predecessors;
@@ -63,7 +62,6 @@ public sealed class MirControlFlowSnapshot
     private readonly FrozenDictionary<MirBlockId, MirProgramPoint> _terminatorPoints;
 
     internal MirControlFlowSnapshot(
-        MirProgram sourceProgram,
         MirCallable sourceCallable,
         IReadOnlyDictionary<MirBlockId, IReadOnlyList<MirBlockId>> successors,
         IReadOnlyDictionary<MirBlockId, IReadOnlyList<MirBlockId>> predecessors,
@@ -72,7 +70,6 @@ public sealed class MirControlFlowSnapshot
         IReadOnlyDictionary<MirBlockId, HashSet<MirBlockId>> postDominators,
         IReadOnlySet<MirBlockId> reachable)
     {
-        _sourceProgram = sourceProgram;
         _sourceCallable = sourceCallable;
 
         _successors = successors.ToFrozenDictionary();
@@ -122,7 +119,6 @@ public sealed class MirControlFlowSnapshot
     public MirCallableId Callable => _sourceCallable.Id;
     public MirBlockId EntryBlock => _sourceCallable.EntryBlock.Id;
     public IReadOnlyList<MirBlockId> ReachableBlocks { get; }
-    internal MirProgram SourceProgram => _sourceProgram;
     internal MirCallable SourceCallable => _sourceCallable;
 
     public bool IsReachable(MirBlockId block)
@@ -266,46 +262,15 @@ public sealed class MirControlFlowSnapshot
 /// </summary>
 internal static class MirControlFlowAnalysis
 {
-    internal static MirControlFlowSnapshot Analyze(
-        MirProgram program,
-        MirCallableId callableId)
-    {
-        ArgumentNullException.ThrowIfNull(program);
-
-        var callable = program.FindCallable(callableId)
-            ?? throw new ArgumentOutOfRangeException(
-                nameof(callableId),
-                callableId,
-                $"callable {callableId} does not belong to the MIR program");
-        return AnalyzeUnchecked(program, callable);
-    }
-
     /// <summary>
-    /// Builds CFG facts after the structural verifier has already established that all referenced
-    /// blocks, edges, values, and instruction identities exist. The verifier and canonical analysis
-    /// store use this entry point without starting verification again.
+    /// Builds CFG facts without starting structural verification. MirCallable construction has already
+    /// established that every CFG target belongs to the callable. The verifier and canonical analysis
+    /// store use this entry point without recursively starting verification.
     /// </summary>
-    internal static MirControlFlowSnapshot AnalyzeUnchecked(
-        MirProgram program,
-        MirCallable callable)
+    internal static MirControlFlowSnapshot AnalyzeUnchecked(MirCallable callable)
     {
-        var successors = callable.Blocks.ToDictionary(
-            block => block.Id,
-            block => (IReadOnlyList<MirBlockId>)Array.AsReadOnly(
-                block.Terminator.Successors
-                    .Distinct()
-                    .OrderBy(id => id.Value)
-                    .ToArray()));
-        var mutablePredecessors = successors.Keys.ToDictionary(
-            block => block,
-            _ => new HashSet<MirBlockId>());
-        foreach (var (block, targets) in successors)
-            foreach (var target in targets)
-                mutablePredecessors[target].Add(block);
-        var predecessors = mutablePredecessors.ToDictionary(
-            pair => pair.Key,
-            pair => (IReadOnlyList<MirBlockId>)Array.AsReadOnly(
-                pair.Value.OrderBy(id => id.Value).ToArray()));
+        var successors = BuildSuccessors(callable);
+        var predecessors = BuildPredecessors(successors);
 
         var reachable = ReachableFrom(callable.EntryBlock.Id, successors);
         var reachableFrom = successors.Keys.ToDictionary(
@@ -328,7 +293,6 @@ internal static class MirControlFlowAnalysis
             successors);
 
         return new MirControlFlowSnapshot(
-            program,
             callable,
             successors,
             predecessors,
@@ -336,6 +300,51 @@ internal static class MirControlFlowAnalysis
             dominators,
             postDominators,
             reachable);
+    }
+
+    private static IReadOnlyDictionary<MirBlockId, IReadOnlyList<MirBlockId>> BuildSuccessors(
+        MirCallable callable)
+    {
+        var successors =
+            new Dictionary<MirBlockId, IReadOnlyList<MirBlockId>>(callable.Blocks.Count);
+
+        foreach (var block in callable.Blocks)
+        {
+            var orderedTargets = block.Terminator.Successors
+                .Distinct()
+                .OrderBy(target => target.Value);
+
+            successors.Add(block.Id, MirCollections.Freeze(orderedTargets));
+        }
+
+        return successors;
+    }
+
+    private static IReadOnlyDictionary<MirBlockId, IReadOnlyList<MirBlockId>> BuildPredecessors(
+        IReadOnlyDictionary<MirBlockId, IReadOnlyList<MirBlockId>> successors)
+    {
+        var mutablePredecessors =
+            new Dictionary<MirBlockId, HashSet<MirBlockId>>(successors.Count);
+
+        foreach (var block in successors.Keys)
+            mutablePredecessors.Add(block, new HashSet<MirBlockId>());
+
+        foreach (var (source, targets) in successors)
+        {
+            foreach (var target in targets)
+                mutablePredecessors[target].Add(source);
+        }
+
+        var predecessors =
+            new Dictionary<MirBlockId, IReadOnlyList<MirBlockId>>(successors.Count);
+
+        foreach (var (target, sources) in mutablePredecessors)
+        {
+            var orderedSources = sources.OrderBy(source => source.Value);
+            predecessors.Add(target, MirCollections.Freeze(orderedSources));
+        }
+
+        return predecessors;
     }
 
     private static HashSet<MirBlockId> ReachableFrom(

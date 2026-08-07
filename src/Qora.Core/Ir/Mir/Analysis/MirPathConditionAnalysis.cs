@@ -164,7 +164,7 @@ public enum MirExecutionMultiplicity
 }
 
 /// <summary>
-/// Exact block-execution conditions and multiplicity facts for one callable in one immutable MIR program.
+/// Exact block-execution conditions and multiplicity facts for one exact callable object.
 /// </summary>
 public sealed class MirPathConditionSnapshot
 {
@@ -182,13 +182,13 @@ public sealed class MirPathConditionSnapshot
     public MirCallableId Callable => _cfg.Callable;
     internal MirControlFlowSnapshot ControlFlow => _cfg;
 
-    internal void EnsureFor(MirProgram program, MirCallableId callable)
+    internal void EnsureFor(MirCallable callable)
     {
-        if (!ReferenceEquals(_cfg.SourceProgram, program)
-            || !ReferenceEquals(_cfg.SourceCallable, program.FindCallable(callable)))
+        ArgumentNullException.ThrowIfNull(callable);
+        if (!ReferenceEquals(_cfg.SourceCallable, callable))
             throw new InvalidOperationException(
-                $"the MIR path-condition analysis does not belong to callable {callable} "
-                + $"in the requested MIR program; it was created for callable {Callable}");
+                $"the MIR path-condition analysis does not belong to callable {callable.Id}; "
+                + $"it was created for callable {Callable}");
     }
 
     public MirPathCondition ConditionFor(MirBlockId block) =>
@@ -215,16 +215,6 @@ public sealed class MirPathConditionSnapshot
 /// </summary>
 internal static class MirPathConditionAnalysis
 {
-    internal static MirPathConditionSnapshot Analyze(
-        MirProgram program,
-        MirCallableId callableId)
-    {
-        ArgumentNullException.ThrowIfNull(program);
-
-        var cfg = MirControlFlowAnalysis.Analyze(program, callableId);
-        return AnalyzeVerified(cfg);
-    }
-
     /// <summary>
     /// Computes path facts from the canonical CFG of an already verified MIR snapshot.
     /// </summary>

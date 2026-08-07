@@ -277,16 +277,8 @@ public sealed class MirSnapshotTests
         Assert.NotSame(firstBlock, secondBlock);
         Assert.NotSame(firstInstruction, secondInstruction);
         Assert.NotSame(firstValue, secondValue);
-        Assert.True(firstCallable.ContainsBlock(firstBlock));
-        Assert.True(firstCallable.ContainsInstruction(firstInstruction));
         Assert.True(firstCallable.ContainsValue(firstValue));
-        Assert.False(firstCallable.ContainsBlock(secondBlock));
-        Assert.False(firstCallable.ContainsInstruction(secondInstruction));
         Assert.False(firstCallable.ContainsValue(secondValue));
-        Assert.Throws<ArgumentException>(() => firstCallable.RequireBlock(secondBlock));
-        Assert.Throws<ArgumentException>(
-            () => firstCallable.RequireInstruction(secondInstruction));
-        Assert.Throws<ArgumentException>(() => firstCallable.RequireValue(secondValue));
 
         var hirStructure = snapshot.HirArtifact.Source.Structure;
         var firstHirCallable = hirStructure.RequireOwningCallable(
@@ -317,10 +309,10 @@ public sealed class MirSnapshotTests
                 new MirInstructionSite(secondCallable.Id, instructionId)));
         Assert.Equal(
             new MirInstructionId(0),
-            firstCallable.DefinitionOf(firstValue).Instruction);
+            firstCallable.DefinitionOf(firstValue.Id).Instruction);
         Assert.Equal(
             new MirInstructionId(0),
-            secondCallable.DefinitionOf(secondValue).Instruction);
+            secondCallable.DefinitionOf(secondValue.Id).Instruction);
     }
 
     [Fact]
@@ -331,20 +323,26 @@ public sealed class MirSnapshotTests
         var analyses = snapshot.Analyses;
 
         var cfg = analyses.ControlFlow(callable);
+        var regions = analyses.ControlRegions(callable);
         var provenance = analyses.StorageProvenance(callable);
         var memory = analyses.MemoryState(callable);
         var paths = analyses.PathConditions(callable);
         var scalars = analyses.ScalarAvailability(callable);
+        var bounds = analyses.Bounds(callable);
+        var callGraph = analyses.CallGraph;
         var effects = analyses.Effects;
         var witnesses = analyses.WitnessAvailability(callable);
 
-        Assert.Same(cfg, analyses.ControlFlow(callable.Id));
-        Assert.Same(provenance, analyses.StorageProvenance(callable.Id));
-        Assert.Same(memory, analyses.MemoryState(callable.Id));
-        Assert.Same(paths, analyses.PathConditions(callable.Id));
-        Assert.Same(scalars, analyses.ScalarAvailability(callable.Id));
+        Assert.Same(cfg, analyses.ControlFlow(callable));
+        Assert.Same(regions, analyses.ControlRegions(callable));
+        Assert.Same(provenance, analyses.StorageProvenance(callable));
+        Assert.Same(memory, analyses.MemoryState(callable));
+        Assert.Same(paths, analyses.PathConditions(callable));
+        Assert.Same(scalars, analyses.ScalarAvailability(callable));
+        Assert.Same(bounds, analyses.Bounds(callable));
+        Assert.Same(callGraph, analyses.CallGraph);
         Assert.Same(effects, analyses.Effects);
-        Assert.Same(witnesses, analyses.WitnessAvailability(callable.Id));
+        Assert.Same(witnesses, analyses.WitnessAvailability(callable));
 
         var concurrent = await Task.WhenAll(
             Enumerable.Range(0, 16)
@@ -405,8 +403,6 @@ public sealed class MirSnapshotTests
         Assert.NotSame(firstInstruction.Origin, secondInstruction.Origin);
 
         Assert.False(second.Program.ContainsCallable(firstCallable));
-        Assert.False(secondCallable.ContainsBlock(firstBlock));
-        Assert.False(secondCallable.ContainsInstruction(firstInstruction));
         Assert.False(secondCallable.ContainsValue(firstValue));
         Assert.False(secondCallable.ContainsStorage(firstStorage));
         Assert.False(secondCallable.ContainsQubit(firstQubit));
@@ -415,10 +411,6 @@ public sealed class MirSnapshotTests
             () => second.Program.RequireCallable(firstCallable));
         Assert.Throws<ArgumentException>(
             () => unrelated.Program.RequireCallable(firstCallable));
-        Assert.Throws<ArgumentException>(() => secondCallable.RequireBlock(firstBlock));
-        Assert.Throws<ArgumentException>(
-            () => secondCallable.RequireInstruction(firstInstruction));
-        Assert.Throws<ArgumentException>(() => secondCallable.RequireValue(firstValue));
         Assert.Throws<ArgumentException>(() => secondCallable.RequireStorage(firstStorage));
         Assert.Throws<ArgumentException>(() => secondCallable.RequireQubit(firstQubit));
 
@@ -433,13 +425,39 @@ public sealed class MirSnapshotTests
 
         Assert.Throws<ArgumentException>(
             () => second.Analyses.ControlFlow(firstCallable));
+        Assert.Throws<ArgumentException>(
+            () => second.Analyses.ControlRegions(firstCallable));
+        Assert.Throws<ArgumentException>(
+            () => second.Analyses.StorageProvenance(firstCallable));
+        Assert.Throws<ArgumentException>(
+            () => second.Analyses.MemoryState(firstCallable));
+        Assert.Throws<ArgumentException>(
+            () => second.Analyses.PathConditions(firstCallable));
+        Assert.Throws<ArgumentException>(
+            () => second.Analyses.ScalarAvailability(firstCallable));
+        Assert.Throws<ArgumentException>(
+            () => second.Analyses.WitnessAvailability(firstCallable));
+        Assert.Throws<ArgumentException>(
+            () => second.Analyses.Bounds(firstCallable));
         var firstCfg = first.Analyses.ControlFlow(firstCallable);
         var secondCfg = second.Analyses.ControlFlow(secondCallable);
         var foreignPoint = firstCfg.TerminatorPoint(firstBlock.Id);
         Assert.Throws<InvalidOperationException>(
             () => secondCfg.IsValueAvailableAt(secondValue.Id, foreignPoint));
-        Assert.Throws<InvalidOperationException>(
-            () => first.Analyses.Effects.EnsureFor(second.Program));
+
+        var firstInstructionSite = new MirInstructionSite(
+            firstCallable.Id,
+            firstInstruction.Id);
+        var secondInstructionSite = new MirInstructionSite(
+            secondCallable.Id,
+            secondInstruction.Id);
+        Assert.NotSame(first.Analyses.Effects, second.Analyses.Effects);
+        Assert.Same(
+            firstInstruction,
+            first.Analyses.Effects.RequireInstruction(firstInstructionSite));
+        Assert.Same(
+            secondInstruction,
+            second.Analyses.Effects.RequireInstruction(secondInstructionSite));
 
         Assert.Equal(
             first.HirArtifact.Source.SourceMap.Find(

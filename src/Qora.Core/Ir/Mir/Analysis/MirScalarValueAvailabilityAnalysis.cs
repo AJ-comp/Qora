@@ -94,7 +94,7 @@ public sealed class MirScalarValueAvailabilitySnapshot
                         current,
                         MirScalarValueAvailabilityKind.Available,
                         Array.Empty<MirInstructionId>()));
-                var definition = SourceCallable.DefinitionOf(currentValue);
+                var definition = SourceCallable.DefinitionOf(current);
                 if (definition.Kind != MirValueDefinitionKind.InstructionResult
                     || definition.Instruction is not MirInstructionId instructionId)
                     return Cache(Unavailable(current));

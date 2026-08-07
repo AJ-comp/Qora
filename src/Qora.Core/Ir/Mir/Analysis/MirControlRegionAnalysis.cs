@@ -55,7 +55,7 @@ internal sealed class MirNaturalLoopRegion
 }
 
 /// <summary>
-/// Immutable structured-region facts for one callable in one exact MIR program. This object does not
+/// Immutable structured-region facts for one exact callable object. This object does not
 /// copy instructions or expressions. It only classifies the canonical CFG's natural-loop boundaries;
 /// SESE condition joins are queried from the exact dominance/post-dominance snapshot while lowering.
 /// </summary>

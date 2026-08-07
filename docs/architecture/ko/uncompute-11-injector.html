@@ -129,15 +129,15 @@
   </nav>
   <div class="call">
     <span class="h">구현 상태</span>
-    이 장은 앞으로 연결할 automatic-uncomputation scheduler와 injector의 설계 계약을 설명해요.<br>
-    현재 compiler에는 SSA/CFG MIR 분석 기반과 <code>MirAdjointMaterializer</code>가 있지만, 여러 ancilla의 전역 cleanup 순서를 계산하고 inverse request를 자동 주입하는 scheduler는 아직 활성화되지 않았어요.<br>
-    따라서 아래의 주입 결과는 현재 Qora가 자동으로 방출하는 소스가 아니라, 구현할 MIR 변환의 기대 결과예요.
+    이 장은 앞으로 연결할 automatic-uncomputation scheduler와 injector의 설계 계약을 설명합니다.<br>
+    현재 compiler에는 SSA/CFG MIR 분석 기반과 <code>MirAdjointMaterializer</code>가 있지만, 여러 ancilla의 전역 cleanup 순서를 계산하고 inverse request를 자동 주입하는 scheduler는 아직 활성화되지 않았습니다.<br>
+    따라서 아래의 주입 결과는 현재 Qora가 자동으로 방출하는 소스가 아니라, 구현할 MIR 변환의 기대 결과입니다.
   </div>
   <p>
     <a href="uncompute-02-ladder.html">2장</a>의 판별 사다리를 통과해 청소 후보가 된 앤실라가
     되돌림 안전 판정(rung ③)까지 통과해 safe가 되면, 완성될 compiler(rung ④)는 그 앤실라를 |0⟩로
-    되돌리는 정리 코드를 MIR에 만들어 넣게 될 거예요.<br>
-    이 단계는 회로를 새로 설계하는 것이 아니라 앞에 이미 적힌 문장들을 재료로 삼으며, 목표 절차는 다음 한 문장으로 요약할 수 있어요.
+    되돌리는 정리 코드를 MIR에 만들어 넣게 됩니다.<br>
+    이 단계는 회로를 새로 설계하는 것이 아니라 앞에 이미 적힌 문장들을 재료로 삼으며, 목표 절차는 다음 한 문장으로 요약할 수 있습니다.
   </p>
   <div class="rule">앤실라를 편집한 <strong>문장들의 목록</strong>을 가져와, 각 문장의 <strong>역</strong>을, <strong>역순</strong>으로, <strong>사망점에</strong> 붙여넣습니다.</div>
   <p>
@@ -159,7 +159,7 @@
     이제 남은 물음은 각 문장에 대해 붙여넣을 "역"이 구체적으로 어떤 문장이냐는 것입니다.
   </p>
 
-  <h3>그 역은 구체적으로 어떤 문장일까요 — 자기 역 게이트 X·CNOT·CCX</h3>
+  <h3>구체적인 역문장 — 자기 역 게이트 X·CNOT·CCX</h3>
   <p>
     각 문장의 역은 즉석에서 계산하는 것이 아니라, 문장 종류별로 미리 정해진 카탈로그에서 꺼내 옵니다.<br>
     카탈로그의 항목을 하나씩 상태벡터 위에서 확인합니다.<br>
@@ -191,7 +191,7 @@
   <p>
     CCX 게이트는 조건이 "컨트롤 두 개가 모두 1인 항"로 늘어난 같은 XOR 편집이므로 역시 자기 역이고, 아래 첫째 예제에서 절차 전체와 함께 확인합니다.<br>
     세 게이트 모두 기저 값만 만졌고 진폭은 어느 시점에도 건드리지 않았습니다.<br>
-    그럼 기저 값을 뒤집으면서 진폭까지 만지는 문장의 역도, 값을 한 번 더 뒤집는 것으로 충분할까요.
+    그렇다면 기저 값을 뒤집으면서 진폭까지 만지는 문장의 역도 값을 한 번 더 뒤집는 것으로 충분합니까?
   </p>
 
   <h3>값과 진폭을 동시에 만지는 Y — 역은 X가 아니라 Y†입니다</h3>
@@ -218,7 +218,7 @@
     그래서 카탈로그는 Y 게이트의 역으로 값만 뒤집는 게이트가 아니라 Y†를 지정합니다.<br>
     다만 앤실라 자동 청소의 목록에서 이 항목이 직접 나올 일은 없습니다.<br>
     현재 <code>MirEffectAnalysis</code>가 앤실라에 대한 Y 쓰기에 <code>MirQubitEffectFlags.NonQfree</code>를 붙이므로,
-    목표 v1 scheduler는 이를 차단하게 될 거예요.<br>
+    목표 v1 scheduler는 이를 차단하게 됩니다.<br>
     이 항목이 실제로 일하는 곳은 카탈로그의 마지막 항목인 호출의 역입니다.<br>
     컴파일러 내부의 역연산 생성기가 연산 본문을 뒤집다가 본문 속 Y 게이트를 만나면, 이 항목에 따라 Y†를 내놓습니다.
   </p>
@@ -256,7 +256,7 @@ CCX(t, c, d);    <span class="cm">// ② action:   d ^= t AND c   ← t의 마�
     어디에서도 건드려지지 않고, 생존자 <code>a</code>·<code>b</code>·<code>c</code>·<code>d</code>의 상태는 완전히 보존됩니다.<br>
     ③은 사용자가 직접 쓰는
     코드가 아니라, 측정하지 않은 <code>use</code> 레지스터는 |0⟩로 반납되어야 한다는 언어
-    규칙(<a href="uncompute-01-ancilla.html">1장</a>)을 이행하기 위해 목표 scheduler가 넣게 될 코드예요.
+    규칙(<a href="uncompute-01-ancilla.html">1장</a>)을 이행하기 위해 목표 scheduler가 넣게 될 코드입니다.
   </p>
 
   <h3>예제 — 편집이 두 번이면 역순이 보입니다: 호출에는 내부 역연산 표식이 붙습니다</h3>

@@ -1,0 +1,627 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>14. Basic Block와 Terminator — Qora 컴파일러 개발자 매뉴얼</title>
+<link rel="stylesheet" href="developer.css">
+<script src="developer-syntax.js" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#main-content">본문으로 건너뛰기</a>
+<header class="hero">
+  <div class="tag">Qora · Compiler Developer Manual · Chapter 14</div>
+  <h1>Basic Block와 Terminator</h1>
+  <p>소스의 <code>if</code>가 <code>b0~b3</code>과 네 개의 종료 명령으로 만들어지는 실제 순서</p>
+</header>
+
+<main class="wrap" id="main-content">
+  <nav class="chapter-nav" aria-label="장 이동(상단)">
+    <div class="group"><a href="chapter-13.html">← 이전: 큐비트 버전</a><a href="index.html#chapters">전체 목차</a></div>
+    <div class="group"><a href="chapter-15.html">다음: 조건문 lowering →</a></div>
+  </nav>
+
+  <p class="lead">
+    공통 예제의 <code>if</code>에 도착했을 때 현재 builder는 <code>b0</code>을 가리키며, 아직 <code>b1</code>, <code>b2</code>, <code>b3</code>은 만들어지지 않았습니다.<br>
+    이 상태에서 <code>CreateMirBlock</code>, <code>BranchTo</code>, 두 번의 <code>LowerScopedBranch</code>, 두 번의 <code>JumpTo</code>, 합류 후 <code>Return</code>이 호출되는 순서대로 네 block이 완성되는 과정을 추적합니다.
+  </p>
+
+  <h2 id="source">이번 장에서 실제로 처리할 소스</h2>
+
+<pre><code class="language-qora">function Next(value: int): int
+{
+    return value + 1;
+}
+
+operation Work()
+{
+    var values: int[] = [0];
+    use q = Qubit[1];
+
+    values[0] = Next(values[0]);
+
+    if (values[0] == 1)
+    {
+        X(q[0]);
+    }
+
+    H(q[0]);
+}</code></pre>
+
+  <p>
+    block 경계를 만드는 직접적인 소스는 <code>if</code>이지만, <code>b0</code>는 <code>if</code>를 만났을 때 처음 생기지 않습니다.<br>
+    <code>Work(c44)</code> lowering을 시작한 <code>LowerToMirCallable()</code>이 본문보다 먼저 진입 block을 만들었습니다.
+  </p>
+
+<pre><code class="language-csharp">var mirEntryBlockBuilder = CreateMirBlock(mirCallableOrigin);
+_currentMirBlockBuilder = mirEntryBlockBuilder;
+// 첫 CreateMirBlock 호출이 b0 builder를 만들고 등록함
+
+LowerParameters();
+LowerStatements(_hirCallable.Body.Statements);
+// _hirCallable = Work h44
+// Work에는 매개변수가 없으므로 LowerParameters 결과는 []
+// 본문 앞 세 문장을 처리한 뒤 LowerStatement(hirIf)에 도달함</code></pre>
+
+  <h2 id="b0"><code>b0</code>: 조건식 처리와 branch 생성</h2>
+
+  <p>
+    <code>LowerStatement</code>이 <code>HirIfStatement</code> case를 선택하기 직전에는 배열 대입까지 끝난 상태입니다.<br>
+    따라서 <code>b0</code>에는 <code>i0~i7</code>이 있고, 배열 dictionary는 <code>%v6</code>, 큐비트 dictionary는 <code>q0.v0</code>을 가리킵니다.<br>
+    아직 조건식을 내리지 않았으므로 다음 instruction과 값은 각각 <code>i8</code>, <code>%v7</code>입니다.
+  </p>
+
+<pre><code class="language-plaintext">LowerStatement(hirIf) 직전
+├─ _currentMirBlockBuilder = b0
+├─ b0.Instructions         = [i0, i1, i2, i3, i4, i5, i6, i7]
+├─ b0.Terminator           = 아직 없음
+├─ SymbolId(values)        → %v6
+├─ SymbolId(q)             → q0.v0
+├─ 다음 instruction ID     = i8
+├─ 다음 value ID           = %v7
+└─ 다음 block ID           = b1</code></pre>
+
+  <p>
+    진입 호출은 아래 switch arm에서 <code>LowerIf(hirIf)</code>으로 이어집니다.
+  </p>
+
+<pre><code class="language-csharp">case HirIfStatement hirIf:
+    // hirIf.Condition       = values[0] == 1
+    // hirIf.Then.Statements = [X(q[0]);]
+    // hirIf.Else.Statements = []
+    LowerIf(hirIf);
+    return;</code></pre>
+
+  <p>
+    아래는 현재 구현의 <code>LowerIf</code> 전체 함수에 이 예제에서 들어가는 값을 주석으로 표시한 것입니다.<br>
+    뒤의 절에서는 이 코드가 실제로 실행되는 순서대로 <code>b0</code>, <code>b1</code>, <code>b2</code>, <code>b3</code>의 변화를 다시 펼칩니다.
+  </p>
+
+<pre><code class="language-csharp">private void LowerIf(HirIfStatement hirIf)
+{
+    var mirOrigin = MirOriginFor(hirIf);
+    var mirConditionValueId = LowerExpressionAs(
+        hirIf.Condition,
+        MirType.Scalar(QType.Bit));
+    // i8/%v7, i9/%v8, i10/%v9, i11/%v10 생성
+    // mirConditionValueId = %v10
+
+    var mirBranchBlock = RequireCurrentMirBlock();
+    var flowStateBeforeBranch = _currentFlowState.Clone();
+    var mirThenBlock = CreateMirBlock(mirOrigin);
+    var mirElseBlock = CreateMirBlock(mirOrigin);
+    // mirBranchBlock        = b0
+    // flowStateBeforeBranch = {values→%v6, q→q0.v0}
+    // mirThenBlock          = b1
+    // mirElseBlock          = b2
+
+    mirBranchBlock.BranchTo(
+        mirConditionValueId,
+        mirThenBlock,
+        Array.Empty&lt;MirValueId&gt;(),
+        mirElseBlock,
+        Array.Empty&lt;MirValueId&gt;(),
+        mirOrigin);
+    // b0.Terminator = MirBranch(%v10, b1, [], b2, [])
+
+    var thenBranchExit = LowerScopedBranch(
+        mirThenBlock,
+        flowStateBeforeBranch,
+        hirIf.Then.Statements);
+    var elseBranchExit = LowerScopedBranch(
+        mirElseBlock,
+        flowStateBeforeBranch,
+        hirIf.Else.Statements);
+    // thenBranchExit = (b1, {values→%v6, q→q0.v1})
+    // elseBranchExit = (b2, {values→%v6, q→q0.v0})
+
+    if (thenBranchExit.ExitBlock is null
+        &amp;&amp; elseBranchExit.ExitBlock is null)
+    {
+        _currentMirBlockBuilder = null;
+        _currentFlowState = flowStateBeforeBranch;
+        return;
+    }
+    // 두 exit block이 모두 있으므로 이 분기는 실행하지 않음
+
+    var mirMergeBlock = CreateMirBlock(mirOrigin);
+    // 세 번째 새 block 호출: mirMergeBlock = b3
+
+    if (thenBranchExit.ExitBlock is null
+        || elseBranchExit.ExitBlock is null)
+    {
+        var survivingBranchExit =
+            thenBranchExit.ExitBlock is not null
+                ? thenBranchExit
+                : elseBranchExit;
+        survivingBranchExit.ExitBlock!.JumpTo(
+            mirMergeBlock,
+            Array.Empty&lt;MirValueId&gt;(),
+            mirOrigin);
+        _currentMirBlockBuilder = mirMergeBlock;
+        _currentFlowState = survivingBranchExit.ExitFlowState;
+        return;
+    }
+    // 두 exit block이 모두 있으므로 이 분기도 실행하지 않음
+
+    var mergedFlowState = flowStateBeforeBranch.Clone();
+    var mirThenPhiArguments = new List&lt;MirValueId&gt;();
+    var mirElsePhiArguments = new List&lt;MirValueId&gt;();
+    foreach (var hirSymbolId in
+             flowStateBeforeBranch.CurrentMirValueByHirSymbolId.Keys.OrderBy(
+                 id => id.Value))
+    {
+        if (!thenBranchExit.ExitFlowState
+                .CurrentMirValueByHirSymbolId.TryGetValue(
+                hirSymbolId,
+                out var mirThenValueId)
+            || !elseBranchExit.ExitFlowState
+                .CurrentMirValueByHirSymbolId.TryGetValue(
+                hirSymbolId,
+                out var mirElseValueId))
+        {
+            continue;
+        }
+        if (mirThenValueId == mirElseValueId)
+        {
+            mergedFlowState.CurrentMirValueByHirSymbolId[
+                    hirSymbolId] =
+                mirThenValueId;
+            // values는 양쪽 모두 %v6이므로 이 분기를 선택함
+            continue;
+        }
+
+        var mirValueType = MirTypeOf(mirThenValueId);
+        if (MirTypeOf(mirElseValueId) != mirValueType)
+        {
+            throw MirLoweringError(
+                $"branch values for symbol {hirSymbolId} "
+                + "have different MIR types");
+        }
+        var mirPhiValueId = AddBlockArgument(
+            mirMergeBlock,
+            mirValueType,
+            hirSymbolId);
+        mirThenPhiArguments.Add(mirThenValueId);
+        mirElsePhiArguments.Add(mirElseValueId);
+        mergedFlowState.CurrentMirValueByHirSymbolId[hirSymbolId] =
+            mirPhiValueId;
+    }
+    // mirThenPhiArguments = []
+    // mirElsePhiArguments = []
+    // b3.Arguments        = []
+
+    var mirThenEdge = thenBranchExit.ExitBlock.JumpTo(
+        mirMergeBlock,
+        mirThenPhiArguments,
+        mirOrigin);
+    var mirElseEdge = elseBranchExit.ExitBlock.JumpTo(
+        mirMergeBlock,
+        mirElsePhiArguments,
+        mirOrigin);
+    // b1.Terminator = MirJump(b3, []), mirThenEdge = Edge(b1,0)
+    // b2.Terminator = MirJump(b3, []), mirElseEdge = Edge(b2,0)
+
+    MergeQubitStatesAtJoin(
+        mergedFlowState,
+        thenBranchExit.ExitFlowState,
+        mirThenEdge,
+        elseBranchExit.ExitFlowState,
+        mirElseEdge,
+        mirMergeBlock);
+    // q0.v1과 q0.v0을 b3.QubitPhis의 q0.v2로 합침
+
+    _currentMirBlockBuilder = mirMergeBlock;
+    _currentFlowState = mergedFlowState;
+    // 다음 바깥 문장 H(q[0])은 b3과 {values→%v6, q→q0.v2}에서 시작함
+}</code></pre>
+
+  <p>
+    함수 첫 호출인 <code>LowerExpressionAs</code>가 조건식 전체를 먼저 내립니다.<br>
+    그 결과 <code>i8~i11</code>과 <code>%v7~%v10</code>이 <code>b0</code>에 추가됩니다.<br>
+    이제 <code>%v10</code>이 branch의 실제 조건 인수로 준비되었습니다.
+  </p>
+
+<pre><code class="language-plaintext">b0.Instructions
+├─ i0  MirConstant                    → %v0
+├─ i1  MirArrayCreate                 → %v1
+├─ i2  MirQubitAllocate               → q0.v0
+├─ i3  MirConstant                    → %v2
+├─ i4  MirConstant                    → %v3
+├─ i5  MirArrayLoad                   → %v4
+├─ i6  MirPureCall(Next c6)           → %v5
+├─ i7  MirArrayStore                  → %v6
+├─ i8  MirConstant                    → %v7
+├─ i9  MirArrayLoad                   → %v8
+├─ i10 MirConstant                    → %v9
+└─ i11 MirBinary(Equal)               → %v10</code></pre>
+
+  <p>
+    조건식 다음에는 <code>CreateMirBlock</code>을 두 번 호출합니다.<br>
+    lowerer에는 이미 <code>b0</code> 하나가 등록되어 있으므로 할당기는 차례대로 <code>b1</code>과 <code>b2</code>를 반환합니다.
+  </p>
+
+<pre><code class="language-csharp">private MirBlockBuilder CreateMirBlock(MirOrigin mirOrigin)
+{
+    var mirBlockBuilder = new MirBlockBuilder(
+        this,
+        AllocateMirBlockId(),
+        mirOrigin);
+    _mirBlockBuilders.Add(mirBlockBuilder);
+    return mirBlockBuilder;
+}
+
+// LowerIf의 첫 호출  → b1 builder 생성·등록
+// LowerIf의 둘째 호출 → b2 builder 생성·등록
+// 현재 등록 순서      = [b0, b1, b2]</code></pre>
+
+  <p>
+    이어 <code>b0</code> builder의 <code>BranchTo</code>가 호출됩니다.<br>
+    이 함수는 target builder가 같은 callable lowerer에 등록되었는지 검사한 뒤 <code>MirBranch</code>를 만들고, <code>Terminate</code>를 통해 <code>b0</code>를 닫습니다.
+  </p>
+
+<pre><code class="language-csharp">public (
+    MirControlFlowEdge TrueEdge,
+    MirControlFlowEdge FalseEdge) BranchTo(
+    MirValueId condition,
+    MirBlockBuilder trueTargetMirBlock,
+    IReadOnlyList&lt;MirValueId&gt; trueArguments,
+    MirBlockBuilder falseTargetMirBlock,
+    IReadOnlyList&lt;MirValueId&gt; falseArguments,
+    MirOrigin mirOrigin)
+{
+    ValidateTarget(trueTargetMirBlock);
+    ValidateTarget(falseTargetMirBlock);
+    Terminate(new MirBranch(
+        condition,
+        trueTargetMirBlock.Id,
+        trueArguments,
+        falseTargetMirBlock.Id,
+        falseArguments,
+        mirOrigin));
+    trueTargetMirBlock._hasIncomingControlFlow = true;
+    falseTargetMirBlock._hasIncomingControlFlow = true;
+    return (
+        new MirControlFlowEdge(Id, successorOrdinal: 0),
+        new MirControlFlowEdge(Id, successorOrdinal: 1));
+}
+
+// this                  = b0 builder
+// condition             = %v10
+// trueTargetMirBlock    = b1 builder, trueArguments=[]
+// falseTargetMirBlock   = b2 builder, falseArguments=[]
+// b0.Terminator         = MirBranch(%v10, b1, [], b2, [])
+// 반환 가능한 edge      = Edge(b0,0), Edge(b0,1)</code></pre>
+
+  <h3 id="why-branch-not-instruction">조건 계산과 block 종료의 분리</h3>
+
+  <p>
+    <code>i11 MirBinary</code>은 <code>%v10</code>이라는 값을 만들기 때문에 <code>b0.Instructions</code>에 들어갑니다.<br>
+    반면에 <code>MirBranch</code>는 새 값을 만들지 않고 <code>b0</code>의 다음 실행 위치를 결정하므로 <code>b0.Terminator</code>에 들어갑니다.<br>
+    이 시점의 <code>b0</code>는 더 이상 일반 instruction을 받을 수 없습니다.
+  </p>
+
+<pre><code class="language-plaintext">완성 대기 중인 b0 builder
+├─ Instructions = [i0, i1, ..., i11]
+└─ Terminator
+   └─ MirBranch
+      ├─ Condition      = %v10
+      ├─ TrueTarget     = b1
+      ├─ TrueArguments  = []
+      ├─ FalseTarget    = b2
+      └─ FalseArguments = []</code></pre>
+
+  <h2 id="b1"><code>b1</code>: 참 본문을 내린 뒤 합류점으로 jump</h2>
+
+  <p>
+    <code>LowerScopedBranch(b1, flowStateBeforeBranch, [X(q[0]);])</code>가 현재 block을 <code>b1</code>로 바꾸고 상태를 clone합니다.<br>
+    그 안의 <code>LowerStatements</code>가 <code>X(q[0]);</code>을 내려 <code>i12</code>, <code>%v11</code>, <code>i13</code>, <code>q0.v1</code>을 만듭니다.<br>
+    이 함수가 반환할 때 <code>b1</code>에는 아직 Terminator가 없으며, 반환된 <code>ExitBlock</code>이 바로 열린 <code>b1</code> builder입니다.
+  </p>
+
+<pre><code class="language-plaintext">thenBranchExit 반환 시점
+├─ ExitBlock = b1 builder
+├─ b1.Instructions
+│  ├─ i12 MirConstant(index 0)       → %v11
+│  └─ i13 MirQuantumApply("X")       → q0.v1
+├─ b1.Terminator = 아직 없음
+└─ ExitFlowState
+   ├─ SymbolId(values) → %v6
+   └─ SymbolId(q)      → q0.v1</code></pre>
+
+  <h2 id="b2"><code>b2</code>: 빈 거짓 본문을 보존하는 block</h2>
+
+  <p>
+    다음 호출 <code>LowerScopedBranch(b2, flowStateBeforeBranch, [])</code>도 같은 방식으로 분기 전 상태를 clone합니다.<br>
+    다만 HIR statement 목록이 비어 있으므로 instruction을 하나도 만들지 않습니다.<br>
+    이 함수 역시 Terminator가 아직 없는 열린 <code>b2</code> builder를 반환합니다.
+  </p>
+
+<pre><code class="language-plaintext">elseBranchExit 반환 시점
+├─ ExitBlock       = b2 builder
+├─ b2.Instructions = []
+├─ b2.Terminator   = 아직 없음
+└─ ExitFlowState
+   ├─ SymbolId(values) → %v6
+   └─ SymbolId(q)      → q0.v0</code></pre>
+
+  <p>
+    두 경로의 lowering이 모두 끝난 다음에야 <code>LowerIf</code>은 세 번째 <code>CreateMirBlock(mirOrigin)</code>을 호출합니다.<br>
+    현재 등록 목록이 <code>[b0,b1,b2]</code>이므로 새 합류 builder의 ID는 <code>b3</code>입니다.
+  </p>
+
+  <p>
+    고전 상태 비교에서 양쪽 <code>values</code>가 모두 <code>%v6</code>으로 같으므로 <code>mirThenPhiArguments</code>와 <code>mirElsePhiArguments</code>는 빈 목록으로 남습니다.<br>
+    그 뒤 <code>b1.JumpTo(b3, [], origin)</code>과 <code>b2.JumpTo(b3, [], origin)</code>이 실행됩니다.
+  </p>
+
+<pre><code class="language-csharp">public MirControlFlowEdge JumpTo(
+    MirBlockBuilder targetMirBlock,
+    IReadOnlyList&lt;MirValueId&gt; arguments,
+    MirOrigin mirOrigin)
+{
+    ValidateTarget(targetMirBlock);
+    Terminate(new MirJump(
+        targetMirBlock.Id,
+        arguments,
+        mirOrigin));
+    targetMirBlock._hasIncomingControlFlow = true;
+    return new MirControlFlowEdge(Id, successorOrdinal: 0);
+}
+
+// 첫 호출: this=b1, target=b3, arguments=[]
+//          b1.Terminator=MirJump(b3, []), 반환 Edge(b1,0)
+// 둘째 호출: this=b2, target=b3, arguments=[]
+//          b2.Terminator=MirJump(b3, []), 반환 Edge(b2,0)</code></pre>
+
+  <h2 id="b3"><code>b3</code>: edge 합류, <code>H</code>, return</h2>
+
+  <p>
+    두 jump가 만든 정확한 edge는 <code>MergeQubitStatesAtJoin</code>의 인수로 들어갑니다.<br>
+    참 경로의 <code>q0.v1</code>과 거짓 경로의 <code>q0.v0</code>이 다르므로 <code>b3.QubitPhis</code>에 <code>q0.v2</code>가 추가됩니다.<br>
+    이후 <code>LowerIf</code>은 현재 builder를 <code>b3</code>로, 현재 dictionary를 <code>SymbolId(q) → q0.v2</code>로 설정하고 반환합니다.
+  </p>
+
+<pre><code class="language-plaintext">b3, H 처리 직전
+├─ Arguments = []
+├─ QubitPhis
+│  └─ q0.v2
+│     ├─ Edge(b1,0) → q0.v1
+│     └─ Edge(b2,0) → q0.v0
+├─ Instructions = []
+├─ Terminator   = 아직 없음
+├─ SymbolId(values) → %v6
+└─ SymbolId(q)      → q0.v2</code></pre>
+
+  <p>
+    바깥 <code>LowerStatements</code>가 다음 문장 <code>H(q[0]);</code>을 처리하면 <code>i14 MirConstant → %v12</code>와 <code>i15 MirQuantumApply("H") → q0.v3</code>이 <code>b3.Instructions</code>에 추가됩니다.<br>
+    이제 소스 본문은 끝났지만 <code>b3</code>는 아직 열려 있습니다.
+  </p>
+
+  <p>
+    <code>Work</code>는 function이 아니라 operation이므로 <code>LowerToMirCallable()</code>의 마지막 분기가 <code>ReturnFromCurrentMirBlock(value: null, ...)</code>을 호출합니다.<br>
+    이 호출은 <code>b3.Return(null, origin)</code>으로 이어져 <code>MirReturn(Value=null)</code>을 Terminator로 설치합니다.
+  </p>
+
+<pre><code class="language-csharp">LowerStatements(_hirCallable.Body.Statements);
+
+if (_currentMirBlockBuilder is not null)
+{
+    if (_hirCallable.IsFunction)
+    {
+        MarkCurrentMirBlockUnreachable(
+            MirOrigin.GeneratedFrom(
+                mirCallableOrigin,
+                "missing validated function return"));
+    }
+    else
+    {
+        ReturnFromCurrentMirBlock(
+            value: null,
+            MirOrigin.GeneratedFrom(
+                mirCallableOrigin,
+                "implicit operation return"));
+    }
+}
+
+// _hirCallable       = Work operation
+// _currentMirBlockBuilder = b3
+// IsFunction         = false
+// b3.Terminator      = MirReturn(Value=null)</code></pre>
+
+  <h2 id="whole-cfg">builder 네 개가 완성된 최종 MIR</h2>
+
+  <p>
+    모든 Terminator가 설치된 뒤 <code>LowerToMirCallable()</code>은 등록 순서대로 각 builder의 <code>Build()</code>를 호출합니다.<br>
+    따라서 최종 <code>MirCallable.Blocks</code>의 순서는 <code>[b0,b1,b2,b3]</code>입니다.
+  </p>
+
+<pre><code class="language-plaintext">b0
+├─ Instructions = i0~i11
+└─ MirBranch(%v10)
+   ├─ successor 0 → b1, arguments=[]
+   └─ successor 1 → b2, arguments=[]
+
+b1
+├─ Instructions = [i12, i13]
+└─ MirJump → b3, arguments=[]
+   └─ Edge(Source=b1, SuccessorOrdinal=0)
+
+b2
+├─ Instructions = []
+└─ MirJump → b3, arguments=[]
+   └─ Edge(Source=b2, SuccessorOrdinal=0)
+
+b3
+├─ Arguments = []
+├─ QubitPhis = [q0.v2]
+├─ Instructions = [i14, i15]
+└─ MirReturn(Value=null)</code></pre>
+
+<pre><code class="language-plaintext">                           ┌─ true  → b1 ── jump ──┐
+b0 ── branch %v10 ────────┤                       ├─→ b3 ── return
+                           └─ false → b2 ── jump ──┘</code></pre>
+
+  <h2 id="instruction-and-result">추적 뒤 구분하는 instruction과 결과</h2>
+
+  <p>
+    <code>%v0 = const 0</code>은 읽기 편한 축약 표기입니다.<br>
+    실제 <code>b0.Instructions</code> 원소는 ID <code>i0</code>을 가진 <code>MirConstant</code>이고, 그 객체가 결과 <code>MirValue %v0</code>을 소유합니다.<br>
+    다른 instruction은 <code>i0</code> 자체가 아니라 결과 ID <code>%v0</code>을 operand로 참조합니다.
+  </p>
+
+<pre><code class="language-plaintext">i0 MirConstant
+├─ LiteralText = "0"
+├─ Result
+│  ├─ Id   = %v0
+│  └─ Type = int
+└─ Origin = 배열 리터럴의 0 위치</code></pre>
+
+  <h2 id="block-shape">예제에서 확인된 <code>MirBlock</code> 구성</h2>
+
+  <p>
+    네 builder를 실제로 만든 뒤에는 <code>MirBlock</code>의 각 필드가 무엇을 담는지 구체적으로 설명할 수 있습니다.<br>
+    <code>b3</code>를 기준으로 보면 고전 합류값은 없으므로 <code>Arguments</code>가 비고, 큐비트 합류는 필요하므로 <code>QubitPhis</code>에 <code>q0.v2</code>가 있으며, 일반 계산은 <code>Instructions</code>, 종료는 <code>Terminator</code>에 분리됩니다.
+  </p>
+
+<pre><code class="language-plaintext">MirBlock b3
+├─ Id           = b3
+├─ Arguments    = []
+├─ QubitPhis    = [q0.v2]
+├─ Instructions = [i14 MirConstant, i15 MirQuantumApply]
+├─ Terminator   = MirReturn(Value=null)
+└─ Origin       = HirIf h35, 즉 소스 if 문 전체의 Origin</code></pre>
+
+  <h3 id="dominance">왜 <code>b1</code>이 <code>b0</code>의 값을 직접 참조하는가</h3>
+
+  <p>
+    <code>q0.v0</code>과 <code>%v6</code>은 모두 <code>b0</code>에서 정의됩니다.<br>
+    <code>b1</code>, <code>b2</code>, <code>b3</code>에 도달하는 모든 경로는 반드시 <code>b0</code>를 지나므로 이 정의들은 뒤 block을 지배합니다.<br>
+    따라서 <code>b1</code>의 <code>X</code>는 별도 edge argument 없이 <code>q0.v0</code>을 직접 참조할 수 있습니다.
+  </p>
+
+  <h2 id="arguments">이번 예제의 빈 Terminator argument</h2>
+
+<pre><code class="language-plaintext">b0 MirBranch
+├─ TrueArguments  = []
+└─ FalseArguments = []
+
+b1 MirJump.Arguments = []
+b2 MirJump.Arguments = []
+b3 Arguments         = []</code></pre>
+
+  <p>
+    분기 양쪽에서 고전 배열의 현재값은 모두 <code>%v6</code>입니다.<br>
+    <code>LowerIf</code>의 <code>mirThenValueId == mirElseValueId</code> 분기가 이 동일성을 확인하여 새 block argument를 만들지 않았습니다.<br>
+    반면에 큐비트 버전은 다르므로 고전 argument 목록에 섞지 않고 <code>b3.QubitPhis</code>의 <code>q0.v2</code>로 합칩니다.
+  </p>
+
+  <h3 id="block-argument-example">고전 block argument가 만들어지는 정확한 조건</h3>
+
+  <p>
+    현재 예제에서 이 경로는 실행되지 않지만, 실제 <code>LowerIf</code> 코드는 양쪽 <code>MirValueId</code>가 다를 때만 <code>AddBlockArgument</code>를 호출합니다.<br>
+    그 결과 ID를 합류 dictionary에 넣고, 참·거짓 경로의 기존 값을 같은 위치의 <code>MirJump.Arguments</code>에 추가합니다.<br>
+    이 예제에서는 양쪽 값이 모두 <code>%v6</code>이므로 해당 조건이 성립하지 않는다는 사실만 확인하면 충분합니다.
+  </p>
+
+  <h2 id="terminators">추적에서 실제로 만난 Terminator</h2>
+
+  <div class="panel">
+    <table>
+      <caption><code>Work</code>의 block별 종료 명령</caption>
+      <thead>
+        <tr><th scope="col">Block</th><th scope="col">Terminator</th><th scope="col">실제 인수</th><th scope="col">다음 block</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><code>b0</code></td><td><code>MirBranch</code></td><td><code>Condition=%v10</code>, 양쪽 arguments <code>[]</code></td><td><code>b1</code>, <code>b2</code></td></tr>
+        <tr><td><code>b1</code></td><td><code>MirJump</code></td><td><code>Target=b3</code>, <code>Arguments=[]</code></td><td><code>b3</code></td></tr>
+        <tr><td><code>b2</code></td><td><code>MirJump</code></td><td><code>Target=b3</code>, <code>Arguments=[]</code></td><td><code>b3</code></td></tr>
+        <tr><td><code>b3</code></td><td><code>MirReturn</code></td><td><code>Value=null</code></td><td>없음</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    현재 MIR에는 <code>MirUnreachable</code>도 있지만 이 소스에서는 생성되지 않습니다.<br>
+    위 표의 제어 흐름은 후속 CFG 분석이 새로 결정한 결과가 아니라, lowering이 각 block의 Terminator에 이미 기록한 권위 있는 실행 연결입니다.
+  </p>
+
+  <h2 id="builder-boundary">Terminator 누락을 막는 builder 경계</h2>
+
+  <p>
+    <code>BranchTo</code>, <code>JumpTo</code>, <code>Return</code>은 모두 내부 <code>Terminate</code>를 호출합니다.<br>
+    이미 Terminator가 있으면 두 번째 종료를 거부하고, 정상 방출 경로의 현재 builder도 <code>null</code>로 바꿉니다.<br>
+    마지막 <code>Build()</code>은 Terminator가 없는 builder를 불변 <code>MirBlock</code>으로 만들지 않습니다.
+  </p>
+
+<pre><code class="language-csharp">private void Terminate(MirTerminator mirTerminator)
+{
+    ArgumentNullException.ThrowIfNull(mirTerminator);
+    ValidateRegistration(this);
+    if (_terminator is not null)
+    {
+        throw new InvalidOperationException(
+            $"QINTERNAL: MIR block {Id} already has a terminator");
+    }
+
+    _terminator = mirTerminator;
+    _owner.OnMirBlockTerminated(this);
+}
+
+public MirBlock Build()
+{
+    if (_terminator is null)
+    {
+        throw new InvalidOperationException(
+            $"QINTERNAL: MIR block {Id} has no terminator");
+    }
+
+    return new MirBlock(
+        Id,
+        _arguments,
+        Instructions,
+        _terminator,
+        Origin,
+        QubitPhis);
+}</code></pre>
+
+  <div class="callout good">
+    <span class="h">이 장의 결론</span>
+    <code>b0</code>는 callable 진입 때 먼저 만들어지고, <code>LowerIf</code>이 조건을 <code>%v10</code>까지 계산한 뒤 <code>b1</code>과 <code>b2</code>를 만들어 branch로 닫습니다.<br>
+    두 분기 본문을 모두 처리한 뒤에 <code>b3</code>가 생기며, <code>b1</code>과 <code>b2</code>는 그 합류점으로 jump합니다.<br>
+    마지막 <code>H</code>가 <code>b3</code>에 들어간 뒤 암시적 <code>MirReturn</code>이 block과 callable 실행을 끝냅니다.
+  </div>
+
+  <p>
+    다음 장에서는 방금 추적한 <code>LowerIf</code> 안에서 고전 flow state와 큐비트 flow state를 합치는 부분만 더 세밀하게 분리합니다.
+  </p>
+
+  <nav class="chapter-nav" aria-label="장 이동(하단)">
+    <div class="group"><a href="chapter-13.html">← 이전: 큐비트 버전</a><a href="index.html#chapters">전체 목차</a></div>
+    <div class="group"><a href="chapter-15.html">다음: 조건문 lowering →</a></div>
+  </nav>
+
+  <footer>Qora 컴파일러 개발자 매뉴얼 · 14장</footer>
+</main>
+</body>
+</html>

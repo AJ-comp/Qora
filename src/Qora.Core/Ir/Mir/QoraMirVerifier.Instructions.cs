@@ -1,3 +1,5 @@
+using Qora.Ir.Mir.Analysis;
+
 namespace Qora.Ir.Mir;
 
 internal static partial class QoraMirVerifier
@@ -6,7 +8,7 @@ internal static partial class QoraMirVerifier
     {
         private void VerifyBlockContents(
             MirCallable callable,
-            IReadOnlyDictionary<MirBlockId, HashSet<MirBlockId>> dominators)
+            MirControlFlowSnapshot controlFlow)
         {
             foreach (var block in callable.Blocks)
             {
@@ -15,14 +17,14 @@ internal static partial class QoraMirVerifier
                     VerifyInstructionUses(
                         callable,
                         instruction,
-                        dominators);
+                        controlFlow);
                     VerifyInstruction(callable, instruction);
                 }
 
                 VerifyTerminatorUses(
                     callable,
                     block,
-                    dominators);
+                    controlFlow);
                 VerifyTerminator(callable, block);
             }
         }

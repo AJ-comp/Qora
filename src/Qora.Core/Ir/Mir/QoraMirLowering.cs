@@ -663,7 +663,7 @@ internal static class QoraMirLowering
                 if (builtinParameterSpec.Type == QType.Qubit)
                 {
                     mirCallOperands.Add(new MirQubitCallOperand(
-                        LowerQubitAccess(hirArgument),
+                        LowerQubitAccess(hirArgument.Expression),
                         hirArgument.Ownership,
                         hirArgument.Access));
                 }
@@ -713,7 +713,7 @@ internal static class QoraMirLowering
                 if (hirParameter.Type == QType.Qubit)
                 {
                     mirCallOperands.Add(new MirQubitCallOperand(
-                        LowerQubitAccess(hirArgument),
+                        LowerQubitAccess(hirArgument.Expression),
                         hirArgument.Ownership,
                         hirArgument.Access));
                     continue;
@@ -1648,10 +1648,6 @@ internal static class QoraMirLowering
             _currentFlowState = mergedFlowState;
             return mirResultValueId;
         }
-
-        private MirQubitAccess LowerQubitAccess(
-            HirArgument hirArgument) =>
-            LowerQubitAccess(hirArgument.Expression);
 
         private MirQubitAccess LowerQubitAccess(
             HirExpression hirExpression)

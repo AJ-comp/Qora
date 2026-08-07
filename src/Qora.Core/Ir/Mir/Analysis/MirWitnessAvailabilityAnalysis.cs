@@ -144,30 +144,6 @@ public sealed class MirWitnessAvailabilitySnapshot
 
 internal static class MirWitnessAvailabilityAnalysis
 {
-    internal static MirWitnessAvailabilitySnapshot Analyze(
-        MirProgram program,
-        MirEffectSnapshot effects,
-        MirCallableId callableId)
-    {
-        ArgumentNullException.ThrowIfNull(program);
-        ArgumentNullException.ThrowIfNull(effects);
-
-        var callable = program.FindCallable(callableId)
-            ?? throw new ArgumentOutOfRangeException(
-                nameof(callableId),
-                callableId,
-                $"callable {callableId} does not belong to the MIR program");
-        var cfg = MirControlFlowAnalysis.AnalyzeUnchecked(program, callable);
-        var provenance = MirStorageProvenanceAnalysis.AnalyzeUnchecked(
-            program,
-            callable);
-        var memory = MirMemoryStateAnalysis.AnalyzeVerified(
-            cfg,
-            provenance);
-        var scalars = MirScalarValueAvailabilityAnalysis.AnalyzeVerified(memory);
-        return AnalyzeVerified(effects, scalars);
-    }
-
     /// <summary>
     /// Joins exact effect, CFG, memory, and scalar snapshots already owned by one
     /// <see cref="MirAnalysisStore"/>.
@@ -178,7 +154,6 @@ internal static class MirWitnessAvailabilityAnalysis
     {
         ArgumentNullException.ThrowIfNull(effects);
         ArgumentNullException.ThrowIfNull(scalars);
-        effects.EnsureFor(scalars.ControlFlow.SourceProgram);
 
         return new MirWitnessAvailabilitySnapshot(
             effects,

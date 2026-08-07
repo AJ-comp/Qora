@@ -128,14 +128,14 @@
   </nav>
   <div class="call">
     <span class="h">Qora 구현 상태</span>
-    Qora의 source→HIR→SSA/CFG MIR→typed OpenQASM pipeline과 MIR-only inverse materializer는 구현되어 있어요.<br>
-    반면에 이 장에서 비교하는 자동 cleanup scheduler와 injector는 아직 roadmap 단계이므로, Qora 항목은 현재 기능과 장기 목표를 구분해서 읽어야 해요.
+    Qora의 source→HIR→SSA/CFG MIR→typed OpenQASM pipeline과 MIR-only inverse materializer는 구현되어 있습니다.<br>
+    반면에 이 장에서 비교하는 자동 cleanup scheduler와 injector는 아직 roadmap 단계이므로, Qora 항목은 현재 기능과 장기 목표를 구분해서 읽어야 합니다.
   </div>
   <p>
     <a href="uncompute-15-two-runtimes.html">15장</a>은 마이크로초의 코히어런스 창이 호스트의
     인터프리터를 물리적으로 거부하기 때문에, 회로 내 반응 로직은 컴파일되어 QPU 옆에 미리 배치되어야
     한다는 결론으로 끝났습니다.<br>
-    그렇다면 같은 물리 위에서 일하는 다른 도구들은 이 강제 앞에서 각자 어떤 자리를 골랐을까요.<br>
+    그렇다면 같은 물리 위에서 일하는 다른 도구들이 이 강제 앞에서 어떤 자리를 선택했는지 확인합니다.<br>
     이 장에서는 2026년 현재의 도구들을 층별로 세워 놓고, 앞 장들에서 유도한 규칙들이 그 지형의
     어디에 서 있는지 확인합니다.
   </p>
@@ -167,7 +167,7 @@
     Quantinuum의 Guppy는 선형 타입으로 큐빗 누수와 복제를 컴파일 에러로 강제하되, 청소 자체는
     사용자 몫으로 남깁니다.<br>
     Classiq Qmod는 추론 기반 자동 uncomputation을 클로즈드 플랫폼으로 상용화했습니다.<br>
-    Qora는 이 층에서 OpenQASM 3 AOT compiler를 공개하고 있으며, 주석 없는 추론과 자동 청소, 그리고 못 치우면 명시적 에러라는 조합을 MIR scheduler의 목표 계약으로 두고 있어요.
+    Qora는 이 층에서 OpenQASM 3 AOT compiler를 공개하고 있으며, 주석 없는 추론과 자동 청소, 그리고 청소할 수 없으면 명시적 오류를 내는 조합을 MIR scheduler의 목표 계약으로 두고 있습니다.
   </p>
   <p>
     세 층을 한눈에 정리하면 다음과 같습니다.
@@ -206,7 +206,7 @@
     앤실라 <code>t</code>의 이력은 CNOT 한 번뿐이고, CNOT 게이트는 기저 상태의 값만 바꾸고 진폭은 건드리지
     않는 qfree 편집입니다 (<a href="uncompute-09-qfree.html">9장</a>).<br>
     그래서 목표 scheduler에서 <code>t</code>는 안전 판정을 통과하고, 컴파일러가 사망점에 역연산
-    <code>CNOT(q[0], t[0])</code>를 자동으로 주입하게 될 거예요.
+    <code>CNOT(q[0], t[0])</code>를 자동으로 주입하게 됩니다.
   </p>
 <pre><code>operation Main(){
     use q = Qubit[1];
@@ -223,7 +223,7 @@
     나온 기여가 다시 만나 |0⟩ 쪽에서는 보강되고 |1⟩ 쪽에서는 상쇄되므로, 측정 결과는 언제나
     0입니다.<br>
     <a href="uncompute-01-ancilla.html">1장</a>의 해결 단계에서 손으로 넣었던 바로 그 정리 코드를,
-    목표 scheduler에서는 컴파일러가 넣게 될 거예요.
+    목표 scheduler에서는 컴파일러가 넣게 됩니다.
   </p>
 
   <h4>2단계 — 한 줄을 더하면 같은 프로그램이 컴파일 에러가 됩니다</h4>
@@ -248,7 +248,7 @@
     <code>t</code>에 남긴 위상이 두 기저 상태 항 사이의 상대 위상으로 살아남고, 어떤 역연산 주입도
     <a href="uncompute-09-qfree.html">9장</a>의 두 조건을 함께 지킬 수 없게 됩니다
     (<a href="uncompute-10-y-gate.html">10장</a>).<br>
-    자동 청소가 불가능해졌으므로, 목표 scheduler는 조용히 넘어가는 대신 에러로 보고하게 될 거예요.
+    자동 청소가 불가능해졌으므로, 목표 scheduler는 조용히 넘어가는 대신 오류로 보고하게 됩니다.
   </p>
   <p>
     이 에러에서 벗어나는 길도 명시적입니다.<br>
@@ -257,10 +257,10 @@
     어느 쪽이든 선택이 코드에 그대로 남으므로, 컴파일러가 몰래 무언가를 버리는 일은 없습니다.
   </p>
 
-  <h3>같은 접근은 같은 규칙에 도달했을까요 — Classiq Qmod와 항목별 비교</h3>
+  <h3>같은 접근은 같은 규칙에 도달했는가 — Classiq Qmod와 항목별 비교</h3>
   <p>
     탈출구의 모양은 언어마다 달라도 구조는 같았습니다.<br>
-    그렇다면 접근까지 같은 두 시스템은 세부 규칙까지 같아질까요.<br>
+    그렇다면 접근까지 같은 두 시스템이 세부 규칙까지 같은지 확인합니다.<br>
     이 질문을 확인할 상대로 가장 알맞은 시스템이 Classiq Qmod입니다.<br>
     주석 없는 추론으로 앤실라를
     식별해 자동으로 청소한다는 접근이 Qora와 같으므로, 항목별로 나란히 놓으면 어느 선택이 접근
@@ -282,14 +282,14 @@
     청소의 실체도 두 시스템 모두 같아서, 앤실라의 이력을 거꾸로 되감는 역연산을 회로에 넣습니다.<br>
     Qora의 목표 설계에서는 주입 위치가 앤실라의 마지막 사용 직후, 곧 사망점 한 곳으로 정해져 있고
     (<a href="uncompute-11-injector.html">11장</a>), 1단계 예제의
-    <code>CNOT(q[0], t[0])</code>가 예정된 주입이에요.<br>
+    <code>CNOT(q[0], t[0])</code>가 예정된 주입입니다.<br>
     Classiq Qmod는 같은 역연산 주입을 쓰되, 어디에 배치할지는 합성 엔진이 결정합니다.
   </p>
 
   <h4>루프·조건문 안의 쓰기 — 여기서부터 달라집니다</h4>
   <p>
     보수적인 Qora scheduler 설계는 먼저 문장 단위 역변환만 허용하므로, <code>for</code>나 <code>if</code> 안에서
-    생긴 MIR 효과를 안전하게 배치할 수 없으면 자동 청소를 보수적으로 차단하게 돼요
+    생긴 MIR 효과를 안전하게 배치할 수 없으면 자동 청소를 보수적으로 차단하게 됩니다
     (<a href="uncompute-12-loops.html">12장</a>).
   </p>
 <pre><code>operation Main(){
@@ -308,11 +308,11 @@
 
   <h4>원소 단위 정밀도 — MIR은 원소를 구분하고, scheduler가 판정하게 됩니다</h4>
   <p>
-    현재 MIR의 <code>MirQubitAccess</code>는 한 레지스터 안에서도 원소를 구분할 수 있어요.<br>
-    다만 이 근거를 이용해 원소별 cleanup 판정과 리포트를 만드는 scheduler는 아직 구현되지 않았어요
+    현재 MIR의 <code>MirQubitAccess</code>는 한 레지스터 안에서도 원소를 구분할 수 있습니다.<br>
+    다만 이 근거를 이용해 원소별 cleanup 판정과 리포트를 만드는 scheduler는 아직 구현되지 않았습니다
     (<a href="uncompute-13-blanket.html">13장</a>).<br>
     아래 프로그램에서 측정된 <code>a[0]</code>은 출력으로 승격되고, <code>a[1]</code>만 청소 후보로
-    판정되어 목표 scheduler에서는 역연산이 자동 주입돼요.
+    판정되어 목표 scheduler에서는 역연산이 자동 주입됩니다.
   </p>
 <pre><code>operation FlipOne(p: Qubit){ X(p); }
 operation Main(){
@@ -323,7 +323,7 @@ operation Main(){
 }</code></pre>
   <p>
     사용자 소스에는 역연산 표기가 없습니다.<br>
-    목표 compiler의 내부 MIR에서는 <code>a[1]</code>의 정확한 사망점에만 <code>MirQuantumApply(Target=FlipOne, Functors=[MirFunctor.Adjoint], Operands=[a[1]])</code> 요청을 주입하게 될 거예요.
+    목표 compiler의 내부 MIR에서는 <code>a[1]</code>의 정확한 사망점에만 <code>MirQuantumApply(Target=FlipOne, Functors=[MirFunctor.Adjoint], Operands=[a[1]])</code> 요청을 주입하게 됩니다.
   </p>
   <p>
     Classiq Qmod에서 배열은 수명상 한 덩어리라서, 같은 상황이 오면 사용자가 배열을 수동으로
@@ -333,7 +333,7 @@ operation Main(){
   <h4>Y·CY의 취급 — 같은 위험을 서로 다른 자리에서 막습니다</h4>
   <p>
     2단계 예제에서 본 대로, 현재 MIR 효과 분석은 Y·CY 쓰기에
-    <code>MirQubitEffectFlags.NonQfree</code>를 붙이고, 목표 v1 scheduler는 이를 차단 근거로 사용하게 돼요
+    <code>MirQubitEffectFlags.NonQfree</code>를 붙이고, 목표 v1 scheduler는 이를 차단 근거로 사용하게 됩니다
     (<a href="uncompute-10-y-gate.html">10장</a>).<br>
     Classiq Qmod는 Y 자체를 허용하되, 얽힌 상대에게 비치환 연산을 금지합니다.<br>
     막는 자리가 다를 뿐 지키려는 것은 같습니다.<br>
@@ -343,7 +343,7 @@ operation Main(){
 
   <h4>동적 값 — 막는 방식이 다를 뿐 도착점은 같습니다</h4>
   <p>
-    컴파일 타임에 정해지지 않는 인덱스나 루프 경계가 cleanup 이력에 들어오면 목표 scheduler는 에러로 보고하게 돼요
+    컴파일 타임에 정해지지 않는 인덱스나 루프 경계가 cleanup 이력에 들어오면 목표 scheduler는 에러로 보고합니다
     (<a href="uncompute-14-limits.html">14장</a>).<br>
     Classiq Qmod는 문법 자체가 컴파일 타임 전용이어서, 그런 값을 적을 자리부터 없습니다.<br>
     에러로 막느냐 문법으로 막느냐가 다를 뿐, 회로는 컴파일 타임에 확정된다는

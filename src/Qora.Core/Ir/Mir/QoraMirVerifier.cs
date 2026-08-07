@@ -1,4 +1,5 @@
 using System.Text;
+using Qora.Ir.Mir.Analysis;
 
 namespace Qora.Ir.Mir;
 
@@ -72,13 +73,12 @@ internal static partial class QoraMirVerifier
             var callableErrorStart = _errors.Count;
             VerifyQubitSeeds(callable);
 
-            var predecessors = BuildPredecessors(callable);
-            var dominators = ComputeDominators(callable, predecessors);
-            VerifyQubitFlow(callable, dominators);
-            VerifyBlockContents(callable, dominators);
+            var controlFlow = MirControlFlowAnalysis.AnalyzeUnchecked(callable);
+            VerifyQubitFlow(callable, controlFlow);
+            VerifyBlockContents(callable, controlFlow);
 
             if (_errors.Count == callableErrorStart)
-                VerifyGraphContracts(callable);
+                VerifyGraphContracts(callable, controlFlow);
         }
 
         private void Add(

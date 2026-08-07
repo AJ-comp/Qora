@@ -63,8 +63,9 @@ public sealed class MirImmutabilityTests
         var callables = new List<MirCallable> { clonedCallable };
         var program = new MirProgram(clonedCallable, callables);
         QoraMirVerifier.VerifyOrThrow(program);
-        var effects = MirEffectAnalysis.Analyze(program);
-        var cfg = MirControlFlowAnalysis.Analyze(program, clonedCallable.Id);
+        var analyses = new MirAnalysisStore(program);
+        var effects = analyses.Effects;
+        var cfg = analyses.ControlFlow(clonedCallable);
         var effectSite = new MirInstructionSite(
             clonedCallable.Id,
             clonedApply.Id);
@@ -97,7 +98,6 @@ public sealed class MirImmutabilityTests
         Assert.Empty(retainedApply.MutableArrayResults);
         Assert.Empty(retainedApply.Functors);
 
-        effects.EnsureFor(program);
         Assert.NotNull(effects.EffectAt(effectSite));
         Assert.Single(effects.Effects);
 

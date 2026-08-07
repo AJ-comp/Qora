@@ -1,4 +1,5 @@
 using Qora.Ir.Mir;
+using Qora.Ir.Mir.Analysis;
 
 namespace Qora.Tests;
 
@@ -75,9 +76,8 @@ public sealed class MirShortCircuitLoweringTests
             main.Blocks,
             block => block.Instructions.OfType<MirArrayLoad>().Any());
 
-        var cfg = Qora.Ir.Mir.Analysis.MirControlFlowAnalysis.Analyze(
-            program,
-            main.Id);
+        var analyses = new MirAnalysisStore(program);
+        var cfg = analyses.ControlFlow(main);
         Assert.False(cfg.Dominates(loadBlock.Id, main.EntryBlock.Id));
         Assert.Contains(
             main.Blocks

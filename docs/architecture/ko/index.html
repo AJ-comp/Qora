@@ -148,8 +148,8 @@
     Qora는 파서 엔진(Janglim) 위에 얹힌 얇은 프런트엔드와, 그 위에 <strong>Qora가 전적으로 소유하는
     멀티패스 미들엔드</strong>로 이루어져 있습니다. 컴파일은 작고 단일 목적을 가진 패스들의 일직선입니다.
     각 패스는 한 형태의 프로그램을 받아 딱 한 가지 일만 하고, 조금 더 완성된 프로그램을 다음 패스에 넘깁니다 —
-    마지막 패스가 OpenQASM 3을 출력할 때까지요.<br>
-    이 문서는 그 일직선을 처음부터 끝까지 한 단계씩 따라가면서, 실제 compiler output과 설명을 위한 짧은 MIR 도식을 함께 사용해요.
+    이 흐름은 마지막 패스가 OpenQASM 3을 출력할 때까지 이어집니다.<br>
+    이 문서는 그 일직선을 처음부터 끝까지 한 단계씩 따라가면서, 실제 compiler output과 설명을 위한 짧은 MIR 도식을 함께 사용합니다.
   </p>
 
   <div class="flowline">
@@ -173,19 +173,19 @@
     <dl class="meta-grid">
       <div>
         <dt>문서 성격</dt>
-        <dd>Qora 컴파일러 구조를 설명하는 기준 설계 문서예요.</dd>
+        <dd>Qora 컴파일러 구조를 설명하는 기준 설계 문서입니다.</dd>
       </div>
       <div>
         <dt>다루는 범위</dt>
-        <dd>소스 텍스트가 AST, 검증된 HIR, SSA/CFG MIR, typed target model, OpenQASM으로 바뀌는 전체 경로를 다뤄요.</dd>
+        <dd>소스 텍스트가 AST, 검증된 HIR, SSA/CFG MIR, typed target model, OpenQASM으로 바뀌는 전체 경로를 다룹니다.</dd>
       </div>
       <div>
         <dt>읽는 사람</dt>
-        <dd>컴파일러 패스를 수정하거나 <code>--stages</code> 출력과 실제 방출 결과를 맞춰 봐야 하는 사람에게 필요해요.</dd>
+        <dd>컴파일러 패스를 수정하거나 <code>--stages</code> 출력과 실제 방출 결과를 대조해야 하는 사람에게 필요합니다.</dd>
       </div>
       <div>
         <dt>핵심 계약</dt>
-        <dd>각 패스는 구조화된 IR을 입력으로 받고, 한 가지 책임만 수행한 뒤 다음 패스에 넘겨요.</dd>
+        <dd>각 패스는 구조화된 IR을 입력으로 받고, 한 가지 책임만 수행한 뒤 다음 패스에 넘깁니다.</dd>
       </div>
     </dl>
   </section>
@@ -232,7 +232,7 @@ operation Main() {
 }</code></pre>
 
   <p>
-    이름이 패스들을 지나며 어떻게 변하는지 보세요. <code>Fanout</code>은 네임스페이스를 얻고
+    이름이 패스들을 지나며 어떻게 변하는지 확인할 수 있습니다. <code>Fanout</code>은 네임스페이스를 얻고
     (<code>Prep.Fanout</code>), 구체적 크기를 얻은 뒤(<code>Prep.Fanout__sz3</code>), 마지막으로
     OpenQASM용으로 평탄화됩니다(<code>Prep_Fanout__sz3</code>). 각 변화는 바로 아래의 한 패스가 맡습니다.
   </p>
@@ -252,7 +252,7 @@ operation Main() {
   </div>
 
   <div class="call why">
-    <span class="h">왜 경계를 이렇게 뚜렷이 유지하나?</span>
+    <span class="h">경계를 뚜렷이 유지하는 이유</span>
     Qora가 다뤄야 할 모든 것 — 타입, 역연산, 제네릭, 이름 안전성 — 은 엔진의 트리가 아니라
     <strong>Qora 자신의 IR</strong> 위에서 처리됩니다. 그래서 엔진은 양자에 대해 아무것도 모르는 범용 파서로
     남을 수 있고, Qora는 문법을 건드리지 않고도 기능(새 패스)을 추가할 수 있습니다. 엔진에 의존하는 유일한
@@ -310,11 +310,11 @@ operation Main() {
   <p class="stagehead">in: 엔진 AST + revision-bound session &nbsp;·&nbsp; out: <code>HirProgram</code> (source-shaped HIR) &nbsp;·&nbsp; 패스: <code>AstToHirLowering</code></p>
 
   <p>
-    로워링은 엔진의 트리를 <strong>한 번</strong> 순회하며 Qora가 소유하는 불변 IR로 다시 세워요.<br>
+    로워링은 엔진의 트리를 <strong>한 번</strong> 순회하며 Qora가 소유하는 불변 IR로 다시 세웁니다.<br>
     <code>HirProgram.Declarations</code>가 유일한 선언 소유 트리이며, <code>HirNamespaceDeclaration</code>은
-    하위 선언과 <code>open</code>을 소유하고 <code>HirCallable</code>은 매개변수와 <code>HirBlock</code>을 소유해요.<br>
-    그리고 모든 문장과 표현식은 현재 revision의 lowering session이 발급한 identity를 가진 typed node가 돼요.
-    예제의 IR은 다음과 같아요.
+    하위 선언과 <code>open</code>을 소유하고 <code>HirCallable</code>은 매개변수와 <code>HirBlock</code>을 소유합니다.<br>
+    그리고 모든 문장과 표현식은 현재 revision의 lowering session이 발급한 identity를 가진 typed node가 됩니다.
+    예제의 IR은 다음과 같습니다.
   </p>
 
 <pre><code>HirProgram
@@ -329,7 +329,7 @@ operation Main() {
     HirVariableDeclarationStatement(bit r, HirMeasurementExpression(reg[0]))</code></pre>
 
   <div class="call why">
-    <span class="h">왜 트리를 타입 있는 데이터로 다시 만드나?</span>
+    <span class="h">트리를 타입 있는 데이터로 다시 만드는 이유</span>
     이후 패스가 문자열을 다시 파싱하지 않고 호출 대상·인수·수식자를 검사할 수 있기 때문입니다. 미들엔드
     전체가 IR 기반인 것도 같은 이유입니다. 패스들이 구조화된 노드를 읽고 쓰므로, 각 패스는 짧게 유지되고
     틀리기 어렵습니다.
@@ -341,18 +341,18 @@ operation Main() {
 
   <p>
     <strong>Expand</strong>는 모듈 로더입니다. 파일에 <code>import "lib/prep.qor"</code>가 있었다면, 이
-    패스가 그 파일을 파싱·로워링하고 최상위 선언 subtree를 하나의 <code>HirProgram</code>에 이어 붙여요.<br>
-    이후 모든 단계는 하나의 프로그램을 보지만, namespace 소유 관계는 이름 문자열로 평탄화되지 않고 선언 트리에 그대로 남아요.
-    (예제는 아무것도 임포트하지 않으므로 여기서는 아무 일도 하지 않아요.<br>
-    파일이 없으면 <code>QSEM020</code>이 됩니다. 반면에 순환 back-edge는 <code>loaded</code>에 이미 등록된 경로로 보아 오류 없이 생략해요.<br>
-    <code>QSEM021</code>은 폐기된 예약 코드로만 남아 더 이상 생성하지 않아요.)
+    패스가 그 파일을 파싱·로워링하고 최상위 선언 subtree를 하나의 <code>HirProgram</code>에 이어 붙입니다.<br>
+    이후 모든 단계는 하나의 프로그램을 보지만, namespace 소유 관계는 이름 문자열로 평탄화되지 않고 선언 트리에 그대로 남습니다.
+    (예제는 아무것도 임포트하지 않으므로 여기서는 아무 일도 하지 않습니다.<br>
+    파일이 없으면 <code>QSEM020</code>이 됩니다. 반면에 순환 back-edge는 <code>loaded</code>에 이미 등록된 경로로 보아 오류 없이 생략합니다.<br>
+    <code>QSEM021</code>은 폐기된 예약 코드로만 남아 더 이상 생성하지 않습니다.)
   </p>
 
   <p>
-    측정식은 Expand와 Resolve 사이에서 target 모양의 HIR로 바꾸지 않아요.
-    <code>if (M(q[0]) == 1)</code>은 조건 안의 canonical <code>HirMeasurementExpression</code>으로 그대로 남아요.
-    이후 <code>QoraMirLowering</code>이 측정을 정확한 평가 위치에 놓고, short-circuit 제어 흐름을 CFG로 분명하게 표현해요.
-    마지막으로 OpenQASM target lowering이 구조화된 제어 흐름을 복원하면서 필요한 측정용 <code>bit</code>을 방출해요:
+    측정식은 Expand와 Resolve 사이에서 target 모양의 HIR로 바꾸지 않습니다.
+    <code>if (M(q[0]) == 1)</code>은 조건 안의 canonical <code>HirMeasurementExpression</code>으로 그대로 남습니다.
+    이후 <code>QoraMirLowering</code>이 측정을 정확한 평가 위치에 놓고, short-circuit 제어 흐름을 CFG로 분명하게 표현합니다.
+    마지막으로 OpenQASM target lowering이 구조화된 제어 흐름을 복원하면서 필요한 측정용 <code>bit</code>을 방출합니다:
   </p>
 
 <pre><code>operation Main() {
@@ -368,7 +368,7 @@ int v3;
 bit v4;
 int v5;
 v0 = 0;
-<span class="add">v1 = measure q[v0];</span>            <span class="cm">← 측정 결과가 SSA에 대응하는 target value가 돼요</span>
+<span class="add">v1 = measure q[v0];</span>            <span class="cm">← 측정 결과가 SSA에 대응하는 target value가 됩니다</span>
 v2 = 1;
 v3 = int(v1);
 v4 = v3 == v2;
@@ -393,13 +393,13 @@ v4 = v3 == v2;
   <p class="stagehead">in: 해소된 IR &nbsp;·&nbsp; out: 오류 목록 (또는 없음) &nbsp;·&nbsp; 패스: <code>QoraValidator</code> + <code>SymbolTableBuilder</code></p>
 
   <p>
-    검증은 한 가지 질문에 답해요: <strong>이름·타입·스코프·호출 및 소유권 계약이 서로 맞는 올바른 Qora
-    프로그램인가?</strong><br>
-    OpenQASM이나 다른 backend가 이 프로그램을 표현할 수 있는지는 여기서 판단하지 않아요.<br>
-    HIR 전체를 한 번 순회하며 첫 오류에서 멈추지 않고 <strong>모든 위반을 수집</strong>해요.<br>
-    이때 검증기는 통합 심볼 테이블도 만들어요. 파라미터, 레지스터, 측정 비트, 변수, 상수, 루프 변수가 어느
-    스코프에 사는지 기록하고, 각 이름이 어디에서 사용되는지도 함께 모아요.<br>
-    모든 규칙에는 안정된 <code>QSEM</code> 코드가 있어 에디터가 물결선을 붙일 수 있어요. 그중 몇 가지를 보면:
+    검증은 한 가지 질문에 답합니다: <strong>이름·타입·스코프·호출 및 소유권 계약이 서로 맞는 올바른 Qora
+    프로그램입니까?</strong><br>
+    OpenQASM이나 다른 backend가 이 프로그램을 표현할 수 있는지는 여기서 판단하지 않습니다.<br>
+    HIR 전체를 한 번 순회하며 첫 오류에서 멈추지 않고 <strong>모든 위반을 수집</strong>합니다.<br>
+    이때 검증기는 통합 심볼 테이블도 만듭니다. 파라미터, 레지스터, 측정 비트, 변수, 상수, 루프 변수가 어느
+    스코프에 사는지 기록하고, 각 이름이 어디에서 사용되는지도 함께 모읍니다.<br>
+    모든 규칙에는 안정된 <code>QSEM</code> 코드가 있어 에디터가 물결선을 붙일 수 있습니다. 그중 몇 가지는 다음과 같습니다:
   </p>
 
   <div class="panel">
@@ -415,15 +415,15 @@ v4 = v3 == v2;
   </div>
 
   <p>
-    지역 바인딩은 선언된 지점부터 해당 lexical scope의 끝까지 보이며, 선언보다 먼저 사용하면 <code>QSEM025</code>예요.<br>
-    <code>use</code> 선언도 같은 이름 규칙을 따르지만, 할당 자체는 별도의 언어 계약에 따라 entry operation의 최상위에서만 가능해요.<br>
-    순수 함수 호출은 일반 고전 값이므로 배열 리터럴의 원소와 <code>for</code> 범위의 경계에서도 사용할 수 있어요.<br>
-    원소 타입이 같은 고전 배열은 구조적 <code>==</code>와 <code>!=</code>를 지원해요. 길이가 다르면 같지 않고, 길이가 같으면
-    각 원소를 비교해요.
+    지역 바인딩은 선언된 지점부터 해당 lexical scope의 끝까지 보이며, 선언보다 먼저 사용하면 <code>QSEM025</code>입니다.<br>
+    <code>use</code> 선언도 같은 이름 규칙을 따르지만, 할당 자체는 별도의 언어 계약에 따라 entry operation의 최상위에서만 가능합니다.<br>
+    순수 함수 호출은 일반 고전 값이므로 배열 리터럴의 원소와 <code>for</code> 범위의 경계에서도 사용할 수 있습니다.<br>
+    원소 타입이 같은 고전 배열은 구조적 <code>==</code>와 <code>!=</code>를 지원합니다. 길이가 다르면 같지 않고, 길이가 같으면
+    각 원소를 비교합니다.
   </p>
 
   <div class="call why">
-    <span class="h">왜 변환 패스들보다 먼저 검증하나?</span>
+    <span class="h">변환 패스들보다 먼저 검증하는 이유</span>
     이후 모든 패스가 프로그램이 이미 온전하다고 가정할 수 있게 하기 때문입니다. 단형화기는 스코프에서
     해소되지 않는 이름을 만나지 않고, 이미터는 잘못된 호출을 만나지 않습니다. 게이트가 모두의 앞에 서
     있기에 각 변환 패스는 단순해질 수 있습니다.
@@ -436,8 +436,8 @@ v4 = v3 == v2;
   <p>
     표면 타입 <code>Fanout(q: Qubit[])</code>에는 배열 길이를 적지 않습니다.<br>
     단형화기(monomorphizer)는 각 호출부에서 실제 레지스터 크기를 읽어 <strong>구체적인 내부 복사본을 만들고</strong>,
-    파라미터에 알려진 폭을 부여한 뒤 호출이 해당 복사본을 가리키도록 다시 써요.<br>
-    공통 HIR에서는 <code>q.Count</code>를 보존하고, target이 나중에 알려진 폭을 사용해 내려요.<br>
+    파라미터에 알려진 폭을 부여한 뒤 호출이 해당 복사본을 가리키도록 다시 씁니다.<br>
+    공통 HIR에서는 <code>q.Count</code>를 보존하고, target이 나중에 알려진 폭을 사용해 내립니다.<br>
     예제의 호출은 <code>reg</code>(큐비트 3개)를 넘기므로:
   </p>
 
@@ -447,8 +447,8 @@ v4 = v3 == v2;
   </div>
 
   <p>
-    이제 폭이 구체적이므로 프로그램은 <strong>두 번째로 검증</strong>돼요.<br>
-    인덱스 범위와 레지스터 크기 일치 검사가 비로소 대조할 값을 얻고, 이 패스 이후에는 제네릭 연산이 남지 않아요.
+    이제 폭이 구체적이므로 프로그램은 <strong>두 번째로 검증</strong>됩니다.<br>
+    인덱스 범위와 레지스터 크기 일치 검사가 비로소 대조할 값을 얻고, 이 패스 이후에는 제네릭 연산이 남지 않습니다.
   </p>
 
   <h2 id="s7"><span class="n">7</span>Lower — 소스 모양 HIR에서 SSA/CFG MIR로</h2>
@@ -456,8 +456,8 @@ v4 = v3 == v2;
   <p class="stagehead">in: 검증된 specialized HIR + 의미 정보 &nbsp;·&nbsp; out: <code>MirSnapshot</code> &nbsp;·&nbsp; 패스: <code>QoraMirLowering</code></p>
 
   <p>
-    HIR은 사용자가 작성한 프로그램 모양을 유지하므로 이름 해소, 타입 검사, 진단에 알맞아요.<br>
-    그 책임을 마치면 <code>QoraMirLowering</code>이 실행 중심 표현을 만들면서, 고전값에는 SSA version을 붙이고 분기와 반복은 명시적인 제어 흐름 그래프로 바꿔요.
+    HIR은 사용자가 작성한 프로그램 모양을 유지하므로 이름 해소, 타입 검사, 진단에 알맞습니다.<br>
+    그 책임을 마치면 <code>QoraMirLowering</code>이 실행 중심 표현을 만들면서, 고전값에는 SSA version을 붙이고 분기와 반복은 명시적인 제어 흐름 그래프로 바꿉니다.
   </p>
 
 <pre><code>var x: int = 1;
@@ -470,9 +470,9 @@ v1 = add v0, 1
 return</code></pre>
 
   <p>
-    결과는 <code>MirStage.Lowered</code> 상태의 정확한 불변 <code>MirSnapshot</code> 객체예요.<br>
-    이 객체는 실제로 소비한 final HIR을 <code>HirArtifact</code>로, MIR의 source provenance를 program-owned <code>Origins</code>로 보존해요.<br>
-    컴파일 identity는 <code>HirArtifact</code>에만 있고 MIR에 다시 복사하지 않으므로, backend는 이름이나 중복 ID로 MIR의 출처를 추측할 필요가 없어요.
+    결과는 <code>MirStage.Lowered</code> 상태의 정확한 불변 <code>MirSnapshot</code> 객체입니다.<br>
+    이 객체는 실제로 소비한 final HIR을 <code>HirArtifact</code>로, MIR의 source provenance를 program-owned <code>Origins</code>로 보존합니다.<br>
+    컴파일 identity는 <code>HirArtifact</code>에만 있고 MIR에 다시 복사하지 않으므로, backend는 이름이나 중복 ID로 MIR의 출처를 추측할 필요가 없습니다.
   </p>
 
   <h2 id="s8"><span class="n">8</span>MIR 분석과 내부 역연산 실체화</h2>
@@ -480,14 +480,14 @@ return</code></pre>
   <p class="stagehead">패스: exact <code>MirProgram</code> 분석 → <code>MirAdjointMaterializer</code></p>
 
   <p>
-    제어 흐름, 효과, 별칭, 메모리 상태, 경로 조건, 제어 영역 분석은 자신이 설명하는 정확한 <code>MirProgram</code> 객체에만 묶여요.<br>
-    분석 결과를 HIR에 복사하지 않으며, 새 프로그램을 가진 snapshot에 이전 프로그램의 사실을 재사용하지도 않아요.
+    제어 흐름, 효과, 별칭, 메모리 상태, 경로 조건, 제어 영역 분석은 자신이 설명하는 정확한 <code>MirProgram</code> 객체에만 묶입니다.<br>
+    분석 결과를 HIR에 복사하지 않으며, 새 프로그램을 가진 snapshot에 이전 프로그램의 사실을 재사용하지도 않습니다.
   </p>
 
   <p>
-    역연산 요청도 오직 MIR에만 존재해요.<br>
-    컴파일러 내부 scheduler가 정확한 <code>MirQuantumApply</code> 하나에 <code>MirFunctor.Adjoint</code>를 붙이면, <code>MirAdjointMaterializer</code>가 필요한 역방향 MIR callable을 합성하고 요청을 typed callable target으로 바꾼 뒤 바로 이전 MIR snapshot을 exact <code>PreviousSnapshot</code>으로 가진 새 snapshot을 발행해요.<br>
-    Qora 소스와 HIR에는 <code>Adjoint</code>, 역연산 표식, conjugation node가 없어요.
+    역연산 요청도 오직 MIR에만 존재합니다.<br>
+    컴파일러 내부 scheduler가 정확한 <code>MirQuantumApply</code> 하나에 <code>MirFunctor.Adjoint</code>를 붙이면, <code>MirAdjointMaterializer</code>가 필요한 역방향 MIR callable을 합성하고 요청을 typed callable target으로 바꾼 뒤 바로 이전 MIR snapshot을 exact <code>PreviousSnapshot</code>으로 가진 새 snapshot을 발행합니다.<br>
+    Qora 소스와 HIR에는 <code>Adjoint</code>, 역연산 표식, conjugation node가 없습니다.
   </p>
 
 <pre><code>MirQuantumApply(Target = Prepare, Functors = [MirFunctor.Adjoint])
@@ -496,9 +496,9 @@ MirCallable __qora_inverse_...(reversed unitary body)
 MirQuantumApply(Target = __qora_inverse_..., Functors = [])</code></pre>
 
   <div class="call why">
-    <span class="h">왜 이 경계를 MIR에 두나요?</span>
-    자동 uncomputation은 SSA version, CFG 경로, storage 상태, 정확한 instruction identity가 필요해요.<br>
-    요청과 합성 callable을 MIR에 두면 scheduler와 materializer가 같은 근거를 공유하면서도 HIR에 컴파일러 전용 문법을 추가하거나 별도 target 경로를 만들지 않을 수 있어요.
+    <span class="h">이 경계를 MIR에 두는 이유</span>
+    자동 uncomputation은 SSA version, CFG 경로, storage 상태, 정확한 instruction identity가 필요합니다.<br>
+    요청과 합성 callable을 MIR에 두면 scheduler와 materializer가 같은 근거를 공유하면서도 HIR에 컴파일러 전용 문법을 추가하거나 별도 target 경로를 만들지 않을 수 있습니다.
   </div>
 
   <h2 id="s9"><span class="n">9</span>OpenQASM target lowering과 방출</h2>
@@ -506,25 +506,25 @@ MirQuantumApply(Target = __qora_inverse_..., Functors = [])</code></pre>
   <p class="stagehead">in: materialized MIR &nbsp;·&nbsp; target: <code>MirOpenQasmTargetProgram</code> &nbsp;·&nbsp; 패스: <code>MirOpenQasmLowering</code> → <code>MirQasmEmitter</code></p>
 
   <p>
-    OpenQASM backend는 정확한 materialized MIR snapshot을 소비해요.<br>
-    CFG에서 구조화된 <code>if</code>, <code>while</code>, loop exit를 복원하고, SSA 값과 phi edge를 typed target declaration과 assignment로 바꾸며, 충돌 없는 OpenQASM 이름도 이 단계에서 정해요.<br>
-    결과인 <code>MirOpenQasmTargetProgram</code>은 target type, callable, declaration, statement와 target-local identity를 소유하고, HIR을 두 번째 권위 저장소로 들고 있지 않아요.
+    OpenQASM backend는 정확한 materialized MIR snapshot을 소비합니다.<br>
+    CFG에서 구조화된 <code>if</code>, <code>while</code>, loop exit를 복원하고, SSA 값과 phi edge를 typed target declaration과 assignment로 바꾸며, 충돌 없는 OpenQASM 이름도 이 단계에서 정합니다.<br>
+    결과인 <code>MirOpenQasmTargetProgram</code>은 target type, callable, declaration, statement와 target-local identity를 소유하고, HIR을 두 번째 권위 저장소로 들고 있지 않습니다.
   </p>
 
   <p>
-    올바른 Qora 프로그램을 OpenQASM이 표현할 수 있는지 묻는 첫 단계가 바로 여기예요.<br>
-    고전 배열 등가 비교에서 알려진 길이가 다르면 상수 결과로 lowering하고, 같은 길이의 일반 배열은 원소별 비교로 lowering해요.<br>
-    동적 길이의 일반 배열 비교는 현재 OpenQASM backend가 표현할 수 없어 <code>QASM002</code>를 내요.<br>
+    올바른 Qora 프로그램을 OpenQASM이 표현할 수 있는지 묻는 첫 단계가 바로 여기입니다.<br>
+    고전 배열 등가 비교에서 알려진 길이가 다르면 상수 결과로 lowering하고, 같은 길이의 일반 배열은 원소별 비교로 lowering합니다.<br>
+    동적 길이의 일반 배열 비교는 현재 OpenQASM backend가 표현할 수 없어 <code>QASM002</code>를 냅니다.<br>
     또한 가변 빌림인 <code>var bit[]</code> 파라미터는 HIR과 MIR에서 올바르지만, 값으로 전달되는 bit register로는 호출자에게
-    쓰기 결과를 되돌려줄 수 없어 현재 OpenQASM target이 <code>QASM002</code>를 내요.<br>
-    반면 가변 이전인 <code>move var bit[]</code>는 지원해요. 소유권을 소비한다는 계약과 <code>bit[N]</code> 값을 target callable에
-    전달하는 방식이 서로 맞기 때문이에요.
+    쓰기 결과를 되돌려줄 수 없어 현재 OpenQASM target이 <code>QASM002</code>를 냅니다.<br>
+    반면 가변 이전인 <code>move var bit[]</code>는 지원합니다. 소유권을 소비한다는 계약과 <code>bit[N]</code> 값을 target callable에
+    전달하는 방식이 서로 맞기 때문입니다.
   </p>
 
   <p>
-    그다음 <code>MirQasmEmitter</code>가 이 target model을 직렬화해요.<br>
-    source 이름을 다시 해소하거나 semantic fact를 조회하고, 역연산을 합성하거나 제어 흐름을 재구성하지 않아요.<br>
-    앞으로 다른 backend가 추가되어도 HIR 파이프라인을 분기하지 않고 같은 canonical MIR을 자기 typed lowering으로 소비할 수 있어요.
+    그다음 <code>MirQasmEmitter</code>가 이 target model을 직렬화합니다.<br>
+    source 이름을 다시 해소하거나 semantic fact를 조회하고, 역연산을 합성하거나 제어 흐름을 재구성하지 않습니다.<br>
+    앞으로 다른 backend가 추가되어도 HIR 파이프라인을 분기하지 않고 같은 canonical MIR을 자기 typed lowering으로 소비할 수 있습니다.
   </p>
 
   <h2 id="s10"><span class="n">10</span>전체 파이프라인 한눈에</h2>
@@ -556,16 +556,16 @@ MirQuantumApply(Target = __qora_inverse_..., Functors = [])</code></pre>
   <div class="call why">
     <span class="h">이것이 향하는 곳 — 자동 언컴퓨테이션</span>
     Silq식 자동 언컴퓨테이션 — <strong>임시 큐비트가 더 이상 필요 없어지는 지점을 찾아 그 역연산을 자동으로
-    주입하는 것</strong> — 을 위한 단계 경계는 이제 MIR에 있어요.<br>
-    scheduler는 exact <code>MirProgram</code>에 묶인 SSA/CFG 사실을 소비해 전역 cleanup 순서를 구하고, 정확한 MIR instruction에 inverse request를 주입하게 될 거예요.<br>
-    <code>MirAdjointMaterializer</code>와 typed target 경로는 이미 이 표현을 소비해요.<br>
-    다만 조건문·반복문·별칭·고전 witness 안정성·여러 ancilla 사이의 충돌은 scheduler가 해당 사례를 허용하기 전에 명시적으로 증명해야 해요.
+    주입하는 것</strong> — 을 위한 단계 경계는 이제 MIR에 있습니다.<br>
+    scheduler는 exact <code>MirProgram</code>에 묶인 SSA/CFG 사실을 소비해 전역 cleanup 순서를 구하고, 정확한 MIR instruction에 inverse request를 주입하게 될 것입니다.<br>
+    <code>MirAdjointMaterializer</code>와 typed target 경로는 이미 이 표현을 소비합니다.<br>
+    다만 조건문·반복문·별칭·고전 witness 안정성·여러 ancilla 사이의 충돌은 scheduler가 해당 사례를 허용하기 전에 명시적으로 증명해야 합니다.
   </div>
 
   <hr>
 
   <p style="color:var(--muted); font-size:.92rem;">
-    소스·AST·HIR·OpenQASM 리스팅은 실제 Qora 컴파일러(<code>qora --json --stages</code>)에서 얻었고, 짧은 MIR 리스팅은 실제 MIR type을 사용한 설명용 도식이에요.<br>
+    소스·AST·HIR·OpenQASM 리스팅은 실제 Qora 컴파일러(<code>qora --json --stages</code>)에서 얻었고, 짧은 MIR 리스팅은 실제 MIR type을 사용한 설명용 도식입니다.<br>
     소스, 파이프라인 순서대로: <code>QoraGrammar.cs</code> (문법) ·
     <code>Ir/AstToHirLowering.cs</code> + <code>Ir/AstExpressionLowering.cs</code> (AST→HIR) ·
     <code>Ir/Passes/ModuleLoader.cs</code> · <code>Resolver.cs</code> · <code>SymbolTable.cs</code> · <code>QoraValidator.cs</code> ·

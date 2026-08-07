@@ -60,17 +60,18 @@ internal static partial class QoraMirVerifier
         /// Verifies contracts which require whole-CFG facts after the local structural and type checks
         /// have succeeded. Keeping this as a second phase avoids treating an incomplete graph as analyzable.
         /// </summary>
-        private void VerifyGraphContracts(MirCallable callable)
+        private void VerifyGraphContracts(
+            MirCallable callable,
+            MirControlFlowSnapshot controlFlow)
         {
-            var cfg = MirControlFlowAnalysis.AnalyzeUnchecked(_program, callable);
-            var provenance = MirStorageProvenanceAnalysis.AnalyzeUnchecked(_program, callable);
+            var provenance = MirStorageProvenanceAnalysis.AnalyzeUnchecked(callable);
             var memory = MirMemoryStateAnalysis.AnalyzeVerified(
-                cfg,
+                controlFlow,
                 provenance);
             VerifyExclusiveCallOperands(callable, provenance);
             VerifyArrayCallMinimumLengths(callable, provenance);
-            VerifyCurrentArrayStates(callable, cfg, memory);
-            VerifyCurrentQubitStates(callable, cfg);
+            VerifyCurrentArrayStates(callable, controlFlow, memory);
+            VerifyCurrentQubitStates(callable, controlFlow);
         }
 
         /// <summary>
@@ -600,7 +601,7 @@ internal static partial class QoraMirVerifier
 
         private void VerifyQubitFlow(
             MirCallable callable,
-            IReadOnlyDictionary<MirBlockId, HashSet<MirBlockId>> dominators)
+            MirControlFlowSnapshot controlFlow)
         {
             var definitions =
                 new Dictionary<MirQubitKey, (MirBlockId? Block, int? InstructionIndex)>();
@@ -738,7 +739,7 @@ internal static partial class QoraMirVerifier
                     return null;
                 }
 
-                if (!dominators[useBlock].Contains(definitionBlock))
+                if (!controlFlow.Dominates(definitionBlock, useBlock))
                 {
                     return $"uses qubit {qubit}, defined in {definitionBlock}, whose definition "
                         + $"does not dominate {useBlock}";

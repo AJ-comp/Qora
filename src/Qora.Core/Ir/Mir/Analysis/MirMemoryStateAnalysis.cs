@@ -107,7 +107,7 @@ public sealed class MirMemoryStateSnapshot
 
         // This also rejects a point issued by another CFG snapshot.
         var ssaAvailable = _cfg.IsValueAvailableAt(state, point);
-        var definition = SourceCallable.DefinitionOf(value);
+        var definition = SourceCallable.DefinitionOf(state);
         var definitionBlock = DefinitionBlock(definition);
         var requiresSameIteration =
             definitionBlock is MirBlockId block
@@ -165,7 +165,7 @@ public sealed class MirMemoryStateSnapshot
             inState.Add(block.Id, new FlowFact(available: true));
             outState.Add(block.Id, new FlowFact(available: true));
         }
-        var definition = SourceCallable.DefinitionOf(value);
+        var definition = SourceCallable.DefinitionOf(state);
         var parameterDefinition =
             definition.Kind == MirValueDefinitionKind.Parameter;
 
@@ -314,37 +314,9 @@ public sealed class MirMemoryStateSnapshot
 
 internal static class MirMemoryStateAnalysis
 {
-    internal static MirMemoryStateSnapshot Analyze(
-        MirProgram program,
-        MirCallableId callableId)
-    {
-        ArgumentNullException.ThrowIfNull(program);
-
-        var callable = program.FindCallable(callableId)
-            ?? throw new ArgumentOutOfRangeException(
-                nameof(callableId),
-                callableId,
-                $"callable {callableId} does not belong to the MIR program");
-        return AnalyzeUnchecked(program, callable);
-    }
-
     /// <summary>
-    /// Builds memory-state facts after structural MIR verification. The verifier and canonical analysis
-    /// store use this form for memory-Phi and call-alias contracts without starting verification again.
-    /// </summary>
-    internal static MirMemoryStateSnapshot AnalyzeUnchecked(
-        MirProgram program,
-        MirCallable callable)
-    {
-        var cfg = MirControlFlowAnalysis.AnalyzeUnchecked(program, callable);
-        var provenance = MirStorageProvenanceAnalysis.AnalyzeUnchecked(program, callable);
-        return AnalyzeVerified(cfg, provenance);
-    }
-
-    /// <summary>
-    /// Builds memory facts from dependency snapshots owned by the same verified MIR snapshot.
-    /// <see cref="MirAnalysisStore"/> uses this entry point so all downstream analyses share one CFG
-    /// and one storage-provenance instance per callable.
+    /// Builds memory facts from dependency snapshots owned by the same exact callable.
+    /// <see cref="MirAnalysisStore"/> supplies the canonical CFG and storage-provenance instances.
     /// </summary>
     internal static MirMemoryStateSnapshot AnalyzeVerified(
         MirControlFlowSnapshot cfg,
@@ -353,7 +325,7 @@ internal static class MirMemoryStateAnalysis
         ArgumentNullException.ThrowIfNull(cfg);
         ArgumentNullException.ThrowIfNull(provenance);
         var callable = cfg.SourceCallable;
-        provenance.EnsureFor(cfg.SourceProgram, callable.Id);
+        provenance.EnsureFor(callable);
         var mutations = CollectMutations(callable, provenance);
         return new MirMemoryStateSnapshot(
             cfg,

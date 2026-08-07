@@ -43,8 +43,8 @@ public sealed record MirBoundsResult(
     MirBoundsClassification Classification);
 
 /// <summary>
-/// Bounds classifications for every classical-array and qubit-array index in one callable.
-/// The result is derived from the exact immutable MIR program and cannot be reused with another one.
+/// Bounds classifications for every classical-array and qubit-array index in one exact callable.
+/// The result cannot be reused after a MIR rewrite replaces that callable object.
 /// </summary>
 public sealed class MirBoundsSnapshot
 {
@@ -109,23 +109,6 @@ public sealed class MirBoundsSnapshot
 
 internal static class MirBoundsAnalysis
 {
-    internal static MirBoundsSnapshot Analyze(
-        MirProgram program,
-        MirCallableId callableId)
-    {
-        ArgumentNullException.ThrowIfNull(program);
-
-        var callable = program.FindCallable(callableId)
-            ?? throw new ArgumentOutOfRangeException(
-                nameof(callableId),
-                callableId,
-                $"callable {callableId} does not belong to the MIR program");
-        var cfg = MirControlFlowAnalysis.AnalyzeUnchecked(program, callable);
-        var paths = MirPathConditionAnalysis.AnalyzeVerified(cfg);
-        var storage = MirStorageProvenanceAnalysis.AnalyzeUnchecked(program, callable);
-        return AnalyzeVerified(paths, storage);
-    }
-
     internal static MirBoundsSnapshot AnalyzeVerified(
         MirPathConditionSnapshot paths,
         MirStorageProvenanceSnapshot storage)
@@ -134,7 +117,7 @@ internal static class MirBoundsAnalysis
         ArgumentNullException.ThrowIfNull(storage);
         var cfg = paths.ControlFlow;
         var callable = cfg.SourceCallable;
-        storage.EnsureFor(cfg.SourceProgram, callable.Id);
+        storage.EnsureFor(callable);
 
         var analyzer = new Analyzer(callable, cfg, paths, storage);
         return new MirBoundsSnapshot(cfg, analyzer.Analyze());
@@ -760,7 +743,7 @@ internal static class MirBoundsAnalysis
             try
             {
                 var mirValue = _callable.RequireValue(value);
-                var definition = _callable.DefinitionOf(mirValue);
+                var definition = _callable.DefinitionOf(value);
                 result = definition.Kind switch
                 {
                     MirValueDefinitionKind.BlockArgument =>

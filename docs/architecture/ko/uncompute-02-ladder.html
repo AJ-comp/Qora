@@ -150,8 +150,8 @@
   </div>
   <div class="call">
     <span class="h">구현 상태</span>
-    현재 MIR은 위 판정에 필요한 큐빗 버전과 명령별 효과를 기록해요.<br>
-    다만 cleanup scheduler가 최종 후보·safe 판정을 발행하거나 역연산을 자동 주입하는 단계는 아직 구현되지 않았어요.
+      현재 MIR은 위 판정에 필요한 큐빗 버전과 명령별 효과를 기록합니다.<br>
+    다만 cleanup scheduler가 최종 후보·safe 판정을 발행하거나 역연산을 자동 주입하는 단계는 아직 구현되지 않았습니다.
   </div>
   <p>
     각 질문이 실제로 어떤 큐빗을 필터링하는지, 0번과 1번을 예제로 하나씩 확인하겠습니다.<br>
@@ -205,7 +205,7 @@ var r: bit = M(q[0]);     <span class="cm">// q를 측정해 그 값을 r에 저
 
   <h3>예제 — 목표 scheduler가 세 질문을 적용하면</h3>
   <p>
-    아래 분류는 현재 CLI가 내놓는 리포트가 아니라, 앞으로 MIR cleanup scheduler가 같은 근거를 소비해 내릴 판정이에요.<br>
+      아래 분류는 현재 CLI가 내놓는 리포트가 아니라, 앞으로 MIR cleanup scheduler가 같은 근거를 소비해 내릴 판정입니다.<br>
     파라미터 하나,
     측정되는 레지스터 하나, 청소 후보 하나가 모두 등장하는 작은 프로그램으로
     확인해 보겠습니다.
@@ -240,8 +240,8 @@ a:   ancilla, cleanup candidate — safe to uncompute</code></pre>
     클래식 코드의 <code>t = ...; result = f(t);</code>에서 <code>t</code>가 임시 변수인 것과 같은
     상황입니다.<br>
     이런 큐빗이 청소 후보가 되고, 목표 scheduler는 <code>a</code>가 마지막으로 쓰인 <code>CNOT</code> 직후에
-    정리 코드를 넣게 될 거예요.<br>
-    현재 컴파일러는 이 자동 주입 단계까지는 수행하지 않아요.<br>
+      정리 코드를 넣게 됩니다.<br>
+      현재 컴파일러는 이 자동 주입 단계까지는 수행하지 않습니다.<br>
     그 정리 코드가 정확히 무엇이고 어떻게 만들어지는지는
     <a href="uncompute-11-injector.html">11장</a>에서 다룹니다.
   </p>

@@ -1,0 +1,641 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>13. 큐비트 identity와 버전 — Qora 컴파일러 개발자 매뉴얼</title>
+<link rel="stylesheet" href="developer.css">
+<script src="developer-syntax.js" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#main-content">본문으로 건너뛰기</a>
+<header class="hero">
+  <div class="tag">Qora · Compiler Developer Manual · Chapter 13</div>
+  <h1>큐비트 identity와 버전</h1>
+  <p><code>use</code>, <code>X</code>, 분기 합류, <code>H</code>가 만드는 <code>q0.v0~v3</code> 추적</p>
+</header>
+
+<main class="wrap" id="main-content">
+  <nav class="chapter-nav" aria-label="장 이동(상단)">
+    <div class="group"><a href="chapter-12.html">← 이전: 배열 Storage</a><a href="index.html#chapters">전체 목차</a></div>
+    <div class="group"><a href="chapter-14.html">다음: Basic Block →</a></div>
+  </nav>
+
+  <p class="lead">
+    공통 소스의 <code>use q = Qubit[1];</code>이 <code>LowerQubitDeclaration</code>에 들어가면 첫 큐비트 상태 <code>q0.v0</code>이 등록됩니다.<br>
+    바로 그 호출에서 출발하여 분기 안팎에서 같은 큐비트가 어떤 객체로 이어지는지 따라갑니다.<br>
+    그 뒤 분기마다 복제된 dictionary, <code>X</code> 호출의 operand와 effect 판정, <code>q0.v1</code> 생성, 거짓 경로의 <code>q0.v0</code> 유지, Phi <code>q0.v2</code>, 마지막 <code>H</code> 결과 <code>q0.v3</code>을 순서대로 연결합니다.
+  </p>
+
+  <h2 id="source">이번 장에서 실제로 처리할 소스</h2>
+
+<pre><code class="language-qora">function Next(value: int): int
+{
+    return value + 1;
+}
+
+operation Work()
+{
+    var values: int[] = [0];
+    use q = Qubit[1];
+
+    values[0] = Next(values[0]);
+
+    if (values[0] == 1)
+    {
+        X(q[0]);
+    }
+
+    H(q[0]);
+}</code></pre>
+
+  <p>
+    추적 대상은 <code>Work h44 → c44</code>입니다.<br>
+    <code>LowerStatements(_hirCallable.Body.Statements)</code>가 위 본문을 소스 순서대로 순회하며, 큐비트와 관련하여 처음 전달하는 인수는 <code>use q = Qubit[1];</code>을 나타내는 <code>HirQubitDeclarationStatement</code>입니다.
+  </p>
+
+  <h2 id="allocation">첫 큐비트 문장: <code>use q = Qubit[1]</code></h2>
+
+  <p>
+    이 문장 직전에는 배열 선언만 끝났습니다.<br>
+    따라서 <code>b0</code>에는 <code>i0</code>과 <code>i1</code>이 있고, 다음 instruction ID는 <code>i2</code>입니다.<br>
+    큐비트 ID를 아직 하나도 할당하지 않았으므로 <code>_initialMirQubitsById</code>, 버전 counter, 현재 큐비트 dictionary는 모두 비어 있습니다.
+  </p>
+
+<pre><code class="language-plaintext">use 처리 직전
+├─ _currentMirBlockBuilder = b0
+├─ b0.Instructions         = [i0 MirConstant, i1 MirArrayCreate]
+├─ 다음 instruction ID     = i2
+├─ 다음 qubit ID           = q0
+├─ _initialMirQubitsById   = {}
+├─ _nextMirQubitVersionById = {}
+└─ CurrentMirQubitByHirSymbolId = {}</code></pre>
+
+  <p>
+    <code>LowerStatement</code>은 인수의 실제 타입이 <code>HirQubitDeclarationStatement</code>이므로 아래 case를 선택합니다.
+  </p>
+
+<pre><code class="language-csharp">case HirQubitDeclarationStatement hirQubitDeclaration:
+    // hirQubitDeclaration = use q = Qubit[1];
+    LowerQubitDeclaration(hirQubitDeclaration);
+    return;</code></pre>
+
+  <h3 id="allocation-code"><code>LowerQubitDeclaration</code> 전체 코드와 상태 변경</h3>
+
+<pre><code class="language-csharp">private void LowerQubitDeclaration(
+    HirQubitDeclarationStatement hirQubitDeclaration)
+{
+    var hirQubitSymbol = RequireHirDeclarationSymbol(
+        hirQubitDeclaration.Id,
+        $"qubit allocation `{hirQubitDeclaration.Name}`");
+    _currentFlowState.TrackDeclaredHirSymbol(hirQubitSymbol.Id);
+    // hirQubitDeclaration = use q = Qubit[1];
+    // hirQubitSymbol      = 최종 HIR model의 Symbol(q)
+
+    var mirOrigin = MirOriginFor(hirQubitDeclaration);
+    var mirAllocatedQubit = new MirQubitFromUse(
+        AllocateMirQubitId(),
+        hirQubitDeclaration.Name,
+        hirQubitDeclaration.Size,
+        mirOrigin);
+    // AllocateMirQubitId()      = q0
+    // hirQubitDeclaration.Name = "q"
+    // hirQubitDeclaration.Size = 1
+    // mirAllocatedQubit        = q0.v0
+
+    RegisterInitialMirQubit(hirQubitSymbol.Id, mirAllocatedQubit);
+    // _initialMirQubitsById[q0]    = q0.v0
+    // _nextMirQubitVersionById[q0] = 1
+
+    EmitMirInstruction(new MirQubitAllocate(
+        AllocateMirInstructionId(),
+        mirAllocatedQubit,
+        mirOrigin));
+    // AllocateMirInstructionId() = i2
+    // b0.Instructions에 i2 MirQubitAllocate(Result=q0.v0) 추가
+
+    _currentFlowState.CurrentMirQubitByHirSymbolId[hirQubitSymbol.Id] =
+        mirAllocatedQubit;
+    // dictionary 변경: SymbolId(q) → q0.v0
+}</code></pre>
+
+  <p>
+    <code>MirQubitFromUse</code> 생성자는 최초 버전을 <code>v0</code>으로 고정합니다.<br>
+    <code>RegisterInitialMirQubit</code>는 그 객체를 <code>q0</code>의 권위 있는 최초 정의로 등록하고 다음 버전 번호를 <code>1</code>로 설정합니다.<br>
+    마지막 dictionary 대입이 끝난 뒤부터 소스의 <code>q</code> 사용은 <code>q0.v0</code>을 찾을 수 있습니다.
+  </p>
+
+<pre><code class="language-plaintext">use 처리 직후
+├─ i2 MirQubitAllocate.Result = q0.v0
+├─ _initialMirQubitsById[q0] = q0.v0
+├─ _nextMirQubitVersionById[q0] = 1
+└─ CurrentMirQubitByHirSymbolId
+   └─ SymbolId(q) → q0.v0</code></pre>
+
+  <h2 id="branch-entry">분기 직전 상태와 경로별 dictionary 복제</h2>
+
+  <p>
+    <code>use</code> 뒤의 배열 대입은 큐비트 dictionary를 변경하지 않습니다.<br>
+    배열 대입까지 끝난 다음 <code>LowerStatements</code>가 <code>if</code>의 HIR 문장을 꺼내 <code>LowerStatement(hirIf)</code>에 전달하고, <code>HirIfStatement</code> case가 <code>LowerIf(hirIf)</code>을 호출합니다.<br>
+    이 호출 직전에는 조건식을 아직 lowering하지 않았으므로 <code>%v10</code>, <code>flowStateBeforeBranch</code>, <code>b1</code>, <code>b2</code>가 존재하지 않습니다.
+  </p>
+
+<pre><code class="language-plaintext">LowerIf(hirIf) 호출 직전
+├─ hirIf.Condition       = values[0] == 1
+├─ hirIf.Then.Statements = [X(q[0]);]
+├─ hirIf.Else.Statements = []
+├─ _currentMirBlockBuilder = b0
+├─ b0.Instructions         = [i0, i1, i2, i3, i4, i5, i6, i7]
+├─ CurrentMirValueByHirSymbolId
+│  └─ SymbolId(values) → %v6
+├─ CurrentMirQubitByHirSymbolId
+│  └─ SymbolId(q) → q0.v0
+├─ 다음 instruction ID = i8
+└─ 다음 value ID       = %v7</code></pre>
+
+  <p>
+    <code>LowerIf</code> 안에 들어간 뒤에는 다음 순서가 고정되어 있습니다.<br>
+    먼저 <code>LowerExpressionAs</code>가 조건식을 끝까지 처리하여 <code>i8~i11</code>과 <code>%v7~%v10</code>을 만들고, 그 다음 <code>RequireCurrentMirBlock()</code>가 현재 builder <code>b0</code>를 반환합니다.<br>
+    이어 현재 flow state를 clone한 뒤 <code>b1</code>과 <code>b2</code>를 만들며, 마지막으로 준비된 여섯 인수를 <code>BranchTo</code>에 전달합니다.
+  </p>
+
+<pre><code class="language-plaintext">LowerIf 내부의 실제 생성 순서
+1. LowerExpressionAs(hirIf.Condition, bit)
+   ├─ i8  MirConstant       → %v7
+   ├─ i9  MirArrayLoad      → %v8
+   ├─ i10 MirConstant       → %v9
+   └─ i11 MirBinary(Equal)  → %v10
+      └─ mirConditionValueId = %v10
+
+2. RequireCurrentMirBlock()
+   └─ mirBranchBlock = b0
+
+3. _currentFlowState.Clone()
+   └─ flowStateBeforeBranch = {values→%v6, q→q0.v0}
+
+4. CreateMirBlock(mirOrigin)
+   └─ mirThenBlock = b1
+
+5. CreateMirBlock(mirOrigin)
+   └─ mirElseBlock = b2
+
+6. b0.BranchTo(%v10, b1, [], b2, [], mirOrigin)</code></pre>
+
+  <p>
+    <code>b0.BranchTo(%v10, b1, [], b2, [], mirOrigin)</code>가 <code>b0</code>를 닫은 뒤, <code>LowerIf</code>은 같은 <code>flowStateBeforeBranch</code>를 두 번 <code>LowerScopedBranch</code>에 전달합니다.<br>
+    그러나 두 경로가 같은 mutable dictionary를 공유하지는 않습니다.<br>
+    아래 전체 함수의 두 번째 줄이 인수로 받은 상태를 다시 <code>Clone()</code>하기 때문입니다.
+  </p>
+
+<pre><code class="language-csharp">private (
+    MirBlockBuilder? ExitBlock,
+    LoweringFlowState ExitFlowState) LowerScopedBranch(
+    MirBlockBuilder mirBranchBlock,
+    LoweringFlowState entryFlowState,
+    IReadOnlyList&lt;HirStatement&gt; hirStatements)
+{
+    _currentMirBlockBuilder = mirBranchBlock;
+    _currentFlowState = entryFlowState.Clone();
+    _currentFlowState.PushHirSymbolLifetimeFrame();
+    LowerStatements(hirStatements);
+    _currentFlowState.PopHirSymbolLifetimeFrame();
+    return (_currentMirBlockBuilder, _currentFlowState);
+}
+
+// 첫 호출
+// mirBranchBlock = b1
+// entryFlowState = {values→%v6, q→q0.v0}
+// hirStatements  = [X(q[0]);]
+
+// 둘째 호출
+// mirBranchBlock = b2
+// entryFlowState = {values→%v6, q→q0.v0}
+// hirStatements  = []</code></pre>
+
+  <h2 id="true-path">참 경로: <code>X(q[0])</code>이 <code>q0.v1</code>을 만드는 과정</h2>
+
+  <p>
+    첫 <code>LowerScopedBranch</code>는 현재 block을 <code>b1</code>로, 현재 큐비트 dictionary를 <code>SymbolId(q) → q0.v0</code>으로 설정합니다.<br>
+    그 뒤 <code>LowerStatements([X(q[0]);])</code>가 <code>HirCallStatement</code>을 전달하고, <code>LowerStatementCall</code>에 진입합니다.
+  </p>
+
+  <h3 id="qubit-lookup"><code>LowerStatementCall</code>에서 현재 <code>q</code> 조회</h3>
+
+  <p>
+    아래는 예제값 주석을 덧붙인 <code>LowerStatementCall</code> 전체 함수입니다.<br>
+    의미 model이 <code>X</code>를 <code>SymbolKind.BuiltinGate</code>로 결합했으므로 user callable 분기는 건너뛰고 built-in gate 경로를 선택합니다.
+  </p>
+
+<pre><code class="language-csharp">private void LowerStatementCall(
+    HirCallStatement hirCallStatement)
+{
+    var mirCallOrigin = MirOriginFor(hirCallStatement);
+    var hirCall = hirCallStatement.Call;
+    var semanticCallTargetSymbol =
+        RequireHirCallTargetSymbol(hirCall);
+    // hirCallStatement         = X(q[0]);
+    // hirCall                  = X(q[0])
+    // semanticCallTargetSymbol = BuiltinGate symbol "X"
+
+    if (semanticCallTargetSymbol.Kind == SymbolKind.Callable)
+    {
+        // X는 BuiltinGate이므로 이 분기를 선택하지 않음
+        var hirUserCallable = RequireHirCallableDeclaration(
+            semanticCallTargetSymbol);
+        if (hirUserCallable.IsFunction)
+        {
+            LowerPureCall(hirCall);
+            return;
+        }
+
+        LowerUserOperationCall(
+            hirCallStatement,
+            hirUserCallable);
+        return;
+    }
+
+    if (semanticCallTargetSymbol.Kind
+        != SymbolKind.BuiltinGate)
+    {
+        throw MirLoweringError(
+            $"statement call `{hirCall.Name}` targets semantic symbol kind "
+            + semanticCallTargetSymbol.Kind);
+    }
+    // Kind가 BuiltinGate이므로 검사를 통과함
+
+    var builtinGateName =
+        semanticCallTargetSymbol.SourceName;
+    var builtinGateSignature = QoraGates.SigOf(
+        builtinGateName,
+        hirCallStatement.Modifiers.Count(
+            modifier => modifier == QGateModifier.Controlled))
+        ?? throw MirLoweringError(
+            $"validated built-in gate `{builtinGateName}` has no signature");
+    var mirCallOperands =
+        new List&lt;MirCallOperand&gt;(hirCall.Arguments.Count);
+    // builtinGateName      = "X"
+    // builtinGateSignature = X의 매개변수 계약
+    // mirCallOperands      = []
+
+    for (var argumentIndex = 0;
+         argumentIndex &lt; hirCall.Arguments.Count;
+         argumentIndex++)
+    {
+        var hirArgument =
+            hirCall.Arguments[argumentIndex];
+        var builtinParameterSpec =
+            builtinGateSignature.Parameters[argumentIndex];
+        // argumentIndex            = 0
+        // hirArgument.Expression   = q[0]
+        // builtinParameterSpec.Type = QType.Qubit
+
+        if (builtinParameterSpec.Type == QType.Qubit)
+        {
+            mirCallOperands.Add(new MirQubitCallOperand(
+                LowerQubitAccess(hirArgument.Expression),
+                hirArgument.Ownership,
+                hirArgument.Access));
+            // 이 분기를 선택함
+        }
+        else
+        {
+            var mirArgumentValueId = LowerExpressionAs(
+                hirArgument.Expression,
+                MirType.Scalar(builtinParameterSpec.Type));
+            mirCallOperands.Add(new MirClassicalCallOperand(
+                mirArgumentValueId,
+                hirArgument.Ownership,
+                hirArgument.Access));
+        }
+    }
+
+    EmitMirQuantumApply(
+        new MirBuiltinGateTarget(builtinGateName),
+        mirCallOperands,
+        Array.Empty&lt;MirMutableArrayResult&gt;(),
+        LowerModifiersToMirFunctors(hirCallStatement.Modifiers),
+        mirCallOrigin);
+    // Target="X", Operands=[q0.v0[%v11]], MutableArrayResults=[], Functors=[]
+}</code></pre>
+
+  <p>
+    <code>LowerStatementCall</code>의 for loop가 만든 지역 변수 <code>hirArgument</code>은 <code>X</code>의 첫 인수이며, <code>hirArgument.Expression</code>은 <code>q[0]</code>입니다.<br>
+    이 값이 <code>LowerQubitAccess(hirArgument.Expression)</code>에 전달되어 함수 매개변수 <code>hirExpression</code>이 됩니다.<br>
+    따라서 아래 코드는 <code>LowerQubitAccess(HirExpression hirExpression)</code>의 <code>switch (hirExpression)</code> 가운데 실제로 선택된 index-expression case입니다.<br>
+    index expression case가 <code>SymbolIdOf(q)</code>를 얻고, 현재 참 경로 dictionary에서 <code>q0.v0</code>을 꺼냅니다.<br>
+    이어 index 리터럴 <code>0</code>이 <code>i12 MirConstant → %v11</code>을 만들고, 반환값은 <code>MirQubitAccess(q0.v0, %v11)</code>입니다.
+  </p>
+
+<pre><code class="language-csharp">case HirIndexExpression
+{
+    Receiver: HirNameExpression hirReceiverName,
+    Index: { } hirIndex,
+}:
+{
+    var hirSymbolId = SymbolIdOf(
+        hirReceiverName,
+        $"qubit name `{hirReceiverName.Name}`");
+    // hirReceiverName = "q"
+    // hirSymbolId     = SymbolId(q)
+
+    if (!_currentFlowState.CurrentMirQubitByHirSymbolId
+        .TryGetValue(
+            hirSymbolId,
+            out var currentMirQubit))
+    {
+        throw MirLoweringError(
+            $"name `{hirReceiverName.Name}` does not denote a qubit");
+    }
+    // 참 경로 dictionary 조회 결과: currentMirQubit = q0.v0
+
+    var mirIndexValueId = LowerExpressionAs(
+        hirIndex,
+        MirType.Scalar(QType.Int));
+    // hirIndex = 정수 리터럴 0
+    // i12 MirConstant → %v11
+
+    return new MirQubitAccess(
+        currentMirQubit,
+        mirIndexValueId,
+        MirOriginFor(hirExpression));
+    // 반환 = q0.v0[%v11]
+}</code></pre>
+
+  <h3 id="qubit-operand">호출 operand 완성</h3>
+
+<pre><code class="language-plaintext">mirCallOperands[0]
+└─ MirQubitCallOperand
+   ├─ Qubit
+   │  ├─ Qubit = MirQubitKey(q0, v0)
+   │  ├─ Index = %v11
+   │  └─ Origin = 소스의 q[0]
+   ├─ Ownership = Borrowed
+   └─ Access    = ReadOnly</code></pre>
+
+  <p>
+    <code>q0</code>의 숫자 <code>0</code>은 callable 안에서 큐비트 binding에 할당한 <code>MirQubitId</code>입니다.<br>
+    반면에 <code>q[0]</code>의 index <code>0</code>은 레지스터 원소 위치이며, 일반 고전 SSA 값 <code>%v11</code>로 전달됩니다.<br>
+    따라서 <code>q[0]</code>에 접근해도 원소 전용 큐비트 ID를 새로 만들지는 않습니다.
+  </p>
+
+  <h3 id="write-effect">effect 판정과 <code>q0.v1</code> 생성</h3>
+
+  <p>
+    <code>EmitMirQuantumApply</code>는 operand를 받자마자 무조건 새 버전을 만들지 않습니다.<br>
+    먼저 <code>WrittenQubitOperandIndexes</code>를 호출하며, <code>X</code>에서는 <code>AngleFirst=false</code>, <code>Unitary=true</code>, <code>Diagonal=false</code>, control 수 <code>0</code>이므로 결과는 <code>[0]</code>입니다.<br>
+    즉 유일한 큐비트 operand가 write 대상입니다.
+  </p>
+
+<pre><code class="language-plaintext">WrittenQubitOperandIndexes의 선택 결과
+├─ mirCallTarget             = MirBuiltinGateTarget("X")
+├─ firstQubitOperandIndex    = 0
+├─ qubitOperandIndexes       = [0]
+├─ !builtinGateInfo.Unitary  = false → 건너뜀
+├─ builtinGateInfo.Diagonal  = false → 건너뜀
+├─ controlQubitCount         = 0
+└─ Skip(0)                   = [0]</code></pre>
+
+  <p>
+    아래 전체 함수에서 첫 instruction 할당은 <code>i13</code>입니다.<br>
+    write operand <code>0</code>에서 <code>q0</code>을 얻고, <code>CreateQubitAfterInstruction(q0, origin)</code>이 counter의 현재값 <code>1</code>을 사용하여 <code>q0.v1</code>을 만듭니다.
+  </p>
+
+<pre><code class="language-csharp">private void EmitMirQuantumApply(
+    MirCallTarget mirCallTarget,
+    IReadOnlyList&lt;MirCallOperand&gt; mirCallOperands,
+    IReadOnlyList&lt;MirMutableArrayResult&gt; mirMutableArrayResults,
+    IReadOnlyList&lt;MirFunctor&gt; mirFunctors,
+    MirOrigin mirOrigin)
+{
+    var mirInstructionId = AllocateMirInstructionId();
+    var mirQubitResults =
+        new List&lt;MirQubitAfterInstruction&gt;();
+    var writtenMirQubitIds = new HashSet&lt;MirQubitId&gt;();
+    var writtenQubitOperandIndexes = WrittenQubitOperandIndexes(
+        mirCallTarget,
+        mirCallOperands,
+        mirFunctors);
+    // mirInstructionId            = i13
+    // writtenQubitOperandIndexes  = [0]
+
+    foreach (var operandIndex in writtenQubitOperandIndexes)
+    {
+        if (operandIndex &lt; 0
+            || operandIndex &gt;= mirCallOperands.Count)
+        {
+            throw MirLoweringError(
+                $"quantum write operand {operandIndex} "
+                + "is outside the operand list");
+        }
+
+        if (mirCallOperands[operandIndex]
+            is not MirQubitCallOperand mirQubitOperand)
+        {
+            throw MirLoweringError(
+                $"quantum write operand {operandIndex} is not a qubit");
+        }
+
+        var mirQubitId = mirQubitOperand.Qubit.Qubit.Id;
+        // operandIndex = 0, mirQubitId = q0
+
+        if (!writtenMirQubitIds.Add(mirQubitId))
+            continue;
+
+        mirQubitResults.Add(
+            CreateQubitAfterInstruction(mirQubitId, mirOrigin));
+        // counter 1을 소비하여 q0.v1 생성, 다음 counter는 2
+    }
+
+    EmitMirInstruction(new MirQuantumApply(
+        mirInstructionId,
+        mirCallTarget,
+        mirCallOperands,
+        mirQubitResults,
+        mirMutableArrayResults,
+        mirFunctors,
+        mirOrigin));
+    // b1.Instructions에 i13 MirQuantumApply("X") 추가
+    // QubitResults = [q0.v1]
+
+    foreach (var mirQubitResult in mirQubitResults)
+        UpdateCurrentQubitAfterWrite(mirQubitResult);
+    // 참 경로 dictionary 변경: SymbolId(q) → q0.v1
+}</code></pre>
+
+<pre><code class="language-plaintext">X 처리 직후의 참 경로
+├─ b1.Instructions
+│  ├─ i12 MirConstant → %v11
+│  └─ i13 MirQuantumApply("X")
+│     ├─ Operands     = [q0.v0[%v11]]
+│     └─ QubitResults = [q0.v1]
+├─ _nextMirQubitVersionById[q0] = 2
+└─ CurrentMirQubitByHirSymbolId
+   └─ SymbolId(q) → q0.v1</code></pre>
+
+  <h2 id="false-path">거짓 경로: <code>q0.v0</code> 유지</h2>
+
+  <p>
+    두 번째 <code>LowerScopedBranch</code>는 <code>b2</code>와 분기 전 상태의 새 clone으로 시작합니다.<br>
+    <code>hirStatements = []</code>이므로 <code>LowerStatements</code>는 아무 instruction도 방출하지 않습니다.<br>
+    따라서 거짓 경로의 exit dictionary는 입력과 같은 <code>SymbolId(q) → q0.v0</code>입니다.
+  </p>
+
+<pre><code class="language-plaintext">두 branch의 반환 상태
+├─ thenBranchExit
+│  ├─ ExitBlock = b1
+│  └─ SymbolId(q) → q0.v1
+└─ elseBranchExit
+   ├─ ExitBlock = b2
+   └─ SymbolId(q) → q0.v0</code></pre>
+
+  <h2 id="phi">합류: 두 버전에서 <code>q0.v2</code> 생성</h2>
+
+  <p>
+    <code>LowerIf</code>은 두 경로를 모두 내린 다음에 <code>CreateMirBlock(mirOrigin)</code>을 호출하여 <code>b3</code>를 만듭니다.<br>
+    고전 dictionary의 <code>values</code>는 양쪽 모두 <code>%v6</code>이므로 block argument를 만들지 않습니다.<br>
+    이어 <code>b1.JumpTo(b3, [], origin)</code>과 <code>b2.JumpTo(b3, [], origin)</code>이 각각 정확한 incoming edge를 반환합니다.
+  </p>
+
+<pre><code class="language-plaintext">MergeQubitStatesAtJoin의 실제 인수
+├─ mergedFlowState                = 분기 전 상태 clone, q→q0.v0
+├─ firstPredecessorFlowState      = b1 exit, q→q0.v1
+├─ firstIncomingEdge              = (Source=b1, SuccessorOrdinal=0)
+├─ secondPredecessorFlowState     = b2 exit, q→q0.v0
+├─ secondIncomingEdge             = (Source=b2, SuccessorOrdinal=0)
+└─ mirJoinBlock                   = b3</code></pre>
+
+  <p>
+    merge 함수가 얻는 두 현재 key는 <code>q0.v1</code>과 <code>q0.v0</code>이므로 equality 분기는 거짓입니다.<br>
+    따라서 <code>CreateQubitPhi</code>를 호출하며, 현재 counter <code>2</code>가 새 버전 <code>q0.v2</code>에 사용됩니다.
+  </p>
+
+<pre><code class="language-csharp">if (firstIncomingMirQubit.Key == secondIncomingMirQubit.Key)
+{
+    // q0.v1 != q0.v0이므로 실행하지 않음
+    mergedFlowState.CurrentMirQubitByHirSymbolId[hirSymbolId] =
+        firstIncomingMirQubit;
+}
+else
+{
+    var mirQubitPhi = CreateQubitPhi(
+        hirSymbolId,
+        mirMergeBlock,
+        new[]
+        {
+            new MirQubitPhiInput(
+                firstIncomingEdge,
+                firstIncomingMirQubit),
+            new MirQubitPhiInput(
+                secondIncomingEdge,
+                secondIncomingMirQubit),
+        });
+    // 입력 1 = Edge(b1,0), q0.v1
+    // 입력 2 = Edge(b2,0), q0.v0
+    // mirQubitPhi = q0.v2
+
+    mergedFlowState.CurrentMirQubitByHirSymbolId[hirSymbolId] =
+        mirQubitPhi;
+    // 합류 dictionary: SymbolId(q) → q0.v2
+}</code></pre>
+
+<pre><code class="language-plaintext">b3.QubitPhis[0]
+└─ MirQubitPhi q0.v2
+   ├─ Input(Edge(b1,0), MirQubitKey(q0,v1))
+   └─ Input(Edge(b2,0), MirQubitKey(q0,v0))
+
+합류 완료 후
+├─ _currentMirBlockBuilder = b3
+├─ SymbolId(q) → q0.v2
+└─ _nextMirQubitVersionById[q0] = 3</code></pre>
+
+  <h2 id="h-gate">다음 소비처: <code>H(q[0])</code>이 <code>q0.v3</code> 생성</h2>
+
+  <p>
+    <code>LowerIf</code>이 반환하면 바깥 <code>LowerStatements</code>는 다음 소스 문장 <code>H(q[0]);</code>을 처리합니다.<br>
+    현재 block은 <code>b3</code>이고 dictionary는 <code>SymbolId(q) → q0.v2</code>이므로, 앞에서 본 같은 <code>LowerStatementCall</code> 경로가 이번에는 <code>q0.v2</code>을 읽습니다.
+  </p>
+
+<pre><code class="language-plaintext">H(q[0])의 실제 생성 순서
+├─ LowerQubitAccess(q[0])
+│  ├─ dictionary 조회                  → q0.v2
+│  ├─ i14 MirConstant(index 0)         → %v12
+│  └─ MirQubitAccess                   → q0.v2[%v12]
+├─ WrittenQubitOperandIndexes("H")     → [0]
+├─ i15 MirQuantumApply("H")
+│  ├─ Operands                         = [q0.v2[%v12]]
+│  └─ QubitResults                     = [q0.v3]
+├─ dictionary 변경                     → SymbolId(q) → q0.v3
+└─ _nextMirQubitVersionById[q0]        = 4</code></pre>
+
+  <p>
+    이로써 <code>q0.v2</code>의 바로 다음 소비처는 <code>i15</code>의 operand이고, <code>i15</code>가 만든 <code>q0.v3</code>이 callable 종료 시점의 현재 버전이 됩니다.
+  </p>
+
+  <h2 id="id-and-version">추적을 마친 뒤 읽는 <code>q0.v0</code>의 의미</h2>
+
+<pre><code class="language-plaintext">q0.v0
+│  │
+│  └─ v0: 같은 identity의 데이터 흐름 버전
+└──── q0: Work 안에서 q binding에 할당된 큐비트 identity</code></pre>
+
+  <p>
+    <code>q0</code>는 <code>use q</code>에서 한 번 할당된 뒤 <code>X</code>, Phi, <code>H</code>를 지나도 유지됩니다.<br>
+    반면에 버전은 write나 경로 합류가 발생할 때 <code>v0 → v1 → v2 → v3</code>으로 진행합니다.<br>
+    이 버전은 실제 진폭이나 상태 벡터를 저장하지 않으며, 어느 instruction과 어느 경로의 결과를 다음 명령이 사용하는지 나타내는 symbolic identity입니다.
+  </p>
+
+  <div class="callout warn">
+    <span class="h">Phi는 양자 게이트가 아닙니다</span>
+    <code>q0.v2</code>는 두 큐비트를 복제하거나 섞지 않습니다.<br>
+    이미 선택된 실행 경로가 <code>b1</code>이면 <code>q0.v1</code>, <code>b2</code>이면 <code>q0.v0</code>을 이어받도록 MIR의 정의·사용 관계를 하나로 연결합니다.
+  </div>
+
+  <h2 id="whole-flow">소스 문장에서 다음 소비처까지의 전체 연결</h2>
+
+<pre><code class="language-qora">use q = Qubit[1];</code></pre>
+
+<pre><code class="language-plaintext">└─ i2 MirQubitAllocate → q0.v0
+   └─ SymbolId(q) → q0.v0
+
+if (%v10)                              // b0에서 분기
+├─ 참 b1: X(q[0]);
+│  ├─ i12 MirConstant → %v11
+│  ├─ q0.v0[%v11]
+│  └─ i13 MirQuantumApply("X") → q0.v1
+│     └─ 참 경로 SymbolId(q) → q0.v1
+│
+└─ 거짓 b2: 본문 없음
+   └─ 거짓 경로 SymbolId(q) → q0.v0
+
+b3 합류
+├─ Edge(b1,0), q0.v1 ─┐
+│                     ├─ MirQubitPhi → q0.v2
+├─ Edge(b2,0), q0.v0 ─┘
+└─ SymbolId(q) → q0.v2
+
+H(q[0]);
+├─ i14 MirConstant → %v12
+├─ q0.v2[%v12]
+└─ i15 MirQuantumApply("H") → q0.v3
+   └─ SymbolId(q) → q0.v3</code></pre>
+
+  <div class="callout good">
+    <span class="h">이 장의 결론</span>
+    <code>use</code>가 <code>q0.v0</code>을 등록하고, 참 경로의 <code>X</code>가 <code>q0.v1</code>을 만듭니다.<br>
+    거짓 경로는 <code>q0.v0</code>을 유지하므로 합류점은 두 incoming edge를 <code>q0.v2</code>로 묶습니다.<br>
+    마지막 <code>H</code>는 합류 dictionary에서 <code>q0.v2</code>을 읽어 <code>q0.v3</code>을 만듭니다.
+  </div>
+
+  <p>
+    다음 장에서는 같은 <code>if</code> 문장이 <code>b0</code>의 branch, <code>b1</code>과 <code>b2</code>의 jump, <code>b3</code>의 return으로 만들어지는 순서를 block builder 호출과 함께 추적합니다.
+  </p>
+
+  <nav class="chapter-nav" aria-label="장 이동(하단)">
+    <div class="group"><a href="chapter-12.html">← 이전: 배열 Storage</a><a href="index.html#chapters">전체 목차</a></div>
+    <div class="group"><a href="chapter-14.html">다음: Basic Block →</a></div>
+  </nav>
+
+  <footer>Qora 컴파일러 개발자 매뉴얼 · 13장</footer>
+</main>
+</body>
+</html>

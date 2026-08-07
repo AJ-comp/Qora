@@ -17,6 +17,27 @@ emitted as **OpenQASM 3.0**.
 > named there may have been retired by a later release; the newest release notes and current architecture
 > documents define the present pipeline.
 
+## 0.38.0 — 2026-08-07
+
+### Changed
+- **Each callable is now the authoritative boundary for callable-local MIR analysis.** `MirAnalysisStore`
+  accepts the exact `MirCallable` object and owns the cached control-flow, storage-provenance, memory-state,
+  path-condition, scalar-availability, witness-availability, and bounds results for that callable. Analyses
+  no longer retain unnecessary whole-program back-references or duplicate callable-ID entry points.
+- **MIR verification and downstream analyses now share one canonical control-flow result.** SSA-value and
+  qubit dominance checks, storage and memory contracts, structured regions, and bounds reasoning reuse the
+  same `MirControlFlowSnapshot` instead of independently rebuilding predecessor and dominator graphs.
+- **HIR and MIR query APIs now expose one unambiguous ownership path.** Redundant ID/object overload pairs
+  were removed where the owning program, callable, or scope graph already provides the authoritative lookup.
+
+### Fixed
+- **A malformed MIR call to a missing callable now reports MIR100 instead of interrupting analysis with an
+  exception.** Verification therefore remains the single diagnostic boundary for invalid call targets.
+
+### Removed
+- Unused HIR namespace and scope lookup overloads, detached MIR analysis entry points, redundant entity-object
+  lookup overloads, and per-callable analysis snapshots' unnecessary `MirProgram` ownership references.
+
 ## 0.37.0 — 2026-08-04
 
 ### Changed

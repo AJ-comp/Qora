@@ -30,7 +30,8 @@ public sealed class MirMemoryStateAnalysisTests
         var store = Assert.Single(
             main.Blocks.SelectMany(block => block.Instructions)
                 .OfType<MirArrayStore>());
-        var analysis = MirMemoryStateAnalysis.Analyze(program, main.Id);
+        var analyses = new MirAnalysisStore(program);
+        var analysis = analyses.MemoryState(main);
         var exit = ExitBlock(main);
 
         var oldAvailability = analysis.CheckAtTerminator(oldState, exit.Id);
@@ -68,7 +69,8 @@ public sealed class MirMemoryStateAnalysisTests
             main.Blocks.SelectMany(block => block.Instructions)
                 .OfType<MirQuantumApply>());
         var state = Assert.IsType<MirClassicalCallOperand>(call.Operands[0]).Value;
-        var analysis = MirMemoryStateAnalysis.Analyze(program, main.Id);
+        var analyses = new MirAnalysisStore(program);
+        var analysis = analyses.MemoryState(main);
 
         Assert.True(
             analysis.CheckAtTerminator(state, ExitBlock(main).Id).IsAvailable);
@@ -105,7 +107,8 @@ public sealed class MirMemoryStateAnalysisTests
         var later = Assert.Single(
             calls,
             call => call.Target.DisplayName == "H");
-        var analysis = MirMemoryStateAnalysis.Analyze(program, main.Id);
+        var analyses = new MirAnalysisStore(program);
+        var analysis = analyses.MemoryState(main);
 
         Assert.Equal(
             MirMemoryStateAvailabilityKind.Clobbered,
@@ -133,7 +136,8 @@ public sealed class MirMemoryStateAnalysisTests
                 .OfType<MirQuantumApply>());
         var input = Assert.IsType<MirClassicalCallOperand>(call.Operands[0]).Value;
         var output = Assert.Single(call.MutableArrayResults).Result.Id;
-        var analysis = MirMemoryStateAnalysis.Analyze(program, main.Id);
+        var analyses = new MirAnalysisStore(program);
+        var analysis = analyses.MemoryState(main);
         var exit = ExitBlock(main);
 
         var killed = analysis.CheckAtTerminator(input, exit.Id);
@@ -172,7 +176,8 @@ public sealed class MirMemoryStateAnalysisTests
         var outputs = call.MutableArrayResults
             .Select(result => result.Result.Id)
             .ToArray();
-        var analysis = MirMemoryStateAnalysis.Analyze(program, main.Id);
+        var analyses = new MirAnalysisStore(program);
+        var analysis = analyses.MemoryState(main);
         var exit = ExitBlock(main);
 
         Assert.Equal(2, inputs.Length);
@@ -216,11 +221,12 @@ public sealed class MirMemoryStateAnalysisTests
         var headerState = Assert.Single(
             main.Values,
             value => value.Type.IsArray
-                && main.DefinitionOf(value).Kind == MirValueDefinitionKind.BlockArgument);
+                && main.DefinitionOf(value.Id).Kind == MirValueDefinitionKind.BlockArgument);
         var exit = Assert.Single(
             main.Blocks,
             block => block.Terminator is MirReturn);
-        var analysis = MirMemoryStateAnalysis.Analyze(program, main.Id);
+        var analyses = new MirAnalysisStore(program);
+        var analysis = analyses.MemoryState(main);
         var availability = analysis.CheckAtTerminator(
             headerState.Id,
             exit.Id);
@@ -302,7 +308,8 @@ public sealed class MirMemoryStateAnalysisTests
             .Single(item => item.argument.Type.IsArray)
             .index;
         var headerState = header.Arguments[argumentIndex];
-        var cfg = MirControlFlowAnalysis.Analyze(program, main.Id);
+        var analyses = new MirAnalysisStore(program);
+        var cfg = analyses.ControlFlow(main);
         var backedge = Assert.Single(
             main.Blocks,
             block => block.Id != header.Id

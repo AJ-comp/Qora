@@ -129,14 +129,14 @@
   </nav>
   <div class="call">
     <span class="h">구현 상태</span>
-    이 장의 분류는 future automatic-uncomputation scheduler가 지켜야 할 설계 기준이에요.<br>
-    현재 compiler는 MIR-only inverse materialization 경계까지 갖췄지만 cleanup schedule과 자동 주입은 아직 활성화하지 않았으므로, 아래의 통과·차단 표시는 현재 CLI 결과가 아니라 목표 scheduler의 판정을 뜻해요.
+    이 장의 분류는 future automatic-uncomputation scheduler가 지켜야 할 설계 기준입니다.<br>
+    현재 compiler는 MIR-only inverse materialization 경계까지 갖췄지만 cleanup schedule과 자동 주입은 아직 활성화하지 않았으므로, 아래의 통과·차단 표시는 현재 CLI 결과가 아니라 목표 scheduler의 판정을 뜻합니다.
   </div>
   <p>
     앞의 설계 사례에서는 <a href="uncompute-10-y-gate.html">10장</a>의 Y 차단, <a href="uncompute-12-loops.html">12장</a>의
-    조건·루프 내부 쓰기에 대한 보수적 거부, <a href="uncompute-13-blanket.html">13장</a>의 statement-wide 차단을 분류했어요.<br>
-    그런데 이 차단들은 같은 무게가 아니에요.<br>
-    10장은 "계약을 지킬 방법이 존재하지 않는다"는 단계별 계산으로 끝났고, 12장은 callable 경계를 이용하면 미래의 보수적 scheduler가 처리할 수 있는 구조를 보여줬어요.<br>
+    조건·루프 내부 쓰기에 대한 보수적 거부, <a href="uncompute-13-blanket.html">13장</a>의 statement-wide 차단을 분류했습니다.<br>
+    그런데 이 차단들은 같은 무게가 아닙니다.<br>
+    10장은 "계약을 지킬 방법이 존재하지 않는다"는 단계별 계산으로 끝났고, 12장은 callable 경계를 이용하면 미래의 보수적 scheduler가 처리할 수 있는 구조를 보여줬습니다.<br>
     존재하지 않는 것과 아직 못 하는 것은 사용자에게 전혀 다른 행동을 요구하므로, 에러를 받았을 때
     가장 먼저 물어야 할 질문은 이 차단이 둘 중 어느 쪽인가 하는 것입니다.<br>
     판별 기준은 <a href="uncompute-09-qfree.html">9장</a>에서 정의한 계약(앤실라 복귀, 나머지 보존)
@@ -242,10 +242,10 @@ var c: bit = M(out[0]);  <span class="cm">// c = 1 (확률 100%)</span></code></
   </div>
   <p>
     목표 설계에서 오른쪽이 safe 후보인 이유는 <code>Flip(a)</code>가 역 카탈로그에 항목이 있는 호출 문장 하나이기
-    때문이고, 왼쪽이 막히는 이유는 같은 계산이 카탈로그에 없는 모양으로 적혀 있기 때문이에요.<br>
-    문장 모양의 문제이므로 구현이 자라면 사라지는 차단이에요.<br>
+    때문이고, 왼쪽이 막히는 이유는 같은 계산이 카탈로그에 없는 모양으로 적혀 있기 때문입니다.<br>
+    문장 모양의 문제이므로 구현이 확장되면 사라지는 차단입니다.<br>
     몸통이 전부 값 편집인 복합문을 하나의 단위로 역변환하는 확장이 들어오면, 왼쪽 코드도 감싸지
-    않은 채 처리할 수 있어요.
+    않은 채 처리할 수 있습니다.
   </p>
 
   <h3>그럼 지금까지 만난 차단은 각각 어느 쪽인가 — 여덟 가지 차단의 지도</h3>
@@ -261,7 +261,7 @@ var c: bit = M(out[0]);  <span class="cm">// c = 1 (확률 100%)</span></code></
       <tr><td class="k">얽힌 타깃 위의 Y·CY</td><td>🧱 원리적 한계</td><td>역연산을 주입하면 생존자의 측정 결과가 100% 확률의 1에서 100% 확률의 0으로 바뀝니다 (<a href="uncompute-10-y-gate.html">10장</a>의 단계별 상태벡터)</td></tr>
       <tr><td class="k">측정된 값</td><td>🧱 원리적 한계</td><td>붕괴에는 유니터리 역이 없고, 측정된 앤실라는 출력으로 승격되어 애초에 청소 후보가 아닙니다 (<a href="uncompute-02-ladder.html">2장</a>의 승격 규칙)</td></tr>
       <tr><td class="k">런타임 의존 값 (동적 인덱스·경계)</td><td>🧱 정적 컴파일의 숙명</td><td>컴파일 타임에 회로를 확정하는 모든 언어가 공유하는 한계입니다 (확정이 왜 물리적 강제인지는 <a href="uncompute-15-two-runtimes.html">15장</a>)</td></tr>
-      <tr><td class="k">벌거벗은 루프 (몸통이 값 편집뿐)</td><td>🔧 보수적 거부</td><td>보수적인 목표 설계는 callable 경계만 역변환하고, 복합문 통째 역변환이 추가되면 감싸기 없이도 처리할 수 있어요 (위 대표 사례 ②, <a href="uncompute-12-loops.html">12장</a>)</td></tr>
+      <tr><td class="k">벌거벗은 루프 (몸통이 값 편집뿐)</td><td>🔧 보수적 거부</td><td>보수적인 목표 설계는 callable 경계만 역변환하고, 복합문 통째 역변환이 추가되면 감싸기 없이도 처리할 수 있습니다 (위 대표 사례 ②, <a href="uncompute-12-loops.html">12장</a>)</td></tr>
       <tr><td class="k">정적 담요 (리터럴 경계 루프·브로드캐스트)</td><td>🔧 보수적 거부</td><td><a href="uncompute-13-blanket.html">13장</a>의 혼합 운명 예제가 이 차단이며, 정적 전개로 원소별 정밀 기록이 가능해지면 자동 청소로 전환됩니다</td></tr>
       <tr><td class="k">확정 기저값 위의 Y</td><td>🔧 보수적 거부</td><td>얽히지 않은 타깃 위의 Y 게이트가 무해함은 <a href="uncompute-10-y-gate.html">10장</a>의 한 항짜리 예제에서 확인했으며, 얽히지 않았음을 그래프로 증명하면 재허용 가능합니다</td></tr>
       <tr><td class="k">측정 bit 조건의 if 안 쓰기</td><td>🔧+🧱 혼합</td><td>역 문장 자체는 만들 수 있지만 "조건이 변하지 않았다"는 증명이 추가로 필요합니다 (바로 아래 예제)</td></tr>

@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>16. MirProgram, MirSnapshot, 분석 저장소 — Qora 컴파일러 개발자 매뉴얼</title>
+<link rel="stylesheet" href="developer.css">
+<script src="developer-syntax.js" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#main-content">본문으로 건너뛰기</a>
+<header class="hero">
+  <div class="tag">Qora · Compiler Developer Manual · Chapter 16</div>
+  <h1>MirProgram, MirSnapshot, 분석 저장소</h1>
+  <p>완성된 Next와 Work가 검증된 최초 MIR snapshot으로 발행되는 실제 호출 순서</p>
+</header>
+
+<main class="wrap" id="main-content">
+  <nav class="chapter-nav" aria-label="장 이동(상단)">
+    <div class="group"><a href="chapter-15.html">← 이전: 조건문 lowering</a><a href="index.html#chapters">전체 목차</a></div>
+    <div class="group"><a href="chapter-17.html">다음: CFG 간선 →</a></div>
+  </nav>
+
+  <p class="lead">
+    15장 끝에서 <code>Work c44</code>의 마지막 instruction과 Terminator까지 모두 완성되었습니다.<br>
+    이제 그 결과가 들어 있는 실제 지역 변수 <code>mirCallables</code>와 <code>mirEntryCallable</code>에서 출발하여, <code>MirProgram</code> 생성, 검증, <code>MirSnapshot</code> 발행, 첫 CFG 요청까지를 하나의 호출 흐름으로 연결합니다.
+  </p>
+
+  <h2 id="source">이번 장의 입력을 만든 소스</h2>
+
+<pre><code class="language-qora">function Next(value: int): int
+{
+    return value + 1;
+}
+
+operation Work()
+{
+    var values: int[] = [0];
+    use q = Qubit[1];
+
+    values[0] = Next(values[0]);
+
+    if (values[0] == 1)
+    {
+        X(q[0]);
+    }
+
+    H(q[0]);
+}</code></pre>
+
+  <p>
+    앞 장들에서 <code>Next h6</code>은 <code>Next c6</code>으로, <code>Work h44</code>는 <code>Work c44</code>로 내려왔습니다.<br>
+    이제 소스 문장을 다시 lowering하지 않습니다. 완성된 두 <code>MirCallable</code> 객체를 하나의 발행 가능한 결과로 묶는 단계입니다.
+  </p>
+
+  <h2 id="lowering-result">callable 순회가 끝난 실제 지역 변수</h2>
+
+  <p>
+    <code>LowerHirArtifact</code>의 <code>foreach</code>가 두 번 실행된 직후 상태는 다음과 같습니다.<br>
+    <code>mirEntryCallable</code>은 ID를 다시 검색한 결과가 아니라, 두 번째 반복에서 <code>hirCallable</code>과 HIR 진입점이 같은 객체였기 때문에 방금 생성된 <code>Work c44</code> 객체를 그대로 받은 값입니다.
+  </p>
+
+<pre><code class="language-plaintext">// foreach 종료 직후의 예제값
+hirProgram.Callables   = [Next h6, Work h44]
+hirEntryCallable       = Work h44
+
+mirCallables           = [Next c6, Work c44]
+mirEntryCallable       = Work c44
+
+ReferenceEquals(mirCallables[1], mirEntryCallable) = true</code></pre>
+
+  <p>
+    이 두 지역 변수는 <code>LowerHirArtifact</code>의 callable 순회에서 만들어졌습니다.<br>
+    다음 전체 함수에 공통 예제의 값을 대입하면 생성 위치와 이후 소비 순서를 함께 확인할 수 있습니다.
+  </p>
+
+<pre><code class="language-csharp">private static MirSnapshot LowerHirArtifact(
+    HirSemanticArtifact hirArtifact,
+    IMirLoweringTraceSink? traceSink)
+{
+    ArgumentNullException.ThrowIfNull(hirArtifact);
+
+    var hirSnapshot = hirArtifact.Source;
+    var hirProgram = hirSnapshot.Program;
+    // 예제값: Callables=[Next h6, Work h44], EntryCallable=Work h44
+
+    var hirEntryCallable = hirProgram.EntryCallable
+        ?? throw new InvalidOperationException(
+            "validated HIR must contain an operation before MIR lowering");
+
+    var mirCallables = new List&lt;MirCallable&gt;();
+    MirCallable? mirEntryCallable = null;
+
+    foreach (var hirCallable in hirProgram.Callables)
+    {
+        // 1회차 hirCallable=Next h6, 2회차=Work h44
+        var mirCallableLowerer = new HirCallableToMirLowerer(
+            hirCallable,
+            hirArtifact,
+            traceSink);
+        var mirCallable = mirCallableLowerer.LowerToMirCallable();
+        // 1회차 결과=Next c6, 2회차 결과=Work c44
+
+        mirCallables.Add(mirCallable);
+        if (ReferenceEquals(hirCallable, hirEntryCallable))
+            mirEntryCallable = mirCallable;
+        // 2회차에서만 true: mirEntryCallable=Work c44
+    }
+
+    var mirProgram = new MirProgram(
+        mirEntryCallable
+            ?? throw new InvalidOperationException(
+                "validated HIR entry callable must be lowered into MIR"),
+        mirCallables);
+    // 실제 인수: entryPoint=Work c44,
+    // callables=[Next c6, Work c44]
+
+    return MirSnapshot.CreateLowered(mirProgram);
+}</code></pre>
+
+  <h2 id="program"><code>MirProgram</code> 생성자 안에서 확정되는 소유 관계</h2>
+
+  <p>
+    위 함수의 다음 진입점은 <code>new MirProgram(Work c44, [Next c6, Work c44])</code>입니다.<br>
+    생성자는 먼저 목록과 ID index를 만든 뒤, 전달된 진입점이 그 목록 안의 정확한 객체인지 확인합니다.
+  </p>
+
+<pre><code class="language-csharp">internal MirProgram(
+    MirCallable entryPoint,                 // Work c44
+    IEnumerable&lt;MirCallable&gt; callables)     // [Next c6, Work c44]
+{
+    ArgumentNullException.ThrowIfNull(entryPoint);
+    ArgumentNullException.ThrowIfNull(callables);
+
+    Callables = MirCollections.Freeze(callables);
+    // [Next c6, Work c44]
+    _callables = IndexCallables(Callables);
+    // { c6 → Next 객체, c44 → Work 객체 }
+
+    if (!_callables.TryGetValue(entryPoint.Id, out var ownedEntryPoint)
+        || !ReferenceEquals(ownedEntryPoint, entryPoint))
+    {
+        throw new ArgumentException(
+            $"entry callable {entryPoint.Id} must be the exact object owned by this MIR program",
+            nameof(entryPoint));
+    }
+    // ownedEntryPoint=목록의 Work c44, entryPoint=같은 Work c44 → 통과
+
+    if (entryPoint.Kind != MirCallableKind.Operation)
+    {
+        throw new ArgumentException(
+            "the MIR entry callable must be an operation",
+            nameof(entryPoint));
+    }
+    // Work.Kind=Operation → 통과
+
+    if (entryPoint.Parameters.Count != 0)
+    {
+        throw new ArgumentException(
+            "the MIR entry callable must not declare parameters",
+            nameof(entryPoint));
+    }
+    // Work.Parameters=[] → 통과
+
+    HirArtifact = RequireSingleHirArtifact(entryPoint, Callables);
+    EnsureExclusiveEntityOwnership(Callables);
+    EntryPoint = entryPoint;
+}</code></pre>
+
+  <p>
+    <code>IndexCallables</code>는 <code>c6</code>과 <code>c44</code>를 key로 등록하며, 중복 callable ID가 있으면 생성 중에 거부합니다.<br>
+    이어서 <code>RequireSingleHirArtifact</code>가 두 callable뿐 아니라 그 아래의 value, storage, qubit, block, Terminator, instruction, qubit access의 <code>Origin</code>까지 순회합니다. 공통 예제의 모든 origin은 동일한 최종 HIR artifact를 가리키므로 검사를 통과합니다.
+  </p>
+
+<pre><code class="language-plaintext">// RequireSingleHirArtifact의 이번 결과
+hirArtifact = Work c44의 Origin이 가리키는 최종 effect-analysis artifact
+
+Next c6의 모든 entity.Origin.SourceHirOrigin.HirArtifact
+    ReferenceEquals hirArtifact → true
+Work c44의 모든 entity.Origin.SourceHirOrigin.HirArtifact
+    ReferenceEquals hirArtifact → true
+
+MirProgram.HirArtifact = hirArtifact</code></pre>
+
+  <p>
+    그다음 <code>EnsureExclusiveEntityOwnership</code>은 reference equality를 사용하는 작업용 dictionary에 각 객체와 소유 callable ID를 등록합니다.<br>
+    예를 들어 <code>Work c44</code>의 <code>b0</code>, <code>%v10</code>, <code>q0.v2</code>, <code>i15</code>는 모두 owner <code>c44</code>로 등록됩니다. 같은 객체가 <code>Next c6</code> 아래에도 나타나면 즉시 예외가 발생하지만, 공통 예제에는 그런 공유가 없습니다.
+  </p>
+
+<pre><code class="language-plaintext">// EnsureExclusiveEntityOwnership의 예제 등록 일부
+owners[Next의 %v0 객체] = c6
+owners[Next의 b0 객체]  = c6
+
+owners[Work의 b0 객체]  = c44
+owners[Work의 %v10 객체]= c44
+owners[Work의 i15 객체] = c44
+owners[Work의 q0.v2 객체] = c44
+
+// 충돌 없음 → EntryPoint=Work c44 대입까지 완료</code></pre>
+
+  <h2 id="create-lowered"><code>CreateLowered</code>가 여는 최초 snapshot 생성자</h2>
+
+  <p>
+    <code>MirProgram</code> 생성이 끝나면 제어가 <code>LowerHirArtifact</code>의 마지막 줄로 돌아옵니다.<br>
+    지역 변수 <code>mirProgram</code>은 방금 검사를 통과한 동일한 객체이며, <code>CreateLowered</code>는 이 객체를 private root 생성자에 그대로 전달합니다.
+  </p>
+
+<pre><code class="language-csharp">// LowerHirArtifact의 마지막 줄
+return MirSnapshot.CreateLowered(mirProgram);
+
+// 실제 구현 전체
+internal static MirSnapshot CreateLowered(MirProgram program) =&gt;
+    new(program);</code></pre>
+
+<pre><code class="language-plaintext">// 예제 인수
+program.EntryPoint = Work c44
+program.Callables  = [Next c6, Work c44]</code></pre>
+
+  <h2 id="hir-ready">root 생성자의 첫 분기: HIR 준비 상태</h2>
+
+  <p>
+    private 생성자는 먼저 <code>program.HirArtifact</code>를 지역 변수로 꺼냅니다.<br>
+    이 값은 앞의 <code>RequireSingleHirArtifact</code>가 확정한 바로 그 artifact이며, 같은 객체가 MIR 생성자의 HIR 근거로 이어집니다.
+  </p>
+
+<pre><code class="language-csharp">private MirSnapshot(MirProgram program)
+{
+    ArgumentNullException.ThrowIfNull(program);
+
+    var hirArtifact = program.HirArtifact;
+    // 예제값: 최종 effect-analysis artifact
+
+    if (!hirArtifact.IsReadyForMirLowering)
+    {
+        throw new ArgumentException(
+            "MIR lowering requires a HIR artifact ready for MIR lowering.",
+            nameof(program));
+    }
+    QoraMirVerifier.VerifyOrThrow(program);
+
+    Stage = MirStage.Lowered;
+    Program = program;
+    HirArtifact = hirArtifact;
+    PreviousSnapshot = null;
+    Analyses = new MirAnalysisStore(program);
+}</code></pre>
+
+  <p>
+    <code>IsReadyForMirLowering</code>은 새 분석을 실행하지 않고 이미 기록된 두 값을 확인하는 계산 property입니다.<br>
+    공통 예제의 artifact는 effect analysis 단계이고 validation이 승인되었으므로 조건은 참입니다.
+  </p>
+
+<pre><code class="language-csharp">public bool IsReadyForMirLowering =&gt;
+    Phase == HirSemanticPhase.EffectAnalysis &amp;&amp; IsAccepted;</code></pre>
+
+<pre><code class="language-plaintext">// 예제값
+Phase      = EffectAnalysis
+IsAccepted = true
+IsReadyForMirLowering = true
+
+!true → false  // 예외 분기를 건너뜀</code></pre>
+
+  <h2 id="verifier"><code>VerifyOrThrow</code>의 실제 호출 사슬</h2>
+
+  <p>
+    준비 상태를 통과한 다음 줄은 <code>QoraMirVerifier.VerifyOrThrow(program)</code>입니다.<br>
+    이 호출은 <code>Verify → new Verifier(program).Run → VerifyCallable</code>로 이어집니다.
+  </p>
+
+<pre><code class="language-csharp">public static void VerifyOrThrow(MirProgram program)
+{
+    var errors = Verify(program);
+    if (errors.Count == 0) return;
+
+    var message = new StringBuilder("QINTERNAL: invalid Qora MIR");
+    foreach (var error in errors)
+        message.AppendLine().Append("  ").Append(error);
+    throw new InvalidOperationException(message.ToString());
+}
+
+public static IReadOnlyList&lt;MirVerificationError&gt; Verify(MirProgram program)
+{
+    ArgumentNullException.ThrowIfNull(program);
+    return new Verifier(program).Run();
+}</code></pre>
+
+  <p>
+    <code>Run</code>은 ID 순서로 <code>Next c6</code>을 먼저, <code>Work c44</code>를 다음에 검사합니다.<br>
+    각 callable에서는 CFG를 임시로 계산하여 큐비트 흐름, block 내용, 그래프 계약을 확인합니다. 여기서 <code>AnalyzeUnchecked</code>의 “unchecked”는 callable 생성자가 동일 callable 밖의 CFG target을 이미 거부했으므로 verifier를 재귀 호출하지 않는다는 뜻입니다.
+  </p>
+
+<pre><code class="language-csharp">public IReadOnlyList&lt;MirVerificationError&gt; Run()
+{
+    foreach (var callable in
+             _program.Callables.OrderBy(callable =&gt; callable.Id.Value))
+        VerifyCallable(callable);
+    // 반복값: Next c6 → Work c44
+
+    if (_errors.Count == 0)
+        VerifyQubitWriteContracts();
+
+    return _errors;
+}
+
+private void VerifyCallable(MirCallable callable)
+{
+    var callableErrorStart = _errors.Count;
+    VerifyQubitSeeds(callable);
+
+    var controlFlow = MirControlFlowAnalysis.AnalyzeUnchecked(callable);
+    VerifyQubitFlow(callable, controlFlow);
+    VerifyBlockContents(callable, controlFlow);
+
+    if (_errors.Count == callableErrorStart)
+        VerifyGraphContracts(callable, controlFlow);
+}</code></pre>
+
+  <p>
+    <code>Work c44</code> 차례에는 15장에서 만든 <code>b0 → [b1,b2]</code>, <code>b1 → b3</code>, <code>b2 → b3</code>, <code>b3 → []</code>이 분석됩니다.<br>
+    이 CFG를 이용하여 <code>%v10</code>이 <code>b0</code>의 branch 전에 정의되었는지, <code>q0.v2</code>의 두 Phi 입력이 실제 <code>b3</code> incoming edge와 맞는지, <code>H</code>가 <code>q0.v2</code> 이후의 버전 <code>q0.v3</code>을 만드는지 확인합니다. 오류가 없으므로 <code>VerifyOrThrow</code>는 예외 없이 반환합니다.
+  </p>
+
+  <h2 id="snapshot">검증 뒤에 대입되는 <code>MirSnapshot</code> 필드</h2>
+
+  <p>
+    verifier가 반환한 뒤에야 root 생성자의 다섯 대입이 실행됩니다.<br>
+    <code>Program</code>은 복사본이 아니라 생성자에 들어온 동일한 <code>mirProgram</code> 객체이며, 최초 snapshot이므로 이전 snapshot은 없습니다.
+  </p>
+
+<pre><code class="language-plaintext">Stage = MirStage.Lowered;
+// Lowered
+
+Program = program;
+// EntryPoint=Work c44, Callables=[Next c6, Work c44]
+
+HirArtifact = hirArtifact;
+// 위 두 callable의 모든 Origin이 공유하는 exact artifact
+
+PreviousSnapshot = null;
+// 최초 snapshot
+
+Analyses = new MirAnalysisStore(program);
+// 이 program만 받는 새 분석 저장소</code></pre>
+
+  <p>
+    따라서 <code>MirSnapshot</code>은 MIR을 한 벌 더 복사한 객체가 아닙니다.<br>
+    검증을 통과한 정확한 <code>MirProgram</code>, 현재 stage, 원본 HIR artifact, 이 program 전용 분석 진입점을 함께 발행하는 단위입니다.
+  </p>
+
+  <h2 id="analysis-store"><code>MirAnalysisStore</code> 생성 직후의 상태</h2>
+
+  <p>
+    마지막 대입이 호출하는 생성자의 인수도 동일한 <code>program</code>입니다.<br>
+    생성자는 program-wide 분석인 call graph와 effects의 <code>Lazy</code> factory를 준비하지만, callable별 CFG dictionary는 아직 비어 있습니다.
+  </p>
+
+<pre><code class="language-csharp">internal MirAnalysisStore(MirProgram program)
+{
+    _program = program
+        ?? throw new ArgumentNullException(nameof(program));
+    _callGraph = NewLazy(
+        () =&gt; MirCallGraphAnalysis.AnalyzeVerified(_program));
+    _effects = NewLazy(
+        () =&gt; MirEffectAnalysis.AnalyzeVerified(
+            CallGraph,
+            callable =&gt; StorageProvenance(callable),
+            callable =&gt; PathConditions(callable)));
+}</code></pre>
+
+<pre><code class="language-plaintext">// 생성 직후 예제 상태
+_program.EntryPoint = Work c44
+_controlFlow        = {}
+_callGraph.IsValueCreated = false
+_effects.IsValueCreated   = false</code></pre>
+
+  <p>
+    즉 snapshot 발행만으로 CFG, call graph, effects가 모두 계산되지는 않습니다.<br>
+    저장소는 요청받은 분석만 계산하고, 그 결과를 이 snapshot의 수명 동안 재사용합니다.
+  </p>
+
+  <h2 id="consumer">기본 컴파일 경로의 실제 첫 소비 코드</h2>
+
+  <p>
+    기본 CLI 경로는 root snapshot을 받은 직후 임의로 <code>Work</code>의 CFG부터 요청하지 않습니다.<br>
+    <code>QoraCompiler</code>의 실제 다음 두 문장은 <code>ToMir</code>이 반환한 snapshot을 지역 변수 <code>mir</code>에 저장하고, 곧바로 그 snapshot의 전체 effect 분석을 강제로 평가합니다.
+  </p>
+
+<pre><code class="language-csharp">mir = builtHir.ToMir(
+    instrumentation?.MirLowering);
+// 예제값: mir.Program.Callables=[Next c6, Work c44]
+//         mir.Analyses._controlFlow={}
+
+_ = mir.Analyses.Effects;
+// 실제 첫 분석 요청</code></pre>
+
+  <p>
+    공개 property <code>Effects</code>는 생성 시 준비한 <code>_effects</code>의 <code>Value</code>를 읽습니다.<br>
+    따라서 이 줄에서 effect factory가 처음 실행되며, 생성자에서 연결해 둔 <code>CallGraph</code>, <code>StorageProvenance</code>, <code>PathConditions</code>가 실제 호출로 바뀝니다.
+  </p>
+
+<pre><code class="language-csharp">public MirEffectSnapshot Effects =&gt; _effects.Value;
+
+// _effects가 실행하는 factory
+MirEffectAnalysis.AnalyzeVerified(
+    CallGraph,
+    callable =&gt; StorageProvenance(callable),
+    callable =&gt; PathConditions(callable))</code></pre>
+
+  <h2 id="control-flow-query"><code>Effects</code>에서 call graph와 callable 순회로</h2>
+
+  <p>
+    <code>AnalyzeVerified</code> 호출 인수를 평가할 때 먼저 <code>CallGraph</code> property가 <code>_callGraph.Value</code>를 읽습니다.<br>
+    <code>MirCallGraphAnalysis.AnalyzeVerified(_program)</code>이 <code>Next c6</code>과 <code>Work c44</code>의 instruction을 순회한 결과, 공통 예제에서는 <code>Work c44/i6 → Next c6</code> 호출 하나가 기록됩니다.
+  </p>
+
+<pre><code class="language-csharp">public MirCallGraph CallGraph =&gt; _callGraph.Value;</code></pre>
+
+<pre><code class="language-plaintext">// 첫 평가 결과
+MirCallGraph.Calls
+└─ MirCallSite
+   ├─ Instruction = c44/i6
+   ├─ Caller      = c44
+   └─ Callee      = c6</code></pre>
+
+  <p>
+    완성된 call graph와 두 provider delegate가 <code>MirEffectAnalysis.AnalyzeVerified</code>에 전달됩니다.<br>
+    이 메서드는 <code>Analyzer.Run</code>을 호출하고, <code>Run</code>은 formal qubit summary를 준비한 다음 <code>_program.Callables</code>의 저장 순서 그대로 반복합니다. 따라서 첫 <code>callable</code>은 <code>Next c6</code>이고 두 번째가 <code>Work c44</code>입니다.
+  </p>
+
+<pre><code class="language-csharp">public MirEffectSnapshot Run()
+{
+    var orderedSummaries = _qubitEffects.SummarizeAll();
+
+    var effects = new List&lt;MirQuantumInstructionEffect&gt;();
+    foreach (var callable in _program.Callables)
+    {
+        // 1회차 callable=Next c6
+        // 2회차 callable=Work c44
+        var storage = _storageProvenance(callable);
+        storage.EnsureFor(callable);
+        var paths = _pathConditions(callable);
+        paths.EnsureFor(callable);
+        foreach (var block in callable.Blocks)
+        {
+            foreach (var instruction in block.Instructions)
+            {
+                switch (instruction)
+                {
+                    case MirQuantumApply apply:
+                        effects.Add(DescribeApply(
+                            callable,
+                            apply,
+                            storage,
+                            paths));
+                        break;
+                    case MirMeasure measure:
+                        effects.Add(DescribeMeasure(
+                            callable,
+                            measure,
+                            paths));
+                        break;
+                }
+            }
+        }
+    }
+
+    return new MirEffectSnapshot(_program, effects, orderedSummaries);
+}</code></pre>
+
+  <h2 id="queries"><code>Next c6</code> 처리로 먼저 채워지는 cache</h2>
+
+  <p>
+    첫 반복에서 <code>StorageProvenance(Next c6)</code>가 <code>_storageProvenance[c6]</code>을 계산합니다.<br>
+    이어지는 <code>PathConditions(Next c6)</code>의 factory는 내부에서 <code>ControlFlow(Next c6)</code>을 요청하므로, 비어 있던 CFG cache에는 <code>c6</code>이 먼저 들어갑니다.
+  </p>
+
+<pre><code class="language-csharp">public MirStorageProvenanceSnapshot StorageProvenance(
+    MirCallable callable)
+{
+    var source = _program.RequireCallable(callable);
+    return _storageProvenance.GetOrAdd(
+        source.Id,
+        _ =&gt; NewLazy(
+            () =&gt; MirStorageProvenanceAnalysis.AnalyzeUnchecked(source))).Value;
+}
+
+public MirPathConditionSnapshot PathConditions(MirCallable callable)
+{
+    var source = _program.RequireCallable(callable);
+    return _pathConditions.GetOrAdd(
+        source.Id,
+        _ =&gt; NewLazy(
+            () =&gt; MirPathConditionAnalysis.AnalyzeVerified(
+                ControlFlow(source)))).Value;
+}</code></pre>
+
+<pre><code class="language-plaintext">// Next 반복의 실제 호출
+StorageProvenance(Next c6)
+→ PathConditions(Next c6)
+  → ControlFlow(Next c6)
+    → AnalyzeUnchecked(Next c6)
+
+// Next 반복 종료 직후
+_storageProvenance.Keys = [c6]
+_pathConditions.Keys    = [c6]
+_controlFlow.Keys       = [c6]</code></pre>
+
+  <p>
+    <code>Next c6</code>에는 quantum instruction이 없으므로 instruction 반복은 effect를 추가하지 않습니다.<br>
+    그러나 <code>PathConditions</code>를 준비하는 과정에서 CFG는 이미 계산되었으며, 이 결과는 같은 store의 key <code>c6</code>에 남습니다.
+  </p>
+
+  <p>
+    두 번째 반복이 시작되면 <code>callable=Work c44</code>입니다.<br>
+    이 시점에는 <code>c6</code> CFG만 cache되어 있고 <code>c44</code> key는 아직 없습니다. 먼저 <code>StorageProvenance(Work c44)</code>가 배열 <code>values</code>의 provenance를 계산한 뒤, <code>PathConditions(Work c44)</code>이 처음으로 <code>ControlFlow(Work c44)</code>을 요청합니다.
+  </p>
+
+<pre><code class="language-plaintext">// Work 반복 시작 직전
+_controlFlow =
+{
+    c6 → Lazy(completed Next CFG)
+}
+
+callable = Work c44
+StorageProvenance(Work c44)
+→ PathConditions(Work c44)
+  → ControlFlow(Work c44)
+
+// ControlFlow 진입 직전에도 c44 key는 없음
+_controlFlow.ContainsKey(c44) = false</code></pre>
+
+  <h2 id="temporary-cfg">verifier의 CFG가 cache에 남지 않는 이유</h2>
+
+  <p>
+    verifier도 앞서 <code>AnalyzeUnchecked(Next c6)</code>과 <code>AnalyzeUnchecked(Work c44)</code>을 호출했지만, <code>Effects</code>의 의존성 계산은 두 CFG를 다시 계산합니다.<br>
+    verifier가 실행될 때는 root 생성자의 <code>Analyses = new MirAnalysisStore(program)</code> 대입 전이므로 store 자체가 아직 존재하지 않습니다. verifier의 지역 변수 <code>controlFlow</code>는 검사가 끝나면 사라지고, 발행된 snapshot의 cache에는 들어가지 않습니다.
+  </p>
+
+<pre><code class="language-plaintext">MirSnapshot root 생성자
+├─ HIR readiness 확인
+├─ VerifyOrThrow(program)
+│  ├─ AnalyzeUnchecked(Next c6)    // 검증용 지역 결과
+│  └─ AnalyzeUnchecked(Work c44)   // 검증용 지역 결과
+├─ Stage/Program/HirArtifact 대입
+└─ new MirAnalysisStore(program)   // 빈 cache 생성
+
+QoraCompiler의 실제 다음 요청: Effects
+├─ Next 반복의 PathConditions
+│  └─ ControlFlow(Next c6)         // cache에 c6 추가
+└─ Work 반복의 PathConditions
+   └─ ControlFlow(Work c44)        // cache에 c44가 없으므로 최초 분석
+      └─ AnalyzeUnchecked(Work c44)</code></pre>
+
+  <p>
+    17장은 마지막 <code>ControlFlow(Work c44)</code> 내부에서 <code>source=Work c44</code>가 확정되고 <code>GetOrAdd</code>가 c44용 <code>Lazy</code>를 추가하는 순간부터 이어집니다.<br>
+    그 분석이 반환된 뒤에는 <code>PathConditions(Work)</code>과 effect instruction 순회가 계속되며, 같은 lowered snapshot을 사용하는 후속 CFG 요청은 cache hit가 됩니다.
+  </p>
+
+  <div class="callout good">
+    <span class="h">예제 뒤의 일반 원리</span>
+    <code>MirProgram</code>은 정확한 진입점 객체, callable 목록, 하나의 HIR artifact, entity의 배타적 소유를 생성 시점에 확정합니다.<br>
+    <code>MirSnapshot</code>은 HIR 준비 상태와 MIR verifier를 통과한 뒤에만 발행됩니다.<br>
+    기본 CLI는 이어서 <code>Effects</code>를 요청하며, 그 의존성은 program 순서대로 <code>Next c6</code>의 CFG를 먼저 cache한 다음 <code>Work c44</code>의 CFG를 처음 계산합니다.
+  </div>
+
+  <nav class="chapter-nav" aria-label="장 이동(하단)">
+    <div class="group"><a href="chapter-15.html">← 이전: 조건문 lowering</a><a href="index.html#chapters">전체 목차</a></div>
+    <div class="group"><a href="chapter-17.html">다음: CFG 간선 →</a></div>
+  </nav>
+
+  <footer>Qora 컴파일러 개발자 매뉴얼 · 16장</footer>
+</main>
+</body>
+</html>

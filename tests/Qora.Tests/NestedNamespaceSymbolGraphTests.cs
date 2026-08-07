@@ -536,9 +536,9 @@ public class NestedNamespaceSymbolGraphTests
         var conditionSite = new HirScopeSite(branch.Id, HirScopeSiteRole.IfCondition);
         var thenSite = new HirScopeSite(branch.Id, HirScopeSiteRole.IfThen);
         var elseSite = new HirScopeSite(branch.Id, HirScopeSiteRole.IfElse);
-        var conditionScope = Assert.IsType<Scope>(model.FindScope(conditionSite));
-        var thenScope = Assert.IsType<Scope>(model.FindScope(thenSite));
-        var elseScope = Assert.IsType<Scope>(model.FindScope(elseSite));
+        var conditionScope = Assert.IsType<Scope>(graph.FindScope(conditionSite));
+        var thenScope = Assert.IsType<Scope>(graph.FindScope(thenSite));
+        var elseScope = Assert.IsType<Scope>(graph.FindScope(elseSite));
 
         Assert.Equal(HirScopeKind.Program, graph.RootScope.Kind);
         Assert.Null(graph.RootScope.ParentScopeId);
@@ -553,11 +553,10 @@ public class NestedNamespaceSymbolGraphTests
         Assert.Equal(HirScopeKind.Block, thenScope.Kind);
         Assert.Equal(HirScopeKind.Block, elseScope.Kind);
 
-        Assert.Same(callableScope, model.FindScope(callableSite));
         Assert.Same(callableScope, graph.FindScope(callableSite));
         Assert.Same(thenScope, graph.FindScope(thenSite));
         Assert.NotEqual(thenScope.Id, elseScope.Id);
-        Assert.Same(thenScope, model.FindScope(thenScope.Id));
+        Assert.Same(thenScope, graph.FindScope(thenScope.Id));
         Assert.Same(thenScope, model.Scopes[thenScope.Id]);
         Assert.Same(workSymbol, graph.Symbols[workSymbol.Id]);
         Assert.Same(model.FindSymbol(inner.Id), thenScope.LookupLocal("inner"));

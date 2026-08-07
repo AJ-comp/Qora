@@ -1,0 +1,617 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>10. Callable 하나를 MIR로 만들기 — Qora 컴파일러 개발자 매뉴얼</title>
+<link rel="stylesheet" href="developer.css">
+<script src="developer-syntax.js" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#main-content">본문으로 건너뛰기</a>
+<header class="hero">
+  <div class="tag">Qora · Compiler Developer Manual · Chapter 10</div>
+  <h1>Callable 하나를 MIR로 만들기</h1>
+  <p><code>foreach</code>의 두 반복에서 lowerer 생성부터 <code>MirCallable</code> 반환까지</p>
+</header>
+
+<main class="wrap" id="main-content">
+  <nav class="chapter-nav" aria-label="장 이동(상단)">
+    <div class="group"><a href="chapter-09.html">← 이전: HIR→MIR 경계</a><a href="index.html#chapters">전체 목차</a></div>
+    <div class="group"><a href="chapter-11.html">다음: 고전 값과 SSA 버전 →</a></div>
+  </nav>
+
+  <p class="lead">
+    9장의 <code>foreach</code> 안으로 들어갑니다.<br>
+    첫 반복의 <code>Next h6</code>과 둘째 반복의 <code>Work h44</code>가 각각 어떤 생성자 인수로 들어가며, <code>LowerToMirCallable()</code>이 매개변수·block·문장을 어떤 순서로 소비하고 무엇을 반환하는지 실제 상태값으로 확인합니다.
+  </p>
+
+  <h2 id="input">이번 장에서 처리할 두 callable</h2>
+
+<pre><code class="language-qora">function Next(value: int): int
+{
+    return value + 1;
+}
+
+operation Work()
+{
+    var values: int[] = [0];
+    use q = Qubit[1];
+    values[0] = Next(values[0]);
+
+    if (values[0] == 1)
+    {
+        X(q[0]);
+    }
+
+    H(q[0]);
+}</code></pre>
+
+  <p>
+    첫 반복 직전에는 <code>hirProgram.Callables = [Next h6, Work h44]</code>, <code>mirCallables = []</code>, <code>mirEntryCallable = null</code>입니다.<br>
+    <code>foreach</code>가 먼저 <code>Next h6</code>을 꺼내 아래 생성자를 호출하고, 그 작업이 끝난 뒤에야 <code>Work h44</code>을 꺼내 새로운 lowerer를 만듭니다.
+  </p>
+
+<pre><code class="language-plaintext">// 첫 반복의 실제 호출
+var mirCallableLowerer = new HirCallableToMirLowerer(
+    hirCallable: Next h6,
+    hirArtifact: 최종 effect-analysis artifact,
+    traceSink: null);
+var mirCallable = mirCallableLowerer.LowerToMirCallable();
+// 반환값: Next c6
+
+// 둘째 반복의 실제 호출
+var mirCallableLowerer = new HirCallableToMirLowerer(
+    hirCallable: Work h44,
+    hirArtifact: 첫 반복과 같은 artifact,
+    traceSink: null);
+var mirCallable = mirCallableLowerer.LowerToMirCallable();
+// 반환값: Work c44</code></pre>
+
+  <h2 id="constructor">새 lowerer에 세 인수 저장하기</h2>
+
+  <p>
+    생성자에 들어가는 세 값은 모두 호출부에서 왔습니다. <code>hirCallable</code>은 현재 <code>foreach</code> 원소이고, <code>hirArtifact</code>는 9장에서 <code>ToMir()</code>이 꺼낸 객체이며, <code>traceSink</code>는 기본 CLI 실행이 전달한 <code>null</code>입니다.<br>
+    생성자 전체는 다음과 같습니다.
+  </p>
+
+<pre><code class="language-csharp">public HirCallableToMirLowerer(
+    HirCallable hirCallable,
+    HirSemanticArtifact hirArtifact,
+    IMirLoweringTraceSink? traceSink)
+{
+    // 첫 반복: Next h6, 둘째 반복: Work h44
+    _hirCallable = hirCallable;
+
+    // 두 반복 모두 같은 최종 HIR artifact
+    _hirArtifact = hirArtifact;
+
+    // 첫 반복: new MirCallableId(6)  = c6
+    // 둘째 반복: new MirCallableId(44) = c44
+    _mirCallableId =
+        new MirCallableId(hirCallable.Id.Value);
+
+    // 기본 CLI 예제값: null
+    _traceSink = traceSink;
+}</code></pre>
+
+  <p>
+    첫 lowerer가 반환된 뒤 그 객체를 재설정하여 <code>Work</code>에 사용하지 않습니다.<br>
+    둘째 반복은 새 객체를 만들기 때문에 callable 내부의 block·값·instruction 번호가 다시 0부터 시작합니다.
+  </p>
+
+  <h2 id="owned-state">생성 직후 작업 상태</h2>
+
+  <p>
+    다음 필드는 lowerer 인스턴스가 만들어질 때 초기화됩니다.<br>
+    아래 코드는 현재 구현의 필드 선언이며, 오른쪽 주석은 생성 직후의 예제값입니다.
+  </p>
+
+<pre><code class="language-csharp">private readonly List&lt;MirBlockBuilder&gt; _mirBlockBuilders = new(); // []
+private readonly MirBlockId.Allocator _mirBlockIds = new();       // 다음 ID b0
+private readonly List&lt;MirValue&gt; _mirValues = new();               // []
+private readonly List&lt;IMirParameter&gt; _mirParameters = new();      // []
+private readonly Dictionary&lt;MirQubitId, MirQubit&gt;
+    _initialMirQubitsById = new();                                // {}
+private readonly Dictionary&lt;MirQubitId, int&gt;
+    _nextMirQubitVersionById = new();                             // {}
+
+private int _nextMirInstructionIdValue;                           // 0
+private int _nextMirStorageIdValue;                               // 0
+private MirBlockBuilder? _currentMirBlockBuilder;                 // null
+private LoweringFlowState _currentFlowState = new();              // 값 {}, 큐비트 {}</code></pre>
+
+  <p>
+    이 상태는 프로그램 전체의 전역 카운터가 아닙니다.<br>
+    따라서 <code>Next c6</code>과 <code>Work c44</code>은 둘 다 <code>b0</code>, <code>%v0</code>, <code>i0</code>을 가질 수 있으며, 어느 callable에 속하는지 함께 보면 충돌하지 않습니다.
+  </p>
+
+  <h2 id="lower-method"><code>LowerToMirCallable()</code> 전체 실행 순서</h2>
+
+  <p>
+    이제 호출된 메서드 전체를 읽습니다.<br>
+    코드는 실제 구현과 같으며, 예제값을 밝히는 주석만 추가했습니다.
+  </p>
+
+<pre><code class="language-csharp">public MirCallable LowerToMirCallable()
+{
+    // 첫 반복: Next h6의 Origin, 둘째 반복: Work h44의 Origin
+    var mirCallableOrigin = MirOriginFor(_hirCallable);
+    var hirCallableSymbol = RequireHirDeclarationSymbol(
+        _hirCallable.Id,
+        $"callable `{_hirCallable.Name}`");
+    var hirScopeGraph = _hirArtifact.Model.ScopeGraph
+        ?? throw MirLoweringError(
+            "the final HIR semantic model has no scope graph");
+    var qualifiedSourceCallableName =
+        hirScopeGraph.QualifiedName(hirCallableSymbol);
+
+    // 각 lowerer의 첫 block이므로 두 반복 모두 b0
+    var mirEntryBlockBuilder = CreateMirBlock(mirCallableOrigin);
+    _currentMirBlockBuilder = mirEntryBlockBuilder;
+
+    // Next: value 매개변수 하나를 %v0으로 만듭니다.
+    // Work: 매개변수가 없어 상태가 바뀌지 않습니다.
+    LowerParameters();
+
+    // Next: return value + 1 한 문장
+    // Work: 선언, use, 대입, if, H 호출의 다섯 문장
+    LowerStatements(_hirCallable.Body.Statements);
+
+    if (_currentMirBlockBuilder is not null)
+    {
+        if (_hirCallable.IsFunction)
+        {
+            MarkCurrentMirBlockUnreachable(
+                MirOrigin.GeneratedFrom(
+                    mirCallableOrigin,
+                    "missing validated function return"));
+        }
+        else
+        {
+            // Work의 H 호출 뒤 열린 b3을 value: null인 return으로 닫습니다.
+            ReturnFromCurrentMirBlock(
+                value: null,
+                MirOrigin.GeneratedFrom(
+                    mirCallableOrigin,
+                    "implicit operation return"));
+        }
+    }
+
+    var mirBlocks = new List&lt;MirBlock&gt;(_mirBlockBuilders.Count);
+    MirBlock? mirEntryBlock = null;
+    foreach (var mirBlockBuilder in _mirBlockBuilders)
+    {
+        var mirBlock = mirBlockBuilder.Build();
+        mirBlocks.Add(mirBlock);
+        if (ReferenceEquals(mirBlockBuilder, mirEntryBlockBuilder))
+            mirEntryBlock = mirBlock;
+    }
+
+    if (mirEntryBlock is null)
+        throw MirLoweringError("the MIR entry block was not emitted");
+
+    // 첫 반복 반환: Next c6, 매개변수 [%v0], block [b0]
+    // 둘째 반복 반환: Work c44, 매개변수 [], block [b0,b1,b2,b3]
+    return new MirCallable(
+        _mirCallableId,
+        qualifiedSourceCallableName,
+        _hirCallable.ReturnType is { } returns
+            ? MirType.Scalar(returns)
+            : null,
+        _mirParameters,
+        mirEntryBlock,
+        mirBlocks,
+        mirCallableOrigin);
+}</code></pre>
+
+  <p>
+    메서드의 순서는 이름과 진입 block을 먼저 확정하고, 매개변수를 현재 흐름 상태에 등록한 다음, 본문 문장을 소스 순서대로 내리는 방식입니다.<br>
+    그 뒤 열린 경로를 닫고 임시 block을 불변 <code>MirBlock</code>으로 만든 후 <code>MirCallable</code> 하나를 반환합니다.<br>
+    다음 절부터 같은 순서를 예제값으로 나눠 확인합니다.
+  </p>
+
+  <h2 id="identity">1. <code>Next h6</code>의 이름과 출처 확정</h2>
+
+  <p>
+    첫 반복에서 <code>_hirCallable = Next h6</code>입니다. <code>MirOriginFor(Next h6)</code>은 현재 artifact와 <code>h6</code>을 묶고, <code>RequireHirDeclarationSymbol(h6, "callable `Next`")</code>은 의미 모델에서 <code>Next</code> 선언 Symbol을 꺼냅니다.<br>
+    이 예제에는 namespace가 없으므로 <code>hirScopeGraph.QualifiedName(hirCallableSymbol)</code>의 결과는 <code>"Next"</code>입니다.
+  </p>
+
+<pre><code class="language-plaintext">첫 네 지역 변수
+├─ mirCallableOrigin = (최종 hirArtifact, Next h6)
+├─ hirCallableSymbol = Symbol(Next 선언)
+├─ hirScopeGraph      = 같은 artifact.Model.ScopeGraph
+└─ qualifiedSourceCallableName = "Next"</code></pre>
+
+  <p>
+    둘째 반복에서도 동일한 코드가 실행되며 값만 <code>Work h44</code>, <code>Symbol(Work 선언)</code>, <code>"Work"</code>로 바뀝니다.
+  </p>
+
+  <h2 id="entry-block">2. 첫 block을 만들고 현재 block으로 선택</h2>
+
+  <p>
+    각 lowerer의 block allocator는 아직 한 번도 사용되지 않았으므로 <code>AllocateMirBlockId()</code>가 <code>b0</code>을 반환합니다. <code>CreateMirBlock()</code> 전체는 새 builder를 목록에 등록한 뒤 그 객체를 그대로 반환합니다.
+  </p>
+
+<pre><code class="language-csharp">private MirBlockBuilder CreateMirBlock(MirOrigin mirOrigin)
+{
+    // Next와 Work 모두 첫 호출에서는 AllocateMirBlockId() = b0
+    var mirBlockBuilder = new MirBlockBuilder(
+        this,
+        AllocateMirBlockId(),
+        mirOrigin);
+
+    // [] -&gt; [b0 builder]
+    _mirBlockBuilders.Add(mirBlockBuilder);
+    return mirBlockBuilder;
+}</code></pre>
+
+<pre><code class="language-plaintext">CreateMirBlock() 직후
+├─ mirEntryBlockBuilder = b0 builder
+├─ _mirBlockBuilders    = [같은 b0 builder]
+└─ _currentMirBlockBuilder = 같은 b0 builder</code></pre>
+
+  <h2 id="parameters">3. <code>Next(value: int)</code>의 매개변수 등록</h2>
+
+  <p>
+    <code>LowerParameters()</code>에 별도 인수가 없는 이유는 입력이 이미 <code>_hirCallable</code>과 <code>_hirArtifact</code> 필드에 저장되어 있기 때문입니다.<br>
+    이 예제에서는 <code>Next</code>에 스칼라 매개변수 하나가 있고 <code>Work</code>에는 매개변수가 없습니다.<br>
+    아래 전체 함수에서 실제로 선택되는 경로를 주석으로 표시했습니다.
+  </p>
+
+<pre><code class="language-csharp">private void LowerParameters()
+{
+    // Next와 Work 모두 배열 매개변수 요구가 없으므로 null입니다.
+    var requiredArrayLengths =
+        _hirArtifact.Model.RequiredArgLengths(_hirCallable.Id);
+
+    for (var hirParameterIndex = 0;
+         hirParameterIndex &lt; _hirCallable.Parameters.Count;
+         hirParameterIndex++)
+    {
+        // Next 첫 반복: hirParameterIndex = 0, hirParameter = value:int
+        // Work: Parameters.Count = 0이므로 for 본문에 들어오지 않습니다.
+        var hirParameter = _hirCallable.Parameters[hirParameterIndex];
+        var hirParameterSymbol = RequireHirDeclarationSymbol(
+            hirParameter.Id,
+            $"parameter `{hirParameter.Name}`");
+        var mirParameterOrigin = MirOriginFor(hirParameter);
+        _currentFlowState.TrackDeclaredHirSymbol(hirParameterSymbol.Id);
+
+        if (hirParameter.Type == QType.Qubit)
+        {
+            var mirQubitId = AllocateMirQubitId();
+            var mirQubitParameter = hirParameter.IsArray
+                ? MirQubitParameter.Array(
+                    mirQubitId,
+                    hirParameter.Name,
+                    hirParameter.RegisterSize,
+                    hirParameter.Ownership,
+                    mirParameterOrigin)
+                : MirQubitParameter.Single(
+                    mirQubitId,
+                    hirParameter.Name,
+                    hirParameter.Ownership,
+                    mirParameterOrigin);
+            RegisterInitialMirQubit(
+                hirParameterSymbol.Id,
+                mirQubitParameter);
+            _currentFlowState.CurrentMirQubitByHirSymbolId[
+                    hirParameterSymbol.Id] =
+                mirQubitParameter;
+            _mirParameters.Add(mirQubitParameter);
+            continue;
+        }
+
+        // Next의 value는 IsArray = false이므로 Scalar(Int)입니다.
+        var mirParameterType = hirParameter.IsArray
+            ? MirType.Array(hirParameter.Type, hirParameter.RegisterSize)
+            : MirType.Scalar(hirParameter.Type);
+        var mirParameterValue = CreateMirValue(
+            mirParameterType,
+            hirParameterSymbol.Id,
+            mirParameterOrigin);
+        MirArrayStorage? mirArrayStorage = null;
+        if (hirParameter.IsArray)
+        {
+            mirArrayStorage = new MirArrayStorage(
+                AllocateMirStorageId(),
+                hirParameter.Name,
+                mirParameterOrigin);
+            _traceSink?.LinkStorage(
+                hirParameterSymbol.Id,
+                _mirCallableId,
+                mirArrayStorage.Id);
+        }
+        var minimumLength = hirParameter.IsArray ? 1 : 0;
+        if (hirParameter.IsArray
+            &amp;&amp; requiredArrayLengths is not null
+            &amp;&amp; requiredArrayLengths.TryGetValue(
+                hirParameter.Name,
+                out var requiredLength))
+        {
+            if (requiredLength &lt; 0 || requiredLength &gt; int.MaxValue)
+            {
+                throw MirLoweringError(
+                    $"array parameter `{hirParameter.Name}` has invalid "
+                    + $"minimum length {requiredLength}");
+            }
+
+            minimumLength = Math.Max(minimumLength, (int)requiredLength);
+        }
+        _currentFlowState.CurrentMirValueByHirSymbolId[
+                hirParameterSymbol.Id] =
+            mirParameterValue.Id;
+        var mirParameter = mirArrayStorage is null
+            ? MirClassicalParameter.Scalar(
+                hirParameter.Name,
+                mirParameterValue,
+                hirParameter.Ownership,
+                hirParameter.Access)
+            : MirClassicalParameter.Array(
+                hirParameter.Name,
+                mirParameterValue,
+                mirArrayStorage,
+                hirParameter.Ownership,
+                hirParameter.Access,
+                minimumLength);
+        _mirParameters.Add(mirParameter);
+    }
+}</code></pre>
+
+  <p>
+    <code>Next</code> lowerer의 <code>_mirValues</code>는 비어 있었으므로 <code>CreateMirValue()</code>가 <code>%v0</code>을 만듭니다.<br>
+    이어서 현재 흐름 dictionary에 <code>Symbol(value) → %v0</code>을 기록하고, 같은 값을 가진 <code>MirClassicalParameter</code>를 <code>_mirParameters</code>에 추가합니다.
+  </p>
+
+<pre><code class="language-plaintext">Next의 LowerParameters() 종료 상태
+├─ _mirValues = [%v0 : int]
+├─ _mirParameters = [value -&gt; %v0]
+└─ CurrentMirValueByHirSymbolId
+   └─ Symbol(value) -&gt; %v0
+
+Work의 LowerParameters() 종료 상태
+├─ _mirValues = []
+├─ _mirParameters = []
+└─ CurrentMirValueByHirSymbolId = {}</code></pre>
+
+  <h2 id="statements">4. 본문 문장을 소스 순서대로 분기</h2>
+
+  <p>
+    다음 소비처는 <code>LowerStatements(_hirCallable.Body.Statements)</code>입니다. <code>Next</code>의 목록에는 <code>return</code> 하나가 있고, <code>Work</code>의 목록에는 선언, 큐비트 할당, 대입, <code>if</code>, <code>H</code> 호출이 차례로 들어 있습니다.<br>
+    목록 순회 함수와 문장 종류를 고르는 함수의 전체 코드는 다음과 같습니다.
+  </p>
+
+<pre><code class="language-csharp">private void LowerStatements(IReadOnlyList&lt;HirStatement&gt; hirStatements)
+{
+    for (var hirStatementIndex = 0;
+         hirStatementIndex &lt; hirStatements.Count;
+         hirStatementIndex++)
+    {
+        if (_currentMirBlockBuilder is null)
+        {
+            for (;
+                 hirStatementIndex &lt; hirStatements.Count;
+                 hirStatementIndex++)
+            {
+                MarkUnreachableDeclarations(
+                    hirStatements[hirStatementIndex]);
+            }
+            return;
+        }
+
+        // Next: index 0 = HirReturnStatement
+        // Work: index 0..4 = declaration, use, assignment, if, H call
+        LowerStatement(hirStatements[hirStatementIndex]);
+    }
+}
+
+private void LowerStatement(HirStatement hirStatement)
+{
+    switch (hirStatement)
+    {
+        case HirQubitDeclarationStatement hirQubitDeclaration:
+            LowerQubitDeclaration(hirQubitDeclaration);
+            return;
+
+        case HirVariableDeclarationStatement hirDeclaration:
+            LowerDeclaration(hirDeclaration);
+            return;
+
+        case HirAssignmentStatement hirAssignment:
+            LowerAssignment(hirAssignment);
+            return;
+
+        case HirCallStatement hirCallStatement:
+            LowerStatementCall(hirCallStatement);
+            return;
+
+        case HirIfStatement hirIf:
+            LowerIf(hirIf);
+            return;
+
+        case HirForStatement hirFor:
+            LowerFor(hirFor);
+            return;
+
+        case HirWhileStatement hirWhile:
+            LowerWhile(hirWhile);
+            return;
+
+        case HirRepeatStatement hirRepeat:
+            LowerRepeat(hirRepeat);
+            return;
+
+        case HirReturnStatement hirReturn:
+            LowerReturn(hirReturn);
+            return;
+
+        default:
+            throw MirLoweringError(
+                $"unsupported HIR statement {hirStatement.GetType().Name}");
+    }
+}</code></pre>
+
+  <p>
+    <code>Next</code>에서는 <code>HirReturnStatement</code> 분기가 선택되어 <code>LowerReturn()</code>으로 들어갑니다.<br>
+    <code>value + 1</code>을 처리한 결과 <code>%v2</code>가 생기고 <code>b0</code>의 terminator가 <code>return %v2</code>로 정해집니다.<br>
+    block이 닫히면 <code>_currentMirBlockBuilder</code>는 <code>null</code>이 됩니다.<br>
+    이 값이 만들어지는 정확한 호출 순서는 11장 첫 절에서 이어서 추적합니다.
+  </p>
+
+<pre><code class="language-plaintext">Next의 문장 처리 결과
+└─ b0
+   ├─ i0: %v1 = const int 1
+   ├─ i1: %v2 = add %v0, %v1
+   └─ return %v2
+
+상태
+├─ _mirValues = [%v0, %v1, %v2]
+├─ _nextMirInstructionIdValue = 2
+└─ _currentMirBlockBuilder = null</code></pre>
+
+  <p>
+    <code>Work</code>에서는 같은 switch가 다섯 번 호출됩니다.<br>
+    첫 선언은 <code>%v0</code>, <code>%v1</code>, <code>$s0</code>을 만들고, 큐비트 선언은 <code>q0.v0</code>을 할당하며, 대입은 배열의 현재 연결을 <code>%v1</code>에서 <code>%v6</code>으로 바꿉니다.<br>
+    이어서 <code>if</code>가 <code>b1</code>, <code>b2</code>, <code>b3</code>을 만들고 현재 block을 합류점 <code>b3</code>으로 옮깁니다.<br>
+    마지막 <code>H(q[0])</code>은 그 <code>b3</code>에 <code>i14</code>와 <code>i15</code>를 추가합니다.
+  </p>
+
+<pre><code class="language-plaintext">Work의 소스 문장별 결과
+├─ var values = [0]                  -&gt; %v0, %v1, $s0, i0..i1
+├─ use q = Qubit[1]                  -&gt; q0.v0, i2
+├─ values[0] = Next(values[0])       -&gt; %v2..%v6, i3..i7
+├─ if (values[0] == 1) { X(q[0]); }  -&gt; %v7..%v11, i8..i13, b1..b3
+└─ H(q[0])                           -&gt; %v12, i14..i15
+
+문장 처리 직후
+├─ _mirBlockBuilders = [b0, b1, b2, b3]
+├─ _currentMirBlockBuilder = b3
+├─ CurrentMirValueByHirSymbolId[Symbol(values)] = %v6
+└─ CurrentMirQubitByHirSymbolId[Symbol(q)] = q0.v3</code></pre>
+
+  <div class="callout">
+    <span class="h">여기서 이어지는 세부 추적</span>
+    고전 값 <code>%v0…%v12</code>과 명령 <code>i0…i15</code>의 생성 순서는 <a href="chapter-11.html">11장</a>에서 같은 입력을 그대로 사용하여 추적합니다.<br>
+    배열의 <code>$s0</code>과 상태값 <code>%v1/%v6</code> 관계는 <a href="chapter-12.html">12장</a>, 큐비트 <code>q0.v0…v3</code> 관계는 <a href="chapter-13.html">13장</a>에서 이어집니다.
+  </div>
+
+  <h2 id="implicit-return">5. <code>Work</code>의 열린 <code>b3</code> 닫기</h2>
+
+  <p>
+    <code>Next</code>는 소스의 <code>return</code>이 이미 <code>b0</code>을 닫았으므로 <code>_currentMirBlockBuilder is not null</code> 조건이 거짓입니다.<br>
+    반면에 <code>Work</code>는 반환값이 없는 operation이고 마지막 <code>H</code> 뒤의 <code>b3</code>이 열려 있습니다.<br>
+    따라서 <code>ReturnFromCurrentMirBlock(value: null, generatedOrigin)</code>을 호출합니다.
+  </p>
+
+<pre><code class="language-csharp">private void ReturnFromCurrentMirBlock(
+    MirValueId? value,
+    MirOrigin mirOrigin)
+{
+    // Work 예제값: currentMirBlock = b3, value = null
+    var currentMirBlock = RequireCurrentMirBlock();
+    currentMirBlock.Return(value, mirOrigin);
+}</code></pre>
+
+  <p>
+    <code>MirBlockBuilder.Return()</code>은 <code>MirReturn(null, generatedOrigin)</code>을 terminator로 저장합니다.<br>
+    이어서 <code>OnMirBlockTerminated(b3)</code>가 현재 block을 <code>null</code>로 바꾸므로, 이제 Work에도 열린 제어 흐름 경로가 남지 않습니다.
+  </p>
+
+  <h2 id="build-blocks">6. 임시 builder를 불변 block으로 완성</h2>
+
+  <p>
+    문장 처리 중에는 instruction과 terminator를 추가해야 하므로 <code>MirBlockBuilder</code>를 사용했습니다.<br>
+    모든 경로를 닫은 다음에는 <code>LowerToMirCallable()</code>의 두 번째 <code>foreach</code>가 각 builder의 <code>Build()</code>를 호출합니다.
+  </p>
+
+<pre><code class="language-csharp">public MirBlock Build()
+{
+    // 예제의 b0..b3은 모두 return, branch, jump 중 하나를 가집니다.
+    if (_terminator is null)
+    {
+        throw new InvalidOperationException(
+            $"QINTERNAL: MIR block {Id} has no terminator");
+    }
+
+    return new MirBlock(
+        Id,
+        _arguments,
+        Instructions,
+        _terminator,
+        Origin,
+        QubitPhis);
+}</code></pre>
+
+  <p>
+    <code>Next</code>에서는 <code>b0 builder</code> 하나가 <code>MirBlock b0</code> 하나가 됩니다.<br>
+    <code>Work</code>에서는 등록 순서대로 <code>b0</code>, <code>b1</code>, <code>b2</code>, <code>b3</code>가 완성됩니다.<br>
+    첫 builder는 앞에서 보관한 <code>mirEntryBlockBuilder</code>와 같은 객체이므로, 그 결과인 <code>MirBlock b0</code>이 <code>mirEntryBlock</code>으로 선택됩니다.
+  </p>
+
+  <h2 id="result">7. 두 <code>MirCallable</code> 반환</h2>
+
+  <p>
+    첫 반복의 마지막 생성자 호출에는 <code>c6</code>, 이름 <code>"Next"</code>, 반환 타입 <code>int</code>, 매개변수 <code>[%v0 value]</code>, 진입 block <code>b0</code>, 전체 block <code>[b0]</code>이 들어갑니다.<br>
+    반환된 <code>Next c6</code>은 9장의 <code>mirCallables</code> 목록 첫 원소로 바로 소비됩니다.
+  </p>
+
+<pre><code class="language-plaintext">function @c6 Next(%v0 value: int) -&gt; int
+  entry ^b0
+  ^b0():
+    %v1: int = const int 1
+    %v2: int = add %v0, %v1
+    return %v2</code></pre>
+
+  <p>
+    둘째 반복의 생성자 호출에는 <code>c44</code>, 이름 <code>"Work"</code>, 반환 타입 <code>null</code>, 빈 매개변수 목록, 진입 block <code>b0</code>, 전체 block <code>[b0,b1,b2,b3]</code>가 들어갑니다.<br>
+    반환된 <code>Work c44</code>은 목록 둘째 원소가 되며, 동시에 HIR 진입점 <code>Work h44</code>에 대응하는 MIR 진입점으로 선택됩니다.
+  </p>
+
+<pre><code class="language-plaintext">operation @c44 Work()
+  entry ^b0
+  blocks = [^b0, ^b1, ^b2, ^b3]
+  values = [%v0 .. %v12]
+  instructions = [i0 .. i15]
+  final terminator = ^b3의 implicit return</code></pre>
+
+  <h2 id="local-ids">추적 뒤에 정리하는 로컬 ID 규칙</h2>
+
+  <p>
+    값·block·instruction 번호는 각 <code>HirCallableToMirLowerer</code>가 독립적으로 발급합니다.<br>
+    따라서 <code>%v0</code>이나 <code>i0</code>만으로 프로그램 전체 위치를 나타낼 수는 없습니다.<br>
+    예를 들어 <code>Next c6</code>의 <code>%v0</code>은 매개변수 <code>value</code>이고, <code>Work c44</code>의 <code>%v0</code>은 배열 리터럴 원소 <code>0</code>입니다.
+  </p>
+
+<pre><code class="language-plaintext">Next c6
+├─ b0
+├─ %v0 = parameter value
+└─ i0 = const int 1
+
+Work c44
+├─ b0
+├─ %v0 = const int 0
+└─ i0 = const int 0</code></pre>
+
+  <p>
+    프로그램 전체에서 instruction을 가리킬 때는 callable ID와 로컬 instruction ID를 함께 가진 <code>MirInstructionSite</code>를 사용합니다.<br>
+    이 예제의 X와 H는 각각 <code>c44/i13</code>, <code>c44/i15</code>입니다.<br>
+    값의 정의 위치를 역으로 조회하는 방식은 <a href="chapter-11.html#definition">11장의 정의 위치 절</a>에서 확인할 수 있습니다.
+  </p>
+
+  <div class="callout good">
+    <span class="h">이번 장에서 확인한 실행</span>
+    <code>foreach</code>는 <code>Next h6</code>과 <code>Work h44</code>마다 새 lowerer를 만듭니다.<br>
+    각 lowerer는 생성 직후 빈 작업 상태에서 시작하여 이름·진입 block·매개변수·본문·종료·block build 순서로 처리하고, 완성된 <code>Next c6</code> 또는 <code>Work c44</code> 하나만 바깥 목록에 반환합니다.
+  </div>
+
+  <nav class="chapter-nav" aria-label="장 이동(하단)">
+    <div class="group"><a href="chapter-09.html">← 이전: HIR→MIR 경계</a><a href="index.html#chapters">전체 목차</a></div>
+    <div class="group"><a href="chapter-11.html">다음: 고전 값과 SSA 버전 →</a></div>
+  </nav>
+
+  <footer>Qora 컴파일러 개발자 매뉴얼 · 10장</footer>
+</main>
+</body>
+</html>

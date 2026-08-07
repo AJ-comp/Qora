@@ -6,6 +6,46 @@ namespace Qora.Tests;
 public sealed class MirCallContractVerifierTests
 {
     [Fact]
+    public void VerifierReturnsMir100ForMissingCalleeWithoutThrowing()
+    {
+        var context = MirTestContext.Create();
+        var origin = context.Origin();
+        var entryBlockId = MirTestContext.BlockId(0);
+        var missingCalleeId = new MirCallableId(1);
+        var call = new MirQuantumApply(
+            new MirInstructionId(0),
+            new MirUserCallableTarget(missingCalleeId),
+            Array.Empty<MirCallOperand>(),
+            Array.Empty<MirQubitAfterInstruction>(),
+            Array.Empty<MirMutableArrayResult>(),
+            Array.Empty<MirFunctor>(),
+            origin);
+        var entryBlock = new MirBlock(
+            entryBlockId,
+            Array.Empty<MirValue>(),
+            new MirInstruction[] { call },
+            new MirReturn(null, origin),
+            origin);
+        var entry = new MirCallable(
+            new MirCallableId(0),
+            "Main",
+            returnType: null,
+            parameters: Array.Empty<IMirParameter>(),
+            entryBlock,
+            new[] { entryBlock },
+            origin);
+        var program = context.Program(entry, new[] { entry });
+
+        var error = Assert.Single(QoraMirVerifier.Verify(program));
+
+        Assert.Equal("MIR100", error.Code);
+        Assert.Contains(
+            $"missing callable {missingCalleeId}",
+            error.Message,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void VerifierRejectsKnownArrayShorterThanCalleeMinimumLength()
     {
         var context = MirTestContext.Create();

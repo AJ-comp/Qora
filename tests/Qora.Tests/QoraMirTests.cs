@@ -92,7 +92,7 @@ public sealed class QoraMirTests
                 && target.Callable == flipIf.Id);
         var mergedInput = Assert.IsType<MirClassicalCallOperand>(call.Operands[0]).Value;
         var mergedValue = Assert.IsType<MirValue>(main.FindValue(mergedInput));
-        var mergedDefinition = main.DefinitionOf(mergedValue);
+        var mergedDefinition = main.DefinitionOf(mergedValue.Id);
 
         Assert.Equal(MirValueDefinitionKind.BlockArgument, mergedDefinition.Kind);
         var mergeBlockId = Assert.IsType<MirBlockId>(mergedDefinition.Block);
@@ -1801,35 +1801,6 @@ public sealed class QoraMirTests
             new[] { malformedCallable });
 
         Assert.Empty(QoraMirVerifier.Verify(branchLocal));
-    }
-
-    [Fact]
-    public void EffectSnapshotRejectsEveryOtherProgramInstance()
-    {
-        var (program, effects) = CompileMir("""
-            operation Main() {
-                use register = Qubit[1];
-                X(register[0]);
-            }
-            """);
-
-        Assert.True(effects.IsFor(program));
-        effects.EnsureFor(program);
-
-        var detachedProgramCopy = new MirProgram(
-            program.EntryPoint,
-            program.Callables.ToArray());
-        Assert.False(effects.IsFor(detachedProgramCopy));
-        Assert.Throws<InvalidOperationException>(() => effects.EnsureFor(detachedProgramCopy));
-
-        var (otherSnapshot, _) = CompileMir("""
-            operation Main() {
-                use register = Qubit[1];
-                X(register[0]);
-            }
-            """);
-        Assert.False(effects.IsFor(otherSnapshot));
-        Assert.Throws<InvalidOperationException>(() => effects.EnsureFor(otherSnapshot));
     }
 
     [Fact]

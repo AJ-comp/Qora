@@ -2,6 +2,11 @@
 
 All notable changes to the Qora Language extension.
 
+## 0.31.0
+
+- Bundles the **Qora v0.38.0** compiler.
+- Extension commands, settings, UI, language configuration, and source highlighting are unchanged.
+
 ## 0.30.0
 
 - Bundles the **Qora v0.37.0** compiler, which closes source-language typing in target-independent HIR and

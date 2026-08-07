@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Qora 컴파일러 개발자 매뉴얼 — 전체 주제 목록</title>
+<link rel="stylesheet" href="developer.css">
+<script src="developer-syntax.js" defer></script>
+</head>
+<body class="index-page">
+<a class="skip-link" href="#main-content">본문으로 건너뛰기</a>
+<header class="hero">
+  <div class="tag">Qora · Compiler Developer Manual</div>
+  <h1>Qora 컴파일러 개발자 매뉴얼</h1>
+  <p>두 callable을 따라가며 실제 구현을 읽는 초심자용 안내서 · 전체 주제 목록</p>
+</header>
+
+<main class="wrap" id="main-content">
+  <nav class="doc-links" aria-label="관련 문서">
+    <a class="doc-link" href="../../architecture/ko/index.html">컴파일 파이프라인 설계</a>
+    <a class="doc-link" href="../../architecture/ko/datasheet.html">컴파일러 데이터시트</a>
+  </nav>
+
+  <p class="lead">
+    이 매뉴얼은 하나의 Qora 예제가 실제 컴파일러 구현을 통과하는 순서를 추적합니다.<br>
+    각 장은 현재 소스 문장에서 출발하여 어느 함수로 들어가는지, 실제 인수값으로 어떤 분기를 타는지, 그 결과 어떤 객체·ID·상태가 만들어져 다음 코드에 전달되는지를 실행 순서대로 설명합니다.
+  </p>
+
+  <div class="callout good">
+    <span class="h">현재 문서 상태</span>
+    전체 학습 경로는 28개 장으로 구성되어 있습니다.<br>
+    현재 상세 본문이 작성된 범위는 실제 코드와 대조한 9–17장이며, 나머지 장에는 이후 작성 범위를 나타내는 목차만 있습니다.
+  </div>
+
+  <h2 id="difference">문서별 역할</h2>
+
+  <div class="panel">
+    <table>
+      <caption>Qora 컴파일러 문서 세 종류의 역할</caption>
+      <thead>
+        <tr><th scope="col">문서</th><th scope="col">답하는 질문</th><th scope="col">중심 내용</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>컴파일 파이프라인 설계</td>
+          <td>왜 AST, HIR, MIR, Target으로 단계를 나누는가?</td>
+          <td>전체 변환 경로와 단계별 책임을 개념 중심으로 설명</td>
+        </tr>
+        <tr>
+          <td>컴파일러 데이터시트</td>
+          <td>각 단계가 무엇을 소유하고 무엇을 보장하는가?</td>
+          <td>자료구조, 패스 계약, 권위 저장소, 불변 조건을 규격 중심으로 설명</td>
+        </tr>
+        <tr>
+          <td>개발자 매뉴얼</td>
+          <td>실제 소스 코드가 구현 안에서 어떻게 처리되는가?</td>
+          <td>호출 순서, 실제 객체와 ID, 중간 값, 디버깅 위치를 코드 흐름 중심으로 설명</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2 id="example">끝까지 따라갈 두 callable</h2>
+
+  <p>
+    상세 본문이 준비된 9–17장은 아래의 같은 예제를 계속 추적합니다.<br>
+    따라서 Symbol 연결, SSA 값, CallGraph, Basic Block, CFG, 큐비트 버전이 서로 다른 예제에서 단절되지 않고 하나의 컴파일 흐름으로 이어집니다.
+  </p>
+
+<pre><code class="language-qora">function Next(value: int): int
+{
+    return value + 1;
+}
+
+operation Work()
+{
+    var values: int[] = [0];
+    use q = Qubit[1];
+
+    values[0] = Next(values[0]);
+
+    if (values[0] == 1)
+    {
+        X(q[0]);
+    }
+
+    H(q[0]);
+}</code></pre>
+
+  <div class="flow">
+    Source <span>→</span> AST <span>→</span> HIR + SemanticModel <span>→</span>
+    SSA/CFG MIR <span>→</span> MIR Analyses <span>→</span> Target IR <span>→</span> OpenQASM
+  </div>
+
+  <div class="callout">
+    <span class="h">설명 규칙</span>
+    각 장은 <strong>현재 소스 문장 → 실제 진입 함수 → 예제 인수값 → 선택된 분기 → 생성 객체와 상태 변경 → 다음 소비처</strong> 순서를 따릅니다.<br>
+    자료구조의 일반 정의와 구조적 계약은 예제 흐름을 완료한 뒤 정리하며, 상세 규격은 데이터시트의 정확한 항목으로 연결합니다.
+  </div>
+
+  <h2 id="toc">전체 학습 경로</h2>
+
+  <div class="parts">
+    <section class="part">
+      <span class="part-number">Part I · 입구</span>
+      <h3>소스가 컴파일 요청이 되기까지</h3>
+      <ol>
+        <li><a href="#c1">저장소와 컴파일 진입점</a></li>
+        <li><a href="#c2">Compilation 요청과 결과</a></li>
+        <li><a href="#c3">문자열에서 AST까지</a></li>
+      </ol>
+    </section>
+
+    <section class="part">
+      <span class="part-number">Part II · HIR</span>
+      <h3>소스 구조에 정확한 의미 붙이기</h3>
+      <ol start="4">
+        <li><a href="#c4">AST에서 불변 HIR로</a></li>
+        <li><a href="#c5">노드 ID와 소스 위치</a></li>
+        <li><a href="#c6">Scope와 Symbol</a></li>
+        <li><a href="#c7">이름 해소와 호출 대상</a></li>
+        <li><a href="#c8">타입·호출 계약·최종 HIR artifact</a></li>
+      </ol>
+    </section>
+
+    <section class="part">
+      <span class="part-number">Part III · MIR Lowering</span>
+      <h3>실행과 분석이 가능한 그래프로 내리기</h3>
+      <ol start="9">
+        <li><a href="chapter-09.html">HIR→MIR 경계</a></li>
+        <li><a href="chapter-10.html">Callable 하나를 MIR로 만들기</a></li>
+        <li><a href="chapter-11.html">고전 값과 SSA 버전</a></li>
+        <li><a href="chapter-12.html">Storage와 배열 상태</a></li>
+        <li><a href="chapter-13.html">큐비트 ID와 버전</a></li>
+        <li><a href="chapter-14.html">Basic Block와 Terminator</a></li>
+        <li><a href="chapter-15.html">조건문 lowering과 분기 합류</a></li>
+      </ol>
+    </section>
+
+    <section class="part">
+      <span class="part-number">Part IV · MIR 분석</span>
+      <h3>완성된 MIR에서 사실 계산하기</h3>
+      <ol start="16">
+        <li><a href="chapter-16.html">MirSnapshot과 분석 저장소</a></li>
+        <li><a href="chapter-17.html">CFG와 successor·predecessor</a></li>
+        <li><a href="#c18">도달 가능성과 지배 관계</a></li>
+        <li><a href="#c19">값·메모리·경로·범위 분석</a></li>
+        <li><a href="#c20">CallGraph와 양자 효과</a></li>
+      </ol>
+    </section>
+
+    <section class="part">
+      <span class="part-number">Part V · 변환과 Target</span>
+      <h3>MIR에서 실행 가능한 출력까지</h3>
+      <ol start="21">
+        <li><a href="#c21">컴파일러 내부 역연산</a></li>
+        <li><a href="#c22">자동 uncomputation이 들어갈 경계</a></li>
+        <li><a href="#c23">Target IR lowering</a></li>
+        <li><a href="#c24">OpenQASM 방출</a></li>
+      </ol>
+    </section>
+
+    <section class="part">
+      <span class="part-number">Part VI · 개발 작업</span>
+      <h3>기능을 안전하게 추가하고 검증하기</h3>
+      <ol start="25">
+        <li><a href="#c25">새 문법과 의미 규칙 추가</a></li>
+        <li><a href="#c26">새 MIR 명령과 분석 추가</a></li>
+        <li><a href="#c27">Target 기능 추가</a></li>
+        <li><a href="#c28">테스트·단계 출력·적대적 검증</a></li>
+      </ol>
+    </section>
+  </div>
+
+  <h2 id="chapters">장별 주제</h2>
+
+  <section class="chapter" id="c1">
+    <h3>1. 저장소와 컴파일 진입점 <span class="status">현재 구현</span></h3>
+    <p class="meta"><strong>질문:</strong> 실행 파일, Core, LanguageServices, 테스트는 어디에서 만나며 첫 중단점은 어디에 두는가?</p>
+    <p class="meta"><strong>주요 코드:</strong> <code>src/Qora</code>, <code>QoraCompiler</code>, <code>src/Qora.Core</code>, <code>tests/Qora.Tests</code></p>
+  </section>
+
+  <section class="chapter" id="c2">
+    <h3>2. Compilation 요청과 결과 <span class="status">현재 구현</span></h3>
+    <p class="meta"><strong>질문:</strong> 소스와 출력 계획이 어떻게 하나의 컴파일 결과가 되며 실패 시 어느 단계까지 남는가?</p>
+    <p class="meta"><strong>주요 코드:</strong> <code>CompilationSession</code>, <code>CompilationOutputPlan</code>, <code>Compilation</code></p>
+  </section>
+
+  <section class="chapter" id="c3">
+    <h3>3. 문자열에서 AST까지 <span class="status">현재 구현</span></h3>
+    <p class="meta"><strong>질문:</strong> Janglim이 두 callable을 어떤 구문 트리로 만들고 Qora의 소유 경계는 어디에서 시작되는가?</p>
+    <p class="meta"><strong>주요 코드:</strong> parser grammar, syntax snapshot, source map</p>
+  </section>
+
+  <section class="chapter" id="c4">
+    <h3>4. AST에서 불변 HIR로 <span class="status">현재 구현</span></h3>
+    <p class="meta"><strong>질문:</strong> <code>Next</code>와 <code>Work</code>가 어떤 <code>HirCallable</code>과 표현식 트리가 되는가?</p>
+    <p class="meta"><strong>주요 코드:</strong> <code>AstToHirLowering</code>, expression lowering, HIR builder</p>
+  </section>
+
+  <section class="chapter" id="c5">
+    <h3>5. 노드 ID와 소스 위치 <span class="status">현재 구현</span></h3>
+    <p class="meta"><strong>질문:</strong> 선언, 호출, 비교식의 <code>HirNodeId</code>가 무엇을 식별하고 진단 위치와 어떻게 연결되는가?</p>
+    <p class="meta"><strong>주요 코드:</strong> HIR node identity, <code>SourceMap</code>, <code>SourceSpan</code></p>
+  </section>
+
+  <section class="chapter" id="c6">
+    <h3>6. Scope와 Symbol <span class="status">현재 구현</span></h3>
+    <p class="meta"><strong>질문:</strong> <code>Next</code>의 매개변수 <code>value</code>와 <code>Work</code>의 지역 변수 <code>values</code>가 서로 다른 Symbol로 연결되고 블록 안 이름이 어떻게 검색되는가?</p>
+    <p class="meta"><strong>주요 코드:</strong> <code>HirScopeGraph</code>, <code>ScopeId</code>, <code>SymbolId</code>, <code>HirSemanticModel</code></p>
+  </section>
+
+  <section class="chapter" id="c7">
+    <h3>7. 이름 해소와 호출 대상 <span class="status">현재 구현</span></h3>
+    <p class="meta"><strong>질문:</strong> <code>Next(values[0])</code>가 정확히 어느 선언을 호출하는지 한 번만 결정되는 과정은 무엇인가?</p>
+    <p class="meta"><strong>주요 코드:</strong> <code>Resolver</code>, callable binding, namespace lookup</p>
+  </section>
+
+  <section class="chapter" id="c8">
+    <h3>8. 타입·호출 계약·최종 HIR artifact <span class="status">현재 구현</span></h3>
+    <p class="meta"><strong>질문:</strong> 인수와 매개변수, 반환식과 반환형, 조건식의 타입을 누가 검사하고 MIR로 갈 수 있는 최종 상태를 어떻게 봉인하는가?</p>
+    <p class="meta"><strong>주요 코드:</strong> <code>QoraValidator</code>, <code>ExpressionTypes</code>, <code>HirSemanticArtifact</code>, effect analysis</p>
+  </section>
+
+  <section class="chapter" id="c9">
+    <h3>9. HIR→MIR 경계 <span class="status">현재 구현</span></h3>
+    <p class="meta"><strong>질문:</strong> 최종 HIR과 정확한 SemanticModel이 어떻게 한 번의 <code>ToMir</code> 호출로 내려가는가?</p>
+    <p class="meta"><strong>주요 코드:</strong> <code>HirCompilation.ToMir</code>, <code>QoraMirLowering</code>, <code>MirSnapshot.CreateLowered</code></p>
+    <a class="chapter-link" href="chapter-09.html">9장 본문 읽기 →</a>
+  </section>
+
+  <section class="chapter" id="c10">
+    <h3>10. Callable 하나를 MIR로 만들기 <span class="status">현재 구현</span></h3>
+    <p class="meta"><strong>질문:</strong> HIR callable 하나가 독립된 <code>MirCallable</code>과 로컬 ID 공간으로 만들어지는 순서는 무엇인가?</p>
+    <p class="meta"><strong>주요 코드:</strong> callable lowerer, parameter registration, block builder, ID allocation</p>
+    <a class="chapter-link" href="chapter-10.html">10장 본문 읽기 →</a>
+  </section>
+
+  <section class="chapter" id="c11">
+    <h3>11. 고전 값과 SSA 버전 <span class="status">현재 구현</span></h3>
+    <p class="meta"><strong>질문:</strong> 상수 <code>0</code>과 <code>1</code>, <code>Next</code>의 반환값, 비교 결과가 각각 어떤 <code>MirValue</code>와 instruction이 되는가?</p>
+    <p class="meta"><strong>주요 코드:</strong> <code>MirClassicalParameter</code>, <code>MirConstant</code>, <code>MirBinary</code>, <code>MirValueId</code></p>
+    <a class="chapter-link" href="chapter-11.html">11장 본문 읽기 →</a>
+  </section>
+
+  <section class="chapter" id="c12">
+    <h3>12. Storage와 배열 상태 <span class="status">현재 구현</span></h3>
+    <p class="meta"><strong>질문:</strong> <code>values</code>의 고유한 저장 장소와 값 버전이 왜 분리되며 <code>values[0]</code>의 load·store가 어떤 그래프를 만드는가?</p>
+    <p class="meta"><strong>주요 코드:</strong> <code>MirArrayStorage</code>, array value, load/store instruction, storage provenance</p>
+    <a class="chapter-link" href="chapter-12.html">12장 본문 읽기 →</a>
+  </section>
+
+  <section class="chapter" id="c13">
+    <h3>13. 큐비트 ID와 버전 <span class="status">현재 구현</span></h3>
+    <p class="meta"><strong>질문:</strong> <code>use</code>로 만든 <code>q[0]</code>이 <code>X</code>와 <code>H</code>를 지나며 어떤 큐비트 버전으로 이어지는가?</p>
+    <p class="meta"><strong>주요 코드:</strong> <code>MirQubitFromUse</code>, <code>MirQubitAfterInstruction</code>, <code>MirQubitPhi</code>, qubit access</p>
+    <a class="chapter-link" href="chapter-13.html">13장 본문 읽기 →</a>
+  </section>
+
+  <section class="chapter" id="c14">
+    <h3>14. Basic Block와 Terminator <span class="status">현재 구현</span></h3>
+    <p class="meta"><strong>질문:</strong> 일반 instruction과 블록의 마지막 이동 명령은 왜 분리되며 <code>MirJump</code>, <code>MirBranch</code>, <code>MirReturn</code>은 무엇을 저장하는가?</p>
+    <p class="meta"><strong>주요 코드:</strong> <code>MirBlock</code>, <code>MirTerminator</code>, block builder</p>
+    <a class="chapter-link" href="chapter-14.html">14장 본문 읽기 →</a>
+  </section>
+
+  <section class="chapter" id="c15">
+    <h3>15. 조건문 lowering과 분기 합류 <span class="status">현재 구현</span></h3>
+    <p class="meta"><strong>질문:</strong> <code>if (values[0] == 1)</code>이 조건 블록, 참 블록, 거짓 블록, 합류 블록으로 나뉘고 값과 큐비트가 어떻게 합쳐지는가?</p>
+    <p class="meta"><strong>주요 코드:</strong> <code>LowerIf</code>, <code>MirBranch</code>, block argument, phi, flow state</p>
+    <a class="chapter-link" href="chapter-15.html">15장 본문 읽기 →</a>
+  </section>
+
+  <section class="chapter" id="c16">
+    <h3>16. MirSnapshot과 분석 저장소 <span class="status">현재 구현</span></h3>
+    <p class="meta"><strong>질문:</strong> 완성된 <code>MirProgram</code>과 현재 프로그램에만 유효한 분석 결과가 어떻게 함께 묶이는가?</p>
+    <p class="meta"><strong>주요 코드:</strong> <code>MirSnapshot</code>, <code>MirProgram</code>, <code>MirAnalysisStore</code></p>
+    <a class="chapter-link" href="chapter-16.html">16장 본문 읽기 →</a>
+  </section>
+
+  <section class="chapter" id="c17">
+    <h3>17. CFG와 successor·predecessor <span class="status">현재 구현</span></h3>
+    <p class="meta"><strong>질문:</strong> 이미 완성된 Terminator에서 <code>b0 → [b1, b2]</code>와 그 역방향 표를 어떻게 만드는가?</p>
+    <p class="meta"><strong>주요 코드:</strong> <code>MirControlFlowAnalysis</code>, <code>BuildSuccessors</code>, <code>BuildPredecessors</code></p>
+    <a class="chapter-link" href="chapter-17.html">17장 본문 읽기 →</a>
+  </section>
+
+  <section class="chapter" id="c18">
+    <h3>18. 도달 가능성과 지배 관계 <span class="status">현재 구현</span></h3>
+    <p class="meta"><strong>질문:</strong> 어느 블록에 도달할 수 있고 어떤 계산이 다른 지점보다 반드시 먼저 실행되는지 어떻게 증명하는가?</p>
+    <p class="meta"><strong>주요 코드:</strong> reachability, dominator, post-dominator, control regions</p>
+  </section>
+
+  <section class="chapter" id="c19">
+    <h3>19. 값·메모리·경로·범위 분석 <span class="status">현재 구현</span></h3>
+    <p class="meta"><strong>질문:</strong> 특정 프로그램 지점에서 사용할 수 있는 값, 현재 storage 상태, 경로 조건, 배열 인덱스 안전성을 어떻게 계산하는가?</p>
+    <p class="meta"><strong>주요 코드:</strong> scalar/witness availability, memory state, path condition, bounds analysis</p>
+  </section>
+
+  <section class="chapter" id="c20">
+    <h3>20. CallGraph와 양자 효과 <span class="status">현재 구현</span></h3>
+    <p class="meta"><strong>질문:</strong> <code>Work → Next</code> 호출 관계와 <code>X(q[0])</code>, <code>H(q[0])</code>의 큐비트 읽기·쓰기 효과를 어떻게 합성하는가?</p>
+    <p class="meta"><strong>주요 코드:</strong> <code>MirCallGraph</code>, <code>MirEffectAnalysis</code>, callable summary</p>
+  </section>
+
+  <section class="chapter" id="c21">
+    <h3>21. 컴파일러 내부 역연산 <span class="status">현재 구현</span></h3>
+    <p class="meta"><strong>질문:</strong> 사용자 문법에 없는 역연산 요청이 왜 MIR에만 존재하고 역방향 callable이 어떻게 합성되는가?</p>
+    <p class="meta"><strong>주요 코드:</strong> <code>MirFunctor.Adjoint</code>, <code>MirAdjointMaterializer</code>, generated origin</p>
+  </section>
+
+  <section class="chapter" id="c22">
+    <h3>22. 자동 uncomputation이 들어갈 경계 <span class="status future">확장 예정</span></h3>
+    <p class="meta"><strong>질문:</strong> 고전 witness 안정성, 여러 ancilla의 청소 의존 관계, cleanup 계획과 실제 MIR 주입은 어느 분석 결과를 소비해야 하는가?</p>
+    <p class="meta"><strong>예정 경계:</strong> exact MIR analyses → cleanup plan → MIR rewrite → 기존 역연산 실체화</p>
+  </section>
+
+  <section class="chapter" id="c23">
+    <h3>23. Target IR lowering <span class="status">현재 구현</span></h3>
+    <p class="meta"><strong>질문:</strong> 타깃 독립적인 MIR가 OpenQASM 전용 타입·이름·구조화된 제어 흐름으로 어떻게 바뀌는가?</p>
+    <p class="meta"><strong>주요 코드:</strong> <code>MirOpenQasmLowering</code>, <code>MirOpenQasmTargetProgram</code></p>
+  </section>
+
+  <section class="chapter" id="c24">
+    <h3>24. OpenQASM 방출 <span class="status">현재 구현</span></h3>
+    <p class="meta"><strong>질문:</strong> 의미 판단을 마친 target model이 어떻게 최종 텍스트가 되며 emitter가 하지 않아야 할 일은 무엇인가?</p>
+    <p class="meta"><strong>주요 코드:</strong> <code>MirQasmEmitter</code>, target declarations, statements, expressions</p>
+  </section>
+
+  <section class="chapter" id="c25">
+    <h3>25. 새 문법과 의미 규칙 추가 <span class="status">개발 절차</span></h3>
+    <p class="meta"><strong>질문:</strong> 문법, AST lowering, HIR, 이름 해소, 타입 검사 가운데 어디를 변경하고 어느 단계에서는 변경하지 않아야 하는가?</p>
+    <p class="meta"><strong>검증:</strong> parser, HIR structure, semantic diagnostics, target-independent boundary tests</p>
+  </section>
+
+  <section class="chapter" id="c26">
+    <h3>26. 새 MIR 명령과 분석 추가 <span class="status">개발 절차</span></h3>
+    <p class="meta"><strong>질문:</strong> 유효한 MIR만 생성하게 경계를 닫고 새 instruction을 verifier·분석·rewrite에 연결하는 순서는 무엇인가?</p>
+    <p class="meta"><strong>검증:</strong> constructor invariants, lowering tests, CFG/SSA analysis tests, transformation tests</p>
+  </section>
+
+  <section class="chapter" id="c27">
+    <h3>27. Target 기능 추가 <span class="status">개발 절차</span></h3>
+    <p class="meta"><strong>질문:</strong> OpenQASM 또는 새로운 backend의 제약을 HIR·MIR에 역류시키지 않고 target 경계에서 처리하는 방법은 무엇인가?</p>
+    <p class="meta"><strong>검증:</strong> target policy diagnostics, typed target model tests, emitter snapshots</p>
+  </section>
+
+  <section class="chapter" id="c28">
+    <h3>28. 테스트·단계 출력·적대적 검증 <span class="status">개발 절차</span></h3>
+    <p class="meta"><strong>질문:</strong> 정상 예제뿐 아니라 shadowing, 분기, alias, 잘못된 ID, 타깃 경계 같은 반례로 구조적 결함을 어떻게 찾는가?</p>
+    <p class="meta"><strong>주요 도구:</strong> unit tests, compilation stages, MIR dumps, backend validation, adversarial review</p>
+  </section>
+
+  <footer>
+    Qora 컴파일러 개발자 매뉴얼 · 전체 주제 목록<br>
+    규격과 불변 조건은 <a href="../../architecture/ko/datasheet.html">컴파일러 데이터시트</a>를 기준으로 삼습니다.
+  </footer>
+</main>
+</body>
+</html>

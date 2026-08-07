@@ -104,19 +104,8 @@ namespace Qora.Ir.Passes;
 /// </summary>
 internal static class QoraValidator
 {
-    public static List<QoraError> Validate(HirProgram? program) =>
-        Validate(program, out _);
-
-    /// <summary>Validate AND keep what validation proved: the scope trees built per operation are collected
-    /// into a <see cref="HirSemanticModel"/> (Id-keyed side table) instead of being discarded, so later stages
-    /// consume the validation-time facts rather than re-deriving them.</summary>
-    public static List<QoraError> Validate(
-        HirProgram? program,
-        out HirSemanticModel? model) =>
-        ValidateCore(program, sourceSnapshot: null, out model);
-
     /// <summary>
-    /// Production validation entry point. The resulting model is capability-bound to this exact HIR
+     /// Production validation entry point. The resulting model is capability-bound to this exact HIR
     /// snapshot, so it cannot later be attached to a detached tree which merely reuses the same IDs.
     /// </summary>
     internal static List<QoraError> Validate(

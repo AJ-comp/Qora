@@ -1671,7 +1671,7 @@ internal static class MirOpenQasmLowering
                 _ => new HashSet<HiddenStorageKey>());
             var callees = program.Callables.ToDictionary(
                 callable => callable.Id,
-                callable => callGraph.CallsFrom(callable.Id)
+                callable => callGraph.CallsFrom(callable)
                     .Select(site => site.Callee)
                     .ToHashSet());
 

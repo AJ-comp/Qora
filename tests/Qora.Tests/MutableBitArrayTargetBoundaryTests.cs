@@ -40,7 +40,7 @@ public sealed class MutableBitArrayTargetBoundaryTests
             Assert.Single(
                 rewrite.Parameters,
                 candidate => candidate is MirClassicalParameter));
-        var parameterType = rewrite.RequireValue(parameter.Value).Type;
+        var parameterType = rewrite.RequireValue(parameter.Value.Id).Type;
 
         Assert.Equal(expectedOwnership, parameter.Ownership);
         Assert.Equal(QAccessMode.Mutable, parameter.Access);

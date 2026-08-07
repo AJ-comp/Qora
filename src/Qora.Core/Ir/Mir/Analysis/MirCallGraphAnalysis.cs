@@ -40,15 +40,12 @@ public sealed class MirCallGraph
     public IReadOnlyList<MirCallSite> Calls { get; }
     internal MirProgram SourceProgram => _program;
 
-    public IReadOnlyList<MirCallSite> CallsFrom(MirCallableId caller)
+    public IReadOnlyList<MirCallSite> CallsFrom(MirCallable caller)
     {
-        _program.RequireCallable(caller);
-        return _callsFrom.GetValueOrDefault(caller)
+        var source = _program.RequireCallable(caller);
+        return _callsFrom.GetValueOrDefault(source.Id)
             ?? Array.Empty<MirCallSite>();
     }
-
-    public IReadOnlyList<MirCallSite> CallsFrom(MirCallable caller) =>
-        CallsFrom(_program.RequireCallable(caller).Id);
 
 }
 

@@ -60,15 +60,6 @@ public sealed class HirProgram : HirNode
         return indexed.NamespacePath;
     }
 
-    /// <summary>The namespace path that structurally contains the callable identity.</summary>
-    public string NamespaceOf(HirNodeId callableId) =>
-        _index.CallableById.TryGetValue(callableId, out var indexed)
-            ? indexed.NamespacePath
-            : throw new ArgumentOutOfRangeException(
-                nameof(callableId),
-                callableId,
-                "the HIR program contains no callable with this identity");
-
     public HirCallable? EntryCallable =>
         Callables.FirstOrDefault(callable =>
             !callable.IsFunction

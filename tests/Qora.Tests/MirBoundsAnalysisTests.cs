@@ -53,14 +53,15 @@ public sealed class MirBoundsAnalysisTests
         var load = Assert.Single(Instructions(main).OfType<MirArrayLoad>());
         var index = main.RequireValue(load.Index);
         var indexInstruction = Assert.IsType<MirConstant>(
-            main.RequireInstruction(main.DefinitionOf(index).Instruction!.Value));
+            main.RequireInstruction(main.DefinitionOf(index.Id).Instruction!.Value));
         var rewritten = RewriteInstruction(
             source.Program,
             main,
             indexInstruction with { Text = "2" });
 
-        var result = Assert.Single(
-            MirBoundsAnalysis.Analyze(rewritten, main.Id).Results);
+        var analyses = new MirAnalysisStore(rewritten);
+        var rewrittenMain = rewritten.RequireCallable(main.Id);
+        var result = Assert.Single(analyses.Bounds(rewrittenMain).Results);
 
         Assert.Equal(MirBoundsClassification.Invalid, result.Classification);
     }
@@ -87,8 +88,9 @@ public sealed class MirBoundsAnalysisTests
             main,
             subtrahend with { Text = long.MinValue.ToString() });
 
-        var result = Assert.Single(
-            MirBoundsAnalysis.Analyze(rewritten, main.Id).Results);
+        var analyses = new MirAnalysisStore(rewritten);
+        var rewrittenMain = rewritten.RequireCallable(main.Id);
+        var result = Assert.Single(analyses.Bounds(rewrittenMain).Results);
 
         Assert.Equal(MirBoundsClassification.Unproven, result.Classification);
     }
@@ -154,14 +156,15 @@ public sealed class MirBoundsAnalysisTests
         var load = Assert.Single(Instructions(main).OfType<MirArrayLoad>());
         var index = main.RequireValue(load.Index);
         var indexInstruction = Assert.IsType<MirConstant>(
-            main.RequireInstruction(main.DefinitionOf(index).Instruction!.Value));
+            main.RequireInstruction(main.DefinitionOf(index.Id).Instruction!.Value));
         var rewritten = RewriteInstruction(
             source.Program,
             main,
             indexInstruction with { Text = "9" });
 
-        var result = Assert.Single(
-            MirBoundsAnalysis.Analyze(rewritten, main.Id).Results);
+        var analyses = new MirAnalysisStore(rewritten);
+        var rewrittenMain = rewritten.RequireCallable(main.Id);
+        var result = Assert.Single(analyses.Bounds(rewrittenMain).Results);
 
         Assert.Equal(MirBoundsClassification.Proven, result.Classification);
     }
@@ -329,7 +332,8 @@ public sealed class MirBoundsAnalysisTests
             origin);
         var program = context.Program(entryCallable, new[] { callable, entryCallable });
 
-        var result = Assert.Single(MirBoundsAnalysis.Analyze(program, callableId).Results);
+        var analyses = new MirAnalysisStore(program);
+        var result = Assert.Single(analyses.Bounds(callable).Results);
 
         Assert.Equal(MirBoundsClassification.Unproven, result.Classification);
     }
@@ -509,7 +513,7 @@ public sealed class MirBoundsAnalysisTests
         var main = Callable(mir.Program, "Main");
 
         var first = mir.Analyses.Bounds(main);
-        var second = mir.Analyses.Bounds(main.Id);
+        var second = mir.Analyses.Bounds(main);
         var result = Assert.Single(first.Results);
 
         Assert.Same(first, second);

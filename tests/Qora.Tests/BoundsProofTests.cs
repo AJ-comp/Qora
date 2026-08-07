@@ -1649,9 +1649,8 @@ public class BoundsProofTests
         // The same (resolved, pre-mono) program validated directly: the literal index and the CROSS-array
         // loop bound are postponed — and on the ledger. The same-array `0..q.Count-1` loop is NOT: P2
         // proves it for ANY length, so there is no promise to record.
-        var preErrors = QoraValidator.Validate(r.Hir.Resolved!.Program, out var pre);
-        Assert.Empty(preErrors);
-        Assert.Collection(pre!.DeferredSizeChecks,
+        var pre = r.Hir.ResolvedValidation!.Model;
+        Assert.Collection(pre.DeferredSizeChecks,
             d => Assert.Equal(("Flip", "q", "q[5]"), (d.Op, d.Array, d.Access)),
             d => Assert.Equal(("Flip", "q", "q[i]"), (d.Op, d.Array, d.Access)));
     }
@@ -1677,9 +1676,8 @@ public class BoundsProofTests
         Assert.True(r.Succeeded);
         Assert.Empty(r.Hir.SpecializedValidation!.Model.DeferredSizeChecks);
 
-        var preErrors = QoraValidator.Validate(r.Hir.Resolved!.Program, out var pre);
-        Assert.Empty(preErrors);
-        Assert.Collection(pre!.DeferredSizeChecks,
+        var pre = r.Hir.ResolvedValidation!.Model;
+        Assert.Collection(pre.DeferredSizeChecks,
             d => Assert.Equal(("Pick", "f", "f[n]"), (d.Op, d.Array, d.Access)),
             d => Assert.Equal(("Pick", "f", "f[n]"), (d.Op, d.Array, d.Access)));
     }
@@ -1702,9 +1700,9 @@ public class BoundsProofTests
             """);
         Assert.True(r.Succeeded);
 
-        QoraValidator.Validate(r.Hir.Resolved!.Program, out var pre);
+        var pre = r.Hir.ResolvedValidation!.Model;
         var ops = r.Hir.Resolved!.Program!.Callables.ToDictionary(o => o.Name, o => o.Id);
-        Assert.True(pre!.WillBeRechecked(ops["Main"]));    // concrete: checks complete without deferral
+        Assert.True(pre.WillBeRechecked(ops["Main"]));    // concrete: checks complete without deferral
         Assert.True(pre.WillBeRechecked(ops["Flip"]));     // generic reached from Main
         Assert.False(pre.WillBeRechecked(ops["Dead1"]));   // generic nothing calls
         Assert.False(pre.WillBeRechecked(ops["Dead2"]));   // one caller — but a dead one

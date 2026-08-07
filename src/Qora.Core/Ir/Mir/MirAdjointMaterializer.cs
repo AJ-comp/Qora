@@ -171,7 +171,7 @@ public static class MirAdjointMaterializer
     {
         foreach (var caller in snapshot.Program.Callables)
         {
-            foreach (var site in snapshot.Analyses.CallGraph.CallsFrom(caller.Id))
+            foreach (var site in snapshot.Analyses.CallGraph.CallsFrom(caller))
             {
                 var instruction = caller.RequireInstruction(
                     site.Instruction.Instruction);
@@ -370,7 +370,7 @@ public static class MirAdjointMaterializer
                 return;
             }
 
-            foreach (var site in _callGraph.CallsFrom(callableId))
+            foreach (var site in _callGraph.CallsFrom(callable))
             {
                 if (callable.RequireInstruction(site.Instruction.Instruction)
                     is not MirQuantumApply apply)

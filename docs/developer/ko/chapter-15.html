@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>15. 조건문 lowering과 분기 합류 — Qora 컴파일러 개발자 매뉴얼</title>
+<link rel="stylesheet" href="developer.css">
+<script src="developer-syntax.js" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#main-content">본문으로 건너뛰기</a>
+<header class="hero">
+  <div class="tag">Qora · Compiler Developer Manual · Chapter 15</div>
+  <h1>조건문 lowering과 분기 합류</h1>
+  <p>소스의 if가 조건·참·거짓·합류 block과 Phi로 바뀌는 과정을 한 줄씩 따라가기</p>
+</header>
+
+<main class="wrap" id="main-content">
+  <nav class="chapter-nav" aria-label="장 이동(상단)">
+    <div class="group"><a href="chapter-14.html">← 이전: Basic Block</a><a href="index.html#chapters">전체 목차</a></div>
+    <div class="group"><a href="chapter-16.html">다음: MIR snapshot →</a></div>
+  </nav>
+
+  <p class="lead">
+    아래 예제의 <code>if</code> 문장이 <code>LowerStatement</code>에 전달되면 조건 계산, 참·거짓 block 생성, 두 경로의 lowering, 합류 순서로 실행이 이어집니다.<br>
+    그 첫 호출부터 다음 문장 <code>H(q[0])</code>이 합류 결과 <code>q0.v2</code>를 읽는 지점까지 실제 지역 변수와 생성 객체를 따라갑니다.
+  </p>
+
+  <h2 id="source">이번 장에서 처리할 소스</h2>
+
+<pre><code class="language-qora">function Next(value: int): int
+{
+    return value + 1;
+}
+
+operation Work()
+{
+    var values: int[] = [0];
+    use q = Qubit[1];
+
+    values[0] = Next(values[0]);
+
+    if (values[0] == 1)       // 이번 장의 진입 문장
+    {
+        X(q[0]);
+    }
+
+    H(q[0]);                  // 합류 결과의 첫 소비자
+}</code></pre>
+
+  <p>
+    최종 HIR에서 이 operation은 <code>Work h44</code>이고, 현재 lowering 객체가 만드는 callable은 <code>Work c44</code>입니다.<br>
+    이번 장에서 계속 사용하는 <code>b0</code>, <code>%v10</code>, <code>q0.v2</code>는 모두 이 <code>Work c44</code> 안의 ID입니다.
+  </p>
+
+  <h2 id="before-if"><code>if</code> 직전의 실제 상태</h2>
+
+  <p>
+    <code>LowerToMirCallable</code>은 <code>Work h44</code>의 본문을 소스 순서대로 처리합니다.<br>
+    따라서 <code>if</code>에 도착했을 때 앞의 선언과 대입은 이미 끝났으며, 현재 block과 두 심벌의 값은 다음과 같습니다.
+  </p>
+
+<pre><code class="language-plaintext">// Work h44의 네 번째 문장을 처리하기 직전
+_currentMirBlockBuilder = b0
+
+_currentFlowState.CurrentMirValueByHirSymbolId
+└─ Symbol(values) → %v6
+
+_currentFlowState.CurrentMirQubitByHirSymbolId
+└─ Symbol(q) → q0.v0
+
+// %v6의 출처
+%v5 = call @c6:Next(%v4)           // Next(values[0])의 반환값
+%v6 = array.store %v1[%v2], %v5    // values[0] 대입 뒤의 배열 상태
+
+// q0.v0의 출처
+i2: qubit.allocate q0.v0           // use q = Qubit[1]</code></pre>
+
+  <p>
+    여기서 <code>Symbol(values)</code>와 <code>Symbol(q)</code>는 이름 문자열이 아니라 HIR 의미 모델이 확정한 <code>SymbolId</code>입니다.<br>
+    lowering은 이름을 다시 해석하지 않고 이 두 dictionary에서 현재 MIR 값만 읽고 바꿉니다.
+  </p>
+
+  <h2 id="condition">소스 문장에서 <code>LowerIf</code>까지</h2>
+
+  <p>
+    위 상태를 만든 호출은 <code>LowerToMirCallable → LowerStatements</code>입니다.<br>
+    다음 코드는 실제 구현에 예제값 주석만 덧붙인 것이며, <code>hirStatements[3]</code>이 이번 <code>if</code> 문장입니다.
+  </p>
+
+<pre><code class="language-csharp">private void LowerStatements(IReadOnlyList&lt;HirStatement&gt; hirStatements)
+{
+    for (var hirStatementIndex = 0;
+         hirStatementIndex &lt; hirStatements.Count;
+         hirStatementIndex++)
+    {
+        if (_currentMirBlockBuilder is null)
+        {
+            for (;
+                 hirStatementIndex &lt; hirStatements.Count;
+                 hirStatementIndex++)
+            {
+                MarkUnreachableDeclarations(
+                    hirStatements[hirStatementIndex]);
+            }
+            return;
+        }
+
+        // 예제값: index=3, current block=b0,
+        // hirStatements[3]=HirIfStatement(values[0] == 1)
+        LowerStatement(hirStatements[hirStatementIndex]);
+    }
+}</code></pre>
+
+  <p>
+    <code>_currentMirBlockBuilder</code>가 <code>b0</code>이므로 도달 불가 분기는 선택되지 않습니다.<br>
+    이어서 <code>LowerStatement</code>의 switch가 런타임 타입 <code>HirIfStatement</code>을 확인하고 <code>LowerIf(hirIf)</code>를 호출합니다.
+  </p>
+
+<pre><code class="language-csharp">private void LowerStatement(HirStatement hirStatement)
+{
+    switch (hirStatement)
+    {
+        case HirQubitDeclarationStatement hirQubitDeclaration:
+            LowerQubitDeclaration(hirQubitDeclaration);
+            return;
+        case HirVariableDeclarationStatement hirDeclaration:
+            LowerDeclaration(hirDeclaration);
+            return;
+        case HirAssignmentStatement hirAssignment:
+            LowerAssignment(hirAssignment);
+            return;
+        case HirCallStatement hirCallStatement:
+            LowerStatementCall(hirCallStatement);
+            return;
+
+        // 이번 호출에서 선택되는 분기
+        // hirIf.Condition = values[0] == 1
+        // hirIf.Then.Statements = [X(q[0])]
+        // hirIf.Else.Statements = []
+        case HirIfStatement hirIf:
+            LowerIf(hirIf);
+            return;
+        case HirForStatement hirFor:
+            LowerFor(hirFor);
+            return;
+        case HirWhileStatement hirWhile:
+            LowerWhile(hirWhile);
+            return;
+        case HirRepeatStatement hirRepeat:
+            LowerRepeat(hirRepeat);
+            return;
+        case HirReturnStatement hirReturn:
+            LowerReturn(hirReturn);
+            return;
+        default:
+            throw MirLoweringError(
+                $"unsupported HIR statement {hirStatement.GetType().Name}");
+    }
+}</code></pre>
+
+  <p>
+    <code>LowerIf</code>의 첫 실행은 조건식 lowering입니다.<br>
+    현재 배열 값 <code>%v6</code>을 읽어 <code>%v7</code>부터 <code>%v10</code>까지를 <code>b0.Instructions</code> 뒤에 추가하고, 마지막 비교 결과 <code>%v10</code>을 반환합니다.
+  </p>
+
+<pre><code class="language-plaintext">// LowerExpressionAs(hirIf.Condition, bit)의 실제 결과
+%v7  = const 0                 // values[0]의 인덱스
+%v8  = array.load %v6[%v7]    // 갱신된 배열의 원소
+%v9  = const 1                 // == 오른쪽 피연산자
+%v10 = eq %v8, %v9            // MirBranch가 읽을 bit
+
+mirConditionValueId = %v10
+_currentFlowState   = { values → %v6, q → q0.v0 }</code></pre>
+
+  <h2 id="blocks"><code>LowerIf</code> 전체 호출 흐름</h2>
+
+  <p>
+    이제 조건값과 진입 상태의 출처가 모두 확인되었습니다.<br>
+    아래는 실제 <code>LowerIf</code> 전체 함수이며, 주석에는 공통 예제에서 각 지역 변수에 들어가는 값을 기록했습니다.
+  </p>
+
+<pre><code class="language-csharp">private void LowerIf(HirIfStatement hirIf)
+{
+    var mirOrigin = MirOriginFor(hirIf);
+    var mirConditionValueId = LowerExpressionAs(
+        hirIf.Condition,
+        MirType.Scalar(QType.Bit));
+    // 예제값: mirConditionValueId=%v10, current block=b0
+
+    var mirBranchBlock = RequireCurrentMirBlock();       // b0
+    var flowStateBeforeBranch = _currentFlowState.Clone();
+    // { values → %v6, q → q0.v0 }
+    var mirThenBlock = CreateMirBlock(mirOrigin);         // b1
+    var mirElseBlock = CreateMirBlock(mirOrigin);         // b2
+    mirBranchBlock.BranchTo(
+        mirConditionValueId,                              // %v10
+        mirThenBlock, Array.Empty&lt;MirValueId&gt;(),          // b1, []
+        mirElseBlock, Array.Empty&lt;MirValueId&gt;(),          // b2, []
+        mirOrigin);
+
+    var thenBranchExit = LowerScopedBranch(
+        mirThenBlock,
+        flowStateBeforeBranch,
+        hirIf.Then.Statements);                           // [X(q[0])]
+    var elseBranchExit = LowerScopedBranch(
+        mirElseBlock,
+        flowStateBeforeBranch,
+        hirIf.Else.Statements);                           // []
+
+    if (thenBranchExit.ExitBlock is null
+        &amp;&amp; elseBranchExit.ExitBlock is null)
+    {
+        // 예제에서는 b1과 b2가 모두 살아 있으므로 선택되지 않음
+        _currentMirBlockBuilder = null;
+        _currentFlowState = flowStateBeforeBranch;
+        return;
+    }
+
+    var mirMergeBlock = CreateMirBlock(mirOrigin);        // b3
+    if (thenBranchExit.ExitBlock is null
+        || elseBranchExit.ExitBlock is null)
+    {
+        // 예제에서는 두 ExitBlock이 모두 있으므로 선택되지 않음
+        var survivingBranchExit =
+            thenBranchExit.ExitBlock is not null
+                ? thenBranchExit
+                : elseBranchExit;
+        survivingBranchExit.ExitBlock!.JumpTo(
+            mirMergeBlock,
+            Array.Empty&lt;MirValueId&gt;(),
+            mirOrigin);
+        _currentMirBlockBuilder = mirMergeBlock;
+        _currentFlowState = survivingBranchExit.ExitFlowState;
+        return;
+    }
+
+    // 이번 예제는 여기부터 계속 실행됨
+    var mergedFlowState = flowStateBeforeBranch.Clone();
+    var mirThenPhiArguments = new List&lt;MirValueId&gt;();     // []
+    var mirElsePhiArguments = new List&lt;MirValueId&gt;();     // []
+    foreach (var hirSymbolId in
+             flowStateBeforeBranch.CurrentMirValueByHirSymbolId.Keys.OrderBy(
+                 id =&gt; id.Value))
+    {
+        // 유일한 고전 심벌 values:
+        // mirThenValueId=%v6, mirElseValueId=%v6
+        if (!thenBranchExit.ExitFlowState
+                .CurrentMirValueByHirSymbolId.TryGetValue(
+                hirSymbolId,
+                out var mirThenValueId)
+            || !elseBranchExit.ExitFlowState
+                .CurrentMirValueByHirSymbolId.TryGetValue(
+                hirSymbolId,
+                out var mirElseValueId))
+        {
+            continue;
+        }
+        if (mirThenValueId == mirElseValueId)
+        {
+            // %v6 == %v6이므로 이번에 선택되는 분기
+            mergedFlowState.CurrentMirValueByHirSymbolId[hirSymbolId] =
+                mirThenValueId;
+            continue;
+        }
+
+        var mirValueType = MirTypeOf(mirThenValueId);
+        if (MirTypeOf(mirElseValueId) != mirValueType)
+        {
+            throw MirLoweringError(
+                $"branch values for symbol {hirSymbolId} "
+                + "have different MIR types");
+        }
+        var mirPhiValueId = AddBlockArgument(
+            mirMergeBlock,
+            mirValueType,
+            hirSymbolId);
+        mirThenPhiArguments.Add(mirThenValueId);
+        mirElsePhiArguments.Add(mirElseValueId);
+        mergedFlowState.CurrentMirValueByHirSymbolId[hirSymbolId] =
+            mirPhiValueId;
+    }
+
+    var mirThenEdge = thenBranchExit.ExitBlock.JumpTo(
+        mirMergeBlock, mirThenPhiArguments, mirOrigin);    // (b1, 0), []
+    var mirElseEdge = elseBranchExit.ExitBlock.JumpTo(
+        mirMergeBlock, mirElsePhiArguments, mirOrigin);    // (b2, 0), []
+    MergeQubitStatesAtJoin(
+        mergedFlowState,                                  // values=%v6, q=q0.v0
+        thenBranchExit.ExitFlowState, mirThenEdge,         // q=q0.v1, (b1,0)
+        elseBranchExit.ExitFlowState, mirElseEdge,         // q=q0.v0, (b2,0)
+        mirMergeBlock);                                    // b3
+    _currentMirBlockBuilder = mirMergeBlock;               // b3
+    _currentFlowState = mergedFlowState;                   // values=%v6, q=q0.v2
+}</code></pre>
+
+  <h2 id="branch"><code>b0</code>을 닫는 조건 분기</h2>
+
+  <p>
+    <code>RequireCurrentMirBlock()</code>은 조건 instruction을 방금 추가한 <code>b0</code>을 반환합니다.<br>
+    이어서 <code>CreateMirBlock</code>을 두 번 호출하여 <code>b1</code>과 <code>b2</code>를 만들고, <code>BranchTo</code>가 <code>b0</code>의 Terminator를 다음 값으로 확정합니다.
+  </p>
+
+<pre><code class="language-plaintext">b0.Terminator = MirBranch
+├─ Condition      = %v10
+├─ TrueTarget     = b1
+├─ TrueArguments  = []
+├─ FalseTarget    = b2
+└─ FalseArguments = []
+
+// 즉시 바뀐 제어 흐름
+b0.Terminator.Successors = [b1, b2]</code></pre>
+
+  <p>
+    이 시점부터 CFG의 갈림길은 소스의 <code>if</code>가 아니라 <code>MirBranch</code>가 권위 있는 원본입니다.<br>
+    17장의 분석기는 이 Terminator를 읽을 뿐, 조건문 lowering을 다시 수행하지 않습니다.
+  </p>
+
+  <h2 id="then-path"><code>b1</code>에서 실행되는 참 본문</h2>
+
+  <p>
+    첫 <code>LowerScopedBranch</code> 호출은 <code>b1</code>, 분기 전 상태, 문장 목록 <code>[X(q[0])]</code>을 받습니다.<br>
+    함수 전체의 실행 순서는 다음과 같습니다.
+  </p>
+
+<pre><code class="language-csharp">private (
+    MirBlockBuilder? ExitBlock,
+    LoweringFlowState ExitFlowState) LowerScopedBranch(
+    MirBlockBuilder mirBranchBlock,                  // b1
+    LoweringFlowState entryFlowState,                // values=%v6, q=q0.v0
+    IReadOnlyList&lt;HirStatement&gt; hirStatements)       // [X(q[0])]
+{
+    _currentMirBlockBuilder = mirBranchBlock;         // current=b1
+    _currentFlowState = entryFlowState.Clone();
+    _currentFlowState.PushHirSymbolLifetimeFrame();
+    LowerStatements(hirStatements);                  // LowerStatement → LowerStatementCall
+    _currentFlowState.PopHirSymbolLifetimeFrame();
+    return (_currentMirBlockBuilder, _currentFlowState);
+    // (ExitBlock=b1, ExitFlowState={values=%v6, q=q0.v1})
+}</code></pre>
+
+  <p>
+    <code>X(q[0])</code>은 <code>HirCallStatement</code>이므로 <code>LowerStatementCall</code> 분기가 선택됩니다.<br>
+    <code>LowerQubitAccess</code>가 <code>Symbol(q) → q0.v0</code>을 읽고 인덱스 <code>%v11</code>을 만든 뒤, <code>X</code>의 write 결과로 새 버전 <code>q0.v1</code>을 발급합니다.
+  </p>
+
+<pre><code class="language-plaintext">// b1 종료 직전
+b1.Instructions
+├─ i12: %v11 = const 0
+└─ i13: X(q0.v0[%v11]) → q0.v1
+
+thenBranchExit.ExitBlock = b1
+thenBranchExit.ExitFlowState
+├─ Symbol(values) → %v6
+└─ Symbol(q)      → q0.v1</code></pre>
+
+  <h2 id="else-path"><code>b2</code>에서 실행되는 빈 거짓 본문</h2>
+
+  <p>
+    두 번째 <code>LowerScopedBranch</code>는 같은 분기 전 상태를 다시 복제하되, 문장 목록으로 빈 <code>[]</code>를 받습니다.<br>
+    따라서 <code>LowerStatements([])</code>은 아무 instruction도 만들지 않으며, 거짓 경로의 큐비트는 <code>q0.v0</code> 그대로 남습니다.
+  </p>
+
+<pre><code class="language-plaintext">LowerScopedBranch(
+    mirBranchBlock: b2,
+    entryFlowState: { values → %v6, q → q0.v0 },
+    hirStatements: [])
+
+elseBranchExit.ExitBlock = b2
+elseBranchExit.ExitFlowState
+├─ Symbol(values) → %v6
+└─ Symbol(q)      → q0.v0</code></pre>
+
+  <h2 id="merge-block">실제로 선택되는 합류 경로</h2>
+
+  <p>
+    참 경로의 <code>ExitBlock</code>은 <code>b1</code>이고 거짓 경로의 <code>ExitBlock</code>은 <code>b2</code>입니다.<br>
+    그러므로 “둘 다 종료됨” 조건은 거짓이고 “한쪽만 종료됨” 조건도 거짓입니다. <code>LowerIf</code>은 두 경로를 합치는 본 경로를 계속 실행하며 세 번째 새 block <code>b3</code>을 만듭니다.
+  </p>
+
+<pre><code class="language-plaintext">thenBranchExit.ExitBlock is null &amp;&amp; elseBranchExit.ExitBlock is null
+false &amp;&amp; false → false
+
+mirMergeBlock = CreateMirBlock(mirOrigin) → b3
+
+thenBranchExit.ExitBlock is null || elseBranchExit.ExitBlock is null
+false || false → false
+
+// 다음 실행 위치: 고전값 비교 루프</code></pre>
+
+  <h2 id="classical-merge">고전 상태 <code>%v6</code>의 합류</h2>
+
+  <p>
+    분기 전에 살아 있던 고전 심벌은 <code>values</code> 하나입니다.<br>
+    참 경로와 거짓 경로 모두 현재값이 정확히 같은 <code>%v6</code>이므로 <code>mirThenValueId == mirElseValueId</code> 분기가 선택됩니다. 따라서 <code>b3.Arguments</code>에는 새 고전 Phi 값이 생기지 않습니다.
+  </p>
+
+<pre><code class="language-plaintext">hirSymbolId       = Symbol(values)
+mirThenValueId   = %v6
+mirElseValueId   = %v6
+%v6 == %v6       = true
+
+mergedFlowState.CurrentMirValueByHirSymbolId
+└─ Symbol(values) → %v6
+
+mirThenPhiArguments = []
+mirElsePhiArguments = []
+b3.Arguments          = []</code></pre>
+
+  <h2 id="incoming-edges"><code>b3</code>로 들어오는 두 edge</h2>
+
+  <p>
+    고전 인수 목록이 확정되면 <code>JumpTo</code>가 <code>b1</code>과 <code>b2</code>를 각각 <code>b3</code>에 연결합니다.<br>
+    두 출발 block 모두 목적지가 하나뿐이므로 반환되는 <code>MirControlFlowEdge</code>의 successor 순번은 0입니다.
+  </p>
+
+<pre><code class="language-plaintext">mirThenEdge = b1.JumpTo(b3, [], mirOrigin)
+├─ Source           = b1
+└─ SuccessorOrdinal = 0
+
+mirElseEdge = b2.JumpTo(b3, [], mirOrigin)
+├─ Source           = b2
+└─ SuccessorOrdinal = 0
+
+b1.Terminator = MirJump(Target=b3, Arguments=[])
+b2.Terminator = MirJump(Target=b3, Arguments=[])</code></pre>
+
+  <p>
+    이 edge는 목적지 ID 하나가 아닙니다.<br>
+    출발 block과 그 Terminator 안의 successor 순번을 함께 저장하므로, 뒤에서 큐비트 Phi 입력이 어느 실행 경로에서 왔는지 구분할 수 있습니다.
+  </p>
+
+  <h2 id="qubit-phi"><code>q0.v1</code>과 <code>q0.v0</code>의 Phi</h2>
+
+  <p>
+    이제 <code>MergeQubitStatesAtJoin</code>은 <code>mergedFlowState</code>의 큐비트를 ID별로 묶습니다.<br>
+    이 예제에는 <code>Symbol(q)</code> 하나가 <code>q0</code>을 가리키므로 alias group도 하나뿐입니다. 이어서 두 종료 상태에서 같은 <code>q0</code>의 현재 버전을 읽습니다.
+  </p>
+
+<pre><code class="language-plaintext">mirQubitAliasGroup
+├─ MirQubitId  = q0
+└─ HirSymbolIds = [Symbol(q)]
+
+firstIncomingMirQubit  = q0.v1    // b1, X 실행 뒤
+secondIncomingMirQubit = q0.v0    // b2, X를 거치지 않음
+
+firstIncomingMirQubit.Key == secondIncomingMirQubit.Key
+q0.v1 == q0.v0 → false             // CreateQubitPhi 경로 선택</code></pre>
+
+  <p>
+    선택된 <code>CreateQubitPhi</code> 호출의 실제 인수와 결과는 다음과 같습니다.<br>
+    버전 allocator의 다음 값이 2이므로 <code>q0.v2</code>가 생성되고, 이 객체는 일반 instruction이 아니라 <code>b3.QubitPhis</code>에 추가됩니다.
+  </p>
+
+<pre><code class="language-plaintext">CreateQubitPhi(
+    hirSymbolId: Symbol(q),
+    mirJoinBlock: b3,
+    mirPhiInputs:
+    [
+        MirQubitPhiInput(Edge=(b1,0), Qubit=q0.v1),
+        MirQubitPhiInput(Edge=(b2,0), Qubit=q0.v0),
+    ])
+
+_nextMirQubitVersionById[q0]: 2 → 3
+
+b3.QubitPhis
+└─ MirQubitPhi
+   ├─ Key = q0.v2
+   ├─ Input[0] = ((b1,0), q0.v1)
+   └─ Input[1] = ((b2,0), q0.v0)
+
+mergedFlowState.CurrentMirQubitByHirSymbolId
+└─ Symbol(q) → MirQubitPhi(Key=q0.v2)</code></pre>
+
+  <p>
+    <code>q0.v2</code>는 새 물리 큐비트가 아닙니다.<br>
+    같은 identity <code>q0</code>의 현재 버전을 “<code>b1</code>에서 왔으면 <code>v1</code>, <code>b2</code>에서 왔으면 <code>v0</code>”으로 정하는 합류 정의입니다.
+  </p>
+
+  <h2 id="after-merge">현재 flow 교체와 다음 문장</h2>
+
+  <p>
+    <code>LowerIf</code>의 마지막 두 대입은 새로 만든 합류 block과 합류 상태를 현재값으로 교체합니다.<br>
+    함수가 반환되면 바깥 <code>LowerStatements</code>의 반복 인덱스가 다음 문장 <code>H(q[0])</code>으로 이동합니다.
+  </p>
+
+<pre><code class="language-plaintext">// LowerIf 마지막 상태 변경
+_currentMirBlockBuilder = b3
+_currentFlowState
+├─ Symbol(values) → %v6
+└─ Symbol(q)      → MirQubitPhi(Key=q0.v2)
+
+// LowerStatements 다음 반복
+hirStatementIndex = 4
+hirStatements[4]  = HirCallStatement(H(q[0]))
+
+LowerStatement(H call)
+→ case HirCallStatement
+→ LowerStatementCall
+→ LowerQubitAccess(q[0])
+→ CurrentMirQubitByHirSymbolId[Symbol(q)] = q0.v2
+→ %v12 = const 0
+→ i15: H(q0.v2[%v12]) → q0.v3</code></pre>
+
+  <h2 id="result">한 문장에서 다음 소비자까지의 결과</h2>
+
+<pre><code class="language-plaintext">if (values[0] == 1)                    H(q[0])
+        │                                 ▲
+        ▼                                 │ q0.v2 소비
+b0: %v10 계산, branch b1/b2               │
+        │                 │               │
+        ▼                 ▼               │
+b1: X(q0.v0)→q0.v1    b2: q0.v0 유지      │
+        │                 │               │
+        └──── jump b3 ────┘               │
+                  │                       │
+                  ▼                       │
+b3: q0.v2 = phi((b1,0):q0.v1, (b2,0):q0.v0)
+    %v12 = const 0
+    H(q0.v2[%v12]) → q0.v3
+    return</code></pre>
+
+  <div class="callout good">
+    <span class="h">예제 뒤의 일반 원리</span>
+    조건문 lowering은 소스의 한 문장을 조건값, 명시적인 Terminator, 경로별 flow 복제, 합류 상태로 바꿉니다.<br>
+    두 고전 현재값이 다르면 합류 block argument를 만들지만, 이 예제의 <code>values</code>는 양쪽 모두 <code>%v6</code>이므로 만들지 않습니다.<br>
+    반면 큐비트 버전은 <code>q0.v1</code>과 <code>q0.v0</code>으로 다르므로 <code>MirQubitPhi q0.v2</code>가 필요합니다.
+  </div>
+
+  <nav class="chapter-nav" aria-label="장 이동(하단)">
+    <div class="group"><a href="chapter-14.html">← 이전: Basic Block</a><a href="index.html#chapters">전체 목차</a></div>
+    <div class="group"><a href="chapter-16.html">다음: MIR snapshot →</a></div>
+  </nav>
+
+  <footer>Qora 컴파일러 개발자 매뉴얼 · 15장</footer>
+</main>
+</body>
+</html>

@@ -25,7 +25,8 @@ public sealed class MirPathConditionAnalysisTests
             Assert.Single(
                 callable.Blocks,
                 block => block.Terminator is MirBranch).Terminator);
-        var paths = MirPathConditionAnalysis.Analyze(program, callable.Id);
+        var analyses = new MirAnalysisStore(program);
+        var paths = analyses.PathConditions(callable);
 
         var condition = paths.ConditionFor(applySite.Block);
         Assert.Equal(MirPathConditionKind.Predicate, condition.Kind);
@@ -56,7 +57,8 @@ public sealed class MirPathConditionAnalysisTests
         var site = Assert.Single(
             callable.Blocks,
             block => block.Instructions.Contains(x));
-        var paths = MirPathConditionAnalysis.Analyze(program, callable.Id);
+        var analyses = new MirAnalysisStore(program);
+        var paths = analyses.PathConditions(callable);
 
         var condition = paths.ConditionFor(site.Id);
         Assert.Equal(MirPathConditionKind.Predicate, condition.Kind);
@@ -80,7 +82,8 @@ public sealed class MirPathConditionAnalysisTests
             """);
         var callable = Assert.Single(program.Callables);
         var site = ApplySite(callable);
-        var paths = MirPathConditionAnalysis.Analyze(program, callable.Id);
+        var analyses = new MirAnalysisStore(program);
+        var paths = analyses.PathConditions(callable);
 
         Assert.True(paths.ConditionFor(site.Block).IsAlways);
     }
@@ -102,7 +105,8 @@ public sealed class MirPathConditionAnalysisTests
             """);
         var callable = Assert.Single(program.Callables);
         var site = ApplySite(callable);
-        var paths = MirPathConditionAnalysis.Analyze(program, callable.Id);
+        var analyses = new MirAnalysisStore(program);
+        var paths = analyses.PathConditions(callable);
 
         var condition = paths.ConditionFor(site.Block);
         Assert.Equal(MirPathConditionKind.All, condition.Kind);
@@ -110,7 +114,7 @@ public sealed class MirPathConditionAnalysisTests
         Assert.Equal(2, predicates.Count);
         Assert.All(predicates, predicate => Assert.True(predicate.ExpectedValue));
         Assert.Equal(2, predicates.Select(predicate => predicate.Condition).Distinct().Count());
-        var cfg = MirControlFlowAnalysis.Analyze(program, callable.Id);
+        var cfg = analyses.ControlFlow(callable);
         Assert.True(
             cfg.StrictlyDominates(
                 predicates[0].Controller,
@@ -132,7 +136,8 @@ public sealed class MirPathConditionAnalysisTests
             """);
         var callable = Assert.Single(program.Callables);
         var site = ApplySite(callable);
-        var paths = MirPathConditionAnalysis.Analyze(program, callable.Id);
+        var analyses = new MirAnalysisStore(program);
+        var paths = analyses.PathConditions(callable);
 
         Assert.Equal(
             MirExecutionMultiplicity.LoopCarried,
@@ -181,8 +186,9 @@ public sealed class MirPathConditionAnalysisTests
             program.Callables,
             candidate => candidate.Name == "TailMerge");
         var site = ApplySite(callable);
-        var cfg = MirControlFlowAnalysis.Analyze(program, callable.Id);
-        var paths = MirPathConditionAnalysis.Analyze(program, callable.Id);
+        var analyses = new MirAnalysisStore(program);
+        var cfg = analyses.ControlFlow(callable);
+        var paths = analyses.PathConditions(callable);
 
         // X executes either through the direct true edge (a), or through the false edge followed by
         // b's true edge (!a && b). A flat conjunction used to report no guard, which was false-safe.
@@ -204,7 +210,7 @@ public sealed class MirPathConditionAnalysisTests
                 .Distinct()
                 .Count());
 
-        var effect = Assert.Single(MirEffectAnalysis.Analyze(program).Effects);
+        var effect = Assert.Single(analyses.Effects.Effects);
         Assert.Equal(MirPathConditionKind.Any, effect.PathCondition.Kind);
         Assert.False(effect.PathCondition.IsAlways);
     }

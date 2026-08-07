@@ -425,16 +425,6 @@ public sealed class HirSemanticModel
     public Scope? FindRootScope(HirNodeId opId) =>
         _validation.ScopeGraph?.FindCallableScope(opId);
 
-    /// <summary>
-    /// The scope at a stable HIR node-and-role site. A copied owner node follows the same derivation chain
-    /// as declaration lookup before consulting the graph.
-    /// </summary>
-    public Scope? FindScope(HirScopeSite site) =>
-        _validation.ScopeGraph?.FindScope(site);
-
-    /// <summary>One HIR scope by semantic scope identity.</summary>
-    public Scope? FindScope(ScopeId scopeId) => _validation.ScopeGraph?.FindScope(scopeId);
-
     /// <summary>Every HIR scope in the model, keyed by semantic scope identity.</summary>
     public IReadOnlyDictionary<ScopeId, Scope> Scopes =>
         _validation.ScopeGraph?.Scopes ?? EmptyScopes;

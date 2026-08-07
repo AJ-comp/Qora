@@ -464,44 +464,18 @@ public sealed class MirCallable
     public bool ContainsBlock(MirBlockId id) =>
         _blocks.ContainsKey(id);
 
-    public bool ContainsBlock(MirBlock? block) =>
-        block is not null
-        && _blocks.TryGetValue(block.Id, out var owned)
-        && ReferenceEquals(owned, block);
-
     public MirBlock RequireBlock(MirBlockId id) =>
         _blocks.TryGetValue(id, out var block)
             ? block
             : throw Missing(nameof(id), id, "block");
 
-    public MirBlock RequireBlock(MirBlock block)
-    {
-        ArgumentNullException.ThrowIfNull(block);
-        return ContainsBlock(block)
-            ? block
-            : throw Foreign(nameof(block), block.Id, "block");
-    }
-
     public bool ContainsInstruction(MirInstructionId id) =>
         _instructions.ContainsKey(id);
-
-    public bool ContainsInstruction(MirInstruction? instruction) =>
-        instruction is not null
-        && _instructions.TryGetValue(instruction.Id, out var owned)
-        && ReferenceEquals(owned.Instruction, instruction);
 
     public MirInstruction RequireInstruction(MirInstructionId id) =>
         _instructions.TryGetValue(id, out var location)
             ? location.Instruction
             : throw Missing(nameof(id), id, "instruction");
-
-    public MirInstruction RequireInstruction(MirInstruction instruction)
-    {
-        ArgumentNullException.ThrowIfNull(instruction);
-        return ContainsInstruction(instruction)
-            ? instruction
-            : throw Foreign(nameof(instruction), instruction.Id, "instruction");
-    }
 
     public (MirBlock Block, int Index) RequireInstructionLocation(
         MirInstructionId id) =>
@@ -522,24 +496,10 @@ public sealed class MirCallable
             ? site.Value
             : throw Missing(nameof(id), id, "SSA value");
 
-    public MirValue RequireValue(MirValue value)
-    {
-        ArgumentNullException.ThrowIfNull(value);
-        return ContainsValue(value)
-            ? value
-            : throw Foreign(nameof(value), value.Id, "SSA value");
-    }
-
     public MirValueDefinition DefinitionOf(MirValueId value) =>
         _valueSites.TryGetValue(value, out var site)
             ? site.Definition
             : throw Missing(nameof(value), value, "SSA value");
-
-    public MirValueDefinition DefinitionOf(MirValue value)
-    {
-        value = RequireValue(value);
-        return _valueSites[value.Id].Definition;
-    }
 
     public bool ContainsStorage(MirStorageId id) =>
         _storageSites.ContainsKey(id);
@@ -566,9 +526,6 @@ public sealed class MirCallable
     /// Returns whether a storage is a parameter region or a local allocation. The kind is derived
     /// from the parameter or array-create site which owns the storage identity.
     /// </summary>
-    public MirArrayStorageKind StorageKindOf(MirStorageId storage) =>
-        StorageKindOf(RequireStorage(storage));
-
     public MirArrayStorageKind StorageKindOf(MirArrayStorage storage)
     {
         storage = RequireStorage(storage);
@@ -582,9 +539,6 @@ public sealed class MirCallable
     /// Parameter storage is typed by its parameter value; local storage is typed by its
     /// <see cref="MirArrayCreate"/> result.
     /// </summary>
-    public MirType StorageTypeOf(MirStorageId storage) =>
-        StorageTypeOf(RequireStorage(storage));
-
     public MirType StorageTypeOf(MirArrayStorage storage)
     {
         storage = RequireStorage(storage);
@@ -604,9 +558,6 @@ public sealed class MirCallable
     /// Derives the storage aliasing contract from its owner. Local allocations are unique.
     /// Parameter regions are shared only when the parameter is borrowed and read-only.
     /// </summary>
-    public MirStorageAliasMode StorageAliasModeOf(MirStorageId storage) =>
-        StorageAliasModeOf(RequireStorage(storage));
-
     public MirStorageAliasMode StorageAliasModeOf(MirArrayStorage storage)
     {
         storage = RequireStorage(storage);

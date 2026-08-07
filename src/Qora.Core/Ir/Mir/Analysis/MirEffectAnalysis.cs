@@ -273,7 +273,7 @@ internal sealed class MirFormalQubitEffectQuery
 
         try
         {
-            foreach (var dependency in _callGraph.CallsFrom(callable.Id)
+            foreach (var dependency in _callGraph.CallsFrom(callable)
                          .Where(IsQuantumCall)
                          .Select(call => call.Callee)
                          .Distinct())
@@ -468,17 +468,6 @@ public sealed class MirEffectSnapshot
     public IReadOnlyList<MirQuantumInstructionEffect> Effects { get; }
     public IReadOnlyList<MirCallableEffectSummary> CallableSummaries { get; }
 
-    internal bool IsFor(MirProgram program) =>
-        ReferenceEquals(_sourceProgram, program);
-
-    internal void EnsureFor(MirProgram program)
-    {
-        if (!IsFor(program))
-            throw new InvalidOperationException(
-                "the MIR effect analysis belongs to a different MIR program instance; "
-                + "reanalyze the requested program before consuming it");
-    }
-
     public MirQuantumInstructionEffect? EffectAt(MirInstructionSite site)
         => _effectBySite.GetValueOrDefault(site);
 
@@ -512,23 +501,13 @@ internal static class MirEffectAnalysis
         return new MirFormalQubitEffectQuery(callGraph);
     }
 
-    internal static MirEffectSnapshot Analyze(MirProgram program)
-    {
-        ArgumentNullException.ThrowIfNull(program);
-        var callGraph = MirCallGraphAnalysis.AnalyzeVerified(program);
-        return new Analyzer(
-            callGraph,
-            callable => MirStorageProvenanceAnalysis.Analyze(program, callable),
-            callable => MirPathConditionAnalysis.Analyze(program, callable)).Run();
-    }
-
     /// <summary>
     /// Computes effects from dependency providers owned by the same verified MIR snapshot.
     /// </summary>
     internal static MirEffectSnapshot AnalyzeVerified(
         MirCallGraph callGraph,
-        Func<MirCallableId, MirStorageProvenanceSnapshot> storageProvenance,
-        Func<MirCallableId, MirPathConditionSnapshot> pathConditions)
+        Func<MirCallable, MirStorageProvenanceSnapshot> storageProvenance,
+        Func<MirCallable, MirPathConditionSnapshot> pathConditions)
     {
         ArgumentNullException.ThrowIfNull(callGraph);
         ArgumentNullException.ThrowIfNull(storageProvenance);
@@ -540,13 +519,13 @@ internal static class MirEffectAnalysis
     {
         private readonly MirProgram _program;
         private readonly MirFormalQubitEffectQuery _qubitEffects;
-        private readonly Func<MirCallableId, MirStorageProvenanceSnapshot> _storageProvenance;
-        private readonly Func<MirCallableId, MirPathConditionSnapshot> _pathConditions;
+        private readonly Func<MirCallable, MirStorageProvenanceSnapshot> _storageProvenance;
+        private readonly Func<MirCallable, MirPathConditionSnapshot> _pathConditions;
 
         public Analyzer(
             MirCallGraph callGraph,
-            Func<MirCallableId, MirStorageProvenanceSnapshot> storageProvenance,
-            Func<MirCallableId, MirPathConditionSnapshot> pathConditions)
+            Func<MirCallable, MirStorageProvenanceSnapshot> storageProvenance,
+            Func<MirCallable, MirPathConditionSnapshot> pathConditions)
         {
             _program = callGraph.SourceProgram;
             _qubitEffects = CreateFormalQubitEffectQueryUnchecked(callGraph);
@@ -563,10 +542,10 @@ internal static class MirEffectAnalysis
             var effects = new List<MirQuantumInstructionEffect>();
             foreach (var callable in _program.Callables)
             {
-                var storage = _storageProvenance(callable.Id);
-                storage.EnsureFor(_program, callable.Id);
-                var paths = _pathConditions(callable.Id);
-                paths.EnsureFor(_program, callable.Id);
+                var storage = _storageProvenance(callable);
+                storage.EnsureFor(callable);
+                var paths = _pathConditions(callable);
+                paths.EnsureFor(callable);
                 foreach (var block in callable.Blocks)
                 {
                     foreach (var instruction in block.Instructions)

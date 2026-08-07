@@ -1,0 +1,546 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>17. CFG의 successor와 predecessor — Qora 컴파일러 개발자 매뉴얼</title>
+<link rel="stylesheet" href="developer.css">
+<script src="developer-syntax.js" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#main-content">본문으로 건너뛰기</a>
+<header class="hero">
+  <div class="tag">Qora · Compiler Developer Manual · Chapter 17</div>
+  <h1>CFG의 successor와 predecessor</h1>
+  <p>Work c44의 네 block이 실제 두 인접표와 재사용 가능한 분석 snapshot으로 바뀌는 과정</p>
+</header>
+
+<main class="wrap" id="main-content">
+  <nav class="chapter-nav" aria-label="장 이동(상단)">
+    <div class="group"><a href="chapter-16.html">← 이전: MIR snapshot</a><a href="index.html#chapters">전체 목차</a></div>
+    <div class="group"><a href="index.html#c18">다음 주제: 18장 목차 →</a></div>
+  </nav>
+
+  <p class="lead">
+    아래 공통 소스는 앞 장의 lowering을 거쳐 <code>Work c44</code>와 네 개의 MIR block이 되었습니다.<br>
+    이 장은 완성된 <code>Work c44</code>가 기본 CLI의 효과 분석에 들어가는 지점부터 시작하여, successor와 predecessor dictionary가 채워지는 순서를 실제 지역 변수값으로 연결합니다.
+  </p>
+
+  <h2 id="source">네 block을 만든 공통 소스</h2>
+
+<pre><code class="language-qora">function Next(value: int): int
+{
+    return value + 1;
+}
+
+operation Work()
+{
+    var values: int[] = [0];
+    use q = Qubit[1];
+
+    values[0] = Next(values[0]);
+
+    if (values[0] == 1)
+    {
+        X(q[0]);
+    }
+
+    H(q[0]);
+}</code></pre>
+
+  <p>
+    15장에서 <code>if</code>를 lowering하면서 <code>Work c44</code>의 네 block과 모든 Terminator가 이미 완성되었습니다.<br>
+    이번 분석은 소스 문장을 다시 읽거나 block을 추가하지 않습니다. 아래 입력 객체에 저장된 Terminator만 읽습니다.
+  </p>
+
+<pre><code class="language-plaintext">Work c44.Blocks = [b0, b1, b2, b3]
+
+b0.Terminator = MirBranch(%v10, TrueTarget=b1, FalseTarget=b2)
+b1.Terminator = MirJump(Target=b3)
+b2.Terminator = MirJump(Target=b3)
+b3.Terminator = MirReturn
+
+// 분석 직전에는 위 실행 구조가 완성되어 있습니다.
+// _controlFlow[c6]은 이미 완료되었지만,
+// _controlFlow[c44]는 아직 생성되지 않았습니다.</code></pre>
+
+  <h2 id="analysis-entry">기본 CLI가 <code>Work c44</code>의 CFG를 처음 요청하는 지점</h2>
+
+  <p>
+    16장의 <code>MirEffectAnalysis.Analyzer.Run</code>에서 첫 반복 <code>Next c6</code>이 끝나면 두 번째 반복의 <code>callable</code>에 <code>Work c44</code>가 들어갑니다.<br>
+    <code>StorageProvenance(Work c44)</code>까지 반환된 다음에는 아래의 <code>_pathConditions(callable)</code>이 실행됩니다.
+  </p>
+
+<pre><code class="language-plaintext">// MirEffectAnalysis.Analyzer.Run의 두 번째 callable 반복
+callable = Work c44
+
+// Next 처리에서 이미 만들어진 CFG cache
+_controlFlow =
+{
+    c6 → Lazy(completed Next CFG)
+}
+
+var paths = _pathConditions(callable);
+// delegate 호출: PathConditions(Work c44)</code></pre>
+
+  <p>
+    이 호출은 <code>PathConditions → ControlFlow → AnalyzeUnchecked</code>로 이어지면서 <code>Work c44</code>의 CFG를 처음 계산합니다.<br>
+    먼저 <code>b0</code> 반복에서 successor 항목이 만들어지고, 이어 같은 edge를 뒤집어 predecessor 항목을 채웁니다.<br>
+    그 과정에서 <code>b1</code>, <code>b2</code>, <code>b3</code>이 두 dictionary에 각각 어떤 값으로 들어가는지도 함께 드러납니다.
+  </p>
+
+  <h2 id="input"><code>PathConditions(Work c44)</code>에서 <code>source</code>까지</h2>
+
+  <p>
+    <code>Run</code>의 지역 변수 <code>callable</code>은 <code>_program.Callables</code>의 두 번째 객체인 <code>Work c44</code>입니다.<br>
+    provider delegate가 이 객체를 그대로 <code>PathConditions</code>의 인수로 전달하고, 메서드의 <code>RequireCallable</code>이 현재 store의 program이 소유한 exact object인지 다시 확인합니다.
+  </p>
+
+<pre><code class="language-csharp">public MirPathConditionSnapshot PathConditions(MirCallable callable)
+{
+    var source = _program.RequireCallable(callable);
+    // callable=Work c44
+    // source=Program.Callables[1]의 동일한 Work c44 객체
+
+    return _pathConditions.GetOrAdd(
+        source.Id,                              // c44
+        _ =&gt; NewLazy(
+            () =&gt; MirPathConditionAnalysis.AnalyzeVerified(
+                ControlFlow(source)))).Value;
+}</code></pre>
+
+  <p>
+    <code>_pathConditions</code>에는 아직 c44 항목이 없으므로 <code>GetOrAdd</code>가 새 <code>Lazy</code>를 넣고 <code>.Value</code>가 factory를 실행합니다.<br>
+    factory의 첫 인수 계산이 <code>ControlFlow(source)</code>이며, 이때 전달되는 <code>source</code>는 위에서 확정한 <code>Work c44</code>입니다.
+  </p>
+
+<pre><code class="language-csharp">public MirControlFlowSnapshot ControlFlow(MirCallable callable)
+{
+    var source = _program.RequireCallable(callable);
+    // callable=PathConditions가 전달한 Work c44
+    // source=현재 _program이 소유한 동일한 Work c44
+
+    return _controlFlow.GetOrAdd(
+        source.Id,                              // c44
+        _ =&gt; NewLazy(
+            () =&gt; MirControlFlowAnalysis.AnalyzeUnchecked(source))).Value;
+}</code></pre>
+
+  <p>
+    이 시점의 <code>_controlFlow</code>는 비어 있지 않습니다. 앞선 <code>Next c6</code> 결과가 이미 들어 있지만 key <code>c44</code>는 없습니다.<br>
+    따라서 <code>GetOrAdd</code>가 두 번째 key <code>c44</code>에 새 <code>Lazy</code>를 넣고, 바로 뒤의 <code>.Value</code>가 factory를 실행하여 <code>AnalyzeUnchecked(source)</code>로 들어갑니다.
+  </p>
+
+<pre><code class="language-plaintext">_controlFlow = { c6 → Lazy(completed Next CFG) }
+    ↓ GetOrAdd(c44, factory)
+_controlFlow =
+{
+    c6  → Lazy(completed Next CFG),
+    c44 → Lazy(not evaluated Work CFG)
+}
+    ↓ .Value
+MirControlFlowAnalysis.AnalyzeUnchecked(source: Work c44)</code></pre>
+
+  <h2 id="analysis-order"><code>AnalyzeUnchecked</code>에서 처음 실행되는 두 호출</h2>
+
+  <p>
+    이제 <code>source</code>가 어디서 왔는지 확인했으므로 분석 함수의 전체 실행 순서를 볼 수 있습니다.<br>
+    첫 지역 변수 <code>successors</code>를 만든 뒤, 두 번째 지역 변수 <code>predecessors</code>는 바로 그 첫 결과를 입력으로 받습니다.
+  </p>
+
+<pre><code class="language-csharp">internal static MirControlFlowSnapshot AnalyzeUnchecked(MirCallable callable)
+{
+    // 예제 인수: callable=Work c44
+    var successors = BuildSuccessors(callable);
+    var predecessors = BuildPredecessors(successors);
+
+    var reachable = ReachableFrom(callable.EntryBlock.Id, successors);
+    var reachableFrom = successors.Keys.ToDictionary(
+        block =&gt; block,
+        block =&gt; ReachableFrom(block, successors));
+    var exits = reachable
+        .Where(block =&gt; successors[block].Count == 0)
+        .ToHashSet();
+    var canReachExit = ReachableFrom(exits, predecessors);
+    var dominators = ComputeDominators(
+        callable.EntryBlock.Id,
+        successors.Keys,
+        reachable,
+        predecessors);
+    var postDominators = ComputePostDominators(
+        successors.Keys,
+        reachable,
+        canReachExit,
+        exits,
+        successors);
+
+    return new MirControlFlowSnapshot(
+        callable,
+        successors,
+        predecessors,
+        reachableFrom,
+        dominators,
+        postDominators,
+        reachable);
+}</code></pre>
+
+  <p>
+    이번 장은 첫 두 dictionary가 만들어져 최종 snapshot에 들어가는 경로를 중심으로 다룹니다.<br>
+    도달 가능성과 dominator 계산도 같은 두 표를 소비하며, 공통 예제에서는 모든 block이 도달 가능합니다.
+  </p>
+
+  <h2 id="successors"><code>BuildSuccessors(Work c44)</code> 전체 실행</h2>
+
+  <p>
+    <code>BuildSuccessors</code>가 받는 <code>callable.Blocks</code>의 실제 순서는 <code>[b0,b1,b2,b3]</code>입니다.<br>
+    함수는 각 block의 <code>Terminator.Successors</code>를 읽고, 중복을 제거하고 ID 순서로 정렬한 읽기 전용 목록을 dictionary에 추가합니다.
+  </p>
+
+<pre><code class="language-csharp">private static IReadOnlyDictionary&lt;MirBlockId, IReadOnlyList&lt;MirBlockId&gt;&gt;
+    BuildSuccessors(MirCallable callable)              // Work c44
+{
+    var successors =
+        new Dictionary&lt;MirBlockId, IReadOnlyList&lt;MirBlockId&gt;&gt;(
+            callable.Blocks.Count);                    // capacity=4
+
+    foreach (var block in callable.Blocks)             // b0, b1, b2, b3
+    {
+        var orderedTargets = block.Terminator.Successors
+            .Distinct()
+            .OrderBy(target =&gt; target.Value);
+
+        successors.Add(
+            block.Id,
+            MirCollections.Freeze(orderedTargets));
+    }
+
+    return successors;
+}</code></pre>
+
+  <h2 id="terms">첫 <code>b0</code> 반복에서 확인되는 두 방향</h2>
+
+  <p>
+    첫 반복의 <code>block</code>은 <code>b0</code>이고 Terminator는 15장에서 만든 <code>MirBranch</code>입니다.<br>
+    <code>MirBranch.Successors</code>는 참 목적지 <code>b1</code>과 거짓 목적지 <code>b2</code>를 반환하므로 <code>orderedTargets=[b1,b2]</code>가 됩니다.
+  </p>
+
+<pre><code class="language-plaintext">// BuildSuccessors 첫 반복
+block = b0
+block.Terminator = MirBranch
+block.Terminator.Successors = [b1, b2]
+
+Distinct()       → [b1, b2]
+OrderBy(Id)      → [b1, b2]
+Freeze(...)      → 읽기 전용 [b1, b2]
+
+successors =
+{
+    b0: [b1, b2]
+}</code></pre>
+
+  <p>
+    여기서 <em>successor</em>는 현재 block이 끝난 직후 이동할 수 있는 다음 block입니다.<br>
+    따라서 <code>b1</code>과 <code>b2</code>는 <code>b0</code>의 successors입니다. 반대로 같은 화살표를 도착점에서 읽으면 <code>b0</code>은 <code>b1</code>과 <code>b2</code>의 predecessor가 됩니다. predecessor 표는 이 정방향 표가 모두 완성된 뒤에 만듭니다.
+  </p>
+
+  <p>
+    남은 세 반복도 같은 코드가 다른 Terminator 값을 읽는 과정입니다.<br>
+    각 반복이 끝날 때 dictionary는 다음과 같이 한 항목씩 증가합니다.
+  </p>
+
+<pre><code class="language-plaintext">// 둘째 반복: b1
+b1.Terminator.Successors = [b3]
+successors = { b0:[b1,b2], b1:[b3] }
+
+// 셋째 반복: b2
+b2.Terminator.Successors = [b3]
+successors = { b0:[b1,b2], b1:[b3], b2:[b3] }
+
+// 넷째 반복: b3
+b3.Terminator = MirReturn
+b3.Terminator.Successors = []
+successors =
+{
+    b0: [b1, b2],
+    b1: [b3],
+    b2: [b3],
+    b3: []
+}</code></pre>
+
+  <p>
+    <code>b3</code> 뒤에는 같은 callable 안에서 실행할 block이 없으므로 값은 빈 목록이지만, key <code>b3</code> 자체는 유지됩니다.<br>
+    또한 <code>Distinct()</code>는 같은 목적지가 Terminator에 여러 번 나타나더라도 인접표에는 한 번만 기록하고, <code>OrderBy</code>는 분석 결과의 순서를 ID 기준으로 안정화합니다.
+  </p>
+
+  <h2 id="predecessors"><code>BuildPredecessors(successors)</code>로 전달되는 값</h2>
+
+  <p>
+    <code>BuildSuccessors</code>가 반환하면 <code>AnalyzeUnchecked</code>의 첫 지역 변수가 완성됩니다.<br>
+    다음 호출은 callable이나 Terminator를 다시 받지 않고, 방금 만든 dictionary 하나만 받습니다.
+  </p>
+
+<pre><code class="language-plaintext">BuildPredecessors(
+    successors:
+    {
+        b0: [b1, b2],
+        b1: [b3],
+        b2: [b3],
+        b3: []
+    })</code></pre>
+
+  <p>
+    함수 전체는 먼저 모든 block의 빈 incoming 집합을 만들고, successor 화살표를 역방향으로 등록한 뒤, 각 집합을 정렬된 읽기 전용 목록으로 바꿉니다.
+  </p>
+
+<pre><code class="language-csharp">private static IReadOnlyDictionary&lt;MirBlockId, IReadOnlyList&lt;MirBlockId&gt;&gt;
+    BuildPredecessors(
+        IReadOnlyDictionary&lt;MirBlockId, IReadOnlyList&lt;MirBlockId&gt;&gt;
+            successors)
+{
+    var mutablePredecessors =
+        new Dictionary&lt;MirBlockId, HashSet&lt;MirBlockId&gt;&gt;(successors.Count);
+
+    foreach (var block in successors.Keys)
+        mutablePredecessors.Add(block, new HashSet&lt;MirBlockId&gt;());
+
+    foreach (var (source, targets) in successors)
+    {
+        foreach (var target in targets)
+            mutablePredecessors[target].Add(source);
+    }
+
+    var predecessors =
+        new Dictionary&lt;MirBlockId, IReadOnlyList&lt;MirBlockId&gt;&gt;(successors.Count);
+
+    foreach (var (target, sources) in mutablePredecessors)
+    {
+        var orderedSources = sources.OrderBy(source =&gt; source.Value);
+        predecessors.Add(target, MirCollections.Freeze(orderedSources));
+    }
+
+    return predecessors;
+}</code></pre>
+
+  <h2 id="initialize-predecessors">모든 block의 빈 incoming 집합 생성</h2>
+
+  <p>
+    첫 <code>foreach</code>는 <code>successors.Keys=[b0,b1,b2,b3]</code>을 순회합니다.<br>
+    아직 화살표를 뒤집지 않았으므로 각 value는 빈 <code>HashSet</code>입니다.
+  </p>
+
+<pre><code class="language-plaintext">// 초기화 반복 완료
+mutablePredecessors =
+{
+    b0: {},
+    b1: {},
+    b2: {},
+    b3: {}
+}</code></pre>
+
+  <p>
+    처음부터 네 key를 모두 만드는 이유는 들어오는 화살표가 없는 진입 block <code>b0</code>도 최종 결과에 포함해야 하기 때문입니다.<br>
+    <code>HashSet</code>은 뒤집는 동안 source를 추가할 수 있고 같은 source가 중복 등록되는 것을 막는 작업용 집합입니다.
+  </p>
+
+  <h2 id="reverse-edges">네 source 항목의 역방향 등록</h2>
+
+  <p>
+    두 번째 중첩 반복은 <code>successors</code>의 각 <code>source → targets</code>를 읽습니다.<br>
+    첫 source <code>b0</code>에는 target이 두 개이므로 안쪽 반복도 두 번 실행됩니다.
+  </p>
+
+<pre><code class="language-plaintext">// source=b0, targets=[b1,b2]
+target=b1 → mutablePredecessors[b1].Add(b0)
+target=b2 → mutablePredecessors[b2].Add(b0)
+
+mutablePredecessors =
+{
+    b0: {},
+    b1: {b0},
+    b2: {b0},
+    b3: {}
+}</code></pre>
+
+  <p>
+    이것이 앞에서 확인한 <code>b0 → b1</code>을 <code>b1 ← b0</code>으로 읽는 실제 dictionary 변경입니다.<br>
+    이어서 <code>b1</code>과 <code>b2</code>의 target <code>b3</code>을 각각 뒤집어 등록합니다.
+  </p>
+
+<pre><code class="language-plaintext">// source=b1, targets=[b3]
+mutablePredecessors[b3].Add(b1)
+
+// source=b2, targets=[b3]
+mutablePredecessors[b3].Add(b2)
+
+// source=b3, targets=[]
+// 안쪽 반복 0회, 변경 없음
+
+mutablePredecessors =
+{
+    b0: {},
+    b1: {b0},
+    b2: {b0},
+    b3: {b1, b2}
+}</code></pre>
+
+  <p>
+    <code>b3</code>의 두 predecessor는 15장의 큐비트 Phi 입력이 <code>(b1,0)</code>과 <code>(b2,0)</code> 두 incoming edge를 갖는 이유와 일치합니다.<br>
+    다만 CFG 표에는 목적 block ID만 저장되며, Phi가 보존한 successor 순번과 큐비트 버전은 Terminator와 <code>MirQubitPhiInput</code>이 계속 권위 있는 원본입니다.
+  </p>
+
+  <h2 id="freeze-predecessors">정렬된 읽기 전용 predecessor 목록</h2>
+
+  <p>
+    마지막 반복은 작업용 <code>HashSet</code>을 ID 순서로 정렬하고 <code>MirCollections.Freeze</code>로 읽기 전용 목록을 만듭니다.<br>
+    공통 예제의 최종 반환값은 다음과 같습니다.
+  </p>
+
+<pre><code class="language-plaintext">predecessors =
+{
+    b0: [],
+    b1: [b0],
+    b2: [b0],
+    b3: [b1, b2]
+}</code></pre>
+
+  <h2 id="both-maps">같은 실행 구조를 두 방향으로 읽은 결과</h2>
+
+<pre><code class="language-plaintext">successors                         predecessors
+b0 → [b1, b2]                     b0 ← []
+b1 → [b3]                         b1 ← [b0]
+b2 → [b3]                         b2 ← [b0]
+b3 → []                           b3 ← [b1, b2]
+
+실행 방향
+        ┌──▶ b1 ──┐
+b0 ─────┤         ├──▶ b3
+        └──▶ b2 ──┘</code></pre>
+
+  <p>
+    두 dictionary는 서로 독립적으로 해석한 두 원본이 아닙니다.<br>
+    먼저 각 Terminator에서 successor 표 하나를 만들고, predecessor 표는 그 결과만 뒤집어 만들었으므로 두 방향이 어긋날 여지가 줄어듭니다.
+  </p>
+
+  <h2 id="snapshot-result">나머지 분석값과 <code>MirControlFlowSnapshot</code> 생성</h2>
+
+  <p>
+    두 표가 완성되면 <code>AnalyzeUnchecked</code>은 같은 표를 이용하여 나머지 지역 변수를 계산합니다.<br>
+    공통 예제에는 loop와 도달 불가 block이 없으므로 값은 다음과 같이 닫힙니다.
+  </p>
+
+<pre><code class="language-plaintext">reachable = {b0, b1, b2, b3}
+exits     = {b3}
+
+reachableFrom[b0] = {b0, b1, b2, b3}
+reachableFrom[b1] = {b1, b3}
+reachableFrom[b2] = {b2, b3}
+reachableFrom[b3] = {b3}
+
+dominators[b0] = {b0}
+dominators[b1] = {b0, b1}
+dominators[b2] = {b0, b2}
+dominators[b3] = {b0, b3}
+
+postDominators[b0] = {b0, b3}
+postDominators[b1] = {b1, b3}
+postDominators[b2] = {b2, b3}
+postDominators[b3] = {b3}</code></pre>
+
+  <p>
+    마지막 생성자 호출은 지금까지 사용한 exact <code>Work c44</code> 객체와 모든 결과를 한 번에 전달합니다.<br>
+    successor와 predecessor의 바깥 dictionary는 생성자에서 <code>FrozenDictionary</code>로 바뀌며, 도달 가능성과 dominance 집합도 고정됩니다.
+  </p>
+
+<pre><code class="language-plaintext">return new MirControlFlowSnapshot(
+    sourceCallable: Work c44,
+    successors:     {b0:[b1,b2], b1:[b3], b2:[b3], b3:[]},
+    predecessors:   {b0:[], b1:[b0], b2:[b0], b3:[b1,b2]},
+    reachableFrom:  위의 네 집합,
+    dominators:     위의 네 집합,
+    postDominators: 위의 네 집합,
+    reachable:      {b0,b1,b2,b3});</code></pre>
+
+  <p>
+    생성자는 이어서 <code>Work c44</code>의 각 instruction 위치와 각 block의 Terminator 위치를 <code>MirProgramPoint</code>로 만듭니다.<br>
+    예를 들어 <code>i15</code>는 <code>b3</code> 안에서 <code>H</code> 직전의 point에 연결되고, <code>b3</code>의 Terminator point는 <code>H</code>까지 모든 일반 instruction이 끝난 뒤를 가리킵니다.
+  </p>
+
+<pre><code class="language-plaintext">MirControlFlowSnapshot 결과 일부
+├─ Callable       = c44
+├─ EntryBlock     = b0
+├─ ReachableBlocks= [b0,b1,b2,b3]
+├─ SuccessorsOf(b0)   = [b1,b2]
+├─ PredecessorsOf(b3) = [b1,b2]
+├─ PointBeforeInstruction(i15) = b3의 H 직전
+└─ TerminatorPoint(b3)         = b3의 return 직전</code></pre>
+
+  <h2 id="consumer-api">내부 반환 완료와 외부 <code>ControlFlow</code> cache hit</h2>
+
+  <p>
+    생성된 <code>MirControlFlowSnapshot</code>은 <code>AnalyzeUnchecked</code>에서 반환되어 <code>_controlFlow[c44].Value</code>에 저장됩니다.<br>
+    이어서 <code>ControlFlow</code>가 이 객체를 <code>PathConditions</code>의 factory에 반환하고, path 분석이 끝나면 <code>MirEffectAnalysis.Run</code>의 지역 변수 <code>paths</code>에 도착합니다.
+  </p>
+
+<pre><code class="language-plaintext">new MirControlFlowSnapshot(...)
+    ↓ AnalyzeUnchecked 반환
+_controlFlow[c44].Value = 완성된 Work CFG snapshot
+    ↓ ControlFlow 반환
+MirPathConditionAnalysis.AnalyzeVerified(Work CFG)
+    ↓
+_pathConditions[c44].Value = Work path-condition snapshot
+    ↓ PathConditions 반환
+paths = Work path-condition snapshot
+
+// 이때 CFG cache
+_controlFlow key set = {c6, c44}</code></pre>
+
+  <p>
+    <code>Run</code>은 계속해서 <code>Work c44</code>의 instruction을 순회하며 <code>X</code>와 <code>H</code>의 effect를 기록하고, 마지막에 <code>_effects.Value</code>를 완성합니다.<br>
+    이후 같은 lowered snapshot을 받은 외부 소비자가 진입 operation의 CFG를 요청할 수 있습니다. 다음 코드에서는 <code>mirSnapshot</code>과 <code>workCallable</code>을 먼저 정의한 뒤 <code>ControlFlow</code>를 호출합니다.
+  </p>
+
+<pre><code class="language-csharp">// mir는 16장에서 Effects를 이미 평가한 동일한 lowered snapshot
+MirSnapshot mirSnapshot = mir
+    ?? throw new InvalidOperationException("lowered MIR is missing");
+MirCallable workCallable = mirSnapshot.Program.EntryPoint;
+// exact object: Work c44
+
+MirControlFlowSnapshot firstExternalRequest =
+    mirSnapshot.Analyses.ControlFlow(workCallable);
+// cache hit: _controlFlow[c44]의 완료된 snapshot 반환
+
+MirControlFlowSnapshot secondExternalRequest =
+    mirSnapshot.Analyses.ControlFlow(workCallable);</code></pre>
+
+<pre><code class="language-plaintext">ReferenceEquals(firstExternalRequest, secondExternalRequest) = true
+
+firstExternalRequest.SuccessorsOf(workCallable.EntryBlock.Id)
+→ SuccessorsOf(b0)
+→ [b1, b2]
+
+// 두 외부 호출 모두에서 실행되지 않음
+BuildSuccessors(Work c44)
+BuildPredecessors(successors)
+new MirControlFlowSnapshot(...)</code></pre>
+
+  <p>
+    외부 호출에서도 <code>RequireCallable</code> 검사는 수행되지만, <code>GetOrAdd(c44, ...)</code>는 이미 완료된 <code>Lazy</code>를 반환합니다.<br>
+    따라서 기본 CLI 흐름에서 <code>Work c44</code> CFG의 최초 계산자는 <code>Effects → PathConditions(Work) → ControlFlow(Work)</code>이고, 그 이후 같은 snapshot의 직접적인 <code>ControlFlow(workCallable)</code> 호출은 cache hit입니다.
+  </p>
+
+  <div class="callout good">
+    <span class="h">예제 뒤의 일반 원리</span>
+    successor는 Terminator가 가리키는 다음 block이고, predecessor는 같은 화살표를 도착 block 기준으로 뒤집어 읽은 이전 block입니다.<br>
+    현재 구현은 Terminator에서 successor 표를 먼저 만들고 그 표를 역전하여 predecessor 표를 만들며, 완성된 결과를 exact callable 전용 immutable snapshot으로 cache합니다.<br>
+    공통 예제의 기본 CLI 경로에서는 <code>Effects</code>가 <code>Next c6</code>, <code>Work c44</code> 순서로 이 cache를 채웁니다.
+  </div>
+
+  <nav class="chapter-nav" aria-label="장 이동(하단)">
+    <div class="group"><a href="chapter-16.html">← 이전: MIR snapshot</a><a href="index.html#chapters">전체 목차</a></div>
+    <div class="group"><a href="index.html#c18">다음 주제: 18장 목차 →</a></div>
+  </nav>
+
+  <footer>Qora 컴파일러 개발자 매뉴얼 · 17장</footer>
+</main>
+</body>
+</html>
