@@ -339,26 +339,6 @@ public static class QoraCompiler
             mir = builtHir.ToMir(
                 instrumentation?.MirLowering);
 
-            // MIR analyses run on the canonical lowered graph before any internal inverse request can
-            // be injected. The future cleanup scheduler will consume facts bound to this exact program,
-            // mark exact MIR call sites, and then hand the resulting snapshot to the materializer below.
-            _ = mir.Analyses.Effects;
-            var materialization = MirAdjointMaterializer.Run(mir);
-            if (!materialization.Succeeded)
-            {
-                foreach (var error in materialization.Errors)
-                {
-                    var span = error.Origin.SourceHirOrigin.Span;
-                    diagnostics.Add(
-                        new CompilationDiagnostic(
-                            CompilationStage.MirLowering,
-                            new QoraError(error.Message, error.Code, span),
-                            new DiagnosticOrigin.Mir(mir, error.Origin)));
-                }
-                return Finish();
-            }
-            mir = materialization.Snapshot;
-
             if (AddInvalidMirBoundsDiagnostics(mir))
                 return Finish();
         }

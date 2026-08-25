@@ -112,6 +112,42 @@ public sealed class QoraMirTests
     }
 
     [Fact]
+    public void LoweringUsesTheFirstCreatedBlockAsTheCallableEntry()
+    {
+        var snapshot = CompileSnapshot("""
+            operation Main() {
+                if (true) {
+                }
+            }
+            """);
+        var main = snapshot.Program.EntryPoint;
+
+        Assert.True(main.Blocks.Count > 1);
+        Assert.Same(main.Blocks[0], main.EntryBlock);
+    }
+
+    [Fact]
+    public void MirPrinterPlacesQubitPhiDefinitionsInsideTheirBlock()
+    {
+        var snapshot = CompileSnapshot("""
+            operation Main() {
+                use q = Qubit[1];
+                if (true) {
+                    X(q[0]);
+                }
+                H(q[0]);
+            }
+            """);
+        var printed = MirPrinter.Print(snapshot.Program);
+
+        Assert.Contains("&q0.v2 = phi [&q0.v1, ^b1], [&q0.v0, ^b2]", printed);
+        Assert.DoesNotContain("qubit &q0.v2 [phi", printed);
+        Assert.True(
+            printed.IndexOf("^b3(", StringComparison.Ordinal)
+            < printed.IndexOf("&q0.v2 = phi", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void WhileAndForHeadersCarryLoopValuesThroughBackedgeArguments()
     {
         var snapshot = CompileSnapshot("""
@@ -409,7 +445,7 @@ public sealed class QoraMirTests
             QOwnershipMode.Borrowed,
             context.Origin());
         var input = new MirQubitPhiInput(
-            new MirControlFlowEdge(MirTestContext.BlockId(0), successorOrdinal: 0),
+            MirControlFlowEdge.Jump(MirTestContext.BlockId(0)),
             qubit);
 
         Assert.Throws<ArgumentOutOfRangeException>(
@@ -423,6 +459,34 @@ public sealed class QoraMirTests
                 new MirQubitVersion(1),
                 Array.Empty<MirQubitPhiInput>(),
                 context.Origin()));
+    }
+
+    [Fact]
+    public void ControlFlowEdgesUseSemanticKindsAndRequireSwitchCaseValues()
+    {
+        var source = MirTestContext.BlockId(3);
+        var branchTrue = MirControlFlowEdge.BranchTrue(source);
+        var switchCase = MirControlFlowEdge.SwitchCase(source, 42);
+        var switchDefault = MirControlFlowEdge.SwitchDefault(source);
+
+        Assert.Equal(MirControlFlowEdgeKind.BranchTrue, branchTrue.Kind);
+        Assert.Equal("b3.true", branchTrue.ToString());
+        Assert.Equal(MirControlFlowEdgeKind.SwitchCase, switchCase.Kind);
+        Assert.Equal(42, switchCase.SwitchCaseValue);
+        Assert.Equal("b3.case(42)", switchCase.ToString());
+        Assert.Equal(MirControlFlowEdgeKind.SwitchDefault, switchDefault.Kind);
+        Assert.Null(switchDefault.SwitchCaseValue);
+        Assert.Equal("b3.default", switchDefault.ToString());
+
+        Assert.Throws<ArgumentNullException>(
+            () => new MirControlFlowEdge(
+                source,
+                MirControlFlowEdgeKind.SwitchCase));
+        Assert.Throws<ArgumentException>(
+            () => new MirControlFlowEdge(
+                source,
+                MirControlFlowEdgeKind.Jump,
+                switchCaseValue: 1));
     }
 
     [Fact]
@@ -2160,7 +2224,7 @@ public sealed class QoraMirTests
         var error = Assert.Throws<ArgumentException>(
             () => CopyApplyWithFunctors(
                 reset,
-                new[] { MirFunctor.Adjoint }));
+                new[] { MirFunctor.Controlled }));
         Assert.Contains(
             "non-unitary",
             error.Message,
@@ -2168,7 +2232,7 @@ public sealed class QoraMirTests
     }
 
     [Fact]
-    public void QuantumApplyConstructionRejectsUnknownAndNonCanonicalFunctorLists()
+    public void QuantumApplyConstructionRejectsUnknownAndDuplicateFunctors()
     {
         var (program, _) = CompileMir(
             """
@@ -2189,15 +2253,7 @@ public sealed class QoraMirTests
         Assert.Throws<ArgumentException>(
             () => CopyApplyWithFunctors(
                 apply,
-                new[] { MirFunctor.Adjoint, MirFunctor.Adjoint }));
-        Assert.Throws<ArgumentException>(
-            () => CopyApplyWithFunctors(
-                apply,
                 new[] { MirFunctor.Controlled, MirFunctor.Controlled }));
-        Assert.Throws<ArgumentException>(
-            () => CopyApplyWithFunctors(
-                apply,
-                new[] { MirFunctor.Controlled, MirFunctor.Adjoint }));
     }
 
     [Fact]

@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>11. Classical Values and SSA Versions — Qora Compiler Developer Manual</title>
+<link rel="stylesheet" href="developer.css">
+<script src="developer-syntax.js" defer></script>
+</head>
+<body>
+<nav class="language-switch" aria-label="Language"><strong>English</strong><span aria-hidden="true">·</span><a href="../ko/chapter-11.html">한국어</a><span aria-hidden="true">·</span><a href="../ja/chapter-11.html">日本語</a></nav>
+<a class="skip-link" href="#main-content">Skip to main content</a>
+<header class="hero">
+  <div class="tag">Qora · Compiler Developer Manual · Chapter 11</div>
+  <h1>Classical Values and SSA Versions</h1>
+  <p>Why MIR assigns a new value number when the value of one variable changes</p>
+</header>
+
+<main class="wrap" id="main-content">
+  <nav class="chapter-nav" aria-label="Chapter navigation (top)">
+    <div class="group"><a href="chapter-10.html">← Previous: Callable lowering</a><a href="index.html#chapters">All chapters</a></div>
+    <div class="group"><a href="chapter-12.html">Next: Storage and array state →</a></div>
+  </nav>
+
+  <p class="lead">
+    Source code can assign a new value to the same variable name.<br>
+    MIR distinguishes old and new values by never overwriting a value and assigning a new number whenever a new MIR value is created. This chapter shows how that rule applies to the running example.
+  </p>
+
+  <h2 id="source">Source statements that change values</h2>
+
+<pre><code class="language-qora">function Next(value: int): int
+{
+    return value + 1;
+}
+
+operation Work()
+{
+    var values: int[] = [0];
+    use q = Qubit[1];
+
+    values[0] = Next(values[0]);
+
+    if (values[0] == 1)
+    {
+        X(q[0]);
+    }
+
+    H(q[0]);
+}</code></pre>
+
+  <p>
+    This chapter follows only the classical values of <code>values</code> and the condition expression.<br>
+    There is only one source name, <code>values</code>, but its contents change.<br>
+    Immediately after declaration, element 0 is <code>0</code>. After the assignment, it contains the value returned by <code>Next</code>. The conditional must read this updated second state.
+  </p>
+
+  <h2 id="idea">Keep the name and assign a new number to each value</h2>
+
+<pre><code class="language-plaintext">Qora source
+values = initial array
+values = array after updating an element
+
+MIR
+%v1 = initial array
+%v6 = new array state after updating element 0 of %v1
+
+Value currently referenced by values
+%v1  ──after assignment──▶  %v6</code></pre>
+
+  <p>
+    MIR values <code>%v1</code> and <code>%v6</code> are not different source variables.<br>
+    Both are associated with the source variable <code>values</code>, but they represent the array state at different points in time.
+  </p>
+
+  <p id="create-value">
+    The number after <code>%v</code> is an ID that distinguishes the order in which values are created.<br>
+    Each ID is defined once and is never overwritten with another value. This single-definition property is the central rule of SSA.
+  </p>
+
+  <h2 id="next-values">Next keeps its input separate from its result</h2>
+
+<pre><code class="language-plaintext">function Next(value: int): int
+
+%v0 = parameter value
+%v1 = constant 1
+%v2 = %v0 + %v1
+return %v2</code></pre>
+
+  <p>
+    Computing <code>value + 1</code> does not change the parameter value <code>%v0</code> itself.<br>
+    Constant 1 becomes <code>%v1</code>, and the addition result becomes a new value, <code>%v2</code>. Consequently, the compiler can trace every value back to its origin.
+  </p>
+
+  <p>
+    Value numbers only need to be unique within one callable.<br>
+    Therefore, <code>%v1</code> in <code>Next</code> and <code>%v1</code> in <code>Work</code> below are different values and do not conflict.
+  </p>
+
+  <h2 id="work-start">The array declaration creates the first state</h2>
+
+<pre><code class="language-plaintext">var values: int[] = [0];
+
+%v0 = constant 0
+%v1 = [%v0]
+
+current values → %v1</code></pre>
+
+  <p>
+    First, the compiler creates the number 0 for the array element. It then uses that value to create <code>%v1</code>, an array state of length 1.<br>
+    From this point on, reading the source name <code>values</code> uses its current value, <code>%v1</code>.
+  </p>
+
+  <p>
+    An array also has a storage identity separate from its value versions.<br>
+    Put simply, storage identifies “which array location this is,” while an SSA value such as <code>%v1</code> describes “what that array contains now.” Chapter 12 examines this distinction in detail.
+  </p>
+
+  <h2 id="work-assignment">An array assignment creates a new array state</h2>
+
+<pre><code class="language-plaintext">values[0] = Next(values[0]);
+
+%v2 = destination index 0
+%v3 = source index 0
+%v4 = value read from %v1[%v3]
+%v5 = return value of Next(%v4)
+%v6 = new array state with %v5 stored at index %v2 of %v1
+
+current values: %v1 → %v6</code></pre>
+
+  <p>
+    The important point is that <code>%v1</code> is not overwritten.<br>
+    Updating the element produces a new array state, <code>%v6</code>. Only the “current value of <code>values</code>” remembered by the lowerer changes to <code>%v6</code>.
+  </p>
+
+  <p>
+    Calculations before the assignment can therefore continue to refer to <code>%v1</code>, while calculations after it read <code>%v6</code>.<br>
+    The compiler preserves the exact point at which the value changed while keeping one variable name in the source.
+  </p>
+
+  <h2 id="work-condition">The conditional reads the latest value</h2>
+
+<pre><code class="language-plaintext">if (values[0] == 1)
+
+current values = %v6
+        │
+        ├─ create index 0 → %v7
+        ├─ read %v6[%v7] → %v8
+        └─ create constant 1 → %v9
+                  │
+                  ▼
+             compare values → %v10
+                  │
+                  ▼
+             branch on %v10</code></pre>
+
+  <p>
+    The condition reads the latest array state, <code>%v6</code>, rather than the initial state <code>%v1</code>.<br>
+    MIR preserves the result of <code>Next</code> as call result <code>%v5</code> instead of replacing it with the number 1 in advance.<br>
+    The comparison result is therefore not fixed to <code>true</code> ahead of time. At execution, the computed <code>%v10</code> determines which block is selected.
+  </p>
+
+  <h2 id="definition">Summary</h2>
+
+  <div class="callout good">
+    <span class="h">One name, values from different points in time</span>
+    The source name <code>values</code> remains unchanged.<br>
+    Its current array state changes from <code>%v1</code> immediately after declaration to <code>%v6</code> after assignment, and each MIR value is defined exactly once.
+  </div>
+
+  <p>
+    The next chapter expands on the array storage mentioned here.<br>
+    It shows how MIR represents one array location together with array values that change over time.
+  </p>
+
+  <nav class="chapter-nav" aria-label="Chapter navigation (bottom)">
+    <div class="group"><a href="chapter-10.html">← Previous: Callable lowering</a><a href="index.html#chapters">All chapters</a></div>
+    <div class="group"><a href="chapter-12.html">Next: Storage and array state →</a></div>
+  </nav>
+
+  <footer>Qora Compiler Developer Manual · Chapter 11</footer>
+</main>
+</body>
+</html>

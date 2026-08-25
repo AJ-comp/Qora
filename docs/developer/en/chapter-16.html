@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>16. MirSnapshot and the Analysis Basis — Qora Compiler Developer Manual</title>
+<link rel="stylesheet" href="developer.css">
+<script src="developer-syntax.js" defer></script>
+</head>
+<body>
+<nav class="language-switch" aria-label="Language"><strong>English</strong><span aria-hidden="true">·</span><a href="../ko/chapter-16.html">한국어</a><span aria-hidden="true">·</span><a href="../ja/chapter-16.html">日本語</a></nav>
+<a class="skip-link" href="#main-content">Skip to main content</a>
+<header class="hero">
+  <div class="tag">Qora · Compiler Developer Manual · Chapter 16</div>
+  <h1>MirSnapshot and the Analysis Basis</h1>
+  <p>The boundary that keeps the program and its analyses on the same MIR</p>
+</header>
+
+<main class="wrap" id="main-content">
+  <nav class="chapter-nav" aria-label="Chapter navigation (top)">
+    <div class="group"><a href="chapter-15.html">← Previous: Conditional joins</a><a href="index.html#chapters">All chapters</a></div>
+    <div class="group"><a href="chapter-17.html">Next: CFG edges →</a></div>
+  </nav>
+
+  <p class="lead">
+    Chapter 9 showed how <code>Next</code> and <code>Work</code> are collected into a <code>MirProgram</code>, which then becomes a <code>MirSnapshot</code>.<br>
+    This chapter focuses on one role of a snapshot: binding a program and its analyses to the same basis.
+  </p>
+
+  <h2 id="snapshot">MirSnapshot represents the current MIR state</h2>
+
+  <p>
+    A <code>MirProgram</code> is the executable structure itself. A <code>MirSnapshot</code> is an immutable result that stores that program together with the analysis entry point dedicated to it.<br>
+    A program initially lowered from HIR becomes the first snapshot through <code>MirSnapshot.CreateLowered(program)</code>.
+  </p>
+
+<pre><code class="language-plaintext">MirSnapshot
+├─ Program
+│  ├─ EntryPoint: Work
+│  └─ Callables: [Next, Work]
+└─ Analyses: analysis entry point for this Program</code></pre>
+
+  <p>
+    <code>Program</code> is the MIR execution structure lowered from HIR.<br>
+    <code>Analyses</code> provides the required MIR analyses using that exact <code>Program</code> as its basis.
+  </p>
+
+  <h2 id="analysis-store">The snapshot is the basis for MIR analysis</h2>
+
+  <p>
+    A <code>MirSnapshot</code> contains <code>Analyses</code>, the entry point for analyzing its program.<br>
+    For example, requesting the control flow of <code>Work</code> computes the CFG from the <code>Work</code> contained in this snapshot.
+  </p>
+
+<pre><code class="language-plaintext">MirSnapshot
+├─ Program: [Next, Work]
+└─ Analyses
+   └─ control flow of Work → CFG of Work</code></pre>
+
+  <p>
+    Analysis results do not create another program.<br>
+    They are derived information computed from the MIR in the current snapshot. Chapter 17 continues with the construction of the CFG.
+  </p>
+
+  <p>
+    The next chapter shows how a request for the control flow of <code>Work</code> computes a CFG from the blocks and terminators already present.
+  </p>
+
+  <nav class="chapter-nav" aria-label="Chapter navigation (bottom)">
+    <div class="group"><a href="chapter-15.html">← Previous: Conditional joins</a><a href="index.html#chapters">All chapters</a></div>
+    <div class="group"><a href="chapter-17.html">Next: CFG edges →</a></div>
+  </nav>
+
+  <footer>Qora Compiler Developer Manual · Chapter 16</footer>
+</main>
+</body>
+</html>

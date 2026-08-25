@@ -3,11 +3,10 @@ using Qora.Compiler;
 
 namespace Qora.Ir.Mir;
 
-// The MIR owns stable identities within an explicit program or callable authority. IDs are not required
-// to be contiguous: immutable owner-local indexes provide lookup without forcing unrelated entities to
-// be renumbered after deletion or partial transformation. Program-wide sites pair a callable identity
-// with one owner-local identity, while every entity retains an owner-local origin for diagnostics
-// and derivation. No MIR pass resolves a value, block, or resource by source spelling.
+// The MIR owns identities within an explicit program or callable authority. Immutable owner-local indexes
+// provide direct lookup by those identities. Program-wide sites pair a callable identity with one
+// owner-local identity, while every entity retains an owner-local origin for diagnostics and derivation.
+// No MIR analysis resolves a value, block, or resource by source spelling.
 public readonly record struct MirCallableId
 {
     internal MirCallableId(int value)
@@ -1035,11 +1034,39 @@ public sealed record MirClassicalParameter : IMirParameter
     public int MinimumLength { get; }
 
     internal static MirClassicalParameter Scalar(
+        HirParameter hirParameter,
+        MirValue value)
+    {
+        ArgumentNullException.ThrowIfNull(hirParameter);
+        return Scalar(
+            hirParameter.Name,
+            value,
+            hirParameter.Ownership,
+            hirParameter.Access);
+    }
+
+    internal static MirClassicalParameter Scalar(
         string name,
         MirValue value,
         QOwnershipMode ownership = QOwnershipMode.Borrowed,
         QAccessMode access = QAccessMode.ReadOnly) =>
         new(name, value, storage: null, ownership, access, minimumLength: 0);
+
+    internal static MirClassicalParameter Array(
+        HirParameter hirParameter,
+        MirValue value,
+        MirArrayStorage storage,
+        int minimumLength)
+    {
+        ArgumentNullException.ThrowIfNull(hirParameter);
+        return Array(
+            hirParameter.Name,
+            value,
+            storage,
+            hirParameter.Ownership,
+            hirParameter.Access,
+            minimumLength);
+    }
 
     internal static MirClassicalParameter Array(
         string name,
@@ -1304,19 +1331,72 @@ public sealed record MirQubitAfterInstruction : MirQubit
     }
 }
 
+public enum MirControlFlowEdgeKind
+{
+    Jump,
+    BranchTrue,
+    BranchFalse,
+    SwitchCase,
+    SwitchDefault,
+}
+
 public readonly record struct MirControlFlowEdge
 {
     internal MirControlFlowEdge(
         MirBlockId source,
-        int successorOrdinal)
+        MirControlFlowEdgeKind kind,
+        long? switchCaseValue = null)
     {
-        ArgumentOutOfRangeException.ThrowIfNegative(successorOrdinal);
+        if (!Enum.IsDefined(kind))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(kind),
+                kind,
+                "unknown MIR control-flow edge kind");
+        }
+        if (kind == MirControlFlowEdgeKind.SwitchCase && switchCaseValue is null)
+            throw new ArgumentNullException(nameof(switchCaseValue));
+        if (kind != MirControlFlowEdgeKind.SwitchCase && switchCaseValue is not null)
+        {
+            throw new ArgumentException(
+                "only a switch-case edge may carry a case value",
+                nameof(switchCaseValue));
+        }
+
         Source = source;
-        SuccessorOrdinal = successorOrdinal;
+        Kind = kind;
+        SwitchCaseValue = switchCaseValue;
     }
 
     public MirBlockId Source { get; }
-    public int SuccessorOrdinal { get; }
+    public MirControlFlowEdgeKind Kind { get; }
+    public long? SwitchCaseValue { get; }
+
+    internal static MirControlFlowEdge Jump(MirBlockId source) =>
+        new(source, MirControlFlowEdgeKind.Jump);
+
+    internal static MirControlFlowEdge BranchTrue(MirBlockId source) =>
+        new(source, MirControlFlowEdgeKind.BranchTrue);
+
+    internal static MirControlFlowEdge BranchFalse(MirBlockId source) =>
+        new(source, MirControlFlowEdgeKind.BranchFalse);
+
+    internal static MirControlFlowEdge SwitchCase(MirBlockId source, long value) =>
+        new(source, MirControlFlowEdgeKind.SwitchCase, value);
+
+    internal static MirControlFlowEdge SwitchDefault(MirBlockId source) =>
+        new(source, MirControlFlowEdgeKind.SwitchDefault);
+
+    public override string ToString() => Kind switch
+    {
+        MirControlFlowEdgeKind.Jump => $"{Source}.jump",
+        MirControlFlowEdgeKind.BranchTrue => $"{Source}.true",
+        MirControlFlowEdgeKind.BranchFalse => $"{Source}.false",
+        MirControlFlowEdgeKind.SwitchCase => $"{Source}.case({SwitchCaseValue})",
+        MirControlFlowEdgeKind.SwitchDefault => $"{Source}.default",
+        _ => throw new InvalidOperationException(
+            $"unknown MIR control-flow edge kind {Kind}"),
+    };
 }
 
 public sealed record MirQubitPhiInput
@@ -1527,7 +1607,6 @@ public enum MirArrayInitialization
 
 public enum MirFunctor
 {
-    Adjoint,
     Controlled,
 }
 
@@ -2127,11 +2206,10 @@ public sealed record MirQuantumApply : MirInstruction
                     functor,
                     "unknown MIR functor");
             }
-            if (!seen.Add(functor)
-                || functor == MirFunctor.Adjoint && index != 0)
+            if (!seen.Add(functor))
             {
                 throw new ArgumentException(
-                    "each MIR functor may appear once and Adjoint must precede Controlled",
+                    "each MIR functor may appear once",
                     nameof(functors));
             }
         }

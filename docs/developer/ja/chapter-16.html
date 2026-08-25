@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>16. MirSnapshot と解析基準 — Qora コンパイラ開発者マニュアル</title>
+<link rel="stylesheet" href="developer.css">
+<script src="developer-syntax.js" defer></script>
+</head>
+<body>
+<nav class="language-switch" aria-label="言語"><a href="../en/chapter-16.html">English</a><span aria-hidden="true">·</span><a href="../ko/chapter-16.html">한국어</a><span aria-hidden="true">·</span><strong>日本語</strong></nav>
+<a class="skip-link" href="#main-content">本文へ移動</a>
+<header class="hero">
+  <div class="tag">Qora · Compiler Developer Manual · Chapter 16</div>
+  <h1>MirSnapshot と解析基準</h1>
+  <p>program と解析結果が同じ MIR を参照するための境界</p>
+</header>
+
+<main class="wrap" id="main-content">
+  <nav class="chapter-nav" aria-label="章移動（上）">
+    <div class="group"><a href="chapter-15.html">← 前：条件文の合流</a><a href="index.html#chapters">全章目次</a></div>
+    <div class="group"><a href="chapter-17.html">次：CFG edge →</a></div>
+  </nav>
+
+  <p class="lead">
+    第9章では、<code>Next</code> と <code>Work</code> が <code>MirProgram</code> にまとめられ、その program が <code>MirSnapshot</code> になる流れを確認しました。<br>
+    この章では、snapshot が program と解析を同じ基準へ結び付けるという一つの役割だけを確認します。
+  </p>
+
+  <h2 id="snapshot">MirSnapshot が現在の MIR 状態を表す</h2>
+
+  <p>
+    <code>MirProgram</code> が実行構造そのものなら、<code>MirSnapshot</code> はその program と専用の解析窓口を一緒に保持する不変の結果です。<br>
+    HIR から最初に lower された program は <code>MirSnapshot.CreateLowered(program)</code> によって最初の snapshot になります。
+  </p>
+
+<pre><code class="language-plaintext">MirSnapshot
+├─ Program
+│  ├─ EntryPoint: Work
+│  └─ Callables: [Next, Work]
+└─ Analyses: この Program 専用の解析窓口</code></pre>
+
+  <p>
+    <code>Program</code> は HIR から lower された MIR 実行構造です。<br>
+    <code>Analyses</code> はその <code>Program</code> を基準に必要な MIR 解析を提供します。
+  </p>
+
+  <h2 id="analysis-store">Snapshot は MIR 解析の基準になる</h2>
+
+  <p>
+    <code>MirSnapshot</code> には、この program を解析する窓口である <code>Analyses</code> があります。<br>
+    たとえば <code>Work</code> の制御フローを要求すると、この snapshot 内の <code>Work</code> を基準に CFG を求めます。
+  </p>
+
+<pre><code class="language-plaintext">MirSnapshot
+├─ Program: [Next, Work]
+└─ Analyses
+   └─ Work の制御フロー → Work の CFG</code></pre>
+
+  <p>
+    解析結果は別の program を作りません。<br>
+    現在の snapshot の MIR から計算した派生情報です。CFG が作られる過程は第17章で続けて確認します。
+  </p>
+
+  <p>
+    次の章では、<code>Work</code> の制御フローを要求したとき、すでに作られた block と Terminator から CFG がどう計算されるかだけを確認します。
+  </p>
+
+  <nav class="chapter-nav" aria-label="章移動（下）">
+    <div class="group"><a href="chapter-15.html">← 前：条件文の合流</a><a href="index.html#chapters">全章目次</a></div>
+    <div class="group"><a href="chapter-17.html">次：CFG edge →</a></div>
+  </nav>
+
+  <footer>Qora コンパイラ開発者マニュアル · 第16章</footer>
+</main>
+</body>
+</html>

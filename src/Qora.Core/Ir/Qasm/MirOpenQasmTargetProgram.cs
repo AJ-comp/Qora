@@ -488,7 +488,7 @@ public sealed record MirQasmQuantumApplyStatement : MirQasmStatement
             && (GateParameters.Length != 0 || Modifiers.Length != 0))
         {
             throw new ArgumentException(
-                "a user-operation target must already have inverse/control materialized as a plain callable",
+                "a user-operation target must be a plain callable without modifiers",
                 nameof(target));
         }
     }

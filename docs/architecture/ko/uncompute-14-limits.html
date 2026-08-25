@@ -124,13 +124,13 @@
 
   <nav class="doc-links" aria-label="코스 내비게이션">
     <a class="doc-link" href="uncompute-13-blanket.html">← 13. 담요 문제 — 질의 폭과 문장 폭</a>
-    <a class="doc-link" href="datasheet.html#s8">코스 목차</a>
+    <a class="doc-link" href="index.html#uncompute-course">코스 목차</a>
     <a class="doc-link" href="uncompute-15-two-runtimes.html">15. 왜 정적 컴파일인가 — 두 개의 런타임 →</a>
   </nav>
   <div class="call">
     <span class="h">구현 상태</span>
     이 장의 분류는 future automatic-uncomputation scheduler가 지켜야 할 설계 기준입니다.<br>
-    현재 compiler는 MIR-only inverse materialization 경계까지 갖췄지만 cleanup schedule과 자동 주입은 아직 활성화하지 않았으므로, 아래의 통과·차단 표시는 현재 CLI 결과가 아니라 목표 scheduler의 판정을 뜻합니다.
+    현재 compiler에는 MIR 분석 기반만 있으며 cleanup scheduler와 역연산 생성은 향후 함께 구현할 계획이므로, 아래의 통과·차단 표시는 현재 CLI 결과가 아니라 목표 scheduler의 판정을 뜻합니다.
   </div>
   <p>
     앞의 설계 사례에서는 <a href="uncompute-10-y-gate.html">10장</a>의 Y 차단, <a href="uncompute-12-loops.html">12장</a>의
@@ -237,7 +237,7 @@ use a = Qubit[3];  use out = Qubit[1];
 Flip(a);
 CNOT(a[0], out[0]);
 var c: bit = M(out[0]);  <span class="cm">// c = 1 (확률 100%)</span></code></pre>
-<p class="cm">예정된 compiler-internal MIR request: <code>MirQuantumApply(Target=Flip, Functors=[MirFunctor.Adjoint], Operands=[a])</code></p>
+<p class="cm">예정된 scheduler 변환: <code>Flip(a)</code> 본문의 X 연산을 역순으로 생성</p>
     </div>
   </div>
   <p>
@@ -300,12 +300,12 @@ if (m == 1) { X(a[0]); }    <span class="cm">// a의 쓰기가 측정 bit m에 �
 
   <nav class="doc-links" aria-label="코스 내비게이션">
     <a class="doc-link" href="uncompute-13-blanket.html">← 13. 담요 문제 — 질의 폭과 문장 폭</a>
-    <a class="doc-link" href="datasheet.html#s8">코스 목차</a>
+    <a class="doc-link" href="index.html#uncompute-course">코스 목차</a>
     <a class="doc-link" href="uncompute-15-two-runtimes.html">15. 왜 정적 컴파일인가 — 두 개의 런타임 →</a>
   </nav>
 
   <footer>
-    자동 uncomputation 코스 14/16 · <a href="datasheet.html#s8">코스 목차</a> ·
+    자동 uncomputation 코스 14/16 · <a href="index.html#uncompute-course">코스 목차</a> ·
     <a href="datasheet.html">컴파일러 데이터시트</a>
   </footer>
 

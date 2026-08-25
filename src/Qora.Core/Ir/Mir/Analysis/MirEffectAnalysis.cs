@@ -443,9 +443,8 @@ internal sealed class MirFormalQubitEffectQuery
 }
 
 /// <summary>
-/// Immutable analysis data tied to one exact MIR program object. A transformed program must be analyzed
-/// again; this prevents a cleanup pass from accidentally consuming instructions or values from a stale
-/// program.
+/// Immutable analysis data tied to one exact MIR program object. Every query validates that its callable,
+/// instruction, value, and qubit belong to that program.
 /// </summary>
 public sealed class MirEffectSnapshot
 {

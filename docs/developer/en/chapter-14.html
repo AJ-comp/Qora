@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>14. Basic Blocks and Terminators — Qora Compiler Developer Manual</title>
+<link rel="stylesheet" href="developer.css">
+<script src="developer-syntax.js" defer></script>
+</head>
+<body>
+<nav class="language-switch" aria-label="Language"><strong>English</strong><span aria-hidden="true">·</span><a href="../ko/chapter-14.html">한국어</a><span aria-hidden="true">·</span><a href="../ja/chapter-14.html">日本語</a></nav>
+<a class="skip-link" href="#main-content">Skip to main content</a>
+<header class="hero">
+  <div class="tag">Qora · Compiler Developer Manual · Chapter 14</div>
+  <h1>Basic Blocks and Terminators</h1>
+  <p>How one <code>if</code> is split into <code>b0</code> through <code>b3</code></p>
+</header>
+
+<main class="wrap" id="main-content">
+  <nav class="chapter-nav" aria-label="Chapter navigation (top)">
+    <div class="group"><a href="chapter-13.html">← Previous: Qubit versions</a><a href="index.html#chapters">All chapters</a></div>
+    <div class="group"><a href="chapter-15.html">Next: Conditional lowering →</a></div>
+  </nav>
+
+  <p class="lead">
+    MIR does not preserve an <code>if</code> as a nested statement tree.<br>
+    It groups uninterrupted sequences of instructions into basic blocks and records the next destination at the end of each block.<br>
+    The <code>if</code> in the running example becomes four blocks: <code>b0</code>, <code>b1</code>, <code>b2</code>, and <code>b3</code>.
+  </p>
+
+  <h2 id="source">Qora code under examination</h2>
+
+<pre><code class="language-qora">function Next(value: int): int
+{
+    return value + 1;
+}
+
+operation Work()
+{
+    var values: int[] = [0];
+    use q = Qubit[1];
+
+    values[0] = Next(values[0]);
+
+    if (values[0] == 1)
+    {
+        X(q[0]);
+    }
+
+    H(q[0]);
+}</code></pre>
+
+  <p>
+    The program executes <code>X</code> when the condition is true and does nothing when it is false.<br>
+    Regardless of the selected path, it must execute <code>H</code> after the <code>if</code>.<br>
+    MIR separates these three regions to make the control flow explicit.
+  </p>
+
+  <h2 id="overview">Complete connection of the four blocks</h2>
+
+<pre><code class="language-plaintext">                         ┌─ true ─▶ b1: execute X ─┐
+b0: evaluate and branch                            ├─▶ b3: execute H and return
+                         └─ false ▶ b2: empty path ─┘</code></pre>
+
+  <p>
+    <code>b0</code> evaluates the condition and selects one of two paths.<br>
+    <code>b1</code> represents the true body, while <code>b2</code> represents the false path.<br>
+    Both paths join again at <code>b3</code>, followed by the common <code>H</code> operation.
+  </p>
+
+  <h2 id="b0"><code>b0</code>: evaluate the condition and select a path</h2>
+
+  <p>
+    <code>b0</code> also contains the array declaration and update that execute before the <code>if</code>, but only its final part matters here.<br>
+    MIR evaluates <code>values[0] == 1</code> to produce <code>%v10</code>, and <code>branch</code> uses that value to select the next block.
+  </p>
+
+<pre><code class="language-plaintext">b0
+├─ %v10 = values[0] == 1
+└─ branch %v10
+   ├─ true  → b1
+   └─ false → b2</code></pre>
+
+  <p>
+    The instruction that chooses the next destination at the end of a block is called a terminator.<br>
+    The terminator of <code>b0</code> is a <code>branch</code> with two destinations.<br>
+    Execution splits because a true condition selects <code>b1</code>, while a false condition selects <code>b2</code>.
+  </p>
+
+  <h2 id="branch-blocks"><code>b1</code> and <code>b2</code>: execute each path and move to the join</h2>
+
+<pre><code class="language-plaintext">b1
+├─ X(q0.v0) → q0.v1
+└─ jump b3
+
+b2
+└─ jump b3</code></pre>
+
+  <p>
+    <code>b1</code> executes <code>X(q[0])</code> from the true body.<br>
+    No statements remain on that path, so <code>jump b3</code> moves execution to the join point.
+  </p>
+
+  <p>
+    Although the source has no <code>else</code>, <code>b2</code> is still required.<br>
+    MIR must represent where execution goes after skipping <code>X</code> when the condition is false.<br>
+    This path has no body to execute, so it contains only <code>jump b3</code>.
+  </p>
+
+  <p>
+    <code>jump</code> is also a terminator that ends a block.<br>
+    A <code>branch</code> selects a destination from a condition, while a <code>jump</code> moves to one fixed destination.
+  </p>
+
+  <h2 id="b3"><code>b3</code>: join the paths and execute the remaining code</h2>
+
+<pre><code class="language-plaintext">b3
+├─ q0.v2 = phi(b1: q0.v1, b2: q0.v0)
+├─ H(q0.v2) → q0.v3
+└─ return</code></pre>
+
+  <p>
+    Both <code>b1</code> and <code>b2</code> reach <code>b3</code>.<br>
+    The true path contributes <code>q0.v1</code> after <code>X</code>; the false path contributes original version <code>q0.v0</code>.<br>
+    The Phi combines both inputs into one joined version, <code>q0.v2</code>.
+  </p>
+
+  <p>
+    The source statement <code>H(q[0])</code> follows the <code>if</code>, so it executes in <code>b3</code>.<br>
+    <code>H</code> takes joined version <code>q0.v2</code> and creates <code>q0.v3</code>. Because no statements remain in <code>Work</code>, an implicit <code>return</code> added by MIR ends the block and callable.
+  </p>
+
+  <h2 id="execution">MIR retains both paths</h2>
+
+  <p>
+    All four blocks exist in MIR, but one execution follows only the path selected by the condition.<br>
+    Lowering does not precompute the result of calling <code>Next</code>, so it represents both possibilities below.
+  </p>
+
+<pre><code class="language-plaintext">true path
+b0 → b1 → b3 → return
+
+false path
+b0 → b2 → b3 → return</code></pre>
+
+  <p>
+    As shown in the previous chapter, this exact example selects the true path at runtime.<br>
+    The false path <code>b2</code> is another control-flow possibility preserved by lowering, not a path removed by predicting the execution result.
+  </p>
+
+  <h2 id="summary">Summary</h2>
+
+  <div class="callout good">
+    <span class="h">Control flow in one statement</span>
+    <code>b0</code> uses <code>branch</code> to select a path; <code>b1</code> and <code>b2</code> process their respective paths and use <code>jump</code> to meet at <code>b3</code>.<br>
+    <code>b3</code> joins the path-specific qubit versions, executes <code>H</code>, and ends with <code>return</code>.
+  </div>
+
+  <nav class="chapter-nav" aria-label="Chapter navigation (bottom)">
+    <div class="group"><a href="chapter-13.html">← Previous: Qubit versions</a><a href="index.html#chapters">All chapters</a></div>
+    <div class="group"><a href="chapter-15.html">Next: Conditional lowering →</a></div>
+  </nav>
+
+  <footer>Qora Compiler Developer Manual · Chapter 14</footer>
+</main>
+</body>
+</html>

@@ -43,13 +43,12 @@ internal static class QasmBackend
     }
 
     /// <summary>
-    /// Lowers materialized MIR to OpenQASM. Unproven MIR bounds results are rejected before target
+    /// Lowers MIR to OpenQASM. Unproven MIR bounds results are rejected before target
     /// structure recovery, so every diagnostic still resolves through its exact MIR origin.
     /// </summary>
     public static Result Run(MirSnapshot source)
     {
         ArgumentNullException.ThrowIfNull(source);
-        MirAdjointMaterializer.VerifyMaterialized(source);
 
         var boundsErrors = OpenQasmBoundsValidation.Run(source);
         if (boundsErrors.Count > 0)

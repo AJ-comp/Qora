@@ -131,62 +131,6 @@ public sealed class MirOriginTests
             () => MirOrigin.GeneratedFrom(parent, reason));
     }
 
-    [Fact]
-    public void MaterializedAdjointKeepsTheOriginalCallableAndInstructionOriginChains()
-    {
-        var source = CompileMir(
-            """
-            operation Worker(q: Qubit) {
-                X(q);
-            }
-
-            operation Main() {
-                use q = Qubit[1];
-                Worker(q[0]);
-            }
-            """);
-        var worker = Assert.Single(
-            source.Program.Callables,
-            callable => callable.Name == "Worker");
-        var main = Assert.Single(
-            source.Program.Callables,
-            callable => callable.Name == "Main");
-        var request = Assert.Single(
-            main.Blocks
-                .SelectMany(block => block.Instructions)
-                .OfType<MirQuantumApply>(),
-            instruction => instruction.Target is MirUserCallableTarget target
-                && target.Callable == worker.Id);
-        var requestSite = new MirInstructionSite(main.Id, request.Id);
-        var injected = MirAdjointMaterializer.InjectRequests(
-            source,
-            new[] { requestSite });
-        var result = MirAdjointMaterializer.Run(injected);
-        var output = Assert.IsType<MirSnapshot>(result.Output);
-        var inverse = output.Program.RequireCallable(result.Inverses[worker.Id]);
-
-        var callableOrigin = Assert.IsType<MirGeneratedOrigin>(inverse.Origin);
-        Assert.Same(worker.Origin, callableOrigin.Parent);
-        Assert.Same(
-            worker.Origin.SourceHirOrigin,
-            callableOrigin.SourceHirOrigin);
-
-        var originalGate = Assert.Single(
-            worker.Blocks
-                .SelectMany(block => block.Instructions)
-                .OfType<MirQuantumApply>());
-        var inverseGate = Assert.Single(
-            inverse.Blocks
-                .SelectMany(block => block.Instructions)
-                .OfType<MirQuantumApply>());
-        var instructionOrigin = Assert.IsType<MirGeneratedOrigin>(
-            inverseGate.Origin);
-        Assert.Same(originalGate.Origin, instructionOrigin.Parent);
-        Assert.Same(
-            originalGate.Origin.SourceHirOrigin,
-            instructionOrigin.SourceHirOrigin);
-    }
-
     private static MirSnapshot CompileMir(string source)
     {
         var compilation = QoraCompiler.Compile(

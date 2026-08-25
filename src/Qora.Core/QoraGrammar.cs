@@ -6,7 +6,7 @@ using Janglim.FrontEnd.RegularGrammar;
 namespace Qora;
 
 /// <summary>
-/// Qora v0.38.0 — a Q#/C#-flavored quantum language on the Janglim engine.
+/// Qora v0.39.0 — a Q#/C#-flavored quantum language on the Janglim engine.
 ///
 ///   operation Bell(q: Qubit[]) {        // a subroutine, with trailing-type parameters (name: T)
 ///       H(q[0]);
@@ -162,7 +162,7 @@ public class QoraGrammar : Grammar
     public Terminal Else { get; } = new Terminal(TokenType.Keyword, "else", "else", true, false);
 
     // The Controlled modifier stays in the AST so the gate name that follows can be distinguished from it.
-    // Inversion has no source keyword. A later MIR-only pass may attach an internal inverse request.
+    // Inversion has no source keyword. Automatic uncomputation remains future MIR work.
     public Terminal Controlled { get; } = new Terminal(TokenType.Keyword, "Controlled", "Controlled", true, false);
 
     // --- type keywords (meaning=TRUE so they stay in the AST; bWordPattern=false for keyword priority) ---
@@ -356,7 +356,7 @@ public class QoraGrammar : Grammar
         // each call before MIR lowering: H(q[0]); CNOT(q[0],q[1]); Rx(pi/2, q[0]); Bell(q); Reset(q[0]);
         // The Controlled modifier applies to a single built-in gate:
         //   Controlled X(c,t) -> ctrl @ x c, t;
-        // Inverse applications are compiler-generated IR and deliberately have no source production.
+        // Inverse applications are not part of the current source language or compiler IR.
         // call/gate names may be namespace-qualified (MyLib.Bell) — qname = Ident (Dot Ident)*
         gateStmt.AddItem(qname + LParen + RParen + Semicolon, GateM);
         gateStmt.AddItem(qname + LParen + arg + (Comma + arg).ZeroOrMore() + RParen + Semicolon, GateM);

@@ -3,133 +3,88 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Qora 핵심 설계 문서 — 컴파일 파이프라인 — Qora</title>
+<title>Qora 컴파일러 아키텍처 — 현재 권위 구조와 문서 안내</title>
 <style>
   :root {
-    --bg: #ffffff;
-    --ink: #1f2430;
-    --muted: #5b6472;
-    --line: #e6e8ee;
-    --panel: #f7f8fb;
-    --plus: #1457d6;
-    --minus: #d62b39;
-    --accent: #6b3fd4;
-    --good: #11875b;
+    --bg:#fff; --ink:#1f2430; --muted:#5b6472; --line:#e1e5eb; --panel:#f6f7f9;
+    --blue:#1457d6; --green:#11875b; --amber:#9a6700; --purple:#6b4fc6; --navy:#263141;
   }
-  * { box-sizing: border-box; }
-  html { scroll-behavior: smooth; }
+  * { box-sizing:border-box; }
+  html { scroll-behavior:smooth; }
   body {
-    margin: 0;
-    background: var(--bg);
-    color: var(--ink);
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo",
-      "Malgun Gothic", "Noto Sans KR", "Segoe UI Symbol", "Cambria Math", sans-serif;
-    line-height: 1.75;
-    font-size: 17px;
+    margin:0; background:var(--bg); color:var(--ink); word-break:keep-all; overflow-wrap:break-word;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Apple SD Gothic Neo",
+      "Malgun Gothic","Noto Sans KR","Segoe UI Symbol",sans-serif;
+    font-size:16.5px; line-height:1.72;
   }
-  .wrap { max-width: 880px; margin: 0 auto; padding: 0 20px 120px; }
-  header.hero {
-    padding: 64px 20px 40px;
-    text-align: center;
-    border-bottom: 1px solid var(--line);
-    background: linear-gradient(180deg, #faf9ff, #ffffff);
-  }
-  header.hero h1 { font-size: 2.0rem; margin: 0 0 10px; letter-spacing: -0.5px; }
-  header.hero p { color: var(--muted); margin: 0; font-size: 1.05rem; }
-  .tag { display:inline-block; font-size:.78rem; letter-spacing:.12em; text-transform:uppercase;
-         color: var(--accent); font-weight:700; margin-bottom:14px; }
-  h2 {
-    margin: 56px 0 14px; font-size: 1.45rem; letter-spacing: -0.3px;
-    padding-top: 14px; border-top: 2px solid var(--line);
-  }
-  h2 .n {
-    display:inline-flex; align-items:center; justify-content:center;
-    width: 1.7em; height: 1.7em; border-radius: 50%;
-    background: var(--accent); color:#fff; font-size: .82rem; font-weight:700;
-    margin-right: 10px; vertical-align: middle;
-  }
-  h3 { margin: 30px 0 8px; font-size: 1.12rem; }
-  p { margin: 14px 0; }
-  strong { color: #11203a; }
-  .lead { font-size: 1.08rem; }
-  code, .mono, pre {
-    font-family: "SF Mono", "JetBrains Mono", "D2Coding", Consolas, "Segoe UI Symbol", monospace;
-  }
-  code {
-    background: var(--panel); border: 1px solid var(--line); border-radius: 5px;
-    padding: 1px 6px; font-size: .9em;
-  }
-  pre {
-    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
-    padding: 16px 18px; margin: 18px 0; overflow-x: auto;
-    font-size: .88rem; line-height: 1.55;
-  }
-  pre code { background: none; border: none; padding: 0; font-size: inherit; }
-  pre .cm { color: var(--muted); }            /* comments/auxiliary marks */
-  pre .hl { color: var(--accent); font-weight: 700; }   /* key emphasis */
-  pre .add { color: var(--good); font-weight: 700; }    /* synthesized/newly created */
-  .panel {
-    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
-    padding: 16px 18px; margin: 18px 0; overflow-x: auto;
-  }
-  table.amp { border-collapse: collapse; width: 100%; }
-  table.amp th, table.amp td {
-    padding: 9px 12px; text-align: left; border-bottom: 1px solid var(--line);
-    vertical-align: top;
-  }
-  table.amp th { font-size: .82rem; color: var(--muted); font-weight: 600; }
-  table.amp tr:last-child td { border-bottom: none; }
-  table.amp code { white-space: nowrap; }
-  .call {
-    border-left: 4px solid var(--accent); background: #faf8ff;
-    padding: 14px 18px; border-radius: 0 8px 8px 0; margin: 20px 0;
-  }
-  .call.why { border-color: var(--good); background: #f2fbf7; }
-  .call.warn { border-color: #e6a417; background: #fff9ec; }
-  .call .h { font-weight: 700; display:block; margin-bottom: 4px; }
-  .call p { margin: 8px 0 0; }
-  .rule {
-    text-align:center; font-size: 1.05rem; font-weight: 700; color:#1a1140;
-    background: #f3efff; border:1px solid #e2d8ff; border-radius: 10px;
-    padding: 16px; margin: 20px 0;
-  }
-  .toc {
-    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
-    padding: 16px 22px; margin: 26px 0;
-  }
-  .toc ol { margin: 8px 0 0; padding-left: 20px; }
-  .toc a { color: var(--ink); text-decoration: none; }
-  .toc a:hover { color: var(--accent); }
-  .doc-links { margin: 20px 0 6px; }
-  .doc-link {
-    display:inline-block; background:#f3efff; border:1px solid #e2d8ff; color: var(--accent);
-    font-weight:700; text-decoration:none; border-radius:999px; padding:7px 18px; font-size:.95rem;
-    margin: 0 6px 6px 0;
-  }
-  .doc-link:hover { background:#e9e1ff; }
-  hr { border:none; border-top:1px solid var(--line); margin: 40px 0; }
-  .flowline {
-    text-align:center; font-weight:700; color:#1a1140;
-    background:#f3efff; border:1px solid #e2d8ff; border-radius:10px;
-    padding: 14px 10px; margin: 20px 0; font-size: .95rem;
-    overflow-x: auto; white-space: nowrap;
-  }
-  .flowline .st { color: var(--accent); }
-  .stagehead { color: var(--muted); font-size: .82rem; letter-spacing:.08em; text-transform:uppercase; font-weight:700; }
-  .doc-meta {
-    border: 1px solid #dfe5f2; border-left: 5px solid var(--accent); border-radius: 8px;
-    background: #f8faff; padding: 18px 20px; margin: 24px 0;
-  }
-  .doc-meta .meta-title { font-weight: 800; color: #11203a; margin-bottom: 12px; }
-  .meta-grid {
-    display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 18px;
-    margin: 0;
-  }
-  .meta-grid div { min-width: 0; }
-  .meta-grid dt { color: var(--muted); font-size: .78rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
-  .meta-grid dd { margin: 3px 0 0; }
-  @media (max-width: 720px) {
-    .meta-grid { grid-template-columns: 1fr; }
+  a { color:#1745b5; }
+  code,pre { font-family:"SF Mono","JetBrains Mono","D2Coding",Consolas,monospace; }
+  code { padding:1px 6px; border:1px solid var(--line); border-radius:5px;
+         background:var(--panel); font-size:.9em; word-break:normal; }
+  .wrap { max-width:980px; margin:0 auto; padding:0 20px 110px; }
+  .hero { padding:60px 20px 38px; text-align:center; border-bottom:1px solid var(--line);
+          background:#f7f8fa; }
+  .hero h1 { margin:0 0 10px; font-size:2.05rem; letter-spacing:-.55px; }
+  .hero p { margin:0; color:var(--muted); }
+  .tag { display:inline-block; margin-bottom:14px; color:var(--muted); font-size:.78rem;
+         font-weight:800; letter-spacing:.12em; text-transform:uppercase; }
+  h2 { margin:54px 0 12px; padding-bottom:10px; border-bottom:1px solid var(--line);
+       font-size:1.42rem; letter-spacing:-.3px; scroll-margin-top:58px; }
+  h3 { margin:28px 0 8px; font-size:1.08rem; scroll-margin-top:58px; }
+  p { margin:12px 0; }
+  .lead { margin-top:24px; font-size:1.04rem; }
+  .toc,.doc-links { display:flex; flex-wrap:wrap; gap:9px; margin:20px 0; }
+  .toc a,.doc-link { display:inline-flex; padding:7px 14px; border:1px solid #cddcff;
+                     border-radius:999px; background:#f6f9ff; color:#1745b5;
+                     font-size:.89rem; font-weight:750; text-decoration:none; }
+  .toc a:hover,.doc-link:hover { border-color:#9bb8ff; background:#eef4ff; }
+  .summary { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:11px; margin:22px 0; }
+  .summary div { padding:13px 14px; border:1px solid #dce2e9; border-radius:9px; background:#f8fafc; }
+  .summary dt { color:#596579; font-size:.72rem; font-weight:850; letter-spacing:.07em;
+                text-transform:uppercase; }
+  .summary dd { margin:5px 0 0; color:#24344d; font-size:.91rem; font-weight:700; }
+  .diagram { margin:22px 0; overflow:hidden; border:1px solid #d4dde8;
+             border-radius:12px; background:#f8fafc; }
+  .diagram-scroll { overflow-x:auto; }
+  .diagram svg { display:block; width:100%; min-width:900px; height:auto; }
+  .diagram figcaption { padding:11px 15px; border-top:1px solid #dfe5ed;
+                       background:#fff; color:#536074; font-size:.82rem; }
+  .svg-ui { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Apple SD Gothic Neo",
+            "Malgun Gothic","Noto Sans KR",sans-serif; }
+  .svg-code { font-family:"SF Mono","JetBrains Mono","D2Coding",Consolas,monospace; }
+  .panel { margin:16px 0; overflow-x:auto; border:1px solid var(--line);
+           border-radius:9px; background:#fff; }
+  table.spec { width:100%; border-collapse:collapse; font-size:.9rem; }
+  table.spec th,table.spec td { padding:9px 11px; border-bottom:1px solid var(--line);
+                               text-align:left; vertical-align:top; }
+  table.spec th { background:#fbfbfe; color:var(--muted); font-size:.76rem;
+                  font-weight:800; letter-spacing:.02em; }
+  table.spec tr:last-child td { border-bottom:0; }
+  table.spec td.k { width:1%; color:#1a2740; font-weight:750; white-space:nowrap; }
+  .callout { margin:18px 0; padding:15px 17px; border:1px solid #dfe3e9;
+             border-radius:9px; background:#f8f9fb; }
+  .callout.good { border-color:#b9decf; background:#f5faf7; }
+  .callout .h { display:block; margin-bottom:7px; color:#526071; font-size:.72rem;
+                font-weight:850; letter-spacing:.08em; text-transform:uppercase; }
+  .doc-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; margin:16px 0; }
+  .doc-card { display:block; min-width:0; padding:15px 16px; border:1px solid #dce2e9;
+              border-radius:9px; background:#f8fafc; color:inherit; text-decoration:none; }
+  .doc-card:hover { border-color:#9bb8ff; background:#f3f7ff; }
+  .doc-card b { display:block; margin-bottom:5px; color:#1745b5; }
+  .doc-card span { display:block; color:var(--muted); font-size:.9rem; }
+  .course-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px 16px;
+                 margin:16px 0; padding:18px 22px; border:1px solid var(--line);
+                 border-radius:9px; background:#fbfbfd; }
+  .course-grid a { min-width:0; text-decoration:none; }
+  .course-grid a:hover { text-decoration:underline; }
+  footer { margin-top:58px; padding-top:24px; border-top:1px solid var(--line);
+           color:var(--muted); text-align:center; font-size:.9rem; }
+  @media (max-width:760px) {
+    .wrap { padding-right:16px; padding-left:16px; }
+    .hero { padding-right:16px; padding-left:16px; }
+    .hero h1 { font-size:1.55rem; line-height:1.38; }
+    .summary,.doc-grid,.course-grid { grid-template-columns:1fr; }
+    table.spec td.k { white-space:normal; }
   }
 </style>
 </head>
@@ -137,443 +92,211 @@
 <div class="qora-lang-switch" style="position:sticky;top:0;z-index:99;text-align:right;padding:8px 16px;background:rgba(255,255,255,.92);backdrop-filter:blur(4px);border-bottom:1px solid #e6e8ee;font-size:13px;font-family:sans-serif;"><a href="../en/index.html" onclick="try{localStorage.setItem(&quot;qora-lang&quot;,&quot;en&quot;)}catch(e){}">English</a> · <strong>한국어</strong> · <a href="../ja/index.html" onclick="try{localStorage.setItem(&quot;qora-lang&quot;,&quot;ja&quot;)}catch(e){}">日本語</a></div>
 
 <header class="hero">
-  <div class="tag">Qora · 핵심 설계 문서</div>
-  <h1>Qora 컴파일 파이프라인 설계</h1>
-  <p>소스가 source-shaped HIR, SSA/CFG MIR, typed target, OpenQASM 방출까지 지나가는 기준 흐름</p>
+  <div class="tag">Qora · Compiler Architecture</div>
+  <h1>Qora 컴파일러 아키텍처</h1>
+  <p>현재 권위 구조 · 실제 생산 아티팩트 · 아키텍처 설계 문서</p>
 </header>
 
 <div class="wrap">
-
-  <p class="lead">
-    Qora는 파서 엔진(Janglim) 위에 얹힌 얇은 프런트엔드와, 그 위에 <strong>Qora가 전적으로 소유하는
-    멀티패스 미들엔드</strong>로 이루어져 있습니다. 컴파일은 작고 단일 목적을 가진 패스들의 일직선입니다.
-    각 패스는 한 형태의 프로그램을 받아 딱 한 가지 일만 하고, 조금 더 완성된 프로그램을 다음 패스에 넘깁니다 —
-    이 흐름은 마지막 패스가 OpenQASM 3을 출력할 때까지 이어집니다.<br>
-    이 문서는 그 일직선을 처음부터 끝까지 한 단계씩 따라가면서, 실제 compiler output과 설명을 위한 짧은 MIR 도식을 함께 사용합니다.
-  </p>
-
-  <div class="flowline">
-    소스
-    <span class="st">─Parse─▶</span> AST
-    <span class="st">─Lower─▶</span> HIR
-    <span class="st">─Expand─▶</span> 병합
-    <span class="st">─Desugar measure─▶</span>
-    <span class="st">─Resolve─▶</span> 호출 대상 FQN
-    <span class="st">─Validate + Symbols─▶</span> (오류 시 STOP)
-    <span class="st">─Monomorphize─▶</span> 특수화
-    <span class="st">─Lower MIR─▶</span> SSA/CFG MIR
-    <span class="st">─Analyze─▶</span>
-    <span class="st">─MIR-only 역연산 실체화─▶</span>
-    <span class="st">─Target-lower─▶</span> typed OpenQASM model
-    <span class="st">─Emit─▶</span> OpenQASM 3
-  </div>
-
-  <section class="doc-meta" aria-label="문서 정보">
-    <div class="meta-title">이 문서의 역할</div>
-    <dl class="meta-grid">
-      <div>
-        <dt>문서 성격</dt>
-        <dd>Qora 컴파일러 구조를 설명하는 기준 설계 문서입니다.</dd>
-      </div>
-      <div>
-        <dt>다루는 범위</dt>
-        <dd>소스 텍스트가 AST, 검증된 HIR, SSA/CFG MIR, typed target model, OpenQASM으로 바뀌는 전체 경로를 다룹니다.</dd>
-      </div>
-      <div>
-        <dt>읽는 사람</dt>
-        <dd>컴파일러 패스를 수정하거나 <code>--stages</code> 출력과 실제 방출 결과를 대조해야 하는 사람에게 필요합니다.</dd>
-      </div>
-      <div>
-        <dt>핵심 계약</dt>
-        <dd>각 패스는 구조화된 IR을 입력으로 받고, 한 가지 책임만 수행한 뒤 다음 패스에 넘깁니다.</dd>
-      </div>
-    </dl>
-  </section>
-
-  <nav class="doc-links" aria-label="관련 컴파일러 문서">
-    <a class="doc-link" href="datasheet.html">컴파일러 데이터시트 — 파이프라인·패스·IR·자동 uncomputation</a>
-    <a class="doc-link" href="hadamard.html">H 게이트를 화살표로 이해하기</a>
+  <nav class="toc" aria-label="문서 목차">
+    <a href="#authority">권위 구조</a>
+    <a href="#pipeline">생산 흐름</a>
+    <a href="#documents">문서 지도</a>
+    <a href="#passes">IR 패스</a>
+    <a href="#uncompute-course">자동 uncomputation</a>
+    <a href="#foundations">양자 기초</a>
   </nav>
 
-  <div class="toc">
-    <strong>목차</strong>
-    <ol>
-      <li><a href="#s0">예제 — 모든 패스를 건드리는 파일 하나</a></li>
-      <li><a href="#s1">두 세계 — 엔진이 멈추고 Qora가 시작되는 곳</a></li>
-      <li><a href="#s2">Parse — 소스에서 AST로 (엔진의 몫)</a></li>
-      <li><a href="#s3">Lower — AST에서 소스 모양 HIR로 (경계를 넘다)</a></li>
-      <li><a href="#s4">Expand &amp; Resolve — 임포트와 호출 대상 FQN</a></li>
-      <li><a href="#s5">Validate — 의미 게이트</a></li>
-      <li><a href="#s6">Monomorphize — 큐비트 배열 호출의 특수화</a></li>
-      <li><a href="#s7">Lower — 소스 모양 HIR에서 SSA/CFG MIR로</a></li>
-      <li><a href="#s8">MIR 분석과 내부 역연산 실체화</a></li>
-      <li><a href="#s9">OpenQASM target lowering과 방출</a></li>
-      <li><a href="#s10">전체 파이프라인 한눈에</a></li>
-    </ol>
+  <p class="lead">
+    이 문서는 과거의 <code>소스 → AST → HIR → MIR</code> 직선만 나열하지 않습니다.<br>
+    현재 컴파일러가 실제로 발행하는 <code>Compilation</code>을 중심에 두고, 그 안에서 source·HIR·MIR·target·진단이 어떤 권위 객체로 묶이는지 먼저 보여줍니다.<br>
+    필드와 불변 조건은 같은 아키텍처 문서군의 <a href="datasheet.html">컴파일러 데이터시트</a>에서 확인할 수 있습니다.
+  </p>
+
+  <dl class="summary">
+    <div><dt>공개 결과</dt><dd><code>Compilation</code></dd></div>
+    <div><dt>소스 세대</dt><dd><code>CompilationId</code> + <code>Revision</code></dd></div>
+    <div><dt>MIR 근거</dt><dd>exact final <code>HirArtifact</code></dd></div>
+  </dl>
+
+  <h2 id="authority">1. 현재 권위 구조</h2>
+
+  <figure class="diagram" aria-labelledby="authority-title authority-caption">
+    <div class="diagram-scroll" tabindex="0">
+      <svg viewBox="0 0 1000 500" role="img" aria-labelledby="authority-title authority-desc">
+        <title id="authority-title">Compilation을 중심으로 한 Qora 컴파일 결과의 소유 구조</title>
+        <desc id="authority-desc">CompilationSession이 revision을 발급하고 Compilation이 Sources, Hir, 선택적 Mir, Targets, Diagnostics를 소유합니다. LanguageServiceCompilation은 정확한 Compilation과 선택적 MirSemanticIndex를 함께 묶습니다.</desc>
+        <defs>
+          <marker id="authority-arrow" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto">
+            <path d="M0,0 L9,4.5 L0,9 Z" fill="#718096"/>
+          </marker>
+        </defs>
+
+        <rect x="45" y="34" width="250" height="78" rx="12" fill="#fffaf1" stroke="#c99c49" stroke-width="2"/>
+        <text x="170" y="66" text-anchor="middle" class="svg-code" font-size="17" font-weight="700" fill="#6f4c00">CompilationSession</text>
+        <text x="170" y="91" text-anchor="middle" class="svg-ui" font-size="14" fill="#5b6472">identity · revision 발급</text>
+
+        <path d="M295 73 H385" fill="none" stroke="#718096" stroke-width="2" marker-end="url(#authority-arrow)"/>
+
+        <rect x="400" y="24" width="300" height="98" rx="12" fill="#eef4ff" stroke="#78a7d2" stroke-width="2"/>
+        <text x="550" y="59" text-anchor="middle" class="svg-code" font-size="20" font-weight="800" fill="#1745b5">Compilation</text>
+        <text x="550" y="86" text-anchor="middle" class="svg-ui" font-size="14" fill="#40516b">Id · Revision · ParentRevision?</text>
+        <text x="550" y="108" text-anchor="middle" class="svg-ui" font-size="13" fill="#5b6472">한 source revision의 불변 공개 결과</text>
+
+        <path d="M550 122 V157 H105 V184" fill="none" stroke="#718096" stroke-width="2" marker-end="url(#authority-arrow)"/>
+        <path d="M550 157 H300 V184" fill="none" stroke="#718096" stroke-width="2" marker-end="url(#authority-arrow)"/>
+        <path d="M550 157 V184" fill="none" stroke="#718096" stroke-width="2" marker-end="url(#authority-arrow)"/>
+        <path d="M550 157 H745 V184" fill="none" stroke="#718096" stroke-width="2" marker-end="url(#authority-arrow)"/>
+        <path d="M550 157 H917 V184" fill="none" stroke="#718096" stroke-width="2" marker-end="url(#authority-arrow)"/>
+
+        <g>
+          <rect x="20" y="190" width="170" height="112" rx="10" fill="#f8fafc" stroke="#aeb9c8"/>
+          <text x="105" y="221" text-anchor="middle" class="svg-code" font-size="15" font-weight="700">Sources</text>
+          <text x="105" y="246" text-anchor="middle" class="svg-code" font-size="13" fill="#1745b5">SourceSetSnapshot</text>
+          <text x="105" y="271" text-anchor="middle" class="svg-ui" font-size="12" fill="#5b6472">documents · syntax</text>
+          <text x="105" y="290" text-anchor="middle" class="svg-ui" font-size="12" fill="#5b6472">import graph</text>
+        </g>
+        <g>
+          <rect x="215" y="190" width="170" height="112" rx="10" fill="#f8fafc" stroke="#aeb9c8"/>
+          <text x="300" y="221" text-anchor="middle" class="svg-code" font-size="15" font-weight="700">Hir</text>
+          <text x="300" y="246" text-anchor="middle" class="svg-code" font-size="13" fill="#1745b5">HirCompilation</text>
+          <text x="300" y="271" text-anchor="middle" class="svg-ui" font-size="12" fill="#5b6472">milestones · semantics</text>
+          <text x="300" y="290" text-anchor="middle" class="svg-ui" font-size="12" fill="#5b6472">lineage</text>
+        </g>
+        <g>
+          <rect x="465" y="190" width="170" height="112" rx="10" fill="#f5faf7" stroke="#72b79c"/>
+          <text x="550" y="221" text-anchor="middle" class="svg-code" font-size="15" font-weight="700">Mir?</text>
+          <text x="550" y="246" text-anchor="middle" class="svg-code" font-size="13" fill="#11875b">MirSnapshot</text>
+          <text x="550" y="271" text-anchor="middle" class="svg-ui" font-size="12" fill="#5b6472">program · HirArtifact</text>
+          <text x="550" y="290" text-anchor="middle" class="svg-ui" font-size="12" fill="#5b6472">analysis store</text>
+        </g>
+        <g>
+          <rect x="660" y="190" width="170" height="112" rx="10" fill="#f8fafc" stroke="#aeb9c8"/>
+          <text x="745" y="221" text-anchor="middle" class="svg-code" font-size="15" font-weight="700">Targets</text>
+          <text x="745" y="246" text-anchor="middle" class="svg-code" font-size="13" fill="#1745b5">TargetArtifactSet</text>
+          <text x="745" y="271" text-anchor="middle" class="svg-ui" font-size="12" fill="#5b6472">backend별 artifact</text>
+          <text x="745" y="290" text-anchor="middle" class="svg-ui" font-size="12" fill="#5b6472">최대 하나</text>
+        </g>
+        <g>
+          <rect x="855" y="190" width="125" height="112" rx="10" fill="#f8fafc" stroke="#aeb9c8"/>
+          <text x="917" y="221" text-anchor="middle" class="svg-code" font-size="14" font-weight="700">Diagnostics</text>
+          <text x="917" y="252" text-anchor="middle" class="svg-ui" font-size="12" fill="#5b6472">stage</text>
+          <text x="917" y="273" text-anchor="middle" class="svg-ui" font-size="12" fill="#5b6472">origin</text>
+          <text x="917" y="294" text-anchor="middle" class="svg-ui" font-size="12" fill="#5b6472">QoraError</text>
+        </g>
+
+        <path d="M700 73 H840 V338 H820 V345" fill="none" stroke="#8a73ce" stroke-width="2" stroke-dasharray="6 5" marker-end="url(#authority-arrow)"/>
+        <rect x="270" y="354" width="560" height="105" rx="12" fill="#f7f4ff" stroke="#8a73ce" stroke-width="2"/>
+        <text x="550" y="385" text-anchor="middle" class="svg-code" font-size="17" font-weight="700" fill="#5f46b5">LanguageServiceCompilation</text>
+        <text x="550" y="416" text-anchor="middle" class="svg-ui" font-size="14" fill="#40516b">exact Compilation + MirSemanticIndex?</text>
+        <text x="550" y="440" text-anchor="middle" class="svg-ui" font-size="13" fill="#5b6472">IDE 질의를 요청한 경우에만 lowering trace에서 별도 인덱스 생성</text>
+      </svg>
+    </div>
+    <figcaption id="authority-caption">한 <code>Compilation</code> 안에서 source·HIR·MIR·target·진단이 같은 compilation identity와 revision에 묶입니다.</figcaption>
+  </figure>
+
+  <div class="callout good">
+    <span class="h">구조를 읽는 기준</span>
+    AST는 공개 장기 산출물이 아닙니다.<br>
+    parser가 만든 내부 <code>SyntaxParseProduct.LoweringAst</code>는 문서별 HIR lowering이 끝난 뒤 폐기되며, 공개 결과에는 불변 <code>SyntaxSnapshot</code>과 Qora 소유 HIR만 남습니다.
   </div>
 
-  <h2 id="s0"><span class="n">0</span>예제 — 모든 패스를 건드리는 파일 하나</h2>
-
-  <p>
-    사용자 소스를 처리하는 단계가 실제로 일하는 모습을 보기 위해, <strong>네임스페이스</strong>와
-    <strong>큐비트 배열 파라미터</strong>(<code>Qubit[]</code>), 호출을 한 프로그램에 담았습니다:
-  </p>
-
-<pre><code>namespace Prep {
-    operation Fanout(q: Qubit[]) {        <span class="cm">// 배열 길이는 호출부마다 정해짐</span>
-        for i in 0..q.Count-1 { H(q[i]); }
-    }
-}
-
-operation Main() {
-    use reg = Qubit[3];
-    Prep.Fanout(reg);                    <span class="cm">// 네임스페이스를 넘나드는 호출</span>
-    var r: bit = M(reg[0]);
-}</code></pre>
-
-  <p>
-    이름이 패스들을 지나며 어떻게 변하는지 확인할 수 있습니다. <code>Fanout</code>은 네임스페이스를 얻고
-    (<code>Prep.Fanout</code>), 구체적 크기를 얻은 뒤(<code>Prep.Fanout__sz3</code>), 마지막으로
-    OpenQASM용으로 평탄화됩니다(<code>Prep_Fanout__sz3</code>). 각 변화는 바로 아래의 한 패스가 맡습니다.
-  </p>
-
-  <h2 id="s1"><span class="n">1</span>두 세계 — 엔진이 멈추고 Qora가 시작되는 곳</h2>
-
-  <p>
-    컴파일러 전체에 경계는 정확히 하나뿐입니다. <strong>왼쪽에는 Janglim 파서 엔진</strong>이 있습니다 —
-    문법·렉서, 그리고 텍스트를 구문 트리로 바꾸는 일을 소유합니다. <strong>오른쪽에는 Qora</strong>가 있습니다 —
-    프로그램에 의미를 부여하고, 검사하고, 변환하고, 출력하는 모든 패스가 여기 있습니다. 두 세계는 함수 하나에서
-    만납니다 — <em>로워링(lowering)</em> — 이 함수는 엔진의 트리를 딱 한 번 읽고 다시는 돌아보지 않습니다.
-  </p>
-
-  <div class="rule">
-    소스&nbsp;→&nbsp;AST&nbsp;&nbsp;<span style="color:var(--muted)">│ 엔진 (Janglim)</span><br>
-    <span style="color:var(--muted)">Qora │</span>&nbsp;&nbsp;HIR&nbsp;→&nbsp;SSA/CFG MIR&nbsp;→&nbsp;typed target&nbsp;→&nbsp;OpenQASM
-  </div>
-
-  <div class="call why">
-    <span class="h">경계를 뚜렷이 유지하는 이유</span>
-    Qora가 다뤄야 할 모든 것 — 타입, 역연산, 제네릭, 이름 안전성 — 은 엔진의 트리가 아니라
-    <strong>Qora 자신의 IR</strong> 위에서 처리됩니다. 그래서 엔진은 양자에 대해 아무것도 모르는 범용 파서로
-    남을 수 있고, Qora는 문법을 건드리지 않고도 기능(새 패스)을 추가할 수 있습니다. 엔진에 의존하는 유일한
-    지점은 로워링이며, 나머지 컴파일러는 파서를 통째로 교체해도 살아남습니다.
-  </div>
-
-  <h2 id="s2"><span class="n">2</span>Parse — 소스에서 AST로 (엔진의 몫)</h2>
-
-  <p class="stagehead">in: 소스 텍스트 &nbsp;·&nbsp; out: 구문 트리 &nbsp;·&nbsp; 담당: Janglim 엔진</p>
-
-  <p>
-    엔진은 Qora 문법으로부터 렉서와 LALR 파서를 만든 뒤, 소스를 <strong>파스 트리</strong>로 바꿉니다.
-    이 단계에는 <strong>아무 의미가 없습니다</strong> — <code>Prep.Fanout</code>은 토큰 세 개
-    (<code>Prep</code>, <code>.</code>, <code>Fanout</code>)이며, 호출과 게이트는 똑같이 생겼습니다.
-    예제의 실제 트리:
-  </p>
-
-<pre><code>Nonterminal : Program
-  Nonterminal : Namespace
-    Terminal : Prep
-    Nonterminal : Operation
-      Terminal : Fanout
-      Nonterminal : Param
-        Nonterminal : ArrayType
-          Terminal : Qubit
-        Terminal : q
-      Nonterminal : For
-        Terminal : i
-        Nonterminal : Expr ( 0 )
-        Nonterminal : Expr ( q . Count - 1 )
-        Nonterminal : Gate
-          Terminal : H
-          Nonterminal : IndexAccess ( q , i )
-  Nonterminal : Operation
-    Terminal : Main
-    Nonterminal : Use ( reg , Qubit , 3 )
-    Nonterminal : Gate                  <span class="cm">← 호출도 다른 모든 것처럼 Gate로 태깅됨</span>
-      Terminal : Prep
-      Terminal : .
-      Terminal : Fanout
-      Nonterminal : Expr ( reg )
-    Nonterminal : VarDecl
-      Terminal : bit
-      Terminal : r
-      Nonterminal : Expr → Call ( M , IndexAccess ( reg , 0 ) )</code></pre>
-
-  <div class="call">
-    <span class="h">이 트리는 한 번 읽힌 뒤 다시는 손대지 않습니다</span>
-    이후 모든 단계는 이 트리가 아니라 IR 위에서 작동합니다. <code>Prep.Fanout__sz3</code> 같은 이름은
-    아직 존재하지 않습니다 — 이 뒤에서 태어납니다.
-  </div>
-
-  <h2 id="s3"><span class="n">3</span>Lower — AST에서 소스 모양 HIR로 (경계를 넘다)</h2>
-
-  <p class="stagehead">in: 엔진 AST + revision-bound session &nbsp;·&nbsp; out: <code>HirProgram</code> (source-shaped HIR) &nbsp;·&nbsp; 패스: <code>AstToHirLowering</code></p>
-
-  <p>
-    로워링은 엔진의 트리를 <strong>한 번</strong> 순회하며 Qora가 소유하는 불변 IR로 다시 세웁니다.<br>
-    <code>HirProgram.Declarations</code>가 유일한 선언 소유 트리이며, <code>HirNamespaceDeclaration</code>은
-    하위 선언과 <code>open</code>을 소유하고 <code>HirCallable</code>은 매개변수와 <code>HirBlock</code>을 소유합니다.<br>
-    그리고 모든 문장과 표현식은 현재 revision의 lowering session이 발급한 identity를 가진 typed node가 됩니다.
-    예제의 IR은 다음과 같습니다.
-  </p>
-
-<pre><code>HirProgram
-  Declarations[0] = HirNamespaceDeclaration("Prep")
-    Declarations[0] = HirCallable("Fanout", Qubit q)
-      HirForStatement(i, 0, n - 1)
-        HirCallStatement(H, q[i])
-
-  Declarations[1] = HirCallable("Main")
-    HirQubitDeclarationStatement(reg, 3)
-    HirCallStatement(Prep.Fanout, reg)
-    HirVariableDeclarationStatement(bit r, HirMeasurementExpression(reg[0]))</code></pre>
-
-  <div class="call why">
-    <span class="h">트리를 타입 있는 데이터로 다시 만드는 이유</span>
-    이후 패스가 문자열을 다시 파싱하지 않고 호출 대상·인수·수식자를 검사할 수 있기 때문입니다. 미들엔드
-    전체가 IR 기반인 것도 같은 이유입니다. 패스들이 구조화된 노드를 읽고 쓰므로, 각 패스는 짧게 유지되고
-    틀리기 어렵습니다.
-  </div>
-
-  <h2 id="s4"><span class="n">4</span>Expand &amp; Resolve — 임포트와 호출 대상 FQN</h2>
-
-  <p class="stagehead">패스: <code>ModuleLoader.Expand</code> → <code>Resolver.Resolve</code></p>
-
-  <p>
-    <strong>Expand</strong>는 모듈 로더입니다. 파일에 <code>import "lib/prep.qor"</code>가 있었다면, 이
-    패스가 그 파일을 파싱·로워링하고 최상위 선언 subtree를 하나의 <code>HirProgram</code>에 이어 붙입니다.<br>
-    이후 모든 단계는 하나의 프로그램을 보지만, namespace 소유 관계는 이름 문자열로 평탄화되지 않고 선언 트리에 그대로 남습니다.
-    (예제는 아무것도 임포트하지 않으므로 여기서는 아무 일도 하지 않습니다.<br>
-    파일이 없으면 <code>QSEM020</code>이 됩니다. 반면에 순환 back-edge는 <code>loaded</code>에 이미 등록된 경로로 보아 오류 없이 생략합니다.<br>
-    <code>QSEM021</code>은 폐기된 예약 코드로만 남아 더 이상 생성하지 않습니다.)
-  </p>
-
-  <p>
-    측정식은 Expand와 Resolve 사이에서 target 모양의 HIR로 바꾸지 않습니다.
-    <code>if (M(q[0]) == 1)</code>은 조건 안의 canonical <code>HirMeasurementExpression</code>으로 그대로 남습니다.
-    이후 <code>QoraMirLowering</code>이 측정을 정확한 평가 위치에 놓고, short-circuit 제어 흐름을 CFG로 분명하게 표현합니다.
-    마지막으로 OpenQASM target lowering이 구조화된 제어 흐름을 복원하면서 필요한 측정용 <code>bit</code>을 방출합니다:
-  </p>
-
-<pre><code>operation Main() {
-    use q = Qubit[2];
-    <span class="hl">if (M(q[0]) == 1)</span> { X(q[1]); }
-}
-                       <span class="cm">↓ MIR lowering + OpenQASM target lowering</span>
-qubit[2] q;
-int v0;
-<span class="add">bit v1;</span>
-int v2;
-int v3;
-bit v4;
-int v5;
-v0 = 0;
-<span class="add">v1 = measure q[v0];</span>            <span class="cm">← 측정 결과가 SSA에 대응하는 target value가 됩니다</span>
-v2 = 1;
-v3 = int(v1);
-v4 = v3 == v2;
-<span class="add">if (v4)</span> {
-    v5 = 1;
-    x q[v5];
-}
-</code></pre>
-
-  <p>
-    이어 <strong>Resolve</strong>가 연산 정의와 연산 호출 대상을 <strong>정규화된 이름(FQN)</strong>으로 바꿉니다.
-    <code>namespace Prep</code> 안의 연산 <code>Fanout</code>은 <code>Prep.Fanout</code>이 되고, 호출부
-    <code>Prep.Fanout(reg)</code>가 그것을 가리키는지 확인됩니다. 그래서 위 HIR 리스팅이 이미 <code>Fanout</code>이
-    아니라 <code>Prep.Fanout</code>으로 읽히는 것입니다. 다만 여기서 모든 식별자를 처리하는 것은 아닙니다.
-    변수, 루프 변수, 큐비트 인덱스, 조건식 안의 이름은 다음 검증 단계의 심볼 테이블이 스코프 기준으로 확인합니다.
-    어떤 호출 이름이 모호했다면(<code>open</code>된 두 네임스페이스에서 보였다면) <code>QSEM018</code>이 되고,
-    알 수 없는 네임스페이스나 멤버는 <code>QSEM019</code>가 됩니다.
-  </p>
-
-  <h2 id="s5"><span class="n">5</span>Validate — 의미 게이트</h2>
-
-  <p class="stagehead">in: 해소된 IR &nbsp;·&nbsp; out: 오류 목록 (또는 없음) &nbsp;·&nbsp; 패스: <code>QoraValidator</code> + <code>SymbolTableBuilder</code></p>
-
-  <p>
-    검증은 한 가지 질문에 답합니다: <strong>이름·타입·스코프·호출 및 소유권 계약이 서로 맞는 올바른 Qora
-    프로그램입니까?</strong><br>
-    OpenQASM이나 다른 backend가 이 프로그램을 표현할 수 있는지는 여기서 판단하지 않습니다.<br>
-    HIR 전체를 한 번 순회하며 첫 오류에서 멈추지 않고 <strong>모든 위반을 수집</strong>합니다.<br>
-    이때 검증기는 통합 심볼 테이블도 만듭니다. 파라미터, 레지스터, 측정 비트, 변수, 상수, 루프 변수가 어느
-    스코프에 사는지 기록하고, 각 이름이 어디에서 사용되는지도 함께 모읍니다.<br>
-    모든 규칙에는 안정된 <code>QSEM</code> 코드가 있어 에디터가 물결선을 붙일 수 있습니다. 그중 몇 가지는 다음과 같습니다:
-  </p>
+  <h2 id="pipeline">2. 실제 생산 흐름</h2>
 
   <div class="panel">
-    <table class="amp">
-      <tr><th>코드</th><th>거부하는 것</th></tr>
-      <tr><td><code>QSEM002</code></td><td><code>Foo</code>가 <code>Qora.Intrinsic</code>에 속하지 않은 <code>Controlled Foo</code> — 소스 문법의 <code>Controlled</code>는 intrinsic에만 사용</td></tr>
-      <tr><td><code>QSEM006</code></td><td>시그니처와 맞지 않는 인자의 호출 — 개수, 종류(큐비트 vs 각도), 또는 레지스터 크기</td></tr>
-      <tr><td><code>QSEM007</code></td><td>알 수 없는 게이트/연산 이름("혹시 …?" 힌트 포함)</td></tr>
-      <tr><td><code>QSEM011</code></td><td>callable graph의 순환 — Qora 호출 그래프는 비순환이어야 함</td></tr>
-      <tr><td><code>QSEM016</code></td><td>레지스터 범위를 벗어난 리터럴 큐비트 인덱스</td></tr>
-      <tr><td><code>QSEM025</code></td><td>스코프 안에서 해소되지 않는 식별자 — 알 수 없는 이름 또는 선언 전에 사용된 고전 이름</td></tr>
+    <table class="spec">
+      <tr><th>경계</th><th>실제 생산자</th><th>생산 결과</th></tr>
+      <tr><td class="k">문서 준비</td><td><code>SourceGraphLoader</code> → parser → <code>AstToHirLowering</code></td><td><code>SourceSetSnapshot</code> + 문서별 source-shaped <code>HirProgram</code></td></tr>
+      <tr><td class="k">통합 HIR</td><td><code>ModuleLoader</code> → <code>Resolver</code></td><td>문서별 선언 subtree를 병합하고 호출 대상을 FQN과 <code>CalleeId</code>로 해소한 HIR</td></tr>
+      <tr><td class="k">HIR 의미</td><td><code>QoraValidator</code> → <code>Monomorphizer</code> → <code>EffectAnalysis</code></td><td>검증 outcome과 의미 모델, size-specialized 구조, final effect-analysis artifact</td></tr>
+      <tr><td class="k">MIR</td><td><code>QoraMirLowering</code> → <code>MirAnalysisStore</code></td><td>exact final HIR artifact에 고정된 typed SSA/CFG <code>MirSnapshot</code>과 lazy 분석</td></tr>
+      <tr><td class="k">Target</td><td><code>QasmBackend</code> → <code>MirOpenQasmLowering</code></td><td>typed <code>MirOpenQasmTargetProgram</code>과 OpenQASM text artifact</td></tr>
     </table>
   </div>
 
   <p>
-    지역 바인딩은 선언된 지점부터 해당 lexical scope의 끝까지 보이며, 선언보다 먼저 사용하면 <code>QSEM025</code>입니다.<br>
-    <code>use</code> 선언도 같은 이름 규칙을 따르지만, 할당 자체는 별도의 언어 계약에 따라 entry operation의 최상위에서만 가능합니다.<br>
-    순수 함수 호출은 일반 고전 값이므로 배열 리터럴의 원소와 <code>for</code> 범위의 경계에서도 사용할 수 있습니다.<br>
-    원소 타입이 같은 고전 배열은 구조적 <code>==</code>와 <code>!=</code>를 지원합니다. 길이가 다르면 같지 않고, 길이가 같으면
-    각 원소를 비교합니다.
+    파일 I/O와 문서별 파싱은 <code>SourceGraphLoader</code>가 담당합니다.<br>
+    <code>ModuleLoader</code>는 준비된 문서별 HIR과 import graph만 받아 선언 subtree를 병합하며, 파일을 다시 읽거나 파싱하지 않습니다.<br>
+    각 패스의 정확한 입력·출력·권위 경계는 <a href="datasheet.html#passes">데이터시트의 패스 표</a>에서 확인할 수 있습니다.
   </p>
 
-  <div class="call why">
-    <span class="h">변환 패스들보다 먼저 검증하는 이유</span>
-    이후 모든 패스가 프로그램이 이미 온전하다고 가정할 수 있게 하기 때문입니다. 단형화기는 스코프에서
-    해소되지 않는 이름을 만나지 않고, 이미터는 잘못된 호출을 만나지 않습니다. 게이트가 모두의 앞에 서
-    있기에 각 변환 패스는 단순해질 수 있습니다.
+  <h2 id="documents">3. 문서 지도</h2>
+
+  <div class="doc-grid">
+    <a class="doc-card" href="datasheet.html">
+      <b>컴파일러 데이터시트</b>
+      <span><code>Compilation</code>, SourceSet, HIR, MIR, target과 불변 조건의 기준 문서</span>
+    </a>
+    <a class="doc-card" href="#passes">
+      <b>IR 패스 문서</b>
+      <span>AST→HIR lowering과 문서 그래프 병합의 입력·출력·소유 경계</span>
+    </a>
+    <a class="doc-card" href="#uncompute-course">
+      <b>자동 uncomputation 코스</b>
+      <span>앤실라, 얽힘, qfree 계약, scheduler의 현재 미구현 경계를 잇는 16개 문서</span>
+    </a>
+    <a class="doc-card" href="#foundations">
+      <b>양자 동작 기초</b>
+      <span>아키텍처 설계에서 사용하는 H 게이트와 진폭 변화를 별도 배경 문서로 확인</span>
+    </a>
+    <a class="doc-card" href="../../namespaces-design.md">
+      <b>Namespace와 module 설계</b>
+      <span>다중 파일, namespace, open, scope graph와 이름 해소 규칙의 설계 기록</span>
+    </a>
   </div>
 
-  <h2 id="s6"><span class="n">6</span>Monomorphize — 큐비트 배열 호출의 특수화</h2>
+  <h2 id="passes">4. IR 패스 문서</h2>
 
-  <p class="stagehead">in: 검증된 HIR &nbsp;·&nbsp; out: 구체적 크기의 op을 가진 HIR &nbsp;·&nbsp; 패스: <code>Monomorphizer</code></p>
-
-  <p>
-    표면 타입 <code>Fanout(q: Qubit[])</code>에는 배열 길이를 적지 않습니다.<br>
-    단형화기(monomorphizer)는 각 호출부에서 실제 레지스터 크기를 읽어 <strong>구체적인 내부 복사본을 만들고</strong>,
-    파라미터에 알려진 폭을 부여한 뒤 호출이 해당 복사본을 가리키도록 다시 씁니다.<br>
-    공통 HIR에서는 <code>q.Count</code>를 보존하고, target이 나중에 알려진 폭을 사용해 내립니다.<br>
-    예제의 호출은 <code>reg</code>(큐비트 3개)를 넘기므로:
-  </p>
-
-  <div class="rule">
-    <code>Prep.Fanout(Qubit[])</code> &nbsp;+&nbsp; 크기 3 레지스터로의 호출
-    &nbsp;⟶&nbsp; <code>Prep.Fanout__sz3(Qubit[3])</code>
+  <div class="doc-grid">
+    <a class="doc-card" href="ir-pass-01-ast-to-hir-lowering.html">
+      <b>1. AstToHirLowering</b>
+      <span>문서 AST를 source-shaped HIR 선언 트리로 바꾸는 경계</span>
+    </a>
+    <a class="doc-card" href="ir-pass-02-module-loader.html">
+      <b>2. SourceGraphLoader와 ModuleLoader</b>
+      <span>문서 그래프 준비와 I/O 없는 순수 HIR 병합의 책임 분리</span>
+    </a>
   </div>
 
-  <p>
-    이제 폭이 구체적이므로 프로그램은 <strong>두 번째로 검증</strong>됩니다.<br>
-    인덱스 범위와 레지스터 크기 일치 검사가 비로소 대조할 값을 얻고, 이 패스 이후에는 제네릭 연산이 남지 않습니다.
-  </p>
+  <h2 id="uncompute-course">5. 자동 uncomputation 코스</h2>
 
-  <h2 id="s7"><span class="n">7</span>Lower — 소스 모양 HIR에서 SSA/CFG MIR로</h2>
-
-  <p class="stagehead">in: 검증된 specialized HIR + 의미 정보 &nbsp;·&nbsp; out: <code>MirSnapshot</code> &nbsp;·&nbsp; 패스: <code>QoraMirLowering</code></p>
-
-  <p>
-    HIR은 사용자가 작성한 프로그램 모양을 유지하므로 이름 해소, 타입 검사, 진단에 알맞습니다.<br>
-    그 책임을 마치면 <code>QoraMirLowering</code>이 실행 중심 표현을 만들면서, 고전값에는 SSA version을 붙이고 분기와 반복은 명시적인 제어 흐름 그래프로 바꿉니다.
-  </p>
-
-<pre><code>var x: int = 1;
-x = x + 1;
-
-<span class="cm">↓ QoraMirLowering</span>
-
-v0 = constant 1
-v1 = add v0, 1
-return</code></pre>
-
-  <p>
-    결과는 <code>MirStage.Lowered</code> 상태의 정확한 불변 <code>MirSnapshot</code> 객체입니다.<br>
-    이 객체는 실제로 소비한 final HIR을 <code>HirArtifact</code>로, MIR의 source provenance를 program-owned <code>Origins</code>로 보존합니다.<br>
-    컴파일 identity는 <code>HirArtifact</code>에만 있고 MIR에 다시 복사하지 않으므로, backend는 이름이나 중복 ID로 MIR의 출처를 추측할 필요가 없습니다.
-  </p>
-
-  <h2 id="s8"><span class="n">8</span>MIR 분석과 내부 역연산 실체화</h2>
-
-  <p class="stagehead">패스: exact <code>MirProgram</code> 분석 → <code>MirAdjointMaterializer</code></p>
-
-  <p>
-    제어 흐름, 효과, 별칭, 메모리 상태, 경로 조건, 제어 영역 분석은 자신이 설명하는 정확한 <code>MirProgram</code> 객체에만 묶입니다.<br>
-    분석 결과를 HIR에 복사하지 않으며, 새 프로그램을 가진 snapshot에 이전 프로그램의 사실을 재사용하지도 않습니다.
-  </p>
-
-  <p>
-    역연산 요청도 오직 MIR에만 존재합니다.<br>
-    컴파일러 내부 scheduler가 정확한 <code>MirQuantumApply</code> 하나에 <code>MirFunctor.Adjoint</code>를 붙이면, <code>MirAdjointMaterializer</code>가 필요한 역방향 MIR callable을 합성하고 요청을 typed callable target으로 바꾼 뒤 바로 이전 MIR snapshot을 exact <code>PreviousSnapshot</code>으로 가진 새 snapshot을 발행합니다.<br>
-    Qora 소스와 HIR에는 <code>Adjoint</code>, 역연산 표식, conjugation node가 없습니다.
-  </p>
-
-<pre><code>MirQuantumApply(Target = Prepare, Functors = [MirFunctor.Adjoint])
-                         <span class="cm">↓ MirAdjointMaterializer</span>
-MirCallable __qora_inverse_...(reversed unitary body)
-MirQuantumApply(Target = __qora_inverse_..., Functors = [])</code></pre>
-
-  <div class="call why">
-    <span class="h">이 경계를 MIR에 두는 이유</span>
-    자동 uncomputation은 SSA version, CFG 경로, storage 상태, 정확한 instruction identity가 필요합니다.<br>
-    요청과 합성 callable을 MIR에 두면 scheduler와 materializer가 같은 근거를 공유하면서도 HIR에 컴파일러 전용 문법을 추가하거나 별도 target 경로를 만들지 않을 수 있습니다.
+  <div class="callout">
+    <span class="h">현재 구현 경계</span>
+    자동 uncomputation scheduler와 역연산 생성 패스는 현재 구현되어 있지 않습니다.<br>
+    아래 문서는 현재 MIR이 제공하는 분석 재료와 향후 scheduler가 해결해야 할 판정 문제를 구분해서 읽는 설계 코스입니다.
   </div>
 
-  <h2 id="s9"><span class="n">9</span>OpenQASM target lowering과 방출</h2>
-
-  <p class="stagehead">in: materialized MIR &nbsp;·&nbsp; target: <code>MirOpenQasmTargetProgram</code> &nbsp;·&nbsp; 패스: <code>MirOpenQasmLowering</code> → <code>MirQasmEmitter</code></p>
-
-  <p>
-    OpenQASM backend는 정확한 materialized MIR snapshot을 소비합니다.<br>
-    CFG에서 구조화된 <code>if</code>, <code>while</code>, loop exit를 복원하고, SSA 값과 phi edge를 typed target declaration과 assignment로 바꾸며, 충돌 없는 OpenQASM 이름도 이 단계에서 정합니다.<br>
-    결과인 <code>MirOpenQasmTargetProgram</code>은 target type, callable, declaration, statement와 target-local identity를 소유하고, HIR을 두 번째 권위 저장소로 들고 있지 않습니다.
-  </p>
-
-  <p>
-    올바른 Qora 프로그램을 OpenQASM이 표현할 수 있는지 묻는 첫 단계가 바로 여기입니다.<br>
-    고전 배열 등가 비교에서 알려진 길이가 다르면 상수 결과로 lowering하고, 같은 길이의 일반 배열은 원소별 비교로 lowering합니다.<br>
-    동적 길이의 일반 배열 비교는 현재 OpenQASM backend가 표현할 수 없어 <code>QASM002</code>를 냅니다.<br>
-    또한 가변 빌림인 <code>var bit[]</code> 파라미터는 HIR과 MIR에서 올바르지만, 값으로 전달되는 bit register로는 호출자에게
-    쓰기 결과를 되돌려줄 수 없어 현재 OpenQASM target이 <code>QASM002</code>를 냅니다.<br>
-    반면 가변 이전인 <code>move var bit[]</code>는 지원합니다. 소유권을 소비한다는 계약과 <code>bit[N]</code> 값을 target callable에
-    전달하는 방식이 서로 맞기 때문입니다.
-  </p>
-
-  <p>
-    그다음 <code>MirQasmEmitter</code>가 이 target model을 직렬화합니다.<br>
-    source 이름을 다시 해소하거나 semantic fact를 조회하고, 역연산을 합성하거나 제어 흐름을 재구성하지 않습니다.<br>
-    앞으로 다른 backend가 추가되어도 HIR 파이프라인을 분기하지 않고 같은 canonical MIR을 자기 typed lowering으로 소비할 수 있습니다.
-  </p>
-
-  <h2 id="s10"><span class="n">10</span>전체 파이프라인 한눈에</h2>
-
-  <div class="panel">
-    <table class="amp">
-      <tr><th>단계</th><th>패스</th><th>무엇을 무엇으로</th></tr>
-      <tr><td>Parse</td><td><em>Janglim 엔진</em></td><td>소스 텍스트 → 구문 트리 (아직 의미 없음)</td></tr>
-      <tr><td>Lower HIR</td><td><code>AstToHirLowering</code></td><td>엔진 트리 + lowering session → 불변 <code>HirProgram</code> 선언 트리</td></tr>
-      <tr><td>Expand</td><td><code>ModuleLoader</code></td><td>문서별 선언 subtree → 하나로 병합된 <code>HirProgram</code></td></tr>
-      <tr><td>Resolve</td><td><code>Resolver</code></td><td>연산 호출 대상 → 정규화된 이름(FQN)</td></tr>
-      <tr><td>Validate</td><td><code>QoraValidator</code> + <code>SymbolTableBuilder</code></td><td>IR → 심볼 테이블 + 모든 의미 오류 (방출을 막는 단단한 게이트)</td></tr>
-      <tr><td>Monomorphize</td><td><code>Monomorphizer</code></td><td><code>Qubit[]</code> 호출 → 호출 크기별 내부 복사본, 바뀐 경우 재검증</td></tr>
-      <tr><td>Lower MIR</td><td><code>QoraMirLowering</code></td><td>검증된 HIR + 의미 정보 → 측정을 평가 위치에서 lower한 typed SSA/CFG <code>MirSnapshot</code></td></tr>
-      <tr><td>Analyze MIR</td><td><code>MirAnalysisStore</code></td><td>exact <code>MirProgram</code> → 제어 흐름·효과·별칭·메모리·경로 정보</td></tr>
-      <tr><td>Materialize</td><td><code>MirAdjointMaterializer</code></td><td>MIR-only inverse request → 합성된 inverse MIR callable</td></tr>
-      <tr><td>Target-lower</td><td><code>MirOpenQasmLowering</code></td><td>materialized MIR → typed <code>MirOpenQasmTargetProgram</code></td></tr>
-      <tr><td>Emit</td><td><code>MirQasmEmitter</code></td><td>typed target model → OpenQASM 3 텍스트</td></tr>
-    </table>
+  <div class="course-grid">
+    <a href="uncompute-01-ancilla.html">1. 앤실라와 uncomputation</a>
+    <a href="uncompute-02-ladder.html">2. 컴파일러는 어떤 큐빗을 정리하는가</a>
+    <a href="uncompute-03-ledger.html">3. 상태를 읽는 법 — 상태벡터와 진폭</a>
+    <a href="uncompute-04-entangle.html">4. 곱 상태와 얽힌 상태</a>
+    <a href="uncompute-05-trace.html">5. 곱에서 얽힘으로 — 프로그램 단계별 확인</a>
+    <a href="uncompute-06-phase.html">6. 전역 위상과 상대 위상</a>
+    <a href="uncompute-07-observe.html">7. 측정으로 위상 확인하기</a>
+    <a href="uncompute-08-gates.html">8. 게이트는 상태벡터를 어떻게 바꾸는가</a>
+    <a href="uncompute-09-qfree.html">9. 청소의 계약과 qfree</a>
+    <a href="uncompute-10-y-gate.html">10. Y·CY가 차단되는 이유</a>
+    <a href="uncompute-11-injector.html">11. 주입기 — 문장 붙여넣기 기계</a>
+    <a href="uncompute-12-loops.html">12. 루프와 호출</a>
+    <a href="uncompute-13-blanket.html">13. 담요 문제 — 질의 폭과 문장 폭</a>
+    <a href="uncompute-14-limits.html">14. 원리적 한계와 보수적 거부</a>
+    <a href="uncompute-15-two-runtimes.html">15. 왜 정적 컴파일인가</a>
+    <a href="uncompute-16-landscape.html">16. 언어 지형 속의 Qora</a>
   </div>
 
-  <p>
-    이 형태는 의도된 것입니다: 엔진과의 <strong>경계 하나</strong>, 그다음 <strong>각자 IR에 한 가지 일만 하는
-    작은 패스들</strong>의 일직선, 그리고 그 앞에 선 검증 게이트 덕분에 이후 모든 것이 단순해질 수 있습니다.
-    언어 기능을 추가하는 것은 보통 한 패스를 추가하거나 확장하는 일이지 — 컴파일러를 다시 쓰는 일이 아니며 —
-    끝의 출력 전용 이미터는 여러분이 얻는 OpenQASM이 패스들이 만든 IR 그대로임을 뜻합니다.
-  </p>
+  <h2 id="foundations">6. 양자 동작 기초</h2>
 
-  <div class="call why">
-    <span class="h">이것이 향하는 곳 — 자동 언컴퓨테이션</span>
-    Silq식 자동 언컴퓨테이션 — <strong>임시 큐비트가 더 이상 필요 없어지는 지점을 찾아 그 역연산을 자동으로
-    주입하는 것</strong> — 을 위한 단계 경계는 이제 MIR에 있습니다.<br>
-    scheduler는 exact <code>MirProgram</code>에 묶인 SSA/CFG 사실을 소비해 전역 cleanup 순서를 구하고, 정확한 MIR instruction에 inverse request를 주입하게 될 것입니다.<br>
-    <code>MirAdjointMaterializer</code>와 typed target 경로는 이미 이 표현을 소비합니다.<br>
-    다만 조건문·반복문·별칭·고전 witness 안정성·여러 ancilla 사이의 충돌은 scheduler가 해당 사례를 허용하기 전에 명시적으로 증명해야 합니다.
+  <div class="doc-grid">
+    <a class="doc-card" href="hadamard.html">
+      <b>H 게이트를 화살표로 이해하기</b>
+      <span>진폭, 확률, 부호와 간섭을 한 큐비트의 실제 상태 변화로 설명</span>
+    </a>
   </div>
 
-  <hr>
-
-  <p style="color:var(--muted); font-size:.92rem;">
-    소스·AST·HIR·OpenQASM 리스팅은 실제 Qora 컴파일러(<code>qora --json --stages</code>)에서 얻었고, 짧은 MIR 리스팅은 실제 MIR type을 사용한 설명용 도식입니다.<br>
-    소스, 파이프라인 순서대로: <code>QoraGrammar.cs</code> (문법) ·
-    <code>Ir/AstToHirLowering.cs</code> + <code>Ir/AstExpressionLowering.cs</code> (AST→HIR) ·
-    <code>Ir/Passes/ModuleLoader.cs</code> · <code>Resolver.cs</code> · <code>SymbolTable.cs</code> · <code>QoraValidator.cs</code> ·
-    <code>Monomorphizer.cs</code> · <code>Ir/Mir/QoraMirLowering.cs</code> ·
-    <code>Ir/Mir/MirAdjointMaterializer.cs</code> · <code>Ir/Qasm/MirOpenQasmLowering.cs</code> ·
-    <code>Ir/Qasm/MirQasmEmitter.cs</code> (typed target model→OpenQASM).
-  </p>
-
+  <footer>
+    Qora 컴파일러 아키텍처 허브 · 현재 권위 모델: <code>Compilation</code>
+  </footer>
 </div>
 </body>
 </html>

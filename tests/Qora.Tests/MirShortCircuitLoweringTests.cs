@@ -128,15 +128,21 @@ public sealed class MirShortCircuitLoweringTests
             phi.Inputs,
             input =>
                 input.Edge.Source == shortCircuitSite.Block.Id
-                && input.Edge.SuccessorOrdinal
-                    == (rightOperandUsesTrueEdge ? 1 : 0)
+                && input.Edge.Kind
+                    == (rightOperandUsesTrueEdge
+                        ? MirControlFlowEdgeKind.BranchFalse
+                        : MirControlFlowEdgeKind.BranchTrue)
                 && input.Qubit == measurementSite.Measure.Qubit.Qubit);
         Assert.Contains(
             phi.Inputs,
             input =>
                 input.Edge.Source == measurementSite.Block.Id
-                && input.Edge.SuccessorOrdinal == 0
+                && input.Edge.Kind == MirControlFlowEdgeKind.Jump
                 && input.Qubit == measurementSite.Measure.QubitResult.Key);
+
+        var printed = MirPrinter.Print(program);
+        var skippedEdge = rightOperandUsesTrueEdge ? "false" : "true";
+        Assert.Contains($", ^{shortCircuitSite.Block.Id}.{skippedEdge}]", printed);
 
         var followingX = Assert.Single(
             main.Blocks

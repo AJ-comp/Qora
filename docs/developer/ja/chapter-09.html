@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>9. 最終 HIR から最初の MIR へ — Qora コンパイラ開発者マニュアル</title>
+<link rel="stylesheet" href="developer.css">
+<script src="developer-syntax.js" defer></script>
+</head>
+<body>
+<nav class="language-switch" aria-label="言語"><a href="../en/chapter-09.html">English</a><span aria-hidden="true">·</span><a href="../ko/chapter-09.html">한국어</a><span aria-hidden="true">·</span><strong>日本語</strong></nav>
+<a class="skip-link" href="#main-content">本文へ移動</a>
+<header class="hero">
+  <div class="tag">Qora · Compiler Developer Manual · Chapter 9</div>
+  <h1>最終 HIR から最初の MIR へ</h1>
+  <p>意味解析済みのプログラムが MIR 全体へ変わる大きな流れ</p>
+</header>
+
+<main class="wrap" id="main-content">
+  <nav class="chapter-nav" aria-label="章移動（上）">
+    <div class="group"><a href="index.html#c8">前のトピック：第8章目次</a><a href="index.html#chapters">全章目次</a></div>
+    <div class="group"><a href="chapter-10.html">次：Callable lowering →</a></div>
+  </nav>
+
+  <p class="lead">
+    この章では、最終 HIR が MIR へ渡る境界だけを確認します。<br>
+    個々の文や式をどう変換するかは後に回し、プログラム全体がどの入力からどの結果になるかを先に把握します。
+  </p>
+
+  <h2 id="example">使用するサンプルプログラム</h2>
+
+<pre><code class="language-qora">function Next(value: int): int
+{
+    return value + 1;
+}
+
+operation Work()
+{
+    var values: int[] = [0];
+    use q = Qubit[1];
+
+    values[0] = Next(values[0]);
+
+    if (values[0] == 1)
+    {
+        X(q[0]);
+    }
+
+    H(q[0]);
+}</code></pre>
+
+  <p>
+    意味解析が終わると、HIR には <code>Next</code> と <code>Work</code> という二つの callable があります。<br>
+    <code>Work</code> は実行を開始する operation、<code>Next</code> はその中で呼び出される function です。
+  </p>
+
+  <h2 id="compile-on-current-thread">HIR → MIR 境界の全体像</h2>
+
+<pre><code class="language-plaintext">最終 HIR compilation
+├─ Next
+└─ Work  ← entry operation
+        │
+        │ ToMir()
+        ▼
+最初の MIR snapshot
+└─ MirProgram
+   ├─ Next  (MirCallable)
+   ├─ Work  (MirCallable)
+   └─ EntryPoint = Work</code></pre>
+
+  <p>
+    要点は単純です。<br>
+    <code>ToMir()</code> は最終 HIR の callable を一つずつ MIR callable に変換し、完成した callable を一つの <code>MirProgram</code> にまとめます。その後、その program を最初の <code>MirSnapshot</code> で包んで返します。
+  </p>
+
+  <h2 id="lower-artifact">二つの callable を MirProgram にまとめる</h2>
+
+  <p>
+    意味解析済みの最終 HIR で callable 一覧を先頭から順に走査します。<br>
+    この例では、まず <code>Next</code> を変換し、続いて <code>Work</code> を変換します。
+  </p>
+
+<pre><code class="language-plaintext">HIR callable 一覧
+├─ Next
+│  └─ callable lowering → MirCallable Next
+└─ Work
+   └─ callable lowering → MirCallable Work
+
+完成した MIR callable 一覧
+├─ MirCallable Next
+└─ MirCallable Work</code></pre>
+
+  <p>
+    ここで callable lowering とは、一つの function または operation のパラメータ、本文、block を MIR 形式にする処理です。<br>
+    その内部過程は第10章で個別に確認します。この章では、二つの結果が一つの一覧へ集められる点だけ押さえれば十分です。
+  </p>
+
+  <p>
+    すべての callable が揃うと <code>MirProgram</code> を作ります。<br>
+    callable 一覧だけでなく、どの callable から実行を始めるかも同時に決めます。この例の entry point は operation の <code>Work</code> です。
+  </p>
+
+  <h2 id="snapshot">最初の MirSnapshot を作る時点</h2>
+
+<pre><code class="language-plaintext">MirProgram
+├─ Callables
+│  ├─ Next
+│  └─ Work
+└─ EntryPoint = Work
+        │
+        │ CreateLowered(program)
+        ▼
+MirSnapshot
+├─ Program = 上の MirProgram
+└─ Analyses = その Program 専用の解析窓口</code></pre>
+
+  <p>
+    <code>MirProgram</code> が完成すると、<code>MirSnapshot.CreateLowered(program)</code> が最初の MIR snapshot を作ります。<br>
+    返された snapshot は、今作った <code>MirProgram</code> と、その program を解析する <code>Analyses</code> を一緒に保持します。
+  </p>
+
+  <h2 id="summary">まとめ</h2>
+
+<pre><code class="language-plaintext">ToMir()
+→ 意味解析済みの HIR を選択
+→ Next と Work を個別の MirCallable へ変換
+→ EntryPoint が Work の MirProgram を作成
+→ その MirProgram と Analyses を持つ MirSnapshot を返す</code></pre>
+
+  <p>
+    以上が HIR から MIR へ移る境界の全体です。<br>
+    次の章では、この流れのうち一つの callable を変換する部分だけを拡大し、<code>Next</code> と <code>Work</code> がそれぞれどの <code>MirCallable</code> になるかを確認します。
+  </p>
+
+  <nav class="chapter-nav" aria-label="章移動（下）">
+    <div class="group"><a href="index.html#c8">前のトピック：第8章目次</a><a href="index.html#chapters">全章目次</a></div>
+    <div class="group"><a href="chapter-10.html">次：Callable lowering →</a></div>
+  </nav>
+
+  <footer>Qora コンパイラ開発者マニュアル · 第9章</footer>
+</main>
+</body>
+</html>

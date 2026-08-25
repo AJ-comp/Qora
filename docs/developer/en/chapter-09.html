@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>9. From Final HIR to Initial MIR — Qora Compiler Developer Manual</title>
+<link rel="stylesheet" href="developer.css">
+<script src="developer-syntax.js" defer></script>
+</head>
+<body>
+<nav class="language-switch" aria-label="Language"><strong>English</strong><span aria-hidden="true">·</span><a href="../ko/chapter-09.html">한국어</a><span aria-hidden="true">·</span><a href="../ja/chapter-09.html">日本語</a></nav>
+<a class="skip-link" href="#main-content">Skip to main content</a>
+<header class="hero">
+  <div class="tag">Qora · Compiler Developer Manual · Chapter 9</div>
+  <h1>From Final HIR to Initial MIR</h1>
+  <p>The high-level flow that turns a semantically analyzed program into a complete MIR program</p>
+</header>
+
+<main class="wrap" id="main-content">
+  <nav class="chapter-nav" aria-label="Chapter navigation (top)">
+    <div class="group"><a href="index.html#c8">Previous topic: Chapter 8 index</a><a href="index.html#chapters">All chapters</a></div>
+    <div class="group"><a href="chapter-10.html">Next: Callable lowering →</a></div>
+  </nav>
+
+  <p class="lead">
+    This chapter examines only the boundary where final HIR enters MIR.<br>
+    It postpones the lowering of individual statements and expressions so that the input and output of the whole-program transformation are clear first.
+  </p>
+
+  <h2 id="example">Example program</h2>
+
+<pre><code class="language-qora">function Next(value: int): int
+{
+    return value + 1;
+}
+
+operation Work()
+{
+    var values: int[] = [0];
+    use q = Qubit[1];
+
+    values[0] = Next(values[0]);
+
+    if (values[0] == 1)
+    {
+        X(q[0]);
+    }
+
+    H(q[0]);
+}</code></pre>
+
+  <p>
+    After semantic analysis, HIR contains two callables: <code>Next</code> and <code>Work</code>.<br>
+    <code>Work</code> is the operation that starts execution, and <code>Next</code> is the function called from it.
+  </p>
+
+  <h2 id="compile-on-current-thread">HIR → MIR boundary at a glance</h2>
+
+<pre><code class="language-plaintext">Final HIR compilation
+├─ Next
+└─ Work  ← entry operation
+        │
+        │ ToMir()
+        ▼
+Initial MIR snapshot
+└─ MirProgram
+   ├─ Next  (MirCallable)
+   ├─ Work  (MirCallable)
+   └─ EntryPoint = Work</code></pre>
+
+  <p>
+    The essential flow is simple.<br>
+    <code>ToMir()</code> lowers each callable in final HIR to a MIR callable, collects the completed callables into one <code>MirProgram</code>, and returns that program wrapped in the initial <code>MirSnapshot</code>.
+  </p>
+
+  <h2 id="lower-artifact">Collecting two callables into a MirProgram</h2>
+
+  <p>
+    The lowerer traverses the callable list in final HIR from beginning to end.<br>
+    In this example it lowers <code>Next</code> first, followed by <code>Work</code>.
+  </p>
+
+<pre><code class="language-plaintext">HIR callable list
+├─ Next
+│  └─ callable lowering → MirCallable Next
+└─ Work
+   └─ callable lowering → MirCallable Work
+
+Completed MIR callable list
+├─ MirCallable Next
+└─ MirCallable Work</code></pre>
+
+  <p>
+    Here, callable lowering converts the parameters, body, and blocks of one function or operation into MIR form.<br>
+    Chapter 10 examines that internal process. For now, it is enough to note that both results are collected in one list.
+  </p>
+
+  <p>
+    Once all callables are ready, the compiler creates a <code>MirProgram</code>.<br>
+    It records both the callable list and the callable where execution begins. In this example, the entry point is the <code>Work</code> operation.
+  </p>
+
+  <h2 id="snapshot">Creating the initial MirSnapshot</h2>
+
+<pre><code class="language-plaintext">MirProgram
+├─ Callables
+│  ├─ Next
+│  └─ Work
+└─ EntryPoint = Work
+        │
+        │ CreateLowered(program)
+        ▼
+MirSnapshot
+├─ Program = MirProgram above
+└─ Analyses = analysis entry point for that Program</code></pre>
+
+  <p>
+    When the <code>MirProgram</code> is complete, <code>MirSnapshot.CreateLowered(program)</code> creates the initial MIR snapshot.<br>
+    The returned snapshot stores the newly created <code>MirProgram</code> together with the <code>Analyses</code> entry point that analyzes that exact program.
+  </p>
+
+  <h2 id="summary">Summary</h2>
+
+<pre><code class="language-plaintext">ToMir()
+→ Select semantically analyzed HIR
+→ Lower Next and Work into separate MirCallable objects
+→ Create a MirProgram whose EntryPoint is Work
+→ Return a MirSnapshot containing that MirProgram and its Analyses</code></pre>
+
+  <p>
+    This is the complete boundary from HIR to MIR.<br>
+    The next chapter zooms in on the lowering of one callable and shows which <code>MirCallable</code> is produced for <code>Next</code> and <code>Work</code>.
+  </p>
+
+  <nav class="chapter-nav" aria-label="Chapter navigation (bottom)">
+    <div class="group"><a href="index.html#c8">Previous topic: Chapter 8 index</a><a href="index.html#chapters">All chapters</a></div>
+    <div class="group"><a href="chapter-10.html">Next: Callable lowering →</a></div>
+  </nav>
+
+  <footer>Qora Compiler Developer Manual · Chapter 9</footer>
+</main>
+</body>
+</html>

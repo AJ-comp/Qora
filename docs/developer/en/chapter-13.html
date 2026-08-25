@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>13. Qubit Identity and Versions — Qora Compiler Developer Manual</title>
+<link rel="stylesheet" href="developer.css">
+<script src="developer-syntax.js" defer></script>
+</head>
+<body>
+<nav class="language-switch" aria-label="Language"><strong>English</strong><span aria-hidden="true">·</span><a href="../ko/chapter-13.html">한국어</a><span aria-hidden="true">·</span><a href="../ja/chapter-13.html">日本語</a></nav>
+<a class="skip-link" href="#main-content">Skip to main content</a>
+<header class="hero">
+  <div class="tag">Qora · Compiler Developer Manual · Chapter 13</div>
+  <h1>Qubit Identity and Versions</h1>
+  <p>Why <code>q0</code> remains while <code>v0 → v1 → v2 → v3</code> is created</p>
+</header>
+
+<main class="wrap" id="main-content">
+  <nav class="chapter-nav" aria-label="Chapter navigation (top)">
+    <div class="group"><a href="chapter-12.html">← Previous: Array storage</a><a href="index.html#chapters">All chapters</a></div>
+    <div class="group"><a href="chapter-14.html">Next: Basic blocks →</a></div>
+  </nav>
+
+  <p class="lead">
+    Applying a gate to a qubit does not replace the source declaration <code>q</code> with a new resource.<br>
+    MIR preserves the fact that it is the same logical qubit resource through <code>q0</code>, while versions such as <code>v0</code> and <code>v1</code> distinguish the computational states produced by gates.<br>
+    This chapter follows only how the length-1 qubit resource <code>q</code> advances through four versions.
+  </p>
+
+  <h2 id="source">Qora code under examination</h2>
+
+<pre><code class="language-qora">function Next(value: int): int
+{
+    return value + 1;
+}
+
+operation Work()
+{
+    var values: int[] = [0];
+    use q = Qubit[1];
+
+    values[0] = Next(values[0]);
+
+    if (values[0] == 1)
+    {
+        X(q[0]);
+    }
+
+    H(q[0]);
+}</code></pre>
+
+  <p>
+    <code>q</code> is a length-1 logical resource containing one qubit.<br>
+    If the condition is true, the program applies <code>X</code> first. It applies <code>H</code> at the end regardless of the condition.<br>
+    Although the condition is true when this example runs, MIR lowering does not precompute the result of calling <code>Next</code>, so it preserves both the true and false paths.
+  </p>
+
+  <h2 id="overview">Complete version flow</h2>
+
+<pre><code class="language-plaintext">use q = Qubit[1]
+        ↓
+      q0.v0
+       ├─────────────────┐
+       │ condition true    │ condition false
+       ↓                  │
+ apply X → q0.v1          │ keep q0.v0
+       └─────────┬────────┘
+                 ↓
+        Phi join → q0.v2
+                 ↓
+          apply H → q0.v3</code></pre>
+
+  <p>
+    Every entry begins with <code>q0</code> because the program continues to use the logical qubit resource <code>q</code> that was declared initially.<br>
+    Only the version suffix changes because MIR must distinguish which gates the resource has passed through at each point.
+  </p>
+
+  <h2 id="allocation-code">Allocation: initial state <code>q0.v0</code></h2>
+
+  <p>
+    When <code>use q = Qubit[1];</code> allocates a length-1 qubit resource, MIR gives that resource the identity <code>q0</code>.<br>
+    <code>q0</code> is not the number of element <code>q[0]</code>. It identifies the entire <code>q</code> declaration within the callable. An actual element is selected with a separate index, as in <code>q0.v0[0]</code>.<br>
+    It therefore does not represent a physical hardware-qubit number.<br>
+    MIR also attaches initial version <code>v0</code>, which has not passed through any gate, producing <code>q0.v0</code>.
+  </p>
+
+<pre><code class="language-plaintext">q0.v0
+│  └─ v0: initial version immediately after allocation
+└──── q0: stable identity of this logical qubit resource</code></pre>
+
+  <p>
+    The later values <code>q0.v1</code>, <code>q0.v2</code>, and <code>q0.v3</code> all describe the same logical resource <code>q0</code>.<br>
+    They do not mean that three more qubit resources are allocated.
+  </p>
+
+  <h2 id="qubit-lookup">Branch: only the true path passes through <code>X</code></h2>
+
+  <p>
+    Both paths begin with the same input, <code>q0.v0</code>, when execution enters the <code>if</code> branch.<br>
+    On the true path, <code>X</code> takes <code>q0.v0</code> as input and records the result after the gate as new version <code>q0.v1</code>.<br>
+    The false path does not execute <code>X</code>, so it keeps <code>q0.v0</code> unchanged.
+  </p>
+
+<pre><code class="language-plaintext">true path   q0.v0 ── X ──▶ q0.v1
+false path  q0.v0 ─────────▶ q0.v0</code></pre>
+
+  <p>
+    Separating the versions lets an analysis that reads MIR determine whether a value has passed through <code>X</code> without reconstructing the instruction order.
+  </p>
+
+  <h2 id="phi">Join: combine both possibilities as <code>q0.v2</code></h2>
+
+  <p>
+    After the <code>if</code>, the true and false paths join again.<br>
+    One path has <code>q0.v1</code> and the other has <code>q0.v0</code>, so the join point cannot unconditionally select either version.<br>
+    MIR combines both possibilities with a Phi and creates <code>q0.v2</code>.
+  </p>
+
+<pre><code class="language-plaintext">true path b1  → q0.v1 ─┐
+                       ├─ Phi → q0.v2
+false path b2 → q0.v0 ─┘</code></pre>
+
+  <p>
+    A Phi is not a new gate and does not allocate a new qubit.<br>
+    It gives one name, <code>q0.v2</code>, to the control-flow choice: <code>q0.v1</code> when execution came from <code>b1</code>, or <code>q0.v0</code> when it came from <code>b2</code>.
+  </p>
+
+  <h2 id="h-gate"><code>H</code> after the join: <code>q0.v3</code></h2>
+
+  <p>
+    The final statement, <code>H(q[0]);</code>, is outside the <code>if</code>, so it runs after both paths have joined.<br>
+    Its input is therefore <code>q0.v2</code>, which represents both possibilities, rather than path-specific <code>q0.v0</code> or <code>q0.v1</code>.<br>
+    The result after <code>H</code> becomes another new version, <code>q0.v3</code>.
+  </p>
+
+<pre><code class="language-plaintext">q0.v2 ── H ──▶ q0.v3</code></pre>
+
+  <h2 id="summary">Summary</h2>
+
+  <div class="callout good">
+    <span class="h">Identity and version</span>
+    <code>q0</code> remains because it is the identity of the initially allocated logical qubit resource <code>q</code>.<br>
+    <code>v0 → v1 → v2 → v3</code> are computational versions that record which gates and branch joins that resource has passed through.<br>
+    Thus, <code>q0.v3</code> is not a fourth resource; it is the latest state of the same <code>q0</code>.
+  </div>
+
+  <p>
+    The next chapter examines the basic blocks that contain these versions.<br>
+    It follows the overall flow to show why the same <code>if</code> is split into <code>b0</code>, <code>b1</code>, <code>b2</code>, and <code>b3</code>.
+  </p>
+
+  <nav class="chapter-nav" aria-label="Chapter navigation (bottom)">
+    <div class="group"><a href="chapter-12.html">← Previous: Array storage</a><a href="index.html#chapters">All chapters</a></div>
+    <div class="group"><a href="chapter-14.html">Next: Basic blocks →</a></div>
+  </nav>
+
+  <footer>Qora Compiler Developer Manual · Chapter 13</footer>
+</main>
+</body>
+</html>

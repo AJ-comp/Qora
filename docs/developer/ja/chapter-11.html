@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>11. 古典値と SSA バージョン — Qora コンパイラ開発者マニュアル</title>
+<link rel="stylesheet" href="developer.css">
+<script src="developer-syntax.js" defer></script>
+</head>
+<body>
+<nav class="language-switch" aria-label="言語"><a href="../en/chapter-11.html">English</a><span aria-hidden="true">·</span><a href="../ko/chapter-11.html">한국어</a><span aria-hidden="true">·</span><strong>日本語</strong></nav>
+<a class="skip-link" href="#main-content">本文へ移動</a>
+<header class="hero">
+  <div class="tag">Qora · Compiler Developer Manual · Chapter 11</div>
+  <h1>古典値と SSA バージョン</h1>
+  <p>同じ変数の値が変わるとき、MIR が新しい値番号を作る理由</p>
+</header>
+
+<main class="wrap" id="main-content">
+  <nav class="chapter-nav" aria-label="章移動（上）">
+    <div class="group"><a href="chapter-10.html">← 前：Callable lowering</a><a href="index.html#chapters">全章目次</a></div>
+    <div class="group"><a href="chapter-12.html">次：Storage と配列状態 →</a></div>
+  </nav>
+
+  <p class="lead">
+    ソースでは、同じ変数名へ新しい値を代入できます。<br>
+    MIR は古い値と新しい値を区別するために値を上書きせず、新しい MIR 値が生まれるたびに新しい番号を付けます。この章では、この規則が共通例へどう適用されるかを確認します。
+  </p>
+
+  <h2 id="source">値が変わるソース文</h2>
+
+<pre><code class="language-qora">function Next(value: int): int
+{
+    return value + 1;
+}
+
+operation Work()
+{
+    var values: int[] = [0];
+    use q = Qubit[1];
+
+    values[0] = Next(values[0]);
+
+    if (values[0] == 1)
+    {
+        X(q[0]);
+    }
+
+    H(q[0]);
+}</code></pre>
+
+  <p>
+    この章では、上のソースのうち <code>values</code> と条件式の古典値だけを追跡します。<br>
+    <code>values</code> という名前は一つだけですが、その内容は変わります。<br>
+    宣言直後の要素 0 は <code>0</code> であり、代入後は <code>Next</code> の戻り値に変わります。条件文は更新後の二つ目の状態を読まなければなりません。
+  </p>
+
+  <h2 id="idea">名前は維持し、値に新しい番号を付ける</h2>
+
+<pre><code class="language-plaintext">Qora ソース
+values = 最初に作った配列
+values = 要素を更新した配列
+
+MIR
+%v1 = 最初に作った配列
+%v6 = %v1 の要素 0 を更新した新しい配列状態
+
+現在 values が指す値
+%v1  ──代入後──▶  %v6</code></pre>
+
+  <p>
+    MIR の <code>%v1</code> と <code>%v6</code> は、別々のソース変数ではありません。<br>
+    どちらもソース変数 <code>values</code> に関連する値ですが、異なる時点の配列状態を表します。
+  </p>
+
+  <p id="create-value">
+    <code>%v</code> の後ろの数字は、値が作られた順序を区別する ID です。<br>
+    各 ID は一度だけ定義され、後から別の値で上書きされません。一つの値が一度だけ定義されることが SSA の中心規則です。
+  </p>
+
+  <h2 id="next-values">Next では入力と結果を分ける</h2>
+
+<pre><code class="language-plaintext">function Next(value: int): int
+
+%v0 = パラメータ value
+%v1 = 定数 1
+%v2 = %v0 + %v1
+return %v2</code></pre>
+
+  <p>
+    <code>value + 1</code> を計算しても、パラメータ <code>%v0</code> 自体は変わりません。<br>
+    定数 1 は <code>%v1</code>、加算結果は <code>%v2</code> という新しい値になります。そのため、各値がどこから来たかを計算経路に沿って逆にたどれます。
+  </p>
+
+  <p>
+    値番号は callable 内だけで区別すれば十分です。<br>
+    したがって、<code>Next</code> の <code>%v1</code> と、下に出てくる <code>Work</code> の <code>%v1</code> は別の値であり、衝突しません。
+  </p>
+
+  <h2 id="work-start">配列宣言で最初の状態を作る</h2>
+
+<pre><code class="language-plaintext">var values: int[] = [0];
+
+%v0 = 定数 0
+%v1 = [%v0]
+
+現在の values → %v1</code></pre>
+
+  <p>
+    まず配列要素に入れる数値 0 を作り、その値を使って長さ 1 の配列状態 <code>%v1</code> を作ります。<br>
+    この時点からソース名 <code>values</code> を読むと、現在値である <code>%v1</code> を使います。
+  </p>
+
+  <p>
+    配列には、値バージョンとは別に storage identity もあります。<br>
+    簡単に言えば、storage は「どの配列領域か」を表し、<code>%v1</code> のような SSA 値は「その配列が今どの内容を持つか」を表します。この区別は第12章で詳しく確認します。
+  </p>
+
+  <h2 id="work-assignment">配列代入は新しい配列状態を作る</h2>
+
+<pre><code class="language-plaintext">values[0] = Next(values[0]);
+
+%v2 = 保存先インデックス 0
+%v3 = 読み取りインデックス 0
+%v4 = %v1[%v3] から読んだ値
+%v5 = Next(%v4) の戻り値
+%v6 = %v1 の %v2 位置を %v5 に変えた新しい配列状態
+
+現在の values: %v1 → %v6</code></pre>
+
+  <p>
+    重要なのは、<code>%v1</code> を上書きしない点です。<br>
+    要素を更新した結果は新しい配列状態 <code>%v6</code> になり、lowerer が記憶する「現在の <code>values</code> 値」だけが <code>%v6</code> に変わります。
+  </p>
+
+  <p>
+    したがって、代入前の計算は引き続き <code>%v1</code> を参照でき、代入後の計算は <code>%v6</code> を読みます。<br>
+    コンパイラは値が変わった時点を失わずに、ソースの変数名を一つのまま維持できます。
+  </p>
+
+  <h2 id="work-condition">条件文は最新の値を読む</h2>
+
+<pre><code class="language-plaintext">if (values[0] == 1)
+
+現在の values = %v6
+        │
+        ├─ インデックス 0 を作る → %v7
+        ├─ %v6[%v7] を読む → %v8
+        └─ 定数 1 を作る → %v9
+                  │
+                  ▼
+             二つの値を比較 → %v10
+                  │
+                  ▼
+             %v10 に従って分岐</code></pre>
+
+  <p>
+    条件式は最初の配列状態 <code>%v1</code> ではなく、最新状態 <code>%v6</code> を読みます。<br>
+    MIR は <code>Next</code> の結果を事前に数値 1 へ置き換えず、<code>%v5</code> という呼び出し結果として保持します。<br>
+    したがって比較結果も事前に <code>true</code> へ固定せず、実行時に計算される <code>%v10</code> が移動先 block を決めます。
+  </p>
+
+  <h2 id="definition">まとめ</h2>
+
+  <div class="callout good">
+    <span class="h">同じ名前、異なる時点の値</span>
+    ソース名 <code>values</code> はそのまま維持されます。<br>
+    一方、現在の配列状態は宣言直後の <code>%v1</code> から代入後の <code>%v6</code> へ変わり、二つの MIR 値はそれぞれ一度だけ定義されます。
+  </div>
+
+  <p>
+    次の章では、ここで触れた配列 storage を詳しく見ます。<br>
+    同じ配列領域と、時間とともに変わる配列値を MIR がどう一緒に表現するかを確認します。
+  </p>
+
+  <nav class="chapter-nav" aria-label="章移動（下）">
+    <div class="group"><a href="chapter-10.html">← 前：Callable lowering</a><a href="index.html#chapters">全章目次</a></div>
+    <div class="group"><a href="chapter-12.html">次：Storage と配列状態 →</a></div>
+  </nav>
+
+  <footer>Qora コンパイラ開発者マニュアル · 第11章</footer>
+</main>
+</body>
+</html>

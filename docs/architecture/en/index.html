@@ -163,7 +163,6 @@
     <span class="st">─Monomorphize─▶</span> specialized
     <span class="st">─Lower MIR─▶</span> SSA/CFG MIR
     <span class="st">─Analyze─▶</span>
-    <span class="st">─Materialize MIR-only inverses─▶</span>
     <span class="st">─Target-lower─▶</span> typed OpenQASM model
     <span class="st">─Emit─▶</span> OpenQASM 3
   </div>
@@ -205,7 +204,7 @@
       <li><a href="#s5">Validate — the semantic gate</a></li>
       <li><a href="#s6">Monomorphize — specializing qubit-array calls</a></li>
       <li><a href="#s7">Lower — source-shaped HIR to SSA/CFG MIR</a></li>
-      <li><a href="#s8">Analyze MIR and materialize internal inverses</a></li>
+      <li><a href="#s8">Analyze MIR</a></li>
       <li><a href="#s9">Target-lower and emit OpenQASM 3</a></li>
       <li><a href="#s10">The whole pipeline at a glance</a></li>
     </ol>
@@ -478,7 +477,7 @@ v1 = add v0, 1
 return</code></pre>
 
   <p>
-    The result is one exact immutable <code>MirSnapshot</code> at <code>MirStage.Lowered</code>. Core retains
+    The result is one exact immutable <code>MirSnapshot</code>. Core retains
     the exact <code>HirArtifact</code> and the program-owned <code>Origins</code> required for diagnostics,
     transformation provenance, and backend errors; it does not retain an always-on
     HIR-symbol-to-MIR-entity query index. When editor tooling requests those relationships,
@@ -488,9 +487,9 @@ return</code></pre>
     exact <code>HirArtifact</code>; MIR does not copy it.
   </p>
 
-  <h2 id="s8"><span class="n">8</span>Analyze MIR and materialize internal inverses</h2>
+  <h2 id="s8"><span class="n">8</span>Analyze MIR</h2>
 
-  <p class="stagehead">passes: analyses for the exact <code>MirProgram</code> → <code>MirAdjointMaterializer</code></p>
+  <p class="stagehead">pass: <code>MirAnalysisStore</code> analyses for the exact <code>MirProgram</code></p>
 
   <p>
     Control-flow, effect, alias, memory-state, path-condition, and control-region analyses are all bound
@@ -499,32 +498,29 @@ return</code></pre>
   </p>
 
   <p>
-    Inverse requests also belong exclusively to MIR. A compiler-internal scheduler may mark one exact
-    <code>MirQuantumApply</code> with <code>MirFunctor.Adjoint</code>. The
-    <code>MirAdjointMaterializer</code> then synthesizes the required inverse MIR callable, rewrites the
-    request to a typed callable target, and publishes a new snapshot whose exact
-    <code>PreviousSnapshot</code> is the immediately preceding MIR snapshot. Qora source and HIR contain no
-    <code>Adjoint</code>, inverse marker, or conjugation node.
+    Automatic uncomputation is not implemented in the current pipeline. It is planned as a future MIR
+    scheduler that will consume these exact SSA/CFG facts, choose cleanup sites and order, and generate
+    the required inverse operations. Qora source, HIR, and the current MIR contain no <code>Adjoint</code>
+    or inverse-request marker, and there is no inverse materializer today.
   </p>
 
-<pre><code>MirQuantumApply(Target = Prepare, Functors = [MirFunctor.Adjoint])
-                         <span class="cm">↓ MirAdjointMaterializer</span>
-MirCallable __qora_inverse_...(reversed unitary body)
-MirQuantumApply(Target = __qora_inverse_..., Functors = [])</code></pre>
+<pre><code>exact MirProgram + effects / CFG / liveness
+                         <span class="cm">↓ future automatic-uncomputation scheduler</span>
+transformed MIR with generated cleanup operations</code></pre>
 
   <div class="call why">
-    <span class="h">Why is this boundary in MIR?</span>
+    <span class="h">Why will this work belong after MIR lowering?</span>
     Automatic uncomputation needs SSA versions, CFG paths, storage states, and exact instruction
-    identities. Keeping requests and synthesized callables in MIR lets the scheduler and materializer
-    share that evidence without adding compiler-only syntax to HIR or creating a second target path.
+    identities. A future scheduler can use that evidence directly without adding compiler-only syntax
+    to HIR. Its concrete transformation API will be introduced together with the scheduler.
   </div>
 
   <h2 id="s9"><span class="n">9</span>Target-lower and emit OpenQASM 3</h2>
 
-  <p class="stagehead">in: materialized MIR &nbsp;·&nbsp; target: <code>MirOpenQasmTargetProgram</code> &nbsp;·&nbsp; passes: <code>MirOpenQasmLowering</code> → <code>MirQasmEmitter</code></p>
+  <p class="stagehead">in: lowered MIR &nbsp;·&nbsp; target: <code>MirOpenQasmTargetProgram</code> &nbsp;·&nbsp; passes: <code>MirOpenQasmLowering</code> → <code>MirQasmEmitter</code></p>
 
   <p>
-    The OpenQASM backend consumes the exact materialized MIR snapshot. It recovers structured
+    The OpenQASM backend consumes the exact lowered MIR snapshot. It recovers structured
     <code>if</code>, <code>while</code>, and loop exits from the CFG, converts SSA values and phi edges into
     typed target declarations and assignments, and assigns collision-free OpenQASM names. The resulting
     <code>MirOpenQasmTargetProgram</code> owns target types, callables, declarations, statements, and their
@@ -561,8 +557,7 @@ MirQuantumApply(Target = __qora_inverse_..., Functors = [])</code></pre>
       <tr><td>Monomorphize</td><td><code>Monomorphizer</code></td><td><code>Qubit[]</code> calls → call-size-specific internal copies, then re-validate if changed</td></tr>
       <tr><td>Lower MIR</td><td><code>QoraMirLowering</code></td><td>accepted HIR + semantic facts → typed SSA/CFG <code>MirSnapshot</code>, with measurements lowered at their evaluation points</td></tr>
       <tr><td>Analyze MIR</td><td><code>MirAnalysisStore</code></td><td>exact <code>MirProgram</code> → control-flow, effects, alias, memory, and path facts</td></tr>
-      <tr><td>Materialize</td><td><code>MirAdjointMaterializer</code></td><td>MIR-only inverse requests → synthesized inverse MIR callables</td></tr>
-      <tr><td>Target-lower</td><td><code>MirOpenQasmLowering</code></td><td>materialized MIR → typed <code>MirOpenQasmTargetProgram</code></td></tr>
+      <tr><td>Target-lower</td><td><code>MirOpenQasmLowering</code></td><td>lowered MIR → typed <code>MirOpenQasmTargetProgram</code></td></tr>
       <tr><td>Emit</td><td><code>MirQasmEmitter</code></td><td>typed target model → OpenQASM 3 text</td></tr>
     </table>
   </div>
@@ -577,10 +572,10 @@ MirQuantumApply(Target = __qora_inverse_..., Functors = [])</code></pre>
   <div class="call why">
     <span class="h">Where this is heading — automatic uncomputation</span>
     Silq-style automatic uncomputation — <strong>finding where a temporary qubit is no longer needed and
-    injecting its inverse automatically</strong> — now has the correct stage boundary. The scheduler will
-    consume SSA/CFG facts bound to one exact <code>MirProgram</code>, find a global cleanup order, and
-    inject exact MIR instruction requests. <code>MirAdjointMaterializer</code> and the typed target path
-    already consume that representation.
+    injecting its inverse automatically</strong> — is planned as a future MIR scheduler. It will consume
+    SSA/CFG facts bound to one exact <code>MirProgram</code>, find a global cleanup order, and generate the
+    required inverse operations. The scheduler and its MIR transformation will be implemented together;
+    neither is a current pipeline stage.
     Conditions, loops, aliases, classical-witness stability, and conflicts between several ancillas still need
     explicit proofs before the scheduler can enable those cases.
   </div>
@@ -594,7 +589,7 @@ MirQuantumApply(Target = __qora_inverse_..., Functors = [])</code></pre>
     <code>Ir/AstToHirLowering.cs</code> + <code>Ir/AstExpressionLowering.cs</code> (AST→HIR) ·
     <code>Ir/Passes/ModuleLoader.cs</code> · <code>Resolver.cs</code> · <code>SymbolTable.cs</code> · <code>QoraValidator.cs</code> ·
     <code>Monomorphizer.cs</code> · <code>Ir/Mir/QoraMirLowering.cs</code> ·
-    <code>Ir/Mir/MirAdjointMaterializer.cs</code> · <code>Ir/Qasm/MirOpenQasmLowering.cs</code> ·
+    <code>Ir/Qasm/MirOpenQasmLowering.cs</code> ·
     <code>Ir/Qasm/MirQasmEmitter.cs</code> (typed target model→OpenQASM).
   </p>
 

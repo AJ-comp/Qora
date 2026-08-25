@@ -1,32 +1,92 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ko">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Qora Documentation</title>
-<script>
-  // language routing: forced choice (localStorage) > browser language > English fallback.
-  (function () {
-    var forced = null;
-    try { forced = localStorage.getItem('qora-lang'); } catch (e) {}
-    var lang = forced;
-    if (lang !== 'en' && lang !== 'ko' && lang !== 'ja') {
-      lang = 'en';
-      var prefs = navigator.languages || [navigator.language || ''];
-      for (var i = 0; i < prefs.length; i++) {
-        var p = String(prefs[i]).toLowerCase();
-        if (p.indexOf('ko') === 0) { lang = 'ko'; break; }
-        if (p.indexOf('ja') === 0) { lang = 'ja'; break; }
-        if (p.indexOf('en') === 0) { lang = 'en'; break; }
-      }
-    }
-    location.replace('architecture/' + lang + '/index.html' + location.search + location.hash);
-  })();
-</script>
+<title>Qora 문서</title>
+<style>
+  :root {
+    --ink:#1f2430; --muted:#5b6472; --line:#dce2e9; --panel:#f8fafc;
+    --blue:#1745b5; --purple:#6b4fc6; --green:#11875b;
+  }
+  * { box-sizing:border-box; }
+  body {
+    margin:0; background:#fff; color:var(--ink); word-break:keep-all; overflow-wrap:break-word;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Apple SD Gothic Neo",
+      "Malgun Gothic","Noto Sans KR",sans-serif;
+    font-size:16.5px; line-height:1.7;
+  }
+  .hero {
+    padding:72px 20px 46px; text-align:center; border-bottom:1px solid var(--line);
+    background:linear-gradient(180deg,#f6f8fc 0%,#fff 100%);
+  }
+  .tag { color:var(--muted); font-size:.78rem; font-weight:850; letter-spacing:.13em; text-transform:uppercase; }
+  h1 { margin:13px 0 8px; font-size:2.2rem; letter-spacing:-.65px; }
+  .hero p { margin:0; color:var(--muted); }
+  main { max-width:980px; margin:0 auto; padding:44px 20px 100px; }
+  .intro { margin:0 0 26px; font-size:1.03rem; }
+  .portals { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:16px; }
+  .portal {
+    display:flex; min-width:0; min-height:230px; padding:23px 22px; flex-direction:column;
+    border:1px solid var(--line); border-radius:14px; background:var(--panel);
+    color:inherit; text-decoration:none; transition:border-color .15s,transform .15s,background .15s;
+  }
+  .portal:hover { border-color:#a9bde9; background:#f5f8ff; transform:translateY(-2px); }
+  .portal:focus-visible { outline:3px solid #9bb8ff; outline-offset:3px; }
+  .portal .kind { margin-bottom:13px; font-size:.73rem; font-weight:900; letter-spacing:.09em; text-transform:uppercase; }
+  .portal.book .kind { color:var(--green); }
+  .portal.manual .kind { color:var(--purple); }
+  .portal.architecture .kind { color:var(--blue); }
+  .portal h2 { margin:0 0 10px; font-size:1.25rem; letter-spacing:-.25px; }
+  .portal p { margin:0; color:var(--muted); font-size:.93rem; }
+  .portal .enter { margin-top:auto; padding-top:24px; color:var(--blue); font-weight:800; }
+  footer { margin-top:42px; padding-top:22px; border-top:1px solid var(--line); color:var(--muted); text-align:center; font-size:.88rem; }
+  @media (max-width:780px) {
+    .hero { padding:54px 16px 36px; }
+    h1 { font-size:1.8rem; }
+    main { padding-right:16px; padding-left:16px; }
+    .portals { grid-template-columns:1fr; }
+    .portal { min-height:0; }
+  }
+</style>
 </head>
 <body>
-<noscript>
-  <p><a href="architecture/en/index.html">English</a> · <a href="architecture/ko/index.html">한국어</a> · <a href="architecture/ja/index.html">日本語</a></p>
-</noscript>
+<header class="hero">
+  <div class="tag">Qora Documentation</div>
+  <h1>Qora 문서</h1>
+  <p>설명서, 개발자 매뉴얼, 컴파일러 아키텍처를 독립된 문서군으로 제공합니다.</p>
+</header>
+
+<main>
+  <p class="intro">
+    찾으려는 내용에 맞는 문서군을 선택하십시오.<br>
+    각 문서군은 자체 목차와 탐색 흐름을 가지며, 다른 문서군의 장 목록을 섞어 표시하지 않습니다.
+  </p>
+
+  <div class="portals">
+    <a class="portal book" href="book/index.html">
+      <span class="kind">Qora Guide</span>
+      <h2>Qora 설명서</h2>
+      <p>Qora 코드와 작은 양자 회로를 사용해 큐비트, 진폭, 간섭, 얽힘과 게이트를 학습합니다.</p>
+      <span class="enter">설명서 열기 →</span>
+    </a>
+
+    <a class="portal manual" href="developer/index.html">
+      <span class="kind">Developer Manual</span>
+      <h2>컴파일러 개발자 매뉴얼</h2>
+      <p>하나의 예제 소스가 HIR과 MIR을 거치는 과정을 실제 C# 함수와 실행값으로 추적합니다. 영어·한국어·일본어를 제공합니다.</p>
+      <span class="enter">매뉴얼 열기 →</span>
+    </a>
+
+    <a class="portal architecture" href="architecture.html">
+      <span class="kind">Compiler Architecture</span>
+      <h2>컴파일러 아키텍처</h2>
+      <p>권위 객체, IR 경계, 패스 계약, target 산출물과 컴파일러 설계 문서를 정리합니다.</p>
+      <span class="enter">아키텍처 열기 →</span>
+    </a>
+  </div>
+
+  <footer>Qora 문서 포털</footer>
+</main>
 </body>
 </html>

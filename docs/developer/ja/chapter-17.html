@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>17. CFG の successor と predecessor — Qora コンパイラ開発者マニュアル</title>
+<link rel="stylesheet" href="developer.css">
+<script src="developer-syntax.js" defer></script>
+</head>
+<body>
+<nav class="language-switch" aria-label="言語"><a href="../en/chapter-17.html">English</a><span aria-hidden="true">·</span><a href="../ko/chapter-17.html">한국어</a><span aria-hidden="true">·</span><strong>日本語</strong></nav>
+<a class="skip-link" href="#main-content">本文へ移動</a>
+<header class="hero">
+  <div class="tag">Qora · Compiler Developer Manual · Chapter 17</div>
+  <h1>CFG の successor と predecessor</h1>
+  <p>Terminator の移動情報を両方向のグラフとして読む過程</p>
+</header>
+
+<main class="wrap" id="main-content">
+  <nav class="chapter-nav" aria-label="章移動（上）">
+    <div class="group"><a href="chapter-16.html">← 前：MIR snapshot</a><a href="index.html#chapters">全章目次</a></div>
+    <div class="group"><a href="index.html#c18">次のトピック：到達可能性と支配関係 →</a></div>
+  </nav>
+
+  <p class="lead">
+    CFG は block 間の移動関係を表すグラフです。<br>
+    Qora は新しい実行構造を作り直さず、各 block の末尾にある Terminator を読んでこのグラフを計算します。
+  </p>
+
+  <h2 id="source">CFG を作る Qora コード</h2>
+
+<pre><code class="language-qora">function Next(value: int): int
+{
+    return value + 1;
+}
+
+operation Work()
+{
+    var values: int[] = [0];
+    use q = Qubit[1];
+
+    values[0] = Next(values[0]);
+
+    if (values[0] == 1)
+    {
+        X(q[0]);
+    }
+
+    H(q[0]);
+}</code></pre>
+
+  <p>
+    第14章では、この条件文を四つの block に分けました。<br>
+    <code>b0</code> は条件を判断し、<code>b1</code> は true 本文を実行し、<code>b2</code> は false 経路を表します。最後の <code>b3</code> で両経路が合流し、<code>H</code> を実行します。
+  </p>
+
+<pre><code class="language-plaintext">        ┌──→ b1: X ──┐
+b0: 条件              ├──→ b3: H → return
+        └──→ b2 ─────┘</code></pre>
+
+  <h2 id="terminators">矢印の元は Terminator</h2>
+
+  <p>
+    すべての block は最後に一つの Terminator を持ちます。<br>
+    一般の MIR 命令が値を計算したりゲートを適用したりするのに対し、Terminator は block の終了後にどこへ移動するかを決めます。
+  </p>
+
+<pre><code class="language-plaintext">b0.Terminator = Branch
+├─ 条件が true  → b1
+└─ 条件が false → b2
+
+b1.Terminator = Jump → b3
+b2.Terminator = Jump → b3
+b3.Terminator = Return</code></pre>
+
+  <p>
+    <code>Branch</code> は行き先が二つ、<code>Jump</code> は一つです。<br>
+    <code>Return</code> は callable 実行を終えるため、次の block はありません。CFG はこれらの事実を表にした結果です。
+  </p>
+
+  <h2 id="successors">次の block を集めると successor 表になる</h2>
+
+  <p>
+    successor は「現在の block の次に進める block」です。<br>
+    解析は各 block の Terminator が指す行き先を読み、次の表を作ります。
+  </p>
+
+<pre><code class="language-plaintext">Successors
+├─ b0 → [b1, b2]
+├─ b1 → [b3]
+├─ b2 → [b3]
+└─ b3 → []</code></pre>
+
+  <p>
+    <code>b0</code> は条件に従って二か所のどちらかへ進めるため、successor が二つあります。<br>
+    <code>b1</code> と <code>b2</code> はどちらも合流 block <code>b3</code> へ移動し、<code>b3</code> は return するため空の一覧を持ちます。
+  </p>
+
+  <div class="callout">
+    <span class="h">注意</span>
+    successor が二つあっても、両方の block を実行する意味ではありません。<br>
+    CFG は実行中に選ばれ得る全経路を表し、実際の実行では条件に合う一経路だけを選びます。
+  </div>
+
+  <h2 id="predecessors">矢印を反転すると predecessor 表になる</h2>
+
+  <p>
+    predecessor は「現在の block へ入れる前の block」です。<br>
+    別の情報源から再計算せず、完成した successor 矢印の向きだけを反転します。
+  </p>
+
+<pre><code class="language-plaintext">Successor 矢印                   反転した Predecessor 関係
+b0 → b1                          b1 ← b0
+b0 → b2                          b2 ← b0
+b1 → b3                          b3 ← b1
+b2 → b3                          b3 ← b2
+
+Predecessors
+├─ b0 ← []
+├─ b1 ← [b0]
+├─ b2 ← [b0]
+└─ b3 ← [b1, b2]</code></pre>
+
+  <p>
+    entry block <code>b0</code> へ入る block はないため、空の一覧です。<br>
+    合流 block <code>b3</code> には true 経路 <code>b1</code> と false 経路 <code>b2</code> の両方が入るため、predecessor が二つあります。
+  </p>
+
+  <p>
+    predecessor を successor から作ると、二つの表の基準が一つに保たれます。<br>
+    一方では <code>b1 → b3</code> なのに、他方では <code>b3 ← b1</code> が抜けるような不整合を避けられます。
+  </p>
+
+  <h2 id="snapshot">二つの表が callable の CFG snapshot になる</h2>
+
+  <p>
+    現在の snapshot で <code>Work</code> の CFG を要求すると、解析ストアが <code>Work</code> の block と Terminator を読みます。<br>
+    その結果、successor と predecessor を含む <code>MirControlFlowSnapshot</code> が作られます。
+  </p>
+
+<pre><code class="language-plaintext">MirSnapshot
+└─ Work の CFG
+   └─ MirControlFlowSnapshot
+      ├─ SourceCallable = Work
+      ├─ EntryBlock = b0
+      ├─ SuccessorsOf(b0) = [b1, b2]
+      └─ PredecessorsOf(b3) = [b1, b2]</code></pre>
+
+  <p>
+    この CFG snapshot は、実行する二つ目の block ツリーではありません。<br>
+    元の <code>Work</code> の block をそのまま指しながら、関係を素早く問い合わせられるよう整理した派生情報です。
+  </p>
+
+  <div class="callout good">
+    <span class="h">まとめ</span>
+    Terminator が block 移動の原本であり、successor はその移動を順方向に整理した表です。<br>
+    predecessor は同じ矢印を反転した表です。両方の結果は一つの callable 専用 CFG snapshot にまとめられ、後の MIR 解析の基盤になります。
+  </div>
+
+  <nav class="chapter-nav" aria-label="章移動（下）">
+    <div class="group"><a href="chapter-16.html">← 前：MIR snapshot</a><a href="index.html#chapters">全章目次</a></div>
+    <div class="group"><a href="index.html#c18">次のトピック：到達可能性と支配関係 →</a></div>
+  </nav>
+
+  <footer>Qora コンパイラ開発者マニュアル · 第17章</footer>
+</main>
+</body>
+</html>

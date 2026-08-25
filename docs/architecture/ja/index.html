@@ -163,7 +163,6 @@
     <span class="st">─Monomorphize─▶</span> 特殊化
     <span class="st">─Lower MIR─▶</span> SSA/CFG MIR
     <span class="st">─Analyze─▶</span>
-    <span class="st">─MIR-only 逆演算を実体化─▶</span>
     <span class="st">─Target-lower─▶</span> typed OpenQASM model
     <span class="st">─Emit─▶</span> OpenQASM 3
   </div>
@@ -205,7 +204,7 @@
       <li><a href="#s5">Validate — 意味のゲート</a></li>
       <li><a href="#s6">Monomorphize — 量子ビット配列呼び出しの特殊化</a></li>
       <li><a href="#s7">Lower — ソース形 HIR から SSA/CFG MIR へ</a></li>
-      <li><a href="#s8">MIR 解析と内部逆演算の実体化</a></li>
+      <li><a href="#s8">MIR 解析</a></li>
       <li><a href="#s9">OpenQASM target lowering と出力</a></li>
       <li><a href="#s10">パイプライン全体を一望する</a></li>
     </ol>
@@ -473,15 +472,15 @@ v1 = add v0, 1
 return</code></pre>
 
   <p>
-    結果は <code>MirStage.Lowered</code> の正確な不変 <code>MirSnapshot</code> オブジェクトです。
+    結果は正確な不変 <code>MirSnapshot</code> オブジェクトです。
     実際に消費した final HIR は <code>HirArtifact</code> に、MIR の source provenance は
     program-owned <code>Origins</code> に保持されます。Compilation identity は
     <code>HirArtifact</code> にだけあり、MIR へ複製されません。
   </p>
 
-  <h2 id="s8"><span class="n">8</span>MIR 解析と内部逆演算の実体化</h2>
+  <h2 id="s8"><span class="n">8</span>MIR 解析</h2>
 
-  <p class="stagehead">パス: exact <code>MirProgram</code> に対する analyses → <code>MirAdjointMaterializer</code></p>
+  <p class="stagehead">パス: exact <code>MirProgram</code> に対する <code>MirAnalysisStore</code> analyses</p>
 
   <p>
     制御フロー、effect、alias、memory state、path condition、control region の各解析は、
@@ -490,32 +489,29 @@ return</code></pre>
   </p>
 
   <p>
-    逆演算要求も MIR にだけ存在します。コンパイラ内部 scheduler が正確な
-    <code>MirQuantumApply</code> に <code>MirFunctor.Adjoint</code> を付けると、
-    <code>MirAdjointMaterializer</code> が逆方向の MIR callable を合成し、要求を typed callable target
-    へ書き換え、直前の MIR snapshot を exact <code>PreviousSnapshot</code> として持つ
-    新しい snapshot を発行します。
-    Qora ソースと HIR には <code>Adjoint</code>、逆演算マーカー、conjugation node がありません。
+    Automatic uncomputation は現在の pipeline には実装されていません。将来の MIR scheduler が
+    これらの正確な SSA/CFG facts を消費し、cleanup の位置と順序を決め、必要な逆演算を生成する計画です。
+    Qora ソース、HIR、現在の MIR には <code>Adjoint</code> や inverse-request marker がなく、
+    inverse materializer も現在は存在しません。
   </p>
 
-<pre><code>MirQuantumApply(Target = Prepare, Functors = [MirFunctor.Adjoint])
-                         <span class="cm">↓ MirAdjointMaterializer</span>
-MirCallable __qora_inverse_...(reversed unitary body)
-MirQuantumApply(Target = __qora_inverse_..., Functors = [])</code></pre>
+<pre><code>exact MirProgram + effects / CFG / liveness
+                         <span class="cm">↓ 将来の automatic-uncomputation scheduler</span>
+cleanup 演算を生成した transformed MIR</code></pre>
 
   <div class="call why">
-    <span class="h">なぜこの境界を MIR に置くのか?</span>
+    <span class="h">なぜ将来の処理を MIR lowering の後に置くのか?</span>
     Automatic uncomputation には SSA version、CFG path、storage state、正確な instruction identity が
-    必要です。要求と合成 callable を MIR に置けば、HIR にコンパイラ専用構文や別の target 経路を
-    追加せずに、scheduler と materializer が同じ根拠を共有できます。
+    必要です。将来の scheduler は HIR にコンパイラ専用構文を追加せず、この根拠を直接利用できます。
+    具体的な transformation API は scheduler と同時に実装します。
   </div>
 
   <h2 id="s9"><span class="n">9</span>OpenQASM target lowering と出力</h2>
 
-  <p class="stagehead">in: materialized MIR &nbsp;·&nbsp; target: <code>MirOpenQasmTargetProgram</code> &nbsp;·&nbsp; パス: <code>MirOpenQasmLowering</code> → <code>MirQasmEmitter</code></p>
+  <p class="stagehead">in: lowered MIR &nbsp;·&nbsp; target: <code>MirOpenQasmTargetProgram</code> &nbsp;·&nbsp; パス: <code>MirOpenQasmLowering</code> → <code>MirQasmEmitter</code></p>
 
   <p>
-    OpenQASM backend は正確な materialized MIR snapshot を消費します。CFG から構造化された
+    OpenQASM backend は正確な lowered MIR snapshot を消費します。CFG から構造化された
     <code>if</code>、<code>while</code>、loop exit を復元し、SSA 値と phi edge を typed target の
     declaration と assignment に変え、衝突しない OpenQASM 名を決めます。結果の
     <code>MirOpenQasmTargetProgram</code> は target type、callable、declaration、statement と
@@ -550,8 +546,7 @@ MirQuantumApply(Target = __qora_inverse_..., Functors = [])</code></pre>
       <tr><td>Monomorphize</td><td><code>Monomorphizer</code></td><td><code>Qubit[]</code> の呼び出し → 呼び出しサイズごとの内部コピー、変化した場合に再検証</td></tr>
       <tr><td>Lower MIR</td><td><code>QoraMirLowering</code></td><td>検証済み HIR + 意味情報 → 測定を評価位置で lower した typed SSA/CFG <code>MirSnapshot</code></td></tr>
       <tr><td>Analyze MIR</td><td><code>MirAnalysisStore</code></td><td>exact <code>MirProgram</code> → control-flow、effect、alias、memory、path facts</td></tr>
-      <tr><td>Materialize</td><td><code>MirAdjointMaterializer</code></td><td>MIR-only inverse request → 合成された inverse MIR callable</td></tr>
-      <tr><td>Target-lower</td><td><code>MirOpenQasmLowering</code></td><td>materialized MIR → typed <code>MirOpenQasmTargetProgram</code></td></tr>
+      <tr><td>Target-lower</td><td><code>MirOpenQasmLowering</code></td><td>lowered MIR → typed <code>MirOpenQasmTargetProgram</code></td></tr>
       <tr><td>Emit</td><td><code>MirQasmEmitter</code></td><td>typed target model → OpenQASM 3 テキスト</td></tr>
     </table>
   </div>
@@ -566,10 +561,10 @@ MirQuantumApply(Target = __qora_inverse_..., Functors = [])</code></pre>
   <div class="call why">
     <span class="h">この先が向かう場所 — 自動アンコンピュテーション</span>
     Silq 流の自動アンコンピュテーション — <strong>一時的な量子ビットがもう不要になる地点を見つけ、その逆演算を
-    自動的に注入する</strong> — ための境界は MIR にあります。Scheduler は exact
-    <code>MirProgram</code> に結び付いた SSA/CFG facts を
-    消費して global cleanup order を求め、正確な MIR instruction に inverse request を注入します。
-    <code>MirAdjointMaterializer</code> と typed target path はすでにこの表現を消費します。条件、loop、
+    自動的に注入する</strong> — 処理は、将来の MIR scheduler として実装する計画です。Scheduler は exact
+    <code>MirProgram</code> に結び付いた SSA/CFG facts を消費して global cleanup order を求め、必要な
+    逆演算を生成します。Scheduler と MIR transformation は同時に実装し、どちらも現在の pipeline stage
+    ではありません。条件、loop、
     alias、classical witness stability、複数 ancilla の競合は、該当ケースを有効にする前に証明が必要です。
   </div>
 
@@ -582,7 +577,7 @@ MirQuantumApply(Target = __qora_inverse_..., Functors = [])</code></pre>
     <code>Ir/AstToHirLowering.cs</code> + <code>Ir/AstExpressionLowering.cs</code>（AST→HIR） ·
     <code>Ir/Passes/ModuleLoader.cs</code> · <code>Resolver.cs</code> · <code>SymbolTable.cs</code> · <code>QoraValidator.cs</code> ·
     <code>Monomorphizer.cs</code> · <code>Ir/Mir/QoraMirLowering.cs</code> ·
-    <code>Ir/Mir/MirAdjointMaterializer.cs</code> · <code>Ir/Qasm/MirOpenQasmLowering.cs</code> ·
+    <code>Ir/Qasm/MirOpenQasmLowering.cs</code> ·
     <code>Ir/Qasm/MirQasmEmitter.cs</code>（typed target model→OpenQASM）。
   </p>
 

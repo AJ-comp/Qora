@@ -1,0 +1,647 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>10. 1つの callable を MIR へ lower する — Qora コンパイラ開発者マニュアル</title>
+<link rel="stylesheet" href="developer.css?v=20260815-3">
+<script src="developer-syntax.js" defer></script>
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11.16.0/dist/mermaid.esm.min.mjs";
+
+  mermaid.initialize({
+    startOnLoad: false,
+    securityLevel: "strict",
+    htmlLabels: false,
+    theme: "base",
+    fontFamily: "-apple-system, BlinkMacSystemFont, Segoe UI, Apple SD Gothic Neo, Malgun Gothic, sans-serif",
+    themeVariables: {
+      background: "#fbfcff",
+      primaryColor: "#f4f1ff",
+      primaryTextColor: "#2c2350",
+      primaryBorderColor: "#7660c8",
+      lineColor: "#64748b",
+      edgeLabelBackground: "#ffffff",
+      fontSize: "15px"
+    },
+    flowchart: {
+      curve: "linear",
+      nodeSpacing: 24,
+      rankSpacing: 34,
+      useMaxWidth: true
+    }
+  });
+
+  await mermaid.run({ querySelector: ".chapter-10-mermaid" });
+</script>
+</head>
+<body>
+<nav class="language-switch" aria-label="言語"><a href="../en/chapter-10.html">English</a><span aria-hidden="true">·</span><a href="../ko/chapter-10.html">한국어</a><span aria-hidden="true">·</span><strong>日本語</strong></nav>
+  <a class="skip-link" href="#main-content">本文へ移動</a>
+<header class="hero">
+  <div class="tag">Qora · コンパイラ開発者マニュアル · 第10章</div>
+  <h1>1つの callable を MIR へ lower する</h1>
+  <p>1つの function または operation が、パラメーター・block・本体を持つ MirCallable になるまで</p>
+</header>
+
+<main class="wrap" id="main-content">
+  <nav class="chapter-nav" aria-label="章ナビゲーション（上部）">
+    <div class="group"><a href="chapter-09.html">← 前章：HIR→MIR 境界</a><a href="index.html#chapters">全章一覧</a><a href="chapter-10-call-flow.html#lower-hir-artifact"><code>LowerHirArtifact()</code> 詳細トレース</a></div>
+    <div class="group"><a href="chapter-11.html">次章：古典値と SSA バージョン →</a></div>
+  </nav>
+
+  <p class="lead">
+    第9章では、<code>Next</code> と <code>Work</code> がそれぞれ1つの <code>MirCallable</code> になることだけを確認しました。<br>
+    この章では、1つの callable を lower するときに最初に何が作られ、ソース本体がどこへ入り、最終結果がどのような形になるかを確認します。
+  </p>
+
+  <h2 id="input">この章で比較する2つの callable</h2>
+
+<pre><code class="language-qora">function Next(value: int): int
+{
+    return value + 1;
+}
+
+operation Work()
+{
+    var values: int[] = [0];
+    use q = Qubit[1];
+
+    values[0] = Next(values[0]);
+
+    if (values[0] == 1)
+    {
+        X(q[0]);
+    }
+
+    H(q[0]);
+}</code></pre>
+
+  <p>
+    どちらの宣言も callable ですが、構造は異なります。<br>
+    <code>Next</code> は1つのパラメーターと戻り値を持つ短い function です。一方、<code>Work</code> はローカル配列・qubit・条件分岐を持つエントリー operation です。
+  </p>
+
+  <p>
+    この入力に対して、現在のコンパイラは <code>Next h6</code> と <code>Work h44</code> という2つの最終 HIR callable を生成します。<br>
+    MIR は同じ数値 ID を保持するため、<code>Next c6</code> と <code>Work c44</code> が生成されます。以降のコードコメントでも、この ID を継続して使用します。
+  </p>
+
+  <h2 id="why-mir">なぜ HIR を MIR へ lower するのか</h2>
+
+  <p>
+    HIR は、ユーザーが書いたコードの入れ子構造を保持するツリーです。<br>
+    たとえば <code>Work</code> は配列宣言・代入・<code>if</code>・<code>H</code> 呼び出しを含み、その <code>if</code> は条件式と <code>X</code> 呼び出しを含みます。この構造は、名前と型の検査や元コードの理解に適しています。
+  </p>
+
+  <p>
+    しかしツリーだけでは、ある地点でどの値が現在値なのかを追跡しにくくなります。<br>
+    ソースでは同じ <code>values</code> という名前を繰り返し使いますが、MIR は更新前の配列 <code>%v1</code>、読み出した要素 <code>%v4</code>、<code>Next</code> の結果 <code>%v5</code>、更新後の配列 <code>%v6</code> を別々の値として区別します。
+  </p>
+
+  <div class="mermaid-overview">
+    <figure class="mermaid-card mermaid-card--hir">
+      <figcaption><span>HIR</span> 保持されるソース構造（簡略化）</figcaption>
+<pre class="mermaid chapter-10-mermaid">
+flowchart TB
+  accTitle: HIR に保持される Work の簡略化されたソース構造
+  accDescr: values 宣言、q 宣言、values への代入、if、H 呼び出し、および if 内の条件と X 呼び出しを示します。中間の HIR block ノードは省略しています。
+
+  work["Work"]
+  values["values を宣言"]
+  qubit["q を宣言"]
+  assign["values[0] へ代入"]
+  ifNode["if"]
+  condition["条件: values[0] == 1"]
+  xCall["X(q[0])"]
+  hCall["H(q[0])"]
+
+  work --- values
+  work --- qubit
+  work --- assign
+  work --- ifNode
+  work --- hCall
+  ifNode --- condition
+  ifNode --- xCall
+</pre>
+    </figure>
+
+    <div class="mermaid-stack">
+      <figure class="mermaid-card">
+        <figcaption><span>MIR</span> 値・qubit の生成と依存関係</figcaption>
+<pre class="mermaid chapter-10-mermaid mermaid--vertical">
+flowchart TB
+  accTitle: MIR の値と qubit の生成・依存関係
+  accDescr: 更新前の配列 v1 から要素 v4、Next の戻り値 v5、更新後の配列 v6 へ至る古典値の流れと、この配列更新から独立した初期 qubit q0.v0 を示します。
+
+  v1["%v1<br/>var values: int[] = [0];"]:::sourceCode
+  v4["%v4<br/>values[0]"]:::sourceCode
+  v5["%v5<br/>Next(values[0])"]:::sourceCode
+  v6["%v6<br/>values[0] = Next(values[0]);"]:::sourceCode
+  q0["&amp;q0.v0<br/>use q = Qubit[1];"]:::sourceCode
+
+  v1 --> v4
+  v4 --> v5
+  v1 --> v6
+  v5 --> v6
+
+  classDef sourceCode font-family:monospace,font-size:14px;
+</pre>
+      </figure>
+
+      <figure class="mermaid-card">
+        <figcaption><span>MIR</span> 実行経路 CFG</figcaption>
+<pre class="mermaid chapter-10-mermaid mermaid--vertical">
+flowchart TB
+  accTitle: MIR の実行経路 CFG
+  accDescr: b0 の条件が true なら b1、false なら b2 へ進み、両方の経路が b3 で合流します。
+
+  b0["b0<br/>var values: int[] = [0];<br/>use q = Qubit[1];<br/>values[0] = Next(values[0]);<br/>if (values[0] == 1)"]:::sourceCode
+  b1["b1<br/>X(q[0]);"]:::sourceCode
+  b2["b2"]:::sourceCode
+  b3["b3<br/>H(q[0]);"]:::sourceCode
+
+  b0 -->|true| b1
+  b0 -->|false| b2
+  b1 --> b3
+  b2 --> b3
+
+  classDef sourceCode font-family:monospace,font-size:14px;
+</pre>
+      </figure>
+    </div>
+  </div>
+
+
+  <p>
+    MIR は実行経路を block 間の接続として表現し、新しく作られた古典値を個別の SSA 値として記録します。<br>
+    そのため後続解析は、ソースツリーを再解釈せずにグラフをたどり、値の変化と分岐の合流を確認できます。HIR はソースの意味を保持し、MIR は実行フローと値の追跡を明示します。
+  </p>
+
+  <h2 id="constructor">callable ごとに専用 lowerer を1つ作る</h2>
+
+  <figure class="mermaid-card">
+    <figcaption><span>HIR → MIR</span> callable ごとの独立した lowering</figcaption>
+<pre class="mermaid chapter-10-mermaid mermaid--wide">
+flowchart TB
+  accTitle: Next と Work を HIR から MIR へ独立して lower する流れ
+  accDescr: Next と Work は別々の callable lowerer を通り、それぞれ異なる MirCallable オブジェクトになります。
+
+  subgraph nextFlow["1回目の lowering"]
+    direction LR
+    nextHir["HIR Next"] --> nextLowerer["Next 専用<br/>callable lowerer"] --> nextMir["MirCallable Next"]
+  end
+
+  subgraph workFlow["2回目の lowering"]
+    direction LR
+    workHir["HIR Work"] --> workLowerer["Work 専用<br/>callable lowerer"] --> workMir["MirCallable Work"]
+  end
+
+  nextFlow ~~~ workFlow
+</pre>
+  </figure>
+
+  <p>
+    callable lowerer は、一度に1つの callable だけを担当する変換オブジェクトです。<br>
+    <code>Next</code> の処理中は、<code>Next</code> のパラメーター・現在の block・値だけを管理します。その処理が終わると、新しい lowerer が <code>Work</code> を別に処理します。
+  </p>
+
+  <h3 id="lower-hir-artifact-source">callable を1つずつ取り出すコード</h3>
+
+  <p>
+    以下は現在の <code>LowerHirArtifact()</code> の完全なコードです。<br>
+    実行文は実装と同一で、この章で使う <code>Next</code> と <code>Work</code> の値を示すコメントだけを追加しています。<br>
+    このトレースでは任意の lowering trace sink を渡さないため、<code>traceSink = null</code> です。<br>
+    C# コード内の下線付き関数名をクリックすると、実行トレースへ移動します。
+  </p>
+
+<pre><code class="language-csharp">private static MirSnapshot LowerHirArtifact(
+    HirSemanticArtifact hirArtifact,
+    IMirLoweringTraceSink? traceSink)
+{
+    // hirArtifact には意味解析後の最終 HIR が入っています。
+    // Callables = [Next h6, Work h44]
+    // EntryCallable = Work h44
+    ArgumentNullException.ThrowIfNull(hirArtifact);
+
+    var hirSnapshot = hirArtifact.Source;
+    var hirProgram = hirSnapshot.Program;
+
+    // 例の値: hirEntryCallable = Work h44
+    var hirEntryCallable = hirProgram.EntryCallable
+        ?? throw new InvalidOperationException(
+            "validated HIR must contain an operation before MIR lowering");
+
+    // まだ callable を lower していないため、両方とも空です。
+    var mirCallables = new List&lt;MirCallable&gt;();
+    MirCallable? mirEntryCallable = null;
+
+    foreach (var hirCallable in hirProgram.Callables)
+    {
+        // 1回目: hirCallable = Next h6
+        // 2回目: hirCallable = Work h44
+        // 反復ごとに新しい lowerer を作るため、callable の作業状態は混ざりません。
+        var mirCallableLowerer = new <a class="code-call-link" href="chapter-10-call-flow.html#callable-lowerer-constructor" title="HirCallableToMirLowerer コンストラクターの実行トレース">HirCallableToMirLowerer</a>(
+            hirCallable,
+            hirArtifact,
+            traceSink);
+
+        // 1回目の結果: mirCallable = Next c6
+        // 2回目の結果: mirCallable = Work c44
+        var mirCallable = mirCallableLowerer.<a class="code-call-link" href="chapter-10-call-flow.html#lower-to-mir-callable" title="LowerToMirCallable の実行トレース">LowerToMirCallable</a>();
+        mirCallables.Add(mirCallable);
+
+        // Next はエントリー operation ではないため、1回目は false です。
+        // Work は hirEntryCallable と同じオブジェクトのため、2回目は true です。
+        if (ReferenceEquals(hirCallable, hirEntryCallable))
+            mirEntryCallable = mirCallable;
+    }
+
+    // 最終結果:
+    // Callables  = [Next c6, Work c44]
+    // EntryPoint = Work c44
+    var mirProgram = new MirProgram(
+        mirEntryCallable
+            ?? throw new InvalidOperationException(
+                "validated HIR entry callable must be lowered into MIR"),
+        mirCallables);
+
+    return MirSnapshot.CreateLowered(mirProgram);
+}</code></pre>
+
+  <p>
+    1回目の反復後、リストには <code>Next c6</code> が入ります。2回目の反復で <code>Work c44</code> が追加されます。<br>
+    <code>Work</code> はエントリー operation なので、同じ <code>Work c44</code> オブジェクトが <code>MirProgram</code> のエントリーポイントとして選ばれます。
+  </p>
+
+  <p>
+    以下は各反復で呼ばれる lowerer コンストラクターの完全なコードです。<br>
+    担当する HIR callable、最終意味情報、任意の trace sink を保存し、HIR callable ノード ID の数値を対応する MIR callable ID として再利用します。
+  </p>
+
+<pre><code class="language-csharp">public HirCallableToMirLowerer(
+    HirCallable hirCallable,
+    HirSemanticArtifact hirArtifact,
+    IMirLoweringTraceSink? traceSink)
+{
+    // 1つ目のオブジェクト: Next h6
+    // 2つ目のオブジェクト: Work h44
+    _hirCallable = hirCallable;
+    _hirArtifact = hirArtifact;
+
+    // h6 は c6 に、h44 は c44 になります。
+    _mirCallableId = new MirCallableId(hirCallable.Id.Value);
+
+    // 既定の CLI 実行では trace を要求しないため null です。
+    _traceSink = traceSink;
+}</code></pre>
+
+  <p>
+    <code>new</code> で作られた lowerer は、空のパラメーターリスト・空の block リスト・現在 block なしの状態から始まります。<br>
+    callable ごとに独立した block ID allocator を持つため、<code>Next</code> と <code>Work</code> はどちらも最初の block を <code>b0</code> と名付けられます。
+  </p>
+
+  <h2 id="lower-method">1つの callable を作る共通手順</h2>
+
+  <figure class="mermaid-card">
+    <figcaption><span>HIR → MIR</span> 1つの callable を作る共通手順</figcaption>
+<pre class="mermaid chapter-10-mermaid mermaid--vertical">
+flowchart TB
+  accTitle: 1つの HIR callable を MirCallable に変える5段階
+  accDescr: LowerToMirCallable が callable 情報を確認し、CreateMirBlock がエントリー block を作成し、LowerParameters がパラメーターを登録し、LowerStatements と LowerStatement が本体を処理し、LowerToMirCallable と MirBlockBuilder.Build が MirCallable を完成させます。
+
+  input["1つの HIR callable"]
+  step1["1<br/>Origin・宣言シンボル・名前を解決<br/><br/>LowerToMirCallable()"]
+  step2["2<br/>エントリー block を作成<br/><br/>CreateMirBlock()"]
+  step3["3<br/>パラメーターを MIR 値または qubit として登録<br/><br/>LowerParameters()"]
+  step4["4<br/>本体の文を順番に lower<br/><br/>LowerStatements()<br/>→ LowerStatement()"]
+  step5["5<br/>残りの経路を閉じて block を確定<br/>MirCallable を返す<br/><br/>LowerToMirCallable()<br/>+ MirBlockBuilder.Build()"]
+
+  input --> step1 --> step2 --> step3 --> step4 --> step5
+</pre>
+  </figure>
+
+  <p>
+    すべての function と operation がこの手順を通ります。<br>
+    違いはパラメーターと本体から生じます。単純な function は1つの block で済みますが、条件分岐を持つ operation は複数の block に分かれます。
+  </p>
+
+  <h3 id="lower-callable-source"><code>Next</code> と <code>Work</code> の実値を入れて関数を追跡する</h3>
+
+  <p>
+    <code>LowerToMirCallable()</code> は <code>Next h6</code> の lowerer で1回、<code>Work h44</code> の lowerer で1回実行されます。<br>
+    以下のコメントは、同じコード内で両方の入力に対する値と分岐がどのように異なるかを示します。
+  </p>
+
+<pre><code class="language-csharp">public MirCallable LowerToMirCallable()
+{
+    // 1回目: _hirCallable = Next h6
+    // 2回目: _hirCallable = Work h44
+    var mirCallableOrigin = MirOriginFor(_hirCallable);
+
+    // 結果: 現在の Next または Work の宣言シンボル
+    var hirCallableSymbol = RequireHirDeclarationSymbol(
+        _hirCallable.Id,
+        $"callable `{_hirCallable.Name}`");
+
+    // 現在の callable を含む namespace を記録した HIR の名前構造。
+    var hirScopeGraph = _hirArtifact.Model.ScopeGraph
+        ?? throw MirLoweringError(
+            "the final HIR semantic model has no scope graph");
+
+    // Next 実行: qualifiedSourceCallableName = "Next"
+    // Work 実行: qualifiedSourceCallableName = "Work"
+    var qualifiedSourceCallableName =
+        hirScopeGraph.QualifiedName(hirCallableSymbol);
+
+    // 各 lowerer が自身の最初の block を作るため、それぞれ別の b0 を持ちます。
+    _currentMirBlockBuilder = CreateMirBlock(mirCallableOrigin);
+
+    // Next 実行: パラメーター value を %v0 として登録します。
+    // Work 実行: パラメーターがないため _mirParameters = [] です。
+    <a class="code-call-link" href="chapter-10-call-flow.html#lower-parameters" title="LowerParameters の実行トレース">LowerParameters</a>();
+
+    /* LowerStatements() は現在の callable の本体全体を処理します。
+
+    Next
+    - return value + 1; の処理で計算 instruction と MirReturn terminator を b0 に追加し、b0 を閉じます。
+    - 現在 block b0 が閉じられるため、_currentMirBlockBuilder は null になります。
+    - _mirBlockBuilders = [b0]
+
+    Work
+    - b0 は変数宣言、qubit の準備、配列代入、if 条件を処理し、b1 または b2 への分岐で閉じます。
+    - b1 は true 経路の X(q[0]); を処理し、b3 への移動で閉じます。
+    - b2 は処理するソース文がない false 経路で、b3 への移動で閉じます。
+    - b3 は b1 と b2 の合流点で、最後の H(q[0]); を処理します。
+    - H(q[0]); は block を閉じず、その後に明示的な return もないため、
+      b3 が開いた現在 block のまま残ります。
+
+    処理後
+    ├─ _mirBlockBuilders = [b0, b1, b2, b3]
+    └─ _currentMirBlockBuilder = b3 */
+    <a class="code-call-link" href="chapter-10-call-flow.html#lower-statements" title="LowerStatements の実行トレース">LowerStatements</a>(_hirCallable.Body.Statements);
+
+    // Next: 現在 block が null なので、以下の if を飛ばします。
+    // Work: 現在 block が b3 なので、以下の if で b3 を閉じます。
+    if (_currentMirBlockBuilder is not null)
+    {
+        if (_hirCallable.IsFunction)
+        {
+            // この例のどちらの callable も、この分岐は選びません。
+            MarkCurrentMirBlockUnreachable(
+                MirOrigin.GeneratedFrom(
+                    mirCallableOrigin,
+                    "missing validated function return"));
+        }
+        else
+        {
+            // Work 実行: 値を持たない暗黙の return を b3 に追加します。
+            ReturnFromCurrentMirBlock(
+                value: null,
+                MirOrigin.GeneratedFrom(
+                    mirCallableOrigin,
+                    "implicit operation return"));
+        }
+    }
+
+    // Next 実行: builder リスト [b0]
+    // Work 実行: builder リスト [b0,b1,b2,b3]
+    // 各 builder を immutable な MirBlock として確定します。
+    var mirBlocks = new List&lt;MirBlock&gt;(_mirBlockBuilders.Count);
+    foreach (var mirBlockBuilder in _mirBlockBuilders)
+    {
+        var mirBlock = mirBlockBuilder.Build();
+        mirBlocks.Add(mirBlock);
+    }
+
+    // 最初に作られた b0 が常にエントリー block です。
+    var mirEntryBlock = mirBlocks[0];
+
+    // Next の戻り値: c6, "Next", int, [%v0], b0, [b0]
+    // Work の戻り値: c44, "Work", null, [], b0, [b0,b1,b2,b3]
+    return new MirCallable(
+        _mirCallableId,
+        qualifiedSourceCallableName,
+        _hirCallable.ReturnType is { } returns
+            ? MirType.Scalar(returns)
+            : null,
+        _mirParameters,
+        mirEntryBlock,
+        mirBlocks,
+        mirCallableOrigin);
+}</code></pre>
+
+  <p>
+    この関数は、上の図と同じ手順を実行します。<br>
+    エントリー block を作り、本体を処理します。<code>Next</code> は明示的な return で終了し、<code>Work</code> は残った operation 経路を値なしの return で閉じます。その結果、それぞれ <code>MirCallable Next c6</code> と <code>MirCallable Work c44</code> になります。
+  </p>
+
+  <h3 id="statement-dispatch-source">2つの callable の本体文が渡される先</h3>
+
+  <p>
+    上の <code>LowerStatements()</code> は本体を先頭から末尾まで走査し、<code>LowerStatement()</code> は現在の文種別に対応する lowering helper を1つ選びます。<br>
+    以下は両関数の現在の完全なコードです。コメントは <code>Next</code> と <code>Work</code> が実際に渡す値を示します。
+  </p>
+
+<pre><code class="language-csharp">private void LowerStatements(IReadOnlyList&lt;HirStatement&gt; hirStatements)
+{
+    // Next 本体: [return value + 1]、b0 から開始
+    // Work 最上位: [var, use, assignment, if, H]、b0 から開始
+    // if の true 本体: [X(q[0])]、b1 から開始
+    // if の false 本体: []、b2 から開始
+    for (var hirStatementIndex = 0;
+         hirStatementIndex &lt; hirStatements.Count;
+         hirStatementIndex++)
+    {
+        // 反復開始時に現在の経路がすでに閉じていれば、残りの文は出力しません。
+        // この例の4回の呼び出しでは、この分岐は選ばれません。
+        if (_currentMirBlockBuilder is null)
+        {
+            for (;
+                 hirStatementIndex &lt; hirStatements.Count;
+                 hirStatementIndex++)
+            {
+                MarkUnreachableDeclarations(
+                    hirStatements[hirStatementIndex]);
+            }
+            return;
+        }
+
+        <a class="code-call-link" href="chapter-10-call-flow.html#lower-statement" title="LowerStatement の実行トレース">LowerStatement</a>(hirStatements[hirStatementIndex]);
+    }
+}</code></pre>
+
+  <p>
+    ループは文を1つ取り出すたびに、以下の <code>LowerStatement()</code> を呼び出します。
+  </p>
+
+<pre><code class="language-csharp">private void LowerStatement(HirStatement hirStatement)
+{
+    switch (hirStatement)
+    {
+        // Work の use q 文が選びます。
+        case HirQubitDeclarationStatement hirQubitDeclaration:
+            LowerQubitDeclaration(hirQubitDeclaration);
+            return;
+
+        // Work の var values 文が選びます。
+        case HirVariableDeclarationStatement hirDeclaration:
+            LowerDeclaration(hirDeclaration);
+            return;
+
+        // Work の values[0] への代入文が選びます。
+        case HirAssignmentStatement hirAssignment:
+            LowerAssignment(hirAssignment);
+            return;
+
+        // Work の H 呼び出しが選びます。
+        // if 内の X 呼び出しも、入れ子の本体を処理するときに同じ分岐を選びます。
+        case HirCallStatement hirCallStatement:
+            LowerStatementCall(hirCallStatement);
+            return;
+
+        // Work の if 文が選びます。
+        case HirIfStatement hirIf:
+            LowerIf(hirIf);
+            return;
+
+        case HirForStatement hirFor:
+            LowerFor(hirFor);
+            return;
+
+        case HirWhileStatement hirWhile:
+            LowerWhile(hirWhile);
+            return;
+
+        case HirRepeatStatement hirRepeat:
+            LowerRepeat(hirRepeat);
+            return;
+
+        // Next の return 文が選びます。
+        case HirReturnStatement hirReturn:
+            LowerReturn(hirReturn);
+            return;
+
+        default:
+            throw MirLoweringError(
+                $"unsupported HIR statement {hirStatement.GetType().Name}");
+    }
+}</code></pre>
+
+  <p>
+    この switch は文の意味を再判定しません。<br>
+    HIR ですでに分類された文種別を読み、対応する helper を呼んですぐに戻ります。
+  </p>
+
+  <h2 id="next">Next は1つの block で完成する</h2>
+
+  <p>
+    <code>Next</code> には <code>value</code> という1つの <code>int</code> パラメーターがあります。<br>
+    lowerer はこれを MIR 入力値 <code>%v0</code> として登録し、エントリー block <code>b0</code> で本体を処理します。
+  </p>
+
+  <figure class="mermaid-card">
+    <figcaption><span>MIR</span> MirCallable Next の構造</figcaption>
+<pre class="mermaid chapter-10-mermaid mermaid--vertical">
+flowchart TB
+  accTitle: MirCallable Next の構造
+  accDescr: Next はパラメーター value とエントリー block b0 を持ち、b0 で数値 1 の生成、加算、return を順番に実行します。
+
+  next["MirCallable Next"]
+  parameter["パラメーター<br/>%v0 value"]
+  block["b0<br/>EntryBlock · Blocks[0]"]
+  constant["数値 1 を生成"]
+  add["%v0 + 1 を計算"]
+  result["結果を return"]
+
+  next --- parameter
+  next --- block
+  block --> constant --> add --> result
+</pre>
+  </figure>
+
+  <p>
+    ソース文 <code>return value + 1;</code> は計算と return に分かれますが、どちらも <code>b0</code> に入ります。<br>
+    return が block を終了させるため、追加の終了文は必要ありません。
+  </p>
+
+  <h2 id="work">Work は条件分岐によって複数の block に分かれる</h2>
+
+  <p>
+    <code>Work</code> にはパラメーターがありませんが、ローカル配列と qubit があります。<br>
+    まずエントリー block で配列を作って qubit を準備し、その後に配列を更新して条件を評価します。
+  </p>
+
+  <figure class="mermaid-card">
+    <figcaption><span>MIR</span> MirCallable Work の構造</figcaption>
+<pre class="mermaid chapter-10-mermaid mermaid--wide">
+flowchart TB
+  accTitle: MirCallable Work の構造
+  accDescr: Work はエントリー block b0、ローカル配列 values、ローカル qubit q、b0 から b3 までの4つの block を持ちます。
+
+  work["MirCallable Work"]
+  values["ローカル配列<br/>values"]
+  qubit["ローカル qubit<br/>q"]
+  blocks["Blocks"]
+  b0["b0<br/>EntryBlock · 初期化 · 配列更新 · 条件評価"]
+  b1["b1<br/>条件が true のとき X を実行"]
+  b2["b2<br/>条件が false のとき gate なし"]
+  b3["b3<br/>経路合流 · H を実行 · return"]
+
+  work --- values
+  work --- qubit
+  work --- blocks
+  blocks --- b0
+  blocks --- b1
+  blocks --- b2
+  blocks --- b3
+</pre>
+  </figure>
+
+  <p>
+    <code>if</code> に到達すると実行が2つの経路に分かれるため、<code>b1</code> と <code>b2</code> が必要になります。<br>
+    両方の経路が終わると <code>b3</code> で合流し、ソースの条件分岐後にある <code>H(q[0]);</code> がそこへ入ります。
+  </p>
+
+  <p id="implicit-return">
+    <code>Work</code> のソースには <code>return</code> 文がありません。<br>
+    operation は値を返さないため、lowerer は最後の <code>b3</code> に値なしの return を自動で追加し、block を正常に閉じます。これを暗黙の return と呼びます。
+  </p>
+
+  <h2 id="result">完成した MirCallable が保持するもの</h2>
+
+  <p>
+    callable の lowering が終わると、作業中のリストが1つの <code>MirCallable</code> にまとめられます。<br>
+    完成したオブジェクトは、callable の ID と名前、戻り値型、パラメーター、エントリー block、完全な block リストを保持します。
+  </p>
+
+  <div class="panel">
+    <table>
+      <caption><code>MirCallable</code> の主要構造</caption>
+      <thead><tr><th scope="col">構成要素</th><th scope="col"><code>Next</code></th><th scope="col"><code>Work</code></th></tr></thead>
+      <tbody>
+        <tr><td>ID</td><td><code>c6</code></td><td><code>c44</code></td></tr>
+        <tr><td>名前</td><td><code>Next</code></td><td><code>Work</code></td></tr>
+        <tr><td>戻り値型</td><td><code>int</code></td><td>なし（<code>null</code>）</td></tr>
+        <tr><td>パラメーター</td><td><code>value</code> 1つ</td><td>なし</td></tr>
+        <tr><td>エントリー block</td><td><code>b0</code></td><td><code>b0</code></td></tr>
+        <tr><td>block 構造</td><td>計算と return を含む1 block</td><td>条件分岐を表す4 block</td></tr>
+        <tr><td>ローカルリソース</td><td>なし</td><td>ローカル配列と qubit</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    まとめると、callable lowerer は1つの HIR 宣言を受け取り、実行順序が明示された block 構造へ変換します。<br>
+    次章では、その block 内の古典値に注目し、1つのソース変数名が MIR で複数の SSA 値になる理由を説明します。
+  </p>
+
+  <nav class="chapter-nav" aria-label="章ナビゲーション（下部）">
+    <div class="group"><a href="chapter-09.html">← 前章：HIR→MIR 境界</a><a href="index.html#chapters">全章一覧</a><a href="chapter-10-call-flow.html#lower-hir-artifact"><code>LowerHirArtifact()</code> 詳細トレース</a></div>
+    <div class="group"><a href="chapter-11.html">次章：古典値と SSA バージョン →</a></div>
+  </nav>
+
+  <footer>Qora コンパイラ開発者マニュアル · 第10章</footer>
+</main>
+</body>
+</html>

@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>15. 条件文 lowering と分岐合流 — Qora コンパイラ開発者マニュアル</title>
+<link rel="stylesheet" href="developer.css">
+<script src="developer-syntax.js" defer></script>
+</head>
+<body>
+<nav class="language-switch" aria-label="言語"><a href="../en/chapter-15.html">English</a><span aria-hidden="true">·</span><a href="../ko/chapter-15.html">한국어</a><span aria-hidden="true">·</span><strong>日本語</strong></nav>
+<a class="skip-link" href="#main-content">本文へ移動</a>
+<header class="hero">
+  <div class="tag">Qora · Compiler Developer Manual · Chapter 15</div>
+  <h1>条件文で状態を分けて合流する</h1>
+  <p>true 経路の変更が false 経路へ混ざらない理由</p>
+</header>
+
+<main class="wrap" id="main-content">
+  <nav class="chapter-nav" aria-label="章移動（上）">
+    <div class="group"><a href="chapter-14.html">← 前：Basic Block</a><a href="index.html#chapters">全章目次</a></div>
+    <div class="group"><a href="chapter-16.html">次：MIR snapshot →</a></div>
+  </nav>
+
+  <p class="lead">
+    第14章では、<code>if</code> が四つの block に分かれる様子を確認しました。<br>
+    この章では、二つの経路の現在キュービットバージョンを別々に維持し、再び合流する過程だけを確認します。
+  </p>
+
+  <h2 id="source">確認する Qora コード</h2>
+
+<pre><code class="language-qora">function Next(value: int): int
+{
+    return value + 1;
+}
+
+operation Work()
+{
+    var values: int[] = [0];
+    use q = Qubit[1];
+
+    values[0] = Next(values[0]);
+
+    if (values[0] == 1)
+    {
+        X(q[0]);
+    }
+
+    H(q[0]);
+}</code></pre>
+
+  <p>
+    <code>values[0] == 1</code> が true なら <code>q[0]</code> に <code>X</code> を適用し、false なら何も起こりません。<br>
+    MIR には両方の経路が残るため、<code>if</code> の後の <code>H(q[0])</code> はどちらの経路からも続けられる必要があります。
+  </p>
+
+  <div class="callout">
+    <span class="h">この章で答える問い</span>
+    true 経路で <code>X</code> が現在バージョンを変えても、false 経路はなぜ元のバージョンを維持できるのでしょうか。<br>
+    MIR は経路別に現在状態を管理し、合流点で比較します。
+  </div>
+
+  <h2 id="two-states">二つの経路は同じ入力から別々に始まる</h2>
+
+  <p>
+    <code>if</code> の直前では、現在の <code>q</code> が <code>q0.v0</code> を指します。<br>
+    lowerer はこの記録を true 経路と false 経路へそれぞれ複製し、二つの経路を独立して処理します。
+  </p>
+
+<pre><code class="language-plaintext">分岐直前の記録: q → q0.v0
+        │
+        ├─ true 経路の記録:  q → q0.v0 ── X ──▶ q0.v1
+        └─ false 経路の記録: q → q0.v0 ─────────▶ q0.v0</code></pre>
+
+  <p>
+    したがって true 経路で <code>X</code> を処理しても、true 経路の記録だけが <code>q0.v1</code> へ変わります。<br>
+    false 経路は別の記録を使うため、引き続き <code>q0.v0</code> を指します。
+  </p>
+
+  <h2 id="qubit-phi">合流点で二つの記録を一度比較する</h2>
+
+  <p>
+    合流点では、二つの経路が記録した現在バージョンを比較します。<br>
+    二つのバージョンが同じならそのまま使い、この例の <code>q0.v1</code> と <code>q0.v0</code> のように異なるなら Phi バージョン <code>q0.v2</code> を作ります。
+  </p>
+
+<pre><code class="language-plaintext">true 経路の現在 q:  q0.v1 ──┐
+                             ├─ 異なる → 合流後の現在 q: q0.v2
+false 経路の現在 q: q0.v0 ──┘</code></pre>
+
+  <p>
+    比較後、合流後の現在 <code>q</code> 記録は <code>q0.v2</code> 一つになります。<br>
+    後の <code>H(q[0])</code> は経路別の記録を再確認せず、この合流記録だけを使います。
+  </p>
+
+  <div class="callout good">
+    <span class="h">まとめ</span>
+    条件文 lowering の要点は、経路別に現在状態を記録することです。<br>
+    そのため一方の経路の変更が他方へ混ざらず、合流点でだけ二つの記録を比較して一つにつなぎます。
+  </div>
+
+  <p>
+    次の章では、こうして完成した <code>Next</code> と <code>Work</code> を一つの <code>MirProgram</code> へまとめる過程を確認します。
+  </p>
+
+  <nav class="chapter-nav" aria-label="章移動（下）">
+    <div class="group"><a href="chapter-14.html">← 前：Basic Block</a><a href="index.html#chapters">全章目次</a></div>
+    <div class="group"><a href="chapter-16.html">次：MIR snapshot →</a></div>
+  </nav>
+
+  <footer>Qora コンパイラ開発者マニュアル · 第15章</footer>
+</main>
+</body>
+</html>

@@ -147,13 +147,12 @@ QoraCompiler.Compile
        │       └─ EffectAnalysis
        ├─ Mir (optional typed SSA/CFG snapshot)
        │   ├─ exact HirArtifact + program-owned Origins
-       │   ├─ MirStage + optional exact PreviousSnapshot
        │   └─ Structure + analyses bound to the exact MirProgram
        ├─ Diagnostics
        │   └─ typed Source / HIR / MIR / Target(backend, exact MIR input) origin
        └─ Targets.Artifacts[TargetBackend]
            └─ OpenQasmArtifact
-               ├─ exact materialized MirSnapshot
+               ├─ exact lowered MirSnapshot
                ├─ MirOpenQasmTargetProgram
                └─ OpenQASM 3 text derived from that target model
 
@@ -236,7 +235,7 @@ Qora.LanguageServices (opt-in)
 - `MirOpenQasmLowering` assigns emitted names and builds an immutable
   `MirOpenQasmTargetProgram`; it never writes a target spelling into `HirSemanticModel` or MIR.
   `TargetArtifactSet.Artifacts` is the authoritative backend-keyed map, while the current convenience
-  view is `Targets.OpenQasm`. `OpenQasmArtifact.Source` identifies the exact materialized
+  view is `Targets.OpenQasm`. `OpenQasmArtifact.Source` identifies the exact lowered
   `MirSnapshot` consumed by this backend. `QasmBackend` accepts only that exact MIR snapshot, and
   `OpenQasmArtifact.Text` is emitted from the typed target program rather than supplied as a second
   authority. Target diagnostics retain the backend and exact `MirSnapshot` input, so provenance

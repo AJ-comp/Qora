@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>14. Basic Block と Terminator — Qora コンパイラ開発者マニュアル</title>
+<link rel="stylesheet" href="developer.css">
+<script src="developer-syntax.js" defer></script>
+</head>
+<body>
+<nav class="language-switch" aria-label="言語"><a href="../en/chapter-14.html">English</a><span aria-hidden="true">·</span><a href="../ko/chapter-14.html">한국어</a><span aria-hidden="true">·</span><strong>日本語</strong></nav>
+<a class="skip-link" href="#main-content">本文へ移動</a>
+<header class="hero">
+  <div class="tag">Qora · Compiler Developer Manual · Chapter 14</div>
+  <h1>Basic Block と Terminator</h1>
+  <p>一つの <code>if</code> が <code>b0</code> から <code>b3</code> までに分かれる過程</p>
+</header>
+
+<main class="wrap" id="main-content">
+  <nav class="chapter-nav" aria-label="章移動（上）">
+    <div class="group"><a href="chapter-13.html">← 前：キュービットバージョン</a><a href="index.html#chapters">全章目次</a></div>
+    <div class="group"><a href="chapter-15.html">次：条件文 lowering →</a></div>
+  </nav>
+
+  <p class="lead">
+    MIR は <code>if</code> をネストした文ツリーのまま保持しません。<br>
+    途切れず順番に実行される命令を Basic Block にまとめ、各 block の最後へ次の移動先を記録します。<br>
+    共通例の <code>if</code> は <code>b0</code>、<code>b1</code>、<code>b2</code>、<code>b3</code> の四つの block になります。
+  </p>
+
+  <h2 id="source">確認する Qora コード</h2>
+
+<pre><code class="language-qora">function Next(value: int): int
+{
+    return value + 1;
+}
+
+operation Work()
+{
+    var values: int[] = [0];
+    use q = Qubit[1];
+
+    values[0] = Next(values[0]);
+
+    if (values[0] == 1)
+    {
+        X(q[0]);
+    }
+
+    H(q[0]);
+}</code></pre>
+
+  <p>
+    条件が true なら <code>X</code> を実行し、false なら何もしません。<br>
+    どちらの経路を選んでも、<code>if</code> の後には <code>H</code> を実行する必要があります。<br>
+    MIR はこの三つの区間を分け、制御フローを明示します。
+  </p>
+
+  <h2 id="overview">四つの block の接続全体</h2>
+
+<pre><code class="language-plaintext">                    ┌─ true ─▶ b1: X 実行 ─┐
+b0: 条件計算と branch                       ├─▶ b3: H 実行と return
+                    └─ false ▶ b2: 空経路 ─┘</code></pre>
+
+  <p>
+    <code>b0</code> は条件を計算し、二つの経路から一つを選びます。<br>
+    <code>b1</code> は true の本文、<code>b2</code> は false の経路を表します。<br>
+    両方の経路は <code>b3</code> で再び合流し、その後に共通して実行する <code>H</code> が続きます。
+  </p>
+
+  <h2 id="b0"><code>b0</code>：条件を計算して経路を選ぶ</h2>
+
+  <p>
+    <code>b0</code> には <code>if</code> より前に実行する配列宣言と更新も入りますが、ここでは最後の部分だけを見れば十分です。<br>
+    MIR は <code>values[0] == 1</code> を計算して <code>%v10</code> を作り、<code>branch</code> がその値から次の block を決めます。
+  </p>
+
+<pre><code class="language-plaintext">b0
+├─ %v10 = values[0] == 1
+└─ branch %v10
+   ├─ true  → b1
+   └─ false → b2</code></pre>
+
+  <p>
+    block の最後で次の移動先を決める命令を Terminator と呼びます。<br>
+    <code>b0</code> の Terminator は二つの行き先を持つ <code>branch</code> です。<br>
+    条件が true なら <code>b1</code>、false なら <code>b2</code> へ移動するため、実行が二つに分かれます。
+  </p>
+
+  <h2 id="branch-blocks"><code>b1</code> と <code>b2</code>：各経路を実行して合流点へ進む</h2>
+
+<pre><code class="language-plaintext">b1
+├─ X(q0.v0) → q0.v1
+└─ jump b3
+
+b2
+└─ jump b3</code></pre>
+
+  <p>
+    <code>b1</code> は true 本文にあった <code>X(q[0])</code> を実行します。<br>
+    実行後に残る true 本文はないため、<code>jump b3</code> で合流点へ移動します。
+  </p>
+
+  <p>
+    元のソースに <code>else</code> はありませんが、<code>b2</code> は必要です。<br>
+    条件が false のときに <code>X</code> を飛ばしてどこへ進むかを表す必要があるためです。<br>
+    この経路に実行する本文はないので、<code>jump b3</code> だけを持ちます。
+  </p>
+
+  <p>
+    <code>jump</code> も block を終える Terminator です。<br>
+    <code>branch</code> は条件によって行き先を選びますが、<code>jump</code> は決められた一つの行き先へ移動します。
+  </p>
+
+  <h2 id="b3"><code>b3</code>：経路を合流し、残りのコードを実行する</h2>
+
+<pre><code class="language-plaintext">b3
+├─ q0.v2 = phi(b1: q0.v1, b2: q0.v0)
+├─ H(q0.v2) → q0.v3
+└─ return</code></pre>
+
+  <p>
+    <code>b1</code> と <code>b2</code> はどちらも <code>b3</code> へ到着します。<br>
+    true 経路からは <code>X</code> を通った <code>q0.v1</code>、false 経路からは元のバージョン <code>q0.v0</code> が来ます。<br>
+    Phi は二つの入力を <code>q0.v2</code> という一つの合流バージョンへまとめます。
+  </p>
+
+  <p>
+    元のコードの <code>H(q[0])</code> は <code>if</code> の後にあるため、<code>b3</code> で実行されます。<br>
+    <code>H</code> が合流バージョン <code>q0.v2</code> を受けて <code>q0.v3</code> を作った後、<code>Work</code> に残る文がないため、MIR が追加した暗黙の <code>return</code> が block と callable を終えます。
+  </p>
+
+  <h2 id="execution">MIR には両方の経路が残る</h2>
+
+  <p>
+    MIR 内には四つの block がすべて存在しますが、一回の実行は条件に合う一つの経路だけを通ります。<br>
+    lowering は <code>Next</code> の呼び出し結果を事前計算しないため、次の二つの可能性を両方表現します。
+  </p>
+
+<pre><code class="language-plaintext">true 経路
+b0 → b1 → b3 → return
+
+false 経路
+b0 → b2 → b3 → return</code></pre>
+
+  <p>
+    前章で確認したとおり、この正確な例を実行すると true 経路を選びます。<br>
+    false 経路 <code>b2</code> は実行結果を予測して削除された経路ではなく、lowering 段階が保持した制御フローの別の可能性です。
+  </p>
+
+  <h2 id="summary">まとめ</h2>
+
+  <div class="callout good">
+    <span class="h">一文で見る制御フロー</span>
+    <code>b0</code> が <code>branch</code> で経路を選び、<code>b1</code> と <code>b2</code> が各経路を処理した後、<code>jump</code> で <code>b3</code> に集まります。<br>
+    <code>b3</code> は経路別のキュービットバージョンを合流し、<code>H</code> を実行してから <code>return</code> で終わります。
+  </div>
+
+  <nav class="chapter-nav" aria-label="章移動（下）">
+    <div class="group"><a href="chapter-13.html">← 前：キュービットバージョン</a><a href="index.html#chapters">全章目次</a></div>
+    <div class="group"><a href="chapter-15.html">次：条件文 lowering →</a></div>
+  </nav>
+
+  <footer>Qora コンパイラ開発者マニュアル · 第14章</footer>
+</main>
+</body>
+</html>

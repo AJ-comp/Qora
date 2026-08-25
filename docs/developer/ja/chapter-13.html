@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>13. キュービット identity とバージョン — Qora コンパイラ開発者マニュアル</title>
+<link rel="stylesheet" href="developer.css">
+<script src="developer-syntax.js" defer></script>
+</head>
+<body>
+<nav class="language-switch" aria-label="言語"><a href="../en/chapter-13.html">English</a><span aria-hidden="true">·</span><a href="../ko/chapter-13.html">한국어</a><span aria-hidden="true">·</span><strong>日本語</strong></nav>
+<a class="skip-link" href="#main-content">本文へ移動</a>
+<header class="hero">
+  <div class="tag">Qora · Compiler Developer Manual · Chapter 13</div>
+  <h1>キュービット identity とバージョン</h1>
+  <p><code>q0</code> は維持され、<code>v0 → v1 → v2 → v3</code> が生まれる理由</p>
+</header>
+
+<main class="wrap" id="main-content">
+  <nav class="chapter-nav" aria-label="章移動（上）">
+    <div class="group"><a href="chapter-12.html">← 前：配列 Storage</a><a href="index.html#chapters">全章目次</a></div>
+    <div class="group"><a href="chapter-14.html">次：Basic Block →</a></div>
+  </nav>
+
+  <p class="lead">
+    キュービットにゲートを適用しても、ソースの <code>q</code> 宣言が新しいリソースへ変わるわけではありません。<br>
+    MIR は同じ論理キュービットリソースであることを <code>q0</code> で維持しながら、ゲートを通って変化した計算状態を <code>v0</code>、<code>v1</code> のように区別します。<br>
+    下のコードで、長さ 1 のキュービットリソース <code>q</code> が四つのバージョンへ進む流れだけを確認します。
+  </p>
+
+  <h2 id="source">確認する Qora コード</h2>
+
+<pre><code class="language-qora">function Next(value: int): int
+{
+    return value + 1;
+}
+
+operation Work()
+{
+    var values: int[] = [0];
+    use q = Qubit[1];
+
+    values[0] = Next(values[0]);
+
+    if (values[0] == 1)
+    {
+        X(q[0]);
+    }
+
+    H(q[0]);
+}</code></pre>
+
+  <p>
+    <code>q</code> は一つのキュービットを持つ長さ 1 の論理リソースです。<br>
+    条件が true なら最初に <code>X</code> を適用し、条件に関係なく最後に <code>H</code> を適用します。<br>
+    この例を実行すると条件は true ですが、MIR lowering は <code>Next</code> の呼び出し結果を事前計算しないため、true・false 両方の経路を保持します。
+  </p>
+
+  <h2 id="overview">バージョン全体の流れ</h2>
+
+<pre><code class="language-plaintext">use q = Qubit[1]
+        ↓
+      q0.v0
+       ├─────────────────┐
+       │ 条件 true         │ 条件 false
+       ↓                  │
+  X 適用 → q0.v1          │ q0.v0 を維持
+       └─────────┬────────┘
+                 ↓
+        Phi 合流 → q0.v2
+                 ↓
+          H 適用 → q0.v3</code></pre>
+
+  <p>
+    すべての項目が <code>q0</code> で始まるのは、最初に宣言した論理キュービットリソース <code>q</code> を使い続けるためです。<br>
+    後ろのバージョンだけが変わるのは、各地点でどのゲートまで通過したかを区別する必要があるためです。
+  </p>
+
+  <h2 id="allocation-code">割り当て：最初の状態 <code>q0.v0</code></h2>
+
+  <p>
+    <code>use q = Qubit[1];</code> が長さ 1 のキュービットリソースを割り当てると、MIR はそのリソースへ <code>q0</code> という identity を与えます。<br>
+    <code>q0</code> は個別要素 <code>q[0]</code> の番号ではなく、callable 内の <code>q</code> 宣言全体を区別する番号です。実際の要素は <code>q0.v0[0]</code> のように別のインデックスで選択します。<br>
+    したがって、ハードウェア上の物理キュービット番号ではありません。<br>
+    同時に、まだゲートを通っていない最初のバージョン <code>v0</code> が付き、<code>q0.v0</code> になります。
+  </p>
+
+<pre><code class="language-plaintext">q0.v0
+│  └─ v0: 割り当て直後の最初のバージョン
+└──── q0: この論理キュービットリソースの不変 identity</code></pre>
+
+  <p>
+    後に出てくる <code>q0.v1</code>、<code>q0.v2</code>、<code>q0.v3</code> は、すべて同じ論理リソース <code>q0</code> に関する記録です。<br>
+    キュービットリソースをさらに三つ割り当てる意味ではありません。
+  </p>
+
+  <h2 id="qubit-lookup">分岐：true 経路だけが <code>X</code> を通る</h2>
+
+  <p>
+    <code>if</code> 分岐へ入るとき、両方の経路は同じ入力 <code>q0.v0</code> から始まります。<br>
+    true 経路では <code>X</code> が <code>q0.v0</code> を入力とし、ゲート通過後の結果を新しいバージョン <code>q0.v1</code> として記録します。<br>
+    一方、false 経路は <code>X</code> を実行しないため、<code>q0.v0</code> をそのまま維持します。
+  </p>
+
+<pre><code class="language-plaintext">true 経路   q0.v0 ── X ──▶ q0.v1
+false 経路  q0.v0 ─────────▶ q0.v0</code></pre>
+
+  <p>
+    このようにバージョンを分けると、MIR を読む解析は「この値は X を通った状態か」を命令順序から再推測せずに判断できます。
+  </p>
+
+  <h2 id="phi">合流：二つの可能性を <code>q0.v2</code> にまとめる</h2>
+
+  <p>
+    <code>if</code> が終わると、true 経路と false 経路は再び一つに合流します。<br>
+    しかし一方は <code>q0.v1</code>、もう一方は <code>q0.v0</code> なので、合流点でどちらか一つを無条件に選べません。<br>
+    MIR はこの二つの可能性を Phi でまとめ、<code>q0.v2</code> を作ります。
+  </p>
+
+<pre><code class="language-plaintext">true 経路 b1  → q0.v1 ─┐
+                       ├─ Phi → q0.v2
+false 経路 b2 → q0.v0 ─┘</code></pre>
+
+  <p>
+    Phi は新しいゲートではなく、新しいキュービットも割り当てません。<br>
+    実行が <code>b1</code> から来たなら <code>q0.v1</code>、<code>b2</code> から来たなら <code>q0.v0</code> という制御フローの選択を、一つの名前 <code>q0.v2</code> で表します。
+  </p>
+
+  <h2 id="h-gate">合流後の <code>H</code>：<code>q0.v3</code></h2>
+
+  <p>
+    最後の文 <code>H(q[0]);</code> は <code>if</code> の外側にあるため、二つの経路が合流した後に実行されます。<br>
+    したがって入力は特定経路の <code>q0.v0</code> や <code>q0.v1</code> ではなく、両方の可能性を表す <code>q0.v2</code> です。<br>
+    <code>H</code> を通った結果は、再び新しいバージョン <code>q0.v3</code> になります。
+  </p>
+
+<pre><code class="language-plaintext">q0.v2 ── H ──▶ q0.v3</code></pre>
+
+  <h2 id="summary">まとめ</h2>
+
+  <div class="callout good">
+    <span class="h">identity と version</span>
+    <code>q0</code> は最初に割り当てた論理キュービットリソース <code>q</code> の identity なので維持されます。<br>
+    <code>v0 → v1 → v2 → v3</code> は、そのリソースがどのゲートと分岐合流を通ったかを表す計算バージョンです。<br>
+    したがって <code>q0.v3</code> は四つ目のリソースではなく、同じ <code>q0</code> の最新状態です。
+  </div>
+
+  <p>
+    次の章では、これらのバージョンを入れる Basic Block を確認します。<br>
+    同じ <code>if</code> が <code>b0</code>、<code>b1</code>、<code>b2</code>、<code>b3</code> に分かれる理由を、全体の流れに沿って確認します。
+  </p>
+
+  <nav class="chapter-nav" aria-label="章移動（下）">
+    <div class="group"><a href="chapter-12.html">← 前：配列 Storage</a><a href="index.html#chapters">全章目次</a></div>
+    <div class="group"><a href="chapter-14.html">次：Basic Block →</a></div>
+  </nav>
+
+  <footer>Qora コンパイラ開発者マニュアル · 第13章</footer>
+</main>
+</body>
+</html>

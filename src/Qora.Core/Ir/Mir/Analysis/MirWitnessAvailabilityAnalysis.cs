@@ -18,8 +18,8 @@ public sealed record MirWitnessIssue(
 
 /// <summary>
 /// Availability of the exact classical inputs used by one forward quantum instruction at a proposed
-/// later point. This is deliberately not an overall cleanup-safety verdict: physical reversibility,
-/// qubit dependency ordering, and adjoint materialization remain separate analyses.
+/// later point. This is deliberately not an overall cleanup-safety verdict: physical reversibility
+/// and qubit dependency ordering remain separate analyses.
 /// </summary>
 public sealed record MirWitnessAvailability(
     IReadOnlyList<MirWitnessIssue> Issues,

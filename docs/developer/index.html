@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Qora Compiler Developer Manual</title>
+<script>
+  (function () {
+    var lang = null;
+    try { lang = localStorage.getItem('qora-lang'); } catch (e) {}
+    if (lang !== 'en' && lang !== 'ko' && lang !== 'ja') {
+      lang = 'en';
+      var prefs = navigator.languages || [navigator.language || ''];
+      for (var i = 0; i < prefs.length; i++) {
+        var p = String(prefs[i]).toLowerCase();
+        if (p.indexOf('ko') === 0) { lang = 'ko'; break; }
+        if (p.indexOf('ja') === 0) { lang = 'ja'; break; }
+        if (p.indexOf('en') === 0) { lang = 'en'; break; }
+      }
+    }
+    location.replace(lang + '/index.html');
+  })();
+</script>
+<meta http-equiv="refresh" content="1; url=en/index.html">
+</head>
+<body><p><a href="en/index.html">Open the Qora Compiler Developer Manual</a></p></body>
+</html>

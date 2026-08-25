@@ -117,7 +117,6 @@ internal static class QoraMirLowering
         // Result:
         //
         // MirSnapshot
-        // ├─ Stage          = Lowered
         // ├─ Program        = mirProgram
         // ├─ HirArtifact    = hirArtifact
         // └─ Analyses       = new MirAnalysisStore(mirProgram)
@@ -168,8 +167,7 @@ internal static class QoraMirLowering
             var qualifiedSourceCallableName =
                 hirScopeGraph.QualifiedName(hirCallableSymbol);
 
-            var mirEntryBlockBuilder = CreateMirBlock(mirCallableOrigin);
-            _currentMirBlockBuilder = mirEntryBlockBuilder;
+            _currentMirBlockBuilder = CreateMirBlock(mirCallableOrigin);
 
             LowerParameters();
             LowerStatements(_hirCallable.Body.Statements);
@@ -194,17 +192,13 @@ internal static class QoraMirLowering
             }
 
             var mirBlocks = new List<MirBlock>(_mirBlockBuilders.Count);
-            MirBlock? mirEntryBlock = null;
             foreach (var mirBlockBuilder in _mirBlockBuilders)
             {
                 var mirBlock = mirBlockBuilder.Build();
                 mirBlocks.Add(mirBlock);
-                if (ReferenceEquals(mirBlockBuilder, mirEntryBlockBuilder))
-                    mirEntryBlock = mirBlock;
             }
 
-            if (mirEntryBlock is null)
-                throw MirLoweringError("the MIR entry block was not emitted");
+            var mirEntryBlock = mirBlocks[0];
 
             return new MirCallable(
                 _mirCallableId,
@@ -220,8 +214,7 @@ internal static class QoraMirLowering
 
         private void LowerParameters()
         {
-            var requiredArrayLengths =
-                _hirArtifact.Model.RequiredArgLengths(_hirCallable.Id);
+            var requiredArrayLengths = _hirArtifact.Model.RequiredArgLengths(_hirCallable.Id);
 
             for (var hirParameterIndex = 0;
                  hirParameterIndex < _hirCallable.Parameters.Count;
@@ -236,82 +229,113 @@ internal static class QoraMirLowering
 
                 if (hirParameter.Type == QType.Qubit)
                 {
-                    var mirQubitId = AllocateMirQubitId();
-                    var mirQubitParameter = hirParameter.IsArray
-                        ? MirQubitParameter.Array(
-                            mirQubitId,
-                            hirParameter.Name,
-                            hirParameter.RegisterSize,
-                            hirParameter.Ownership,
-                            mirParameterOrigin)
-                        : MirQubitParameter.Single(
-                            mirQubitId,
-                            hirParameter.Name,
-                            hirParameter.Ownership,
-                            mirParameterOrigin);
-                    RegisterInitialMirQubit(
+                    LowerQubitParameter(
+                        hirParameter,
                         hirParameterSymbol.Id,
-                        mirQubitParameter);
-                    _currentFlowState.CurrentMirQubitByHirSymbolId[
-                            hirParameterSymbol.Id] =
-                        mirQubitParameter;
-                    _mirParameters.Add(mirQubitParameter);
+                        mirParameterOrigin);
                     continue;
                 }
 
-                var mirParameterType = hirParameter.IsArray
-                    ? MirType.Array(hirParameter.Type, hirParameter.RegisterSize)
-                    : MirType.Scalar(hirParameter.Type);
-                var mirParameterValue = CreateMirValue(
-                    mirParameterType,
+                LowerClassicalParameter(
+                    hirParameter,
                     hirParameterSymbol.Id,
-                    mirParameterOrigin);
-                MirArrayStorage? mirArrayStorage = null;
-                if (hirParameter.IsArray)
-                {
-                    mirArrayStorage = new MirArrayStorage(
-                        AllocateMirStorageId(),
-                        hirParameter.Name,
-                        mirParameterOrigin);
-                    _traceSink?.LinkStorage(
-                        hirParameterSymbol.Id,
-                        _mirCallableId,
-                        mirArrayStorage.Id);
-                }
-                var minimumLength = hirParameter.IsArray ? 1 : 0;
-                if (hirParameter.IsArray
-                    && requiredArrayLengths is not null
-                    && requiredArrayLengths.TryGetValue(
-                        hirParameter.Name,
-                        out var requiredLength))
-                {
-                    if (requiredLength < 0 || requiredLength > int.MaxValue)
-                    {
-                        throw MirLoweringError(
-                            $"array parameter `{hirParameter.Name}` has invalid "
-                            + $"minimum length {requiredLength}");
-                    }
-
-                    minimumLength = Math.Max(minimumLength, (int)requiredLength);
-                }
-                _currentFlowState.CurrentMirValueByHirSymbolId[
-                        hirParameterSymbol.Id] =
-                    mirParameterValue.Id;
-                var mirParameter = mirArrayStorage is null
-                    ? MirClassicalParameter.Scalar(
-                        hirParameter.Name,
-                        mirParameterValue,
-                        hirParameter.Ownership,
-                        hirParameter.Access)
-                    : MirClassicalParameter.Array(
-                        hirParameter.Name,
-                        mirParameterValue,
-                        mirArrayStorage,
-                        hirParameter.Ownership,
-                        hirParameter.Access,
-                        minimumLength);
-                _mirParameters.Add(mirParameter);
+                    mirParameterOrigin,
+                    requiredArrayLengths);
             }
+        }
+
+        private void LowerClassicalParameter(
+            HirParameter hirParameter,
+            SymbolId hirParameterSymbolId,
+            MirOrigin mirParameterOrigin,
+            IReadOnlyDictionary<string, long>? requiredArrayLengths)
+        {
+            var mirParameterType = hirParameter.IsArray
+                ? MirType.Array(hirParameter.Type, hirParameter.RegisterSize)
+                : MirType.Scalar(hirParameter.Type);
+            var mirParameterValue = CreateMirValue(
+                mirParameterType,
+                hirParameterSymbolId,
+                mirParameterOrigin);
+            var (mirArrayStorage, minimumLength) =
+                CreateMirParameterStorage(
+                    hirParameter,
+                    hirParameterSymbolId,
+                    mirParameterOrigin,
+                    requiredArrayLengths);
+            _currentFlowState.CurrentMirValueByHirSymbolId[hirParameterSymbolId] = mirParameterValue.Id;
+            var mirParameter = mirArrayStorage is null
+                ? MirClassicalParameter.Scalar(
+                    hirParameter,
+                    mirParameterValue)
+                : MirClassicalParameter.Array(
+                    hirParameter,
+                    mirParameterValue,
+                    mirArrayStorage,
+                    minimumLength);
+            _mirParameters.Add(mirParameter);
+        }
+
+        private (MirArrayStorage? Storage, int MinimumLength)
+            CreateMirParameterStorage(
+                HirParameter hirParameter,
+                SymbolId hirParameterSymbolId,
+                MirOrigin mirParameterOrigin,
+                IReadOnlyDictionary<string, long>? requiredArrayLengths)
+        {
+            if (!hirParameter.IsArray) return (null, 0);
+
+            var mirArrayStorage = new MirArrayStorage(
+                AllocateMirStorageId(),
+                hirParameter.Name,
+                mirParameterOrigin);
+            _traceSink?.LinkStorage(
+                hirParameterSymbolId,
+                _mirCallableId,
+                mirArrayStorage.Id);
+
+            var minimumLength = 1;
+            if (requiredArrayLengths is not null
+                && requiredArrayLengths.TryGetValue(
+                    hirParameter.Name,
+                    out var requiredLength))
+            {
+                if (requiredLength < 0 || requiredLength > int.MaxValue)
+                {
+                    throw MirLoweringError(
+                        $"array parameter `{hirParameter.Name}` has invalid "
+                        + $"minimum length {requiredLength}");
+                }
+
+                minimumLength = Math.Max(minimumLength, (int)requiredLength);
+            }
+
+            return (mirArrayStorage, minimumLength);
+        }
+
+        private void LowerQubitParameter(
+            HirParameter hirParameter,
+            SymbolId hirParameterSymbolId,
+            MirOrigin mirParameterOrigin)
+        {
+            var mirQubitId = AllocateMirQubitId();
+            var mirQubitParameter = hirParameter.IsArray
+                ? MirQubitParameter.Array(
+                    mirQubitId,
+                    hirParameter.Name,
+                    hirParameter.RegisterSize,
+                    hirParameter.Ownership,
+                    mirParameterOrigin)
+                : MirQubitParameter.Single(
+                    mirQubitId,
+                    hirParameter.Name,
+                    hirParameter.Ownership,
+                    mirParameterOrigin);
+            RegisterInitialMirQubit(
+                hirParameterSymbolId,
+                mirQubitParameter);
+            _currentFlowState.CurrentMirQubitByHirSymbolId[hirParameterSymbolId] = mirQubitParameter;
+            _mirParameters.Add(mirQubitParameter);
         }
 
         private void LowerStatements(IReadOnlyList<HirStatement> hirStatements)
@@ -2605,7 +2629,7 @@ internal static class QoraMirLowering
                     arguments,
                     mirOrigin));
                 targetMirBlock._hasIncomingControlFlow = true;
-                return new MirControlFlowEdge(Id, successorOrdinal: 0);
+                return MirControlFlowEdge.Jump(Id);
             }
 
             public (
@@ -2630,8 +2654,8 @@ internal static class QoraMirLowering
                 trueTargetMirBlock._hasIncomingControlFlow = true;
                 falseTargetMirBlock._hasIncomingControlFlow = true;
                 return (
-                    new MirControlFlowEdge(Id, successorOrdinal: 0),
-                    new MirControlFlowEdge(Id, successorOrdinal: 1));
+                    MirControlFlowEdge.BranchTrue(Id),
+                    MirControlFlowEdge.BranchFalse(Id));
             }
 
             public void Return(

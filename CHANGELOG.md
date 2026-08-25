@@ -17,6 +17,39 @@ emitted as **OpenQASM 3.0**.
 > named there may have been retired by a later release; the newest release notes and current architecture
 > documents define the present pipeline.
 
+## 0.39.0 — 2026-08-25
+
+### Added
+- **The compiler developer manual is now complete in English, Korean, and Japanese.** The three editions
+  share the same source examples, anchors, call-flow diagrams, and language switcher. The expanded HIR →
+  MIR chapter traces callable, parameter, statement, CFG, SSA-value, qubit-Phi, block-build, and final
+  `MirCallable` construction steps against the current implementation.
+- **MIR control-flow edges are prepared for switch lowering with explicit case and default identities.**
+  `SwitchCase` carries its case value, while `SwitchDefault` is a distinct validated edge kind.
+
+### Changed
+- **MIR control-flow edges now use semantic kinds instead of positional successor ordinals.** Jump, true,
+  and false paths are represented directly as `Jump`, `BranchTrue`, and `BranchFalse` throughout lowering,
+  verification, bounds analysis, witness analysis, and OpenQASM lowering. Printed edge names such as
+  `b0.true` therefore match the identity used internally rather than translating an opaque numeric index.
+- **Qubit Phi definitions are printed inside their owning block.** MIR output now uses an LLVM-style
+  assignment such as `&q0.v2 = phi [&q0.v1, ^b1], [&q0.v0, ^b2]`, so every produced qubit version has one
+  visible definition site and each incoming predecessor is readable without a separate global qubit line.
+- **HIR → MIR parameter lowering now exposes its actual branches directly.** Qubit parameters, classical
+  parameters, and optional array storage/minimum-length preparation use dedicated helpers, while the first
+  created MIR block is selected directly as the callable entry block.
+- **A `MirSnapshot` is now the exact published MIR program together with its originating final HIR artifact
+  and callable analysis store.** Compilation and downstream consumers no longer carry transformation-stage
+  history that has no current producer or consumer.
+
+### Removed
+- **The unused MIR adjoint materializer and internal inverse-request pipeline were removed.** Qora has no
+  source-level adjoint syntax and no production consumer requested synthesized inverse callables, so the
+  speculative materialization pass, `MirFunctor.Adjoint`, and its isolated test stack no longer expand the
+  compiler surface. `Controlled` remains the supported MIR quantum modifier.
+- Snapshot stage enums, previous-snapshot chains, transformation-only identity-continuity ledgers, and the
+  corresponding compatibility paths that existed solely for the removed adjoint pipeline.
+
 ## 0.38.0 — 2026-08-07
 
 ### Changed

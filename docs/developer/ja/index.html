@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Qora コンパイラ開発者マニュアル — 全トピック一覧</title>
+<link rel="stylesheet" href="developer.css">
+<script src="developer-syntax.js" defer></script>
+</head>
+<body class="index-page">
+<nav class="language-switch" aria-label="言語"><a href="../en/index.html">English</a><span aria-hidden="true">·</span><a href="../ko/index.html">한국어</a><span aria-hidden="true">·</span><strong>日本語</strong></nav>
+<a class="skip-link" href="#main-content">本文へ移動</a>
+<header class="hero">
+  <div class="tag">Qora · Compiler Developer Manual</div>
+  <h1>Qora コンパイラ開発者マニュアル</h1>
+  <p>一つの例からコンパイラ全体の流れを理解するためのガイド</p>
+</header>
+
+<main class="wrap" id="main-content">
+  <p class="lead">
+    このマニュアルでは、一つの Qora ソースが HIR、MIR、MIR 解析へ進む全体の流れを説明します。<br>
+    すべてのヘルパーやコンストラクタ引数を列挙するのではなく、各段階が何を受け取り、何を作り、次の段階へ何を渡すかに焦点を当てます。
+  </p>
+
+  <div class="callout good">
+    <span class="h">現在の収録範囲</span>
+    第9章から第17章までの詳細本文を用意しています。<br>
+    その他の章は、今後扱うトピックを確認できるよう目次だけを残しています。
+  </div>
+
+  <div class="callout">
+    <span class="h">プロジェクトロードマップ</span>
+    現在の実装状況と今後の開発項目は <a href="../../TODO.md">Qora ロードマップ</a>にまとめています。
+  </div>
+
+  <h2 id="difference">このマニュアルの範囲</h2>
+
+  <p>
+    この開発者マニュアルでは、下の例がコンパイラの各段階を通るときにどのように変わるかを順に示します。<br>
+    章別目次と実装関数の追跡リンクも、すべてこのマニュアル内でつながっています。
+  </p>
+
+  <h2 id="example">全章で使用する例</h2>
+
+<pre><code class="language-qora">function Next(value: int): int
+{
+    return value + 1;
+}
+
+operation Work()
+{
+    var values: int[] = [0];
+    use q = Qubit[1];
+
+    values[0] = Next(values[0]);
+
+    if (values[0] == 1)
+    {
+        X(q[0]);
+    }
+
+    H(q[0]);
+}</code></pre>
+
+  <div class="flow">
+    Qora Source <span>→</span> HIR <span>→</span> MIR Callables <span>→</span>
+    MirProgram <span>→</span> MirSnapshot <span>→</span> MIR Analyses
+  </div>
+
+  <p>
+    各章では、この流れに関する一つの問いだけを扱います。<br>
+    たとえば第13章はキュービットのバージョン、第15章は分岐の合流、第17章は CFG に集中します。後段の詳細は、それを必要とする章で説明します。
+  </p>
+
+  <h2 id="toc">学習経路の全体像</h2>
+
+  <div class="parts">
+    <section class="part">
+      <span class="part-number">Part I · 入口</span>
+      <h3>ソースがコンパイル要求になるまで</h3>
+      <p>第1–3章 · コンパイル要求と AST</p>
+    </section>
+
+    <section class="part">
+      <span class="part-number">Part II · HIR</span>
+      <h3>ソース構造に正確な意味を与える</h3>
+      <p>第4–8章 · HIR、スコープ、シンボル、意味解析</p>
+    </section>
+
+    <section class="part">
+      <span class="part-number">Part III · MIR Lowering</span>
+      <h3>実行と解析が可能な形へ lower する</h3>
+      <p>第9–15章 · callable、SSA、storage、キュービットバージョン、分岐</p>
+    </section>
+
+    <section class="part">
+      <span class="part-number">Part IV · MIR 解析</span>
+      <h3>完成した MIR から必要な事実を求める</h3>
+      <p>第16–20章 · snapshot、CFG、値・範囲・効果解析</p>
+    </section>
+
+    <section class="part">
+      <span class="part-number">Part V · 変換と Target</span>
+      <h3>MIR から実行可能な出力まで</h3>
+      <p>第21–24章 · 内部 adjoint、uncomputation、Target</p>
+    </section>
+
+    <section class="part">
+      <span class="part-number">Part VI · 開発作業</span>
+      <h3>機能を追加して検証する</h3>
+      <p>第25–28章 · 機能追加と検証</p>
+    </section>
+  </div>
+
+  <h2 id="chapters">章別トピック</h2>
+
+  <section class="chapter" id="c1">
+    <h3>1. リポジトリとコンパイル入口 <span class="status future">本文予定</span></h3>
+    <p class="meta">実行ファイルと Core がどこで接続し、コンパイル要求がどこから始まるかを扱います。</p>
+  </section>
+
+  <section class="chapter" id="c2">
+    <h3>2. Compilation 要求と結果 <span class="status future">本文予定</span></h3>
+    <p class="meta">ソースとオプションが一つのコンパイル結果になる流れを扱います。</p>
+  </section>
+
+  <section class="chapter" id="c3">
+    <h3>3. 文字列から AST まで <span class="status future">本文予定</span></h3>
+    <p class="meta">ソース文字列が parser を通り、構文木になる過程を扱います。</p>
+  </section>
+
+  <section class="chapter" id="c4">
+    <h3>4. AST から immutable HIR へ <span class="status future">本文予定</span></h3>
+    <p class="meta">構文構造がコンパイラ所有の HIR へ変わる過程を扱います。</p>
+  </section>
+
+  <section class="chapter" id="c5">
+    <h3>5. ノード ID とソース位置 <span class="status future">本文予定</span></h3>
+    <p class="meta">HIR ノードの identity と元のソース位置が結び付く仕組みを扱います。</p>
+  </section>
+
+  <section class="chapter" id="c6">
+    <h3>6. Scope と Symbol <span class="status future">本文予定</span></h3>
+    <p class="meta">宣言と名前の使用が正確な Symbol へ結び付く仕組みを扱います。</p>
+  </section>
+
+  <section class="chapter" id="c7">
+    <h3>7. 名前解決と呼び出し先 <span class="status future">本文予定</span></h3>
+    <p class="meta"><code>Next(values[0])</code> が正確な関数宣言を見つける過程を扱います。</p>
+  </section>
+
+  <section class="chapter" id="c8">
+    <h3>8. 型検査と最終 HIR artifact <span class="status future">本文予定</span></h3>
+    <p class="meta">型と呼び出し契約を確認し、MIR 入力を確定する過程を扱います。</p>
+  </section>
+
+  <section class="chapter" id="c9">
+    <h3>9. HIR→MIR 境界 <span class="status">本文あり</span></h3>
+    <p class="meta">一つの最終 HIR artifact が MIR lowering へ渡される大きな境界を説明します。</p>
+    <a class="chapter-link" href="chapter-09.html">第9章を読む →</a>
+  </section>
+
+  <section class="chapter" id="c10">
+    <h3>10. 一つの Callable を MIR にする <span class="status">本文あり</span></h3>
+    <p class="meta">一つの HIR callable が block と現在状態を持つ <code>MirCallable</code> になる流れを説明します。</p>
+    <a class="chapter-link" href="chapter-10.html">第10章を読む →</a>
+    <a class="chapter-link" href="chapter-10-call-flow.html">実装関数を追跡 →</a>
+  </section>
+
+  <section class="chapter" id="c11">
+    <h3>11. 古典値と SSA バージョン <span class="status">本文あり</span></h3>
+    <p class="meta">定数、計算結果、関数の戻り値が新しい MIR 値へつながる仕組みを説明します。</p>
+    <a class="chapter-link" href="chapter-11.html">第11章を読む →</a>
+  </section>
+
+  <section class="chapter" id="c12">
+    <h3>12. Storage と配列状態 <span class="status">本文あり</span></h3>
+    <p class="meta">配列の identity と変化する値の履歴を分ける理由を説明します。</p>
+    <a class="chapter-link" href="chapter-12.html">第12章を読む →</a>
+  </section>
+
+  <section class="chapter" id="c13">
+    <h3>13. キュービット ID とバージョン <span class="status">本文あり</span></h3>
+    <p class="meta">一つのキュービットがゲートを通るたびに新しいバージョンへ進む仕組みを説明します。</p>
+    <a class="chapter-link" href="chapter-13.html">第13章を読む →</a>
+  </section>
+
+  <section class="chapter" id="c14">
+    <h3>14. Basic Block と Terminator <span class="status">本文あり</span></h3>
+    <p class="meta">一般の MIR 命令と block 最後の制御移動命令を分ける理由を説明します。</p>
+    <a class="chapter-link" href="chapter-14.html">第14章を読む →</a>
+  </section>
+
+  <section class="chapter" id="c15">
+    <h3>15. 条件文で状態を分けて合流する <span class="status">本文あり</span></h3>
+    <p class="meta">true・false 経路の現在キュービットバージョンを別々に管理し、合流点で結ぶ仕組みを説明します。</p>
+    <a class="chapter-link" href="chapter-15.html">第15章を読む →</a>
+  </section>
+
+  <section class="chapter" id="c16">
+    <h3>16. MirSnapshot と解析基準 <span class="status">本文あり</span></h3>
+    <p class="meta">現在の MIR と、それを読む解析窓口を一つの snapshot に固定する理由を説明します。</p>
+    <a class="chapter-link" href="chapter-16.html">第16章を読む →</a>
+  </section>
+
+  <section class="chapter" id="c17">
+    <h3>17. CFG の successor と predecessor <span class="status">本文あり</span></h3>
+    <p class="meta">Terminator の移動情報を順方向・逆方向の block 関係へ変える過程を説明します。</p>
+    <a class="chapter-link" href="chapter-17.html">第17章を読む →</a>
+  </section>
+
+  <section class="chapter" id="c18">
+    <h3>18. 到達可能性と支配関係 <span class="status future">本文予定</span></h3>
+    <p class="meta">CFG 上で到達可能性、dominator、post-dominator を計算する過程を扱います。</p>
+  </section>
+
+  <section class="chapter" id="c19">
+    <h3>19. 値・メモリ・経路・範囲解析 <span class="status future">本文予定</span></h3>
+    <p class="meta">現在値、storage 状態、経路条件、配列インデックスの安全性を計算する過程を扱います。</p>
+  </section>
+
+  <section class="chapter" id="c20">
+    <h3>20. CallGraph と量子効果 <span class="status future">本文予定</span></h3>
+    <p class="meta">callable の呼び出し関係とキュービットの読み書き効果を要約する過程を扱います。</p>
+  </section>
+
+  <section class="chapter" id="c21">
+    <h3>21. コンパイラ内部 adjoint <span class="status future">本文予定</span></h3>
+    <p class="meta">ユーザー構文の外側で必要な逆方向 callable を MIR に作る過程を扱います。</p>
+  </section>
+
+  <section class="chapter" id="c22">
+    <h3>22. 自動 uncomputation の境界 <span class="status future">拡張予定</span></h3>
+    <p class="meta">cleanup 解析、計画、MIR 変換をどの順序でつなぐべきかを扱います。</p>
+  </section>
+
+  <section class="chapter" id="c23">
+    <h3>23. Target IR lowering <span class="status future">本文予定</span></h3>
+    <p class="meta">target 非依存の MIR を各 backend 専用モデルへ変える過程を扱います。</p>
+  </section>
+
+  <section class="chapter" id="c24">
+    <h3>24. OpenQASM 出力 <span class="status future">本文予定</span></h3>
+    <p class="meta">OpenQASM target model が最終テキストとして出力される過程を扱います。</p>
+  </section>
+
+  <section class="chapter" id="c25">
+    <h3>25. 新しい構文と意味規則の追加 <span class="status future">本文予定</span></h3>
+    <p class="meta">構文から HIR 意味検査まで機能を接続する開発手順を扱います。</p>
+  </section>
+
+  <section class="chapter" id="c26">
+    <h3>26. 新しい MIR 命令と解析の追加 <span class="status future">本文予定</span></h3>
+    <p class="meta">新しい MIR 命令を lowering、検証、解析へ接続する開発手順を扱います。</p>
+  </section>
+
+  <section class="chapter" id="c27">
+    <h3>27. Target 機能の追加 <span class="status future">本文予定</span></h3>
+    <p class="meta">backend の制約を HIR・MIR へ逆流させず、target 境界で処理する方法を扱います。</p>
+  </section>
+
+  <section class="chapter" id="c28">
+    <h3>28. テストと敵対的検証 <span class="status future">本文予定</span></h3>
+    <p class="meta">正常例と反例を併用してコンパイラ変更を検証する方法を扱います。</p>
+  </section>
+
+  <footer>
+    Qora コンパイラ開発者マニュアル · 全トピック一覧
+  </footer>
+</main>
+</body>
+</html>

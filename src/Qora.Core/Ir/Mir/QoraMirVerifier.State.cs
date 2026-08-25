@@ -456,8 +456,7 @@ internal static partial class QoraMirVerifier
                             AddAtQubitPhi(
                                 "MIR146",
                                 $"qubit Phi {phi.Key} input on edge "
-                                + $"{input.Edge.Source}:{input.Edge.SuccessorOrdinal} -> "
-                                + $"{block.Id} {error}",
+                                + $"{input.Edge} -> {block.Id} {error}",
                                 callable,
                                 block,
                                 phi);
@@ -755,15 +754,15 @@ internal static partial class QoraMirVerifier
                 {
                     case MirJump jump:
                         yield return (
-                            new MirControlFlowEdge(block.Id, 0),
+                            MirControlFlowEdge.Jump(block.Id),
                             jump.Target);
                         break;
                     case MirBranch branch:
                         yield return (
-                            new MirControlFlowEdge(block.Id, 0),
+                            MirControlFlowEdge.BranchTrue(block.Id),
                             branch.TrueTarget);
                         yield return (
-                            new MirControlFlowEdge(block.Id, 1),
+                            MirControlFlowEdge.BranchFalse(block.Id),
                             branch.FalseTarget);
                         break;
                 }

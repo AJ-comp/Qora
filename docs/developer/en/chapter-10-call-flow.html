@@ -1,0 +1,1980 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>10. Following Implementation Functions and Constructors — Qora Compiler Developer Manual</title>
+<link rel="stylesheet" href="developer.css?v=20260825-paragraph-spacing">
+<script src="developer-syntax.js" defer></script>
+<script src="chapter-10-call-flow.js?v=20260823-top-aligned-cards" defer></script>
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11.16.0/dist/mermaid.esm.min.mjs";
+
+  mermaid.initialize({
+    startOnLoad: false,
+    securityLevel: "strict",
+    htmlLabels: false,
+    markdownAutoWrap: false,
+    theme: "base",
+    fontFamily: "-apple-system, BlinkMacSystemFont, Segoe UI, Apple SD Gothic Neo, Malgun Gothic, sans-serif",
+    themeVariables: {
+      background: "#fbfcff",
+      primaryColor: "#f4f1ff",
+      primaryTextColor: "#2c2350",
+      primaryBorderColor: "#7660c8",
+      lineColor: "#64748b",
+      edgeLabelBackground: "#ffffff",
+      fontSize: "15px"
+    },
+    flowchart: {
+      curve: "linear",
+      nodeSpacing: 24,
+      rankSpacing: 34,
+      wrappingWidth: 520,
+      useMaxWidth: true
+    }
+  });
+
+  await mermaid.run({ querySelector: ".chapter-10-mermaid" });
+</script>
+</head>
+<body class="function-flow-page">
+<nav class="language-switch" aria-label="Language"><strong>English</strong><span aria-hidden="true">·</span><a href="../ko/chapter-10-call-flow.html">한국어</a><span aria-hidden="true">·</span><a href="../ja/chapter-10-call-flow.html">日本語</a></nav>
+<a class="skip-link" href="#main-content">Skip to main content</a>
+<header class="hero">
+  <div class="tag">Qora · Compiler Developer Manual · Chapter 10 Lab</div>
+  <h1>Following Implementation Functions and Constructors</h1>
+  <p>A step-by-step trace of the actual C# functions from Chapter 10, from input values to returned results</p>
+</header>
+
+<main class="wrap" id="main-content">
+  <nav class="chapter-nav" aria-label="Document navigation (top)">
+    <div class="group"><a href="chapter-10.html">← Back to Chapter 10</a><a href="index.html#chapters">All chapters</a></div>
+  </nav>
+
+  <article class="function-trace" id="lower-hir-artifact">
+    <h2><code>LowerHirArtifact()</code></h2>
+    <p>
+      This function lowers each callable in the final HIR to MIR and packages the results into the initial <code>MirSnapshot</code>.<br>
+      In this trace, the <code>foreach</code> loop processes <code>Next</code> and then <code>Work</code>.
+    </p>
+
+    <h3>The Qora program received by this function</h3>
+
+<pre><code class="language-qora">function Next(value: int): int
+{
+    return value + 1;
+}
+
+operation Work()
+{
+    var values: int[] = [0];
+    use q = Qubit[1];
+
+    values[0] = Next(values[0]);
+
+    if (values[0] == 1)
+    {
+        X(q[0]);
+    }
+
+    H(q[0]);
+}</code></pre>
+
+
+    <p>
+      This function does not yet process individual statements such as array declarations or <code>if</code> statements.<br>
+      It first reads two declarations from the program as the callables <code>Next h6</code> and <code>Work h44</code>. The expression <code>Next(values[0])</code> inside <code>Work</code> is not a third callable; it calls the existing <code>Next h6</code> in the list.<br>
+      Because <code>Work</code> is the operation from which execution can begin, <code>EntryCallable</code> is also <code>Work h44</code>.
+    </p>
+
+    <div class="callout">
+      <span class="h">Immediately before the call in the common example</span>
+      <code>hirArtifact.Source.Program.Callables = [Next h6, Work h44]</code><br>
+      <code>hirArtifact.Source.Program.EntryCallable = Work h44</code><br>
+      <code>traceSink = null</code>
+    </div>
+
+<pre><code class="language-csharp">private static MirSnapshot LowerHirArtifact(
+    HirSemanticArtifact hirArtifact,
+    IMirLoweringTraceSink? traceSink)
+{
+    // hirArtifact contains the final HIR after semantic analysis.
+    // Callables = [Next h6, Work h44]
+    // EntryCallable = Work h44
+    ArgumentNullException.ThrowIfNull(hirArtifact);
+
+    var hirSnapshot = hirArtifact.Source;
+    var hirProgram = hirSnapshot.Program;
+
+    // Example value: hirEntryCallable = Work h44
+    var hirEntryCallable = hirProgram.EntryCallable
+        ?? throw new InvalidOperationException(
+            "validated HIR must contain an operation before MIR lowering");
+
+    // No callable has been lowered yet, so both values are empty.
+    var mirCallables = new List&lt;MirCallable&gt;();
+    MirCallable? mirEntryCallable = null;
+
+    foreach (var hirCallable in hirProgram.Callables)
+    {
+        // First iteration:  hirCallable = Next h6
+        // Second iteration: hirCallable = Work h44
+        // A new lowerer is created for each iteration, so the two working states remain separate.
+        var mirCallableLowerer = new <a class="code-call-link" href="#callable-lowerer-constructor" title="Trace the HirCallableToMirLowerer constructor">HirCallableToMirLowerer</a>(
+            hirCallable,
+            hirArtifact,
+            traceSink);
+
+        // First iteration result:  mirCallable = Next c6
+        // Second iteration result: mirCallable = Work c44
+        var mirCallable = mirCallableLowerer.<a class="code-call-link" href="#lower-to-mir-callable" title="Trace LowerToMirCallable">LowerToMirCallable</a>();
+
+        // After the first iteration:  mirCallables = [Next c6]
+        // After the second iteration: mirCallables = [Next c6, Work c44]
+        mirCallables.Add(mirCallable);
+
+        // Next is not the entry operation, so this is false in the first iteration.
+        // Work is the same object as hirEntryCallable, so this is true in the second iteration.
+        if (ReferenceEquals(hirCallable, hirEntryCallable))
+            mirEntryCallable = mirCallable;
+    }
+
+    // Final result:
+    // Callables  = [Next c6, Work c44]
+    // EntryPoint = Work c44
+    var mirProgram = new MirProgram(
+        mirEntryCallable
+            ?? throw new InvalidOperationException(
+                "validated HIR entry callable must be lowered into MIR"),
+        mirCallables);
+
+    return MirSnapshot.CreateLowered(mirProgram);
+}</code></pre>
+
+    <h3>Following the code in execution order</h3>
+    <ol class="execution-steps">
+      <li><strong>Check the input.</strong> The callable list is <code>[Next h6, Work h44]</code>, and the entry callable is <code>Work h44</code>.</li>
+      <li><strong>Process <code>Next h6</code> in the first iteration.</strong> A new lowerer returns <code>Next c6</code>, producing the list <code>[Next c6]</code>.</li>
+      <li><strong>Process <code>Work h44</code> in the second iteration.</strong> A new lowerer returns <code>Work c44</code>, producing the list <code>[Next c6, Work c44]</code>.</li>
+      <li><strong>Connect the entry point.</strong> The HIR object in the second iteration is the same object as <code>EntryCallable</code>, so <code>mirEntryCallable = Work c44</code>.</li>
+      <li><strong>Create the program and snapshot.</strong> The <code>mirProgram</code> containing the two callables and entry point is passed to <code>MirSnapshot.CreateLowered(mirProgram)</code>.</li>
+    </ol>
+
+    <div class="callout good">
+      <span class="h">Returned result</span>
+      <code>MirSnapshot</code><br>
+      <code>Program.Callables = [Next c6, Work c44]</code><br>
+      <code>Program.EntryPoint = Work c44</code>
+    </div>
+
+  </article>
+
+  <article class="function-trace" id="callable-lowerer-constructor">
+    <h2><code>HirCallableToMirLowerer(...)</code> constructor</h2>
+    <p>
+      This constructor stores the target callable and final semantic information in a lowerer dedicated to one HIR callable, and prepares its MIR callable ID.<br>
+      In the common example it runs once for <code>Next h6</code> and once for <code>Work h44</code>.
+    </p>
+
+<pre><code class="language-csharp">public HirCallableToMirLowerer(
+    HirCallable hirCallable,
+    HirSemanticArtifact hirArtifact,
+    IMirLoweringTraceSink? traceSink)
+{
+    // First call:
+    // hirCallable = Next h6
+    // hirArtifact = final HIR artifact([Next h6, Work h44])
+    // traceSink = null
+    //
+    // Second call:
+    // hirCallable = Work h44
+    // hirArtifact = final HIR artifact([Next h6, Work h44])
+    // traceSink = null
+
+    _hirCallable = hirCallable;
+    _hirArtifact = hirArtifact;
+
+    // First call:  hirCallable.Id.Value = 6  → _mirCallableId = c6
+    // Second call: hirCallable.Id.Value = 44 → _mirCallableId = c44
+    _mirCallableId = new MirCallableId(hirCallable.Id.Value);
+    _traceSink = traceSink;
+}</code></pre>
+
+  </article>
+
+  <article class="function-trace" id="lower-to-mir-callable">
+    <h2><code>LowerToMirCallable()</code></h2>
+    <p>
+      This is the central function that completes one HIR callable as a <code>MirCallable</code> with an entry block, parameters, body, and termination.<br>
+      In the common example it runs once in the lowerer for <code>Next h6</code> and once in the lowerer for <code>Work h44</code>.
+    </p>
+
+    <h3>1. Processing <code>Next h6</code></h3>
+
+<pre><code class="language-qora">function Next(value: int): int
+{
+    return value + 1;
+}</code></pre>
+
+    <h4>Parameters and MIR body produced from the original <code>Next</code> code</h4>
+
+    <figure class="mir-result-diagram" aria-labelledby="next-result-title next-result-caption">
+      <div class="mir-result-diagram__scroll" tabindex="0">
+        <svg viewBox="0 0 1000 610" role="img" aria-labelledby="next-result-title next-result-desc">
+          <title id="next-result-title">Mapping from the original Next code to the lowered parameter and body</title>
+          <desc id="next-result-desc">The value parameter, integer 1, value + 1 expression, and return keyword are highlighted in the original Next code on the left and connected by matching colored arrows to their processing function, storage location, object type, or generated result on the right.</desc>
+          <defs>
+            <marker id="next-result-arrow-param" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+              <path d="M0 0 L10 5 L0 10 Z" fill="#6d52b5"/>
+            </marker>
+            <marker id="next-result-arrow-const" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+              <path d="M0 0 L10 5 L0 10 Z" fill="#b7791f"/>
+            </marker>
+            <marker id="next-result-arrow-add" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+              <path d="M0 0 L10 5 L0 10 Z" fill="#16805b"/>
+            </marker>
+            <marker id="next-result-arrow-return" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+              <path d="M0 0 L10 5 L0 10 Z" fill="#2563a8"/>
+            </marker>
+          </defs>
+
+          <rect x="1" y="1" width="998" height="608" rx="14" fill="#f8fafc" stroke="#d7dee8"/>
+          <text class="svg-ui" x="24" y="33" fill="#263247" font-size="16" font-weight="850">Original Qora code → lowered parameter and body</text>
+
+          <rect x="24" y="55" width="430" height="520" rx="12" fill="#111827" stroke="#334155"/>
+          <path d="M36 55 H442 Q454 55 454 67 V101 H24 V67 Q24 55 36 55 Z" fill="#263141"/>
+          <text class="svg-ui" x="46" y="84" fill="#f8fafc" font-size="13" font-weight="850">Corresponding source range</text>
+          <text class="svg-code" x="424" y="84" text-anchor="end" fill="#cbd5e1" font-size="12">Next</text>
+
+          <text class="svg-code" x="48" y="142" fill="#eef4ff" font-size="14">function Next(</text>
+          <rect x="167" y="119" width="92" height="32" rx="6" fill="#32285d" stroke="#9a84e4"/>
+          <text class="svg-code" x="176" y="142" fill="#f3efff" font-size="14" font-weight="800">value: int</text>
+          <text class="svg-code" x="259" y="142" fill="#eef4ff" font-size="14">): int</text>
+
+          <text class="svg-code" x="48" y="180" fill="#eef4ff" font-size="14">{</text>
+          <rect x="72" y="207" width="55" height="31" rx="5" fill="#174f7a" stroke="#60a5d8"/>
+          <text class="svg-code" x="80" y="229" fill="#eff6ff" font-size="14" font-weight="800">return</text>
+          <rect x="132" y="203" width="99" height="39" rx="7" fill="#12382f" stroke="#4fad89" stroke-width="1.5"/>
+          <text class="svg-code" x="139" y="229" fill="#effff8" font-size="14">value</text>
+          <text class="svg-code" x="184" y="229" fill="#effff8" font-size="14" font-weight="800">+</text>
+          <rect x="205" y="207" width="20" height="31" rx="5" fill="#6b4a16" stroke="#e0b04d"/>
+          <text class="svg-code" x="211" y="229" fill="#fff4d6" font-size="14" font-weight="800">1</text>
+          <text class="svg-code" x="235" y="229" fill="#eef4ff" font-size="14">;</text>
+          <text class="svg-code" x="48" y="282" fill="#eef4ff" font-size="14">}</text>
+
+          <text class="svg-ui" x="48" y="334" fill="#94a3b8" font-size="12">Source ranges and MIR results with the same color correspond.</text>
+
+          <rect x="520" y="55" width="456" height="520" rx="12" fill="#fff" stroke="#9db2c9"/>
+          <path d="M532 55 H964 Q976 55 976 67 V101 H520 V67 Q520 55 532 55 Z" fill="#263141"/>
+          <text class="svg-ui" x="542" y="84" fill="#f8fafc" font-size="13" font-weight="850">After LowerParameters() and LowerStatements()</text>
+
+          <rect x="542" y="112" width="412" height="126" rx="9" fill="#f5f2ff" stroke="#8b70d9"/>
+          <text class="svg-ui" x="590" y="133" fill="#6b5aa8" font-size="11.5" font-weight="750">Function</text>
+          <text class="svg-code" x="674" y="133" fill="#5844a3" font-size="12" font-weight="800">LowerParameters()</text>
+          <text class="svg-ui" x="590" y="156" fill="#6b5aa8" font-size="11.5" font-weight="750">Stored in</text>
+          <text class="svg-code" x="674" y="156" fill="#5844a3" font-size="12" font-weight="800">_mirParameters[0]</text>
+          <text class="svg-ui" x="590" y="179" fill="#6b5aa8" font-size="11.5" font-weight="750">Object type</text>
+          <text class="svg-code" x="674" y="179" fill="#5844a3" font-size="12" font-weight="800">MirClassicalParameter</text>
+          <text class="svg-ui" x="590" y="202" fill="#6b5aa8" font-size="11.5" font-weight="750">Name</text>
+          <text class="svg-code" x="674" y="202" fill="#334155" font-size="12">"value"</text>
+          <text class="svg-ui" x="590" y="225" fill="#6b5aa8" font-size="11.5" font-weight="750">Value</text>
+          <text class="svg-code" x="674" y="225" fill="#334155" font-size="12">%v0: int</text>
+
+          <rect x="542" y="246" width="412" height="96" rx="9" fill="#fff8eb" stroke="#d9a23d"/>
+          <text class="svg-ui" x="590" y="268" fill="#8a651f" font-size="11.5" font-weight="750">Function</text>
+          <text class="svg-code" x="674" y="268" fill="#745013" font-size="12" font-weight="800">LowerStatements()</text>
+          <text class="svg-ui" x="590" y="291" fill="#8a651f" font-size="11.5" font-weight="750">Target object</text>
+          <text class="svg-code" x="674" y="291" fill="#334155" font-size="12">MirBlockBuilder b0</text>
+          <text class="svg-ui" x="590" y="314" fill="#8a651f" font-size="11.5" font-weight="750">Stored in</text>
+          <text class="svg-code" x="674" y="314" fill="#334155" font-size="12">Instructions[0]</text>
+          <text class="svg-ui" x="590" y="335" fill="#8a651f" font-size="11.5" font-weight="750">Generated result</text>
+          <text class="svg-code" x="674" y="335" fill="#745013" font-size="12" font-weight="800">%v1 = const 1</text>
+
+          <rect x="542" y="350" width="412" height="96" rx="9" fill="#f3faf7" stroke="#4fad89"/>
+          <text class="svg-ui" x="590" y="372" fill="#27775c" font-size="11.5" font-weight="750">Function</text>
+          <text class="svg-code" x="674" y="372" fill="#116347" font-size="12" font-weight="800">LowerStatements()</text>
+          <text class="svg-ui" x="590" y="395" fill="#27775c" font-size="11.5" font-weight="750">Target object</text>
+          <text class="svg-code" x="674" y="395" fill="#334155" font-size="12">MirBlockBuilder b0</text>
+          <text class="svg-ui" x="590" y="418" fill="#27775c" font-size="11.5" font-weight="750">Stored in</text>
+          <text class="svg-code" x="674" y="418" fill="#334155" font-size="12">Instructions[1]</text>
+          <text class="svg-ui" x="590" y="439" fill="#27775c" font-size="11.5" font-weight="750">Generated result</text>
+          <text class="svg-code" x="674" y="439" fill="#116347" font-size="12" font-weight="800">%v2 = add %v0, %v1</text>
+
+          <rect x="542" y="454" width="412" height="96" rx="9" fill="#eef5fd" stroke="#3b82c4"/>
+          <text class="svg-ui" x="590" y="476" fill="#2f6494" font-size="11.5" font-weight="750">Function</text>
+          <text class="svg-code" x="674" y="476" fill="#174f88" font-size="12" font-weight="800">LowerStatements()</text>
+          <text class="svg-ui" x="590" y="499" fill="#2f6494" font-size="11.5" font-weight="750">Target object</text>
+          <text class="svg-code" x="674" y="499" fill="#334155" font-size="12">MirBlockBuilder b0</text>
+          <text class="svg-ui" x="590" y="522" fill="#2f6494" font-size="11.5" font-weight="750">Stored in</text>
+          <text class="svg-code" x="674" y="522" fill="#334155" font-size="12">Terminator</text>
+          <text class="svg-ui" x="590" y="543" fill="#2f6494" font-size="11.5" font-weight="750">Generated result</text>
+          <text class="svg-code" x="674" y="543" fill="#174f88" font-size="12" font-weight="800">return %v2</text>
+
+          <path d="M259 135 C416 135 470 175 542 175" fill="none" stroke="#6d52b5" stroke-width="2.2" stroke-dasharray="5 4" marker-end="url(#next-result-arrow-param)"/>
+          <path d="M225 222 C408 222 468 294 542 294" fill="none" stroke="#b7791f" stroke-width="2.2" stroke-dasharray="5 4" marker-end="url(#next-result-arrow-const)"/>
+          <path d="M181.5 242 C181.5 285 430 398 542 398" fill="none" stroke="#16805b" stroke-width="2.2" stroke-dasharray="5 4" marker-end="url(#next-result-arrow-add)"/>
+          <path d="M99.5 238 C99.5 310 390 502 542 502" fill="none" stroke="#2563a8" stroke-width="2.2" stroke-dasharray="5 4" marker-end="url(#next-result-arrow-return)"/>
+        </svg>
+      </div>
+      <figcaption id="next-result-caption">
+        Matching colors connect each source token on the left to the object or storage location it produces on the right.<br>
+        The diagram shows the MIR results produced by the Qora parameter and <code>return value + 1;</code>.
+      </figcaption>
+    </figure>
+
+    <p>
+      The diagram below follows how <code>LowerToMirCallable()</code> processes one callable from start to returning a <code>MirCallable</code>.<br>
+      The left side contains the actual C# code, and the right side shows the state produced by each code range while lowering <code>Next</code>.<br>
+      This run begins with <code>_hirCallable = Next h6</code> and <code>_mirCallableId = c6</code>.
+    </p>
+
+<figure class="annotated-code-figure" aria-labelledby="next-code-map-caption">
+      <figcaption id="next-code-map-caption">State produced by each code range while lowering <code>Next</code></figcaption>
+      <div class="annotated-code-figure__scroll" tabindex="0">
+        <div class="annotated-code-map" data-code-map="next">
+          <div class="annotated-code-map__source">
+<pre><code class="language-csharp">public MirCallable LowerToMirCallable()
+{
+<span id="next-code-setup" class="annotated-code-stage annotated-code-tone--purple">    var mirCallableOrigin = MirOriginFor(_hirCallable);
+    var hirCallableSymbol = RequireHirDeclarationSymbol(
+        _hirCallable.Id,
+        $"callable `{_hirCallable.Name}`");
+    var hirScopeGraph = _hirArtifact.Model.ScopeGraph
+        ?? throw MirLoweringError(
+            "the final HIR semantic model has no scope graph");
+    var qualifiedSourceCallableName =
+        hirScopeGraph.QualifiedName(hirCallableSymbol);</span>
+
+<span id="next-code-entry" class="annotated-code-stage annotated-code-tone--blue">    _currentMirBlockBuilder = CreateMirBlock(mirCallableOrigin);</span>
+
+<span id="next-code-parameters" class="annotated-code-stage annotated-code-tone--amber">    <a class="code-call-link" href="#lower-parameters" title="LowerParameters Execution trace">LowerParameters</a>();</span>
+
+<span id="next-code-statements" class="annotated-code-stage annotated-code-tone--green">    <a class="code-call-link" href="#lower-statements" title="LowerStatements Execution trace">LowerStatements</a>(_hirCallable.Body.Statements);</span>
+
+<span id="next-code-termination" class="annotated-code-stage annotated-code-tone--violet">    if (_currentMirBlockBuilder is not null)
+    {
+        if (_hirCallable.IsFunction)
+        {
+            MarkCurrentMirBlockUnreachable(
+                MirOrigin.GeneratedFrom(
+                    mirCallableOrigin,
+                    "missing validated function return"));
+        }
+        else
+        {
+            ReturnFromCurrentMirBlock(
+                value: null,
+                MirOrigin.GeneratedFrom(
+                    mirCallableOrigin,
+                    "implicit operation return"));
+        }
+    }</span>
+
+<span id="next-code-build" class="annotated-code-stage annotated-code-tone--cyan">    var mirBlocks = new List&lt;MirBlock&gt;(_mirBlockBuilders.Count);
+    foreach (var mirBlockBuilder in _mirBlockBuilders)
+    {
+        var mirBlock = mirBlockBuilder.Build();
+        mirBlocks.Add(mirBlock);
+    }</span>
+
+<span id="next-code-entry-select" class="annotated-code-stage annotated-code-tone--rose">    var mirEntryBlock = mirBlocks[0];</span>
+
+<span id="next-code-return" class="annotated-code-stage annotated-code-tone--teal">    return new MirCallable(
+        _mirCallableId,
+        qualifiedSourceCallableName,
+        _hirCallable.ReturnType is { } returns
+            ? MirType.Scalar(returns)
+            : null,
+        _mirParameters,
+        mirEntryBlock,
+        mirBlocks,
+        mirCallableOrigin);</span>
+}</code></pre>
+          </div>
+
+          <aside class="annotated-code-map__notes" aria-label="State after each Next lowering stage">
+            <section class="annotated-code-note annotated-code-tone--purple" data-code-target="next-code-setup">
+              <h5>Prepare origin and name</h5>
+              <div class="annotated-code-note__summary">
+                <p>The HIR ID of the example function <code>Next</code> is <code>h6</code>.</p>
+                <p>The callable origin is created from this ID and the original source location.</p>
+                <p>Next, the declaration symbol associated with HIR node ID <code>h6</code> is found,
+                  and that symbol and the scope graph produce the qualified name <code>"Next"</code>.</p>
+              </div>
+            </section>
+            <section class="annotated-code-note annotated-code-tone--blue" data-code-target="next-code-entry">
+              <h5>Create the entry block</h5>
+              <div class="annotated-code-note__summary">
+                <p><code>CreateMirBlock(mirCallableOrigin)</code> creates
+                  <code>MirBlockBuilder b0</code> for the entry block.</p>
+                <div class="annotated-code-note__state">
+                  <code>builders: [] → [b0]</code>
+                  <code>current: null → b0</code>
+                </div>
+                <p>The <code>b0</code> referenced by <code>current</code> is the same builder
+                  stored at <code>builders[0]</code>.</p>
+              </div>
+            </section>
+            <section class="annotated-code-note annotated-code-tone--amber" data-code-target="next-code-parameters">
+              <h5>Lower the parameter</h5>
+              <dl>
+                <div><dt>Target</dt><dd><code>value: int</code></dd></div>
+                <div><dt>Executed code</dt><dd><code>LowerParameters()</code></dd></div>
+                <div><dt>State change</dt><dd><code>_mirParameters[0] = value → %v0: int</code><br><code>b0</code> remains unchanged</dd></div>
+              </dl>
+            </section>
+            <section class="annotated-code-note annotated-code-tone--green" data-code-target="next-code-statements">
+              <h5>Lower the body</h5>
+              <dl>
+                <div><dt>Target</dt><dd><code>return value + 1;</code><br><code>b0</code></dd></div>
+                <div><dt>Executed code</dt><dd><code>LowerStatements(...)</code></dd></div>
+                <div><dt>State change</dt><dd><code>Instructions = [%v1 const, %v2 add]</code><br><code>Terminator = return %v2</code><br><code>current: b0 → null</code></dd></div>
+              </dl>
+            </section>
+            <section class="annotated-code-note annotated-code-tone--violet" data-code-target="next-code-termination">
+              <h5>Open-block termination branch</h5>
+              <dl>
+                <div><dt>Target</dt><dd><code>current = null</code></dd></div>
+                <div><dt>Executed code</dt><dd><code>if (_currentMirBlockBuilder is not null)</code></dd></div>
+                <div><dt>State change</dt><dd>The condition is <code>false</code>, so the branch is skipped</dd></div>
+              </dl>
+            </section>
+            <section class="annotated-code-note annotated-code-tone--cyan" data-code-target="next-code-build">
+              <h5>Create the immutable block</h5>
+              <div class="annotated-code-note__summary">
+                <p>Calling <code>Build()</code> on <code>MirBlockBuilder b0</code> finalizes it
+                  as immutable <code>MirBlock b0</code>.</p>
+                <p>The resulting <code>MirBlock b0</code> is stored at <code>mirBlocks[0]</code>.</p>
+              </div>
+            </section>
+            <section class="annotated-code-note annotated-code-tone--rose" data-code-target="next-code-entry-select">
+              <h5>Select the entry block</h5>
+              <div class="annotated-code-note__summary">
+                <p>The first block in <code>mirBlocks</code>, <code>b0</code>, is selected as the entry block.</p>
+              </div>
+            </section>
+            <section class="annotated-code-note annotated-code-tone--teal" data-code-target="next-code-return">
+              <h5>Return the MirCallable</h5>
+              <div class="annotated-code-note__summary">
+                <p>The <code>c6</code> ID, <code>"Next"</code> name, <code>int</code> return type,
+                  <code>value(%v0)</code> parameter, and <code>b0</code> block are packaged into and returned as
+                  <code>MirCallable Next c6</code>.</p>
+                <p><code>b0</code> is stored at <code>Blocks[0]</code>
+                  and also serves as the <code>EntryBlock</code> where execution starts.</p>
+              </div>
+            </section>
+          </aside>
+
+          <svg class="annotated-code-map__arrows" aria-hidden="true" data-marker-id="next-code-map-arrow">
+            <defs>
+              <marker id="next-code-map-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+                <path d="M0 0 L10 5 L0 10 Z" fill="context-stroke"/>
+              </marker>
+            </defs>
+          </svg>
+        </div>
+      </div>
+    </figure>
+
+
+    <p>
+      The explicit <code>return</code> in <code>Next</code> closes <code>b0</code>, so the current block is <code>null</code> after lowering the body.<br>
+      Therefore, the branch that appends an implicit return to an open operation path does not run.
+    </p>
+
+    <h3>2. Processing <code>Work h44</code></h3>
+
+<pre><code class="language-qora">operation Work()
+{
+    var values: int[] = [0];
+    use q = Qubit[1];
+
+    values[0] = Next(values[0]);
+
+    if (values[0] == 1)
+    {
+        X(q[0]);
+    }
+
+    H(q[0]);
+}</code></pre>
+
+    <h4>MIR builders produced from the original <code>Work</code> code</h4>
+
+    <figure class="mir-result-diagram" aria-labelledby="work-result-title work-result-caption">
+      <div class="mir-result-diagram__scroll" tabindex="0">
+        <svg viewBox="0 0 1000 1450" role="img" aria-labelledby="work-result-title work-result-desc">
+          <title id="work-result-title">Mapping from the original Work code to the MIR builder structure after lowering the body</title>
+          <desc id="work-result-desc">Five statements in the original Work code on the left are color-coded and connected to the MIR builder state on the right. The if statement is shown as one purple flow through condition evaluation and branching in b0, true path b1, false path b2, merge block b3, and the qubit phi. Block b1 shows the two X-call instructions and jump terminator; b3 shows the phi, two H-call instructions, and still-empty terminator with annotations.</desc>
+          <defs>
+            <marker id="work-result-arrow-var" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+              <path d="M0 0 L10 5 L0 10 Z" fill="#b7791f"/>
+            </marker>
+            <marker id="work-result-arrow-qubit" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+              <path d="M0 0 L10 5 L0 10 Z" fill="#16805b"/>
+            </marker>
+            <marker id="work-result-arrow-assign" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+              <path d="M0 0 L10 5 L0 10 Z" fill="#2563a8"/>
+            </marker>
+            <marker id="work-result-arrow-if" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+              <path d="M0 0 L10 5 L0 10 Z" fill="#6d52b5"/>
+            </marker>
+            <marker id="work-result-arrow-x" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+              <path d="M0 0 L10 5 L0 10 Z" fill="#168ea5"/>
+            </marker>
+            <marker id="work-result-arrow-h" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+              <path d="M0 0 L10 5 L0 10 Z" fill="#a63f63"/>
+            </marker>
+          </defs>
+
+          <rect x="1" y="1" width="998" height="1448" rx="14" fill="#f8fafc" stroke="#d7dee8"/>
+          <text class="svg-ui" x="24" y="33" fill="#263247" font-size="16" font-weight="850">Original Qora code → after LowerStatements()</text>
+
+          <rect x="24" y="55" width="430" height="1358" rx="12" fill="#111827" stroke="#334155"/>
+          <path d="M36 55 H442 Q454 55 454 67 V101 H24 V67 Q24 55 36 55 Z" fill="#263141"/>
+          <text class="svg-ui" x="46" y="84" fill="#f8fafc" font-size="13" font-weight="850">Corresponding source range</text>
+          <text class="svg-code" x="424" y="84" text-anchor="end" fill="#cbd5e1" font-size="12">Work</text>
+
+          <g class="svg-code" fill="#eef4ff" font-size="13.2">
+            <text x="48" y="132">operation Work()</text>
+            <text x="48" y="164">{</text>
+
+            <rect x="62" y="181" width="272" height="38" rx="7" fill="#342711" stroke="#d69a2d"/>
+            <text x="76" y="206" fill="#fff4d6" font-weight="800">var values: int[] = [0];</text>
+
+            <rect x="62" y="235" width="240" height="38" rx="7" fill="#102d27" stroke="#2f9b77"/>
+            <text x="76" y="260" fill="#effff8" font-weight="800">use q = Qubit[1];</text>
+
+            <rect x="62" y="303" width="338" height="38" rx="7" fill="#102f4d" stroke="#3b82c4"/>
+            <text x="76" y="328" fill="#eff6ff" font-weight="800">values[0] = Next(values[0]);</text>
+
+            <rect x="62" y="371" width="338" height="184" rx="9" fill="#182235" stroke="#64748b" stroke-dasharray="5 4"/>
+            <rect x="70" y="380" width="210" height="38" rx="7" fill="#33244f" stroke="#9b7bd7"/>
+            <text x="82" y="405" fill="#f5efff" font-weight="800">if (values[0] == 1)</text>
+            <text x="76" y="438" fill="#cbd5e1">{</text>
+            <rect x="90" y="447" width="122" height="38" rx="7" fill="#12343b" stroke="#38a9bd"/>
+            <text x="102" y="472" fill="#ecfeff" font-weight="800">X(q[0]);</text>
+            <text x="76" y="510" fill="#cbd5e1">}</text>
+
+            <rect x="62" y="579" width="210" height="38" rx="7" fill="#3a2432" stroke="#c76c8b"/>
+            <text x="76" y="604" fill="#fff1f5" font-weight="800">H(q[0]);</text>
+
+            <text x="48" y="646">}</text>
+          </g>
+          <text class="svg-ui" x="48" y="702" fill="#94a3b8" font-size="12">Matching colors connect each Qora statement to the MIR structure it produces.</text>
+
+          <rect x="520" y="55" width="456" height="1358" rx="12" fill="#fff" stroke="#9db2c9"/>
+          <path d="M532 55 H964 Q976 55 976 67 V101 H520 V67 Q520 55 532 55 Z" fill="#263141"/>
+          <text class="svg-ui" x="542" y="84" fill="#f8fafc" font-size="13" font-weight="850">CFG builders after lowering the body</text>
+
+          <rect x="542" y="120" width="412" height="630" rx="10" fill="#eef5fd" stroke="#3b82c4"/>
+          <text class="svg-code" x="562" y="151" fill="#174f88" font-size="13" font-weight="850">MirBlockBuilder b0</text>
+
+          <rect x="562" y="166" width="372" height="112" rx="8" fill="#fff8eb" stroke="#d9a23d"/>
+          <text class="svg-code" x="578" y="188" fill="#745013" font-size="10.5" font-weight="850">Function: LowerDeclaration()　Declaration: values</text>
+          <text class="svg-code" x="578" y="205" fill="#8a651f" font-size="8.8" font-weight="850">MirCallable.Storages[0]</text>
+          <text class="svg-code" x="578" y="221" fill="#334155" font-size="8.5">storage $s0 values: int[1]</text>
+          <text class="svg-ui" x="846" y="221" fill="#8a651f" font-size="9.2" font-weight="750">→ array storage</text>
+          <text class="svg-code" x="578" y="239" fill="#8a651f" font-size="8.8" font-weight="850">Instructions[0..1]</text>
+          <text class="svg-code" x="578" y="254" fill="#334155" font-size="8.5">%v0: int = const int 0</text>
+          <text class="svg-ui" x="846" y="254" fill="#8a651f" font-size="9.2" font-weight="750">→ element at [0]</text>
+          <text class="svg-code" x="578" y="270" fill="#334155" font-size="8.5">%v1: int[1] = array.create $s0 int[1] {%v0}</text>
+          <text class="svg-ui" x="846" y="270" fill="#8a651f" font-size="9.2" font-weight="750">→ initial array state</text>
+
+          <rect x="562" y="292" width="372" height="92" rx="8" fill="#f3faf7" stroke="#4fad89"/>
+          <text class="svg-code" x="578" y="312" fill="#116347" font-size="10.5" font-weight="850">Function: LowerQubitDeclaration()　Declaration: q</text>
+          <text class="svg-code" x="578" y="329" fill="#27775c" font-size="8.8" font-weight="850">MirCallable.Qubits[0]</text>
+          <text class="svg-code" x="578" y="344" fill="#334155" font-size="8.5">qubit &amp;q0.v0 q: qubit[1] [use]</text>
+          <text class="svg-ui" x="846" y="344" fill="#27775c" font-size="9.2" font-weight="750">→ initial state of q</text>
+          <text class="svg-code" x="578" y="360" fill="#27775c" font-size="8.8" font-weight="850">Instructions[2]</text>
+          <text class="svg-code" x="578" y="376" fill="#334155" font-size="8.5">qubit.allocate &amp;q0.v0</text>
+          <text class="svg-ui" x="846" y="376" fill="#27775c" font-size="9.2" font-weight="750">→ allocate q in b0</text>
+
+          <rect x="562" y="392" width="372" height="166" rx="8" fill="#eef5fd" stroke="#3b82c4"/>
+          <text class="svg-code" x="578" y="415" fill="#174f88" font-size="10.5" font-weight="850">Function: LowerAssignment()　Block: b0</text>
+          <text class="svg-code" x="578" y="436" fill="#2f6494" font-size="9.2" font-weight="850">Instructions[3..7]</text>
+          <text class="svg-code" x="578" y="459" fill="#334155" font-size="8.5">%v2: int = const int 0</text>
+          <text class="svg-ui" x="846" y="459" fill="#2563a8" font-size="9.2" font-weight="750">→ assignment index</text>
+          <text class="svg-code" x="578" y="480" fill="#334155" font-size="8.5">%v3: int = const int 0</text>
+          <text class="svg-ui" x="846" y="480" fill="#2563a8" font-size="9.2" font-weight="750">→ Next argument index</text>
+          <text class="svg-code" x="578" y="501" fill="#334155" font-size="8.5">%v4: int = array.load %v1[%v3]</text>
+          <text class="svg-ui" x="846" y="501" fill="#2563a8" font-size="9.2" font-weight="750">→ read values[0]</text>
+          <text class="svg-code" x="578" y="522" fill="#334155" font-size="8.5">%v5: int = call @c6:Next(%v4)</text>
+          <text class="svg-ui" x="846" y="522" fill="#2563a8" font-size="9.2" font-weight="750">→ Next return value</text>
+          <text class="svg-code" x="578" y="543" fill="#334155" font-size="8.5">%v6: int[1] = array.store %v1[%v2], %v5</text>
+          <text class="svg-ui" x="846" y="543" fill="#2563a8" font-size="9.2" font-weight="750">→ updated array</text>
+
+          <rect x="562" y="578" width="372" height="160" rx="8" fill="#f7f1ff" stroke="#8b6fd1"/>
+          <text class="svg-code" x="578" y="600" fill="#5a3fa7" font-size="10.5" font-weight="850">Function: LowerIf()　Starting block: b0</text>
+          <text class="svg-code" x="578" y="620" fill="#6d52b5" font-size="9.2" font-weight="850">Instructions[8..11]</text>
+          <text class="svg-code" x="578" y="640" fill="#334155" font-size="8.5">%v7: int = const int 0</text>
+          <text class="svg-ui" x="846" y="640" fill="#6d52b5" font-size="9.2" font-weight="750">→ index 0</text>
+          <text class="svg-code" x="578" y="659" fill="#334155" font-size="8.5">%v8: int = array.load %v6[%v7]</text>
+          <text class="svg-ui" x="846" y="659" fill="#6d52b5" font-size="9.2" font-weight="750">→ values[0]</text>
+          <text class="svg-code" x="578" y="678" fill="#334155" font-size="8.5">%v9: int = const int 1</text>
+          <text class="svg-ui" x="846" y="678" fill="#6d52b5" font-size="9.2" font-weight="750">→ comparison value 1</text>
+          <text class="svg-code" x="578" y="697" fill="#334155" font-size="8.5">%v10: bit = eq %v8, %v9</text>
+          <text class="svg-ui" x="846" y="697" fill="#6d52b5" font-size="9.2" font-weight="750">→ condition result</text>
+          <text class="svg-code" x="578" y="716" fill="#6d52b5" font-size="9.2" font-weight="850">Terminator</text>
+          <text class="svg-code" x="578" y="733" fill="#334155" font-size="8.5">branch %v10, ^b1(), ^b2()</text>
+          <text class="svg-ui" x="846" y="733" fill="#6d52b5" font-size="9.2" font-weight="750">→ true b1 / false b2</text>
+
+          <rect x="542" y="770" width="194" height="75" rx="10" fill="#f7f1ff" stroke="#8b6fd1"/>
+          <text class="svg-code" x="639" y="794" text-anchor="middle" fill="#5a3fa7" font-size="13" font-weight="850">b1</text>
+          <text class="svg-ui" x="639" y="813" text-anchor="middle" fill="#6d52b5" font-size="9.2" font-weight="750">true path</text>
+          <text class="svg-code" x="639" y="833" text-anchor="middle" fill="#334155" font-size="9.5">q0.v1</text>
+
+          <rect x="760" y="770" width="194" height="75" rx="10" fill="#f7f1ff" stroke="#8b6fd1"/>
+          <text class="svg-code" x="857" y="794" text-anchor="middle" fill="#5a3fa7" font-size="13" font-weight="850">b2</text>
+          <text class="svg-ui" x="857" y="813" text-anchor="middle" fill="#6d52b5" font-size="9.2" font-weight="750">false path</text>
+          <text class="svg-code" x="857" y="833" text-anchor="middle" fill="#334155" font-size="9.5">q0.v0</text>
+
+          <rect x="651" y="880" width="194" height="75" rx="10" fill="#f7f1ff" stroke="#8b6fd1"/>
+          <text class="svg-code" x="748" y="904" text-anchor="middle" fill="#5a3fa7" font-size="13" font-weight="850">b3</text>
+          <text class="svg-code" x="748" y="924" text-anchor="middle" fill="#334155" font-size="9.5">q0.v2</text>
+          <text class="svg-ui" x="748" y="943" text-anchor="middle" fill="#6d52b5" font-size="9.2" font-weight="750">Phi definition</text>
+
+          <text class="svg-ui" x="542" y="979" fill="#475569" font-size="11.5" font-weight="850">MIR state recorded in each block</text>
+
+          <rect x="542" y="995" width="412" height="160" rx="10" fill="#f7f1ff" stroke="#8b6fd1"/>
+          <text class="svg-code" x="562" y="1023" fill="#5a3fa7" font-size="12.5" font-weight="850">MirBlockBuilder b1</text>
+          <rect x="554" y="1034" width="388" height="77" rx="7" fill="#ecfeff" stroke="#38a9bd"/>
+          <text class="svg-code" x="566" y="1052" fill="#28758a" font-size="9.2" font-weight="850">Instructions[0..1]</text>
+          <text class="svg-code" x="566" y="1072" fill="#155e75" font-size="8.5">%v11: int = const int 0</text>
+          <text class="svg-ui" x="846" y="1072" fill="#28758a" font-size="9.2" font-weight="750">→ q[0] index</text>
+          <text class="svg-code" x="566" y="1095" fill="#155e75" font-size="8.5">(&amp;q0.v1) = apply builtin.gate::X(&amp;q0.v0[%v11])</text>
+          <text class="svg-ui" x="846" y="1095" fill="#28758a" font-size="9.2" font-weight="750">→ apply X to q[0]</text>
+          <text class="svg-code" x="562" y="1130" fill="#6d52b5" font-size="9.2" font-weight="850">Terminator</text>
+          <text class="svg-code" x="562" y="1147" fill="#334155" font-size="8.5">jump ^b3()</text>
+          <text class="svg-ui" x="846" y="1147" fill="#6d52b5" font-size="9.2" font-weight="750">→ move to b3</text>
+
+          <rect x="542" y="1180" width="412" height="205" rx="10" fill="#f7f1ff" stroke="#8b6fd1"/>
+          <text class="svg-code" x="562" y="1207" fill="#5a3fa7" font-size="12.5" font-weight="850">MirBlockBuilder b3</text>
+
+          <text class="svg-code" x="562" y="1231" fill="#6d52b5" font-size="9.2" font-weight="850">QubitPhis[0]</text>
+          <text class="svg-code" x="562" y="1253" fill="#334155" font-size="8.5">&amp;q0.v2 = phi [&amp;q0.v1, ^b1], [&amp;q0.v0, ^b2]</text>
+          <text class="svg-ui" x="846" y="1253" fill="#6d52b5" font-size="9.2" font-weight="750">→ merge q states</text>
+
+          <text class="svg-code" x="562" y="1283" fill="#8b294a" font-size="9.2" font-weight="850">Instructions[0..1]</text>
+          <text class="svg-code" x="562" y="1305" fill="#334155" font-size="8.5">%v12: int = const int 0</text>
+          <text class="svg-ui" x="846" y="1305" fill="#a63f63" font-size="9.2" font-weight="750">→ q[0] index</text>
+          <text class="svg-code" x="562" y="1331" fill="#334155" font-size="8.5">(&amp;q0.v3) = apply builtin.gate::H(&amp;q0.v2[%v12])</text>
+          <text class="svg-ui" x="846" y="1331" fill="#a63f63" font-size="9.2" font-weight="750">→ apply H to q[0]</text>
+
+          <text class="svg-code" x="562" y="1360" fill="#6d52b5" font-size="9.2" font-weight="850">Terminator</text>
+          <text class="svg-code" x="562" y="1377" fill="#334155" font-size="8.5">null</text>
+          <text class="svg-ui" x="846" y="1377" fill="#6d52b5" font-size="9.2" font-weight="750">→ block remains open</text>
+
+          <path d="M334 200 C430 200 500 222 562 222" fill="none" stroke="#b7791f" stroke-width="2.2" stroke-dasharray="5 4" marker-end="url(#work-result-arrow-var)"/>
+          <path d="M302 254 C420 254 500 335 562 335" fill="none" stroke="#16805b" stroke-width="2.2" stroke-dasharray="5 4" marker-end="url(#work-result-arrow-qubit)"/>
+          <path d="M400 322 C454 322 500 475 562 475" fill="none" stroke="#2563a8" stroke-width="2.2" stroke-dasharray="5 4" marker-end="url(#work-result-arrow-assign)"/>
+          <path d="M280 399 C420 399 500 646 562 646" fill="none" stroke="#6d52b5" stroke-width="2.2" stroke-dasharray="5 4" marker-end="url(#work-result-arrow-if)"/>
+          <path d="M212 466 C352 510 438 1062 554 1095" fill="none" stroke="#168ea5" stroke-width="2.2" stroke-dasharray="5 4" marker-end="url(#work-result-arrow-x)"/>
+          <path d="M272 598 C414 598 440 1331 542 1331" fill="none" stroke="#a63f63" stroke-width="2.2" stroke-dasharray="5 4" marker-end="url(#work-result-arrow-h)"/>
+
+          <path d="M654 738 C654 750 639 754 639 770" fill="none" stroke="#8b6fd1" stroke-width="1.8" marker-end="url(#work-result-arrow-if)"/>
+          <path d="M842 738 C842 750 857 754 857 770" fill="none" stroke="#8b6fd1" stroke-width="1.8" marker-end="url(#work-result-arrow-if)"/>
+          <text class="svg-ui" x="647" y="758" text-anchor="end" fill="#6d52b5" font-size="10.5" font-weight="750">true</text>
+          <text class="svg-ui" x="866" y="758" fill="#6d52b5" font-size="10.5" font-weight="750">false</text>
+          <path d="M639 845 C639 862 690 865 720 880" fill="none" stroke="#8b6fd1" stroke-width="1.8" marker-end="url(#work-result-arrow-if)"/>
+          <path d="M857 845 C857 862 806 865 776 880" fill="none" stroke="#8b6fd1" stroke-width="1.8" marker-end="url(#work-result-arrow-if)"/>
+        </svg>
+      </div>
+      <figcaption id="work-result-caption">
+        Matching colors connect each Qora statement to the MIR structure it produces.<br>
+        In particular, the <code>if</code> statement is shown as one purple flow from condition evaluation and branching in <code>b0</code> through <code>b1</code>, <code>b2</code>, and the phi merge in <code>b3</code>.
+      </figcaption>
+    </figure>
+
+    <p>
+      We now follow the same <code>LowerToMirCallable()</code> again with <code>Work</code> as its input.<br>
+      This run begins with <code>_hirCallable = Work h44</code> and <code>_mirCallableId = c44</code>.
+    </p>
+
+<figure class="annotated-code-figure" aria-labelledby="work-code-map-caption">
+      <figcaption id="work-code-map-caption">State produced by each code range while lowering <code>Work</code></figcaption>
+      <div class="annotated-code-figure__scroll" tabindex="0">
+        <div class="annotated-code-map" data-code-map="work">
+          <div class="annotated-code-map__source">
+<pre><code class="language-csharp">public MirCallable LowerToMirCallable()
+{
+<span id="work-code-setup" class="annotated-code-stage annotated-code-tone--purple">    var mirCallableOrigin = MirOriginFor(_hirCallable);
+    var hirCallableSymbol = RequireHirDeclarationSymbol(
+        _hirCallable.Id,
+        $"callable `{_hirCallable.Name}`");
+    var hirScopeGraph = _hirArtifact.Model.ScopeGraph
+        ?? throw MirLoweringError(
+            "the final HIR semantic model has no scope graph");
+    var qualifiedSourceCallableName =
+        hirScopeGraph.QualifiedName(hirCallableSymbol);</span>
+
+<span id="work-code-entry" class="annotated-code-stage annotated-code-tone--blue">    _currentMirBlockBuilder = CreateMirBlock(mirCallableOrigin);</span>
+
+<span id="work-code-parameters" class="annotated-code-stage annotated-code-tone--amber">    <a class="code-call-link" href="#lower-parameters" title="LowerParameters Execution trace">LowerParameters</a>();</span>
+
+<span id="work-code-statements" class="annotated-code-stage annotated-code-tone--green">    <a class="code-call-link" href="#lower-statements" title="LowerStatements Execution trace">LowerStatements</a>(_hirCallable.Body.Statements);</span>
+
+<span id="work-code-termination" class="annotated-code-stage annotated-code-tone--violet">    if (_currentMirBlockBuilder is not null)
+    {
+        if (_hirCallable.IsFunction)
+        {
+            MarkCurrentMirBlockUnreachable(
+                MirOrigin.GeneratedFrom(
+                    mirCallableOrigin,
+                    "missing validated function return"));
+        }
+        else
+        {
+            ReturnFromCurrentMirBlock(
+                value: null,
+                MirOrigin.GeneratedFrom(
+                    mirCallableOrigin,
+                    "implicit operation return"));
+        }
+    }</span>
+
+<span id="work-code-build" class="annotated-code-stage annotated-code-tone--cyan">    var mirBlocks = new List&lt;MirBlock&gt;(_mirBlockBuilders.Count);
+    foreach (var mirBlockBuilder in _mirBlockBuilders)
+    {
+        var mirBlock = mirBlockBuilder.Build();
+        mirBlocks.Add(mirBlock);
+    }</span>
+
+<span id="work-code-entry-select" class="annotated-code-stage annotated-code-tone--rose">    var mirEntryBlock = mirBlocks[0];</span>
+
+<span id="work-code-return" class="annotated-code-stage annotated-code-tone--teal">    return new MirCallable(
+        _mirCallableId,
+        qualifiedSourceCallableName,
+        _hirCallable.ReturnType is { } returns
+            ? MirType.Scalar(returns)
+            : null,
+        _mirParameters,
+        mirEntryBlock,
+        mirBlocks,
+        mirCallableOrigin);</span>
+}</code></pre>
+          </div>
+
+          <aside class="annotated-code-map__notes" aria-label="State after each Work lowering stage">
+            <section class="annotated-code-note annotated-code-tone--purple" data-code-target="work-code-setup">
+              <h5>Prepare origin and name</h5>
+              <div class="annotated-code-note__summary">
+                <p>The HIR ID of the example operation <code>Work</code> is <code>h44</code>.</p>
+                <p>The callable origin is created from this ID and the original source location.</p>
+                <p>Next, the declaration symbol associated with HIR node ID <code>h44</code> is found,
+                  and that symbol and the scope graph produce the qualified name <code>"Work"</code>.</p>
+              </div>
+            </section>
+            <section class="annotated-code-note annotated-code-tone--blue" data-code-target="work-code-entry">
+              <h5>Create the entry block</h5>
+              <div class="annotated-code-note__summary">
+                <p><code>CreateMirBlock(mirCallableOrigin)</code> creates
+                  <code>MirBlockBuilder b0</code> for the entry block.</p>
+                <div class="annotated-code-note__state">
+                  <code>builders: [] → [b0]</code>
+                  <code>current: null → b0</code>
+                </div>
+                <p>The <code>b0</code> referenced by <code>current</code> is the same builder
+                  stored at <code>builders[0]</code>.</p>
+              </div>
+            </section>
+            <section class="annotated-code-note annotated-code-tone--amber" data-code-target="work-code-parameters">
+              <h5>Lower parameters</h5>
+              <div class="annotated-code-note__summary">
+                <p>Because <code>Work</code> has no parameters,
+                  the loop in <code>LowerParameters()</code> does not run.</p>
+                <p>No MIR parameter is created,
+                  <code>_mirParameters</code> remains empty,
+                  and the current block <code>b0</code> remains unchanged.</p>
+              </div>
+            </section>
+            <section class="annotated-code-note annotated-code-tone--green" data-code-target="work-code-statements">
+              <h5>Lower the body</h5>
+              <div class="annotated-code-note__summary">
+                <p><code>LowerStatements()</code> processes the five statements in <code>Work</code> in order.</p>
+                <p>The variable declaration, qubit preparation, and array assignment are lowered in <code>b0</code>.
+                  Lowering the <code>if</code> creates true path <code>b1</code>, false path <code>b2</code>,
+                  and merge block <code>b3</code>.</p>
+                <p>The final <code>H(q[0]);</code> is recorded in merge block <code>b3</code>.
+                  Because no explicit <code>return</code> follows the <code>H</code> call,
+                  <code>b3</code> remains open.</p>
+                <div class="annotated-code-note__state">
+                  <code>builders: [b0] → [b0, b1, b2, b3]</code>
+                  <code>current: b0 → b3</code>
+                </div>
+              </div>
+            </section>
+            <section class="annotated-code-note annotated-code-tone--violet" data-code-target="work-code-termination">
+              <h5>Terminate the open block</h5>
+              <div class="annotated-code-note__summary">
+                <p>The current block <code>b3</code> is still open after the body has been lowered.</p>
+                <p>Because <code>Work</code> is an operation with no return value,
+                  <code>ReturnFromCurrentMirBlock()</code> appends an implicit
+                  <code>return</code> to <code>b3</code> and terminates the block.</p>
+                <p>No more statements can be added to a terminated block, so the current block becomes <code>null</code>.</p>
+                <div class="annotated-code-note__state">
+                  <code>b3.Terminator: null → return</code>
+                  <code>current: b3 → null</code>
+                </div>
+              </div>
+            </section>
+            <section class="annotated-code-note annotated-code-tone--cyan" data-code-target="work-code-build">
+              <h5>Create immutable blocks</h5>
+              <div class="annotated-code-note__summary">
+                <p><code>b0</code> through <code>b3</code> are four distinct
+                  <code>MirBlockBuilder</code> objects.</p>
+                <p>Calling <code>Build()</code> on each builder finalizes it as an immutable
+                  <code>MirBlock</code>, and the resulting blocks are stored in the same order.</p>
+                <div class="annotated-code-note__state">
+                  <code>mirBlocks</code>
+                  <code>├─ [0] MirBlock b0</code>
+                  <code>├─ [1] MirBlock b1</code>
+                  <code>├─ [2] MirBlock b2</code>
+                  <code>└─ [3] MirBlock b3</code>
+                </div>
+              </div>
+            </section>
+            <section class="annotated-code-note annotated-code-tone--rose" data-code-target="work-code-entry-select">
+              <h5>Select the entry block</h5>
+              <div class="annotated-code-note__summary">
+                <p>The first block in <code>mirBlocks</code>, <code>b0</code>, is selected as the entry block.</p>
+              </div>
+            </section>
+            <section class="annotated-code-note annotated-code-tone--teal" data-code-target="work-code-return">
+              <h5>Return the MirCallable</h5>
+              <div class="annotated-code-note__summary">
+                <p>The <code>c44</code> ID, <code>"Work"</code> name, no return value or parameters,
+                  and blocks <code>b0</code> through <code>b3</code> are packaged into and returned as
+                  <code>MirCallable Work c44</code>.</p>
+                <p><code>b0</code> is stored at <code>Blocks[0]</code>
+                  and also serves as the <code>EntryBlock</code> where execution starts.</p>
+              </div>
+            </section>
+          </aside>
+
+          <svg class="annotated-code-map__arrows" aria-hidden="true" data-marker-id="work-code-map-arrow">
+            <defs>
+              <marker id="work-code-map-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+                <path d="M0 0 L10 5 L0 10 Z" fill="context-stroke"/>
+              </marker>
+            </defs>
+          </svg>
+        </div>
+      </div>
+    </figure>
+
+
+  </article>
+
+  <article class="function-trace" id="lower-parameters">
+    <h2><code>LowerParameters()</code></h2>
+    <p>
+      This function reads the current HIR callable's parameters in declaration order and registers them as MIR parameters.<br>
+      In the common example it runs once for <code>Next h6</code>, which has one parameter, and once for <code>Work h44</code>, which has none.
+    </p>
+
+    <p>
+      The names <code>_mirValues</code>, <code>_mirParameters</code>, <code>_currentMirBlockBuilder</code>, and <code>_currentFlowState</code> in the code are fields of the current lowerer, not local variables.<br>
+      Their declarations are <code>private readonly List&lt;MirValue&gt; _mirValues = new();</code>, <code>private readonly List&lt;IMirParameter&gt; _mirParameters = new();</code>, <code>private MirBlockBuilder? _currentMirBlockBuilder;</code>, and <code>private LoweringFlowState _currentFlowState = new();</code>.
+    </p>
+
+    <h3>1. Registering <code>value</code> for <code>Next h6</code></h3>
+
+<pre><code class="language-qora">function Next(value: int): int
+{
+    return value + 1;
+}</code></pre>
+
+    <p>
+      This run reads the single parameter <code>value: int</code> inside the parentheses.<br>
+      Entry block <code>b0</code> already exists but is still empty, and the parameter and MIR value lists also begin empty.
+    </p>
+
+    <div class="state-overview">
+      <figure class="state-tree" aria-labelledby="lower-parameters-before">
+        <figcaption id="lower-parameters-before">Before execution</figcaption>
+<pre><code class="language-plaintext"><span class="state-tree__field">_hirCallable</span>       <span class="state-tree__wire">──▶</span> <span class="state-tree__value">Next h6</span>
+<span class="state-tree__field">_mirCallableId</span>     <span class="state-tree__wire">──▶</span> <span class="state-tree__value">c6</span>
+
+<span class="state-tree__field">_hirCallable.Parameters</span>
+<span class="state-tree__wire">└─</span> <span class="state-tree__value">[0] HirParameter value h0</span>
+   <span class="state-tree__wire">├─</span> Type      <span class="state-tree__value">int</span>
+   <span class="state-tree__wire">└─</span> IsArray   <span class="state-tree__value">false</span>
+
+<span class="state-tree__field">_mirParameters</span>    <span class="state-tree__value">[]</span>
+<span class="state-tree__field">_mirValues</span>        <span class="state-tree__value">[]</span>
+
+<span class="state-tree__field">_currentFlowState</span>
+<span class="state-tree__wire">├─</span> _hirSymbolLifetimeFrames
+<span class="state-tree__wire">│  └─</span> [0] root lifetime frame    <span class="state-tree__value">{}</span>
+<span class="state-tree__wire">├─</span> CurrentMirValueByHirSymbolId   <span class="state-tree__value">{}</span>
+<span class="state-tree__wire">└─</span> CurrentMirQubitByHirSymbolId   <span class="state-tree__value">{}</span>
+
+<span class="state-tree__field">_mirBlockBuilders[0]</span> <span class="state-tree__wire">───────────┐</span>
+<span class="state-tree__field">_currentMirBlockBuilder</span> <span class="state-tree__wire">────────┴──▶</span> <span class="state-tree__value">MirBlockBuilder b0</span>
+                                      <span class="state-tree__wire">├─</span> _arguments     <span class="state-tree__value">[]</span>
+                                      <span class="state-tree__wire">├─</span> QubitPhis      <span class="state-tree__value">[]</span>
+                                      <span class="state-tree__wire">├─</span> Instructions   <span class="state-tree__value">[]</span>
+                                      <span class="state-tree__wire">└─</span> Terminator     <span class="state-tree__value">null</span></code></pre>
+      </figure>
+
+      <aside class="state-type-card" aria-labelledby="state-type-card-title">
+        <h4 id="state-type-card-title">Values denoted by the purple names</h4>
+        <p>Purple labels are lowerer field names or property paths that begin at those fields.</p>
+
+        <dl>
+          <div>
+            <dt><code>_hirCallable</code></dt>
+            <dd><code>HirCallable</code><span>The HIR callable declaration currently being lowered</span></dd>
+          </div>
+          <div>
+            <dt><code>_mirCallableId</code></dt>
+            <dd><code>MirCallableId</code><span>Identifier of the MIR callable being built</span></dd>
+          </div>
+          <div>
+            <dt><code>_hirCallable.Parameters</code></dt>
+            <dd><code>IReadOnlyList&lt;HirParameter&gt;</code><span>HIR parameters in declaration order</span></dd>
+          </div>
+          <div>
+            <dt><code>_mirParameters</code></dt>
+            <dd><code>List&lt;IMirParameter&gt;</code><span>MIR parameters registered so far</span></dd>
+          </div>
+          <div>
+            <dt><code>_mirValues</code></dt>
+            <dd><code>List&lt;MirValue&gt;</code><span>MIR values created for the current callable</span></dd>
+          </div>
+          <div>
+            <dt><code>_currentFlowState</code></dt>
+            <dd><code>LoweringFlowState</code><span>Current value, qubit, and lifetime state for each symbol on this path</span></dd>
+          </div>
+          <div>
+            <dt><code>_currentMirBlockBuilder</code></dt>
+            <dd><code>MirBlockBuilder?</code><span>The block builder that receives the next instruction</span></dd>
+          </div>
+        </dl>
+      </aside>
+    </div>
+
+    <figure class="annotated-code-figure" aria-labelledby="lower-parameters-code-map-caption">
+      <figcaption id="lower-parameters-code-map-caption">
+        State produced by the code inside <code>LowerParameters()</code> for <code>Next h6</code>
+      </figcaption>
+      <div class="annotated-code-figure__scroll" tabindex="0">
+        <div class="annotated-code-map" data-code-map="lower-parameters-next">
+          <div class="annotated-code-map__source">
+<pre><code class="language-csharp">private void LowerParameters()
+{
+<span id="lower-parameters-code-lengths" class="annotated-code-stage annotated-code-tone--purple">    var requiredArrayLengths =
+        _hirArtifact.Model.RequiredArgLengths(_hirCallable.Id);</span>
+
+<span id="lower-parameters-code-select" class="annotated-code-stage annotated-code-tone--blue">    for (var hirParameterIndex = 0;
+         hirParameterIndex &lt; _hirCallable.Parameters.Count;
+         hirParameterIndex++)
+    {
+        var hirParameter =
+            _hirCallable.Parameters[hirParameterIndex];</span>
+
+<span id="lower-parameters-code-symbol" class="annotated-code-stage annotated-code-tone--amber">        var hirParameterSymbol = RequireHirDeclarationSymbol(
+            hirParameter.Id,
+            $"parameter `{hirParameter.Name}`");
+        var mirParameterOrigin = MirOriginFor(hirParameter);</span>
+
+<span id="lower-parameters-code-lifetime" class="annotated-code-stage annotated-code-tone--green">        _currentFlowState.TrackDeclaredHirSymbol(
+            hirParameterSymbol.Id);</span>
+
+<span id="lower-parameters-code-qubit" class="annotated-code-stage annotated-code-tone--violet">        if (hirParameter.Type == QType.Qubit)
+        {
+            <a class="code-call-link" href="#lower-qubit-parameter" title="LowerQubitParameter Execution trace">LowerQubitParameter</a>(
+                hirParameter,
+                hirParameterSymbol.Id,
+                mirParameterOrigin);
+            continue;
+        }</span>
+
+<span id="lower-parameters-code-classical" class="annotated-code-stage annotated-code-tone--cyan">        <a class="code-call-link" href="#lower-classical-parameter" title="LowerClassicalParameter Execution trace">LowerClassicalParameter</a>(
+            hirParameter,
+            hirParameterSymbol.Id,
+            mirParameterOrigin,
+            requiredArrayLengths);</span>
+    }
+}</code></pre>
+          </div>
+
+          <aside class="annotated-code-map__notes" aria-label="State after each LowerParameters stage for Next">
+            <section class="annotated-code-note annotated-code-tone--purple" data-code-target="lower-parameters-code-lengths">
+              <h5>Read the required array length</h5>
+              <div class="annotated-code-note__summary">
+                <p>The parameter-length requirements for <code>Next h6</code> are read.</p>
+                <p>Because <code>value</code> is not an array, no array length is required.</p>
+                <div class="annotated-code-note__state">
+                  <code>requiredArrayLengths = null</code>
+                </div>
+              </div>
+            </section>
+
+            <section class="annotated-code-note annotated-code-tone--blue" data-code-target="lower-parameters-code-select">
+              <h5>Select value h0</h5>
+              <div class="annotated-code-note__summary">
+                <p>The parameter list contains only <code>value</code>, so the loop runs once.
+                  The first iteration selects the HIR parameter at index <code>0</code>.</p>
+                <div class="annotated-code-note__state">
+                  <code>hirParameterIndex = 0</code>
+                  <code>hirParameter = value h0</code>
+                  <code>Type = int</code>
+                  <code>IsArray = false</code>
+                  <code>Ownership = Borrowed</code>
+                  <code>Access = ReadOnly</code>
+                </div>
+              </div>
+            </section>
+
+            <section class="annotated-code-note annotated-code-tone--amber" data-code-target="lower-parameters-code-symbol">
+              <h5>Read the symbol and origin</h5>
+              <div class="annotated-code-note__summary">
+                <p>The HIR node ID <code>h0</code> of the <code>value</code> declaration is used as the lookup key
+                  for the symbol information associated with that declaration.</p>
+                <p>Then <code>h0</code> and the original source location are preserved as the MIR parameter's origin.</p>
+                <div class="annotated-code-note__state">
+                  <code>hirParameterSymbol = Symbol(value)</code>
+                  <code>mirParameterOrigin = MirHirOrigin(HIR h0, source span)</code>
+                </div>
+              </div>
+            </section>
+
+            <section class="annotated-code-note annotated-code-tone--green" data-code-target="lower-parameters-code-lifetime">
+              <h5>Register the declaration symbol</h5>
+              <div class="annotated-code-note__summary">
+                <p>The <code>SymbolId</code> of <code>value</code> is registered in the current lifetime frame.</p>
+                <div class="annotated-code-note__state">
+                  <code>lifetime frame: {} → {SymbolId(value)}</code>
+                </div>
+              </div>
+            </section>
+
+            <section class="annotated-code-note annotated-code-tone--violet" data-code-target="lower-parameters-code-qubit">
+              <h5>Check the qubit branch</h5>
+              <div class="annotated-code-note__summary">
+                <p>Because the type of <code>value</code> is <code>int</code>,
+                  <code>hirParameter.Type == QType.Qubit</code> is <code>false</code>.</p>
+                <p>Therefore, neither <code>LowerQubitParameter()</code> nor <code>continue</code> runs.</p>
+              </div>
+            </section>
+
+            <section class="annotated-code-note annotated-code-tone--cyan" data-code-target="lower-parameters-code-classical">
+              <h5>Register the classical parameter</h5>
+              <div class="annotated-code-note__summary">
+                <p><code>value h0</code>, its declaration-symbol ID, origin,
+                  and array-length requirements are passed to <code>LowerClassicalParameter()</code>.</p>
+                <p>The linked function section continues with the detailed construction process.
+                  When the call returns, the MIR parameter for <code>value</code> and <code>%v0</code> have been registered.</p>
+                <div class="annotated-code-note__state">
+                  <code>_mirParameters: [] → [value → %v0: int]</code>
+                  <code>_mirValues: [] → [%v0: int]</code>
+                  <code>CurrentMirValueByHirSymbolId: {} → {SymbolId(value): v0}</code>
+                  <code>b0: unchanged</code>
+                </div>
+                <p>When the loop index becomes <code>1</code>, it equals the parameter count <code>1</code>,
+                  so the loop ends and the function returns.</p>
+              </div>
+            </section>
+          </aside>
+
+          <svg class="annotated-code-map__arrows" aria-hidden="true" data-marker-id="lower-parameters-code-map-arrow">
+            <defs>
+              <marker id="lower-parameters-code-map-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+                <path d="M0 0 L10 5 L0 10 Z" fill="context-stroke"/>
+              </marker>
+            </defs>
+          </svg>
+        </div>
+      </div>
+    </figure>
+
+    <figure class="state-tree state-tree--standalone" aria-labelledby="lower-parameters-after">
+      <figcaption id="lower-parameters-after">After execution</figcaption>
+<pre><code class="language-plaintext"><span class="state-tree__field">_hirCallable</span>       <span class="state-tree__wire">──▶</span> <span class="state-tree__value">Next h6</span>
+<span class="state-tree__field">_mirCallableId</span>     <span class="state-tree__wire">──▶</span> <span class="state-tree__value">c6</span>
+
+<span class="state-tree__field">_hirCallable.Parameters</span>
+<span class="state-tree__wire">└─</span> <span class="state-tree__value">[0] HirParameter value h0</span>
+   <span class="state-tree__wire">├─</span> Type      <span class="state-tree__value">int</span>
+   <span class="state-tree__wire">└─</span> IsArray   <span class="state-tree__value">false</span>
+
+<span class="state-tree__field">_mirParameters</span>
+<span class="state-tree__wire">└─</span> <span class="state-tree__value">[0] MirClassicalParameter value</span>
+   <span class="state-tree__wire">├─</span> Value           <span class="state-tree__wire">──▶</span> <span class="state-tree__value">_mirValues[0] (%v0)</span>
+   <span class="state-tree__wire">├─</span> Storage         <span class="state-tree__value">null</span>
+   <span class="state-tree__wire">├─</span> Ownership       <span class="state-tree__value">Borrowed</span>
+   <span class="state-tree__wire">├─</span> Access          <span class="state-tree__value">ReadOnly</span>
+   <span class="state-tree__wire">└─</span> MinimumLength   <span class="state-tree__value">0</span>
+
+<span class="state-tree__field">_mirValues</span>
+<span class="state-tree__wire">└─</span> <span class="state-tree__value">[0] MirValue %v0</span>
+   <span class="state-tree__wire">├─</span> Id       <span class="state-tree__value">v0</span>
+   <span class="state-tree__wire">├─</span> Type     <span class="state-tree__value">int</span>
+   <span class="state-tree__wire">└─</span> Origin   <span class="state-tree__value">MirHirOrigin</span>
+      <span class="state-tree__wire">├─</span> HirNodeId   <span class="state-tree__value">h0</span>
+      <span class="state-tree__wire">└─</span> Span        <span class="state-tree__value">source span of value</span>
+
+<span class="state-tree__field">_currentFlowState</span>
+<span class="state-tree__wire">├─</span> _hirSymbolLifetimeFrames
+<span class="state-tree__wire">│  └─</span> [0] root lifetime frame
+<span class="state-tree__wire">│     └─</span> <span class="state-tree__value">SymbolId(value)</span>
+<span class="state-tree__wire">├─</span> CurrentMirValueByHirSymbolId
+<span class="state-tree__wire">│  └─</span> <span class="state-tree__value">[SymbolId(value)] = MirValueId v0</span>
+<span class="state-tree__wire">└─</span> CurrentMirQubitByHirSymbolId   <span class="state-tree__value">{}</span>
+
+<span class="state-tree__field">_mirBlockBuilders[0]</span> <span class="state-tree__wire">───────────┐</span>
+<span class="state-tree__field">_currentMirBlockBuilder</span> <span class="state-tree__wire">────────┴──▶</span> <span class="state-tree__value">MirBlockBuilder b0</span>
+                                      <span class="state-tree__wire">├─</span> _arguments     <span class="state-tree__value">[]</span>
+                                      <span class="state-tree__wire">├─</span> QubitPhis      <span class="state-tree__value">[]</span>
+                                      <span class="state-tree__wire">├─</span> Instructions   <span class="state-tree__value">[]</span>
+                                      <span class="state-tree__wire">└─</span> Terminator     <span class="state-tree__value">null</span></code></pre>
+    </figure>
+
+    <h3>2. Processing <code>Work h44</code> with no parameters</h3>
+
+    <p>
+      There are no parameters inside the parentheses of <code>Work()</code>.<br>
+      It still enters the same <code>LowerParameters()</code>, but the <code>for</code> body does not run this time.
+    </p>
+
+    <div class="state-overview state-overview--pair">
+      <figure class="state-tree" aria-labelledby="work-parameters-path">
+        <figcaption id="work-parameters-path">Execution path</figcaption>
+<pre><code class="language-plaintext"><span class="state-tree__field">_hirCallable</span> <span class="state-tree__wire">──▶</span> <span class="state-tree__value">Work h44</span>
+
+RequiredArgLengths(Work h44) <span class="state-tree__wire">──▶</span> <span class="state-tree__value">null</span>
+
+for (hirParameterIndex = <span class="state-tree__value">0</span>)
+<span class="state-tree__wire">└─</span> 0 &lt; Parameters.Count(<span class="state-tree__value">0</span>) <span class="state-tree__wire">──▶</span> <span class="state-tree__value">false</span>
+   <span class="state-tree__wire">└─</span> body executions <span class="state-tree__value">0</span></code></pre>
+      </figure>
+
+      <figure class="state-tree" aria-labelledby="work-parameters-result">
+        <figcaption id="work-parameters-result">State after execution</figcaption>
+<pre><code class="language-plaintext"><span class="state-tree__field">_mirParameters</span>   <span class="state-tree__value">[]</span>
+<span class="state-tree__field">_mirValues</span>       <span class="state-tree__value">[]</span>
+
+<span class="state-tree__field">_currentFlowState</span>
+<span class="state-tree__wire">├─</span> _hirSymbolLifetimeFrames
+<span class="state-tree__wire">│  └─</span> [0] root lifetime frame    <span class="state-tree__value">{}</span>
+<span class="state-tree__wire">├─</span> CurrentMirValueByHirSymbolId   <span class="state-tree__value">{}</span>
+<span class="state-tree__wire">└─</span> CurrentMirQubitByHirSymbolId   <span class="state-tree__value">{}</span>
+
+<span class="state-tree__field">_mirBlockBuilders[0]</span> <span class="state-tree__wire">───────────┐</span>
+<span class="state-tree__field">_currentMirBlockBuilder</span> <span class="state-tree__wire">────────┴──▶</span> <span class="state-tree__value">MirBlockBuilder b0</span>
+                                      <span class="state-tree__wire">├─</span> _arguments     <span class="state-tree__value">[]</span>
+                                      <span class="state-tree__wire">├─</span> QubitPhis      <span class="state-tree__value">[]</span>
+                                      <span class="state-tree__wire">├─</span> Instructions   <span class="state-tree__value">[]</span>
+                                      <span class="state-tree__wire">└─</span> Terminator     <span class="state-tree__value">null</span></code></pre>
+      </figure>
+    </div>
+
+    <p>
+      Thus, lowering <code>Work</code> creates neither a new parameter object nor a new MIR value.<br>
+      However, <code>b0</code> is not empty merely because <code>Work</code> has no parameters. This function only registers callable parameters; it adds no block argument or instruction. Therefore, neither the <code>Next</code> nor the <code>Work</code> execution changes <code>b0</code>.
+    </p>
+  </article>
+
+  <article class="function-trace" id="lower-classical-parameter">
+    <h2><code>LowerClassicalParameter()</code></h2>
+    <p>
+      This function registers one classical HIR parameter as a MIR value and a <code>MirClassicalParameter</code>.<br>
+      The run below processes <code>value h0</code> from <code>Next(value: int)</code>.
+    </p>
+
+    <div class="callout">
+      <span class="h">Actual arguments</span>
+      <code>hirParameter = value h0</code><br>
+      <code>hirParameterSymbolId = SymbolId(value)</code><br>
+      <code>mirParameterOrigin = MirHirOrigin(HIR h0, source span of value)</code><br>
+      <code>requiredArrayLengths = null</code>
+    </div>
+
+<pre><code class="language-csharp">private void LowerClassicalParameter(
+    HirParameter hirParameter,
+    SymbolId hirParameterSymbolId,
+    MirOrigin mirParameterOrigin,
+    IReadOnlyDictionary&lt;string, long&gt;? requiredArrayLengths)
+{
+    /* value is an int, not an array.
+    mirParameterType = MirType.Scalar(int) */
+    var mirParameterType = hirParameter.IsArray
+        ? MirType.Array(hirParameter.Type, hirParameter.RegisterSize)
+        : MirType.Scalar(hirParameter.Type);
+
+    /* The actual integer is not known yet.
+    %v0 represents the int value that will be passed as value at call time.
+
+    _mirValues
+    └─ [0] MirValue %v0
+       ├─ Id = v0
+       ├─ Type = int
+       └─ Origin = MirHirOrigin(value h0) */
+    var mirParameterValue = CreateMirValue(
+        mirParameterType,
+        hirParameterSymbolId,
+        mirParameterOrigin);
+
+    /* Because this is a scalar, the result is (null, 0). */
+    var (mirArrayStorage, minimumLength) =
+        <a class="code-call-link" href="#create-mir-parameter-storage" title="CreateMirParameterStorage Execution trace">CreateMirParameterStorage</a>(
+            hirParameter,
+            hirParameterSymbolId,
+            mirParameterOrigin,
+            requiredArrayLengths);
+
+    /* SymbolId(value) ──▶ MirValueId v0 */
+    _currentFlowState.CurrentMirValueByHirSymbolId[hirParameterSymbolId] = mirParameterValue.Id;
+
+    /* mirArrayStorage is null, so Scalar is called.
+    Name, Ownership, and Access are read directly from hirParameter. */
+    var mirParameter = mirArrayStorage is null
+        ? MirClassicalParameter.Scalar(
+            hirParameter,
+            mirParameterValue)
+        : MirClassicalParameter.Array(
+            hirParameter,
+            mirParameterValue,
+            mirArrayStorage,
+            minimumLength);
+
+    /* _mirParameters
+    └─ [0] MirClassicalParameter value
+       ├─ Value ──▶ _mirValues[0] (%v0)
+       ├─ Storage = null
+       ├─ Ownership = Borrowed
+       ├─ Access = ReadOnly
+       └─ MinimumLength = 0 */
+    _mirParameters.Add(mirParameter);
+}</code></pre>
+
+    <figure class="state-tree state-tree--standalone" aria-labelledby="lower-classical-parameter-after">
+      <figcaption id="lower-classical-parameter-after">After execution</figcaption>
+<pre><code class="language-plaintext"><span class="state-tree__field">_mirParameters</span>
+<span class="state-tree__wire">└─</span> <span class="state-tree__value">[0] MirClassicalParameter value</span>
+   <span class="state-tree__wire">├─</span> Value           <span class="state-tree__wire">──▶</span> <span class="state-tree__value">_mirValues[0] (%v0)</span>
+   <span class="state-tree__wire">├─</span> Storage         <span class="state-tree__value">null</span>
+   <span class="state-tree__wire">├─</span> Ownership       <span class="state-tree__value">Borrowed</span>
+   <span class="state-tree__wire">├─</span> Access          <span class="state-tree__value">ReadOnly</span>
+   <span class="state-tree__wire">└─</span> MinimumLength   <span class="state-tree__value">0</span>
+
+<span class="state-tree__field">_mirValues</span>
+<span class="state-tree__wire">└─</span> <span class="state-tree__value">[0] MirValue %v0</span>
+   <span class="state-tree__wire">├─</span> Id       <span class="state-tree__value">v0</span>
+   <span class="state-tree__wire">├─</span> Type     <span class="state-tree__value">int</span>
+   <span class="state-tree__wire">└─</span> Origin   <span class="state-tree__value">MirHirOrigin(value h0)</span>
+
+<span class="state-tree__field">_currentFlowState.CurrentMirValueByHirSymbolId</span>
+<span class="state-tree__wire">└─</span> <span class="state-tree__value">[SymbolId(value)] = MirValueId v0</span>
+
+<span class="state-tree__field">_currentMirBlockBuilder</span> <span class="state-tree__wire">──▶</span> <span class="state-tree__value">b0 (unchanged)</span></code></pre>
+    </figure>
+  </article>
+
+  <article class="function-trace" id="create-mir-parameter-storage">
+    <h2><code>CreateMirParameterStorage()</code></h2>
+    <p>
+      This function determines whether one classical parameter is a scalar or an array, then returns the required <code>MirArrayStorage?</code> and <code>MinimumLength</code> together.<br>
+      It returns <code>(null, 0)</code> for a scalar. For an array, it creates new storage, computes the minimum length, and returns both values.
+    </p>
+
+    <h3>Processing <code>Next(value: int)</code></h3>
+
+    <div class="callout">
+      <span class="h">Actual arguments</span>
+      <code>hirParameter = value h0</code><br>
+      <code>hirParameterSymbolId = SymbolId of the value declaration</code><br>
+      <code>mirParameterOrigin = MirHirOrigin(HIR h0, source span of value)</code><br>
+      <code>requiredArrayLengths = null</code>
+    </div>
+
+<pre><code class="language-csharp">private (MirArrayStorage? Storage, int MinimumLength)
+    CreateMirParameterStorage(
+        HirParameter hirParameter,
+        SymbolId hirParameterSymbolId,
+        MirOrigin mirParameterOrigin,
+        IReadOnlyDictionary&lt;string, long&gt;? requiredArrayLengths)
+{
+    /* value is a scalar, so this branch is selected.
+    Return value = (Storage: null, MinimumLength: 0) */
+    if (!hirParameter.IsArray) return (null, 0);
+
+    /* The code below runs only for an array parameter.
+    It creates new storage and records the link between the HIR symbol and MIR storage. */
+    var mirArrayStorage = new MirArrayStorage(
+        AllocateMirStorageId(),
+        hirParameter.Name,
+        mirParameterOrigin);
+    _traceSink?.LinkStorage(
+        hirParameterSymbolId,
+        _mirCallableId,
+        mirArrayStorage.Id);
+
+    /* The default minimum length of an array parameter is 1.
+    If the call contract records a greater length, that length is used. */
+    var minimumLength = 1;
+    if (requiredArrayLengths is not null
+        &amp;&amp; requiredArrayLengths.TryGetValue(
+            hirParameter.Name,
+            out var requiredLength))
+    {
+        if (requiredLength &lt; 0 || requiredLength &gt; int.MaxValue)
+        {
+            throw MirLoweringError(
+                $"array parameter `{hirParameter.Name}` has invalid "
+                + $"minimum length {requiredLength}");
+        }
+
+        minimumLength = Math.Max(minimumLength, (int)requiredLength);
+    }
+
+    return (mirArrayStorage, minimumLength);
+}</code></pre>
+
+<pre><code class="language-plaintext">Result of processing value in Next
+Storage       = null
+MinimumLength = 0
+
+Created MirArrayStorage = none
+Invoked LinkStorage     = none</code></pre>
+  </article>
+
+  <article class="function-trace" id="lower-qubit-parameter">
+    <h2><code>LowerQubitParameter()</code></h2>
+    <p>
+      This function creates the initial-version <code>MirQubitParameter</code> for one HIR qubit parameter and registers it in the current lowerer's qubit state.<br>
+      Because the existing <code>Next</code> and <code>Work</code> examples have no qubit parameters, the small auxiliary program below follows how one <code>target</code> parameter is processed.
+    </p>
+
+    <h3>Callables used for this run</h3>
+
+<pre><code class="language-qora">operation Apply(target: Qubit)
+{
+    X(target);
+}
+
+operation Main()
+{
+    use q = Qubit[1];
+    Apply(q[0]);
+}</code></pre>
+
+    <p>
+      In the current CLI output, the two callables are <code>Apply h7/c7</code> and <code>Main h17/c17</code>.<br>
+      The target being processed is <code>target h0</code> of <code>Apply</code>; <code>Main</code> is present to provide the program's entry operation.<br>
+      <code>LowerParameters()</code> first registers the declaration symbol for <code>target</code> in the root lifetime frame, then calls <code>LowerQubitParameter()</code> below.
+    </p>
+
+    <div class="state-overview">
+      <figure class="state-tree" aria-labelledby="lower-qubit-parameter-before">
+        <figcaption id="lower-qubit-parameter-before">Before execution</figcaption>
+<pre><code class="language-plaintext"><span class="state-tree__field">Arguments</span>
+<span class="state-tree__wire">├─</span> hirParameter            <span class="state-tree__wire">──▶</span> <span class="state-tree__value">HirParameter target h0</span>
+<span class="state-tree__wire">│                              ├─</span> Type        <span class="state-tree__value">Qubit</span>
+<span class="state-tree__wire">│                              ├─</span> IsArray     <span class="state-tree__value">false</span>
+<span class="state-tree__wire">│                              └─</span> Ownership   <span class="state-tree__value">Borrowed</span>
+<span class="state-tree__wire">├─</span> hirParameterSymbolId    <span class="state-tree__wire">──▶</span> <span class="state-tree__value">SymbolId(target)</span>
+<span class="state-tree__wire">└─</span> mirParameterOrigin      <span class="state-tree__wire">──▶</span> <span class="state-tree__value">MirHirOrigin</span>
+                                  <span class="state-tree__wire">├─</span> HirNodeId   <span class="state-tree__value">h0</span>
+                                  <span class="state-tree__wire">└─</span> Span        <span class="state-tree__value">source span of target</span>
+
+<span class="state-tree__field">Lowerer fields</span>
+<span class="state-tree__wire">├─</span> _hirCallable                 <span class="state-tree__wire">──▶</span> <span class="state-tree__value">Apply h7</span>
+<span class="state-tree__wire">├─</span> _mirCallableId               <span class="state-tree__wire">──▶</span> <span class="state-tree__value">c7</span>
+<span class="state-tree__wire">├─</span> _initialMirQubitsById             <span class="state-tree__value">{}</span>
+<span class="state-tree__wire">├─</span> _nextMirQubitVersionById          <span class="state-tree__value">{}</span>
+<span class="state-tree__wire">├─</span> _mirParameters                    <span class="state-tree__value">[]</span>
+<span class="state-tree__wire">└─</span> _mirValues                        <span class="state-tree__value">[]</span>
+
+<span class="state-tree__field">_currentFlowState</span>
+<span class="state-tree__wire">├─</span> _hirSymbolLifetimeFrames
+<span class="state-tree__wire">│  └─</span> [0] root lifetime frame
+<span class="state-tree__wire">│     └─</span> <span class="state-tree__value">SymbolId(target)</span>
+<span class="state-tree__wire">├─</span> CurrentMirValueByHirSymbolId   <span class="state-tree__value">{}</span>
+<span class="state-tree__wire">└─</span> CurrentMirQubitByHirSymbolId   <span class="state-tree__value">{}</span>
+
+<span class="state-tree__field">_mirBlockBuilders[0]</span> <span class="state-tree__wire">───────────┐</span>
+<span class="state-tree__field">_currentMirBlockBuilder</span> <span class="state-tree__wire">────────┴──▶</span> <span class="state-tree__value">MirBlockBuilder b0</span>
+                                      <span class="state-tree__wire">├─</span> _arguments     <span class="state-tree__value">[]</span>
+                                      <span class="state-tree__wire">├─</span> QubitPhis      <span class="state-tree__value">[]</span>
+                                      <span class="state-tree__wire">├─</span> Instructions   <span class="state-tree__value">[]</span>
+                                      <span class="state-tree__wire">└─</span> Terminator     <span class="state-tree__value">null</span></code></pre>
+      </figure>
+
+      <aside class="state-type-card" aria-labelledby="lower-qubit-parameter-types">
+        <h4 id="lower-qubit-parameter-types">Collections modified by this function</h4>
+        <p>Each collection references the same qubit parameter for a different purpose.</p>
+
+        <dl>
+          <div>
+            <dt><code>_initialMirQubitsById</code></dt>
+            <dd><code>Dictionary&lt;MirQubitId, MirQubit&gt;</code><span>Initial version for each qubit ID</span></dd>
+          </div>
+          <div>
+            <dt><code>_nextMirQubitVersionById</code></dt>
+            <dd><code>Dictionary&lt;MirQubitId, int&gt;</code><span>Next version number to allocate</span></dd>
+          </div>
+          <div>
+            <dt><code>CurrentMirQubitByHirSymbolId</code></dt>
+            <dd><code>Dictionary&lt;SymbolId, MirQubit&gt;</code><span>Current qubit version referenced by each HIR symbol</span></dd>
+          </div>
+          <div>
+            <dt><code>_mirParameters</code></dt>
+            <dd><code>List&lt;IMirParameter&gt;</code><span>MIR parameter list of the callable</span></dd>
+          </div>
+        </dl>
+      </aside>
+    </div>
+
+    <figure class="annotated-code-figure" aria-labelledby="lower-qubit-parameter-code-map-caption">
+      <figcaption id="lower-qubit-parameter-code-map-caption">
+        State produced by the code inside <code>LowerQubitParameter()</code> while processing <code>target h0</code>
+      </figcaption>
+      <div class="annotated-code-figure__scroll" tabindex="0">
+        <div class="annotated-code-map" data-code-map="lower-qubit-parameter-target">
+          <div class="annotated-code-map__source">
+<pre><code class="language-csharp">private void LowerQubitParameter(
+    HirParameter hirParameter,
+    SymbolId hirParameterSymbolId,
+    MirOrigin mirParameterOrigin)
+{
+<span id="lower-qubit-parameter-code-id" class="annotated-code-stage annotated-code-tone--purple">    var mirQubitId = AllocateMirQubitId();</span>
+
+<span id="lower-qubit-parameter-code-create" class="annotated-code-stage annotated-code-tone--blue">    var mirQubitParameter = hirParameter.IsArray
+        ? MirQubitParameter.Array(
+            mirQubitId,
+            hirParameter.Name,
+            hirParameter.RegisterSize,
+            hirParameter.Ownership,
+            mirParameterOrigin)
+        : MirQubitParameter.Single(
+            mirQubitId,
+            hirParameter.Name,
+            hirParameter.Ownership,
+            mirParameterOrigin);</span>
+
+<span id="lower-qubit-parameter-code-initial" class="annotated-code-stage annotated-code-tone--amber">    RegisterInitialMirQubit(
+        hirParameterSymbolId,
+        mirQubitParameter);</span>
+<span id="lower-qubit-parameter-code-current" class="annotated-code-stage annotated-code-tone--green">    _currentFlowState.CurrentMirQubitByHirSymbolId[hirParameterSymbolId] = mirQubitParameter;</span>
+<span id="lower-qubit-parameter-code-list" class="annotated-code-stage annotated-code-tone--cyan">    _mirParameters.Add(mirQubitParameter);</span>
+}</code></pre>
+          </div>
+
+          <aside class="annotated-code-map__notes" aria-label="State after each LowerQubitParameter stage for target">
+            <section class="annotated-code-note annotated-code-tone--purple" data-code-target="lower-qubit-parameter-code-id">
+              <h5>Allocate a qubit ID</h5>
+              <div class="annotated-code-note__summary">
+                <p>No initial qubit has been registered yet, so the collection is empty and its count is <code>0</code>.</p>
+                <p><code>AllocateMirQubitId()</code> uses that count to create the first qubit ID, <code>q0</code>.</p>
+                <div class="annotated-code-note__state">
+                  <code>_initialMirQubitsById = {}</code>
+                  <code>_initialMirQubitsById.Count = 0</code>
+                  <code>mirQubitId = q0</code>
+                </div>
+              </div>
+            </section>
+
+            <section class="annotated-code-note annotated-code-tone--blue" data-code-target="lower-qubit-parameter-code-create">
+              <h5>Create the initial-version object</h5>
+              <div class="annotated-code-note__summary">
+                <p>Because <code>target</code> is not an array, <code>MirQubitParameter.Single()</code> is called.</p>
+                <p><code>Single()</code> creates a parameter object representing <code>q0.v0</code>, the initial version of <code>q0</code>.</p>
+                <div class="annotated-code-note__state">
+                  <code>mirQubitParameter = MirQubitParameter target q0.v0</code>
+                  <code>Name = "target"</code>
+                  <code>IsArray = false</code>
+                  <code>Length = null</code>
+                  <code>Ownership = Borrowed</code>
+                  <code>Origin = HIR h0 + source span</code>
+                </div>
+              </div>
+            </section>
+
+            <section class="annotated-code-note annotated-code-tone--amber" data-code-target="lower-qubit-parameter-code-initial">
+              <h5>Register the initial version</h5>
+              <div class="annotated-code-note__summary">
+                <p><code>RegisterInitialMirQubit()</code> stores <code>q0.v0</code> as the initial version of <code>q0</code>.</p>
+                <p>The current version is <code>v0</code>, and the next version number is initialized to <code>1</code> for the next state change.</p>
+                <div class="annotated-code-note__state">
+                  <code>_initialMirQubitsById: {} → {q0: q0.v0}</code>
+                  <code>_nextMirQubitVersionById: {} → {q0: 1}</code>
+                </div>
+                <p>If a <code>traceSink</code> is present, it also records the mapping from <code>SymbolId(target)</code> to <code>c7/q0.v0</code>.</p>
+              </div>
+            </section>
+
+            <section class="annotated-code-note annotated-code-tone--green" data-code-target="lower-qubit-parameter-code-current">
+              <h5>Connect the current qubit state</h5>
+              <div class="annotated-code-note__summary">
+                <p>The current MIR qubit version to use when later statements read HIR <code>target</code> is registered.</p>
+                <div class="annotated-code-note__state">
+                  <code>CurrentMirQubitByHirSymbolId: {} → 1 entry</code>
+                  <code>[SymbolId(target)] = q0.v0</code>
+                </div>
+              </div>
+            </section>
+
+            <section class="annotated-code-note annotated-code-tone--cyan" data-code-target="lower-qubit-parameter-code-list">
+              <h5>Connect the callable parameter list</h5>
+              <div class="annotated-code-note__summary">
+                <p>The same <code>MirQubitParameter target q0.v0</code> object is also added to the callable's parameter list.</p>
+                <div class="annotated-code-note__state">
+                  <code>_mirParameters: [] → [target q0.v0]</code>
+                  <code>b0: unchanged</code>
+                </div>
+              </div>
+            </section>
+          </aside>
+
+          <svg class="annotated-code-map__arrows" aria-hidden="true" data-marker-id="lower-qubit-parameter-code-map-arrow">
+            <defs>
+              <marker id="lower-qubit-parameter-code-map-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+                <path d="M0 0 L10 5 L0 10 Z" fill="context-stroke"/>
+              </marker>
+            </defs>
+          </svg>
+        </div>
+      </div>
+    </figure>
+
+    <figure class="state-tree state-tree--standalone" aria-labelledby="lower-qubit-parameter-after">
+      <figcaption id="lower-qubit-parameter-after">After execution</figcaption>
+<pre><code class="language-plaintext"><span class="state-tree__field">_hirCallable</span>       <span class="state-tree__wire">──▶</span> <span class="state-tree__value">Apply h7</span>
+<span class="state-tree__field">_mirCallableId</span>     <span class="state-tree__wire">──▶</span> <span class="state-tree__value">c7</span>
+
+<span class="state-tree__field">_hirCallable.Parameters</span>
+<span class="state-tree__wire">└─</span> <span class="state-tree__value">[0] HirParameter target h0</span>
+   <span class="state-tree__wire">├─</span> Type        <span class="state-tree__value">Qubit</span>
+   <span class="state-tree__wire">├─</span> IsArray     <span class="state-tree__value">false</span>
+   <span class="state-tree__wire">└─</span> Ownership   <span class="state-tree__value">Borrowed</span>
+
+<span class="state-tree__field">_currentFlowState</span>
+<span class="state-tree__wire">├─</span> _hirSymbolLifetimeFrames
+<span class="state-tree__wire">│  └─</span> [0] root lifetime frame
+<span class="state-tree__wire">│     └─</span> <span class="state-tree__value">SymbolId(target)</span>
+<span class="state-tree__wire">├─</span> CurrentMirValueByHirSymbolId   <span class="state-tree__value">{}</span>
+<span class="state-tree__wire">└─</span> CurrentMirQubitByHirSymbolId
+   <span class="state-tree__wire">└─</span> [SymbolId(target)] <span class="state-tree__wire">──▶</span> <span class="state-tree__value">same object shown below</span>
+
+<span class="state-tree__field">_initialMirQubitsById</span>
+<span class="state-tree__wire">└─</span> [q0] <span class="state-tree__wire">──▶</span> <span class="state-tree__value">same object shown below</span>
+
+<span class="state-tree__field">_mirParameters</span>
+<span class="state-tree__wire">└─</span> [0] <span class="state-tree__wire">──▶</span> <span class="state-tree__value">same object shown below</span>
+
+<span class="state-tree__field">Object referenced from all three locations</span>
+<span class="state-tree__wire">└─▶</span> <span class="state-tree__value">MirQubitParameter target q0.v0</span>
+     <span class="state-tree__wire">├─</span> Id          <span class="state-tree__value">q0</span>
+     <span class="state-tree__wire">├─</span> Version     <span class="state-tree__value">v0</span>
+     <span class="state-tree__wire">├─</span> Name        <span class="state-tree__value">"target"</span>
+     <span class="state-tree__wire">├─</span> IsArray     <span class="state-tree__value">false</span>
+     <span class="state-tree__wire">├─</span> Length      <span class="state-tree__value">null</span>
+     <span class="state-tree__wire">├─</span> Ownership   <span class="state-tree__value">Borrowed</span>
+     <span class="state-tree__wire">└─</span> Origin      <span class="state-tree__value">MirHirOrigin</span>
+        <span class="state-tree__wire">├─</span> HirNodeId   <span class="state-tree__value">h0</span>
+        <span class="state-tree__wire">└─</span> Span        <span class="state-tree__value">source span of target</span>
+
+<span class="state-tree__field">_nextMirQubitVersionById</span>
+<span class="state-tree__wire">└─</span> [q0] = <span class="state-tree__value">1</span> <span class="state-tree__wire">──▶</span> next version number to allocate
+
+<span class="state-tree__field">_mirValues</span>   <span class="state-tree__value">[]</span>
+
+<span class="state-tree__field">_mirBlockBuilders[0]</span> <span class="state-tree__wire">───────────┐</span>
+<span class="state-tree__field">_currentMirBlockBuilder</span> <span class="state-tree__wire">────────┴──▶</span> <span class="state-tree__value">MirBlockBuilder b0</span>
+                                      <span class="state-tree__wire">├─</span> _arguments     <span class="state-tree__value">[]</span>
+                                      <span class="state-tree__wire">├─</span> QubitPhis      <span class="state-tree__value">[]</span>
+                                      <span class="state-tree__wire">├─</span> Instructions   <span class="state-tree__value">[]</span>
+                                      <span class="state-tree__wire">└─</span> Terminator     <span class="state-tree__value">null</span></code></pre>
+    </figure>
+
+    <p>
+      <code>_initialMirQubitsById[q0]</code>, <code>CurrentMirQubitByHirSymbolId[SymbolId(target)]</code>, and <code>_mirParameters[0]</code> contain the same <code>MirQubitParameter target q0.v0</code> object.<br>
+      This function only registers a parameter and emits no instruction, so <code>b0</code> remains empty.<br>
+      <code>q0.v1</code> is not created here; it is created when <code>X(target)</code> in the body changes the qubit state.
+    </p>
+  </article>
+
+  <article class="function-trace" id="lower-statements">
+    <h2><code>LowerStatements()</code></h2>
+    <p>
+      This function traverses a list of HIR statements in order and passes each statement to <code>LowerStatement()</code>.<br>
+      The trace below completes <code>Next</code> first, then moves on to <code>Work</code>.
+    </p>
+
+    <h3>1. Lowering the <code>Next</code> body</h3>
+
+<pre><code class="language-qora">function Next(value: int): int
+{
+    return value + 1;
+}</code></pre>
+
+    <p>
+      <code>hirStatements</code> contains only <code>return value + 1;</code>, and the current block is <code>b0</code> at entry.<br>
+      Therefore, the outer <code>for</code> loop runs once.
+    </p>
+
+<pre><code class="language-csharp">private void LowerStatements(IReadOnlyList&lt;HirStatement&gt; hirStatements)
+{
+    /* Actual input when lowering the Next body
+    ├─ hirStatements = [return value + 1]
+    ├─ hirStatements.Count = 1
+    └─ _currentMirBlockBuilder = b0 */
+    for (var hirStatementIndex = 0;
+         hirStatementIndex &lt; hirStatements.Count;
+         hirStatementIndex++)
+    {
+        /* First iteration
+        ├─ hirStatementIndex = 0
+        ├─ hirStatements[0] = return value + 1
+        └─ current block = b0
+
+        b0 is open, so the null branch below does not run. */
+        if (_currentMirBlockBuilder is null)
+        {
+            /* This runs only when an earlier statement ended the current path
+               while statements remain. Remaining statements are not emitted as MIR;
+               when traceSink is present, their declaration symbols are marked unreachable. */
+            for (;
+                 hirStatementIndex &lt; hirStatements.Count;
+                 hirStatementIndex++)
+            {
+                MarkUnreachableDeclarations(
+                    hirStatements[hirStatementIndex]);
+            }
+            return;
+        }
+
+        /* Pass the return statement to LowerStatement().
+
+        Before the call                 After the call
+        current block = b0              b0.Terminator = return %v2
+                                        current block = null */
+        <a class="code-call-link" href="#lower-statement" title="LowerStatement Execution trace">LowerStatement</a>(hirStatements[hirStatementIndex]);
+    }
+
+    /* hirStatementIndex advances to 1.
+       Because 1 &lt; hirStatements.Count(1) is false, the loop ends.
+       The function therefore exits with the current block set to null. */
+}</code></pre>
+
+    <figure class="mermaid-card">
+      <figcaption><span>NEXT</span> Result after lowering one statement</figcaption>
+<pre class="mermaid chapter-10-mermaid mermaid--vertical">
+flowchart TB
+  accTitle: How LowerStatements processes the single return statement in Next
+  accDescr: The function starts at b0, passes return statement 0 in hirStatements to LowerStatement, records the return in b0, and leaves the current block null.
+
+  before["Before the call<br/><br/>hirStatements = [return value + 1]<br/>current block = b0"]:::sourceCode
+  statement["hirStatementIndex = 0<br/>hirStatements[0]<br/><br/>return value + 1;"]:::sourceCode
+  lower["LowerStatement(return)<br/><br/>b0.Terminator = return %v2"]:::sourceCode
+  after["After the call<br/><br/>current block = null"]:::sourceCode
+
+  before --> statement
+  statement --> lower
+  lower --> after
+
+  classDef sourceCode font-family:monospace,font-size:14px;
+</pre>
+    </figure>
+
+    <h3>2. Lowering the <code>Work</code> body</h3>
+
+<pre><code class="language-qora">operation Work()
+{
+    var values: int[] = [0];
+    use q = Qubit[1];
+
+    values[0] = Next(values[0]);
+
+    if (values[0] == 1)
+    {
+        X(q[0]);
+    }
+
+    H(q[0]);
+}</code></pre>
+
+    <p>
+      The first call receives the five top-level statements of <code>Work</code>.<br>
+      While that call lowers the <code>if</code>, it passes the true body and empty false body back into the function. Thus, <code>LowerStatements()</code> runs three times in total while lowering <code>Work</code>.
+    </p>
+
+<pre><code class="language-csharp">private void LowerStatements(IReadOnlyList&lt;HirStatement&gt; hirStatements)
+{
+    /* The same LowerStatements() body is entered three times while lowering Work.
+
+    First call — top-level Work body
+    ├─ hirStatements = [var values, use q, array assignment, if, H]
+    ├─ starting block = b0
+    ├─ 5 iterations
+    └─ While lowering the if at index 3, the two calls below run.
+
+       LowerStatement(if)
+       └─ LowerIf()
+          ├─ LowerScopedBranch(b1, true body)
+          │  └─ Second call: LowerStatements([X(q[0])])
+          └─ LowerScopedBranch(b2, false body)
+             └─ Third call: LowerStatements([])
+
+    Second call — true body of if
+    ├─ hirStatements = [X(q[0])]
+    ├─ starting block = b1
+    └─ 1 iteration
+
+    Third call — false body of if
+    ├─ hirStatements = []
+    ├─ starting block = b2
+    └─ 0 iterations */
+    for (var hirStatementIndex = 0;
+         hirStatementIndex &lt; hirStatements.Count;
+         hirStatementIndex++)
+    {
+        /* The first and second calls have an open current block,
+           so the null branch below does not run.
+
+        First call
+        ├─ current block = b0 when indices 0 through 3 begin
+        └─ current block = b3 when index 4 begins
+
+        Second call
+        └─ current block = b1 when index 0 begins
+
+        The third call has hirStatements.Count = 0,
+        so the for-loop body does not run at all. */
+        if (_currentMirBlockBuilder is null)
+        {
+            /* This runs only when an earlier statement ended the current path
+               while statements remain. Remaining statements are not emitted as MIR;
+               when traceSink is present, their declaration symbols are marked unreachable. */
+            for (;
+                 hirStatementIndex &lt; hirStatements.Count;
+                 hirStatementIndex++)
+            {
+                MarkUnreachableDeclarations(
+                    hirStatements[hirStatementIndex]);
+            }
+            return;
+        }
+
+        /* Execution flow of the first call
+        ├─ index 0: var              current block = b0 afterward
+        ├─ index 1: use              current block = b0 afterward
+        ├─ index 2: array assignment current block = b0 afterward
+        ├─ index 3: pass if to LowerStatement().
+        │
+        │  Before this LowerStatement(if) call returns,
+        │  the first LowerStatements() call pauses here.
+        │
+        │  Second call
+        │  ├─ hirStatementIndex = 0
+        │  ├─ Pass X(q[0]) to LowerStatement().
+        │  └─ Return with current block = b1.
+        │
+        │  Third call
+        │  ├─ hirStatements.Count = 0
+        │  ├─ Do not execute the for-loop body.
+        │  └─ Return with current block = b2.
+        │
+        │  After both calls return, LowerIf() connects b1 and b2 to b3.
+        │  It sets the current block to b3, then returns to index 3 of the first call.
+        └─ index 4: current block = b3 after lowering H */
+        <a class="code-call-link" href="#lower-statement" title="LowerStatement Execution trace">LowerStatement</a>(hirStatements[hirStatementIndex]);
+    }
+
+    /* Return order
+    1. The second call returns, leaving b1 current.
+    2. The third call returns, leaving b2 current.
+    3. The first call returns, leaving b3 current. */
+}</code></pre>
+
+    <h4>Statements selected by <code>hirStatementIndex</code> in the top-level <code>Work</code> list</h4>
+
+    <figure class="mermaid-card">
+      <figcaption><span>WORK</span> Traversal of the top-level <code>hirStatements</code> list</figcaption>
+<pre class="mermaid chapter-10-mermaid mermaid--vertical">
+flowchart TB
+  accTitle: hirStatementIndex and selected statements in the top-level Work body
+  accDescr: As hirStatementIndex advances from 0 through 4, it selects the variable declaration, qubit declaration, array assignment, if statement, and H call from hirStatements in order.
+
+  i0["hirStatementIndex = 0<br/>hirStatements[0]<br/><br/>var values: int[] = [0];"]:::sourceCode
+  i1["hirStatementIndex = 1<br/>hirStatements[1]<br/><br/>use q = Qubit[1];"]:::sourceCode
+  i2["hirStatementIndex = 2<br/>hirStatements[2]<br/><br/>values[0] = Next(values[0]);"]:::sourceCode
+  i3["hirStatementIndex = 3<br/>hirStatements[3]<br/><br/>if (values[0] == 1) { X(q[0]); }"]:::sourceCode
+  i4["hirStatementIndex = 4<br/>hirStatements[4]<br/><br/>H(q[0]);"]:::sourceCode
+
+  i0 --> i1
+  i1 --> i2
+  i2 --> i3
+  i3 --> i4
+
+  classDef sourceCode font-family:monospace,font-size:14px;
+</pre>
+    </figure>
+
+    <h4>How the current block moves while lowering <code>Work</code></h4>
+
+    <figure class="mermaid-card">
+      <figcaption><span>WORK</span> Current-block movement</figcaption>
+<pre class="mermaid chapter-10-mermaid mermaid--vertical">
+flowchart TB
+  accTitle: Path taken by the current MIR block while lowering Work statements
+  accDescr: Declarations, the assignment, and the if condition are lowered in b0. The true path executes X in b1, while the false path passes through b2. Both paths merge in b3, where H is executed.
+
+  block0["b0<br/><br/>var values: int[] = [0];<br/>use q = Qubit[1];<br/>values[0] = Next(values[0]);<br/>if (values[0] == 1)"]:::sourceCode
+  block1["b1 (true path)<br/><br/>X(q[0]);"]:::sourceCode
+  block2["b2 (false path)"]:::sourceCode
+  block3["b3<br/><br/>H(q[0]);"]:::sourceCode
+
+  block0 --> block1
+  block0 --> block2
+  block1 --> block3
+  block2 --> block3
+
+  classDef sourceCode font-family:monospace,font-size:14px;
+</pre>
+    </figure>
+
+  </article>
+
+  <article class="function-trace" id="lower-statement">
+    <h2><code>LowerStatement()</code></h2>
+    <p>
+      This function identifies the kind of one HIR statement and forwards it to the lowering function responsible for that kind.<br>
+      Its own work is limited to selecting exactly one branch of the <code>switch</code> below, calling that branch's helper once, and returning.
+    </p>
+
+    <h3>Every statement received by this function in the common example</h3>
+
+<pre><code class="language-qora">function Next(value: int): int
+{
+    return value + 1;
+}
+
+operation Work()
+{
+    var values: int[] = [0];
+    use q = Qubit[1];
+
+    values[0] = Next(values[0]);
+
+    if (values[0] == 1)
+    {
+        X(q[0]);
+    }
+
+    H(q[0]);
+}</code></pre>
+
+    <p>
+      <code>LowerStatement()</code> does not receive the entire program above at once; each call receives exactly one statement.<br>
+      In the common example it runs seven times: once for the return in <code>Next</code> and six times for statements in <code>Work</code>.<br>
+      The <code>switch</code> below checks only the runtime HIR type of the current <code>hirStatement</code> argument. The order of the cases is not execution order, and exactly one matching case runs per call.
+    </p>
+
+<pre><code class="language-plaintext">1. Next: return value + 1
+
+2. Work: var values = [0]
+3. Work: use q = Qubit[1]
+4. Work: values[0] = Next(values[0])
+5. Work: if (values[0] == 1)
+    6. True body: X(q[0])
+7. Work: H(q[0])</code></pre>
+
+    <p>
+      Item 6, <code>X(q[0])</code>, is a nested execution that occurs while item 5, the <code>if</code>, is being lowered.<br>
+      In contrast, <code>Next(values[0])</code> inside assignment 4 is an expression, so it does not count as a separate <code>LowerStatement()</code> execution.
+    </p>
+
+<pre><code class="language-csharp">private void LowerStatement(HirStatement hirStatement)
+{
+    switch (hirStatement)
+    {
+        // Selected by the use q statement in Work.
+        case HirQubitDeclarationStatement hirQubitDeclaration:
+            LowerQubitDeclaration(hirQubitDeclaration);
+            return;
+
+        // Selected by the var values statement in Work.
+        case HirVariableDeclarationStatement hirDeclaration:
+            LowerDeclaration(hirDeclaration);
+            return;
+
+        // Selected by the values[0] assignment in Work.
+        case HirAssignmentStatement hirAssignment:
+            LowerAssignment(hirAssignment);
+            return;
+
+        // Selected by the H call in Work.
+        // The X call inside if selects the same branch while lowering the nested body.
+        case HirCallStatement hirCallStatement:
+            LowerStatementCall(hirCallStatement);
+            return;
+
+        // Selected by the if statement in Work.
+        case HirIfStatement hirIf:
+            LowerIf(hirIf);
+            return;
+
+        case HirForStatement hirFor:
+            LowerFor(hirFor);
+            return;
+
+        case HirWhileStatement hirWhile:
+            LowerWhile(hirWhile);
+            return;
+
+        case HirRepeatStatement hirRepeat:
+            LowerRepeat(hirRepeat);
+            return;
+
+        // Selected by the return statement in Next.
+        case HirReturnStatement hirReturn:
+            LowerReturn(hirReturn);
+            return;
+
+        default:
+            throw MirLoweringError(
+                $"unsupported HIR statement {hirStatement.GetType().Name}");
+    }
+}</code></pre>
+
+    <h3>Following the code in execution order</h3>
+    <ol class="execution-steps">
+      <li><strong>Inspect the runtime type of <code>hirStatement</code>.</strong> Each of the seven calls receives the HIR type corresponding to its current statement.</li>
+      <li><strong>Select one matching case.</strong> The actual statements and selected helpers are listed below.</li>
+      <li><strong>Return immediately after calling the helper.</strong> The <code>return</code> at the end of each case prevents the same statement from being processed by another case.</li>
+    </ol>
+
+    <h3>Branches selected in the common example</h3>
+
+    <div class="panel">
+      <table>
+        <thead><tr><th>Call</th><th>Qora statement received</th><th>Matching HIR type</th><th>Helper invoked</th></tr></thead>
+        <tbody>
+          <tr><td>1</td><td><code>return value + 1</code></td><td><code>HirReturnStatement</code></td><td><code>LowerReturn()</code></td></tr>
+          <tr><td>2</td><td><code>var values = [0]</code></td><td><code>HirVariableDeclarationStatement</code></td><td><code>LowerDeclaration()</code></td></tr>
+          <tr><td>3</td><td><code>use q = Qubit[1]</code></td><td><code>HirQubitDeclarationStatement</code></td><td><code>LowerQubitDeclaration()</code></td></tr>
+          <tr><td>4</td><td><code>values[0] = Next(values[0])</code></td><td><code>HirAssignmentStatement</code></td><td><code>LowerAssignment()</code></td></tr>
+          <tr><td>5</td><td><code>if (values[0] == 1)</code></td><td><code>HirIfStatement</code></td><td><code>LowerIf()</code></td></tr>
+          <tr><td>6, 7</td><td><code>X(q[0])</code>, <code>H(q[0])</code></td><td><code>HirCallStatement</code></td><td><code>LowerStatementCall()</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>
+      All seven calls invoke one helper and then return without a value.
+    </p>
+  </article>
+
+  <nav class="chapter-nav" aria-label="Document navigation (bottom)">
+    <div class="group"><a href="chapter-10.html">← Back to Chapter 10</a><a href="index.html#chapters">All chapters</a></div>
+  </nav>
+
+  <footer>Qora Compiler Developer Manual · Chapter 10 Function Traces</footer>
+</main>
+</body>
+</html>

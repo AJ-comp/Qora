@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Qora Compiler Developer Manual — Complete Topic Index</title>
+<link rel="stylesheet" href="developer.css">
+<script src="developer-syntax.js" defer></script>
+</head>
+<body class="index-page">
+<nav class="language-switch" aria-label="Language"><strong>English</strong><span aria-hidden="true">·</span><a href="../ko/index.html">한국어</a><span aria-hidden="true">·</span><a href="../ja/index.html">日本語</a></nav>
+<a class="skip-link" href="#main-content">Skip to main content</a>
+<header class="hero">
+  <div class="tag">Qora · Compiler Developer Manual</div>
+  <h1>Qora Compiler Developer Manual</h1>
+  <p>A guide to the compiler's complete flow through one example</p>
+</header>
+
+<main class="wrap" id="main-content">
+  <p class="lead">
+    This manual follows one Qora source program through HIR, MIR, and MIR analysis.<br>
+    Rather than listing every helper and constructor argument, it focuses on what each stage receives, creates, and passes to the next stage.
+  </p>
+
+  <div class="callout good">
+    <span class="h">Current coverage</span>
+    Detailed chapters are available for Chapters 9–17.<br>
+    The remaining chapters stay in the index to show the topics planned for later coverage.
+  </div>
+
+  <div class="callout">
+    <span class="h">Project roadmap</span>
+    The current implementation status and upcoming work are listed in the <a href="../../TODO.md">Qora roadmap</a>.
+  </div>
+
+  <h2 id="difference">Scope of this manual</h2>
+
+  <p>
+    This developer manual shows, in order, how the example below changes as it passes through each compiler stage.<br>
+    The chapter index and implementation call-trace links remain connected within this manual.
+  </p>
+
+  <h2 id="example">Running example</h2>
+
+<pre><code class="language-qora">function Next(value: int): int
+{
+    return value + 1;
+}
+
+operation Work()
+{
+    var values: int[] = [0];
+    use q = Qubit[1];
+
+    values[0] = Next(values[0]);
+
+    if (values[0] == 1)
+    {
+        X(q[0]);
+    }
+
+    H(q[0]);
+}</code></pre>
+
+  <div class="flow">
+    Qora Source <span>→</span> HIR <span>→</span> MIR Callables <span>→</span>
+    MirProgram <span>→</span> MirSnapshot <span>→</span> MIR Analyses
+  </div>
+
+  <p>
+    Each chapter answers one question from this flow.<br>
+    For example, Chapter 13 focuses on qubit versions, Chapter 15 on branch joins, and Chapter 17 on the CFG. Details of later stages appear only when the corresponding chapter needs them.
+  </p>
+
+  <h2 id="toc">Complete learning path</h2>
+
+  <div class="parts">
+    <section class="part">
+      <span class="part-number">Part I · Entry</span>
+      <h3>From source text to a compilation request</h3>
+      <p>Chapters 1–3 · Compilation requests and AST</p>
+    </section>
+
+    <section class="part">
+      <span class="part-number">Part II · HIR</span>
+      <h3>Attach precise meaning to source structure</h3>
+      <p>Chapters 4–8 · HIR, scope, symbols, and semantic analysis</p>
+    </section>
+
+    <section class="part">
+      <span class="part-number">Part III · MIR Lowering</span>
+      <h3>Lower into a form suitable for execution and analysis</h3>
+      <p>Chapters 9–15 · Callables, SSA, storage, qubit versions, and branches</p>
+    </section>
+
+    <section class="part">
+      <span class="part-number">Part IV · MIR Analysis</span>
+      <h3>Derive required facts from completed MIR</h3>
+      <p>Chapters 16–20 · Snapshots, CFG, value, range, and effect analysis</p>
+    </section>
+
+    <section class="part">
+      <span class="part-number">Part V · Transformations and Targets</span>
+      <h3>From MIR to executable output</h3>
+      <p>Chapters 21–24 · Internal adjoints, uncomputation, and targets</p>
+    </section>
+
+    <section class="part">
+      <span class="part-number">Part VI · Development</span>
+      <h3>Add and verify features</h3>
+      <p>Chapters 25–28 · Feature development and verification</p>
+    </section>
+  </div>
+
+  <h2 id="chapters">Topics by chapter</h2>
+
+  <section class="chapter" id="c1">
+    <h3>1. Repository and Compilation Entry Point <span class="status future">Planned</span></h3>
+    <p class="meta">Where the executable meets Core and where a compilation request begins.</p>
+  </section>
+
+  <section class="chapter" id="c2">
+    <h3>2. Compilation Request and Result <span class="status future">Planned</span></h3>
+    <p class="meta">How source and options become one compilation result.</p>
+  </section>
+
+  <section class="chapter" id="c3">
+    <h3>3. From Text to AST <span class="status future">Planned</span></h3>
+    <p class="meta">How source text passes through the parser and becomes a syntax tree.</p>
+  </section>
+
+  <section class="chapter" id="c4">
+    <h3>4. From AST to Immutable HIR <span class="status future">Planned</span></h3>
+    <p class="meta">How syntax structure becomes compiler-owned HIR.</p>
+  </section>
+
+  <section class="chapter" id="c5">
+    <h3>5. Node IDs and Source Locations <span class="status future">Planned</span></h3>
+    <p class="meta">How HIR node identity is linked to the original source location.</p>
+  </section>
+
+  <section class="chapter" id="c6">
+    <h3>6. Scope and Symbols <span class="status future">Planned</span></h3>
+    <p class="meta">How declarations and name uses resolve to exact symbols.</p>
+  </section>
+
+  <section class="chapter" id="c7">
+    <h3>7. Name Resolution and Call Targets <span class="status future">Planned</span></h3>
+    <p class="meta">How <code>Next(values[0])</code> finds the exact function declaration.</p>
+  </section>
+
+  <section class="chapter" id="c8">
+    <h3>8. Type Checking and the Final HIR Artifact <span class="status future">Planned</span></h3>
+    <p class="meta">How type and call contracts are checked before fixing the MIR input.</p>
+  </section>
+
+  <section class="chapter" id="c9">
+    <h3>9. HIR→MIR Boundary <span class="status">Available</span></h3>
+    <p class="meta">The high-level boundary through which one final HIR artifact enters MIR lowering.</p>
+    <a class="chapter-link" href="chapter-09.html">Read Chapter 9 →</a>
+  </section>
+
+  <section class="chapter" id="c10">
+    <h3>10. Lowering One Callable to MIR <span class="status">Available</span></h3>
+    <p class="meta">How one HIR callable becomes a <code>MirCallable</code> with blocks and current state.</p>
+    <a class="chapter-link" href="chapter-10.html">Read Chapter 10 →</a>
+    <a class="chapter-link" href="chapter-10-call-flow.html">Trace the implementation →</a>
+  </section>
+
+  <section class="chapter" id="c11">
+    <h3>11. Classical Values and SSA Versions <span class="status">Available</span></h3>
+    <p class="meta">How constants, computed results, and function returns produce new MIR values.</p>
+    <a class="chapter-link" href="chapter-11.html">Read Chapter 11 →</a>
+  </section>
+
+  <section class="chapter" id="c12">
+    <h3>12. Storage and Array State <span class="status">Available</span></h3>
+    <p class="meta">Why an array's identity is separate from its changing value history.</p>
+    <a class="chapter-link" href="chapter-12.html">Read Chapter 12 →</a>
+  </section>
+
+  <section class="chapter" id="c13">
+    <h3>13. Qubit IDs and Versions <span class="status">Available</span></h3>
+    <p class="meta">How one qubit advances to a new version each time it passes through a gate.</p>
+    <a class="chapter-link" href="chapter-13.html">Read Chapter 13 →</a>
+  </section>
+
+  <section class="chapter" id="c14">
+    <h3>14. Basic Blocks and Terminators <span class="status">Available</span></h3>
+    <p class="meta">Why ordinary MIR instructions are separated from the final control-transfer instruction of a block.</p>
+    <a class="chapter-link" href="chapter-14.html">Read Chapter 14 →</a>
+  </section>
+
+  <section class="chapter" id="c15">
+    <h3>15. Splitting and Joining State at a Conditional <span class="status">Available</span></h3>
+    <p class="meta">How current qubit versions are tracked independently on true and false paths, then joined.</p>
+    <a class="chapter-link" href="chapter-15.html">Read Chapter 15 →</a>
+  </section>
+
+  <section class="chapter" id="c16">
+    <h3>16. MirSnapshot and the Analysis Basis <span class="status">Available</span></h3>
+    <p class="meta">Why the current MIR and the analysis entry point that reads it are fixed in one snapshot.</p>
+    <a class="chapter-link" href="chapter-16.html">Read Chapter 16 →</a>
+  </section>
+
+  <section class="chapter" id="c17">
+    <h3>17. CFG Successors and Predecessors <span class="status">Available</span></h3>
+    <p class="meta">How terminator targets become forward and reverse block relations.</p>
+    <a class="chapter-link" href="chapter-17.html">Read Chapter 17 →</a>
+  </section>
+
+  <section class="chapter" id="c18">
+    <h3>18. Reachability and Dominance <span class="status future">Planned</span></h3>
+    <p class="meta">How reachability, dominators, and post-dominators are computed over the CFG.</p>
+  </section>
+
+  <section class="chapter" id="c19">
+    <h3>19. Value, Memory, Path, and Range Analysis <span class="status future">Planned</span></h3>
+    <p class="meta">How current values, storage state, path conditions, and array-index safety are computed.</p>
+  </section>
+
+  <section class="chapter" id="c20">
+    <h3>20. Call Graph and Quantum Effects <span class="status future">Planned</span></h3>
+    <p class="meta">How callable relationships and qubit read/write effects are summarized.</p>
+  </section>
+
+  <section class="chapter" id="c21">
+    <h3>21. Compiler-Internal Adjoints <span class="status future">Planned</span></h3>
+    <p class="meta">How reverse callables required outside user syntax are created in MIR.</p>
+  </section>
+
+  <section class="chapter" id="c22">
+    <h3>22. Boundaries of Automatic Uncomputation <span class="status future">Expansion planned</span></h3>
+    <p class="meta">How cleanup analysis, planning, and MIR transformation should be ordered.</p>
+  </section>
+
+  <section class="chapter" id="c23">
+    <h3>23. Target IR Lowering <span class="status future">Planned</span></h3>
+    <p class="meta">How target-independent MIR becomes a backend-specific model.</p>
+  </section>
+
+  <section class="chapter" id="c24">
+    <h3>24. OpenQASM Emission <span class="status future">Planned</span></h3>
+    <p class="meta">How the OpenQASM target model is emitted as final text.</p>
+  </section>
+
+  <section class="chapter" id="c25">
+    <h3>25. Adding Syntax and Semantic Rules <span class="status future">Planned</span></h3>
+    <p class="meta">The development flow for connecting a feature from syntax through HIR semantic checks.</p>
+  </section>
+
+  <section class="chapter" id="c26">
+    <h3>26. Adding MIR Instructions and Analyses <span class="status future">Planned</span></h3>
+    <p class="meta">The development flow for connecting a new MIR instruction to lowering, validation, and analysis.</p>
+  </section>
+
+  <section class="chapter" id="c27">
+    <h3>27. Adding Target Features <span class="status future">Planned</span></h3>
+    <p class="meta">How backend constraints remain at the target boundary instead of leaking into HIR or MIR.</p>
+  </section>
+
+  <section class="chapter" id="c28">
+    <h3>28. Testing and Adversarial Verification <span class="status future">Planned</span></h3>
+    <p class="meta">How valid examples and counterexamples are used together to verify compiler changes.</p>
+  </section>
+
+  <footer>
+    Qora Compiler Developer Manual · Complete Topic Index
+  </footer>
+</main>
+</body>
+</html>

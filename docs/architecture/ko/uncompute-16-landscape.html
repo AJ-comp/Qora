@@ -124,12 +124,12 @@
 
   <nav class="doc-links" aria-label="코스 내비게이션">
     <a class="doc-link" href="uncompute-15-two-runtimes.html">← 15. 왜 정적 컴파일인가 — 두 개의 런타임</a>
-    <a class="doc-link" href="datasheet.html#s8">코스 목차</a>
+    <a class="doc-link" href="index.html#uncompute-course">코스 목차</a>
   </nav>
   <div class="call">
     <span class="h">Qora 구현 상태</span>
-    Qora의 source→HIR→SSA/CFG MIR→typed OpenQASM pipeline과 MIR-only inverse materializer는 구현되어 있습니다.<br>
-    반면에 이 장에서 비교하는 자동 cleanup scheduler와 injector는 아직 roadmap 단계이므로, Qora 항목은 현재 기능과 장기 목표를 구분해서 읽어야 합니다.
+    Qora의 source→HIR→SSA/CFG MIR→typed OpenQASM pipeline과 MIR 분석 기반은 구현되어 있습니다.<br>
+    반면에 이 장에서 비교하는 자동 cleanup scheduler와 역연산 생성은 함께 구현할 향후 계획이므로, Qora 항목은 현재 기능과 목표를 구분해서 읽어야 합니다.
   </div>
   <p>
     <a href="uncompute-15-two-runtimes.html">15장</a>은 마이크로초의 코히어런스 창이 호스트의
@@ -323,7 +323,7 @@ operation Main(){
 }</code></pre>
   <p>
     사용자 소스에는 역연산 표기가 없습니다.<br>
-    목표 compiler의 내부 MIR에서는 <code>a[1]</code>의 정확한 사망점에만 <code>MirQuantumApply(Target=FlipOne, Functors=[MirFunctor.Adjoint], Operands=[a[1]])</code> 요청을 주입하게 됩니다.
+    목표 compiler에서는 scheduler가 <code>a[1]</code>의 정확한 사망점에만 <code>FlipOne</code> 본문의 역을 typed MIR로 생성하게 됩니다.
   </p>
   <p>
     Classiq Qmod에서 배열은 수명상 한 덩어리라서, 같은 상황이 오면 사용자가 배열을 수동으로
@@ -357,7 +357,7 @@ operation Main(){
     <table class="spec">
       <tr><th>비교 항목</th><th>Qora</th><th>Classiq Qmod (같은 접근의 상용 시스템)</th></tr>
       <tr><td class="k">앤실라 식별</td><td>MIR에 추론 근거가 있음 · scheduler 판정은 roadmap</td><td>추론 — 같은 접근</td></tr>
-      <tr><td class="k">청소 메커니즘</td><td>MIR-only 역연산 실체화 구현 · schedule과 자동 주입은 roadmap</td><td>역연산 주입 + 합성 엔진이 배치 결정</td></tr>
+      <tr><td class="k">청소 메커니즘</td><td>scheduler와 역연산 생성 모두 향후 계획</td><td>역연산 주입 + 합성 엔진이 배치 결정</td></tr>
       <tr><td class="k">루프/조건문의 청소</td><td>v1 목표는 보수적 거부 (<a href="uncompute-12-loops.html">7</a>·<a href="uncompute-14-limits.html">14장</a> — 완화 예정)</td><td>복합문 통째 역변환으로 지원</td></tr>
       <tr><td class="k">원소 단위 정밀도</td><td><code>MirQubitAccess</code>가 원소를 구분 · scheduler와 리포트는 roadmap</td><td>배열은 수명상 한 덩어리 — 사용자가 수동 분할</td></tr>
       <tr><td class="k">Y·CY 취급</td><td>MIR에서 <code>NonQfree</code> 표시 · v1 목표는 차단 (<a href="uncompute-10-y-gate.html">10장</a>)</td><td>허용하되 얽힌 상대에게 비치환 연산 금지 — 다른 방식의 방어</td></tr>
@@ -381,11 +381,11 @@ operation Main(){
 
   <nav class="doc-links" aria-label="코스 내비게이션">
     <a class="doc-link" href="uncompute-15-two-runtimes.html">← 15. 왜 정적 컴파일인가 — 두 개의 런타임</a>
-    <a class="doc-link" href="datasheet.html#s8">코스 목차</a>
+    <a class="doc-link" href="index.html#uncompute-course">코스 목차</a>
   </nav>
 
   <footer>
-    자동 uncomputation 코스 16/16 · <a href="datasheet.html#s8">코스 목차</a> ·
+    자동 uncomputation 코스 16/16 · <a href="index.html#uncompute-course">코스 목차</a> ·
     <a href="datasheet.html">컴파일러 데이터시트</a>
   </footer>
 

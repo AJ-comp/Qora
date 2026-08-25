@@ -21,7 +21,6 @@ public sealed class SemanticArtifactOwnershipTests
 
         Assert.Same(analyzed.Source, mir.HirArtifact.Source);
         Assert.Same(analyzed, mir.HirArtifact);
-        Assert.Equal(MirStage.Lowered, mir.Stage);
         Assert.Single(mir.Program.Callables);
     }
 

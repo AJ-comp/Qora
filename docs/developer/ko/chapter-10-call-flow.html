@@ -1,0 +1,1980 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>10. 구현 함수·생성자 따라가기 — Qora 컴파일러 개발자 매뉴얼</title>
+<link rel="stylesheet" href="developer.css?v=20260825-paragraph-spacing">
+<script src="developer-syntax.js" defer></script>
+<script src="chapter-10-call-flow.js?v=20260823-top-aligned-cards" defer></script>
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11.16.0/dist/mermaid.esm.min.mjs";
+
+  mermaid.initialize({
+    startOnLoad: false,
+    securityLevel: "strict",
+    htmlLabels: false,
+    markdownAutoWrap: false,
+    theme: "base",
+    fontFamily: "-apple-system, BlinkMacSystemFont, Segoe UI, Apple SD Gothic Neo, Malgun Gothic, sans-serif",
+    themeVariables: {
+      background: "#fbfcff",
+      primaryColor: "#f4f1ff",
+      primaryTextColor: "#2c2350",
+      primaryBorderColor: "#7660c8",
+      lineColor: "#64748b",
+      edgeLabelBackground: "#ffffff",
+      fontSize: "15px"
+    },
+    flowchart: {
+      curve: "linear",
+      nodeSpacing: 24,
+      rankSpacing: 34,
+      wrappingWidth: 520,
+      useMaxWidth: true
+    }
+  });
+
+  await mermaid.run({ querySelector: ".chapter-10-mermaid" });
+</script>
+</head>
+<body class="function-flow-page">
+<nav class="language-switch" aria-label="언어"><a href="../en/chapter-10-call-flow.html">English</a><span aria-hidden="true">·</span><strong>한국어</strong><span aria-hidden="true">·</span><a href="../ja/chapter-10-call-flow.html">日本語</a></nav>
+<a class="skip-link" href="#main-content">본문으로 건너뛰기</a>
+<header class="hero">
+  <div class="tag">Qora · Compiler Developer Manual · Chapter 10 Lab</div>
+  <h1>구현 함수·생성자 따라가기</h1>
+  <p>10장의 실제 C# 함수 하나를 선택해 입력값부터 반환 결과까지 따라가는 페이지</p>
+</header>
+
+<main class="wrap" id="main-content">
+  <nav class="chapter-nav" aria-label="문서 이동(상단)">
+    <div class="group"><a href="chapter-10.html">← 10장으로 돌아가기</a><a href="index.html#chapters">전체 목차</a></div>
+  </nav>
+
+  <article class="function-trace" id="lower-hir-artifact">
+    <h2><code>LowerHirArtifact()</code></h2>
+    <p>
+      최종 HIR의 callable을 하나씩 MIR로 바꾸고, 결과를 최초 <code>MirSnapshot</code>으로 묶는 함수입니다.<br>
+      이번 추적에서는 <code>foreach</code>가 <code>Next</code>와 <code>Work</code>를 차례로 처리합니다.
+    </p>
+
+    <h3>이 함수가 처음 받는 Qora 프로그램</h3>
+
+<pre><code class="language-qora">function Next(value: int): int
+{
+    return value + 1;
+}
+
+operation Work()
+{
+    var values: int[] = [0];
+    use q = Qubit[1];
+
+    values[0] = Next(values[0]);
+
+    if (values[0] == 1)
+    {
+        X(q[0]);
+    }
+
+    H(q[0]);
+}</code></pre>
+
+
+    <p>
+      이 함수는 아직 배열 선언이나 <code>if</code> 같은 개별 문장을 직접 처리하지 않습니다.<br>
+      먼저 프로그램에서 두 선언을 꺼내 <code>Next h6</code>과 <code>Work h44</code>라는 두 callable로 봅니다. <code>Work</code> 안의 <code>Next(values[0])</code>은 새로운 세 번째 callable이 아니라, 이미 목록에 있는 <code>Next h6</code>을 호출하는 표현식입니다.<br>
+      또한 실행을 시작할 수 있는 operation은 <code>Work</code>이므로 <code>EntryCallable</code>도 <code>Work h44</code>입니다.
+    </p>
+
+    <div class="callout">
+      <span class="h">공통 예제의 호출 직전</span>
+      <code>hirArtifact.Source.Program.Callables = [Next h6, Work h44]</code><br>
+      <code>hirArtifact.Source.Program.EntryCallable = Work h44</code><br>
+      <code>traceSink = null</code>
+    </div>
+
+<pre><code class="language-csharp">private static MirSnapshot LowerHirArtifact(
+    HirSemanticArtifact hirArtifact,
+    IMirLoweringTraceSink? traceSink)
+{
+    // hirArtifact에는 의미 분석이 끝난 최종 HIR이 들어 있습니다.
+    // Callables = [Next h6, Work h44]
+    // EntryCallable = Work h44
+    ArgumentNullException.ThrowIfNull(hirArtifact);
+
+    var hirSnapshot = hirArtifact.Source;
+    var hirProgram = hirSnapshot.Program;
+
+    // 예제값: hirEntryCallable = Work h44
+    var hirEntryCallable = hirProgram.EntryCallable
+        ?? throw new InvalidOperationException(
+            "validated HIR must contain an operation before MIR lowering");
+
+    // 아직 변환한 callable이 없으므로 두 값 모두 비어 있습니다.
+    var mirCallables = new List&lt;MirCallable&gt;();
+    MirCallable? mirEntryCallable = null;
+
+    foreach (var hirCallable in hirProgram.Callables)
+    {
+        // 첫 반복: hirCallable = Next h6
+        // 둘째 반복: hirCallable = Work h44
+        // 반복마다 새 lowerer를 만들기 때문에 두 callable의 작업 상태는 섞이지 않습니다.
+        var mirCallableLowerer = new <a class="code-call-link" href="#callable-lowerer-constructor" title="HirCallableToMirLowerer 생성자 실행 추적">HirCallableToMirLowerer</a>(
+            hirCallable,
+            hirArtifact,
+            traceSink);
+
+        // 첫 반복 결과: mirCallable = Next c6
+        // 둘째 반복 결과: mirCallable = Work c44
+        var mirCallable = mirCallableLowerer.<a class="code-call-link" href="#lower-to-mir-callable" title="LowerToMirCallable 실행 추적">LowerToMirCallable</a>();
+
+        // 첫 반복 뒤: mirCallables = [Next c6]
+        // 둘째 반복 뒤: mirCallables = [Next c6, Work c44]
+        mirCallables.Add(mirCallable);
+
+        // Next는 진입 operation이 아니므로 첫 반복에서는 false입니다.
+        // Work는 hirEntryCallable과 같은 객체이므로 둘째 반복에서 true입니다.
+        if (ReferenceEquals(hirCallable, hirEntryCallable))
+            mirEntryCallable = mirCallable;
+    }
+
+    // 최종 결과:
+    // Callables  = [Next c6, Work c44]
+    // EntryPoint = Work c44
+    var mirProgram = new MirProgram(
+        mirEntryCallable
+            ?? throw new InvalidOperationException(
+                "validated HIR entry callable must be lowered into MIR"),
+        mirCallables);
+
+    return MirSnapshot.CreateLowered(mirProgram);
+}</code></pre>
+
+    <h3>코드 순서대로 따라가기</h3>
+    <ol class="execution-steps">
+      <li><strong>입력을 확인합니다.</strong> callable 목록은 <code>[Next h6, Work h44]</code>이고 진입 callable은 <code>Work h44</code>입니다.</li>
+      <li><strong>첫 반복에서 <code>Next h6</code>을 처리합니다.</strong> 새 lowerer가 <code>Next c6</code>을 반환하며 결과 목록은 <code>[Next c6]</code>이 됩니다.</li>
+      <li><strong>둘째 반복에서 <code>Work h44</code>을 처리합니다.</strong> 새 lowerer가 <code>Work c44</code>을 반환하며 결과 목록은 <code>[Next c6, Work c44]</code>이 됩니다.</li>
+      <li><strong>진입점을 연결합니다.</strong> 둘째 반복의 HIR 객체가 <code>EntryCallable</code>과 같으므로 <code>mirEntryCallable = Work c44</code>가 됩니다.</li>
+      <li><strong>프로그램과 snapshot을 만듭니다.</strong> 두 callable과 진입점을 가진 <code>mirProgram</code>을 <code>MirSnapshot.CreateLowered(mirProgram)</code>에 전달합니다.</li>
+    </ol>
+
+    <div class="callout good">
+      <span class="h">반환 결과</span>
+      <code>MirSnapshot</code><br>
+      <code>Program.Callables = [Next c6, Work c44]</code><br>
+      <code>Program.EntryPoint = Work c44</code>
+    </div>
+
+  </article>
+
+  <article class="function-trace" id="callable-lowerer-constructor">
+    <h2><code>HirCallableToMirLowerer(...)</code> 생성자</h2>
+    <p>
+      HIR callable 하나를 담당할 lowerer에 변환 대상과 최종 의미 정보를 보관하고, MIR callable ID를 준비하는 생성자입니다.<br>
+      공통 예제에서는 <code>Next h6</code>과 <code>Work h44</code>를 대상으로 각각 한 번씩 실행됩니다.
+    </p>
+
+<pre><code class="language-csharp">public HirCallableToMirLowerer(
+    HirCallable hirCallable,
+    HirSemanticArtifact hirArtifact,
+    IMirLoweringTraceSink? traceSink)
+{
+    // 첫 번째 호출:
+    // hirCallable = Next h6
+    // hirArtifact = 최종 HIR artifact([Next h6, Work h44])
+    // traceSink = null
+    //
+    // 두 번째 호출:
+    // hirCallable = Work h44
+    // hirArtifact = 최종 HIR artifact([Next h6, Work h44])
+    // traceSink = null
+
+    _hirCallable = hirCallable;
+    _hirArtifact = hirArtifact;
+
+    // 첫 번째 호출: hirCallable.Id.Value = 6  → _mirCallableId = c6
+    // 두 번째 호출: hirCallable.Id.Value = 44 → _mirCallableId = c44
+    _mirCallableId = new MirCallableId(hirCallable.Id.Value);
+    _traceSink = traceSink;
+}</code></pre>
+
+  </article>
+
+  <article class="function-trace" id="lower-to-mir-callable">
+    <h2><code>LowerToMirCallable()</code></h2>
+    <p>
+      하나의 HIR callable을 진입 block, 매개변수, 본문, 종료를 가진 <code>MirCallable</code>로 완성하는 중심 함수입니다.<br>
+      공통 예제에서는 <code>Next h6</code>을 가진 lowerer와 <code>Work h44</code>을 가진 lowerer에서 각각 한 번씩 실행됩니다.
+    </p>
+
+    <h3>1. <code>Next h6</code> 처리</h3>
+
+<pre><code class="language-qora">function Next(value: int): int
+{
+    return value + 1;
+}</code></pre>
+
+    <h4><code>Next</code> 원본 코드가 만든 매개변수와 MIR 본문</h4>
+
+    <figure class="mir-result-diagram" aria-labelledby="next-result-title next-result-caption">
+      <div class="mir-result-diagram__scroll" tabindex="0">
+        <svg viewBox="0 0 1000 610" role="img" aria-labelledby="next-result-title next-result-desc">
+          <title id="next-result-title">Next 원본 코드와 매개변수 및 본문 lowering 결과의 대응</title>
+          <desc id="next-result-desc">왼쪽 Next 원본 코드에서 value 매개변수, 정수 1, value + 1 덧셈 표현식, return 키워드를 각각 강조하고, 같은 색의 화살표로 오른쪽의 처리 함수, 저장 위치, 객체 타입 또는 생성 결과에 연결합니다.</desc>
+          <defs>
+            <marker id="next-result-arrow-param" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+              <path d="M0 0 L10 5 L0 10 Z" fill="#6d52b5"/>
+            </marker>
+            <marker id="next-result-arrow-const" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+              <path d="M0 0 L10 5 L0 10 Z" fill="#b7791f"/>
+            </marker>
+            <marker id="next-result-arrow-add" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+              <path d="M0 0 L10 5 L0 10 Z" fill="#16805b"/>
+            </marker>
+            <marker id="next-result-arrow-return" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+              <path d="M0 0 L10 5 L0 10 Z" fill="#2563a8"/>
+            </marker>
+          </defs>
+
+          <rect x="1" y="1" width="998" height="608" rx="14" fill="#f8fafc" stroke="#d7dee8"/>
+          <text class="svg-ui" x="24" y="33" fill="#263247" font-size="16" font-weight="850">Qora 원본 코드 → 매개변수와 본문 lowering 결과</text>
+
+          <rect x="24" y="55" width="430" height="520" rx="12" fill="#111827" stroke="#334155"/>
+          <path d="M36 55 H442 Q454 55 454 67 V101 H24 V67 Q24 55 36 55 Z" fill="#263141"/>
+          <text class="svg-ui" x="46" y="84" fill="#f8fafc" font-size="13" font-weight="850">원본 코드 대응 범위</text>
+          <text class="svg-code" x="424" y="84" text-anchor="end" fill="#cbd5e1" font-size="12">Next</text>
+
+          <text class="svg-code" x="48" y="142" fill="#eef4ff" font-size="14">function Next(</text>
+          <rect x="167" y="119" width="92" height="32" rx="6" fill="#32285d" stroke="#9a84e4"/>
+          <text class="svg-code" x="176" y="142" fill="#f3efff" font-size="14" font-weight="800">value: int</text>
+          <text class="svg-code" x="259" y="142" fill="#eef4ff" font-size="14">): int</text>
+
+          <text class="svg-code" x="48" y="180" fill="#eef4ff" font-size="14">{</text>
+          <rect x="72" y="207" width="55" height="31" rx="5" fill="#174f7a" stroke="#60a5d8"/>
+          <text class="svg-code" x="80" y="229" fill="#eff6ff" font-size="14" font-weight="800">return</text>
+          <rect x="132" y="203" width="99" height="39" rx="7" fill="#12382f" stroke="#4fad89" stroke-width="1.5"/>
+          <text class="svg-code" x="139" y="229" fill="#effff8" font-size="14">value</text>
+          <text class="svg-code" x="184" y="229" fill="#effff8" font-size="14" font-weight="800">+</text>
+          <rect x="205" y="207" width="20" height="31" rx="5" fill="#6b4a16" stroke="#e0b04d"/>
+          <text class="svg-code" x="211" y="229" fill="#fff4d6" font-size="14" font-weight="800">1</text>
+          <text class="svg-code" x="235" y="229" fill="#eef4ff" font-size="14">;</text>
+          <text class="svg-code" x="48" y="282" fill="#eef4ff" font-size="14">}</text>
+
+          <text class="svg-ui" x="48" y="334" fill="#94a3b8" font-size="12">같은 색의 코드 범위와 MIR 결과가 서로 대응합니다.</text>
+
+          <rect x="520" y="55" width="456" height="520" rx="12" fill="#fff" stroke="#9db2c9"/>
+          <path d="M532 55 H964 Q976 55 976 67 V101 H520 V67 Q520 55 532 55 Z" fill="#263141"/>
+          <text class="svg-ui" x="542" y="84" fill="#f8fafc" font-size="13" font-weight="850">LowerParameters()와 LowerStatements() 처리 후</text>
+
+          <rect x="542" y="112" width="412" height="126" rx="9" fill="#f5f2ff" stroke="#8b70d9"/>
+          <text class="svg-ui" x="590" y="133" fill="#6b5aa8" font-size="11.5" font-weight="750">처리 함수</text>
+          <text class="svg-code" x="674" y="133" fill="#5844a3" font-size="12" font-weight="800">LowerParameters()</text>
+          <text class="svg-ui" x="590" y="156" fill="#6b5aa8" font-size="11.5" font-weight="750">저장 위치</text>
+          <text class="svg-code" x="674" y="156" fill="#5844a3" font-size="12" font-weight="800">_mirParameters[0]</text>
+          <text class="svg-ui" x="590" y="179" fill="#6b5aa8" font-size="11.5" font-weight="750">객체 타입</text>
+          <text class="svg-code" x="674" y="179" fill="#5844a3" font-size="12" font-weight="800">MirClassicalParameter</text>
+          <text class="svg-ui" x="590" y="202" fill="#6b5aa8" font-size="11.5" font-weight="750">Name</text>
+          <text class="svg-code" x="674" y="202" fill="#334155" font-size="12">"value"</text>
+          <text class="svg-ui" x="590" y="225" fill="#6b5aa8" font-size="11.5" font-weight="750">Value</text>
+          <text class="svg-code" x="674" y="225" fill="#334155" font-size="12">%v0: int</text>
+
+          <rect x="542" y="246" width="412" height="96" rx="9" fill="#fff8eb" stroke="#d9a23d"/>
+          <text class="svg-ui" x="590" y="268" fill="#8a651f" font-size="11.5" font-weight="750">처리 함수</text>
+          <text class="svg-code" x="674" y="268" fill="#745013" font-size="12" font-weight="800">LowerStatements()</text>
+          <text class="svg-ui" x="590" y="291" fill="#8a651f" font-size="11.5" font-weight="750">대상 객체</text>
+          <text class="svg-code" x="674" y="291" fill="#334155" font-size="12">MirBlockBuilder b0</text>
+          <text class="svg-ui" x="590" y="314" fill="#8a651f" font-size="11.5" font-weight="750">저장 위치</text>
+          <text class="svg-code" x="674" y="314" fill="#334155" font-size="12">Instructions[0]</text>
+          <text class="svg-ui" x="590" y="335" fill="#8a651f" font-size="11.5" font-weight="750">생성 결과</text>
+          <text class="svg-code" x="674" y="335" fill="#745013" font-size="12" font-weight="800">%v1 = const 1</text>
+
+          <rect x="542" y="350" width="412" height="96" rx="9" fill="#f3faf7" stroke="#4fad89"/>
+          <text class="svg-ui" x="590" y="372" fill="#27775c" font-size="11.5" font-weight="750">처리 함수</text>
+          <text class="svg-code" x="674" y="372" fill="#116347" font-size="12" font-weight="800">LowerStatements()</text>
+          <text class="svg-ui" x="590" y="395" fill="#27775c" font-size="11.5" font-weight="750">대상 객체</text>
+          <text class="svg-code" x="674" y="395" fill="#334155" font-size="12">MirBlockBuilder b0</text>
+          <text class="svg-ui" x="590" y="418" fill="#27775c" font-size="11.5" font-weight="750">저장 위치</text>
+          <text class="svg-code" x="674" y="418" fill="#334155" font-size="12">Instructions[1]</text>
+          <text class="svg-ui" x="590" y="439" fill="#27775c" font-size="11.5" font-weight="750">생성 결과</text>
+          <text class="svg-code" x="674" y="439" fill="#116347" font-size="12" font-weight="800">%v2 = add %v0, %v1</text>
+
+          <rect x="542" y="454" width="412" height="96" rx="9" fill="#eef5fd" stroke="#3b82c4"/>
+          <text class="svg-ui" x="590" y="476" fill="#2f6494" font-size="11.5" font-weight="750">처리 함수</text>
+          <text class="svg-code" x="674" y="476" fill="#174f88" font-size="12" font-weight="800">LowerStatements()</text>
+          <text class="svg-ui" x="590" y="499" fill="#2f6494" font-size="11.5" font-weight="750">대상 객체</text>
+          <text class="svg-code" x="674" y="499" fill="#334155" font-size="12">MirBlockBuilder b0</text>
+          <text class="svg-ui" x="590" y="522" fill="#2f6494" font-size="11.5" font-weight="750">저장 위치</text>
+          <text class="svg-code" x="674" y="522" fill="#334155" font-size="12">Terminator</text>
+          <text class="svg-ui" x="590" y="543" fill="#2f6494" font-size="11.5" font-weight="750">생성 결과</text>
+          <text class="svg-code" x="674" y="543" fill="#174f88" font-size="12" font-weight="800">return %v2</text>
+
+          <path d="M259 135 C416 135 470 175 542 175" fill="none" stroke="#6d52b5" stroke-width="2.2" stroke-dasharray="5 4" marker-end="url(#next-result-arrow-param)"/>
+          <path d="M225 222 C408 222 468 294 542 294" fill="none" stroke="#b7791f" stroke-width="2.2" stroke-dasharray="5 4" marker-end="url(#next-result-arrow-const)"/>
+          <path d="M181.5 242 C181.5 285 430 398 542 398" fill="none" stroke="#16805b" stroke-width="2.2" stroke-dasharray="5 4" marker-end="url(#next-result-arrow-add)"/>
+          <path d="M99.5 238 C99.5 310 390 502 542 502" fill="none" stroke="#2563a8" stroke-width="2.2" stroke-dasharray="5 4" marker-end="url(#next-result-arrow-return)"/>
+        </svg>
+      </div>
+      <figcaption id="next-result-caption">
+        같은 색은 왼쪽의 실제 코드 토큰과 오른쪽에서 생성되거나 저장되는 위치를 연결합니다.<br>
+        Qora 소스의 매개변수와 <code>return value + 1;</code>이 만든 MIR 결과를 보여줍니다.
+      </figcaption>
+    </figure>
+
+    <p>
+      아래 도식은 <code>LowerToMirCallable()</code>이 callable 하나를 처음부터 <code>MirCallable</code> 반환까지 처리하는 과정을 단계별로 보여줍니다.<br>
+      왼쪽은 실제 C# 코드이고, 오른쪽은 각 코드 범위가 <code>Next</code> 실행에서 만든 상태입니다.<br>
+      이 실행의 시작값은 <code>_hirCallable = Next h6</code>, <code>_mirCallableId = c6</code>입니다.
+    </p>
+
+<figure class="annotated-code-figure" aria-labelledby="next-code-map-caption">
+      <figcaption id="next-code-map-caption"><code>Next</code> 실행에서 각 코드 범위가 만드는 상태</figcaption>
+      <div class="annotated-code-figure__scroll" tabindex="0">
+        <div class="annotated-code-map" data-code-map="next">
+          <div class="annotated-code-map__source">
+<pre><code class="language-csharp">public MirCallable LowerToMirCallable()
+{
+<span id="next-code-setup" class="annotated-code-stage annotated-code-tone--purple">    var mirCallableOrigin = MirOriginFor(_hirCallable);
+    var hirCallableSymbol = RequireHirDeclarationSymbol(
+        _hirCallable.Id,
+        $"callable `{_hirCallable.Name}`");
+    var hirScopeGraph = _hirArtifact.Model.ScopeGraph
+        ?? throw MirLoweringError(
+            "the final HIR semantic model has no scope graph");
+    var qualifiedSourceCallableName =
+        hirScopeGraph.QualifiedName(hirCallableSymbol);</span>
+
+<span id="next-code-entry" class="annotated-code-stage annotated-code-tone--blue">    _currentMirBlockBuilder = CreateMirBlock(mirCallableOrigin);</span>
+
+<span id="next-code-parameters" class="annotated-code-stage annotated-code-tone--amber">    <a class="code-call-link" href="#lower-parameters" title="LowerParameters 실행 추적">LowerParameters</a>();</span>
+
+<span id="next-code-statements" class="annotated-code-stage annotated-code-tone--green">    <a class="code-call-link" href="#lower-statements" title="LowerStatements 실행 추적">LowerStatements</a>(_hirCallable.Body.Statements);</span>
+
+<span id="next-code-termination" class="annotated-code-stage annotated-code-tone--violet">    if (_currentMirBlockBuilder is not null)
+    {
+        if (_hirCallable.IsFunction)
+        {
+            MarkCurrentMirBlockUnreachable(
+                MirOrigin.GeneratedFrom(
+                    mirCallableOrigin,
+                    "missing validated function return"));
+        }
+        else
+        {
+            ReturnFromCurrentMirBlock(
+                value: null,
+                MirOrigin.GeneratedFrom(
+                    mirCallableOrigin,
+                    "implicit operation return"));
+        }
+    }</span>
+
+<span id="next-code-build" class="annotated-code-stage annotated-code-tone--cyan">    var mirBlocks = new List&lt;MirBlock&gt;(_mirBlockBuilders.Count);
+    foreach (var mirBlockBuilder in _mirBlockBuilders)
+    {
+        var mirBlock = mirBlockBuilder.Build();
+        mirBlocks.Add(mirBlock);
+    }</span>
+
+<span id="next-code-entry-select" class="annotated-code-stage annotated-code-tone--rose">    var mirEntryBlock = mirBlocks[0];</span>
+
+<span id="next-code-return" class="annotated-code-stage annotated-code-tone--teal">    return new MirCallable(
+        _mirCallableId,
+        qualifiedSourceCallableName,
+        _hirCallable.ReturnType is { } returns
+            ? MirType.Scalar(returns)
+            : null,
+        _mirParameters,
+        mirEntryBlock,
+        mirBlocks,
+        mirCallableOrigin);</span>
+}</code></pre>
+          </div>
+
+          <aside class="annotated-code-map__notes" aria-label="Next 실행 단계별 상태">
+            <section class="annotated-code-note annotated-code-tone--purple" data-code-target="next-code-setup">
+              <h5>출처와 이름 준비</h5>
+              <div class="annotated-code-note__summary">
+                <p>예제 코드 함수 <code>Next</code>의 HIR ID는 <code>h6</code>입니다.</p>
+                <p>이 ID와 원본 소스 위치를 사용하여 callable의 출처 정보를 만듭니다.</p>
+                <p>이어서 HIR 노드 ID <code>h6</code>에 연결된 선언 심벌을 찾고,
+                  그 심벌과 scope graph를 사용하여 최종 이름 <code>"Next"</code>를 구합니다.</p>
+              </div>
+            </section>
+            <section class="annotated-code-note annotated-code-tone--blue" data-code-target="next-code-entry">
+              <h5>진입 block 생성</h5>
+              <div class="annotated-code-note__summary">
+                <p><code>CreateMirBlock(mirCallableOrigin)</code>이 진입 block의
+                  <code>MirBlockBuilder b0</code>를 생성합니다.</p>
+                <div class="annotated-code-note__state">
+                  <code>builders: [] → [b0]</code>
+                  <code>current: null → b0</code>
+                </div>
+                <p><code>current</code>가 가리키는 <code>b0</code>는
+                  <code>builders[0]</code>에 저장된 것과 같은 builder입니다.</p>
+              </div>
+            </section>
+            <section class="annotated-code-note annotated-code-tone--amber" data-code-target="next-code-parameters">
+              <h5>매개변수 처리</h5>
+              <dl>
+                <div><dt>대상</dt><dd><code>value: int</code></dd></div>
+                <div><dt>실행 코드</dt><dd><code>LowerParameters()</code></dd></div>
+                <div><dt>상태 변화</dt><dd><code>_mirParameters[0] = value → %v0: int</code><br><code>b0</code> 변화 없음</dd></div>
+              </dl>
+            </section>
+            <section class="annotated-code-note annotated-code-tone--green" data-code-target="next-code-statements">
+              <h5>본문 처리</h5>
+              <dl>
+                <div><dt>대상</dt><dd><code>return value + 1;</code><br><code>b0</code></dd></div>
+                <div><dt>실행 코드</dt><dd><code>LowerStatements(...)</code></dd></div>
+                <div><dt>상태 변화</dt><dd><code>Instructions = [%v1 const, %v2 add]</code><br><code>Terminator = return %v2</code><br><code>current: b0 → null</code></dd></div>
+              </dl>
+            </section>
+            <section class="annotated-code-note annotated-code-tone--violet" data-code-target="next-code-termination">
+              <h5>열린 block 종료 분기</h5>
+              <dl>
+                <div><dt>대상</dt><dd><code>current = null</code></dd></div>
+                <div><dt>실행 코드</dt><dd><code>if (_currentMirBlockBuilder is not null)</code></dd></div>
+                <div><dt>상태 변화</dt><dd>조건이 <code>false</code>이므로 분기 건너뜀</dd></div>
+              </dl>
+            </section>
+            <section class="annotated-code-note annotated-code-tone--cyan" data-code-target="next-code-build">
+              <h5>immutable block 생성</h5>
+              <div class="annotated-code-note__summary">
+                <p><code>MirBlockBuilder b0</code>에 <code>Build()</code>를 호출하여
+                  수정할 수 없는 <code>MirBlock b0</code>로 확정합니다.</p>
+                <p>생성된 <code>MirBlock b0</code>는 <code>mirBlocks[0]</code>에 저장됩니다.</p>
+              </div>
+            </section>
+            <section class="annotated-code-note annotated-code-tone--rose" data-code-target="next-code-entry-select">
+              <h5>진입 block 선택</h5>
+              <div class="annotated-code-note__summary">
+                <p><code>mirBlocks</code>의 첫 번째 block인 <code>b0</code>를 진입 block으로 선택합니다.</p>
+              </div>
+            </section>
+            <section class="annotated-code-note annotated-code-tone--teal" data-code-target="next-code-return">
+              <h5>MirCallable 반환</h5>
+              <div class="annotated-code-note__summary">
+                <p><code>c6</code> ID, <code>"Next"</code> 이름, <code>int</code> 반환형,
+                  <code>value(%v0)</code> 매개변수와 <code>b0</code> block을 묶어
+                  <code>MirCallable Next c6</code> 객체를 만들고 반환합니다.</p>
+                <p><code>b0</code>는 <code>Blocks[0]</code>에 저장되며,
+                  동시에 실행이 시작되는 <code>EntryBlock</code>입니다.</p>
+              </div>
+            </section>
+          </aside>
+
+          <svg class="annotated-code-map__arrows" aria-hidden="true" data-marker-id="next-code-map-arrow">
+            <defs>
+              <marker id="next-code-map-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+                <path d="M0 0 L10 5 L0 10 Z" fill="context-stroke"/>
+              </marker>
+            </defs>
+          </svg>
+        </div>
+      </div>
+    </figure>
+
+
+    <p>
+      <code>Next</code>의 명시적 <code>return</code>이 <code>b0</code>를 닫으므로 본문 처리 뒤의 현재 block은 <code>null</code>입니다.<br>
+      따라서 열린 operation 경로에 implicit return을 붙이는 분기는 실행되지 않습니다.
+    </p>
+
+    <h3>2. <code>Work h44</code> 처리</h3>
+
+<pre><code class="language-qora">operation Work()
+{
+    var values: int[] = [0];
+    use q = Qubit[1];
+
+    values[0] = Next(values[0]);
+
+    if (values[0] == 1)
+    {
+        X(q[0]);
+    }
+
+    H(q[0]);
+}</code></pre>
+
+    <h4><code>Work</code> 원본 코드가 만든 MIR builder</h4>
+
+    <figure class="mir-result-diagram" aria-labelledby="work-result-title work-result-caption">
+      <div class="mir-result-diagram__scroll" tabindex="0">
+        <svg viewBox="0 0 1000 1450" role="img" aria-labelledby="work-result-title work-result-desc">
+          <title id="work-result-title">Work 원본 코드와 본문 처리 후 MIR builder 구조의 대응</title>
+          <desc id="work-result-desc">왼쪽 Work 원본 코드의 다섯 문장을 색으로 구분하여 오른쪽 MIR builder 상태에 연결합니다. if 문은 b0의 조건 계산과 branch, true 경로 b1, false 경로 b2, 합류 block b3와 큐비트 Phi까지 하나의 보라색 흐름으로 표시합니다. b1에는 X 호출의 두 instruction과 jump terminator를, b3에는 Phi, H 호출의 두 instruction, 아직 비어 있는 terminator를 주석과 함께 모두 표시합니다.</desc>
+          <defs>
+            <marker id="work-result-arrow-var" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+              <path d="M0 0 L10 5 L0 10 Z" fill="#b7791f"/>
+            </marker>
+            <marker id="work-result-arrow-qubit" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+              <path d="M0 0 L10 5 L0 10 Z" fill="#16805b"/>
+            </marker>
+            <marker id="work-result-arrow-assign" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+              <path d="M0 0 L10 5 L0 10 Z" fill="#2563a8"/>
+            </marker>
+            <marker id="work-result-arrow-if" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+              <path d="M0 0 L10 5 L0 10 Z" fill="#6d52b5"/>
+            </marker>
+            <marker id="work-result-arrow-x" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+              <path d="M0 0 L10 5 L0 10 Z" fill="#168ea5"/>
+            </marker>
+            <marker id="work-result-arrow-h" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+              <path d="M0 0 L10 5 L0 10 Z" fill="#a63f63"/>
+            </marker>
+          </defs>
+
+          <rect x="1" y="1" width="998" height="1448" rx="14" fill="#f8fafc" stroke="#d7dee8"/>
+          <text class="svg-ui" x="24" y="33" fill="#263247" font-size="16" font-weight="850">Qora 원본 코드 → LowerStatements() 처리 후</text>
+
+          <rect x="24" y="55" width="430" height="1358" rx="12" fill="#111827" stroke="#334155"/>
+          <path d="M36 55 H442 Q454 55 454 67 V101 H24 V67 Q24 55 36 55 Z" fill="#263141"/>
+          <text class="svg-ui" x="46" y="84" fill="#f8fafc" font-size="13" font-weight="850">원본 코드 대응 범위</text>
+          <text class="svg-code" x="424" y="84" text-anchor="end" fill="#cbd5e1" font-size="12">Work</text>
+
+          <g class="svg-code" fill="#eef4ff" font-size="13.2">
+            <text x="48" y="132">operation Work()</text>
+            <text x="48" y="164">{</text>
+
+            <rect x="62" y="181" width="272" height="38" rx="7" fill="#342711" stroke="#d69a2d"/>
+            <text x="76" y="206" fill="#fff4d6" font-weight="800">var values: int[] = [0];</text>
+
+            <rect x="62" y="235" width="240" height="38" rx="7" fill="#102d27" stroke="#2f9b77"/>
+            <text x="76" y="260" fill="#effff8" font-weight="800">use q = Qubit[1];</text>
+
+            <rect x="62" y="303" width="338" height="38" rx="7" fill="#102f4d" stroke="#3b82c4"/>
+            <text x="76" y="328" fill="#eff6ff" font-weight="800">values[0] = Next(values[0]);</text>
+
+            <rect x="62" y="371" width="338" height="184" rx="9" fill="#182235" stroke="#64748b" stroke-dasharray="5 4"/>
+            <rect x="70" y="380" width="210" height="38" rx="7" fill="#33244f" stroke="#9b7bd7"/>
+            <text x="82" y="405" fill="#f5efff" font-weight="800">if (values[0] == 1)</text>
+            <text x="76" y="438" fill="#cbd5e1">{</text>
+            <rect x="90" y="447" width="122" height="38" rx="7" fill="#12343b" stroke="#38a9bd"/>
+            <text x="102" y="472" fill="#ecfeff" font-weight="800">X(q[0]);</text>
+            <text x="76" y="510" fill="#cbd5e1">}</text>
+
+            <rect x="62" y="579" width="210" height="38" rx="7" fill="#3a2432" stroke="#c76c8b"/>
+            <text x="76" y="604" fill="#fff1f5" font-weight="800">H(q[0]);</text>
+
+            <text x="48" y="646">}</text>
+          </g>
+          <text class="svg-ui" x="48" y="702" fill="#94a3b8" font-size="12">같은 색은 Qora 문장 하나와 그 문장이 만든 MIR 구조를 연결합니다.</text>
+
+          <rect x="520" y="55" width="456" height="1358" rx="12" fill="#fff" stroke="#9db2c9"/>
+          <path d="M532 55 H964 Q976 55 976 67 V101 H520 V67 Q520 55 532 55 Z" fill="#263141"/>
+          <text class="svg-ui" x="542" y="84" fill="#f8fafc" font-size="13" font-weight="850">본문 처리 후 CFG builder</text>
+
+          <rect x="542" y="120" width="412" height="630" rx="10" fill="#eef5fd" stroke="#3b82c4"/>
+          <text class="svg-code" x="562" y="151" fill="#174f88" font-size="13" font-weight="850">MirBlockBuilder b0</text>
+
+          <rect x="562" y="166" width="372" height="112" rx="8" fill="#fff8eb" stroke="#d9a23d"/>
+          <text class="svg-code" x="578" y="188" fill="#745013" font-size="10.5" font-weight="850">처리 함수: LowerDeclaration()　대상 선언: values</text>
+          <text class="svg-code" x="578" y="205" fill="#8a651f" font-size="8.8" font-weight="850">MirCallable.Storages[0]</text>
+          <text class="svg-code" x="578" y="221" fill="#334155" font-size="8.5">storage $s0 values: int[1]</text>
+          <text class="svg-ui" x="846" y="221" fill="#8a651f" font-size="9.2" font-weight="750">→ 배열 저장 공간</text>
+          <text class="svg-code" x="578" y="239" fill="#8a651f" font-size="8.8" font-weight="850">Instructions[0..1]</text>
+          <text class="svg-code" x="578" y="254" fill="#334155" font-size="8.5">%v0: int = const int 0</text>
+          <text class="svg-ui" x="846" y="254" fill="#8a651f" font-size="9.2" font-weight="750">→ [0]의 원소</text>
+          <text class="svg-code" x="578" y="270" fill="#334155" font-size="8.5">%v1: int[1] = array.create $s0 int[1] {%v0}</text>
+          <text class="svg-ui" x="846" y="270" fill="#8a651f" font-size="9.2" font-weight="750">→ 초기 배열 상태</text>
+
+          <rect x="562" y="292" width="372" height="92" rx="8" fill="#f3faf7" stroke="#4fad89"/>
+          <text class="svg-code" x="578" y="312" fill="#116347" font-size="10.5" font-weight="850">처리 함수: LowerQubitDeclaration()　대상 선언: q</text>
+          <text class="svg-code" x="578" y="329" fill="#27775c" font-size="8.8" font-weight="850">MirCallable.Qubits[0]</text>
+          <text class="svg-code" x="578" y="344" fill="#334155" font-size="8.5">qubit &amp;q0.v0 q: qubit[1] [use]</text>
+          <text class="svg-ui" x="846" y="344" fill="#27775c" font-size="9.2" font-weight="750">→ q의 최초 상태</text>
+          <text class="svg-code" x="578" y="360" fill="#27775c" font-size="8.8" font-weight="850">Instructions[2]</text>
+          <text class="svg-code" x="578" y="376" fill="#334155" font-size="8.5">qubit.allocate &amp;q0.v0</text>
+          <text class="svg-ui" x="846" y="376" fill="#27775c" font-size="9.2" font-weight="750">→ b0에서 q 할당</text>
+
+          <rect x="562" y="392" width="372" height="166" rx="8" fill="#eef5fd" stroke="#3b82c4"/>
+          <text class="svg-code" x="578" y="415" fill="#174f88" font-size="10.5" font-weight="850">처리 함수: LowerAssignment()　대상 block: b0</text>
+          <text class="svg-code" x="578" y="436" fill="#2f6494" font-size="9.2" font-weight="850">Instructions[3..7]</text>
+          <text class="svg-code" x="578" y="459" fill="#334155" font-size="8.5">%v2: int = const int 0</text>
+          <text class="svg-ui" x="846" y="459" fill="#2563a8" font-size="9.2" font-weight="750">→ 대입 대상 index</text>
+          <text class="svg-code" x="578" y="480" fill="#334155" font-size="8.5">%v3: int = const int 0</text>
+          <text class="svg-ui" x="846" y="480" fill="#2563a8" font-size="9.2" font-weight="750">→ Next 인수 index</text>
+          <text class="svg-code" x="578" y="501" fill="#334155" font-size="8.5">%v4: int = array.load %v1[%v3]</text>
+          <text class="svg-ui" x="846" y="501" fill="#2563a8" font-size="9.2" font-weight="750">→ values[0] 읽기</text>
+          <text class="svg-code" x="578" y="522" fill="#334155" font-size="8.5">%v5: int = call @c6:Next(%v4)</text>
+          <text class="svg-ui" x="846" y="522" fill="#2563a8" font-size="9.2" font-weight="750">→ Next 반환값</text>
+          <text class="svg-code" x="578" y="543" fill="#334155" font-size="8.5">%v6: int[1] = array.store %v1[%v2], %v5</text>
+          <text class="svg-ui" x="846" y="543" fill="#2563a8" font-size="9.2" font-weight="750">→ 갱신 배열</text>
+
+          <rect x="562" y="578" width="372" height="160" rx="8" fill="#f7f1ff" stroke="#8b6fd1"/>
+          <text class="svg-code" x="578" y="600" fill="#5a3fa7" font-size="10.5" font-weight="850">처리 함수: LowerIf()　시작 block: b0</text>
+          <text class="svg-code" x="578" y="620" fill="#6d52b5" font-size="9.2" font-weight="850">Instructions[8..11]</text>
+          <text class="svg-code" x="578" y="640" fill="#334155" font-size="8.5">%v7: int = const int 0</text>
+          <text class="svg-ui" x="846" y="640" fill="#6d52b5" font-size="9.2" font-weight="750">→ index 0</text>
+          <text class="svg-code" x="578" y="659" fill="#334155" font-size="8.5">%v8: int = array.load %v6[%v7]</text>
+          <text class="svg-ui" x="846" y="659" fill="#6d52b5" font-size="9.2" font-weight="750">→ values[0]</text>
+          <text class="svg-code" x="578" y="678" fill="#334155" font-size="8.5">%v9: int = const int 1</text>
+          <text class="svg-ui" x="846" y="678" fill="#6d52b5" font-size="9.2" font-weight="750">→ 비교값 1</text>
+          <text class="svg-code" x="578" y="697" fill="#334155" font-size="8.5">%v10: bit = eq %v8, %v9</text>
+          <text class="svg-ui" x="846" y="697" fill="#6d52b5" font-size="9.2" font-weight="750">→ 조건 결과</text>
+          <text class="svg-code" x="578" y="716" fill="#6d52b5" font-size="9.2" font-weight="850">Terminator</text>
+          <text class="svg-code" x="578" y="733" fill="#334155" font-size="8.5">branch %v10, ^b1(), ^b2()</text>
+          <text class="svg-ui" x="846" y="733" fill="#6d52b5" font-size="9.2" font-weight="750">→ true b1 / false b2</text>
+
+          <rect x="542" y="770" width="194" height="75" rx="10" fill="#f7f1ff" stroke="#8b6fd1"/>
+          <text class="svg-code" x="639" y="794" text-anchor="middle" fill="#5a3fa7" font-size="13" font-weight="850">b1</text>
+          <text class="svg-ui" x="639" y="813" text-anchor="middle" fill="#6d52b5" font-size="9.2" font-weight="750">true 경로</text>
+          <text class="svg-code" x="639" y="833" text-anchor="middle" fill="#334155" font-size="9.5">q0.v1</text>
+
+          <rect x="760" y="770" width="194" height="75" rx="10" fill="#f7f1ff" stroke="#8b6fd1"/>
+          <text class="svg-code" x="857" y="794" text-anchor="middle" fill="#5a3fa7" font-size="13" font-weight="850">b2</text>
+          <text class="svg-ui" x="857" y="813" text-anchor="middle" fill="#6d52b5" font-size="9.2" font-weight="750">false 경로</text>
+          <text class="svg-code" x="857" y="833" text-anchor="middle" fill="#334155" font-size="9.5">q0.v0</text>
+
+          <rect x="651" y="880" width="194" height="75" rx="10" fill="#f7f1ff" stroke="#8b6fd1"/>
+          <text class="svg-code" x="748" y="904" text-anchor="middle" fill="#5a3fa7" font-size="13" font-weight="850">b3</text>
+          <text class="svg-code" x="748" y="924" text-anchor="middle" fill="#334155" font-size="9.5">q0.v2</text>
+          <text class="svg-ui" x="748" y="943" text-anchor="middle" fill="#6d52b5" font-size="9.2" font-weight="750">Phi 정의</text>
+
+          <text class="svg-ui" x="542" y="979" fill="#475569" font-size="11.5" font-weight="850">각 block에 기록된 MIR 상태</text>
+
+          <rect x="542" y="995" width="412" height="160" rx="10" fill="#f7f1ff" stroke="#8b6fd1"/>
+          <text class="svg-code" x="562" y="1023" fill="#5a3fa7" font-size="12.5" font-weight="850">MirBlockBuilder b1</text>
+          <rect x="554" y="1034" width="388" height="77" rx="7" fill="#ecfeff" stroke="#38a9bd"/>
+          <text class="svg-code" x="566" y="1052" fill="#28758a" font-size="9.2" font-weight="850">Instructions[0..1]</text>
+          <text class="svg-code" x="566" y="1072" fill="#155e75" font-size="8.5">%v11: int = const int 0</text>
+          <text class="svg-ui" x="846" y="1072" fill="#28758a" font-size="9.2" font-weight="750">→ q[0] index</text>
+          <text class="svg-code" x="566" y="1095" fill="#155e75" font-size="8.5">(&amp;q0.v1) = apply builtin.gate::X(&amp;q0.v0[%v11])</text>
+          <text class="svg-ui" x="846" y="1095" fill="#28758a" font-size="9.2" font-weight="750">→ q[0]에 X 적용</text>
+          <text class="svg-code" x="562" y="1130" fill="#6d52b5" font-size="9.2" font-weight="850">Terminator</text>
+          <text class="svg-code" x="562" y="1147" fill="#334155" font-size="8.5">jump ^b3()</text>
+          <text class="svg-ui" x="846" y="1147" fill="#6d52b5" font-size="9.2" font-weight="750">→ b3로 이동</text>
+
+          <rect x="542" y="1180" width="412" height="205" rx="10" fill="#f7f1ff" stroke="#8b6fd1"/>
+          <text class="svg-code" x="562" y="1207" fill="#5a3fa7" font-size="12.5" font-weight="850">MirBlockBuilder b3</text>
+
+          <text class="svg-code" x="562" y="1231" fill="#6d52b5" font-size="9.2" font-weight="850">QubitPhis[0]</text>
+          <text class="svg-code" x="562" y="1253" fill="#334155" font-size="8.5">&amp;q0.v2 = phi [&amp;q0.v1, ^b1], [&amp;q0.v0, ^b2]</text>
+          <text class="svg-ui" x="846" y="1253" fill="#6d52b5" font-size="9.2" font-weight="750">→ q 상태 합류</text>
+
+          <text class="svg-code" x="562" y="1283" fill="#8b294a" font-size="9.2" font-weight="850">Instructions[0..1]</text>
+          <text class="svg-code" x="562" y="1305" fill="#334155" font-size="8.5">%v12: int = const int 0</text>
+          <text class="svg-ui" x="846" y="1305" fill="#a63f63" font-size="9.2" font-weight="750">→ q[0] index</text>
+          <text class="svg-code" x="562" y="1331" fill="#334155" font-size="8.5">(&amp;q0.v3) = apply builtin.gate::H(&amp;q0.v2[%v12])</text>
+          <text class="svg-ui" x="846" y="1331" fill="#a63f63" font-size="9.2" font-weight="750">→ q[0]에 H 적용</text>
+
+          <text class="svg-code" x="562" y="1360" fill="#6d52b5" font-size="9.2" font-weight="850">Terminator</text>
+          <text class="svg-code" x="562" y="1377" fill="#334155" font-size="8.5">null</text>
+          <text class="svg-ui" x="846" y="1377" fill="#6d52b5" font-size="9.2" font-weight="750">→ 아직 열린 block</text>
+
+          <path d="M334 200 C430 200 500 222 562 222" fill="none" stroke="#b7791f" stroke-width="2.2" stroke-dasharray="5 4" marker-end="url(#work-result-arrow-var)"/>
+          <path d="M302 254 C420 254 500 335 562 335" fill="none" stroke="#16805b" stroke-width="2.2" stroke-dasharray="5 4" marker-end="url(#work-result-arrow-qubit)"/>
+          <path d="M400 322 C454 322 500 475 562 475" fill="none" stroke="#2563a8" stroke-width="2.2" stroke-dasharray="5 4" marker-end="url(#work-result-arrow-assign)"/>
+          <path d="M280 399 C420 399 500 646 562 646" fill="none" stroke="#6d52b5" stroke-width="2.2" stroke-dasharray="5 4" marker-end="url(#work-result-arrow-if)"/>
+          <path d="M212 466 C352 510 438 1062 554 1095" fill="none" stroke="#168ea5" stroke-width="2.2" stroke-dasharray="5 4" marker-end="url(#work-result-arrow-x)"/>
+          <path d="M272 598 C414 598 440 1331 542 1331" fill="none" stroke="#a63f63" stroke-width="2.2" stroke-dasharray="5 4" marker-end="url(#work-result-arrow-h)"/>
+
+          <path d="M654 738 C654 750 639 754 639 770" fill="none" stroke="#8b6fd1" stroke-width="1.8" marker-end="url(#work-result-arrow-if)"/>
+          <path d="M842 738 C842 750 857 754 857 770" fill="none" stroke="#8b6fd1" stroke-width="1.8" marker-end="url(#work-result-arrow-if)"/>
+          <text class="svg-ui" x="647" y="758" text-anchor="end" fill="#6d52b5" font-size="10.5" font-weight="750">true</text>
+          <text class="svg-ui" x="866" y="758" fill="#6d52b5" font-size="10.5" font-weight="750">false</text>
+          <path d="M639 845 C639 862 690 865 720 880" fill="none" stroke="#8b6fd1" stroke-width="1.8" marker-end="url(#work-result-arrow-if)"/>
+          <path d="M857 845 C857 862 806 865 776 880" fill="none" stroke="#8b6fd1" stroke-width="1.8" marker-end="url(#work-result-arrow-if)"/>
+        </svg>
+      </div>
+      <figcaption id="work-result-caption">
+        같은 색은 Qora 문장과 그 문장이 만든 MIR 구조를 연결합니다.<br>
+        특히 <code>if</code> 문은 <code>b0</code>의 조건 계산과 분기부터 <code>b1</code>·<code>b2</code>, <code>b3</code>의 Phi 합류까지 하나의 보라색 흐름으로 표시합니다.
+      </figcaption>
+    </figure>
+
+    <p>
+      같은 <code>LowerToMirCallable()</code>을 이번에는 <code>Work</code> 입력으로 다시 따라갑니다.<br>
+      이 실행의 시작값은 <code>_hirCallable = Work h44</code>, <code>_mirCallableId = c44</code>입니다.
+    </p>
+
+<figure class="annotated-code-figure" aria-labelledby="work-code-map-caption">
+      <figcaption id="work-code-map-caption"><code>Work</code> 실행에서 각 코드 범위가 만드는 상태</figcaption>
+      <div class="annotated-code-figure__scroll" tabindex="0">
+        <div class="annotated-code-map" data-code-map="work">
+          <div class="annotated-code-map__source">
+<pre><code class="language-csharp">public MirCallable LowerToMirCallable()
+{
+<span id="work-code-setup" class="annotated-code-stage annotated-code-tone--purple">    var mirCallableOrigin = MirOriginFor(_hirCallable);
+    var hirCallableSymbol = RequireHirDeclarationSymbol(
+        _hirCallable.Id,
+        $"callable `{_hirCallable.Name}`");
+    var hirScopeGraph = _hirArtifact.Model.ScopeGraph
+        ?? throw MirLoweringError(
+            "the final HIR semantic model has no scope graph");
+    var qualifiedSourceCallableName =
+        hirScopeGraph.QualifiedName(hirCallableSymbol);</span>
+
+<span id="work-code-entry" class="annotated-code-stage annotated-code-tone--blue">    _currentMirBlockBuilder = CreateMirBlock(mirCallableOrigin);</span>
+
+<span id="work-code-parameters" class="annotated-code-stage annotated-code-tone--amber">    <a class="code-call-link" href="#lower-parameters" title="LowerParameters 실행 추적">LowerParameters</a>();</span>
+
+<span id="work-code-statements" class="annotated-code-stage annotated-code-tone--green">    <a class="code-call-link" href="#lower-statements" title="LowerStatements 실행 추적">LowerStatements</a>(_hirCallable.Body.Statements);</span>
+
+<span id="work-code-termination" class="annotated-code-stage annotated-code-tone--violet">    if (_currentMirBlockBuilder is not null)
+    {
+        if (_hirCallable.IsFunction)
+        {
+            MarkCurrentMirBlockUnreachable(
+                MirOrigin.GeneratedFrom(
+                    mirCallableOrigin,
+                    "missing validated function return"));
+        }
+        else
+        {
+            ReturnFromCurrentMirBlock(
+                value: null,
+                MirOrigin.GeneratedFrom(
+                    mirCallableOrigin,
+                    "implicit operation return"));
+        }
+    }</span>
+
+<span id="work-code-build" class="annotated-code-stage annotated-code-tone--cyan">    var mirBlocks = new List&lt;MirBlock&gt;(_mirBlockBuilders.Count);
+    foreach (var mirBlockBuilder in _mirBlockBuilders)
+    {
+        var mirBlock = mirBlockBuilder.Build();
+        mirBlocks.Add(mirBlock);
+    }</span>
+
+<span id="work-code-entry-select" class="annotated-code-stage annotated-code-tone--rose">    var mirEntryBlock = mirBlocks[0];</span>
+
+<span id="work-code-return" class="annotated-code-stage annotated-code-tone--teal">    return new MirCallable(
+        _mirCallableId,
+        qualifiedSourceCallableName,
+        _hirCallable.ReturnType is { } returns
+            ? MirType.Scalar(returns)
+            : null,
+        _mirParameters,
+        mirEntryBlock,
+        mirBlocks,
+        mirCallableOrigin);</span>
+}</code></pre>
+          </div>
+
+          <aside class="annotated-code-map__notes" aria-label="Work 실행 단계별 상태">
+            <section class="annotated-code-note annotated-code-tone--purple" data-code-target="work-code-setup">
+              <h5>출처와 이름 준비</h5>
+              <div class="annotated-code-note__summary">
+                <p>예제 코드 operation <code>Work</code>의 HIR ID는 <code>h44</code>입니다.</p>
+                <p>이 ID와 원본 소스 위치를 사용하여 callable의 출처 정보를 만듭니다.</p>
+                <p>이어서 HIR 노드 ID <code>h44</code>에 연결된 선언 심벌을 찾고,
+                  그 심벌과 scope graph를 사용하여 최종 이름 <code>"Work"</code>를 구합니다.</p>
+              </div>
+            </section>
+            <section class="annotated-code-note annotated-code-tone--blue" data-code-target="work-code-entry">
+              <h5>진입 block 생성</h5>
+              <div class="annotated-code-note__summary">
+                <p><code>CreateMirBlock(mirCallableOrigin)</code>이 진입 block의
+                  <code>MirBlockBuilder b0</code>를 생성합니다.</p>
+                <div class="annotated-code-note__state">
+                  <code>builders: [] → [b0]</code>
+                  <code>current: null → b0</code>
+                </div>
+                <p><code>current</code>가 가리키는 <code>b0</code>는
+                  <code>builders[0]</code>에 저장된 것과 같은 builder입니다.</p>
+              </div>
+            </section>
+            <section class="annotated-code-note annotated-code-tone--amber" data-code-target="work-code-parameters">
+              <h5>매개변수 처리</h5>
+              <div class="annotated-code-note__summary">
+                <p><code>Work</code>에는 매개변수가 없으므로
+                  <code>LowerParameters()</code>의 반복문은 한 번도 실행되지 않습니다.</p>
+                <p>따라서 MIR 매개변수도 생성되지 않으며,
+                  <code>_mirParameters</code>는 빈 목록으로 남습니다.
+                  현재 block <code>b0</code>도 변경되지 않습니다.</p>
+              </div>
+            </section>
+            <section class="annotated-code-note annotated-code-tone--green" data-code-target="work-code-statements">
+              <h5>본문 처리</h5>
+              <div class="annotated-code-note__summary">
+                <p><code>LowerStatements()</code>는 <code>Work</code>의 다섯 문장을 순서대로 처리합니다.</p>
+                <p>변수 선언, 큐비트 준비, 배열 대입은 <code>b0</code>에서 처리합니다.
+                  <code>if</code>를 처리하면서 참 경로 <code>b1</code>, 거짓 경로 <code>b2</code>,
+                  두 경로가 합류하는 <code>b3</code>을 생성합니다.</p>
+                <p>마지막 <code>H(q[0]);</code>는 합류 block <code>b3</code>에 기록됩니다.
+                  <code>H</code> 호출 뒤에 명시적인 <code>return</code>이 없으므로
+                  <code>b3</code>은 열린 상태로 남습니다.</p>
+                <div class="annotated-code-note__state">
+                  <code>builders: [b0] → [b0, b1, b2, b3]</code>
+                  <code>current: b0 → b3</code>
+                </div>
+              </div>
+            </section>
+            <section class="annotated-code-note annotated-code-tone--violet" data-code-target="work-code-termination">
+              <h5>열린 block 종료 분기</h5>
+              <div class="annotated-code-note__summary">
+                <p>본문 처리가 끝난 뒤에도 현재 block <code>b3</code>은 열려 있습니다.</p>
+                <p><code>Work</code>는 반환값이 없는 operation이므로,
+                  <code>ReturnFromCurrentMirBlock()</code>이 <code>b3</code>에 암시적인
+                  <code>return</code>을 추가하여 block을 종료합니다.</p>
+                <p>종료된 block에는 문장을 더 추가할 수 없으므로 현재 block은 <code>null</code>이 됩니다.</p>
+                <div class="annotated-code-note__state">
+                  <code>b3.Terminator: null → return</code>
+                  <code>current: b3 → null</code>
+                </div>
+              </div>
+            </section>
+            <section class="annotated-code-note annotated-code-tone--cyan" data-code-target="work-code-build">
+              <h5>immutable block 생성</h5>
+              <div class="annotated-code-note__summary">
+                <p><code>b0</code>부터 <code>b3</code>까지는 서로 다른 네 개의
+                  <code>MirBlockBuilder</code>입니다.</p>
+                <p>각 builder에 <code>Build()</code>를 호출하여 수정할 수 없는
+                  <code>MirBlock</code>으로 확정한 뒤, 생성된 block을 같은 순서로 저장합니다.</p>
+                <div class="annotated-code-note__state">
+                  <code>mirBlocks</code>
+                  <code>├─ [0] MirBlock b0</code>
+                  <code>├─ [1] MirBlock b1</code>
+                  <code>├─ [2] MirBlock b2</code>
+                  <code>└─ [3] MirBlock b3</code>
+                </div>
+              </div>
+            </section>
+            <section class="annotated-code-note annotated-code-tone--rose" data-code-target="work-code-entry-select">
+              <h5>진입 block 선택</h5>
+              <div class="annotated-code-note__summary">
+                <p><code>mirBlocks</code>의 첫 번째 block인 <code>b0</code>를 진입 block으로 선택합니다.</p>
+              </div>
+            </section>
+            <section class="annotated-code-note annotated-code-tone--teal" data-code-target="work-code-return">
+              <h5>MirCallable 반환</h5>
+              <div class="annotated-code-note__summary">
+                <p><code>c44</code> ID와 <code>"Work"</code> 이름을 사용하고, 반환값과 매개변수는 없으며,
+                  <code>b0</code>부터 <code>b3</code>까지의 block을 묶어
+                  <code>MirCallable Work c44</code> 객체를 만들고 반환합니다.</p>
+                <p><code>b0</code>는 <code>Blocks[0]</code>에 저장되며,
+                  동시에 실행이 시작되는 <code>EntryBlock</code>입니다.</p>
+              </div>
+            </section>
+          </aside>
+
+          <svg class="annotated-code-map__arrows" aria-hidden="true" data-marker-id="work-code-map-arrow">
+            <defs>
+              <marker id="work-code-map-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+                <path d="M0 0 L10 5 L0 10 Z" fill="context-stroke"/>
+              </marker>
+            </defs>
+          </svg>
+        </div>
+      </div>
+    </figure>
+
+
+  </article>
+
+  <article class="function-trace" id="lower-parameters">
+    <h2><code>LowerParameters()</code></h2>
+    <p>
+      현재 HIR callable의 매개변수를 앞에서부터 읽어 MIR 매개변수로 등록하는 함수입니다.<br>
+      공통 예제에서는 매개변수 하나를 가진 <code>Next h6</code>에서 한 번 실행되고, 매개변수가 없는 <code>Work h44</code>에서도 한 번 실행됩니다.
+    </p>
+
+    <p>
+      코드에 나오는 <code>_mirValues</code>, <code>_mirParameters</code>, <code>_currentMirBlockBuilder</code>, <code>_currentFlowState</code>는 지역 변수가 아니라 현재 lowerer 객체의 필드입니다.<br>
+      실제 선언은 <code>private readonly List&lt;MirValue&gt; _mirValues = new();</code>, <code>private readonly List&lt;IMirParameter&gt; _mirParameters = new();</code>, <code>private MirBlockBuilder? _currentMirBlockBuilder;</code>, <code>private LoweringFlowState _currentFlowState = new();</code>입니다.
+    </p>
+
+    <h3>1. <code>Next h6</code>의 <code>value</code> 등록</h3>
+
+<pre><code class="language-qora">function Next(value: int): int
+{
+    return value + 1;
+}</code></pre>
+
+    <p>
+      이 실행에서 읽는 대상은 괄호 안의 <code>value: int</code> 하나입니다.<br>
+      진입 block <code>b0</code>는 이미 만들어져 있지만 아직 비어 있으며, 매개변수와 MIR 값을 담을 목록도 빈 상태에서 시작합니다.
+    </p>
+
+    <div class="state-overview">
+      <figure class="state-tree" aria-labelledby="lower-parameters-before">
+        <figcaption id="lower-parameters-before">실행 전</figcaption>
+<pre><code class="language-plaintext"><span class="state-tree__field">_hirCallable</span>       <span class="state-tree__wire">──▶</span> <span class="state-tree__value">Next h6</span>
+<span class="state-tree__field">_mirCallableId</span>     <span class="state-tree__wire">──▶</span> <span class="state-tree__value">c6</span>
+
+<span class="state-tree__field">_hirCallable.Parameters</span>
+<span class="state-tree__wire">└─</span> <span class="state-tree__value">[0] HirParameter value h0</span>
+   <span class="state-tree__wire">├─</span> Type      <span class="state-tree__value">int</span>
+   <span class="state-tree__wire">└─</span> IsArray   <span class="state-tree__value">false</span>
+
+<span class="state-tree__field">_mirParameters</span>    <span class="state-tree__value">[]</span>
+<span class="state-tree__field">_mirValues</span>        <span class="state-tree__value">[]</span>
+
+<span class="state-tree__field">_currentFlowState</span>
+<span class="state-tree__wire">├─</span> _hirSymbolLifetimeFrames
+<span class="state-tree__wire">│  └─</span> [0] root lifetime frame    <span class="state-tree__value">{}</span>
+<span class="state-tree__wire">├─</span> CurrentMirValueByHirSymbolId   <span class="state-tree__value">{}</span>
+<span class="state-tree__wire">└─</span> CurrentMirQubitByHirSymbolId   <span class="state-tree__value">{}</span>
+
+<span class="state-tree__field">_mirBlockBuilders[0]</span> <span class="state-tree__wire">───────────┐</span>
+<span class="state-tree__field">_currentMirBlockBuilder</span> <span class="state-tree__wire">────────┴──▶</span> <span class="state-tree__value">MirBlockBuilder b0</span>
+                                      <span class="state-tree__wire">├─</span> _arguments     <span class="state-tree__value">[]</span>
+                                      <span class="state-tree__wire">├─</span> QubitPhis      <span class="state-tree__value">[]</span>
+                                      <span class="state-tree__wire">├─</span> Instructions   <span class="state-tree__value">[]</span>
+                                      <span class="state-tree__wire">└─</span> Terminator     <span class="state-tree__value">null</span></code></pre>
+      </figure>
+
+      <aside class="state-type-card" aria-labelledby="state-type-card-title">
+        <h4 id="state-type-card-title">보라색 이름이 가리키는 값</h4>
+        <p>보라색 표기는 lowerer의 필드명 또는 그 필드에서 시작한 프로퍼티 경로입니다.</p>
+
+        <dl>
+          <div>
+            <dt><code>_hirCallable</code></dt>
+            <dd><code>HirCallable</code><span>현재 변환하는 HIR callable 선언 하나</span></dd>
+          </div>
+          <div>
+            <dt><code>_mirCallableId</code></dt>
+            <dd><code>MirCallableId</code><span>현재 만들 MIR callable의 식별자</span></dd>
+          </div>
+          <div>
+            <dt><code>_hirCallable.Parameters</code></dt>
+            <dd><code>IReadOnlyList&lt;HirParameter&gt;</code><span>HIR 매개변수를 선언 순서대로 담은 목록</span></dd>
+          </div>
+          <div>
+            <dt><code>_mirParameters</code></dt>
+            <dd><code>List&lt;IMirParameter&gt;</code><span>지금까지 등록한 MIR 매개변수 목록</span></dd>
+          </div>
+          <div>
+            <dt><code>_mirValues</code></dt>
+            <dd><code>List&lt;MirValue&gt;</code><span>현재 callable에서 생성한 MIR 값 목록</span></dd>
+          </div>
+          <div>
+            <dt><code>_currentFlowState</code></dt>
+            <dd><code>LoweringFlowState</code><span>현재 경로의 심벌별 값·큐비트와 수명 상태</span></dd>
+          </div>
+          <div>
+            <dt><code>_currentMirBlockBuilder</code></dt>
+            <dd><code>MirBlockBuilder?</code><span>현재 instruction을 추가할 block builder</span></dd>
+          </div>
+        </dl>
+      </aside>
+    </div>
+
+    <figure class="annotated-code-figure" aria-labelledby="lower-parameters-code-map-caption">
+      <figcaption id="lower-parameters-code-map-caption">
+        <code>Next h6</code> 실행에서 <code>LowerParameters()</code> 내부 코드가 만드는 상태
+      </figcaption>
+      <div class="annotated-code-figure__scroll" tabindex="0">
+        <div class="annotated-code-map" data-code-map="lower-parameters-next">
+          <div class="annotated-code-map__source">
+<pre><code class="language-csharp">private void LowerParameters()
+{
+<span id="lower-parameters-code-lengths" class="annotated-code-stage annotated-code-tone--purple">    var requiredArrayLengths =
+        _hirArtifact.Model.RequiredArgLengths(_hirCallable.Id);</span>
+
+<span id="lower-parameters-code-select" class="annotated-code-stage annotated-code-tone--blue">    for (var hirParameterIndex = 0;
+         hirParameterIndex &lt; _hirCallable.Parameters.Count;
+         hirParameterIndex++)
+    {
+        var hirParameter =
+            _hirCallable.Parameters[hirParameterIndex];</span>
+
+<span id="lower-parameters-code-symbol" class="annotated-code-stage annotated-code-tone--amber">        var hirParameterSymbol = RequireHirDeclarationSymbol(
+            hirParameter.Id,
+            $"parameter `{hirParameter.Name}`");
+        var mirParameterOrigin = MirOriginFor(hirParameter);</span>
+
+<span id="lower-parameters-code-lifetime" class="annotated-code-stage annotated-code-tone--green">        _currentFlowState.TrackDeclaredHirSymbol(
+            hirParameterSymbol.Id);</span>
+
+<span id="lower-parameters-code-qubit" class="annotated-code-stage annotated-code-tone--violet">        if (hirParameter.Type == QType.Qubit)
+        {
+            <a class="code-call-link" href="#lower-qubit-parameter" title="LowerQubitParameter 실행 추적">LowerQubitParameter</a>(
+                hirParameter,
+                hirParameterSymbol.Id,
+                mirParameterOrigin);
+            continue;
+        }</span>
+
+<span id="lower-parameters-code-classical" class="annotated-code-stage annotated-code-tone--cyan">        <a class="code-call-link" href="#lower-classical-parameter" title="LowerClassicalParameter 실행 추적">LowerClassicalParameter</a>(
+            hirParameter,
+            hirParameterSymbol.Id,
+            mirParameterOrigin,
+            requiredArrayLengths);</span>
+    }
+}</code></pre>
+          </div>
+
+          <aside class="annotated-code-map__notes" aria-label="LowerParameters Next 실행 단계별 상태">
+            <section class="annotated-code-note annotated-code-tone--purple" data-code-target="lower-parameters-code-lengths">
+              <h5>배열 길이 요구 조회</h5>
+              <div class="annotated-code-note__summary">
+                <p><code>Next h6</code>의 매개변수 길이 요구를 조회합니다.</p>
+                <p><code>value</code>는 배열이 아니므로 필요한 배열 길이가 없습니다.</p>
+                <div class="annotated-code-note__state">
+                  <code>requiredArrayLengths = null</code>
+                </div>
+              </div>
+            </section>
+
+            <section class="annotated-code-note annotated-code-tone--blue" data-code-target="lower-parameters-code-select">
+              <h5>value h0 선택</h5>
+              <div class="annotated-code-note__summary">
+                <p>매개변수 목록에는 <code>value</code> 하나가 있으므로 반복문은 한 번 실행됩니다.
+                  첫 반복에서 인덱스 <code>0</code>의 HIR 매개변수를 선택합니다.</p>
+                <div class="annotated-code-note__state">
+                  <code>hirParameterIndex = 0</code>
+                  <code>hirParameter = value h0</code>
+                  <code>Type = int</code>
+                  <code>IsArray = false</code>
+                  <code>Ownership = Borrowed</code>
+                  <code>Access = ReadOnly</code>
+                </div>
+              </div>
+            </section>
+
+            <section class="annotated-code-note annotated-code-tone--amber" data-code-target="lower-parameters-code-symbol">
+              <h5>심벌과 Origin 조회</h5>
+              <div class="annotated-code-note__summary">
+                <p><code>value</code> 선언의 HIR 노드 ID인 <code>h0</code>를 조회 키로 사용하여,
+                  그 선언에 연결된 심벌 정보를 가져옵니다.</p>
+                <p>이어서 <code>h0</code>와 원본 소스 위치를 MIR 매개변수의 Origin으로 보존합니다.</p>
+                <div class="annotated-code-note__state">
+                  <code>hirParameterSymbol = Symbol(value)</code>
+                  <code>mirParameterOrigin = MirHirOrigin(HIR h0, source span)</code>
+                </div>
+              </div>
+            </section>
+
+            <section class="annotated-code-note annotated-code-tone--green" data-code-target="lower-parameters-code-lifetime">
+              <h5>선언 심벌 등록</h5>
+              <div class="annotated-code-note__summary">
+                <p><code>value</code>의 <code>SymbolId</code>를 현재 lifetime frame에 등록합니다.</p>
+                <div class="annotated-code-note__state">
+                  <code>lifetime frame: {} → {SymbolId(value)}</code>
+                </div>
+              </div>
+            </section>
+
+            <section class="annotated-code-note annotated-code-tone--violet" data-code-target="lower-parameters-code-qubit">
+              <h5>큐비트 분기 검사</h5>
+              <div class="annotated-code-note__summary">
+                <p><code>value</code>의 타입은 <code>int</code>이므로
+                  <code>hirParameter.Type == QType.Qubit</code> 조건은 <code>false</code>입니다.</p>
+                <p>따라서 <code>LowerQubitParameter()</code>와 <code>continue</code>는 실행하지 않습니다.</p>
+              </div>
+            </section>
+
+            <section class="annotated-code-note annotated-code-tone--cyan" data-code-target="lower-parameters-code-classical">
+              <h5>고전 매개변수 등록</h5>
+              <div class="annotated-code-note__summary">
+                <p><code>LowerClassicalParameter()</code>에 <code>value h0</code>, 선언 심벌 ID,
+                  Origin과 배열 길이 요구를 전달합니다.</p>
+                <p>세부 생성 과정은 함수 링크에서 이어서 설명합니다.
+                  호출이 끝나면 <code>value</code>를 나타내는 MIR 매개변수와 <code>%v0</code>가 등록됩니다.</p>
+                <div class="annotated-code-note__state">
+                  <code>_mirParameters: [] → [value → %v0: int]</code>
+                  <code>_mirValues: [] → [%v0: int]</code>
+                  <code>CurrentMirValueByHirSymbolId: {} → {SymbolId(value): v0}</code>
+                  <code>b0: 변화 없음</code>
+                </div>
+                <p>반복 인덱스가 <code>1</code>이 되면 매개변수 개수 <code>1</code>과 같아지므로
+                  반복문을 끝내고 반환합니다.</p>
+              </div>
+            </section>
+          </aside>
+
+          <svg class="annotated-code-map__arrows" aria-hidden="true" data-marker-id="lower-parameters-code-map-arrow">
+            <defs>
+              <marker id="lower-parameters-code-map-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+                <path d="M0 0 L10 5 L0 10 Z" fill="context-stroke"/>
+              </marker>
+            </defs>
+          </svg>
+        </div>
+      </div>
+    </figure>
+
+    <figure class="state-tree state-tree--standalone" aria-labelledby="lower-parameters-after">
+      <figcaption id="lower-parameters-after">실행 후</figcaption>
+<pre><code class="language-plaintext"><span class="state-tree__field">_hirCallable</span>       <span class="state-tree__wire">──▶</span> <span class="state-tree__value">Next h6</span>
+<span class="state-tree__field">_mirCallableId</span>     <span class="state-tree__wire">──▶</span> <span class="state-tree__value">c6</span>
+
+<span class="state-tree__field">_hirCallable.Parameters</span>
+<span class="state-tree__wire">└─</span> <span class="state-tree__value">[0] HirParameter value h0</span>
+   <span class="state-tree__wire">├─</span> Type      <span class="state-tree__value">int</span>
+   <span class="state-tree__wire">└─</span> IsArray   <span class="state-tree__value">false</span>
+
+<span class="state-tree__field">_mirParameters</span>
+<span class="state-tree__wire">└─</span> <span class="state-tree__value">[0] MirClassicalParameter value</span>
+   <span class="state-tree__wire">├─</span> Value           <span class="state-tree__wire">──▶</span> <span class="state-tree__value">_mirValues[0] (%v0)</span>
+   <span class="state-tree__wire">├─</span> Storage         <span class="state-tree__value">null</span>
+   <span class="state-tree__wire">├─</span> Ownership       <span class="state-tree__value">Borrowed</span>
+   <span class="state-tree__wire">├─</span> Access          <span class="state-tree__value">ReadOnly</span>
+   <span class="state-tree__wire">└─</span> MinimumLength   <span class="state-tree__value">0</span>
+
+<span class="state-tree__field">_mirValues</span>
+<span class="state-tree__wire">└─</span> <span class="state-tree__value">[0] MirValue %v0</span>
+   <span class="state-tree__wire">├─</span> Id       <span class="state-tree__value">v0</span>
+   <span class="state-tree__wire">├─</span> Type     <span class="state-tree__value">int</span>
+   <span class="state-tree__wire">└─</span> Origin   <span class="state-tree__value">MirHirOrigin</span>
+      <span class="state-tree__wire">├─</span> HirNodeId   <span class="state-tree__value">h0</span>
+      <span class="state-tree__wire">└─</span> Span        <span class="state-tree__value">value의 source span</span>
+
+<span class="state-tree__field">_currentFlowState</span>
+<span class="state-tree__wire">├─</span> _hirSymbolLifetimeFrames
+<span class="state-tree__wire">│  └─</span> [0] root lifetime frame
+<span class="state-tree__wire">│     └─</span> <span class="state-tree__value">SymbolId(value)</span>
+<span class="state-tree__wire">├─</span> CurrentMirValueByHirSymbolId
+<span class="state-tree__wire">│  └─</span> <span class="state-tree__value">[SymbolId(value)] = MirValueId v0</span>
+<span class="state-tree__wire">└─</span> CurrentMirQubitByHirSymbolId   <span class="state-tree__value">{}</span>
+
+<span class="state-tree__field">_mirBlockBuilders[0]</span> <span class="state-tree__wire">───────────┐</span>
+<span class="state-tree__field">_currentMirBlockBuilder</span> <span class="state-tree__wire">────────┴──▶</span> <span class="state-tree__value">MirBlockBuilder b0</span>
+                                      <span class="state-tree__wire">├─</span> _arguments     <span class="state-tree__value">[]</span>
+                                      <span class="state-tree__wire">├─</span> QubitPhis      <span class="state-tree__value">[]</span>
+                                      <span class="state-tree__wire">├─</span> Instructions   <span class="state-tree__value">[]</span>
+                                      <span class="state-tree__wire">└─</span> Terminator     <span class="state-tree__value">null</span></code></pre>
+    </figure>
+
+    <h3>2. 매개변수가 없는 <code>Work h44</code> 처리</h3>
+
+    <p>
+      <code>Work()</code>의 괄호 안에는 매개변수가 없습니다.<br>
+      따라서 같은 <code>LowerParameters()</code>에 들어오지만, 이번에는 <code>for</code> 본문을 한 번도 실행하지 않습니다.
+    </p>
+
+    <div class="state-overview state-overview--pair">
+      <figure class="state-tree" aria-labelledby="work-parameters-path">
+        <figcaption id="work-parameters-path">실행 경로</figcaption>
+<pre><code class="language-plaintext"><span class="state-tree__field">_hirCallable</span> <span class="state-tree__wire">──▶</span> <span class="state-tree__value">Work h44</span>
+
+RequiredArgLengths(Work h44) <span class="state-tree__wire">──▶</span> <span class="state-tree__value">null</span>
+
+for (hirParameterIndex = <span class="state-tree__value">0</span>)
+<span class="state-tree__wire">└─</span> 0 &lt; Parameters.Count(<span class="state-tree__value">0</span>) <span class="state-tree__wire">──▶</span> <span class="state-tree__value">false</span>
+   <span class="state-tree__wire">└─</span> 본문 실행 <span class="state-tree__value">0회</span></code></pre>
+      </figure>
+
+      <figure class="state-tree" aria-labelledby="work-parameters-result">
+        <figcaption id="work-parameters-result">실행 후 상태</figcaption>
+<pre><code class="language-plaintext"><span class="state-tree__field">_mirParameters</span>   <span class="state-tree__value">[]</span>
+<span class="state-tree__field">_mirValues</span>       <span class="state-tree__value">[]</span>
+
+<span class="state-tree__field">_currentFlowState</span>
+<span class="state-tree__wire">├─</span> _hirSymbolLifetimeFrames
+<span class="state-tree__wire">│  └─</span> [0] root lifetime frame    <span class="state-tree__value">{}</span>
+<span class="state-tree__wire">├─</span> CurrentMirValueByHirSymbolId   <span class="state-tree__value">{}</span>
+<span class="state-tree__wire">└─</span> CurrentMirQubitByHirSymbolId   <span class="state-tree__value">{}</span>
+
+<span class="state-tree__field">_mirBlockBuilders[0]</span> <span class="state-tree__wire">───────────┐</span>
+<span class="state-tree__field">_currentMirBlockBuilder</span> <span class="state-tree__wire">────────┴──▶</span> <span class="state-tree__value">MirBlockBuilder b0</span>
+                                      <span class="state-tree__wire">├─</span> _arguments     <span class="state-tree__value">[]</span>
+                                      <span class="state-tree__wire">├─</span> QubitPhis      <span class="state-tree__value">[]</span>
+                                      <span class="state-tree__wire">├─</span> Instructions   <span class="state-tree__value">[]</span>
+                                      <span class="state-tree__wire">└─</span> Terminator     <span class="state-tree__value">null</span></code></pre>
+      </figure>
+    </div>
+
+    <p>
+      즉 <code>Work</code> 실행에서는 새 매개변수 객체도, 새 MIR 값도 만들어지지 않습니다.<br>
+      다만 <code>b0</code>가 비어 있는 이유는 <code>Work</code>에 매개변수가 없기 때문만은 아닙니다. 이 함수는 callable 매개변수를 등록할 뿐 block argument나 instruction을 추가하지 않으므로, <code>Next</code>와 <code>Work</code> 모두 <code>b0</code>를 변경하지 않습니다.
+    </p>
+  </article>
+
+  <article class="function-trace" id="lower-classical-parameter">
+    <h2><code>LowerClassicalParameter()</code></h2>
+    <p>
+      HIR의 고전 매개변수 하나를 MIR 값과 <code>MirClassicalParameter</code>로 등록하는 함수입니다.<br>
+      아래 실행에서는 <code>Next(value: int)</code>의 <code>value h0</code> 하나를 처리합니다.
+    </p>
+
+    <div class="callout">
+      <span class="h">실제 인수</span>
+      <code>hirParameter = value h0</code><br>
+      <code>hirParameterSymbolId = SymbolId(value)</code><br>
+      <code>mirParameterOrigin = MirHirOrigin(HIR h0, value의 source span)</code><br>
+      <code>requiredArrayLengths = null</code>
+    </div>
+
+<pre><code class="language-csharp">private void LowerClassicalParameter(
+    HirParameter hirParameter,
+    SymbolId hirParameterSymbolId,
+    MirOrigin mirParameterOrigin,
+    IReadOnlyDictionary&lt;string, long&gt;? requiredArrayLengths)
+{
+    /* value는 배열이 아닌 int입니다.
+    mirParameterType = MirType.Scalar(int) */
+    var mirParameterType = hirParameter.IsArray
+        ? MirType.Array(hirParameter.Type, hirParameter.RegisterSize)
+        : MirType.Scalar(hirParameter.Type);
+
+    /* 아직 실제 정수는 정해지지 않았습니다.
+    %v0는 호출할 때 value로 들어올 int 값을 나타냅니다.
+
+    _mirValues
+    └─ [0] MirValue %v0
+       ├─ Id = v0
+       ├─ Type = int
+       └─ Origin = MirHirOrigin(value h0) */
+    var mirParameterValue = CreateMirValue(
+        mirParameterType,
+        hirParameterSymbolId,
+        mirParameterOrigin);
+
+    /* scalar이므로 결과는 (null, 0)입니다. */
+    var (mirArrayStorage, minimumLength) =
+        <a class="code-call-link" href="#create-mir-parameter-storage" title="CreateMirParameterStorage 실행 추적">CreateMirParameterStorage</a>(
+            hirParameter,
+            hirParameterSymbolId,
+            mirParameterOrigin,
+            requiredArrayLengths);
+
+    /* SymbolId(value) ──▶ MirValueId v0 */
+    _currentFlowState.CurrentMirValueByHirSymbolId[hirParameterSymbolId] = mirParameterValue.Id;
+
+    /* mirArrayStorage = null이므로 Scalar를 호출합니다.
+    Name, Ownership, Access는 hirParameter에서 직접 읽습니다. */
+    var mirParameter = mirArrayStorage is null
+        ? MirClassicalParameter.Scalar(
+            hirParameter,
+            mirParameterValue)
+        : MirClassicalParameter.Array(
+            hirParameter,
+            mirParameterValue,
+            mirArrayStorage,
+            minimumLength);
+
+    /* _mirParameters
+    └─ [0] MirClassicalParameter value
+       ├─ Value ──▶ _mirValues[0] (%v0)
+       ├─ Storage = null
+       ├─ Ownership = Borrowed
+       ├─ Access = ReadOnly
+       └─ MinimumLength = 0 */
+    _mirParameters.Add(mirParameter);
+}</code></pre>
+
+    <figure class="state-tree state-tree--standalone" aria-labelledby="lower-classical-parameter-after">
+      <figcaption id="lower-classical-parameter-after">실행 후</figcaption>
+<pre><code class="language-plaintext"><span class="state-tree__field">_mirParameters</span>
+<span class="state-tree__wire">└─</span> <span class="state-tree__value">[0] MirClassicalParameter value</span>
+   <span class="state-tree__wire">├─</span> Value           <span class="state-tree__wire">──▶</span> <span class="state-tree__value">_mirValues[0] (%v0)</span>
+   <span class="state-tree__wire">├─</span> Storage         <span class="state-tree__value">null</span>
+   <span class="state-tree__wire">├─</span> Ownership       <span class="state-tree__value">Borrowed</span>
+   <span class="state-tree__wire">├─</span> Access          <span class="state-tree__value">ReadOnly</span>
+   <span class="state-tree__wire">└─</span> MinimumLength   <span class="state-tree__value">0</span>
+
+<span class="state-tree__field">_mirValues</span>
+<span class="state-tree__wire">└─</span> <span class="state-tree__value">[0] MirValue %v0</span>
+   <span class="state-tree__wire">├─</span> Id       <span class="state-tree__value">v0</span>
+   <span class="state-tree__wire">├─</span> Type     <span class="state-tree__value">int</span>
+   <span class="state-tree__wire">└─</span> Origin   <span class="state-tree__value">MirHirOrigin(value h0)</span>
+
+<span class="state-tree__field">_currentFlowState.CurrentMirValueByHirSymbolId</span>
+<span class="state-tree__wire">└─</span> <span class="state-tree__value">[SymbolId(value)] = MirValueId v0</span>
+
+<span class="state-tree__field">_currentMirBlockBuilder</span> <span class="state-tree__wire">──▶</span> <span class="state-tree__value">b0 (변경 없음)</span></code></pre>
+    </figure>
+  </article>
+
+  <article class="function-trace" id="create-mir-parameter-storage">
+    <h2><code>CreateMirParameterStorage()</code></h2>
+    <p>
+      고전 매개변수 하나가 scalar인지 array인지 확인하고, 그 매개변수에 필요한 <code>MirArrayStorage?</code>와 <code>MinimumLength</code>를 함께 반환하는 함수입니다.<br>
+      scalar이면 <code>(null, 0)</code>을 반환하고, array이면 새 storage를 만든 뒤 최소 길이를 계산해 반환합니다.
+    </p>
+
+    <h3><code>Next(value: int)</code> 처리</h3>
+
+    <div class="callout">
+      <span class="h">실제 인수</span>
+      <code>hirParameter = value h0</code><br>
+      <code>hirParameterSymbolId = value 선언의 SymbolId</code><br>
+      <code>mirParameterOrigin = MirHirOrigin(HIR h0, value의 source span)</code><br>
+      <code>requiredArrayLengths = null</code>
+    </div>
+
+<pre><code class="language-csharp">private (MirArrayStorage? Storage, int MinimumLength)
+    CreateMirParameterStorage(
+        HirParameter hirParameter,
+        SymbolId hirParameterSymbolId,
+        MirOrigin mirParameterOrigin,
+        IReadOnlyDictionary&lt;string, long&gt;? requiredArrayLengths)
+{
+    /* value는 scalar이므로 이 분기를 선택합니다.
+    반환값 = (Storage: null, MinimumLength: 0) */
+    if (!hirParameter.IsArray) return (null, 0);
+
+    /* 아래는 array 매개변수일 때만 실행됩니다.
+    새 storage를 만들고 HIR 심벌과 MIR storage의 연결을 기록합니다. */
+    var mirArrayStorage = new MirArrayStorage(
+        AllocateMirStorageId(),
+        hirParameter.Name,
+        mirParameterOrigin);
+    _traceSink?.LinkStorage(
+        hirParameterSymbolId,
+        _mirCallableId,
+        mirArrayStorage.Id);
+
+    /* array 매개변수의 기본 최소 길이는 1입니다.
+    호출 계약에 더 큰 길이가 기록되어 있으면 그 길이를 사용합니다. */
+    var minimumLength = 1;
+    if (requiredArrayLengths is not null
+        &amp;&amp; requiredArrayLengths.TryGetValue(
+            hirParameter.Name,
+            out var requiredLength))
+    {
+        if (requiredLength &lt; 0 || requiredLength &gt; int.MaxValue)
+        {
+            throw MirLoweringError(
+                $"array parameter `{hirParameter.Name}` has invalid "
+                + $"minimum length {requiredLength}");
+        }
+
+        minimumLength = Math.Max(minimumLength, (int)requiredLength);
+    }
+
+    return (mirArrayStorage, minimumLength);
+}</code></pre>
+
+<pre><code class="language-plaintext">Next의 value 처리 결과
+Storage       = null
+MinimumLength = 0
+
+생성된 MirArrayStorage = 없음
+호출된 LinkStorage     = 없음</code></pre>
+  </article>
+
+  <article class="function-trace" id="lower-qubit-parameter">
+    <h2><code>LowerQubitParameter()</code></h2>
+    <p>
+      HIR의 큐비트 매개변수 하나를 최초 버전의 <code>MirQubitParameter</code>로 만들고, 현재 lowerer의 큐비트 상태에 등록하는 함수입니다.<br>
+      기존 <code>Next</code>와 <code>Work</code>에는 큐비트 매개변수가 없으므로, 아래의 작은 보조 프로그램에서 <code>target</code> 하나가 처리되는 과정을 따라갑니다.
+    </p>
+
+    <h3>실행에 사용할 callable</h3>
+
+<pre><code class="language-qora">operation Apply(target: Qubit)
+{
+    X(target);
+}
+
+operation Main()
+{
+    use q = Qubit[1];
+    Apply(q[0]);
+}</code></pre>
+
+    <p>
+      현재 CLI에서 두 callable은 <code>Apply h7/c7</code>과 <code>Main h17/c17</code>입니다.<br>
+      지금 처리할 대상은 <code>Apply</code>의 <code>target h0</code> 하나이며, <code>Main</code>은 프로그램의 진입 operation을 제공하기 위해 함께 있습니다.<br>
+      <code>LowerParameters()</code>가 먼저 <code>target</code>의 선언 심벌을 root lifetime frame에 등록한 다음, 아래의 <code>LowerQubitParameter()</code>를 호출합니다.
+    </p>
+
+    <div class="state-overview">
+      <figure class="state-tree" aria-labelledby="lower-qubit-parameter-before">
+        <figcaption id="lower-qubit-parameter-before">실행 전</figcaption>
+<pre><code class="language-plaintext"><span class="state-tree__field">호출 인수</span>
+<span class="state-tree__wire">├─</span> hirParameter            <span class="state-tree__wire">──▶</span> <span class="state-tree__value">HirParameter target h0</span>
+<span class="state-tree__wire">│                              ├─</span> Type        <span class="state-tree__value">Qubit</span>
+<span class="state-tree__wire">│                              ├─</span> IsArray     <span class="state-tree__value">false</span>
+<span class="state-tree__wire">│                              └─</span> Ownership   <span class="state-tree__value">Borrowed</span>
+<span class="state-tree__wire">├─</span> hirParameterSymbolId    <span class="state-tree__wire">──▶</span> <span class="state-tree__value">SymbolId(target)</span>
+<span class="state-tree__wire">└─</span> mirParameterOrigin      <span class="state-tree__wire">──▶</span> <span class="state-tree__value">MirHirOrigin</span>
+                                  <span class="state-tree__wire">├─</span> HirNodeId   <span class="state-tree__value">h0</span>
+                                  <span class="state-tree__wire">└─</span> Span        <span class="state-tree__value">target의 source span</span>
+
+<span class="state-tree__field">lowerer 필드</span>
+<span class="state-tree__wire">├─</span> _hirCallable                 <span class="state-tree__wire">──▶</span> <span class="state-tree__value">Apply h7</span>
+<span class="state-tree__wire">├─</span> _mirCallableId               <span class="state-tree__wire">──▶</span> <span class="state-tree__value">c7</span>
+<span class="state-tree__wire">├─</span> _initialMirQubitsById             <span class="state-tree__value">{}</span>
+<span class="state-tree__wire">├─</span> _nextMirQubitVersionById          <span class="state-tree__value">{}</span>
+<span class="state-tree__wire">├─</span> _mirParameters                    <span class="state-tree__value">[]</span>
+<span class="state-tree__wire">└─</span> _mirValues                        <span class="state-tree__value">[]</span>
+
+<span class="state-tree__field">_currentFlowState</span>
+<span class="state-tree__wire">├─</span> _hirSymbolLifetimeFrames
+<span class="state-tree__wire">│  └─</span> [0] root lifetime frame
+<span class="state-tree__wire">│     └─</span> <span class="state-tree__value">SymbolId(target)</span>
+<span class="state-tree__wire">├─</span> CurrentMirValueByHirSymbolId   <span class="state-tree__value">{}</span>
+<span class="state-tree__wire">└─</span> CurrentMirQubitByHirSymbolId   <span class="state-tree__value">{}</span>
+
+<span class="state-tree__field">_mirBlockBuilders[0]</span> <span class="state-tree__wire">───────────┐</span>
+<span class="state-tree__field">_currentMirBlockBuilder</span> <span class="state-tree__wire">────────┴──▶</span> <span class="state-tree__value">MirBlockBuilder b0</span>
+                                      <span class="state-tree__wire">├─</span> _arguments     <span class="state-tree__value">[]</span>
+                                      <span class="state-tree__wire">├─</span> QubitPhis      <span class="state-tree__value">[]</span>
+                                      <span class="state-tree__wire">├─</span> Instructions   <span class="state-tree__value">[]</span>
+                                      <span class="state-tree__wire">└─</span> Terminator     <span class="state-tree__value">null</span></code></pre>
+      </figure>
+
+      <aside class="state-type-card" aria-labelledby="lower-qubit-parameter-types">
+        <h4 id="lower-qubit-parameter-types">이 함수가 변경하는 컬렉션</h4>
+        <p>각 컬렉션은 같은 큐비트 매개변수를 서로 다른 목적으로 참조합니다.</p>
+
+        <dl>
+          <div>
+            <dt><code>_initialMirQubitsById</code></dt>
+            <dd><code>Dictionary&lt;MirQubitId, MirQubit&gt;</code><span>큐비트 ID별 최초 버전</span></dd>
+          </div>
+          <div>
+            <dt><code>_nextMirQubitVersionById</code></dt>
+            <dd><code>Dictionary&lt;MirQubitId, int&gt;</code><span>다음에 할당할 버전 번호</span></dd>
+          </div>
+          <div>
+            <dt><code>CurrentMirQubitByHirSymbolId</code></dt>
+            <dd><code>Dictionary&lt;SymbolId, MirQubit&gt;</code><span>HIR 심벌이 현재 가리키는 큐비트 버전</span></dd>
+          </div>
+          <div>
+            <dt><code>_mirParameters</code></dt>
+            <dd><code>List&lt;IMirParameter&gt;</code><span>callable의 MIR 매개변수 목록</span></dd>
+          </div>
+        </dl>
+      </aside>
+    </div>
+
+    <figure class="annotated-code-figure" aria-labelledby="lower-qubit-parameter-code-map-caption">
+      <figcaption id="lower-qubit-parameter-code-map-caption">
+        <code>target h0</code>를 처리할 때 <code>LowerQubitParameter()</code> 내부 코드가 만드는 상태
+      </figcaption>
+      <div class="annotated-code-figure__scroll" tabindex="0">
+        <div class="annotated-code-map" data-code-map="lower-qubit-parameter-target">
+          <div class="annotated-code-map__source">
+<pre><code class="language-csharp">private void LowerQubitParameter(
+    HirParameter hirParameter,
+    SymbolId hirParameterSymbolId,
+    MirOrigin mirParameterOrigin)
+{
+<span id="lower-qubit-parameter-code-id" class="annotated-code-stage annotated-code-tone--purple">    var mirQubitId = AllocateMirQubitId();</span>
+
+<span id="lower-qubit-parameter-code-create" class="annotated-code-stage annotated-code-tone--blue">    var mirQubitParameter = hirParameter.IsArray
+        ? MirQubitParameter.Array(
+            mirQubitId,
+            hirParameter.Name,
+            hirParameter.RegisterSize,
+            hirParameter.Ownership,
+            mirParameterOrigin)
+        : MirQubitParameter.Single(
+            mirQubitId,
+            hirParameter.Name,
+            hirParameter.Ownership,
+            mirParameterOrigin);</span>
+
+<span id="lower-qubit-parameter-code-initial" class="annotated-code-stage annotated-code-tone--amber">    RegisterInitialMirQubit(
+        hirParameterSymbolId,
+        mirQubitParameter);</span>
+<span id="lower-qubit-parameter-code-current" class="annotated-code-stage annotated-code-tone--green">    _currentFlowState.CurrentMirQubitByHirSymbolId[hirParameterSymbolId] = mirQubitParameter;</span>
+<span id="lower-qubit-parameter-code-list" class="annotated-code-stage annotated-code-tone--cyan">    _mirParameters.Add(mirQubitParameter);</span>
+}</code></pre>
+          </div>
+
+          <aside class="annotated-code-map__notes" aria-label="LowerQubitParameter target 실행 단계별 상태">
+            <section class="annotated-code-note annotated-code-tone--purple" data-code-target="lower-qubit-parameter-code-id">
+              <h5>큐비트 ID 할당</h5>
+              <div class="annotated-code-note__summary">
+                <p>아직 등록된 최초 큐비트가 없으므로 컬렉션은 비어 있고, 등록 개수는 <code>0</code>입니다.</p>
+                <p><code>AllocateMirQubitId()</code>는 이 개수로 첫 큐비트 ID <code>q0</code>를 만듭니다.</p>
+                <div class="annotated-code-note__state">
+                  <code>_initialMirQubitsById = {}</code>
+                  <code>_initialMirQubitsById.Count = 0</code>
+                  <code>mirQubitId = q0</code>
+                </div>
+              </div>
+            </section>
+
+            <section class="annotated-code-note annotated-code-tone--blue" data-code-target="lower-qubit-parameter-code-create">
+              <h5>최초 버전 객체 생성</h5>
+              <div class="annotated-code-note__summary">
+                <p><code>target</code>은 배열이 아니므로 <code>MirQubitParameter.Single()</code>을 호출합니다.</p>
+                <p><code>Single()</code>은 <code>q0</code>의 최초 버전인 <code>q0.v0</code>를 나타내는 매개변수 객체를 만듭니다.</p>
+                <div class="annotated-code-note__state">
+                  <code>mirQubitParameter = MirQubitParameter target q0.v0</code>
+                  <code>Name = "target"</code>
+                  <code>IsArray = false</code>
+                  <code>Length = null</code>
+                  <code>Ownership = Borrowed</code>
+                  <code>Origin = HIR h0 + source span</code>
+                </div>
+              </div>
+            </section>
+
+            <section class="annotated-code-note annotated-code-tone--amber" data-code-target="lower-qubit-parameter-code-initial">
+              <h5>최초 버전 등록</h5>
+              <div class="annotated-code-note__summary">
+                <p><code>RegisterInitialMirQubit()</code>은 <code>q0.v0</code>를 <code>q0</code>의 최초 버전으로 저장합니다.</p>
+                <p>현재 버전은 <code>v0</code>이며, 다음 상태 변경에서 할당할 버전 번호를 <code>1</code>로 준비합니다.</p>
+                <div class="annotated-code-note__state">
+                  <code>_initialMirQubitsById: {} → {q0: q0.v0}</code>
+                  <code>_nextMirQubitVersionById: {} → {q0: 1}</code>
+                </div>
+                <p><code>traceSink</code>가 있으면 <code>SymbolId(target)</code>과 <code>c7/q0.v0</code>의 대응도 기록합니다.</p>
+              </div>
+            </section>
+
+            <section class="annotated-code-note annotated-code-tone--green" data-code-target="lower-qubit-parameter-code-current">
+              <h5>현재 큐비트 상태 연결</h5>
+              <div class="annotated-code-note__summary">
+                <p>HIR의 <code>target</code>을 이후 문장에서 읽을 때 사용할 현재 MIR 큐비트 버전을 등록합니다.</p>
+                <div class="annotated-code-note__state">
+                  <code>CurrentMirQubitByHirSymbolId: {} → 항목 1개</code>
+                  <code>[SymbolId(target)] = q0.v0</code>
+                </div>
+              </div>
+            </section>
+
+            <section class="annotated-code-note annotated-code-tone--cyan" data-code-target="lower-qubit-parameter-code-list">
+              <h5>callable 매개변수 목록 연결</h5>
+              <div class="annotated-code-note__summary">
+                <p>같은 <code>MirQubitParameter target q0.v0</code> 객체를 callable의 매개변수 목록에도 추가합니다.</p>
+                <div class="annotated-code-note__state">
+                  <code>_mirParameters: [] → [target q0.v0]</code>
+                  <code>b0: 변화 없음</code>
+                </div>
+              </div>
+            </section>
+          </aside>
+
+          <svg class="annotated-code-map__arrows" aria-hidden="true" data-marker-id="lower-qubit-parameter-code-map-arrow">
+            <defs>
+              <marker id="lower-qubit-parameter-code-map-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+                <path d="M0 0 L10 5 L0 10 Z" fill="context-stroke"/>
+              </marker>
+            </defs>
+          </svg>
+        </div>
+      </div>
+    </figure>
+
+    <figure class="state-tree state-tree--standalone" aria-labelledby="lower-qubit-parameter-after">
+      <figcaption id="lower-qubit-parameter-after">실행 후</figcaption>
+<pre><code class="language-plaintext"><span class="state-tree__field">_hirCallable</span>       <span class="state-tree__wire">──▶</span> <span class="state-tree__value">Apply h7</span>
+<span class="state-tree__field">_mirCallableId</span>     <span class="state-tree__wire">──▶</span> <span class="state-tree__value">c7</span>
+
+<span class="state-tree__field">_hirCallable.Parameters</span>
+<span class="state-tree__wire">└─</span> <span class="state-tree__value">[0] HirParameter target h0</span>
+   <span class="state-tree__wire">├─</span> Type        <span class="state-tree__value">Qubit</span>
+   <span class="state-tree__wire">├─</span> IsArray     <span class="state-tree__value">false</span>
+   <span class="state-tree__wire">└─</span> Ownership   <span class="state-tree__value">Borrowed</span>
+
+<span class="state-tree__field">_currentFlowState</span>
+<span class="state-tree__wire">├─</span> _hirSymbolLifetimeFrames
+<span class="state-tree__wire">│  └─</span> [0] root lifetime frame
+<span class="state-tree__wire">│     └─</span> <span class="state-tree__value">SymbolId(target)</span>
+<span class="state-tree__wire">├─</span> CurrentMirValueByHirSymbolId   <span class="state-tree__value">{}</span>
+<span class="state-tree__wire">└─</span> CurrentMirQubitByHirSymbolId
+   <span class="state-tree__wire">└─</span> [SymbolId(target)] <span class="state-tree__wire">──▶</span> <span class="state-tree__value">아래의 동일 객체</span>
+
+<span class="state-tree__field">_initialMirQubitsById</span>
+<span class="state-tree__wire">└─</span> [q0] <span class="state-tree__wire">──▶</span> <span class="state-tree__value">아래의 동일 객체</span>
+
+<span class="state-tree__field">_mirParameters</span>
+<span class="state-tree__wire">└─</span> [0] <span class="state-tree__wire">──▶</span> <span class="state-tree__value">아래의 동일 객체</span>
+
+<span class="state-tree__field">세 위치가 함께 가리키는 객체</span>
+<span class="state-tree__wire">└─▶</span> <span class="state-tree__value">MirQubitParameter target q0.v0</span>
+     <span class="state-tree__wire">├─</span> Id          <span class="state-tree__value">q0</span>
+     <span class="state-tree__wire">├─</span> Version     <span class="state-tree__value">v0</span>
+     <span class="state-tree__wire">├─</span> Name        <span class="state-tree__value">"target"</span>
+     <span class="state-tree__wire">├─</span> IsArray     <span class="state-tree__value">false</span>
+     <span class="state-tree__wire">├─</span> Length      <span class="state-tree__value">null</span>
+     <span class="state-tree__wire">├─</span> Ownership   <span class="state-tree__value">Borrowed</span>
+     <span class="state-tree__wire">└─</span> Origin      <span class="state-tree__value">MirHirOrigin</span>
+        <span class="state-tree__wire">├─</span> HirNodeId   <span class="state-tree__value">h0</span>
+        <span class="state-tree__wire">└─</span> Span        <span class="state-tree__value">target의 source span</span>
+
+<span class="state-tree__field">_nextMirQubitVersionById</span>
+<span class="state-tree__wire">└─</span> [q0] = <span class="state-tree__value">1</span> <span class="state-tree__wire">──▶</span> 다음에 할당할 버전 번호
+
+<span class="state-tree__field">_mirValues</span>   <span class="state-tree__value">[]</span>
+
+<span class="state-tree__field">_mirBlockBuilders[0]</span> <span class="state-tree__wire">───────────┐</span>
+<span class="state-tree__field">_currentMirBlockBuilder</span> <span class="state-tree__wire">────────┴──▶</span> <span class="state-tree__value">MirBlockBuilder b0</span>
+                                      <span class="state-tree__wire">├─</span> _arguments     <span class="state-tree__value">[]</span>
+                                      <span class="state-tree__wire">├─</span> QubitPhis      <span class="state-tree__value">[]</span>
+                                      <span class="state-tree__wire">├─</span> Instructions   <span class="state-tree__value">[]</span>
+                                      <span class="state-tree__wire">└─</span> Terminator     <span class="state-tree__value">null</span></code></pre>
+    </figure>
+
+    <p>
+      <code>_initialMirQubitsById[q0]</code>, <code>CurrentMirQubitByHirSymbolId[SymbolId(target)]</code>, <code>_mirParameters[0]</code>에는 동일한 <code>MirQubitParameter target q0.v0</code> 객체가 들어갑니다.<br>
+      이 함수는 매개변수를 등록할 뿐 instruction을 방출하지 않으므로 <code>b0</code>는 그대로 비어 있습니다.<br>
+      <code>q0.v1</code>은 이 함수에서 만들지 않으며, 본문의 <code>X(target)</code>이 큐비트 상태를 변경할 때 생성됩니다.
+    </p>
+  </article>
+
+  <article class="function-trace" id="lower-statements">
+    <h2><code>LowerStatements()</code></h2>
+    <p>
+      HIR 문장 목록을 앞에서부터 순회하며 각 문장을 <code>LowerStatement()</code>에 전달하는 함수입니다.<br>
+      아래에서는 <code>Next</code> 처리를 먼저 끝까지 확인한 다음, <code>Work</code> 처리로 넘어갑니다.
+    </p>
+
+    <h3>1. <code>Next</code> 본문 처리</h3>
+
+<pre><code class="language-qora">function Next(value: int): int
+{
+    return value + 1;
+}</code></pre>
+
+    <p>
+      <code>hirStatements</code>에는 <code>return value + 1;</code> 한 문장만 들어 있으며, 시작할 때 현재 block은 <code>b0</code>입니다.<br>
+      따라서 바깥 <code>for</code>는 한 번만 실행됩니다.
+    </p>
+
+<pre><code class="language-csharp">private void LowerStatements(IReadOnlyList&lt;HirStatement&gt; hirStatements)
+{
+    /* Next 본문을 처리할 때의 실제 입력
+    ├─ hirStatements = [return value + 1]
+    ├─ hirStatements.Count = 1
+    └─ _currentMirBlockBuilder = b0 */
+    for (var hirStatementIndex = 0;
+         hirStatementIndex &lt; hirStatements.Count;
+         hirStatementIndex++)
+    {
+        /* 첫 반복
+        ├─ hirStatementIndex = 0
+        ├─ hirStatements[0] = return value + 1
+        └─ 현재 block = b0
+
+        b0이 열려 있으므로 아래 null 분기는 실행하지 않습니다. */
+        if (_currentMirBlockBuilder is null)
+        {
+            /* 앞 문장이 현재 경로를 끝냈는데 남은 문장이 있을 때만 실행합니다.
+               남은 문장은 MIR로 만들지 않으며, traceSink가 있으면
+               그 안의 선언 symbol을 '도달 불가'로 기록합니다. */
+            for (;
+                 hirStatementIndex &lt; hirStatements.Count;
+                 hirStatementIndex++)
+            {
+                MarkUnreachableDeclarations(
+                    hirStatements[hirStatementIndex]);
+            }
+            return;
+        }
+
+        /* return 문장을 LowerStatement()에 전달합니다.
+
+        호출 전                       호출 후
+        현재 block = b0               b0.Terminator = return %v2
+                                      현재 block = null */
+        <a class="code-call-link" href="#lower-statement" title="LowerStatement 실행 추적">LowerStatement</a>(hirStatements[hirStatementIndex]);
+    }
+
+    /* hirStatementIndex가 1로 증가합니다.
+       1 &lt; hirStatements.Count(1)가 false이므로 for가 끝납니다.
+       따라서 현재 block이 null인 상태로 이 함수를 종료합니다. */
+}</code></pre>
+
+    <figure class="mermaid-card">
+      <figcaption><span>NEXT</span> 한 문장을 처리한 결과</figcaption>
+<pre class="mermaid chapter-10-mermaid mermaid--vertical">
+flowchart TB
+  accTitle: Next 본문에서 LowerStatements가 return 문장 하나를 처리하는 과정
+  accDescr: b0에서 시작하여 hirStatements 0번 return 문장을 LowerStatement에 전달하고, b0에 return을 기록한 뒤 현재 block이 null이 됩니다.
+
+  before["호출 전<br/><br/>hirStatements = [return value + 1]<br/>현재 block = b0"]:::sourceCode
+  statement["hirStatementIndex = 0<br/>hirStatements[0]<br/><br/>return value + 1;"]:::sourceCode
+  lower["LowerStatement(return)<br/><br/>b0.Terminator = return %v2"]:::sourceCode
+  after["호출 후<br/><br/>현재 block = null"]:::sourceCode
+
+  before --> statement
+  statement --> lower
+  lower --> after
+
+  classDef sourceCode font-family:monospace,font-size:14px;
+</pre>
+    </figure>
+
+    <h3>2. <code>Work</code> 본문 처리</h3>
+
+<pre><code class="language-qora">operation Work()
+{
+    var values: int[] = [0];
+    use q = Qubit[1];
+
+    values[0] = Next(values[0]);
+
+    if (values[0] == 1)
+    {
+        X(q[0]);
+    }
+
+    H(q[0]);
+}</code></pre>
+
+    <p>
+      먼저 <code>Work</code>의 최상위 다섯 문장을 입력으로 한 번 실행합니다.<br>
+      이 실행이 <code>if</code> 문장을 처리할 때 참 본문과 빈 거짓 본문을 각각 다시 전달하므로, <code>Work</code> 처리 안에서는 <code>LowerStatements()</code>가 모두 세 번 실행됩니다.
+    </p>
+
+<pre><code class="language-csharp">private void LowerStatements(IReadOnlyList&lt;HirStatement&gt; hirStatements)
+{
+    /* Work를 처리하는 동안 같은 LowerStatements() 본문에 세 번 진입합니다.
+
+    첫 번째 호출 — Work 최상위 본문
+    ├─ hirStatements = [var values, use q, 배열 대입, if, H]
+    ├─ 시작 block = b0
+    ├─ 반복 5회
+    └─ index 3의 if를 처리하는 동안 아래 두 호출을 실행합니다.
+
+       LowerStatement(if)
+       └─ LowerIf()
+          ├─ LowerScopedBranch(b1, 참 본문)
+          │  └─ 두 번째 호출: LowerStatements([X(q[0])])
+          └─ LowerScopedBranch(b2, 거짓 본문)
+             └─ 세 번째 호출: LowerStatements([])
+
+    두 번째 호출 — if 참 본문
+    ├─ hirStatements = [X(q[0])]
+    ├─ 시작 block = b1
+    └─ 반복 1회
+
+    세 번째 호출 — if 거짓 본문
+    ├─ hirStatements = []
+    ├─ 시작 block = b2
+    └─ 반복 0회 */
+    for (var hirStatementIndex = 0;
+         hirStatementIndex &lt; hirStatements.Count;
+         hirStatementIndex++)
+    {
+        /* 첫 번째 호출과 두 번째 호출은 현재 block이 열려 있으므로
+           아래 null 분기를 실행하지 않습니다.
+
+        첫 번째 호출
+        ├─ index 0~3을 시작할 때 현재 block = b0
+        └─ index 4를 시작할 때 현재 block = b3
+
+        두 번째 호출
+        └─ index 0을 시작할 때 현재 block = b1
+
+        세 번째 호출은 hirStatements.Count가 0이므로
+        for 본문 자체를 한 번도 실행하지 않습니다. */
+        if (_currentMirBlockBuilder is null)
+        {
+            /* 앞 문장이 현재 경로를 끝냈는데 남은 문장이 있을 때만 실행합니다.
+               남은 문장은 MIR로 만들지 않으며, traceSink가 있으면
+               그 안의 선언 symbol을 '도달 불가'로 기록합니다. */
+            for (;
+                 hirStatementIndex &lt; hirStatements.Count;
+                 hirStatementIndex++)
+            {
+                MarkUnreachableDeclarations(
+                    hirStatements[hirStatementIndex]);
+            }
+            return;
+        }
+
+        /* 첫 번째 호출의 실행 흐름
+        ├─ index 0: var       처리 후 현재 block = b0
+        ├─ index 1: use       처리 후 현재 block = b0
+        ├─ index 2: 배열 대입 처리 후 현재 block = b0
+        ├─ index 3: if를 LowerStatement()에 전달합니다.
+        │
+        │  이 LowerStatement(if) 호출이 끝나기 전에
+        │  첫 번째 LowerStatements() 호출은 여기서 잠시 멈춥니다.
+        │
+        │  두 번째 호출
+        │  ├─ hirStatementIndex = 0
+        │  ├─ X(q[0])을 LowerStatement()에 전달합니다.
+        │  └─ 현재 block = b1인 상태로 종료합니다.
+        │
+        │  세 번째 호출
+        │  ├─ hirStatements.Count = 0
+        │  ├─ for 본문을 실행하지 않습니다.
+        │  └─ 현재 block = b2인 상태로 종료합니다.
+        │
+        │  두 호출이 끝나면 LowerIf()가 b1과 b2를 b3에 연결합니다.
+        │  현재 block을 b3으로 바꾼 뒤 첫 번째 호출의 index 3으로 돌아옵니다.
+        └─ index 4: H를 처리한 뒤 현재 block = b3 */
+        <a class="code-call-link" href="#lower-statement" title="LowerStatement 실행 추적">LowerStatement</a>(hirStatements[hirStatementIndex]);
+    }
+
+    /* 호출이 반환되는 순서
+    1. 두 번째 호출이 b1을 남기고 반환합니다.
+    2. 세 번째 호출이 b2를 남기고 반환합니다.
+    3. 첫 번째 호출이 b3을 남기고 반환합니다. */
+}</code></pre>
+
+    <h4><code>Work</code> 최상위 목록에서 <code>hirStatementIndex</code>가 가리키는 문장</h4>
+
+    <figure class="mermaid-card">
+      <figcaption><span>WORK</span> 최상위 <code>hirStatements</code> 목록 순회</figcaption>
+<pre class="mermaid chapter-10-mermaid mermaid--vertical">
+flowchart TB
+  accTitle: Work 최상위 본문의 hirStatementIndex와 선택되는 문장
+  accDescr: hirStatementIndex가 0부터 4까지 증가하면서 hirStatements 목록의 변수 선언, 큐비트 선언, 배열 대입, if 문장, H 호출을 차례로 선택합니다.
+
+  i0["hirStatementIndex = 0<br/>hirStatements[0]<br/><br/>var values: int[] = [0];"]:::sourceCode
+  i1["hirStatementIndex = 1<br/>hirStatements[1]<br/><br/>use q = Qubit[1];"]:::sourceCode
+  i2["hirStatementIndex = 2<br/>hirStatements[2]<br/><br/>values[0] = Next(values[0]);"]:::sourceCode
+  i3["hirStatementIndex = 3<br/>hirStatements[3]<br/><br/>if (values[0] == 1) { X(q[0]); }"]:::sourceCode
+  i4["hirStatementIndex = 4<br/>hirStatements[4]<br/><br/>H(q[0]);"]:::sourceCode
+
+  i0 --> i1
+  i1 --> i2
+  i2 --> i3
+  i3 --> i4
+
+  classDef sourceCode font-family:monospace,font-size:14px;
+</pre>
+    </figure>
+
+    <h4><code>Work</code> 처리에서 현재 block이 이동하는 경로</h4>
+
+    <figure class="mermaid-card">
+      <figcaption><span>WORK</span> 현재 block 이동</figcaption>
+<pre class="mermaid chapter-10-mermaid mermaid--vertical">
+flowchart TB
+  accTitle: Work의 문장을 처리하며 현재 MIR block이 이동하는 경로
+  accDescr: b0에서 선언과 대입 및 if 조건을 처리합니다. 참 경로는 b1에서 X를 실행하고 거짓 경로는 b2를 통과합니다. 두 경로는 b3에서 합류하여 H를 실행합니다.
+
+  block0["b0<br/><br/>var values: int[] = [0];<br/>use q = Qubit[1];<br/>values[0] = Next(values[0]);<br/>if (values[0] == 1)"]:::sourceCode
+  block1["b1 (true 경로)<br/><br/>X(q[0]);"]:::sourceCode
+  block2["b2 (false 경로)"]:::sourceCode
+  block3["b3<br/><br/>H(q[0]);"]:::sourceCode
+
+  block0 --> block1
+  block0 --> block2
+  block1 --> block3
+  block2 --> block3
+
+  classDef sourceCode font-family:monospace,font-size:14px;
+</pre>
+    </figure>
+
+  </article>
+
+  <article class="function-trace" id="lower-statement">
+    <h2><code>LowerStatement()</code></h2>
+    <p>
+      HIR 문장 하나의 종류를 확인하고 그 종류를 담당하는 lowering 함수로 전달합니다.<br>
+      이 함수 자체의 일은 아래 <code>switch</code>에서 정확히 한 분기를 선택하고, 그 분기의 helper를 한 번 호출한 뒤 종료하는 것입니다.
+    </p>
+
+    <h3>공통 예제에서 이 함수가 받는 모든 문장</h3>
+
+<pre><code class="language-qora">function Next(value: int): int
+{
+    return value + 1;
+}
+
+operation Work()
+{
+    var values: int[] = [0];
+    use q = Qubit[1];
+
+    values[0] = Next(values[0]);
+
+    if (values[0] == 1)
+    {
+        X(q[0]);
+    }
+
+    H(q[0]);
+}</code></pre>
+
+    <p>
+      <code>LowerStatement()</code>은 위 프로그램 전체를 한꺼번에 받지 않고, 호출될 때마다 문장 하나만 받습니다.<br>
+      공통 예제에서는 <code>Next</code>의 return 한 번과 <code>Work</code>의 문장 여섯 번을 합쳐 모두 일곱 번 실행됩니다.<br>
+      아래 <code>switch</code>는 현재 인수 <code>hirStatement</code>의 실제 HIR 타입만 확인합니다. case가 적힌 순서는 실행 순서가 아니며, 한 번 호출될 때 일치하는 case 하나만 실행됩니다.
+    </p>
+
+<pre><code class="language-plaintext">1. Next: return value + 1
+
+2. Work: var values = [0]
+3. Work: use q = Qubit[1]
+4. Work: values[0] = Next(values[0])
+5. Work: if (values[0] == 1)
+   6. 참 본문: X(q[0])
+7. Work: H(q[0])</code></pre>
+
+    <p>
+      6번 <code>X(q[0])</code>은 5번 <code>if</code>을 처리하는 도중 발생하는 중첩 실행입니다.<br>
+      반면에 4번 대입문 안의 <code>Next(values[0])</code>은 표현식이므로 별도의 <code>LowerStatement()</code> 실행으로 세지 않습니다.
+    </p>
+
+<pre><code class="language-csharp">private void LowerStatement(HirStatement hirStatement)
+{
+    switch (hirStatement)
+    {
+        // Work의 use q 문장이 선택합니다.
+        case HirQubitDeclarationStatement hirQubitDeclaration:
+            LowerQubitDeclaration(hirQubitDeclaration);
+            return;
+
+        // Work의 var values 문장이 선택합니다.
+        case HirVariableDeclarationStatement hirDeclaration:
+            LowerDeclaration(hirDeclaration);
+            return;
+
+        // Work의 values[0] 대입문이 선택합니다.
+        case HirAssignmentStatement hirAssignment:
+            LowerAssignment(hirAssignment);
+            return;
+
+        // Work의 H 호출이 선택합니다.
+        // if 안의 X 호출도 중첩 본문을 처리할 때 같은 분기를 선택합니다.
+        case HirCallStatement hirCallStatement:
+            LowerStatementCall(hirCallStatement);
+            return;
+
+        // Work의 if 문장이 선택합니다.
+        case HirIfStatement hirIf:
+            LowerIf(hirIf);
+            return;
+
+        case HirForStatement hirFor:
+            LowerFor(hirFor);
+            return;
+
+        case HirWhileStatement hirWhile:
+            LowerWhile(hirWhile);
+            return;
+
+        case HirRepeatStatement hirRepeat:
+            LowerRepeat(hirRepeat);
+            return;
+
+        // Next의 return 문장은 이 분기를 선택합니다.
+        case HirReturnStatement hirReturn:
+            LowerReturn(hirReturn);
+            return;
+
+        default:
+            throw MirLoweringError(
+                $"unsupported HIR statement {hirStatement.GetType().Name}");
+    }
+}</code></pre>
+
+    <h3>코드 순서대로 따라가기</h3>
+    <ol class="execution-steps">
+      <li><strong><code>hirStatement</code>의 실제 타입을 확인합니다.</strong> 일곱 번의 실행마다 현재 문장에 해당하는 HIR 타입이 들어 있습니다.</li>
+      <li><strong>일치하는 case 하나를 선택합니다.</strong> 실제 문장과 선택되는 helper는 아래 표와 같습니다.</li>
+      <li><strong>helper 호출 직후 바로 종료합니다.</strong> 각 case 끝의 <code>return</code> 때문에 같은 문장을 다른 case에서 다시 처리하지 않습니다.</li>
+    </ol>
+
+    <h3>공통 예제에서 선택되는 분기</h3>
+
+    <div class="panel">
+      <table>
+        <thead><tr><th>실행</th><th>받은 Qora 문장</th><th>일치하는 HIR 타입</th><th>호출하는 helper</th></tr></thead>
+        <tbody>
+          <tr><td>1</td><td><code>return value + 1</code></td><td><code>HirReturnStatement</code></td><td><code>LowerReturn()</code></td></tr>
+          <tr><td>2</td><td><code>var values = [0]</code></td><td><code>HirVariableDeclarationStatement</code></td><td><code>LowerDeclaration()</code></td></tr>
+          <tr><td>3</td><td><code>use q = Qubit[1]</code></td><td><code>HirQubitDeclarationStatement</code></td><td><code>LowerQubitDeclaration()</code></td></tr>
+          <tr><td>4</td><td><code>values[0] = Next(values[0])</code></td><td><code>HirAssignmentStatement</code></td><td><code>LowerAssignment()</code></td></tr>
+          <tr><td>5</td><td><code>if (values[0] == 1)</code></td><td><code>HirIfStatement</code></td><td><code>LowerIf()</code></td></tr>
+          <tr><td>6, 7</td><td><code>X(q[0])</code>, <code>H(q[0])</code></td><td><code>HirCallStatement</code></td><td><code>LowerStatementCall()</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>
+      일곱 번의 실행은 모두 helper 하나를 호출한 뒤 값을 반환하지 않고 종료됩니다.
+    </p>
+  </article>
+
+  <nav class="chapter-nav" aria-label="문서 이동(하단)">
+    <div class="group"><a href="chapter-10.html">← 10장으로 돌아가기</a><a href="index.html#chapters">전체 목차</a></div>
+  </nav>
+
+  <footer>Qora 컴파일러 개발자 매뉴얼 · 10장 구현 함수 따라가기</footer>
+</main>
+</body>
+</html>

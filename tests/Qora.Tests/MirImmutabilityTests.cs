@@ -83,7 +83,7 @@ public sealed class MirImmutabilityTests
                 new MirValueId(int.MaxValue),
                 MirType.Array(QType.Int),
                 originalApply.Origin)));
-        functors.Add(MirFunctor.Adjoint);
+        functors.Add(MirFunctor.Controlled);
 
         QoraMirVerifier.VerifyOrThrow(program);
         Assert.Same(clonedCallable, Assert.Single(program.Callables));

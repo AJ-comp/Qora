@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>12. Array Storage and Value State — Qora Compiler Developer Manual</title>
+<link rel="stylesheet" href="developer.css">
+<script src="developer-syntax.js" defer></script>
+</head>
+<body>
+<nav class="language-switch" aria-label="Language"><strong>English</strong><span aria-hidden="true">·</span><a href="../ko/chapter-12.html">한국어</a><span aria-hidden="true">·</span><a href="../ja/chapter-12.html">日本語</a></nav>
+<a class="skip-link" href="#main-content">Skip to main content</a>
+<header class="hero">
+  <div class="tag">Qora · Compiler Developer Manual · Chapter 12</div>
+  <h1>Array Storage and Value State</h1>
+  <p>Why <code>$s0</code>, <code>%v1</code>, and <code>%v6</code> represent different things</p>
+</header>
+
+<main class="wrap" id="main-content">
+  <nav class="chapter-nav" aria-label="Chapter navigation (top)">
+    <div class="group"><a href="chapter-11.html">← Previous: Classical SSA values</a><a href="index.html#chapters">All chapters</a></div>
+    <div class="group"><a href="chapter-13.html">Next: Qubit versions →</a></div>
+  </nav>
+
+  <p class="lead">
+    The local array in this example has two kinds of numbers in MIR.<br>
+    <code>$s0</code> identifies which array it is, while <code>%v1</code> and <code>%v6</code> represent the current state of that array's value.<br>
+    This chapter follows only the creation, update, and subsequent read of the array to make this distinction clear.
+  </p>
+
+  <h2 id="source">Qora code under examination</h2>
+
+<pre><code class="language-qora">function Next(value: int): int
+{
+    return value + 1;
+}
+
+operation Work()
+{
+    var values: int[] = [0];
+    use q = Qubit[1];
+
+    values[0] = Next(values[0]);
+
+    if (values[0] == 1)
+    {
+        X(q[0]);
+    }
+
+    H(q[0]);
+}</code></pre>
+
+  <p>
+    The first statement creates an array named <code>values</code> with length 1.<br>
+    The second passes the current <code>values[0]</code> to <code>Next</code> and stores the returned value back into element 0.<br>
+    The source keeps using the same name, <code>values</code>, while MIR distinguishes its state before and after the update as separate values.
+  </p>
+
+  <h2 id="overview">MIR result at a glance</h2>
+
+<pre><code class="language-plaintext">values in Qora
+    │
+    ├─ array identity: $s0
+    │   └─ unchanged from beginning to end
+    │
+    ├─ initial value state: %v1 = [0]
+    │
+    └─ updated value state: %v6 = [%v5]
+                         └─ %v5 is the result of calling Next
+
+condition values[0] == 1
+    └─ reads the latest state, %v6</code></pre>
+
+  <p>
+    <code>$s0</code> and <code>%v1</code> do not store the same information twice.<br>
+    <code>$s0</code> is the identity tag for the array itself, while <code>%v1</code> is the array's initial value.<br>
+    Updating an element leaves the identity unchanged but changes the value state to <code>%v6</code>.
+  </p>
+
+  <h2 id="creation-lowering-code">Declaration: <code>$s0</code> and <code>%v1</code> are created together</h2>
+
+  <p>
+    Lowering the first statement, <code>var values: int[] = [0];</code>, creates the following two kinds of information in MIR.
+  </p>
+
+<pre><code class="language-plaintext">storage $s0 values: int[1]
+
+%v0: int    = const 0
+%v1: int[1] = array.create $s0 {%v0}</code></pre>
+
+  <p>
+    <code>storage $s0</code> is the identity of the array <code>values</code> declared inside <code>Work</code>.<br>
+    In simple terms, it is a label that groups records as referring to the same <code>values</code> array.<br>
+    Changing an element does not replace <code>values</code> with another array, so <code>$s0</code> remains unchanged.
+  </p>
+
+  <p>
+    In contrast, <code>%v0</code> is literal <code>0</code>, and <code>%v1</code> is the first array state containing that value.<br>
+    The relationship at this point is therefore straightforward.
+  </p>
+
+<pre><code class="language-plaintext">$s0  → Which array is it?          → values
+%v1  → What is its current value?  → [0]</code></pre>
+
+  <h2 id="next-call">Update: the same <code>$s0</code> receives a new value state</h2>
+
+<pre><code class="language-qora">values[0] = Next(values[0]);</code></pre>
+
+  <p>
+    This statement first reads element 0 from the existing array.<br>
+    Because the current array state is <code>%v1</code>, MIR reads element 0 from it into <code>%v4</code>.<br>
+    It then receives the return value of <code>Next(%v4)</code> as <code>%v5</code> and creates <code>%v6</code>, a new array state with that value stored at index 0.<br>
+    The intermediate values <code>%v2</code> and <code>%v3</code> each represent index 0. This chapter focuses only on the array states <code>%v1</code> and <code>%v6</code>.
+  </p>
+
+<pre><code class="language-plaintext">previous state %v1 = [0]
+       │
+       ├─ read element 0 → %v4
+       ├─ Next(%v4)     → %v5
+       └─ store %v5 in element 0
+              ↓
+new state %v6 = [%v5]
+
+array identity remains $s0</code></pre>
+
+  <p>
+    The important point is that <code>%v1</code> is never rewritten.<br>
+    MIR values do not change after creation, so an update creates a new state, <code>%v6</code>, using the previous state as input.<br>
+    Later analysis can therefore identify the array before the update from <code>%v1</code> and after the update from <code>%v6</code>.
+  </p>
+
+  <h2 id="latest-state">The next statement reads the latest state, <code>%v6</code></h2>
+
+  <p>
+    The next condition, <code>if (values[0] == 1)</code>, still uses only the source name <code>values</code>.<br>
+    After the preceding assignment, however, the current state of <code>values</code> is <code>%v6</code>.<br>
+    The condition therefore reads element 0 from updated state <code>%v6</code>, not initial state <code>%v1</code>.
+  </p>
+
+<pre><code class="language-plaintext">after declaration  values → %v1 → [0]
+after assignment   values → %v6 → [%v5]
+read in condition  values → %v6[0]</code></pre>
+
+  <p>
+    Running this example makes <code>Next(0)</code> return 1.<br>
+    MIR does not assume that result in advance; it preserves it as call result <code>%v5</code>. The important fact here is not whether the number is known ahead of time, but that the next statement reads the latest array state, <code>%v6</code>.
+  </p>
+
+  <h2 id="summary">Summary</h2>
+
+  <div class="callout good">
+    <span class="h">Questions answered by the two kinds of numbers</span>
+    <code>$s0</code> answers “Which array is this?”<br>
+    <code>%v1</code> and <code>%v6</code> answer “What value did that array have at this point?”<br>
+    Updating an array element preserves <code>$s0</code> and changes only the value state from <code>%v1</code> to <code>%v6</code>.
+  </div>
+
+  <p>
+    The next chapter applies the same principle to qubits.<br>
+    A qubit keeps the identity <code>q0</code>, but its current-state version changes after a qubit-writing instruction such as <code>X</code> or <code>H</code> in this example.
+  </p>
+
+  <nav class="chapter-nav" aria-label="Chapter navigation (bottom)">
+    <div class="group"><a href="chapter-11.html">← Previous: Classical SSA values</a><a href="index.html#chapters">All chapters</a></div>
+    <div class="group"><a href="chapter-13.html">Next: Qubit versions →</a></div>
+  </nav>
+
+  <footer>Qora Compiler Developer Manual · Chapter 12</footer>
+</main>
+</body>
+</html>

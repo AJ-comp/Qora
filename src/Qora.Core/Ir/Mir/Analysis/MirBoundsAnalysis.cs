@@ -632,13 +632,7 @@ internal static class MirBoundsAnalysis
 
             if (_callable.RequireBlock(incoming.Source).Terminator is MirBranch branch)
             {
-                var edgeValue = incoming.SuccessorOrdinal switch
-                {
-                    0 => true,
-                    1 => false,
-                    _ => throw new InvalidOperationException(
-                        $"QINTERNAL: branch edge {incoming.SuccessorOrdinal} is not valid"),
-                };
+                var edgeValue = BranchValue(incoming.Edge);
                 CollectRequiredConstraintsForTruth(
                     branch.Condition,
                     edgeValue,
@@ -657,13 +651,7 @@ internal static class MirBoundsAnalysis
                 || branch.Condition != incoming.Value)
                 return false;
 
-            var edgeValue = incoming.SuccessorOrdinal switch
-            {
-                0 => true,
-                1 => false,
-                _ => throw new InvalidOperationException(
-                    $"QINTERNAL: branch edge {incoming.SuccessorOrdinal} is not valid"),
-            };
+            var edgeValue = BranchValue(incoming.Edge);
             return edgeValue != expected;
         }
 
@@ -675,15 +663,17 @@ internal static class MirBoundsAnalysis
             if (terminator is not MirBranch branch)
                 return Proof.Unknown;
 
-            var expected = incoming.SuccessorOrdinal switch
-            {
-                0 => true,
-                1 => false,
-                _ => throw new InvalidOperationException(
-                    $"QINTERNAL: branch edge {incoming.SuccessorOrdinal} is not valid"),
-            };
+            var expected = BranchValue(incoming.Edge);
             return ProveTruth(branch.Condition, expected, incoming.Source, targets);
         }
+
+        private static bool BranchValue(MirControlFlowEdge edge) => edge.Kind switch
+        {
+            MirControlFlowEdgeKind.BranchTrue => true,
+            MirControlFlowEdgeKind.BranchFalse => false,
+            _ => throw new InvalidOperationException(
+                $"QINTERNAL: {edge} is not a branch edge"),
+        };
 
         private Proof ProveComparison(
             MirBinary comparison,
@@ -1321,8 +1311,7 @@ internal static class MirBoundsAnalysis
             var incoming = new Dictionary<(MirBlockId, int), List<IncomingValue>>();
 
             void Add(
-                MirBlockId source,
-                int successorOrdinal,
+                MirControlFlowEdge edge,
                 MirBlockId target,
                 IReadOnlyList<MirValueId> arguments)
             {
@@ -1334,7 +1323,7 @@ internal static class MirBoundsAnalysis
                         values = new List<IncomingValue>();
                         incoming.Add(key, values);
                     }
-                    values.Add(new IncomingValue(source, successorOrdinal, arguments[index]));
+                    values.Add(new IncomingValue(edge, arguments[index]));
                 }
             }
 
@@ -1343,11 +1332,20 @@ internal static class MirBoundsAnalysis
                 switch (block.Terminator)
                 {
                     case MirJump jump:
-                        Add(block.Id, 0, jump.Target, jump.Arguments);
+                        Add(
+                            MirControlFlowEdge.Jump(block.Id),
+                            jump.Target,
+                            jump.Arguments);
                         break;
                     case MirBranch branch:
-                        Add(block.Id, 0, branch.TrueTarget, branch.TrueArguments);
-                        Add(block.Id, 1, branch.FalseTarget, branch.FalseArguments);
+                        Add(
+                            MirControlFlowEdge.BranchTrue(block.Id),
+                            branch.TrueTarget,
+                            branch.TrueArguments);
+                        Add(
+                            MirControlFlowEdge.BranchFalse(block.Id),
+                            branch.FalseTarget,
+                            branch.FalseArguments);
                         break;
                 }
             }
@@ -1355,9 +1353,11 @@ internal static class MirBoundsAnalysis
         }
 
         private sealed record IncomingValue(
-            MirBlockId Source,
-            int SuccessorOrdinal,
-            MirValueId Value);
+            MirControlFlowEdge Edge,
+            MirValueId Value)
+        {
+            public MirBlockId Source => Edge.Source;
+        }
 
         private enum Proof
         {

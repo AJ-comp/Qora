@@ -33,7 +33,7 @@ internal sealed class MirOpenQasmLoweringResult
 }
 
 /// <summary>
-/// Lowers one exact, materialized MIR snapshot into the typed OpenQASM target model. MIR callable,
+/// Lowers one exact MIR snapshot into the typed OpenQASM target model. MIR callable,
 /// value, storage, qubit, and block identities are the only semantic references consumed here; final
 /// spellings are allocated only after every reference has already been resolved.
 ///
@@ -519,11 +519,15 @@ internal static class MirOpenQasmLowering
                 switch (block.Terminator)
                 {
                     case MirJump:
-                        PrepareEdge(block, 0);
+                        PrepareEdge(block, MirControlFlowEdge.Jump(block.Id));
                         break;
                     case MirBranch:
-                        PrepareEdge(block, 0);
-                        PrepareEdge(block, 1);
+                        PrepareEdge(
+                            block,
+                            MirControlFlowEdge.BranchTrue(block.Id));
+                        PrepareEdge(
+                            block,
+                            MirControlFlowEdge.BranchFalse(block.Id));
                         break;
                 }
             }
@@ -531,9 +535,9 @@ internal static class MirOpenQasmLowering
 
         private void PrepareEdge(
             MirBlock sourceBlock,
-            int successorOrdinal)
+            MirControlFlowEdge edge)
         {
-            var (target, arguments) = EdgeOf(sourceBlock, successorOrdinal);
+            var (target, arguments) = EdgeOf(sourceBlock, edge);
             var parameters = _callable.RequireBlock(target).Arguments;
             for (var index = 0; index < arguments.Count; index++)
             {
@@ -541,14 +545,14 @@ internal static class MirOpenQasmLowering
                 if (parameterType.IsArray) continue;
                 var declaration = NextDeclaration();
                 var name = _names.Fresh(
-                    $"edge_{sourceBlock.Id.Value}_{successorOrdinal}_{index}");
+                    $"edge_{sourceBlock.Id.Value}_{EdgeName(edge)}_{index}");
                 _prologue.Add(
                     new MirQasmValueDeclarationStatement(
                         declaration,
                         name,
                         TargetType(parameterType)));
                 _edgeTemporaries.Add(
-                    new EdgeArgumentKey(sourceBlock.Id, successorOrdinal, index),
+                    new EdgeArgumentKey(edge, index),
                     declaration);
             }
         }
@@ -707,7 +711,7 @@ internal static class MirOpenQasmLowering
                             $"reachable block {current} ends in `unreachable`");
 
                     case MirJump jump:
-                        EmitEdge(block, successorOrdinal: 0, output);
+                        EmitEdge(block, MirControlFlowEdge.Jump(block.Id), output);
                         if (regionLoop is not null
                             && jump.Target == regionLoop.Header)
                         {
@@ -757,8 +761,8 @@ internal static class MirOpenQasmLowering
                 regionLoop);
             var thenBody = new List<MirQasmStatement>();
             var elseBody = new List<MirQasmStatement>();
-            EmitEdge(sourceBlock, 0, thenBody);
-            EmitEdge(sourceBlock, 1, elseBody);
+            EmitEdge(sourceBlock, MirControlFlowEdge.BranchTrue(source), thenBody);
+            EmitEdge(sourceBlock, MirControlFlowEdge.BranchFalse(source), elseBody);
 
             if (join is MirBlockId merge)
             {
@@ -1241,7 +1245,7 @@ internal static class MirOpenQasmLowering
                     {
                         var modifiers = string.Join(", ", apply.Functors);
                         throw Unsupported(
-                            $"user callable {user.Callable} still carries unmaterialized modifier(s): " +
+                            $"user callable {user.Callable} carries unsupported modifier(s): " +
                             modifiers,
                             apply.Origin);
                     }
@@ -1277,8 +1281,6 @@ internal static class MirOpenQasmLowering
                     var modifiers = apply.Functors.Select(
                         functor => functor switch
                         {
-                            MirFunctor.Adjoint =>
-                                MirQasmQuantumModifier.Inverse,
                             MirFunctor.Controlled =>
                                 MirQasmQuantumModifier.Controlled,
                             _ => throw Internal(
@@ -1314,11 +1316,11 @@ internal static class MirOpenQasmLowering
 
         private void EmitEdge(
             MirBlock sourceBlock,
-            int successorOrdinal,
+            MirControlFlowEdge edge,
             List<MirQasmStatement> output)
         {
             var source = sourceBlock.Id;
-            var (target, arguments) = EdgeOf(sourceBlock, successorOrdinal);
+            var (target, arguments) = EdgeOf(sourceBlock, edge);
             var parameters = _callable.RequireBlock(target).Arguments;
             var scalarTransfers = new List<(
                 MirQasmDeclarationId Temporary,
@@ -1338,7 +1340,7 @@ internal static class MirOpenQasmLowering
                     continue;
                 }
 
-                var key = new EdgeArgumentKey(source, successorOrdinal, index);
+                var key = new EdgeArgumentKey(edge, index);
                 if (!_edgeTemporaries.TryGetValue(key, out var temporary))
                     throw Internal($"edge argument {key} has no target temporary");
                 scalarTransfers.Add(
@@ -1369,20 +1371,39 @@ internal static class MirOpenQasmLowering
 
         private (MirBlockId Target, IReadOnlyList<MirValueId> Arguments) EdgeOf(
             MirBlock sourceBlock,
-            int successorOrdinal)
+            MirControlFlowEdge edge)
         {
+            if (edge.Source != sourceBlock.Id)
+            {
+                throw Internal(
+                    $"edge {edge} does not leave block {sourceBlock.Id}");
+            }
+
             return sourceBlock.Terminator switch
             {
-                MirJump jump when successorOrdinal == 0 =>
+                MirJump jump when edge.Kind == MirControlFlowEdgeKind.Jump =>
                     (jump.Target, jump.Arguments),
-                MirBranch branch when successorOrdinal == 0 =>
+                MirBranch branch
+                    when edge.Kind == MirControlFlowEdgeKind.BranchTrue =>
                     (branch.TrueTarget, branch.TrueArguments),
-                MirBranch branch when successorOrdinal == 1 =>
+                MirBranch branch
+                    when edge.Kind == MirControlFlowEdgeKind.BranchFalse =>
                     (branch.FalseTarget, branch.FalseArguments),
                 _ => throw Internal(
-                    $"block {sourceBlock.Id} has no successor {successorOrdinal}"),
+                    $"block {sourceBlock.Id} has no edge {edge.Kind}"),
             };
         }
+
+        private static string EdgeName(MirControlFlowEdge edge) => edge.Kind switch
+        {
+            MirControlFlowEdgeKind.Jump => "jump",
+            MirControlFlowEdgeKind.BranchTrue => "true",
+            MirControlFlowEdgeKind.BranchFalse => "false",
+            MirControlFlowEdgeKind.SwitchCase => $"case_{edge.SwitchCaseValue}",
+            MirControlFlowEdgeKind.SwitchDefault => "default",
+            _ => throw new InvalidOperationException(
+                $"unknown MIR control-flow edge kind {edge.Kind}"),
+        };
 
         private void Assign(
             MirValueId result,
@@ -1843,8 +1864,7 @@ internal static class MirOpenQasmLowering
         MirStorageId Storage);
 
     private readonly record struct EdgeArgumentKey(
-        MirBlockId Source,
-        int SuccessorOrdinal,
+        MirControlFlowEdge Edge,
         int ArgumentIndex);
 
     private enum PathOutcomeKind

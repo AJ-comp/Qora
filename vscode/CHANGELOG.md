@@ -2,6 +2,18 @@
 
 All notable changes to the Qora Language extension.
 
+## 0.32.0
+
+- Bundles the **Qora v0.39.0** compiler.
+- MIR control-flow edges now retain semantic jump, true, false, switch-case, and switch-default identities
+  instead of positional successor numbers. Qubit Phi definitions are printed inside their owning blocks
+  with readable predecessor labels.
+- Removes the unused internal adjoint-materialization and snapshot-stage history infrastructure. Qora
+  source syntax, extension commands, settings, UI, language configuration, and source highlighting are
+  unchanged.
+- Links to the expanded compiler developer manual, now maintained in English, Korean, and Japanese with
+  matching source examples and call-flow diagrams.
+
 ## 0.31.0
 
 - Bundles the **Qora v0.38.0** compiler.

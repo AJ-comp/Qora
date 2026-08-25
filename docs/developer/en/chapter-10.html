@@ -1,0 +1,648 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>10. Lowering One Callable to MIR — Qora Compiler Developer Manual</title>
+<link rel="stylesheet" href="developer.css?v=20260815-3">
+<script src="developer-syntax.js" defer></script>
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11.16.0/dist/mermaid.esm.min.mjs";
+
+  mermaid.initialize({
+    startOnLoad: false,
+    securityLevel: "strict",
+    htmlLabels: false,
+    theme: "base",
+    fontFamily: "-apple-system, BlinkMacSystemFont, Segoe UI, Apple SD Gothic Neo, Malgun Gothic, sans-serif",
+    themeVariables: {
+      background: "#fbfcff",
+      primaryColor: "#f4f1ff",
+      primaryTextColor: "#2c2350",
+      primaryBorderColor: "#7660c8",
+      lineColor: "#64748b",
+      edgeLabelBackground: "#ffffff",
+      fontSize: "15px"
+    },
+    flowchart: {
+      curve: "linear",
+      nodeSpacing: 24,
+      rankSpacing: 34,
+      useMaxWidth: true
+    }
+  });
+
+  await mermaid.run({ querySelector: ".chapter-10-mermaid" });
+</script>
+</head>
+<body>
+<nav class="language-switch" aria-label="Language"><strong>English</strong><span aria-hidden="true">·</span><a href="../ko/chapter-10.html">한국어</a><span aria-hidden="true">·</span><a href="../ja/chapter-10.html">日本語</a></nav>
+<a class="skip-link" href="#main-content">Skip to main content</a>
+<header class="hero">
+  <div class="tag">Qora · Compiler Developer Manual · Chapter 10</div>
+  <h1>Lowering One Callable to MIR</h1>
+  <p>How one function or operation becomes a MirCallable with parameters, blocks, and a body</p>
+</header>
+
+<main class="wrap" id="main-content">
+  <nav class="chapter-nav" aria-label="Chapter navigation (top)">
+    <div class="group"><a href="chapter-09.html">← Previous: HIR→MIR boundary</a><a href="index.html#chapters">All chapters</a><a href="chapter-10-call-flow.html#lower-hir-artifact"><code>LowerHirArtifact()</code> detailed trace</a></div>
+    <div class="group"><a href="chapter-11.html">Next: Classical values and SSA versions →</a></div>
+  </nav>
+
+  <p class="lead">
+    Chapter 9 established only that <code>Next</code> and <code>Work</code> each become one <code>MirCallable</code>.<br>
+    This chapter shows what is created first when lowering one callable, where its source body goes, and what the final result looks like.
+  </p>
+
+  <h2 id="input">The two callables compared in this chapter</h2>
+
+<pre><code class="language-qora">function Next(value: int): int
+{
+    return value + 1;
+}
+
+operation Work()
+{
+    var values: int[] = [0];
+    use q = Qubit[1];
+
+    values[0] = Next(values[0]);
+
+    if (values[0] == 1)
+    {
+        X(q[0]);
+    }
+
+    H(q[0]);
+}</code></pre>
+
+  <p>
+    Both declarations are callables, but they have different shapes.<br>
+    <code>Next</code> is a short function with one parameter and a return value. <code>Work</code> is the entry operation with a local array, a qubit, and a conditional.
+  </p>
+
+  <p>
+    With this exact input, the current compiler produces two final HIR callables: <code>Next h6</code> and <code>Work h44</code>.<br>
+    MIR preserves the same numeric IDs, producing <code>Next c6</code> and <code>Work c44</code>. The code comments below continue to use these IDs.
+  </p>
+
+  <h2 id="why-mir">Why lower HIR to MIR?</h2>
+
+  <p>
+    HIR is a tree that preserves the nested structure of user-written code.<br>
+    For example, <code>Work</code> contains the array declaration, assignment, <code>if</code>, and <code>H</code> call, while the <code>if</code> contains its condition and the <code>X</code> call. This structure is well suited to checking names and types and understanding the original code.
+  </p>
+
+  <p>
+    A tree alone is inconvenient for tracking which value is current at a particular point.<br>
+    The source repeatedly uses the same name <code>values</code>, while MIR distinguishes the pre-update array <code>%v1</code>, loaded element <code>%v4</code>, result of <code>Next</code> <code>%v5</code>, and updated array <code>%v6</code> as separate values.
+  </p>
+
+  <div class="mermaid-overview">
+    <figure class="mermaid-card mermaid-card--hir">
+      <figcaption><span>HIR</span> Preserved source structure (simplified)</figcaption>
+<pre class="mermaid chapter-10-mermaid">
+flowchart TB
+  accTitle: Simplified Work source structure preserved in HIR
+  accDescr: Shows the values declaration, q declaration, values assignment, if, H call, and the condition and X call inside the if; intermediate HIR block nodes are omitted.
+
+  work["Work"]
+  values["declare values"]
+  qubit["declare q"]
+  assign["assign values[0]"]
+  ifNode["if"]
+  condition["condition: values[0] == 1"]
+  xCall["X(q[0])"]
+  hCall["H(q[0])"]
+
+  work --- values
+  work --- qubit
+  work --- assign
+  work --- ifNode
+  work --- hCall
+  ifNode --- condition
+  ifNode --- xCall
+</pre>
+    </figure>
+
+    <div class="mermaid-stack">
+      <figure class="mermaid-card">
+        <figcaption><span>MIR</span> Value and qubit creation and dependencies</figcaption>
+<pre class="mermaid chapter-10-mermaid mermaid--vertical">
+flowchart TB
+  accTitle: Creation and dependency relationships of MIR values and qubits
+  accDescr: Shows the classical value flow from pre-update array v1 through element v4 and Next return v5 to updated array v6, together with initial qubit q0.v0, which is independent of this array update.
+
+  v1["%v1<br/>var values: int[] = [0];"]:::sourceCode
+  v4["%v4<br/>values[0]"]:::sourceCode
+  v5["%v5<br/>Next(values[0])"]:::sourceCode
+  v6["%v6<br/>values[0] = Next(values[0]);"]:::sourceCode
+  q0["&amp;q0.v0<br/>use q = Qubit[1];"]:::sourceCode
+
+  v1 --> v4
+  v4 --> v5
+  v1 --> v6
+  v5 --> v6
+
+  classDef sourceCode font-family:monospace,font-size:14px;
+</pre>
+      </figure>
+
+      <figure class="mermaid-card">
+        <figcaption><span>MIR</span> Execution-path CFG</figcaption>
+<pre class="mermaid chapter-10-mermaid mermaid--vertical">
+flowchart TB
+  accTitle: MIR execution-path CFG
+  accDescr: A true condition in b0 moves to b1, a false condition moves to b2, and both paths join at b3.
+
+  b0["b0<br/>var values: int[] = [0];<br/>use q = Qubit[1];<br/>values[0] = Next(values[0]);<br/>if (values[0] == 1)"]:::sourceCode
+  b1["b1<br/>X(q[0]);"]:::sourceCode
+  b2["b2"]:::sourceCode
+  b3["b3<br/>H(q[0]);"]:::sourceCode
+
+  b0 -->|true| b1
+  b0 -->|false| b2
+  b1 --> b3
+  b2 --> b3
+
+  classDef sourceCode font-family:monospace,font-size:14px;
+</pre>
+      </figure>
+    </div>
+  </div>
+
+
+  <p>
+    MIR represents execution paths as connections between blocks and records each newly created classical value as a separate SSA value.<br>
+    Later analyses can therefore follow the graph to inspect value changes and branch joins without reinterpreting the source tree. HIR preserves source meaning, while MIR makes execution flow and value tracking explicit.
+  </p>
+
+  <h2 id="constructor">Create one dedicated lowerer per callable</h2>
+
+  <figure class="mermaid-card">
+    <figcaption><span>HIR → MIR</span> Independent lowering for each callable</figcaption>
+<pre class="mermaid chapter-10-mermaid mermaid--wide">
+flowchart TB
+  accTitle: Independent HIR-to-MIR lowering of Next and Work
+  accDescr: Next and Work pass through separate callable lowerers and become distinct MirCallable objects.
+
+  subgraph nextFlow["First lowering"]
+    direction LR
+    nextHir["HIR Next"] --> nextLowerer["callable lowerer<br/>for Next"] --> nextMir["MirCallable Next"]
+  end
+
+  subgraph workFlow["Second lowering"]
+    direction LR
+    workHir["HIR Work"] --> workLowerer["callable lowerer<br/>for Work"] --> workMir["MirCallable Work"]
+  end
+
+  nextFlow ~~~ workFlow
+</pre>
+  </figure>
+
+  <p>
+    A callable lowerer is a transformation object responsible for exactly one callable at a time.<br>
+    While processing <code>Next</code>, it manages only the parameters, current block, and values of <code>Next</code>. After that work completes, a new lowerer processes <code>Work</code> separately.
+  </p>
+
+  <h3 id="lower-hir-artifact-source">The code that takes callables one at a time</h3>
+
+  <p>
+    The code below is the complete current <code>LowerHirArtifact()</code>.<br>
+    Its executable statements match the implementation; only comments for the <code>Next</code> and <code>Work</code> values used in this chapter were added.<br>
+    This trace does not supply the optional lowering trace sink, so <code>traceSink = null</code>.<br>
+    Click an underlined function name in the C# code to open its execution trace.
+  </p>
+
+<pre><code class="language-csharp">private static MirSnapshot LowerHirArtifact(
+    HirSemanticArtifact hirArtifact,
+    IMirLoweringTraceSink? traceSink)
+{
+    // hirArtifact contains the final HIR after semantic analysis.
+    // Callables = [Next h6, Work h44]
+    // EntryCallable = Work h44
+    ArgumentNullException.ThrowIfNull(hirArtifact);
+
+    var hirSnapshot = hirArtifact.Source;
+    var hirProgram = hirSnapshot.Program;
+
+    // Example value: hirEntryCallable = Work h44
+    var hirEntryCallable = hirProgram.EntryCallable
+        ?? throw new InvalidOperationException(
+            "validated HIR must contain an operation before MIR lowering");
+
+    // No callable has been lowered yet, so both values are empty.
+    var mirCallables = new List&lt;MirCallable&gt;();
+    MirCallable? mirEntryCallable = null;
+
+    foreach (var hirCallable in hirProgram.Callables)
+    {
+        // First iteration: hirCallable = Next h6
+        // Second iteration: hirCallable = Work h44
+        // A new lowerer is created for each iteration, so callable state cannot mix.
+        var mirCallableLowerer = new <a class="code-call-link" href="chapter-10-call-flow.html#callable-lowerer-constructor" title="HirCallableToMirLowerer constructor execution trace">HirCallableToMirLowerer</a>(
+            hirCallable,
+            hirArtifact,
+            traceSink);
+
+        // First result: mirCallable = Next c6
+        // Second result: mirCallable = Work c44
+        var mirCallable = mirCallableLowerer.<a class="code-call-link" href="chapter-10-call-flow.html#lower-to-mir-callable" title="LowerToMirCallable execution trace">LowerToMirCallable</a>();
+        mirCallables.Add(mirCallable);
+
+        // Next is not the entry operation, so this is false in the first iteration.
+        // Work is the same object as hirEntryCallable, so this is true in the second.
+        if (ReferenceEquals(hirCallable, hirEntryCallable))
+            mirEntryCallable = mirCallable;
+    }
+
+    // Final result:
+    // Callables  = [Next c6, Work c44]
+    // EntryPoint = Work c44
+    var mirProgram = new MirProgram(
+        mirEntryCallable
+            ?? throw new InvalidOperationException(
+                "validated HIR entry callable must be lowered into MIR"),
+        mirCallables);
+
+    return MirSnapshot.CreateLowered(mirProgram);
+}</code></pre>
+
+  <p>
+    After the first iteration, <code>Next c6</code> is in the list. The second iteration adds <code>Work c44</code>.<br>
+    Because <code>Work</code> is the entry operation, the same <code>Work c44</code> object is selected as the entry point of the <code>MirProgram</code>.
+  </p>
+
+  <p>
+    The constructor below is the complete lowerer constructor called for each iteration.<br>
+    It stores the assigned HIR callable, final semantic information, and optional trace sink, and reuses the numeric HIR callable node ID as the corresponding MIR callable ID.
+  </p>
+
+<pre><code class="language-csharp">public HirCallableToMirLowerer(
+    HirCallable hirCallable,
+    HirSemanticArtifact hirArtifact,
+    IMirLoweringTraceSink? traceSink)
+{
+    // First object: Next h6
+    // Second object: Work h44
+    _hirCallable = hirCallable;
+    _hirArtifact = hirArtifact;
+
+    // h6 becomes c6, and h44 becomes c44.
+    _mirCallableId = new MirCallableId(hirCallable.Id.Value);
+
+    // The default CLI run requests no trace, so this is null.
+    _traceSink = traceSink;
+}</code></pre>
+
+  <p>
+    A lowerer created with <code>new</code> starts with empty parameter and block lists and no current block.<br>
+    Each callable also has its own block ID allocator, so both <code>Next</code> and <code>Work</code> can name their first block <code>b0</code>.
+  </p>
+
+  <h2 id="lower-method">Common sequence for creating one callable</h2>
+
+  <figure class="mermaid-card">
+    <figcaption><span>HIR → MIR</span> Common sequence for creating one callable</figcaption>
+<pre class="mermaid chapter-10-mermaid mermaid--vertical">
+flowchart TB
+  accTitle: Five stages that turn one HIR callable into a MirCallable
+  accDescr: LowerToMirCallable checks callable information, CreateMirBlock creates the entry block, LowerParameters registers parameters, LowerStatements and LowerStatement process the body, and LowerToMirCallable with MirBlockBuilder.Build completes the MirCallable.
+
+  input["One HIR callable"]
+  step1["1<br/>Resolve origin, declaration symbol, and name<br/><br/>LowerToMirCallable()"]
+  step2["2<br/>Create entry block<br/><br/>CreateMirBlock()"]
+  step3["3<br/>Register parameters as MIR values or qubits<br/><br/>LowerParameters()"]
+  step4["4<br/>Lower body statements in order<br/><br/>LowerStatements()<br/>→ LowerStatement()"]
+  step5["5<br/>Close remaining paths · finalize blocks<br/>Return MirCallable<br/><br/>LowerToMirCallable()<br/>+ MirBlockBuilder.Build()"]
+
+  input --> step1 --> step2 --> step3 --> step4 --> step5
+</pre>
+  </figure>
+
+  <p>
+    Every function and operation follows this sequence.<br>
+    Differences come from their parameters and body. A simple function may require one block, while an operation with a conditional splits into multiple blocks.
+  </p>
+
+  <h3 id="lower-callable-source">Tracing the function with <code>Next</code> and <code>Work</code> substituted</h3>
+
+  <p>
+    <code>LowerToMirCallable()</code> runs once on the lowerer for <code>Next h6</code> and once on the lowerer for <code>Work h44</code>.<br>
+    The comments below show how values and branches differ for both inputs within the same code.
+  </p>
+
+<pre><code class="language-csharp">public MirCallable LowerToMirCallable()
+{
+    // First run: _hirCallable = Next h6
+    // Second run: _hirCallable = Work h44
+    var mirCallableOrigin = MirOriginFor(_hirCallable);
+
+    // Result: declaration symbol for the current Next or Work
+    var hirCallableSymbol = RequireHirDeclarationSymbol(
+        _hirCallable.Id,
+        $"callable `{_hirCallable.Name}`");
+
+    // HIR name structure that records the namespace containing the current callable.
+    var hirScopeGraph = _hirArtifact.Model.ScopeGraph
+        ?? throw MirLoweringError(
+            "the final HIR semantic model has no scope graph");
+
+    // Next run: qualifiedSourceCallableName = "Next"
+    // Work run: qualifiedSourceCallableName = "Work"
+    var qualifiedSourceCallableName =
+        hirScopeGraph.QualifiedName(hirCallableSymbol);
+
+    // Each lowerer creates its own first block, so each has a distinct b0.
+    _currentMirBlockBuilder = CreateMirBlock(mirCallableOrigin);
+
+    // Next run: register parameter value as %v0.
+    // Work run: no parameters, so _mirParameters = [].
+    <a class="code-call-link" href="chapter-10-call-flow.html#lower-parameters" title="LowerParameters execution trace">LowerParameters</a>();
+
+    /* LowerStatements() processes the complete body of the current callable.
+
+    Next
+    - Processing return value + 1; adds calculation instructions and a MirReturn terminator to b0, then closes b0.
+    - Because current block b0 is closed, _currentMirBlockBuilder becomes null.
+    - _mirBlockBuilders = [b0]
+
+    Work
+    - b0 processes the variable declaration, qubit preparation, array assignment, and if condition,
+      then closes by branching to b1 or b2.
+    - b1 processes X(q[0]); on the true path, then closes by moving to b3.
+    - b2 is the false path with no source statement to process; it closes by moving to b3.
+    - b3 is the join of b1 and b2 and processes the final H(q[0]);.
+    - H(q[0]); does not close the block, and no explicit return follows it,
+      so b3 remains the open current block.
+
+    After processing
+    ├─ _mirBlockBuilders = [b0, b1, b2, b3]
+    └─ _currentMirBlockBuilder = b3 */
+    <a class="code-call-link" href="chapter-10-call-flow.html#lower-statements" title="LowerStatements execution trace">LowerStatements</a>(_hirCallable.Body.Statements);
+
+    // Next: the current block is null, so skip the if below.
+    // Work: the current block is b3, so the if below closes b3.
+    if (_currentMirBlockBuilder is not null)
+    {
+        if (_hirCallable.IsFunction)
+        {
+            // Neither callable in this example selects this branch.
+            MarkCurrentMirBlockUnreachable(
+                MirOrigin.GeneratedFrom(
+                    mirCallableOrigin,
+                    "missing validated function return"));
+        }
+        else
+        {
+            // Work run: attach a valueless implicit return to b3.
+            ReturnFromCurrentMirBlock(
+                value: null,
+                MirOrigin.GeneratedFrom(
+                    mirCallableOrigin,
+                    "implicit operation return"));
+        }
+    }
+
+    // Next run: builder list [b0]
+    // Work run: builder list [b0,b1,b2,b3]
+    // Finalize each builder as an immutable MirBlock.
+    var mirBlocks = new List&lt;MirBlock&gt;(_mirBlockBuilders.Count);
+    foreach (var mirBlockBuilder in _mirBlockBuilders)
+    {
+        var mirBlock = mirBlockBuilder.Build();
+        mirBlocks.Add(mirBlock);
+    }
+
+    // The first block created, b0, is always the entry block.
+    var mirEntryBlock = mirBlocks[0];
+
+    // Next return: c6, "Next", int, [%v0], b0, [b0]
+    // Work return: c44, "Work", null, [], b0, [b0,b1,b2,b3]
+    return new MirCallable(
+        _mirCallableId,
+        qualifiedSourceCallableName,
+        _hirCallable.ReturnType is { } returns
+            ? MirType.Scalar(returns)
+            : null,
+        _mirParameters,
+        mirEntryBlock,
+        mirBlocks,
+        mirCallableOrigin);
+}</code></pre>
+
+  <p>
+    This function performs the same sequence shown in the diagram above.<br>
+    It creates the entry block and processes the body. <code>Next</code> ends with an explicit return; <code>Work</code> closes its remaining operation path with a valueless return. They become <code>MirCallable Next c6</code> and <code>MirCallable Work c44</code>, respectively.
+  </p>
+
+  <h3 id="statement-dispatch-source">Where the body statements of both callables go</h3>
+
+  <p>
+    <code>LowerStatements()</code> above traverses the body from beginning to end, and <code>LowerStatement()</code> selects one lowering helper that matches the current statement kind.<br>
+    The complete current code of both functions follows. The comments show the actual values supplied by <code>Next</code> and <code>Work</code>.
+  </p>
+
+<pre><code class="language-csharp">private void LowerStatements(IReadOnlyList&lt;HirStatement&gt; hirStatements)
+{
+    // Next body: [return value + 1], starts at b0
+    // Work top level: [var, use, assignment, if, H], starts at b0
+    // true body of if: [X(q[0])], starts at b1
+    // false body of if: [], starts at b2
+    for (var hirStatementIndex = 0;
+         hirStatementIndex &lt; hirStatements.Count;
+         hirStatementIndex++)
+    {
+        // If the current path is already closed at the start of an iteration,
+        // do not emit the remaining statements. None of the four calls in this example select this branch.
+        if (_currentMirBlockBuilder is null)
+        {
+            for (;
+                 hirStatementIndex &lt; hirStatements.Count;
+                 hirStatementIndex++)
+            {
+                MarkUnreachableDeclarations(
+                    hirStatements[hirStatementIndex]);
+            }
+            return;
+        }
+
+        <a class="code-call-link" href="chapter-10-call-flow.html#lower-statement" title="LowerStatement execution trace">LowerStatement</a>(hirStatements[hirStatementIndex]);
+    }
+}</code></pre>
+
+  <p>
+    The loop calls <code>LowerStatement()</code> below each time it takes one statement.
+  </p>
+
+<pre><code class="language-csharp">private void LowerStatement(HirStatement hirStatement)
+{
+    switch (hirStatement)
+    {
+        // Selected by Work's use q statement.
+        case HirQubitDeclarationStatement hirQubitDeclaration:
+            LowerQubitDeclaration(hirQubitDeclaration);
+            return;
+
+        // Selected by Work's var values statement.
+        case HirVariableDeclarationStatement hirDeclaration:
+            LowerDeclaration(hirDeclaration);
+            return;
+
+        // Selected by Work's assignment to values[0].
+        case HirAssignmentStatement hirAssignment:
+            LowerAssignment(hirAssignment);
+            return;
+
+        // Selected by Work's H call.
+        // The X call inside the if selects the same branch while processing the nested body.
+        case HirCallStatement hirCallStatement:
+            LowerStatementCall(hirCallStatement);
+            return;
+
+        // Selected by Work's if statement.
+        case HirIfStatement hirIf:
+            LowerIf(hirIf);
+            return;
+
+        case HirForStatement hirFor:
+            LowerFor(hirFor);
+            return;
+
+        case HirWhileStatement hirWhile:
+            LowerWhile(hirWhile);
+            return;
+
+        case HirRepeatStatement hirRepeat:
+            LowerRepeat(hirRepeat);
+            return;
+
+        // Selected by Next's return statement.
+        case HirReturnStatement hirReturn:
+            LowerReturn(hirReturn);
+            return;
+
+        default:
+            throw MirLoweringError(
+                $"unsupported HIR statement {hirStatement.GetType().Name}");
+    }
+}</code></pre>
+
+  <p>
+    This switch does not determine statement meaning again.<br>
+    It reads the statement kind already classified in HIR, calls the matching helper, and returns immediately.
+  </p>
+
+  <h2 id="next">Next is completed with one block</h2>
+
+  <p>
+    <code>Next</code> has one <code>int</code> parameter named <code>value</code>.<br>
+    The lowerer registers it as MIR input value <code>%v0</code> and processes the body in entry block <code>b0</code>.
+  </p>
+
+  <figure class="mermaid-card">
+    <figcaption><span>MIR</span> Structure of MirCallable Next</figcaption>
+<pre class="mermaid chapter-10-mermaid mermaid--vertical">
+flowchart TB
+  accTitle: Structure of MirCallable Next
+  accDescr: Next has parameter value and entry block b0, where it creates the number 1, performs the addition, and returns in order.
+
+  next["MirCallable Next"]
+  parameter["Parameter<br/>%v0 value"]
+  block["b0<br/>EntryBlock · Blocks[0]"]
+  constant["create number 1"]
+  add["compute %v0 + 1"]
+  result["return result"]
+
+  next --- parameter
+  next --- block
+  block --> constant --> add --> result
+</pre>
+  </figure>
+
+  <p>
+    Source statement <code>return value + 1;</code> is split into computation and return, but both remain in <code>b0</code>.<br>
+    The return ends the block, so no additional terminating statement is needed.
+  </p>
+
+  <h2 id="work">Work splits into multiple blocks because of the conditional</h2>
+
+  <p>
+    <code>Work</code> has no parameters, but it has a local array and a qubit.<br>
+    It first creates the array and prepares the qubit in the entry block, then updates the array and evaluates the condition.
+  </p>
+
+  <figure class="mermaid-card">
+    <figcaption><span>MIR</span> Structure of MirCallable Work</figcaption>
+<pre class="mermaid chapter-10-mermaid mermaid--wide">
+flowchart TB
+  accTitle: Structure of MirCallable Work
+  accDescr: Work has entry block b0, local array values, local qubit q, and four blocks from b0 through b3.
+
+  work["MirCallable Work"]
+  values["local array<br/>values"]
+  qubit["local qubit<br/>q"]
+  blocks["Blocks"]
+  b0["b0<br/>EntryBlock · initialize · update array · evaluate condition"]
+  b1["b1<br/>execute X when condition is true"]
+  b2["b2<br/>no gate when condition is false"]
+  b3["b3<br/>join paths · execute H · return"]
+
+  work --- values
+  work --- qubit
+  work --- blocks
+  blocks --- b0
+  blocks --- b1
+  blocks --- b2
+  blocks --- b3
+</pre>
+  </figure>
+
+  <p>
+    Encountering the <code>if</code> splits execution into two paths, requiring <code>b1</code> and <code>b2</code>.<br>
+    After both paths finish, they join at <code>b3</code>, which contains <code>H(q[0]);</code> from after the conditional in the source.
+  </p>
+
+  <p id="implicit-return">
+    The source of <code>Work</code> has no <code>return</code> statement.<br>
+    Because an operation returns no value, the lowerer automatically appends a valueless return to the final <code>b3</code>, closing the block normally. This is called an implicit return.
+  </p>
+
+  <h2 id="result">What the completed MirCallable stores</h2>
+
+  <p>
+    When callable lowering finishes, the working lists are collected into one <code>MirCallable</code>.<br>
+    The completed object retains the callable ID and name, return type, parameters, entry block, and complete block list.
+  </p>
+
+  <div class="panel">
+    <table>
+      <caption>Core structure of <code>MirCallable</code></caption>
+      <thead><tr><th scope="col">Component</th><th scope="col"><code>Next</code></th><th scope="col"><code>Work</code></th></tr></thead>
+      <tbody>
+        <tr><td>ID</td><td><code>c6</code></td><td><code>c44</code></td></tr>
+        <tr><td>Name</td><td><code>Next</code></td><td><code>Work</code></td></tr>
+        <tr><td>Return type</td><td><code>int</code></td><td>none (<code>null</code>)</td></tr>
+        <tr><td>Parameters</td><td>one <code>value</code></td><td>none</td></tr>
+        <tr><td>Entry block</td><td><code>b0</code></td><td><code>b0</code></td></tr>
+        <tr><td>Block structure</td><td>one block containing computation and return</td><td>four blocks representing a conditional branch</td></tr>
+        <tr><td>Local resources</td><td>none</td><td>local array and qubit</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    In summary, a callable lowerer takes one HIR declaration and turns it into a block structure with explicit execution order.<br>
+    The next chapter focuses on the classical values inside those blocks and explains why one source variable name becomes multiple SSA values in MIR.
+  </p>
+
+  <nav class="chapter-nav" aria-label="Chapter navigation (bottom)">
+    <div class="group"><a href="chapter-09.html">← Previous: HIR→MIR boundary</a><a href="index.html#chapters">All chapters</a><a href="chapter-10-call-flow.html#lower-hir-artifact"><code>LowerHirArtifact()</code> detailed trace</a></div>
+    <div class="group"><a href="chapter-11.html">Next: Classical values and SSA versions →</a></div>
+  </nav>
+
+  <footer>Qora Compiler Developer Manual · Chapter 10</footer>
+</main>
+</body>
+</html>

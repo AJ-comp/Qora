@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>15. Conditional Lowering and Branch Joins — Qora Compiler Developer Manual</title>
+<link rel="stylesheet" href="developer.css">
+<script src="developer-syntax.js" defer></script>
+</head>
+<body>
+<nav class="language-switch" aria-label="Language"><strong>English</strong><span aria-hidden="true">·</span><a href="../ko/chapter-15.html">한국어</a><span aria-hidden="true">·</span><a href="../ja/chapter-15.html">日本語</a></nav>
+<a class="skip-link" href="#main-content">Skip to main content</a>
+<header class="hero">
+  <div class="tag">Qora · Compiler Developer Manual · Chapter 15</div>
+  <h1>Splitting and Joining State at a Conditional</h1>
+  <p>Why a change on the true path does not leak into the false path</p>
+</header>
+
+<main class="wrap" id="main-content">
+  <nav class="chapter-nav" aria-label="Chapter navigation (top)">
+    <div class="group"><a href="chapter-14.html">← Previous: Basic blocks</a><a href="index.html#chapters">All chapters</a></div>
+    <div class="group"><a href="chapter-16.html">Next: MIR snapshots →</a></div>
+  </nav>
+
+  <p class="lead">
+    Chapter 14 showed how an <code>if</code> is split into four blocks.<br>
+    This chapter focuses only on keeping the current qubit version separate on each path and joining those versions again.
+  </p>
+
+  <h2 id="source">Qora code under examination</h2>
+
+<pre><code class="language-qora">function Next(value: int): int
+{
+    return value + 1;
+}
+
+operation Work()
+{
+    var values: int[] = [0];
+    use q = Qubit[1];
+
+    values[0] = Next(values[0]);
+
+    if (values[0] == 1)
+    {
+        X(q[0]);
+    }
+
+    H(q[0]);
+}</code></pre>
+
+  <p>
+    If <code>values[0] == 1</code> is true, <code>X</code> is applied to <code>q[0]</code>; if false, nothing happens.<br>
+    Because MIR preserves both paths, <code>H(q[0])</code> after the <code>if</code> must be able to continue from either one.
+  </p>
+
+  <div class="callout">
+    <span class="h">Question answered in this chapter</span>
+    How can the false path retain its original version when <code>X</code> changes the current version on the true path?<br>
+    MIR tracks current state independently for each path and compares the states at the join point.
+  </div>
+
+  <h2 id="two-states">Both paths start independently from the same input</h2>
+
+  <p>
+    Immediately before the <code>if</code>, current <code>q</code> refers to <code>q0.v0</code>.<br>
+    The lowerer copies this record into the true and false paths, then processes each path independently.
+  </p>
+
+<pre><code class="language-plaintext">before branch: q → q0.v0
+        │
+        ├─ true-path record:  q → q0.v0 ── X ──▶ q0.v1
+        └─ false-path record: q → q0.v0 ─────────▶ q0.v0</code></pre>
+
+  <p>
+    Processing <code>X</code> on the true path therefore changes only the true-path record to <code>q0.v1</code>.<br>
+    The false path uses a separate record and continues to refer to <code>q0.v0</code>.
+  </p>
+
+  <h2 id="qubit-phi">Compare both records once at the join point</h2>
+
+  <p>
+    At the join point, the lowerer compares the current versions recorded by both paths.<br>
+    If they match, it uses that version directly. If they differ as <code>q0.v1</code> and <code>q0.v0</code> do here, it creates Phi version <code>q0.v2</code>.
+  </p>
+
+<pre><code class="language-plaintext">current q on true path:  q0.v1 ──┐
+                                 ├─ different → current q after join: q0.v2
+current q on false path: q0.v0 ──┘</code></pre>
+
+  <p>
+    After the comparison, the current <code>q</code> record after the join is the single version <code>q0.v2</code>.<br>
+    The following <code>H(q[0])</code> uses only this joined record without checking the path-specific records again.
+  </p>
+
+  <div class="callout good">
+    <span class="h">Summary</span>
+    The essential rule of conditional lowering is to record current state independently for each path.<br>
+    A change on one path cannot leak into another, and the two records are compared and connected only at the join point.
+  </div>
+
+  <p>
+    The next chapter shows how the completed <code>Next</code> and <code>Work</code> callables are collected into one <code>MirProgram</code>.
+  </p>
+
+  <nav class="chapter-nav" aria-label="Chapter navigation (bottom)">
+    <div class="group"><a href="chapter-14.html">← Previous: Basic blocks</a><a href="index.html#chapters">All chapters</a></div>
+    <div class="group"><a href="chapter-16.html">Next: MIR snapshots →</a></div>
+  </nav>
+
+  <footer>Qora Compiler Developer Manual · Chapter 15</footer>
+</main>
+</body>
+</html>

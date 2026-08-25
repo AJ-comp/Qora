@@ -124,13 +124,13 @@
 
   <nav class="doc-links" aria-label="코스 내비게이션">
     <a class="doc-link" href="uncompute-10-y-gate.html">← 10. Y·CY가 차단되는 이유 — 위상</a>
-    <a class="doc-link" href="datasheet.html#s8">코스 목차</a>
+    <a class="doc-link" href="index.html#uncompute-course">코스 목차</a>
     <a class="doc-link" href="uncompute-12-loops.html">12. 루프와 호출 — 왜 판정이 달라지는가 →</a>
   </nav>
   <div class="call">
     <span class="h">구현 상태</span>
     이 장은 앞으로 연결할 automatic-uncomputation scheduler와 injector의 설계 계약을 설명합니다.<br>
-    현재 compiler에는 SSA/CFG MIR 분석 기반과 <code>MirAdjointMaterializer</code>가 있지만, 여러 ancilla의 전역 cleanup 순서를 계산하고 inverse request를 자동 주입하는 scheduler는 아직 활성화되지 않았습니다.<br>
+    현재 compiler에는 SSA/CFG MIR 분석 기반이 있지만, 여러 ancilla의 전역 cleanup 순서를 계산하고 필요한 역연산을 생성하는 scheduler는 아직 구현되지 않았습니다.<br>
     따라서 아래의 주입 결과는 현재 Qora가 자동으로 방출하는 소스가 아니라, 구현할 MIR 변환의 기대 결과입니다.
   </div>
   <p>
@@ -220,7 +220,7 @@
     현재 <code>MirEffectAnalysis</code>가 앤실라에 대한 Y 쓰기에 <code>MirQubitEffectFlags.NonQfree</code>를 붙이므로,
     목표 v1 scheduler는 이를 차단하게 됩니다.<br>
     이 항목이 실제로 일하는 곳은 카탈로그의 마지막 항목인 호출의 역입니다.<br>
-    컴파일러 내부의 역연산 생성기가 연산 본문을 뒤집다가 본문 속 Y 게이트를 만나면, 이 항목에 따라 Y†를 내놓습니다.
+    향후 scheduler의 역연산 생성 단계가 연산 본문을 뒤집다가 본문 속 Y 게이트를 만나면, 이 항목에 따라 Y†를 내놓습니다.
   </p>
 
   <h3>예제 — 3중 컨트롤을 앤실라로 조립하고 자동 청소</h3>
@@ -259,7 +259,7 @@ CCX(t, c, d);    <span class="cm">// ② action:   d ^= t AND c   ← t의 마�
     규칙(<a href="uncompute-01-ancilla.html">1장</a>)을 이행하기 위해 목표 scheduler가 넣게 될 코드입니다.
   </p>
 
-  <h3>예제 — 편집이 두 번이면 역순이 보입니다: 호출에는 내부 역연산 표식이 붙습니다</h3>
+  <h3>예제 — 편집이 두 번이면 역순이 보입니다: 호출 본문도 거꾸로 펼칩니다</h3>
   <p>
     앞의 예제는 목록에 항목이 하나라서 역순이 드러나지 않았습니다.<br>
     이번에는 앤실라 <code>t</code>를 게이트로 한
@@ -282,20 +282,19 @@ operation Main(){
 }</code></pre>
   <p>
     위 코드는 사용자 소스이며 <code>Adjoint</code> 문법을 포함하지 않습니다.<br>
-    scheduler가 나중에 ③ 직후의 정확한 MIR instruction 위치를 선택하면, 컴파일러 내부 MIR에는 다음 요청과 역방향 게이트가 추가됩니다.
+    향후 scheduler가 ③ 직후의 정확한 MIR instruction 위치를 선택하고 역연산을 생성하면, transformed MIR에는 다음 게이트가 추가됩니다.
   </p>
-<pre><code><span class="add">MirQuantumApply(Target=Mix, Functors=[MirFunctor.Adjoint], Operands=[q[0], t[0]])</span>
+<pre><code><span class="add">MirQuantumApply(Target=CNOT, Functors=[], Operands=[q[0], t[0]])</span>
+<span class="add">MirQuantumApply(Target=X, Functors=[], Operands=[t[0]])</span>
 <span class="add">MirQuantumApply(Target=X, Functors=[], Operands=[t[0]])</span></code></pre>
   <p>
     <code>t</code>를 편집한 문장의 목록은 [①, ②] 두 개입니다.<br>
     역순이므로 ②의 역이 먼저, ①의 역이 나중에
     붙습니다.<br>
-    ②는 호출이므로 내부 MIR에서 <code>MirFunctor.Adjoint</code> 요청이 붙은 <code>MirQuantumApply</code>가 되는데, 이것은 <code>Mix</code>가 한 일을 정확히 되돌리라는 컴파일러 전용 요청입니다.<br>
-    그다음 <code>MirAdjointMaterializer</code>가 역방향 callable을 합성하고 이 요청을 typed callable target으로 바꿉니다.<br>
-    안을 들여다보면 본문에도 같은 규칙이 적용되어 있습니다.<br>
-    <code>CNOT(s, d)</code>가 먼저, <code>X(d)</code>가 나중, 즉 <code>Mix</code> 본문 각 문장의 역을 역순으로
-    실행하는 것입니다.<br>
-    각 기저 상태에서 <code>t</code>의 값을 따라가 보면, 주입된 두 항이 <code>t</code>를 |0⟩로 데려다 놓는
+    ②는 호출이므로 향후 scheduler가 <code>Mix</code> 본문의 역을 typed MIR로 생성해야 합니다.<br>
+    따라서 <code>CNOT(s, d)</code>가 먼저, <code>X(d)</code>가 나중에 실행되고, 마지막으로 ①의 역인
+    <code>X(t[0])</code>가 붙습니다.<br>
+    각 기저 상태에서 <code>t</code>의 값을 따라가 보면, 주입된 세 게이트가 <code>t</code>를 |0⟩로 데려다 놓는
     과정이 그대로 보입니다.
   </p>
   <div class="panel">
@@ -327,14 +326,14 @@ operation Main(){
       <tr><td><code>CNOT(c[0], t[0])</code></td><td><code>CNOT(c[0], t[0])</code></td><td>같은 XOR을 한 번 더 (자기 역)</td><td>CNOT 단계표</td></tr>
       <tr><td><code>CCX(a, b, t)</code></td><td><code>CCX(a, b, t)</code></td><td>자기 역</td><td>첫째 예제</td></tr>
       <tr><td><code>Y(t[0])</code></td><td><code>Y†(t[0])</code></td><td>위상까지 함께 되돌리는 수반(adjoint) 게이트</td><td>Y 단계표</td></tr>
-      <tr><td><code>Foo(...)</code> 호출</td><td>내부 MIR의 <code>MirQuantumApply(Target=Foo, Functors=[MirFunctor.Adjoint], ...)</code></td><td><code>MirAdjointMaterializer</code>가 합성하는 Foo 본문 전체의 역</td><td>둘째 예제 (<code>Mix</code>)</td></tr>
+      <tr><td><code>Foo(...)</code> 호출</td><td>향후 scheduler가 생성할 typed inverse MIR</td><td>Foo 본문의 각 연산을 역순으로 되돌림</td><td>둘째 예제 (<code>Mix</code>)</td></tr>
     </table>
   </div>
 
   <div class="call">
     <span class="h">주입 지점은 스코프 끝이 아니라 사망점입니다</span>
     <p>무엇을 붙여넣는지가 카탈로그로 정해졌으니, 마지막으로 붙여넣는 위치를 확인합니다.<br>
-    재료 조건(<a href="datasheet.html#s7">데이터시트 7장</a> rung ③의 4번 조항)은 "앤실라를 만든 재료가 <strong>사망점까지</strong> 그 값 그대로"를
+    <a href="uncompute-02-ladder.html">2장의 질문 2</a>에서 다루는 재료 보존 조건은 "앤실라를 만든 재료가 <strong>사망점까지</strong> 그 값 그대로"를
     요구합니다.<br>
     주입이 바로 그 사망점에서 일어나기 때문입니다.<br>
     앤실라가 컨테이너(if/for) 안에서
@@ -345,12 +344,12 @@ operation Main(){
 
   <nav class="doc-links" aria-label="코스 내비게이션">
     <a class="doc-link" href="uncompute-10-y-gate.html">← 10. Y·CY가 차단되는 이유 — 위상</a>
-    <a class="doc-link" href="datasheet.html#s8">코스 목차</a>
+    <a class="doc-link" href="index.html#uncompute-course">코스 목차</a>
     <a class="doc-link" href="uncompute-12-loops.html">12. 루프와 호출 — 왜 판정이 달라지는가 →</a>
   </nav>
 
   <footer>
-    자동 uncomputation 코스 11/16 · <a href="datasheet.html#s8">코스 목차</a> ·
+    자동 uncomputation 코스 11/16 · <a href="index.html#uncompute-course">코스 목차</a> ·
     <a href="datasheet.html">컴파일러 데이터시트</a>
   </footer>
 

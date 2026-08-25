@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>12. 配列 Storage と値状態 — Qora コンパイラ開発者マニュアル</title>
+<link rel="stylesheet" href="developer.css">
+<script src="developer-syntax.js" defer></script>
+</head>
+<body>
+<nav class="language-switch" aria-label="言語"><a href="../en/chapter-12.html">English</a><span aria-hidden="true">·</span><a href="../ko/chapter-12.html">한국어</a><span aria-hidden="true">·</span><strong>日本語</strong></nav>
+<a class="skip-link" href="#main-content">本文へ移動</a>
+<header class="hero">
+  <div class="tag">Qora · Compiler Developer Manual · Chapter 12</div>
+  <h1>配列 Storage と値状態</h1>
+  <p><code>$s0</code>、<code>%v1</code>、<code>%v6</code> が異なる理由</p>
+</header>
+
+<main class="wrap" id="main-content">
+  <nav class="chapter-nav" aria-label="章移動（上）">
+    <div class="group"><a href="chapter-11.html">← 前：古典 SSA 値</a><a href="index.html#chapters">全章目次</a></div>
+    <div class="group"><a href="chapter-13.html">次：キュービットバージョン →</a></div>
+  </nav>
+
+  <p class="lead">
+    この例のローカル配列を MIR で見ると、二種類の番号が現れます。<br>
+    <code>$s0</code> は「どの配列か」を区別し、<code>%v1</code> と <code>%v6</code> は「その配列の値が現在どの状態か」を表します。<br>
+    この章では、下のコードで配列を作り、更新し、再び読む流れだけを追跡して両者の違いを確認します。
+  </p>
+
+  <h2 id="source">確認する Qora コード</h2>
+
+<pre><code class="language-qora">function Next(value: int): int
+{
+    return value + 1;
+}
+
+operation Work()
+{
+    var values: int[] = [0];
+    use q = Qubit[1];
+
+    values[0] = Next(values[0]);
+
+    if (values[0] == 1)
+    {
+        X(q[0]);
+    }
+
+    H(q[0]);
+}</code></pre>
+
+  <p>
+    最初の文は長さ 1 の配列 <code>values</code> を作ります。<br>
+    次の文は現在の <code>values[0]</code> を <code>Next</code> へ渡し、返された値を要素 0 へ保存します。<br>
+    ソースは同じ名前 <code>values</code> を使い続けますが、MIR は更新前と更新後を別の値として区別します。
+  </p>
+
+  <h2 id="overview">MIR 結果の全体像</h2>
+
+<pre><code class="language-plaintext">Qora の values
+    │
+    ├─ 配列の identity: $s0
+    │   └─ 最初から最後まで変わらない
+    │
+    ├─ 最初の値状態: %v1 = [0]
+    │
+    └─ 更新後の値状態: %v6 = [%v5]
+                         └─ %v5 は Next の呼び出し結果
+
+条件式 values[0] == 1
+    └─ 最新状態 %v6 を読む</code></pre>
+
+  <p>
+    <code>$s0</code> と <code>%v1</code> は同じ情報を二重に保存しているわけではありません。<br>
+    <code>$s0</code> は配列自体を区別する名前札であり、<code>%v1</code> はその配列が最初に持った値です。<br>
+    要素を更新すると名前札は残り、値状態だけが <code>%v6</code> へ変わります。
+  </p>
+
+  <h2 id="creation-lowering-code">宣言：<code>$s0</code> と <code>%v1</code> を同時に作る</h2>
+
+  <p>
+    最初の文 <code>var values: int[] = [0];</code> を lower すると、MIR に次の二種類の情報が生まれます。
+  </p>
+
+<pre><code class="language-plaintext">storage $s0 values: int[1]
+
+%v0: int    = const 0
+%v1: int[1] = array.create $s0 {%v0}</code></pre>
+
+  <p>
+    <code>storage $s0</code> は <code>Work</code> 内で宣言された配列 <code>values</code> の identity です。<br>
+    簡単に言えば、「これらの値はすべて <code>values</code> 配列に関する記録である」とまとめる名前札です。<br>
+    配列要素が変わっても <code>values</code> が別の配列に置き換わるわけではないため、<code>$s0</code> は維持されます。
+  </p>
+
+  <p>
+    一方、<code>%v0</code> はリテラル <code>0</code>、<code>%v1</code> はその 0 を要素として持つ最初の配列状態です。<br>
+    したがって、この時点の関係は単純です。
+  </p>
+
+<pre><code class="language-plaintext">$s0  → どの配列か？       → values
+%v1  → 現在の配列値は何か？ → [0]</code></pre>
+
+  <h2 id="next-call">更新：同じ <code>$s0</code> に新しい値状態を作る</h2>
+
+<pre><code class="language-qora">values[0] = Next(values[0]);</code></pre>
+
+  <p>
+    この文は、まず既存の配列から要素 0 を読みます。<br>
+    現在の配列状態は <code>%v1</code> なので、MIR はその要素 0 を読み、<code>%v4</code> に置きます。<br>
+    続いて <code>Next(%v4)</code> の戻り値を <code>%v5</code> とし、その値を位置 0 へ保存した新しい配列状態 <code>%v6</code> を作ります。<br>
+    間にある <code>%v2</code> と <code>%v3</code> はそれぞれ位置 0 を表す MIR 値です。この章では配列状態 <code>%v1</code> と <code>%v6</code> にだけ集中します。
+  </p>
+
+<pre><code class="language-plaintext">以前の状態 %v1 = [0]
+       │
+       ├─ 要素 0 を読む → %v4
+       ├─ Next(%v4)     → %v5
+       └─ 要素 0 に %v5 を保存
+              ↓
+新しい状態 %v6 = [%v5]
+
+配列の identity は引き続き $s0</code></pre>
+
+  <p>
+    ここで重要なのは、<code>%v1</code> を書き換えないことです。<br>
+    MIR 値は一度作られると変わらないため、更新は既存状態を入力として新しい状態 <code>%v6</code> を作ります。<br>
+    後の解析は、<code>%v1</code> から更新前の配列を、<code>%v6</code> から更新後の配列を正確に把握できます。
+  </p>
+
+  <h2 id="latest-state">次の文は最新状態 <code>%v6</code> を読む</h2>
+
+  <p>
+    次の条件式 <code>if (values[0] == 1)</code> にも、引き続き <code>values</code> とだけ書かれています。<br>
+    しかし直前の代入後、<code>values</code> の現在状態は <code>%v6</code> です。<br>
+    したがって条件式は最初の状態 <code>%v1</code> ではなく、更新状態 <code>%v6</code> の要素 0 を読みます。
+  </p>
+
+<pre><code class="language-plaintext">宣言直後       values → %v1 → [0]
+代入後         values → %v6 → [%v5]
+条件式で読む   values → %v6[0]</code></pre>
+
+  <p>
+    この例を実行すると <code>Next(0)</code> の結果は 1 です。<br>
+    ただし MIR はその結果を事前に 1 と決めず、<code>%v5</code> という呼び出し結果として保持します。ここで重要なのは数値を事前に知ることではなく、次の文が最新の配列状態 <code>%v6</code> を読むことです。
+  </p>
+
+  <h2 id="summary">まとめ</h2>
+
+  <div class="callout good">
+    <span class="h">二種類の番号が答える問い</span>
+    <code>$s0</code> は「どの配列か？」に答えます。<br>
+    <code>%v1</code> と <code>%v6</code> は「その配列がこの時点でどの値を持つか？」に答えます。<br>
+    配列要素を更新すると <code>$s0</code> は維持され、値状態だけが <code>%v1 → %v6</code> へ変わります。
+  </div>
+
+  <p>
+    次の章では同じ原理をキュービットへ適用します。<br>
+    キュービットも <code>q0</code> という identity は維持しますが、この例の <code>X</code> や <code>H</code> のようなキュービットへ書き込む命令を通ると、現在状態を表すバージョンが変わります。
+  </p>
+
+  <nav class="chapter-nav" aria-label="章移動（下）">
+    <div class="group"><a href="chapter-11.html">← 前：古典 SSA 値</a><a href="index.html#chapters">全章目次</a></div>
+    <div class="group"><a href="chapter-13.html">次：キュービットバージョン →</a></div>
+  </nav>
+
+  <footer>Qora コンパイラ開発者マニュアル · 第12章</footer>
+</main>
+</body>
+</html>

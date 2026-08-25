@@ -55,6 +55,7 @@ public static class MirPrinter
             }
 
             foreach (var qubit in callable.Qubits
+                         .Where(qubit => qubit is not MirQubitPhi)
                          .OrderBy(qubit => qubit.Id.Value)
                          .ThenBy(qubit => qubit.Version.Value))
             {
@@ -71,6 +72,12 @@ public static class MirPrinter
             var arguments = string.Join(", ", block.Arguments.Select(argument =>
                 $"{Value(argument.Id)}: {TypeOf(argument.Id)}"));
             _text.AppendLine($"  {Block(block.Id)}({arguments}): {Origin(block.Origin)}");
+            foreach (var phi in block.QubitPhis)
+            {
+                var inputs = string.Join(", ", phi.Inputs.Select(PhiInput));
+                _text.AppendLine(
+                    $"    {Qubit(phi.Key)} = phi {inputs} {Origin(phi.Origin)}");
+            }
             foreach (var instruction in block.Instructions)
                 _text.AppendLine($"    {Instruction(instruction)} {Origin(instruction.Origin)}");
             _text.AppendLine($"    {Terminator(block.Terminator)} {Origin(block.Terminator.Origin)}");
@@ -204,6 +211,22 @@ public static class MirPrinter
                 ? $"{Qubit(access.Qubit)}[{Value(index)}]"
                 : Qubit(access.Qubit);
 
+        private string PhiInput(MirQubitPhiInput input)
+        {
+            var source = input.Edge.Kind switch
+            {
+                MirControlFlowEdgeKind.Jump => Block(input.Edge.Source),
+                MirControlFlowEdgeKind.BranchTrue => $"{Block(input.Edge.Source)}.true",
+                MirControlFlowEdgeKind.BranchFalse => $"{Block(input.Edge.Source)}.false",
+                MirControlFlowEdgeKind.SwitchCase =>
+                    $"{Block(input.Edge.Source)}.case({input.Edge.SwitchCaseValue})",
+                MirControlFlowEdgeKind.SwitchDefault => $"{Block(input.Edge.Source)}.default",
+                _ => throw new InvalidOperationException(
+                    $"unknown MIR control-flow edge kind {input.Edge.Kind}"),
+            };
+            return $"[{Qubit(input.Qubit)}, {source}]";
+        }
+
         private static string ApplyResults(MirQuantumApply apply)
         {
             var results = apply.QubitResults
@@ -223,31 +246,8 @@ public static class MirPrinter
                 $"{local.Name}: {QubitShape(local.IsArray, local.Length)} [use]",
             MirQubitAfterInstruction =>
                 "[instruction-result]",
-            MirQubitPhi phi =>
-                $"[phi {Block(FindPhiBlock(phi))}"
-                + (phi.Inputs.Count == 0
-                    ? "]"
-                    : $" <- {string.Join(", ", phi.Inputs.Select(input =>
-                        $"{Block(input.Edge.Source)}#{input.Edge.SuccessorOrdinal}:{Qubit(input.Qubit)}"))}]"),
             _ => $"[unknown {qubit.GetType().Name}]",
         };
-
-        private MirBlockId FindPhiBlock(MirQubitPhi phi)
-        {
-            var callable = _currentCallable
-                ?? throw new InvalidOperationException("no MIR callable is being printed");
-            foreach (var block in callable.Blocks)
-            {
-                foreach (var candidate in block.QubitPhis)
-                {
-                    if (ReferenceEquals(candidate, phi))
-                        return block.Id;
-                }
-            }
-
-            throw new InvalidOperationException(
-                $"MIR qubit Phi {phi.Key} has no containing block");
-        }
 
         private static string QubitShape(bool isArray, int? length) =>
             isArray

@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>17. CFG Successors and Predecessors — Qora Compiler Developer Manual</title>
+<link rel="stylesheet" href="developer.css">
+<script src="developer-syntax.js" defer></script>
+</head>
+<body>
+<nav class="language-switch" aria-label="Language"><strong>English</strong><span aria-hidden="true">·</span><a href="../ko/chapter-17.html">한국어</a><span aria-hidden="true">·</span><a href="../ja/chapter-17.html">日本語</a></nav>
+<a class="skip-link" href="#main-content">Skip to main content</a>
+<header class="hero">
+  <div class="tag">Qora · Compiler Developer Manual · Chapter 17</div>
+  <h1>CFG Successors and Predecessors</h1>
+  <p>Reading terminator transfers as a graph in both directions</p>
+</header>
+
+<main class="wrap" id="main-content">
+  <nav class="chapter-nav" aria-label="Chapter navigation (top)">
+    <div class="group"><a href="chapter-16.html">← Previous: MIR snapshots</a><a href="index.html#chapters">All chapters</a></div>
+    <div class="group"><a href="index.html#c18">Next topic: Reachability and dominance →</a></div>
+  </nav>
+
+  <p class="lead">
+    A CFG is a graph of transfers between blocks.<br>
+    Instead of constructing another execution structure, Qora computes this graph by reading the terminator already stored at the end of each block.
+  </p>
+
+  <h2 id="source">Qora code used to build the CFG</h2>
+
+<pre><code class="language-qora">function Next(value: int): int
+{
+    return value + 1;
+}
+
+operation Work()
+{
+    var values: int[] = [0];
+    use q = Qubit[1];
+
+    values[0] = Next(values[0]);
+
+    if (values[0] == 1)
+    {
+        X(q[0]);
+    }
+
+    H(q[0]);
+}</code></pre>
+
+  <p>
+    Chapter 14 split this conditional into four blocks.<br>
+    <code>b0</code> evaluates the condition, <code>b1</code> executes the true body, and <code>b2</code> represents the false path. The two paths join at <code>b3</code>, which then executes <code>H</code>.
+  </p>
+
+<pre><code class="language-plaintext">          ┌──→ b1: X ──┐
+b0: condition           ├──→ b3: H → return
+        └──→ b2 ─────┘</code></pre>
+
+  <h2 id="terminators">Terminators are the source of the arrows</h2>
+
+  <p>
+    Every block has one terminator at its end.<br>
+    Ordinary MIR instructions compute values or apply gates; a terminator decides where execution moves after the block ends.
+  </p>
+
+<pre><code class="language-plaintext">b0.Terminator = Branch
+├─ condition true  → b1
+└─ condition false → b2
+
+b1.Terminator = Jump → b3
+b2.Terminator = Jump → b3
+b3.Terminator = Return</code></pre>
+
+  <p>
+    <code>Branch</code> has two destinations, while <code>Jump</code> has one.<br>
+    <code>Return</code> ends callable execution and therefore has no next block. The CFG is a tabular representation of these facts.
+  </p>
+
+  <h2 id="successors">Collecting next blocks produces the successor table</h2>
+
+  <p>
+    A successor is a block that execution can enter after the current block.<br>
+    The analysis reads the destinations referenced by each block's terminator and creates the following table.
+  </p>
+
+<pre><code class="language-plaintext">Successors
+├─ b0 → [b1, b2]
+├─ b1 → [b3]
+├─ b2 → [b3]
+└─ b3 → []</code></pre>
+
+  <p>
+    <code>b0</code> has two successors because the condition can select either destination.<br>
+    Both <code>b1</code> and <code>b2</code> move to join block <code>b3</code>; <code>b3</code> returns and therefore has an empty list.
+  </p>
+
+  <div class="callout">
+    <span class="h">Important</span>
+    Having two successors does not mean that both blocks execute.<br>
+    A CFG represents every path that may be selected; one actual execution selects only the path matching the condition.
+  </div>
+
+  <h2 id="predecessors">Reversing the arrows produces the predecessor table</h2>
+
+  <p>
+    A predecessor is a previous block that can transfer into the current block.<br>
+    It is not recomputed from another source; the completed successor arrows are simply reversed.
+  </p>
+
+<pre><code class="language-plaintext">Successor arrow                 Reversed predecessor relation
+b0 → b1                          b1 ← b0
+b0 → b2                          b2 ← b0
+b1 → b3                          b3 ← b1
+b2 → b3                          b3 ← b2
+
+Predecessors
+├─ b0 ← []
+├─ b1 ← [b0]
+├─ b2 ← [b0]
+└─ b3 ← [b1, b2]</code></pre>
+
+  <p>
+    No block enters entry block <code>b0</code>, so its list is empty.<br>
+    Join block <code>b3</code> has two predecessors because both true-path <code>b1</code> and false-path <code>b2</code> enter it.
+  </p>
+
+  <p>
+    Deriving predecessors from successors keeps both tables based on one source of truth.<br>
+    This avoids inconsistencies such as recording <code>b1 → b3</code> on one side while omitting <code>b3 ← b1</code> on the other.
+  </p>
+
+  <h2 id="snapshot">Both tables form the callable's CFG snapshot</h2>
+
+  <p>
+    When the CFG of <code>Work</code> is requested from the current snapshot, the analysis store reads the blocks and terminators of <code>Work</code>.<br>
+    The result is a <code>MirControlFlowSnapshot</code> containing successors and predecessors.
+  </p>
+
+<pre><code class="language-plaintext">MirSnapshot
+└─ CFG of Work
+   └─ MirControlFlowSnapshot
+      ├─ SourceCallable = Work
+      ├─ EntryBlock = b0
+      ├─ SuccessorsOf(b0) = [b1, b2]
+      └─ PredecessorsOf(b3) = [b1, b2]</code></pre>
+
+  <p>
+    This CFG snapshot is not a second block tree to execute.<br>
+    It is derived information that continues to reference the original blocks of <code>Work</code> while making their relationships efficient to query.
+  </p>
+
+  <div class="callout good">
+    <span class="h">Summary</span>
+    Terminators are the authoritative source of block transfers, and the successor table records those transfers in the forward direction.<br>
+    The predecessor table reverses the same arrows. Both results are collected into one callable-specific CFG snapshot that supports later MIR analyses.
+  </div>
+
+  <nav class="chapter-nav" aria-label="Chapter navigation (bottom)">
+    <div class="group"><a href="chapter-16.html">← Previous: MIR snapshots</a><a href="index.html#chapters">All chapters</a></div>
+    <div class="group"><a href="index.html#c18">Next topic: Reachability and dominance →</a></div>
+  </nav>
+
+  <footer>Qora Compiler Developer Manual · Chapter 17</footer>
+</main>
+</body>
+</html>

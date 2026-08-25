@@ -13,8 +13,7 @@ work · **hard** = needs a self-contained compiler pass · **not-expressible** =
 
 ## ✅ Done — v0.8
 
-- **Controlled gates** — `Controlled G(...)` → `ctrl @ g`.
-  Inverse applications are compiler-generated MIR only and have no source or HIR spelling. (clean)
+- **Controlled gates** — `Controlled G(...)` → `ctrl @ g`. (clean)
 - **Richer conditions** — `== != < <= > >= && || !` in `if` / `while` / `repeat` (flat; OpenQASM
   re-parses precedence). Enables real measurement-feedback and counters. (clean)
 - **`if` / `else` / `else if`** — both-way branching on a measured bit. (clean)
@@ -108,18 +107,15 @@ declared at `Main` top level and lowers to OpenQASM general arrays. (clean)
   after functors + richer measurement. (hard)
 ---
 
-## Auto-uncompute — rung ④ injector prerequisites (2026-07-12 deep-dive on blanket+all-scratch)
+## Auto-uncompute — rung ④ scheduler prerequisites (2026-07-12 deep-dive on blanket+all-scratch)
 
-- **#17 — wiring the injector to MIR-only inverse materialization.** A safe verdict on a register
-  written by a call such as `Bcast(a)` promises an internal inverse request for that exact MIR
-  instruction. `MirAdjointMaterializer` already owns this boundary: `InjectRequests` marks an exact
-  `MirInstructionSite` by attaching `MirFunctor.Adjoint` to its `MirQuantumApply`, and `Run` synthesizes
-  the required inverse MIR callable before rewriting the request to a typed call. Qora source and HIR
-  contain no inverse marker or HIR-side inversion machinery. Rung ④ must therefore compute a global LIFO cleanup
-  schedule, inject requests into a new MIR snapshot, and pass that exact object to the materializer.
-  The current materializer deliberately accepts only the straight-line unitary subset; branch CFGs,
-  measurement, mutation, local allocation, recursion, and unstable witnesses must remain explicit
-  blockers until their inverse semantics are implemented.
+- **#17 — implement cleanup scheduling and inverse generation together.** A safe verdict on a register
+  written by a call such as `Bcast(a)` must identify the exact MIR instruction whose effect needs to be
+  undone. The current compiler has no inverse-request marker or inverse materializer. Rung ④ must consume
+  the exact MIR analyses, compute a global LIFO cleanup schedule, and generate typed inverse MIR as one
+  future scheduler pipeline. Qora source and HIR remain free of compiler-only inverse syntax. The first
+  implementation must reject branch CFGs, measurement, mutation, local allocation, recursion, and unstable
+  witnesses until their inverse semantics are explicitly supported.
 
 ## Auto-uncompute — registered data gaps (from the requirements cross-check, 2026-07-11)
 
@@ -131,12 +127,10 @@ that exact MIR program; HIR keeps no parallel qubit history or cleanup verdict. 
   availability. A scheduler that injects `if (r==1) { inverse }` must reconstruct the matching guard at
   the chosen cleanup site, prove every required value is still available there, and reject unavailable
   or loop-carried predicates. This is scheduler work, not a missing HIR event stream.
-- **#14 — post-injection re-analysis.** The cleanup scheduler consumes analyses bound to one exact
-  `MirProgram` owned by one `MirSnapshot`. Rung ④ must publish the injected program as a new
-  `MirStage.InverseRequestsInjected` snapshot, retain the exact immediately preceding MIR snapshot as
-  `PreviousSnapshot`, replay its origins, and recompute every invalidated MIR analysis rather than
-  reusing facts from the previous program. Successful
-  materialization then publishes the next `MirStage.AdjointsMaterialized` snapshot.
+- **#14 — post-transformation re-analysis.** The cleanup scheduler will consume analyses bound to one exact
+  `MirProgram` owned by one `MirSnapshot`. Its implementation must publish transformed MIR as a distinct,
+  verified result, preserve the required origins, and recompute every invalidated MIR analysis rather than
+  reusing facts from the previous program. No inverse-request or materialization stage exists today.
 - **#16 — cleanup-candidate conditions coupled to FUTURE features** (2026-07-11 literature
   cross-check: Silq PLDI'20, Q#, Unqomp PLDI'21/Reqomp, Twist POPL'22, Quipper, Bennett'73, Gidney'18 —
   20/20 key claims source-verified). For today's quantum feature set, a future MIR scheduler can derive
@@ -195,9 +189,8 @@ that exact MIR program; HIR keeps no parallel qubit history or cleanup verdict. 
   HIR in v0.33).** Statement and value calls share `HirCallExpression`, which carries
   `HirNodeId? CalleeId`. Resolver binds a user call to its callee's stable node Id once, and
   monomorphization re-points the reference to the selected
-  specialization. HIR→MIR lowering replaces that HIR reference with `MirUserCallableTarget(MirCallableId)`.
-  `MirAdjointMaterializer` synthesizes a fresh MIR callable ID and rewrites the internal request to that
-  typed target; built-ins remain `MirBuiltinGateTarget`. Validation, effect analysis, MIR lowering, target
+  specialization. HIR→MIR lowering replaces that HIR reference with `MirUserCallableTarget(MirCallableId)`;
+  built-ins remain `MirBuiltinGateTarget`. Validation, effect analysis, MIR lowering, target
   lowering, and emission fail loudly on missing or dangling IDs. Printers may display readable names, but
   those spellings are never semantic identity.
 - **#20 — immutable compilation snapshots and explicit stage ownership — ✅ SHIPPED
@@ -232,7 +225,7 @@ that exact MIR program; HIR keeps no parallel qubit history or cleanup verdict. 
   query maps above the compiler IR layer. Ordinary compilation and every backend run without creating
   that index.
   Target results live in the backend-keyed `TargetArtifactSet.Artifacts` map. `QasmBackend` consumes the
-  exact materialized `MirSnapshot` and produces `MirOpenQasmTargetProgram`; `OpenQasmArtifact.Text` is
+  exact lowered `MirSnapshot` and produces `MirOpenQasmTargetProgram`; `OpenQasmArtifact.Text` is
   derived from that model. The artifact records the exact MIR source it consumed, and the backend never
   reaches back into HIR. Target diagnostics likewise carry the backend plus the exact MIR input object.
   The CLI renders `--stages` from this completed aggregate without rerunning passes.
@@ -245,11 +238,10 @@ that exact MIR program; HIR keeps no parallel qubit history or cleanup verdict. 
 
 Updated 2026-07-27. The module system, typed functions and returns, expression calls, float/angle
 types, effect analysis, ownership contracts, MIR, and immutable compilation snapshots have landed.
-The main dependent track is now **automatic uncomputation**: the injector must consume the existing
-effect/liveness facts, insert identity-bound internal inverse requests, preserve the scope-exit |0⟩ guarantee, and
-publish a new MIR snapshot with the immediately preceding MIR snapshot as its exact
-`PreviousSnapshot`, directly shared immutable origins, and freshly computed analyses rather than mutate an
-earlier snapshot. Local allocation lowering
+The main dependent track is now **automatic uncomputation**: a future MIR scheduler must consume the existing
+effect/liveness facts, compute a global cleanup order, generate typed inverse operations, preserve the scope-exit
+|0⟩ guarantee, and publish a distinct verified MIR result with freshly computed analyses rather than mutate an
+earlier program. Local allocation lowering
 depends on that guarantee. Incremental invalidation and IDE query indexes should extend the existing
 document identities, the exact HIR artifact, direct MIR origins, and source maps. IDE-only symbol-to-MIR
 lookups belong to the opt-in `Qora.LanguageServices.MirSemanticIndex`; they must not become a second

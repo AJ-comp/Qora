@@ -189,7 +189,7 @@ public sealed class MirQasmEmitterTests
     }
 
     [Fact]
-    public void RejectsModifiersOnUserOperationsBecauseTheyMustBeMaterializedInMir()
+    public void RejectsModifiersOnUserOperations()
     {
         var error = Assert.Throws<ArgumentException>(
             () => new MirQasmQuantumApplyStatement(
@@ -198,7 +198,7 @@ public sealed class MirQasmEmitterTests
                 Array.Empty<MirQasmExpression>(),
                 new[] { MirQasmQuantumModifier.Inverse }));
 
-        Assert.Contains("already have inverse/control materialized", error.Message);
+        Assert.Contains("must be a plain callable without modifiers", error.Message);
     }
 
     [Fact]
