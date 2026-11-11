@@ -32,8 +32,9 @@ public sealed class MirOpenQasmLoweringTests
             }
             """);
 
-        Assert.Contains("while (true) {", qasm);
-        Assert.Contains("break;", qasm);
+        Assert.Contains("while (loop_active == 1) {", qasm);
+        Assert.Contains("loop_active = 0;", qasm);
+        Assert.DoesNotContain("break;", qasm);
         Assert.DoesNotContain("__pc", qasm);
     }
 
@@ -55,7 +56,8 @@ public sealed class MirOpenQasmLoweringTests
             """);
         var qasm = Assert.IsType<OpenQasmArtifact>(
             compilation.Targets.OpenQasm).Text;
-        Assert.Equal(2, Count(qasm, "while (true) {"));
+        Assert.Equal(2, Count(qasm, "while (loop_active"));
+        Assert.DoesNotContain("break;", qasm);
         Assert.DoesNotContain("__pc", qasm);
     }
 
@@ -109,7 +111,8 @@ public sealed class MirOpenQasmLoweringTests
             """);
         var qasm = Assert.IsType<OpenQasmArtifact>(
             compilation.Targets.OpenQasm).Text;
-        Assert.Equal(2, Count(qasm, "while (true) {"));
+        Assert.Equal(2, Count(qasm, "while (loop_active"));
+        Assert.DoesNotContain("break;", qasm);
         Assert.Contains("return_done = 1;", qasm);
         Assert.Equal(1, Count(qasm, "return ret;"));
     }

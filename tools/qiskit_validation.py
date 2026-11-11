@@ -1,7 +1,13 @@
 # -*- coding: utf-8 -*-
-"""Release-gate validation: Qora-emitted QASM must LOAD in Qiskit and RUN with correct semantics.
+"""Qiskit importer compatibility probe, not Qora's execution-result protocol.
 
-Requires: pip install qiskit qiskit-qasm3-import qiskit-aer  (and a Debug build of src/Qora).
+This diagnostic inspects internal classical registers to check circuit behavior when import succeeds.
+Those registers are NOT the Qora entry return and must not be used as user-facing execution results.
+The current importer cannot load all generated declarations (including integer result/completion
+transport). Import failures remain failures; this probe never strips output declarations or rewrites
+the program to make it load. Use braket_validation.py for the typed entry-return contract.
+
+Requires: python -m pip install -r tools/requirements.txt  (and a Debug build of src/Qora).
 Run before releases (see the release checklist). Known importer gaps (qiskit-qasm3-import 0.6.0):
 def subroutines, int/const declarations, variable register indices (q[i] in for), && / || - those
 cases FAIL at qasm3.loads until Qora grows a flattening emission mode or the importer catches up.
@@ -37,7 +43,7 @@ def keys(counts):
     return {k.replace(" ", "") for k in counts}
 
 def load_and_run(name, src, expect_keys=None, subset=False):
-    """Compile -> qasm3.loads -> simulate; verify measured keys."""
+    """Compile -> import -> inspect internal register keys for this diagnostic only."""
     try:
         qasm = compile_qora(src)
     except AssertionError as e:

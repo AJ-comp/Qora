@@ -687,8 +687,8 @@ public class OwnershipParameterTests
             operation Consume(move values: int[]) {}
             operation Inspect(values: int[]) {}
             operation Main() {
-                const never: bit = false;
-                const done: bit = true;
+                const never: bool = false;
+                const done: bool = true;
                 var values: int[] = [1];
                 if (never) {
                     Consume(move values);

@@ -4,8 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>13. キュービット identity とバージョン — Qora コンパイラ開発者マニュアル</title>
-<link rel="stylesheet" href="developer.css">
-<script src="developer-syntax.js" defer></script>
+<link rel="stylesheet" href="developer.css?v=20261004-svg-trees-r56">
+<link rel="stylesheet" href="../section-heading.css?v=20260826-section-tab-standard">
+<script src="developer-syntax.js?v=20260828-localized-format-r1" defer></script>
 </head>
 <body>
 <nav class="language-switch" aria-label="言語"><a href="../en/chapter-13.html">English</a><span aria-hidden="true">·</span><a href="../ko/chapter-13.html">한국어</a><span aria-hidden="true">·</span><strong>日本語</strong></nav>
@@ -28,7 +29,7 @@
     下のコードで、長さ 1 のキュービットリソース <code>q</code> が四つのバージョンへ進む流れだけを確認します。
   </p>
 
-  <h2 id="source">確認する Qora コード</h2>
+  <h2 id="source" class="trace-section-heading"><span>確認する Qora コード</span></h2>
 
 <pre><code class="language-qora">function Next(value: int): int
 {
@@ -56,9 +57,9 @@ operation Work()
     この例を実行すると条件は true ですが、MIR lowering は <code>Next</code> の呼び出し結果を事前計算しないため、true・false 両方の経路を保持します。
   </p>
 
-  <h2 id="overview">バージョン全体の流れ</h2>
+  <h2 id="overview" class="trace-section-heading"><span>バージョン全体の流れ</span></h2>
 
-<pre><code class="language-plaintext">use q = Qubit[1]
+<figure class="structure-figure"><svg class="structure-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 382" role="img" aria-labelledby="flow-chapter-13-1-title flow-chapter-13-1-desc"><title id="flow-chapter-13-1-title">use q = Qubit[1]</title><desc id="flow-chapter-13-1-desc">use q = Qubit[1]
         ↓
       q0.v0
        ├─────────────────┐
@@ -69,14 +70,14 @@ operation Work()
                  ↓
         Phi 合流 → q0.v2
                  ↓
-          H 適用 → q0.v3</code></pre>
+          H 適用 → q0.v3</desc><defs><marker id="flow-chapter-13-1-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0 L10 5 L0 10 Z" fill="#354bff"/></marker></defs><g font-family="Consolas, Malgun Gothic, sans-serif"><rect x="200" y="8" width="240" height="62" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="212" y="34" font-size="14" fill="#111936" text-anchor="start" font-weight="700">use q = Qubit[1]</text><text x="212" y="56" font-size="14" fill="#111936" text-anchor="start">q0.v0</text><rect x="12" y="100" width="270" height="62" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="24" y="126" font-size="14" fill="#152581" text-anchor="start" font-weight="700">真の経路 b1</text><text x="24" y="148" font-size="14" fill="#152581" text-anchor="start">X: q0.v0 → q0.v1</text><rect x="358" y="100" width="270" height="62" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="370" y="126" font-size="14" fill="#111936" text-anchor="start" font-weight="700">偽の経路 b2</text><text x="370" y="148" font-size="14" fill="#111936" text-anchor="start">q0.v0</text><path d="M320.0 70 V85.0 H147.0 V98" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-13-1-arrow)"/><path d="M320.0 70 V85.0 H493.0 V98" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-13-1-arrow)"/><rect x="190" y="232" width="260" height="40" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="202" y="258" font-size="14" fill="#152581" text-anchor="start" font-weight="700">Phi → q0.v2</text><path d="M147.0 162 V197.0 H320.0 V230" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-13-1-arrow)"/><path d="M493.0 162 V197.0 H320.0 V230" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-13-1-arrow)"/><rect x="190" y="324" width="260" height="40" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="202" y="350" font-size="14" fill="#152581" text-anchor="start" font-weight="700">H: q0.v2 → q0.v3</text><path d="M320.0 272 V298.0 H320.0 V322" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-13-1-arrow)"/></g></svg></figure>
 
   <p>
     すべての項目が <code>q0</code> で始まるのは、最初に宣言した論理キュービットリソース <code>q</code> を使い続けるためです。<br>
     後ろのバージョンだけが変わるのは、各地点でどのゲートまで通過したかを区別する必要があるためです。
   </p>
 
-  <h2 id="allocation-code">割り当て：最初の状態 <code>q0.v0</code></h2>
+  <h2 id="allocation-code" class="trace-section-heading"><span>割り当て：最初の状態 <code>q0.v0</code></span></h2>
 
   <p>
     <code>use q = Qubit[1];</code> が長さ 1 のキュービットリソースを割り当てると、MIR はそのリソースへ <code>q0</code> という identity を与えます。<br>
@@ -85,16 +86,30 @@ operation Work()
     同時に、まだゲートを通っていない最初のバージョン <code>v0</code> が付き、<code>q0.v0</code> になります。
   </p>
 
-<pre><code class="language-plaintext">q0.v0
+<figure class="structure-figure"><div class="item-tree-diagram item-tree-diagram--native" data-item-tree="structure-chapter-13-2" style="--item-tree-width:435px">
+  <svg class="native-item-tree" xmlns="http://www.w3.org/2000/svg" width="435" height="108" viewBox="0 0 435 108" role="img" aria-labelledby="structure-chapter-13-2-title structure-chapter-13-2-desc">
+    <title id="structure-chapter-13-2-title">q0.v0</title>
+    <desc id="structure-chapter-13-2-desc">q0.v0
 │  └─ v0: 割り当て直後の最初のバージョン
-└──── q0: この論理キュービットリソースの不変 identity</code></pre>
+└──── q0: この論理キュービットリソースの不変 identity</desc>
+    <path class="native-item-tree__guides" d="M 22 34 V 81 M 22 51 H 40 M 22 81 H 40"/>
+    <text x="16" y="26" data-tree-depth="0" data-tree-row="0" data-continuation="false"><tspan class="native-item-tree__field">q0.v0</tspan></text>
+    <text x="44" y="56" data-tree-depth="1" data-tree-row="1" data-continuation="false">v0: <tspan class="native-item-tree__type">割り当て直後の最初のバージョン</tspan></text>
+    <text x="44" y="86" data-tree-depth="1" data-tree-row="2" data-continuation="false">q0: <tspan class="native-item-tree__type">この論理キュービットリソースの不変 identity</tspan></text>
+  </svg>
+</div>
+<div class="item-tree-legend" data-legend-for="structure-chapter-13-2" aria-label="図の凡例">
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">├─</span><span>識別子の構成要素</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">[]</span><span>空のリスト</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">{}</span><span>空の集合またはマップ</span></span>
+</div></figure>
 
   <p>
     後に出てくる <code>q0.v1</code>、<code>q0.v2</code>、<code>q0.v3</code> は、すべて同じ論理リソース <code>q0</code> に関する記録です。<br>
     キュービットリソースをさらに三つ割り当てる意味ではありません。
   </p>
 
-  <h2 id="qubit-lookup">分岐：true 経路だけが <code>X</code> を通る</h2>
+  <h2 id="qubit-lookup" class="trace-section-heading"><span>分岐：true 経路だけが <code>X</code> を通る</span></h2>
 
   <p>
     <code>if</code> 分岐へ入るとき、両方の経路は同じ入力 <code>q0.v0</code> から始まります。<br>
@@ -102,14 +117,14 @@ operation Work()
     一方、false 経路は <code>X</code> を実行しないため、<code>q0.v0</code> をそのまま維持します。
   </p>
 
-<pre><code class="language-plaintext">true 経路   q0.v0 ── X ──▶ q0.v1
-false 経路  q0.v0 ─────────▶ q0.v0</code></pre>
+<figure class="structure-figure"><svg class="structure-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 196" role="img" aria-labelledby="flow-chapter-13-3-title flow-chapter-13-3-desc"><title id="flow-chapter-13-3-title">true 経路   q0.v0 ── X ──▶ q0.v1</title><desc id="flow-chapter-13-3-desc">true 経路   q0.v0 ── X ──▶ q0.v1
+false 経路  q0.v0 ─────────▶ q0.v0</desc><defs><marker id="flow-chapter-13-3-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0 L10 5 L0 10 Z" fill="#354bff"/></marker></defs><g font-family="Consolas, Malgun Gothic, sans-serif"><text x="12" y="27" font-size="16" fill="#111936" text-anchor="start">分岐直前: q → q0.v0</text><text x="12" y="76" font-size="14" fill="#111936" text-anchor="start">真の経路</text><rect x="160" y="50" width="160" height="40" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="172" y="76" font-size="14" fill="#111936" text-anchor="start" font-weight="700">q0.v0</text><rect x="468" y="50" width="160" height="40" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="480" y="76" font-size="14" fill="#152581" text-anchor="start" font-weight="700">q0.v1</text><path d="M320 70.0 H394.0 V70.0 H466" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-13-3-arrow)"/><text x="394.0" y="61.0" font-size="12" fill="#111936" text-anchor="middle">X</text><text x="12" y="164" font-size="14" fill="#111936" text-anchor="start">偽の経路</text><rect x="160" y="138" width="160" height="40" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="172" y="164" font-size="14" fill="#111936" text-anchor="start" font-weight="700">q0.v0</text><rect x="468" y="138" width="160" height="40" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="480" y="164" font-size="14" fill="#111936" text-anchor="start" font-weight="700">q0.v0</text><path d="M320 158.0 H394.0 V158.0 H466" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-13-3-arrow)"/></g></svg></figure>
 
   <p>
     このようにバージョンを分けると、MIR を読む解析は「この値は X を通った状態か」を命令順序から再推測せずに判断できます。
   </p>
 
-  <h2 id="phi">合流：二つの可能性を <code>q0.v2</code> にまとめる</h2>
+  <h2 id="phi" class="trace-section-heading"><span>合流：二つの可能性を <code>q0.v2</code> にまとめる</span></h2>
 
   <p>
     <code>if</code> が終わると、true 経路と false 経路は再び一つに合流します。<br>
@@ -117,16 +132,16 @@ false 経路  q0.v0 ─────────▶ q0.v0</code></pre>
     MIR はこの二つの可能性を Phi でまとめ、<code>q0.v2</code> を作ります。
   </p>
 
-<pre><code class="language-plaintext">true 経路 b1  → q0.v1 ─┐
+<figure class="structure-figure"><svg class="structure-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 198" role="img" aria-labelledby="flow-chapter-13-4-title flow-chapter-13-4-desc"><title id="flow-chapter-13-4-title">true 経路 b1  → q0.v1 ─┐</title><desc id="flow-chapter-13-4-desc">true 経路 b1  → q0.v1 ─┐
                        ├─ Phi → q0.v2
-false 経路 b2 → q0.v0 ─┘</code></pre>
+false 経路 b2 → q0.v0 ─┘</desc><defs><marker id="flow-chapter-13-4-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0 L10 5 L0 10 Z" fill="#354bff"/></marker></defs><g font-family="Consolas, Malgun Gothic, sans-serif"><rect x="12" y="8" width="270" height="62" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="24" y="34" font-size="14" fill="#152581" text-anchor="start" font-weight="700">真の経路 b1</text><text x="24" y="56" font-size="14" fill="#152581" text-anchor="start">X: q0.v0 → q0.v1</text><rect x="358" y="8" width="270" height="62" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="370" y="34" font-size="14" fill="#111936" text-anchor="start" font-weight="700">偽の経路 b2</text><text x="370" y="56" font-size="14" fill="#111936" text-anchor="start">q0.v0</text><rect x="190" y="140" width="260" height="40" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="202" y="166" font-size="14" fill="#152581" text-anchor="start" font-weight="700">Phi → q0.v2</text><path d="M147.0 70 V105.0 H320.0 V138" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-13-4-arrow)"/><path d="M493.0 70 V105.0 H320.0 V138" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-13-4-arrow)"/></g></svg></figure>
 
   <p>
     Phi は新しいゲートではなく、新しいキュービットも割り当てません。<br>
     実行が <code>b1</code> から来たなら <code>q0.v1</code>、<code>b2</code> から来たなら <code>q0.v0</code> という制御フローの選択を、一つの名前 <code>q0.v2</code> で表します。
   </p>
 
-  <h2 id="h-gate">合流後の <code>H</code>：<code>q0.v3</code></h2>
+  <h2 id="h-gate" class="trace-section-heading"><span>合流後の <code>H</code>：<code>q0.v3</code></span></h2>
 
   <p>
     最後の文 <code>H(q[0]);</code> は <code>if</code> の外側にあるため、二つの経路が合流した後に実行されます。<br>
@@ -134,9 +149,9 @@ false 経路 b2 → q0.v0 ─┘</code></pre>
     <code>H</code> を通った結果は、再び新しいバージョン <code>q0.v3</code> になります。
   </p>
 
-<pre><code class="language-plaintext">q0.v2 ── H ──▶ q0.v3</code></pre>
+<figure class="structure-figure"><svg class="structure-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 70" role="img" aria-labelledby="flow-chapter-13-5-title flow-chapter-13-5-desc"><title id="flow-chapter-13-5-title">q0.v2 ── H ──▶ q0.v3</title><desc id="flow-chapter-13-5-desc">q0.v2 ── H ──▶ q0.v3</desc><defs><marker id="flow-chapter-13-5-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0 L10 5 L0 10 Z" fill="#354bff"/></marker></defs><g font-family="Consolas, Malgun Gothic, sans-serif"><rect x="12" y="12" width="200" height="40" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="24" y="38" font-size="14" fill="#111936" text-anchor="start" font-weight="700">q0.v2</text><rect x="428" y="12" width="200" height="40" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="440" y="38" font-size="14" fill="#152581" text-anchor="start" font-weight="700">q0.v3</text><path d="M212 32.0 H320.0 V32.0 H426" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-13-5-arrow)"/><text x="320.0" y="23.0" font-size="12" fill="#111936" text-anchor="middle">H</text></g></svg></figure>
 
-  <h2 id="summary">まとめ</h2>
+  <h2 id="summary" class="trace-section-heading"><span>まとめ</span></h2>
 
   <div class="callout good">
     <span class="h">identity と version</span>

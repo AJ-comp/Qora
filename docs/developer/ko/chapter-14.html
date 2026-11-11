@@ -4,8 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>14. Basic Block와 Terminator — Qora 컴파일러 개발자 매뉴얼</title>
-<link rel="stylesheet" href="developer.css">
-<script src="developer-syntax.js" defer></script>
+<link rel="stylesheet" href="developer.css?v=20261004-svg-trees-r56">
+<link rel="stylesheet" href="../section-heading.css?v=20260826-section-tab-standard">
+<script src="developer-syntax.js?v=20260828-localized-format-r1" defer></script>
 </head>
 <body>
 <nav class="language-switch" aria-label="언어"><a href="../en/chapter-14.html">English</a><span aria-hidden="true">·</span><strong>한국어</strong><span aria-hidden="true">·</span><a href="../ja/chapter-14.html">日本語</a></nav>
@@ -28,7 +29,7 @@
     공통 예제의 <code>if</code>는 <code>b0</code>, <code>b1</code>, <code>b2</code>, <code>b3</code> 네 block으로 바뀝니다.
   </p>
 
-  <h2 id="source">살펴볼 Qora 코드</h2>
+  <h2 id="source" class="trace-section-heading"><span>살펴볼 Qora 코드</span></h2>
 
 <pre><code class="language-qora">function Next(value: int): int
 {
@@ -56,11 +57,11 @@ operation Work()
     MIR은 이 세 구간을 분리해 제어 흐름을 명시적으로 나타냅니다.
   </p>
 
-  <h2 id="overview">네 block의 전체 연결</h2>
+  <h2 id="overview" class="trace-section-heading"><span>네 block의 전체 연결</span></h2>
 
-<pre><code class="language-plaintext">                    ┌─ 참 ─▶ b1: X 실행 ─┐
+<figure class="structure-figure"><svg class="structure-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 350" role="img" aria-labelledby="flow-chapter-14-1-title flow-chapter-14-1-desc"><title id="flow-chapter-14-1-title">                    ┌─ 참 ─▶ b1: X 실행 ─┐</title><desc id="flow-chapter-14-1-desc">                    ┌─ 참 ─▶ b1: X 실행 ─┐
 b0: 조건 계산과 branch                    ├─▶ b3: H 실행과 return
-                    └─ 거짓 ▶ b2: 빈 경로 ─┘</code></pre>
+                    └─ 거짓 ▶ b2: 빈 경로 ─┘</desc><defs><marker id="flow-chapter-14-1-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0 L10 5 L0 10 Z" fill="#354bff"/></marker></defs><g font-family="Consolas, Malgun Gothic, sans-serif"><rect x="186" y="8" width="268" height="62" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="198" y="34" font-size="14" fill="#111936" text-anchor="start" font-weight="700">b0</text><text x="198" y="56" font-size="14" fill="#111936" text-anchor="start">조건 계산 · branch</text><rect x="12" y="142" width="270" height="62" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="24" y="168" font-size="14" fill="#152581" text-anchor="start" font-weight="700">b1</text><text x="24" y="190" font-size="14" fill="#152581" text-anchor="start">X(q[0]);</text><rect x="358" y="142" width="270" height="62" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="370" y="168" font-size="14" fill="#111936" text-anchor="start" font-weight="700">b2</text><text x="370" y="190" font-size="14" fill="#111936" text-anchor="start">빈 경로</text><rect x="186" y="270" width="268" height="62" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="198" y="296" font-size="14" fill="#152581" text-anchor="start" font-weight="700">b3</text><text x="198" y="318" font-size="14" fill="#152581" text-anchor="start">H(q[0]); · return</text><path d="M320.0 70 V106.0 H147.0 V140" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-14-1-arrow)"/><text x="239.5" y="100.0" font-size="12" fill="#111936" text-anchor="middle">true</text><path d="M320.0 70 V106.0 H493.0 V140" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-14-1-arrow)"/><text x="412.5" y="100.0" font-size="12" fill="#111936" text-anchor="middle">false</text><path d="M147.0 204 V237.0 H320.0 V268" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-14-1-arrow)"/><path d="M493.0 204 V237.0 H320.0 V268" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-14-1-arrow)"/></g></svg></figure>
 
   <p>
     <code>b0</code>는 조건을 계산하고 두 경로 중 하나를 고릅니다.<br>
@@ -68,18 +69,34 @@ b0: 조건 계산과 branch                    ├─▶ b3: H 실행과 return
     두 경로는 <code>b3</code>에서 다시 합쳐지고, 그 뒤에 공통으로 실행할 <code>H</code>가 이어집니다.
   </p>
 
-  <h2 id="b0"><code>b0</code>: 조건을 계산하고 경로를 선택합니다</h2>
+  <h2 id="b0" class="trace-section-heading"><span><code>b0</code>: 조건을 계산하고 경로를 선택합니다</span></h2>
 
   <p>
     <code>b0</code>에는 <code>if</code> 전에 실행할 배열 선언과 갱신도 들어 있지만, 여기서는 마지막 부분만 보면 충분합니다.<br>
     MIR은 <code>values[0] == 1</code>을 계산하여 <code>%v10</code>을 만들고, <code>branch</code>가 그 값을 보고 다음 block을 결정합니다.
   </p>
 
-<pre><code class="language-plaintext">b0
+<figure class="structure-figure"><div class="item-tree-diagram item-tree-diagram--native" data-item-tree="structure-chapter-14-2" style="--item-tree-width:280px">
+  <svg class="native-item-tree" xmlns="http://www.w3.org/2000/svg" width="280" height="168" viewBox="0 0 280 168" role="img" aria-labelledby="structure-chapter-14-2-title structure-chapter-14-2-desc">
+    <title id="structure-chapter-14-2-title">b0</title>
+    <desc id="structure-chapter-14-2-desc">b0
 ├─ %v10 = values[0] == 1
 └─ branch %v10
    ├─ true  → b1
-   └─ false → b2</code></pre>
+   └─ false → b2</desc>
+    <path class="native-item-tree__guides" d="M 22 34 V 81 M 22 51 H 40 M 22 81 H 40 M 50 94 V 141 M 50 111 H 68 M 50 141 H 68"/>
+    <text x="16" y="26" data-tree-depth="0" data-tree-row="0" data-continuation="false"><tspan class="native-item-tree__field">b0</tspan></text>
+    <text x="44" y="56" data-tree-depth="1" data-tree-row="1" data-continuation="false">%v10 = <tspan class="native-item-tree__value">values[0] == 1</tspan></text>
+    <text x="44" y="86" data-tree-depth="1" data-tree-row="2" data-continuation="false"><tspan class="native-item-tree__field">branch %v10</tspan></text>
+    <text x="72" y="116" data-tree-depth="2" data-tree-row="3" data-continuation="false">true<tspan class="native-item-tree__wire"> → </tspan><tspan class="native-item-tree__reference">b1</tspan></text>
+    <text x="72" y="146" data-tree-depth="2" data-tree-row="4" data-continuation="false">false<tspan class="native-item-tree__wire"> → </tspan><tspan class="native-item-tree__reference">b2</tspan></text>
+  </svg>
+</div>
+<div class="item-tree-legend" data-legend-for="structure-chapter-14-2" aria-label="그림 범례">
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">→</span><span>조건에 따라 이동할 블록</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">[]</span><span>빈 목록</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">{}</span><span>비어 있는 집합 또는 맵</span></span>
+</div></figure>
 
   <p>
     block의 마지막에서 다음 이동을 정하는 명령을 Terminator라고 합니다.<br>
@@ -87,14 +104,30 @@ b0: 조건 계산과 branch                    ├─▶ b3: H 실행과 return
     조건이 참이면 <code>b1</code>, 거짓이면 <code>b2</code>로 이동하므로 실행이 두 갈래로 나뉩니다.
   </p>
 
-  <h2 id="branch-blocks"><code>b1</code>과 <code>b2</code>: 각 경로를 실행하고 합류점으로 갑니다</h2>
+  <h2 id="branch-blocks" class="trace-section-heading"><span><code>b1</code>과 <code>b2</code>: 각 경로를 실행하고 합류점으로 갑니다</span></h2>
 
-<pre><code class="language-plaintext">b1
+<figure class="structure-figure"><div class="item-tree-diagram item-tree-diagram--native" data-item-tree="structure-chapter-14-3" style="--item-tree-width:280px">
+  <svg class="native-item-tree" xmlns="http://www.w3.org/2000/svg" width="280" height="184" viewBox="0 0 280 184" role="img" aria-labelledby="structure-chapter-14-3-title structure-chapter-14-3-desc">
+    <title id="structure-chapter-14-3-title">b1</title>
+    <desc id="structure-chapter-14-3-desc">b1
 ├─ X(q0.v0) → q0.v1
 └─ jump b3
 
 b2
-└─ jump b3</code></pre>
+└─ jump b3</desc>
+    <path class="native-item-tree__guides" d="M 22 34 V 81 M 22 51 H 40 M 22 81 H 40 M 22 140 V 157 M 22 157 H 40"/>
+    <text x="16" y="26" data-tree-depth="0" data-tree-row="0" data-continuation="false"><tspan class="native-item-tree__field">b1</tspan></text>
+    <text x="44" y="56" data-tree-depth="1" data-tree-row="1" data-continuation="false">X(q0.v0)<tspan class="native-item-tree__wire"> → </tspan><tspan class="native-item-tree__reference">q0.v1</tspan></text>
+    <text x="44" y="86" data-tree-depth="1" data-tree-row="2" data-continuation="false">jump b3</text>
+    <text x="16" y="132" data-tree-depth="0" data-tree-row="3" data-continuation="false"><tspan class="native-item-tree__field">b2</tspan></text>
+    <text x="44" y="162" data-tree-depth="1" data-tree-row="4" data-continuation="false">jump b3</text>
+  </svg>
+</div>
+<div class="item-tree-legend" data-legend-for="structure-chapter-14-3" aria-label="그림 범례">
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">→</span><span>연산 결과의 큐비트 버전</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">[]</span><span>빈 목록</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">{}</span><span>비어 있는 집합 또는 맵</span></span>
+</div></figure>
 
   <p>
     <code>b1</code>은 참 본문에 있던 <code>X(q[0])</code>을 실행합니다.<br>
@@ -112,12 +145,27 @@ b2
     <code>branch</code>가 조건에 따라 목적지를 고르는 반면, <code>jump</code>는 정해진 목적지 하나로 이동합니다.
   </p>
 
-  <h2 id="b3"><code>b3</code>: 경로를 합치고 남은 코드를 실행합니다</h2>
+  <h2 id="b3" class="trace-section-heading"><span><code>b3</code>: 경로를 합치고 남은 코드를 실행합니다</span></h2>
 
-<pre><code class="language-plaintext">b3
+<figure class="structure-figure"><div class="item-tree-diagram item-tree-diagram--native" data-item-tree="structure-chapter-14-4" style="--item-tree-width:342px">
+  <svg class="native-item-tree" xmlns="http://www.w3.org/2000/svg" width="342" height="138" viewBox="0 0 342 138" role="img" aria-labelledby="structure-chapter-14-4-title structure-chapter-14-4-desc">
+    <title id="structure-chapter-14-4-title">b3</title>
+    <desc id="structure-chapter-14-4-desc">b3
 ├─ q0.v2 = phi(b1: q0.v1, b2: q0.v0)
 ├─ H(q0.v2) → q0.v3
-└─ return</code></pre>
+└─ return</desc>
+    <path class="native-item-tree__guides" d="M 22 34 V 111 M 22 51 H 40 M 22 81 H 40 M 22 111 H 40"/>
+    <text x="16" y="26" data-tree-depth="0" data-tree-row="0" data-continuation="false"><tspan class="native-item-tree__field">b3</tspan></text>
+    <text x="44" y="56" data-tree-depth="1" data-tree-row="1" data-continuation="false">q0.v2 = <tspan class="native-item-tree__value">phi(b1: q0.v1, b2: q0.v0)</tspan></text>
+    <text x="44" y="86" data-tree-depth="1" data-tree-row="2" data-continuation="false">H(q0.v2)<tspan class="native-item-tree__wire"> → </tspan><tspan class="native-item-tree__reference">q0.v3</tspan></text>
+    <text x="44" y="116" data-tree-depth="1" data-tree-row="3" data-continuation="false">return</text>
+  </svg>
+</div>
+<div class="item-tree-legend" data-legend-for="structure-chapter-14-4" aria-label="그림 범례">
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">→</span><span>연산 결과의 큐비트 버전</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">[]</span><span>빈 목록</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">{}</span><span>비어 있는 집합 또는 맵</span></span>
+</div></figure>
 
   <p>
     <code>b3</code>에는 <code>b1</code>과 <code>b2</code>가 모두 도착합니다.<br>
@@ -130,25 +178,25 @@ b2
     <code>H</code>가 합류 버전 <code>q0.v2</code>을 받아 <code>q0.v3</code>을 만든 뒤, <code>Work</code>에 남은 문장이 없으므로 MIR이 붙인 암시적 <code>return</code>이 block과 callable을 끝냅니다.
   </p>
 
-  <h2 id="execution">MIR에는 두 경로가 모두 남습니다</h2>
+  <h2 id="execution" class="trace-section-heading"><span>MIR에는 두 경로가 모두 남습니다</span></h2>
 
   <p>
     MIR 안에는 네 block이 모두 존재하지만, 한 번의 실행은 조건에 맞는 경로 하나만 지납니다.<br>
     lowering은 <code>Next</code>의 호출 결과를 미리 계산하지 않으므로 다음 두 가능성을 모두 표현합니다.
   </p>
 
-<pre><code class="language-plaintext">참 경로
+<figure class="structure-figure"><svg class="structure-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 208" role="img" aria-labelledby="flow-chapter-14-5-title flow-chapter-14-5-desc"><title id="flow-chapter-14-5-title">참 경로</title><desc id="flow-chapter-14-5-desc">참 경로
 b0 → b1 → b3 → return
 
 거짓 경로
-b0 → b2 → b3 → return</code></pre>
+b0 → b2 → b3 → return</desc><defs><marker id="flow-chapter-14-5-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0 L10 5 L0 10 Z" fill="#354bff"/></marker></defs><g font-family="Consolas, Malgun Gothic, sans-serif"><text x="12" y="24" font-size="15" fill="#111936" text-anchor="start">참 경로</text><rect x="12" y="40" width="132" height="40" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="24" y="66" font-size="14" fill="#111936" text-anchor="start" font-weight="700">b0</text><rect x="172" y="40" width="132" height="40" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="184" y="66" font-size="14" fill="#111936" text-anchor="start" font-weight="700">b1</text><path d="M144 60.0 H158.0 V60.0 H170" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-14-5-arrow)"/><rect x="332" y="40" width="132" height="40" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="344" y="66" font-size="14" fill="#111936" text-anchor="start" font-weight="700">b3</text><path d="M304 60.0 H318.0 V60.0 H330" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-14-5-arrow)"/><rect x="492" y="40" width="132" height="40" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="504" y="66" font-size="14" fill="#152581" text-anchor="start" font-weight="700">return</text><path d="M464 60.0 H478.0 V60.0 H490" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-14-5-arrow)"/><text x="12" y="134" font-size="15" fill="#111936" text-anchor="start">거짓 경로</text><rect x="12" y="150" width="132" height="40" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="24" y="176" font-size="14" fill="#111936" text-anchor="start" font-weight="700">b0</text><rect x="172" y="150" width="132" height="40" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="184" y="176" font-size="14" fill="#111936" text-anchor="start" font-weight="700">b2</text><path d="M144 170.0 H158.0 V170.0 H170" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-14-5-arrow)"/><rect x="332" y="150" width="132" height="40" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="344" y="176" font-size="14" fill="#111936" text-anchor="start" font-weight="700">b3</text><path d="M304 170.0 H318.0 V170.0 H330" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-14-5-arrow)"/><rect x="492" y="150" width="132" height="40" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="504" y="176" font-size="14" fill="#152581" text-anchor="start" font-weight="700">return</text><path d="M464 170.0 H478.0 V170.0 H490" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-14-5-arrow)"/></g></svg></figure>
 
   <p>
     앞 장에서 확인했듯 이 정확한 예제를 실행하면 참 경로를 택합니다.<br>
     거짓 경로 <code>b2</code>는 실행 결과를 예측해 제거한 경로가 아니라, lowering 단계가 보존한 제어 흐름의 다른 가능성입니다.
   </p>
 
-  <h2 id="summary">정리</h2>
+  <h2 id="summary" class="trace-section-heading"><span>정리</span></h2>
 
   <div class="callout good">
     <span class="h">한 문장으로 보는 제어 흐름</span>

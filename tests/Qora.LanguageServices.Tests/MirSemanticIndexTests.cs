@@ -8,6 +8,49 @@ namespace Qora.LanguageServices.Tests;
 public sealed class MirSemanticIndexTests
 {
     [Fact]
+    public void BoolPredicatesAndMeasuredBitsKeepDistinctSemanticTypes()
+    {
+        var result = Compile("""
+            operation Main(): bool {
+                use q = Qubit[1];
+                var measured = M(q[0]);
+                var predicate = measured == 1;
+                var literal = true;
+                return predicate == literal;
+            }
+            """);
+        var index = Assert.IsType<MirSemanticIndex>(result.MirSemanticIndex);
+        var callable = index.Mir.Program.EntryPoint;
+        var callableIndex = index.Callable(callable);
+
+        foreach (var (name, expectedType) in new[]
+                 {
+                     ("measured", QType.Bit),
+                     ("predicate", QType.Bool),
+                     ("literal", QType.Bool),
+                 })
+        {
+            var symbol = Symbol(index, name);
+            Assert.Equal(expectedType, symbol.Type);
+            var value = Assert.Single(callableIndex.ValuesFor(symbol));
+            Assert.Equal(MirType.Scalar(expectedType), value.Type);
+            Assert.Contains(symbol, callableIndex.SymbolsFor(value));
+        }
+    }
+
+    [Fact]
+    public void BoolTypeErrorsDoNotProduceASemanticIndex()
+    {
+        var result = new LanguageServiceSession().Compile(
+            "operation Main() { var flag: bit = true; }");
+
+        Assert.False(result.Compilation.Succeeded);
+        Assert.Contains(result.Compilation.Diagnostics, diagnostic => diagnostic.Error.Code == "QSEM037");
+        Assert.Null(result.Compilation.Mir);
+        Assert.Null(result.MirSemanticIndex);
+    }
+
+    [Fact]
     public void AliasedDeclarationsProduceAManyToManyValueIndex()
     {
         var result = Compile(

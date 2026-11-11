@@ -597,10 +597,11 @@ internal abstract class HirConstructionSession
     }
 
     internal HirReturnStatement Return(
-        HirExpression value,
+        HirExpression? value,
         SourceSpan? span = null)
     {
-        RequireOwned(value, nameof(value));
+        if (value is not null)
+            RequireOwned(value, nameof(value));
         return new HirReturnStatement(
             Fresh(span),
             value);

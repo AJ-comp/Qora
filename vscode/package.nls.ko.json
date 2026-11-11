@@ -1,6 +1,6 @@
 {
   "displayName": "Qora 언어",
-  "description": "Qora 양자 토이 언어를 위한 문법 하이라이팅, hover 설명, 스니펫, 실시간 파스 오류, OpenQASM 변환.",
+  "description": "Qora 양자 프로그래밍: 실시간 진단, 문법 하이라이팅, OpenQASM 3 변환과 반환값의 타입을 보존하는 로컬 실행.",
   "command.transpile.title": "Qora: OpenQASM으로 변환",
   "command.showStages.title": "Qora: 컴파일 단계 보기 (AST / HIR / MIR / OpenQASM)",
   "command.openExample.title": "Qora: 예제 열기",

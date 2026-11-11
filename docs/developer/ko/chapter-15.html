@@ -4,8 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>15. 조건문 lowering과 분기 합류 — Qora 컴파일러 개발자 매뉴얼</title>
-<link rel="stylesheet" href="developer.css">
-<script src="developer-syntax.js" defer></script>
+<link rel="stylesheet" href="developer.css?v=20260924-layout-review-r49">
+<link rel="stylesheet" href="../section-heading.css?v=20260826-section-tab-standard">
+<script src="developer-syntax.js?v=20260828-localized-format-r1" defer></script>
 </head>
 <body>
 <nav class="language-switch" aria-label="언어"><a href="../en/chapter-15.html">English</a><span aria-hidden="true">·</span><strong>한국어</strong><span aria-hidden="true">·</span><a href="../ja/chapter-15.html">日本語</a></nav>
@@ -27,7 +28,7 @@
     이번 장에서는 두 경로의 현재 큐비트 버전을 따로 유지한 뒤 다시 합치는 과정만 살펴봅니다.
   </p>
 
-  <h2 id="source">살펴볼 Qora 코드</h2>
+  <h2 id="source" class="trace-section-heading"><span>살펴볼 Qora 코드</span></h2>
 
 <pre><code class="language-qora">function Next(value: int): int
 {
@@ -60,33 +61,33 @@ operation Work()
     MIR은 경로별 현재 상태를 따로 관리한 뒤 합류점에서 비교합니다.
   </div>
 
-  <h2 id="two-states">두 경로는 같은 입력에서 따로 시작합니다</h2>
+  <h2 id="two-states" class="trace-section-heading"><span>두 경로는 같은 입력에서 따로 시작합니다</span></h2>
 
   <p>
     <code>if</code> 직전에는 현재 <code>q</code>가 <code>q0.v0</code>을 가리킵니다.<br>
     lowerer는 이 기록을 참 경로와 거짓 경로에 각각 복사한 뒤, 두 경로를 서로 독립적으로 처리합니다.
   </p>
 
-<pre><code class="language-plaintext">분기 직전 기록: q → q0.v0
+<figure class="structure-figure"><svg class="structure-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 196" role="img" aria-labelledby="flow-chapter-15-1-title flow-chapter-15-1-desc"><title id="flow-chapter-15-1-title">분기 직전 기록: q → q0.v0</title><desc id="flow-chapter-15-1-desc">분기 직전 기록: q → q0.v0
         │
         ├─ 참 경로 기록: q → q0.v0 ── X ──▶ q0.v1
-        └─ 거짓 경로 기록: q → q0.v0 ─────────▶ q0.v0</code></pre>
+        └─ 거짓 경로 기록: q → q0.v0 ─────────▶ q0.v0</desc><defs><marker id="flow-chapter-15-1-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0 L10 5 L0 10 Z" fill="#354bff"/></marker></defs><g font-family="Consolas, Malgun Gothic, sans-serif"><text x="12" y="27" font-size="16" fill="#111936" text-anchor="start">분기 직전: q → q0.v0</text><text x="12" y="76" font-size="14" fill="#111936" text-anchor="start">참 경로</text><rect x="160" y="50" width="160" height="40" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="172" y="76" font-size="14" fill="#111936" text-anchor="start" font-weight="700">q0.v0</text><rect x="468" y="50" width="160" height="40" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="480" y="76" font-size="14" fill="#152581" text-anchor="start" font-weight="700">q0.v1</text><path d="M320 70.0 H394.0 V70.0 H466" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-15-1-arrow)"/><text x="394.0" y="61.0" font-size="12" fill="#111936" text-anchor="middle">X</text><text x="12" y="164" font-size="14" fill="#111936" text-anchor="start">거짓 경로</text><rect x="160" y="138" width="160" height="40" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="172" y="164" font-size="14" fill="#111936" text-anchor="start" font-weight="700">q0.v0</text><rect x="468" y="138" width="160" height="40" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="480" y="164" font-size="14" fill="#111936" text-anchor="start" font-weight="700">q0.v0</text><path d="M320 158.0 H394.0 V158.0 H466" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-15-1-arrow)"/></g></svg></figure>
 
   <p>
     따라서 참 경로에서 <code>X</code>를 처리해도 참 경로의 기록만 <code>q0.v1</code>로 바뀝니다.<br>
     거짓 경로는 별도 기록을 사용하므로 계속 <code>q0.v0</code>을 가리킵니다.
   </p>
 
-  <h2 id="qubit-phi">합류점에서 두 기록을 한 번 비교합니다</h2>
+  <h2 id="qubit-phi" class="trace-section-heading"><span>합류점에서 두 기록을 한 번 비교합니다</span></h2>
 
   <p>
     합류점에서는 두 경로가 기록한 현재 버전을 비교합니다.<br>
     두 버전이 같으면 그대로 사용하고, 이 예제처럼 <code>q0.v1</code>과 <code>q0.v0</code>으로 다르면 Phi 버전 <code>q0.v2</code>를 만듭니다.
   </p>
 
-<pre><code class="language-plaintext">참 경로의 현재 q: q0.v1 ──┐
+<figure class="structure-figure"><svg class="structure-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 198" role="img" aria-labelledby="flow-chapter-15-2-title flow-chapter-15-2-desc"><title id="flow-chapter-15-2-title">참 경로의 현재 q: q0.v1 ──┐</title><desc id="flow-chapter-15-2-desc">참 경로의 현재 q: q0.v1 ──┐
                            ├─ 서로 다름 → 합류 뒤 현재 q: q0.v2
-거짓 경로의 현재 q: q0.v0 ─┘</code></pre>
+거짓 경로의 현재 q: q0.v0 ─┘</desc><defs><marker id="flow-chapter-15-2-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0 L10 5 L0 10 Z" fill="#354bff"/></marker></defs><g font-family="Consolas, Malgun Gothic, sans-serif"><rect x="12" y="8" width="270" height="62" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="24" y="34" font-size="14" fill="#152581" text-anchor="start" font-weight="700">참 경로 b1</text><text x="24" y="56" font-size="14" fill="#152581" text-anchor="start">X: q0.v0 → q0.v1</text><rect x="358" y="8" width="270" height="62" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="370" y="34" font-size="14" fill="#111936" text-anchor="start" font-weight="700">거짓 경로 b2</text><text x="370" y="56" font-size="14" fill="#111936" text-anchor="start">q0.v0</text><rect x="190" y="140" width="260" height="40" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="202" y="166" font-size="14" fill="#152581" text-anchor="start" font-weight="700">Phi → q0.v2</text><path d="M147.0 70 V105.0 H320.0 V138" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-15-2-arrow)"/><path d="M493.0 70 V105.0 H320.0 V138" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-15-2-arrow)"/></g></svg></figure>
 
   <p>
     비교가 끝나면 합류 뒤의 현재 <code>q</code> 기록은 <code>q0.v2</code> 하나가 됩니다.<br>

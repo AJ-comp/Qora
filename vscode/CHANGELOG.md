@@ -2,6 +2,33 @@
 
 All notable changes to the Qora Language extension.
 
+## 0.33.0 — 2026-11-11
+
+- Bundles the **Qora v0.40.0** compiler.
+- Supports distinct `bool` and `bit` types, scalar-returning operations, comparison values, and grouped
+  arithmetic. Float-to-int implicit conversion is consistently rejected. Source highlighting and
+  examples follow the new type and return rules.
+- Adds hover documentation for `bool` and excludes Boolean/array declarations from the OpenQASM
+  gate summary; regression tests cover both extension helpers.
+- Includes `bool` in function-return and classical-array snippets, documents Boolean-array defaults,
+  and updates `var`/`move` hover guidance for Boolean arrays.
+- **Breaking result-display change:** Run Program groups only the entry operation's explicit return
+  values. Void entries display success and shot count without a histogram; internal measurements
+  are not exported and no final measurements are appended. Boolean results remain `true`/`false`,
+  and large integers retain their exact decimal values.
+- Requires current `entryResult` compiler metadata and rejects incompatible custom compiler bundles
+  rather than silently substituting measurement counts. Shot settings accept positive integers only.
+- Refreshes the private Python runner setup for Python 3.11–3.13 (Python 3.12 when provisioned), pins
+  Braket SDK 1.127.8 / simulator 1.43.1, and updates packaging dependencies and the lockfile.
+- Corrects the bundled `s`, `sdg`, `t`, `tdg`, and `sx` definitions to use `pow(0.5)`. Regression tests
+  execute both shipped standard-gate libraries and compiled Qora S/T programs through the runner.
+- Updates English, Korean, Japanese, and Vietnamese descriptions and execution-result guidance.
+- **Known backend limits:** the ordinary Braket install does not include pending upstream fixes for
+  all validated paths, including Boolean arrays. The 54-case execution suite passes with the four
+  local Braket patches combined, not with the ordinary installation. Qubit-array parameter
+  measurement and some controlled-gate layouts remain unresolved even with those patches. See the
+  [language release notes](https://github.com/AJ-comp/Qora/blob/main/CHANGELOG.md#0400--2026-11-11).
+
 ## 0.32.0
 
 - Bundles the **Qora v0.39.0** compiler.

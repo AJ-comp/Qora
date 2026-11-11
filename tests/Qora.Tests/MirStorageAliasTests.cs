@@ -237,14 +237,12 @@ public sealed class MirStorageAliasTests
         IReadOnlyList<MirBlock>? blocks = null)
     {
         var rebuiltBlocks = blocks ?? source.Blocks;
-        var rebuiltEntryBlock = rebuiltBlocks.Single(
-            block => block.Id == source.EntryBlock.Id);
         return new MirCallable(
             source.Id,
             source.Name,
+            source.Kind,
             source.ReturnType,
             source.Parameters,
-            rebuiltEntryBlock,
             rebuiltBlocks,
             source.Origin);
     }

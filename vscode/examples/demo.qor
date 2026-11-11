@@ -5,7 +5,7 @@ operation Prepare(q: Qubit[]) {
     Ry(0.5, q[0]);
 }
 
-operation Main() {
+operation Main(): bit {
     use q = Qubit[2];
     const n: int = 3;
     Prepare(q);
@@ -16,4 +16,5 @@ operation Main() {
     if (r == 1) {
         X(q[1]);
     }
+    return r;
 }

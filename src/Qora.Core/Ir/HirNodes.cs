@@ -486,17 +486,18 @@ public sealed class HirReturnStatement : HirStatement
 {
     internal HirReturnStatement(
         HirNodeStamp stamp,
-        HirExpression value)
+        HirExpression? value)
         : base(stamp)
     {
-        Value = value ?? throw new ArgumentNullException(nameof(value));
+        Value = value;
     }
 
-    public HirExpression Value { get; }
+    public HirExpression? Value { get; }
 
     internal override IEnumerable<HirNode> Children()
     {
-        yield return Value;
+        if (Value is not null)
+            yield return Value;
     }
 }
 

@@ -222,8 +222,8 @@ public sealed class MirPathConditionAnalysisTests
         var callableId = new MirCallableId(0);
         var a = new MirValueId(0);
         var b = new MirValueId(1);
-        var aValue = new MirValue(a, MirType.Scalar(QType.Bit), source);
-        var bValue = new MirValue(b, MirType.Scalar(QType.Bit), source);
+        var aValue = new MirValue(a, MirType.Scalar(QType.Bool), source);
+        var bValue = new MirValue(b, MirType.Scalar(QType.Bool), source);
         var qubit = MirQubitParameter.Single(
             new MirQubitId(0),
             "q",
@@ -295,6 +295,7 @@ public sealed class MirPathConditionAnalysisTests
         var tailMerge = new MirCallable(
             callableId,
             name: "TailMerge",
+            kind: MirCallableKind.Operation,
             returnType: null,
             parameters: new IMirParameter[]
             {
@@ -302,7 +303,6 @@ public sealed class MirPathConditionAnalysisTests
                 MirClassicalParameter.Scalar("b", bValue),
                 qubit,
             },
-            entryBlock: entryBlock,
             blocks: tailMergeBlocks,
             source);
         var mainEntryBlock = new MirBlock(
@@ -314,9 +314,9 @@ public sealed class MirPathConditionAnalysisTests
         var main = new MirCallable(
             entryPointId,
             name: "Main",
+            kind: MirCallableKind.Operation,
             returnType: null,
             parameters: Array.Empty<IMirParameter>(),
-            entryBlock: mainEntryBlock,
             blocks: new[] { mainEntryBlock },
             source);
 

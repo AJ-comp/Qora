@@ -21,15 +21,23 @@ public sealed class CompilationArchitectureTests
         Assert.NotNull(compilation.Targets.OpenQasm);
     }
 
-    [Fact]
-    public void EmptySourceIsARejectedCompilationNotASuccessWithoutArtifacts()
+    [Theory]
+    [InlineData("")]
+    [InlineData(" \t\r\n")]
+    [InlineData("// comment without a final newline")]
+    [InlineData("// first comment\r\n  // second comment\r\n")]
+    public void SourceWithoutTopLevelItemsIsRejectedAtSyntax(string source)
     {
-        var compilation = QoraCompiler.Compile(string.Empty);
+        // Qora requires at least one top-level item. Janglim 0.6.0 checks EOF against that grammar
+        // instead of treating an empty token stream as a successful parse without an AST.
+        var compilation = QoraCompiler.Compile(source);
 
         Assert.False(compilation.Succeeded);
         var diagnostic = Assert.Single(compilation.Diagnostics);
-        Assert.Equal(CompilationStage.HirPreflight, diagnostic.Stage);
-        Assert.Equal("QSEM040", diagnostic.Error.Code);
+        Assert.Equal(CompilationStage.Syntax, diagnostic.Stage);
+        Assert.Equal("CE0001", diagnostic.Error.Code);
+        Assert.False(compilation.Sources.EntrySyntax.Succeeded);
+        Assert.Null(compilation.Sources.EntrySyntax.Ast);
         Assert.Null(compilation.Mir);
         Assert.Empty(compilation.Targets.Artifacts);
     }

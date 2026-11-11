@@ -226,7 +226,7 @@ public sealed class MirBoundsAnalysisTests
         var secondParameterValue = new MirValue(secondParameterValueId, arrayType, origin);
         var conditionValue = new MirValue(
             conditionValueId,
-            MirType.Scalar(QType.Bit),
+            MirType.Scalar(QType.Bool),
             origin);
         var firstPhiValue = new MirValue(firstPhiValueId, arrayType, origin);
         var secondPhiValue = new MirValue(secondPhiValueId, arrayType, origin);
@@ -250,6 +250,7 @@ public sealed class MirBoundsAnalysisTests
         var callable = new MirCallable(
             callableId,
             "Worker",
+            kind: MirCallableKind.Operation,
             returnType: null,
             parameters: new IMirParameter[]
             {
@@ -265,7 +266,6 @@ public sealed class MirBoundsAnalysisTests
                     minimumLength: 1),
                 MirClassicalParameter.Scalar("condition", conditionValue),
             },
-            entryBlock: workerEntryBlock,
             blocks: new[]
             {
                 workerEntryBlock,
@@ -325,9 +325,9 @@ public sealed class MirBoundsAnalysisTests
         var entryCallable = new MirCallable(
             entryCallableId,
             "Main",
+            kind: MirCallableKind.Operation,
             returnType: null,
             parameters: Array.Empty<IMirParameter>(),
-            entryBlock: mainEntryBlock,
             blocks: new[] { mainEntryBlock },
             origin);
         var program = context.Program(entryCallable, new[] { callable, entryCallable });
@@ -579,7 +579,6 @@ public sealed class MirBoundsAnalysisTests
         MirInstruction replacement)
     {
         var blocks = new List<MirBlock>(callable.Blocks.Count);
-        MirBlock? rewrittenEntryBlock = null;
         foreach (var block in callable.Blocks)
         {
             var instructions = block.Instructions
@@ -589,19 +588,14 @@ public sealed class MirBoundsAnalysisTests
                 .ToArray();
             var rewrittenBlock = block with { Instructions = instructions };
             blocks.Add(rewrittenBlock);
-
-            if (ReferenceEquals(block, callable.EntryBlock))
-                rewrittenEntryBlock = rewrittenBlock;
         }
 
         var rewrittenCallable = new MirCallable(
             callable.Id,
             callable.Name,
+            callable.Kind,
             callable.ReturnType,
             callable.Parameters,
-            rewrittenEntryBlock
-                ?? throw new InvalidOperationException(
-                    "MIR rewrite dropped the callable entry block"),
             blocks,
             callable.Origin);
         var rewrittenCallables = program.Callables

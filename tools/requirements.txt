@@ -1,0 +1,5 @@
+# Install from the repository root: python -m pip install -r tools/requirements.txt
+-r ../vscode/runner/requirements.txt
+qiskit==2.6.2
+qiskit-qasm3-import==0.6.0
+qiskit-aer==0.18.2

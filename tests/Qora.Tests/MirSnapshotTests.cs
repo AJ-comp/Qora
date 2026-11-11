@@ -393,9 +393,9 @@ public sealed class MirSnapshotTests
         return new MirCallable(
             id,
             name,
+            kind: MirCallableKind.Operation,
             returnType: null,
             Array.Empty<IMirParameter>(),
-            block,
             new[] { block },
             source);
     }

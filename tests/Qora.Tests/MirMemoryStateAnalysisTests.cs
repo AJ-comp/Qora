@@ -365,15 +365,12 @@ public sealed class MirMemoryStateAnalysisTests
                 ? replacement
                 : block)
             .ToArray();
-        var rewrittenEntryBlock = Assert.Single(
-            rewrittenBlocks,
-            block => block.Id == callable.EntryBlock.Id);
         var rewrittenCallable = new MirCallable(
             callable.Id,
             callable.Name,
+            callable.Kind,
             callable.ReturnType,
             callable.Parameters,
-            rewrittenEntryBlock,
             rewrittenBlocks,
             callable.Origin);
         var rewrittenCallables = program.Callables

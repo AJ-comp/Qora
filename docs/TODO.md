@@ -23,19 +23,21 @@ Earlier: operations + C#-style params + calls, `use`/`Qubit`, gates (H/X/Y/Z/S/T
 Rx/Ry/Rz), measurement (`var r: bit = M(q)`), classical vars (const/var/int/bit) + reassignment + arithmetic,
 `for`-in-range, `while`, `repeat`-`until`. Emits OpenQASM 3.
 
-Also shipped: **size-independent qubit-register parameters and classical arrays**. Helpers receive
+Also implemented: **size-independent qubit-register parameters and classical arrays**. Helpers receive
 `Qubit[]` and can iterate with `.Count`; the compiler specializes each call to its concrete register
-size. Classical `int[]` / `float[]` / `bit[]` / `angle[]` values support literals, zero-initialized
+size. Classical `bool[]` / `int[]` / `float[]` / `bit[]` / `angle[]` values support literals, zero-initialized
 `new T[N]`, indexed reads and writes, `.Count`, and mutable `T[]` helper parameters. Array storage is
 declared at `Main` top level and lowers to OpenQASM general arrays. (clean)
 
-## ⏸ Deferred to the ENGINE (not to be hacked around in Qora)
+## Parser-engine integration follow-ups
 
-- **Block comments `/* */`.** Line comments `//` shipped in v0.9, but block comments still depend on
-  the Janglim lexer's true longest-match support. Fix that capability in the engine; do **not** add a
-  Qora-side pre-lexing string pass, which would blur the engine/language boundary and make source spans
-  fragile.
-- **Parser crash on very large inputs.** Found incidentally during a 2026-07-10 adversarial review's
+- **Block comments `/* */` — Qora implementation pending.** Line comments `//` shipped in v0.9.
+  Janglim 0.5.0 added true longest-match support, including block-comment regression tests; the engine
+  prerequisite is therefore satisfied by Qora's current Janglim 0.6.0 dependency. Qora still needs its
+  own grammar terminal and language-level tests. Do **not** add a pre-lexing string pass, which would
+  blur the engine/language boundary and make source spans fragile.
+- **Parser crash on very large inputs — engine follow-up, not confirmed fixed.** Found incidentally
+  during a 2026-07-10 adversarial review's
   performance probe: a generated source with tens of thousands of statements makes the Janglim parse-tree
   path throw a raw `InvalidOperationException` ("Sequence contains no elements" — an internal
   `First()`/`Last()` on an empty sequence at scale) at `QoraParser.cs`'s `result.ToParseTree`. Report to
@@ -61,15 +63,31 @@ declared at `Main` top level and lowers to OpenQASM general arrays. (clean)
   coexist with effectful quantum `operation` declarations. The validator enforces pure function bodies,
   classical-only signatures, and the operation/function call boundary. The entry callable becomes the
   OpenQASM top-level body, while every non-entry function or operation lowers to a `def`.
-- **Return values + typed returns** — ✅ SHIPPED in v0.30: functions declare one scalar
-  `int` / `bit` / `float` / `angle` return type and use `return expr;`, while operations remain void.
+- **Return values + typed returns** — ✅ Function returns shipped in v0.30; operation returns and
+  the separate `bool` type shipped in v0.40.0. Both kinds of callable now support
+  one scalar `bool` / `int` / `bit` / `float` / `angle` return type with `return expr;`.
+  An operation's omitted return type remains void. Only the entry operation's returned value
+  is an execution result, with no implicit measurement or export of internal measurement records.
   Return paths and result types are validated before MIR and target lowering.
 - **Calls used as expressions** — ✅ SHIPPED in v0.30 and unified in v0.33: `HirCallExpression`
   preserves nested function calls in values, conditions, arguments, and returns. Resolver binds each
   call to its typed `CalleeId`; validation,
   monomorphization, MIR lowering, and OpenQASM emission consume that identity.
-- **`bool` classical type** — `float` and `angle` have shipped, while a Boolean type distinct from the
-  measurement-oriented `bit` remains. It maps directly to OpenQASM 3 `bool`. (clean)
+- **`bool` classical type** — ✅ SHIPPED in v0.40.0: logical values and comparison results are `bool`,
+  separate from measurement-oriented `bit`. Conditions accept only `bool`, implicit conversion to or
+  from numeric types is rejected, and `bool[]` maps to OpenQASM classical arrays. Execution results
+  preserve `true`/`false` rather than converting them to measurement bits.
+  **Upstream release pending:** the unpatched Braket local simulator crashes on Boolean-array reads and array
+  arguments (`BoolType.size` is missing), also reproducible without Qora using `array[bool, 2]`.
+  Reported in [issue #429](https://github.com/amazon-braket/amazon-braket-default-simulator-python/issues/429),
+  fixed by [PR #430](https://github.com/amazon-braket/amazon-braket-default-simulator-python/pull/430).
+  This fix plus PRs #425/#426/#428 passes the current 54-case Qora execution suite locally; the fixes
+  still await upstream merge and release and are not included in an ordinary package install.
+  The affected regressions remain enabled.
+- **Additional Braket execution bugs — unresolved:** measuring a `Qubit[]` helper-parameter element
+  can fail, and certain noncontiguous controlled-gate layouts can return incorrect results. Both
+  reproduce in standalone OpenQASM and remain outside the passing 54-case suite, including with
+  the four pending patches combined. Do not treat the passing suite as support for these cases.
 - **`within { } apply { }` conjugation (auto-uncompute)** ⚛️ — run U, then V, then automatically
   run U† — the U·V·U† scratch/ancilla pattern; one of the most important quantum lessons. OpenQASM
   has no conjugation construct, so Qora must synthesize `inv(U)` itself — feasible only once the
@@ -135,12 +153,12 @@ that exact MIR program; HIR keeps no parallel qubit history or cleanup verdict. 
   cross-check: Silq PLDI'20, Q#, Unqomp PLDI'21/Reqomp, Twist POPL'22, Quipper, Bennett'73, Gidney'18 —
   20/20 key claims source-verified). For today's quantum feature set, a future MIR scheduler can derive
   a cleanup candidate from a local `MirQubitFromUse` birth plus the absence of measurement or escape
-  effects. Operations remain void, functions are classical-only, and there are no general qubit aliases
+  effects. Operations can return classical scalars but not qubits, functions are classical-only, and there are no general qubit aliases
   or closures, so those conditions cover every current escape channel. Future escape channels extend
   this MIR candidate query in the SAME change:
   - **Future qubit-returning values or other qubit escape channels** → add "not returned / does not
-    escape" (Silq: return consumes; Bennett: outputs are copied out of scratch). Current functions are
-    classical-only, so the shipped scalar return feature does not create this escape channel.
+    escape" (Silq: return consumes; Bennett: outputs are copied out of scratch). Current function and
+    operation returns are classical scalars, so they do not create this qubit escape channel.
   - **Future general qubit aliasing beyond the current checked call contracts** → add "no live alias";
     long-lived borrowed aliases split ancillas into clean (end |0⟩, value-verifiable) vs **dirty**
     (end = original unknown state — verifiable only by structural compute/uncompute pairing à la
@@ -245,5 +263,5 @@ earlier program. Local allocation lowering
 depends on that guarantee. Incremental invalidation and IDE query indexes should extend the existing
 document identities, the exact HIR artifact, direct MIR origins, and source maps. IDE-only symbol-to-MIR
 lookups belong to the opt-in `Qora.LanguageServices.MirSemanticIndex`; they must not become a second
-mutable ledger of semantic facts inside Core. `bool`, automatic controlled-operation generation, and the target-erased
+mutable ledger of semantic facts inside Core. Automatic controlled-operation generation and the target-erased
 `Result` / `Pauli` abstractions remain later language work.

@@ -1,4 +1,4 @@
-# Qora v0.39.0 — complete language reference for AI assistants
+# Qora v0.40.0 — complete language reference for AI assistants
 
 Qora is a quantum programming language (Q#/C#-flavored syntax) that compiles to OpenQASM 3.
 File extension: `.qor`. This file is the full, authoritative surface spec: everything below is
@@ -117,7 +117,7 @@ operation Main()                // global namespace; the entry point; takes NO p
     use q = Qubit[2];           // qubit allocation: ONLY in the entry op, top level only
     MyLib.Bell(q);              // qualified call
     var n: int = MyLib.two();   // qualified function call is also valid in an expression
-    var r: bit = M(q[0]);       // measurement (the only way to get a bit)
+    var r: bit = M(q[0]);       // measurement result: 0 or 1
     if (r == 1) { X(q[1]); }
 }
 ```
@@ -129,17 +129,27 @@ operation Main()                // global namespace; the entry point; takes NO p
 - `q: Qubit` is a single-qubit parameter. `q: Qubit[]` is a register parameter whose length is supplied
   by the caller; use `q.Count` inside the operation. The compiler specializes the operation for each
   concrete register size before emitting OpenQASM.
-- `int`, `float`, `bit`, `angle` are classical scalar types. Measurement produces a `bit`, which holds
-  a 0/1 result.
+- `bool`, `int`, `float`, `bit`, `angle` are classical scalar types. Measurement produces a `bit`,
+  which holds a 0/1 result. `true`/`false` and comparisons produce `bool`. There is no implicit conversion
+  between `bool` and any other classical scalar type, in either direction. This rule applies to
+  initializers, assignments, array elements, callable arguments, and returns.
 - `use name = Qubit[N];` — allocate a register. The name becomes visible at this declaration point,
   and the declaration is allowed only at the entry operation's top level, not inside loops/branches.
-- Classical arrays use `int[]`, `float[]`, `bit[]`, or `angle[]`. Declare them anywhere a scalar
+- Classical arrays use `bool[]`, `int[]`, `float[]`, `bit[]`, or `angle[]`. Declare them anywhere a scalar
   declaration goes — `Main`, helper operations, loops, branches — either with a non-empty literal
   (`var xs: int[] = [1, 2, 3];`) or a positive literal-sized, zero-initialized allocation
   (`var xs: int[] = new int[3];`); the compiler handles OpenQASM's global-scope rule automatically. Helper
   operations may also receive matching `T[]` parameters. Read/write elements with `xs[i]`, and read
   the length with `xs.Count`. A pure function call is a valid literal element, for example
   `var xs: int[] = [first(), second()];`.
+  Backend limitation: the unpatched Braket local simulator used for validation crashes when reading `bool[]`
+  elements or passing Boolean arrays (`BoolType.size` is missing). This also reproduces with standalone
+  OpenQASM `array[bool, 2]`. Issue #429 and PR #430 in amazon-braket-default-simulator-python track the fix.
+  Combining PR #430 with #425/#426/#428 passes the current 54-case Qora execution suite locally. Upstream merge and
+  release remain pending; do not claim an ordinary package install includes these fixes or change Boolean semantics.
+  Additional Braket failures remain outside that passing suite even with those patches: measuring a
+  Qubit[] helper-parameter element can fail, and some noncontiguous controlled-gate layouts produce
+  wrong results. Both reproduce in standalone OpenQASM; passing the suite does not establish universal simulator support.
 - An index is a full expression whose result must be one scalar `int`: `xs[i + 1]`, `xs[idx()]`, and
   `q[choose(k)]` all parse and use ordinary function name/signature/type resolution. OpenQASM emission
   still requires an in-bounds proof. A function result is not currently evaluated at compile time, so
@@ -171,7 +181,7 @@ operation Main()                // global namespace; the entry point; takes NO p
 
   For example, declare `operation Increment(var values: int[])` and call `Increment(var values)`.
 - The supported combinations depend on storage shape. `var` and `move var` require a whole classical
-  array (`int[]`, `float[]`, `angle[]`, or `bit[]`). Read-only `move` also accepts `Qubit[]` and a whole
+  array (`bool[]`, `int[]`, `float[]`, `angle[]`, or `bit[]`). Read-only `move` also accepts `Qubit[]` and a whole
   single `Qubit` binding. Classical scalars are Copy values and reject `move`, while qubits do not use
   `var`. Every `function` parameter uses only the default borrowed/read-only contract. The OpenQASM target
   reports QASM002 only for borrowed mutable `var bit[]`, whose writes must remain caller-visible but cannot
@@ -194,30 +204,46 @@ operation Main()                // global namespace; the entry point; takes NO p
   (`const r = M(q[0]);`), but can never be assigned again (QSEM024).
 - When the type is omitted, the declaration keeps the initializer's semantic type through emission.
   Literals, referenced variables, operators, array elements, and function calls use the same rule:
-  `var truth = true` is `bit`, `var copy = anAngle` is `angle`, and `var x = f()` uses `f`'s return type.
+  `var truth = true` and `var same = 1 == 1` are `bool`, `var copy = anAngle` is `angle`,
+  and `var x = f()` uses `f`'s return type. Comparisons can be stored, assigned, passed, and returned;
+  logical `!`, `&&`, and `||` remain condition-only syntax.
 - `var r: bit = M(q[i]);` — measure qubit i into a fresh bit. `r = M(q[i]);` re-measures.
   A whole declaration/assignment RHS may instead use `M(a)` when `a` is one `Qubit`. An indexed
-  measurement is also legal inside an `if`/`while`/`repeat` condition as `M(q[i])`; the common lowering
+  measurement is also legal inside an `if`/`while`/`repeat` condition as `M(q[i]) == 1`; the common lowering
   pass hoists it to a fresh bit at the condition's evaluation point. Measurement is not a value for
   ordinary arithmetic or call arguments (measure into a bit first).
-- An `operation` is void (no return value); its call is a STATEMENT only. To return a value, use a
-  `function` (see below). Qubit allocation sizes and `new T[N]` array lengths must be positive literal integers.
+- `operation Name(params): T { ... return value; }` may return one scalar `bool`/`int`/`bit`/`float`/`angle`.
+  Omitting `: T` keeps it void; a void operation can exit with `return;` but cannot return a value.
+  Typed operations must return a compatible value on every path. They can be used in expressions inside
+  operations, and retain their quantum/mutation effects; functions cannot call them.
+  `return M(q);` returns that measurement's bit. Measurement does not otherwise become an execution output.
+  Only the entry operation's returned value is exposed per shot. Helper returns go to their caller;
+  a void entry exposes no measurement results. The runner never adds final measurements.
+  Array/tuple return types are not supported. Angle execution results are radians.
+  Boolean execution results remain JSON `true`/`false`; bit results remain integer `0`/`1`.
+  Qubit allocation sizes and `new T[N]` array lengths must be positive literal integers.
+- CLI JSON includes `entryResult: { type, outputName }` from the same compilation as `qasm`.
+  Runners read only that declared OpenQASM output, never guess from names or expose all measurements.
+  For void entries, OpenQASM carries an internal completion marker set to 1 so Braket does not fall back
+  to exporting measurements. It is execution protocol data, NOT a Qora return value: the Qora runner
+  validates it and shows only successful completion. Raw OpenQASM consumers must honor this metadata
+  to reproduce Qora's user-facing result contract. Missing shots or output values are errors, not zeros.
 
 ## Functions (classical, value-returning)
 
 - `function Name(params): T { … return e; }` — a classical, pure subroutine (Q#'s `function`). Parameters
   are read-only classical scalars or arrays and accept only the default borrowed/read-only spelling;
   `var`, `move`, and `move var` are not allowed. The return type `T` is a classical scalar
-  (`int`/`bit`/`float`/`angle`); neither may be a qubit. A `bit[]` parameter is specialized to the concrete
+  (`bool`/`int`/`bit`/`float`/`angle`); neither may be a qubit. A `bit[]` parameter is specialized to the concrete
   argument width at every expression call site, so width-2 and width-3 calls receive separate generated
   definitions while repeated calls of the same width reuse one. The body is
   PURE: only classical statements (`var`/`const`/`if`/`for`/`while`), calls to OTHER functions, and `return`.
   A function may NOT apply a gate, `use` qubits, measure, or call an operation (QSEM033).
-- Because a function is pure, its CALL is a value — usable anywhere in an expression: an initializer
+- A typed callable's CALL produces a value usable in expressions: an initializer
   (`var k: int = two();`), an assignment RHS, a gate argument (`Rx(angleOf(k), q[0])`), a condition
   (`if (c == g()) { … }`), an array literal element (`var xs: int[] = [g(), 2];`), a `for` range bound
-  (`for i in 0..end() { … }`), or another function's body (`return inner(y) + 1;`). An `operation` call
-  has no value (QSEM005); only a function's does.
+  (`for i in 0..end() { … }`). A function's body may call other functions (`return inner(y) + 1;`),
+  but not operations, even when they return a value. A void operation call has no value (QSEM005).
 - Function calls follow the same namespace rules as operation calls. Inside `namespace L`, `two()` first
   searches `L`; `open Other;` makes `Other.two()` available as `two()` when it is the only match; and
   `L.two()` may be written explicitly in any expression position.
@@ -243,7 +269,10 @@ operation Main()                // global namespace; the entry point; takes NO p
 ## Statements
 
 - Gate/operation call: `Name(args);` — qubits as `q` (whole register) or `q[i]`.
-- `if (cond) { } else { }` (else-if allowed). Conditions: == != < <= > >= && || ! over bits/ints.
+- `if (cond) { } else { }` (else-if allowed), `while`, and `until` require a `bool` condition.
+  Compare bits or numbers explicitly, such as `r == 1` or `count != 0`; `if (r)` and `if (count)` are errors.
+  Equality accepts two booleans or compatible numeric operands; ordering comparisons require numbers.
+  Logical `&&`, `||`, and `!` accept only booleans and are available only in conditions.
 - `for i in start..stop { }` — inclusive range; bounds are expressions, so
   `for i in 0..values.Count-1 { }` and `for i in 0..end() { }` are valid when the bound is one `int`.
 - `while (cond) { }` · `repeat { } until (cond);`
@@ -321,7 +350,7 @@ QSEM030 OpenQASM target cannot emit an index whose in-bounds proof remains unres
 QSEM031 expression or nested-block structure exceeds the compiler depth limit
 QSEM033 impure function body (a gate, `use`, measurement, or operation call inside a function)
 QSEM034 a qubit in a function signature (function parameters/return are classical)
-QSEM035 `return` outside a function (an operation is void), or a function has a path that returns nothing
+QSEM035 a void callable returns a value, a typed callable returns no value, or a typed callable has a path with no return
 QSEM036 a whole `bit[]` register used as a number or ordered (use `AsInt(f)`)
 QSEM037 incompatible function return/result type, or a whole classical array used as one scalar
 QSEM038 invalid ownership/access contract (unsupported shape, marker mismatch, or read-only mutation)
@@ -347,12 +376,12 @@ qora --json [file] [--stages] [--base-dir <dir>] [--source-path <path>]
   original/FQN source names unmangled. These views are read from the same completed immutable
   `Compilation`; the CLI does not rerun compiler passes to reconstruct them. A stage not reached
   because of an earlier error is returned as an empty string.
-- Emitted QASM starts with `// generated by Qora v0.39.0`.
+- Emitted QASM starts with `// generated by Qora v0.40.0`.
 
 ## Executing programs
 
 - Full language (def/int/for/while): `python tools/run_braket.py file.qor --shots 1000` — runs on
-  Amazon Braket's LOCAL simulator (pip install amazon-braket-sdk, Python 3.10-3.13). Keep
+  Amazon Braket's LOCAL simulator (python -m pip install -r vscode/runner/requirements.txt, Python 3.11-3.13). Keep
   tools/stdgates.inc next to the working directory (the script handles this).
 - Qiskit (`qiskit.qasm3.loads`): accepts only the FLAT subset — no `def`, no `int` declarations,
   no variable qubit indices. Programs with operations/loops/variables will not load there today.

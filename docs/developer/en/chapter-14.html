@@ -4,8 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>14. Basic Blocks and Terminators — Qora Compiler Developer Manual</title>
-<link rel="stylesheet" href="developer.css">
-<script src="developer-syntax.js" defer></script>
+<link rel="stylesheet" href="developer.css?v=20261004-svg-trees-r56">
+<link rel="stylesheet" href="../section-heading.css?v=20260826-section-tab-standard">
+<script src="developer-syntax.js?v=20260828-localized-format-r1" defer></script>
 </head>
 <body>
 <nav class="language-switch" aria-label="Language"><strong>English</strong><span aria-hidden="true">·</span><a href="../ko/chapter-14.html">한국어</a><span aria-hidden="true">·</span><a href="../ja/chapter-14.html">日本語</a></nav>
@@ -28,7 +29,7 @@
     The <code>if</code> in the running example becomes four blocks: <code>b0</code>, <code>b1</code>, <code>b2</code>, and <code>b3</code>.
   </p>
 
-  <h2 id="source">Qora code under examination</h2>
+  <h2 id="source" class="trace-section-heading"><span>Qora code under examination</span></h2>
 
 <pre><code class="language-qora">function Next(value: int): int
 {
@@ -56,11 +57,11 @@ operation Work()
     MIR separates these three regions to make the control flow explicit.
   </p>
 
-  <h2 id="overview">Complete connection of the four blocks</h2>
+  <h2 id="overview" class="trace-section-heading"><span>Complete connection of the four blocks</span></h2>
 
-<pre><code class="language-plaintext">                         ┌─ true ─▶ b1: execute X ─┐
+<figure class="structure-figure"><svg class="structure-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 350" role="img" aria-labelledby="flow-chapter-14-1-title flow-chapter-14-1-desc"><title id="flow-chapter-14-1-title">                         ┌─ true ─▶ b1: execute X ─┐</title><desc id="flow-chapter-14-1-desc">                         ┌─ true ─▶ b1: execute X ─┐
 b0: evaluate and branch                            ├─▶ b3: execute H and return
-                         └─ false ▶ b2: empty path ─┘</code></pre>
+                         └─ false ▶ b2: empty path ─┘</desc><defs><marker id="flow-chapter-14-1-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0 L10 5 L0 10 Z" fill="#354bff"/></marker></defs><g font-family="Consolas, Malgun Gothic, sans-serif"><rect x="186" y="8" width="268" height="62" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="198" y="34" font-size="14" fill="#111936" text-anchor="start" font-weight="700">b0</text><text x="198" y="56" font-size="14" fill="#111936" text-anchor="start">Condition · branch</text><rect x="12" y="142" width="270" height="62" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="24" y="168" font-size="14" fill="#152581" text-anchor="start" font-weight="700">b1</text><text x="24" y="190" font-size="14" fill="#152581" text-anchor="start">X(q[0]);</text><rect x="358" y="142" width="270" height="62" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="370" y="168" font-size="14" fill="#111936" text-anchor="start" font-weight="700">b2</text><text x="370" y="190" font-size="14" fill="#111936" text-anchor="start">Empty branch</text><rect x="186" y="270" width="268" height="62" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="198" y="296" font-size="14" fill="#152581" text-anchor="start" font-weight="700">b3</text><text x="198" y="318" font-size="14" fill="#152581" text-anchor="start">H(q[0]); · return</text><path d="M320.0 70 V106.0 H147.0 V140" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-14-1-arrow)"/><text x="239.5" y="100.0" font-size="12" fill="#111936" text-anchor="middle">true</text><path d="M320.0 70 V106.0 H493.0 V140" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-14-1-arrow)"/><text x="412.5" y="100.0" font-size="12" fill="#111936" text-anchor="middle">false</text><path d="M147.0 204 V237.0 H320.0 V268" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-14-1-arrow)"/><path d="M493.0 204 V237.0 H320.0 V268" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-14-1-arrow)"/></g></svg></figure>
 
   <p>
     <code>b0</code> evaluates the condition and selects one of two paths.<br>
@@ -68,18 +69,34 @@ b0: evaluate and branch                            ├─▶ b3: execute H and r
     Both paths join again at <code>b3</code>, followed by the common <code>H</code> operation.
   </p>
 
-  <h2 id="b0"><code>b0</code>: evaluate the condition and select a path</h2>
+  <h2 id="b0" class="trace-section-heading"><span><code>b0</code>: evaluate the condition and select a path</span></h2>
 
   <p>
     <code>b0</code> also contains the array declaration and update that execute before the <code>if</code>, but only its final part matters here.<br>
     MIR evaluates <code>values[0] == 1</code> to produce <code>%v10</code>, and <code>branch</code> uses that value to select the next block.
   </p>
 
-<pre><code class="language-plaintext">b0
+<figure class="structure-figure"><div class="item-tree-diagram item-tree-diagram--native" data-item-tree="structure-chapter-14-2" style="--item-tree-width:280px">
+  <svg class="native-item-tree" xmlns="http://www.w3.org/2000/svg" width="280" height="168" viewBox="0 0 280 168" role="img" aria-labelledby="structure-chapter-14-2-title structure-chapter-14-2-desc">
+    <title id="structure-chapter-14-2-title">b0</title>
+    <desc id="structure-chapter-14-2-desc">b0
 ├─ %v10 = values[0] == 1
 └─ branch %v10
    ├─ true  → b1
-   └─ false → b2</code></pre>
+   └─ false → b2</desc>
+    <path class="native-item-tree__guides" d="M 22 34 V 81 M 22 51 H 40 M 22 81 H 40 M 50 94 V 141 M 50 111 H 68 M 50 141 H 68"/>
+    <text x="16" y="26" data-tree-depth="0" data-tree-row="0" data-continuation="false"><tspan class="native-item-tree__field">b0</tspan></text>
+    <text x="44" y="56" data-tree-depth="1" data-tree-row="1" data-continuation="false">%v10 = <tspan class="native-item-tree__value">values[0] == 1</tspan></text>
+    <text x="44" y="86" data-tree-depth="1" data-tree-row="2" data-continuation="false"><tspan class="native-item-tree__field">branch %v10</tspan></text>
+    <text x="72" y="116" data-tree-depth="2" data-tree-row="3" data-continuation="false">true<tspan class="native-item-tree__wire"> → </tspan><tspan class="native-item-tree__reference">b1</tspan></text>
+    <text x="72" y="146" data-tree-depth="2" data-tree-row="4" data-continuation="false">false<tspan class="native-item-tree__wire"> → </tspan><tspan class="native-item-tree__reference">b2</tspan></text>
+  </svg>
+</div>
+<div class="item-tree-legend" data-legend-for="structure-chapter-14-2" aria-label="Diagram legend">
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">→</span><span>Block selected by the condition</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">[]</span><span>Empty list</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">{}</span><span>Empty set or map</span></span>
+</div></figure>
 
   <p>
     The instruction that chooses the next destination at the end of a block is called a terminator.<br>
@@ -87,14 +104,30 @@ b0: evaluate and branch                            ├─▶ b3: execute H and r
     Execution splits because a true condition selects <code>b1</code>, while a false condition selects <code>b2</code>.
   </p>
 
-  <h2 id="branch-blocks"><code>b1</code> and <code>b2</code>: execute each path and move to the join</h2>
+  <h2 id="branch-blocks" class="trace-section-heading"><span><code>b1</code> and <code>b2</code>: execute each path and move to the join</span></h2>
 
-<pre><code class="language-plaintext">b1
+<figure class="structure-figure"><div class="item-tree-diagram item-tree-diagram--native" data-item-tree="structure-chapter-14-3" style="--item-tree-width:280px">
+  <svg class="native-item-tree" xmlns="http://www.w3.org/2000/svg" width="280" height="184" viewBox="0 0 280 184" role="img" aria-labelledby="structure-chapter-14-3-title structure-chapter-14-3-desc">
+    <title id="structure-chapter-14-3-title">b1</title>
+    <desc id="structure-chapter-14-3-desc">b1
 ├─ X(q0.v0) → q0.v1
 └─ jump b3
 
 b2
-└─ jump b3</code></pre>
+└─ jump b3</desc>
+    <path class="native-item-tree__guides" d="M 22 34 V 81 M 22 51 H 40 M 22 81 H 40 M 22 140 V 157 M 22 157 H 40"/>
+    <text x="16" y="26" data-tree-depth="0" data-tree-row="0" data-continuation="false"><tspan class="native-item-tree__field">b1</tspan></text>
+    <text x="44" y="56" data-tree-depth="1" data-tree-row="1" data-continuation="false">X(q0.v0)<tspan class="native-item-tree__wire"> → </tspan><tspan class="native-item-tree__reference">q0.v1</tspan></text>
+    <text x="44" y="86" data-tree-depth="1" data-tree-row="2" data-continuation="false">jump b3</text>
+    <text x="16" y="132" data-tree-depth="0" data-tree-row="3" data-continuation="false"><tspan class="native-item-tree__field">b2</tspan></text>
+    <text x="44" y="162" data-tree-depth="1" data-tree-row="4" data-continuation="false">jump b3</text>
+  </svg>
+</div>
+<div class="item-tree-legend" data-legend-for="structure-chapter-14-3" aria-label="Diagram legend">
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">→</span><span>Resulting qubit version</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">[]</span><span>Empty list</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">{}</span><span>Empty set or map</span></span>
+</div></figure>
 
   <p>
     <code>b1</code> executes <code>X(q[0])</code> from the true body.<br>
@@ -112,12 +145,27 @@ b2
     A <code>branch</code> selects a destination from a condition, while a <code>jump</code> moves to one fixed destination.
   </p>
 
-  <h2 id="b3"><code>b3</code>: join the paths and execute the remaining code</h2>
+  <h2 id="b3" class="trace-section-heading"><span><code>b3</code>: join the paths and execute the remaining code</span></h2>
 
-<pre><code class="language-plaintext">b3
+<figure class="structure-figure"><div class="item-tree-diagram item-tree-diagram--native" data-item-tree="structure-chapter-14-4" style="--item-tree-width:342px">
+  <svg class="native-item-tree" xmlns="http://www.w3.org/2000/svg" width="342" height="138" viewBox="0 0 342 138" role="img" aria-labelledby="structure-chapter-14-4-title structure-chapter-14-4-desc">
+    <title id="structure-chapter-14-4-title">b3</title>
+    <desc id="structure-chapter-14-4-desc">b3
 ├─ q0.v2 = phi(b1: q0.v1, b2: q0.v0)
 ├─ H(q0.v2) → q0.v3
-└─ return</code></pre>
+└─ return</desc>
+    <path class="native-item-tree__guides" d="M 22 34 V 111 M 22 51 H 40 M 22 81 H 40 M 22 111 H 40"/>
+    <text x="16" y="26" data-tree-depth="0" data-tree-row="0" data-continuation="false"><tspan class="native-item-tree__field">b3</tspan></text>
+    <text x="44" y="56" data-tree-depth="1" data-tree-row="1" data-continuation="false">q0.v2 = <tspan class="native-item-tree__value">phi(b1: q0.v1, b2: q0.v0)</tspan></text>
+    <text x="44" y="86" data-tree-depth="1" data-tree-row="2" data-continuation="false">H(q0.v2)<tspan class="native-item-tree__wire"> → </tspan><tspan class="native-item-tree__reference">q0.v3</tspan></text>
+    <text x="44" y="116" data-tree-depth="1" data-tree-row="3" data-continuation="false">return</text>
+  </svg>
+</div>
+<div class="item-tree-legend" data-legend-for="structure-chapter-14-4" aria-label="Diagram legend">
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">→</span><span>Resulting qubit version</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">[]</span><span>Empty list</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">{}</span><span>Empty set or map</span></span>
+</div></figure>
 
   <p>
     Both <code>b1</code> and <code>b2</code> reach <code>b3</code>.<br>
@@ -130,25 +178,25 @@ b2
     <code>H</code> takes joined version <code>q0.v2</code> and creates <code>q0.v3</code>. Because no statements remain in <code>Work</code>, an implicit <code>return</code> added by MIR ends the block and callable.
   </p>
 
-  <h2 id="execution">MIR retains both paths</h2>
+  <h2 id="execution" class="trace-section-heading"><span>MIR retains both paths</span></h2>
 
   <p>
     All four blocks exist in MIR, but one execution follows only the path selected by the condition.<br>
     Lowering does not precompute the result of calling <code>Next</code>, so it represents both possibilities below.
   </p>
 
-<pre><code class="language-plaintext">true path
+<figure class="structure-figure"><svg class="structure-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 208" role="img" aria-labelledby="flow-chapter-14-5-title flow-chapter-14-5-desc"><title id="flow-chapter-14-5-title">true path</title><desc id="flow-chapter-14-5-desc">true path
 b0 → b1 → b3 → return
 
 false path
-b0 → b2 → b3 → return</code></pre>
+b0 → b2 → b3 → return</desc><defs><marker id="flow-chapter-14-5-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0 L10 5 L0 10 Z" fill="#354bff"/></marker></defs><g font-family="Consolas, Malgun Gothic, sans-serif"><text x="12" y="24" font-size="15" fill="#111936" text-anchor="start">True path</text><rect x="12" y="40" width="132" height="40" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="24" y="66" font-size="14" fill="#111936" text-anchor="start" font-weight="700">b0</text><rect x="172" y="40" width="132" height="40" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="184" y="66" font-size="14" fill="#111936" text-anchor="start" font-weight="700">b1</text><path d="M144 60.0 H158.0 V60.0 H170" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-14-5-arrow)"/><rect x="332" y="40" width="132" height="40" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="344" y="66" font-size="14" fill="#111936" text-anchor="start" font-weight="700">b3</text><path d="M304 60.0 H318.0 V60.0 H330" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-14-5-arrow)"/><rect x="492" y="40" width="132" height="40" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="504" y="66" font-size="14" fill="#152581" text-anchor="start" font-weight="700">return</text><path d="M464 60.0 H478.0 V60.0 H490" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-14-5-arrow)"/><text x="12" y="134" font-size="15" fill="#111936" text-anchor="start">False path</text><rect x="12" y="150" width="132" height="40" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="24" y="176" font-size="14" fill="#111936" text-anchor="start" font-weight="700">b0</text><rect x="172" y="150" width="132" height="40" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="184" y="176" font-size="14" fill="#111936" text-anchor="start" font-weight="700">b2</text><path d="M144 170.0 H158.0 V170.0 H170" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-14-5-arrow)"/><rect x="332" y="150" width="132" height="40" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="344" y="176" font-size="14" fill="#111936" text-anchor="start" font-weight="700">b3</text><path d="M304 170.0 H318.0 V170.0 H330" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-14-5-arrow)"/><rect x="492" y="150" width="132" height="40" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="504" y="176" font-size="14" fill="#152581" text-anchor="start" font-weight="700">return</text><path d="M464 170.0 H478.0 V170.0 H490" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-14-5-arrow)"/></g></svg></figure>
 
   <p>
     As shown in the previous chapter, this exact example selects the true path at runtime.<br>
     The false path <code>b2</code> is another control-flow possibility preserved by lowering, not a path removed by predicting the execution result.
   </p>
 
-  <h2 id="summary">Summary</h2>
+  <h2 id="summary" class="trace-section-heading"><span>Summary</span></h2>
 
   <div class="callout good">
     <span class="h">Control flow in one statement</span>

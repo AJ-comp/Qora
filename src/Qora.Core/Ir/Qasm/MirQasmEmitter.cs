@@ -169,6 +169,9 @@ public static class MirQasmEmitter
                 case MirQasmUnsignedCastExpression cast:
                     VisitExpression(cast.Operand);
                     break;
+                case MirQasmFloatCastExpression cast:
+                    VisitExpression(cast.Operand);
+                    break;
                 case MirQasmFunctionCallExpression call:
                     if (call.Target is MirQasmUserFunctionTarget user)
                         dependencies.Add(user.Callable);
@@ -225,7 +228,9 @@ public static class MirQasmEmitter
                 {
                     case MirQasmValueDeclarationStatement declaration:
                     {
-                        var prefix = declaration.IsConst ? "const " : string.Empty;
+                        var prefix = declaration.IsOutput
+                            ? "output "
+                            : declaration.IsConst ? "const " : string.Empty;
                         var initializer = declaration.Initializer is { } initializerValue
                             ? $" = {Render(initializerValue, bindings)}"
                             : string.Empty;
@@ -352,6 +357,8 @@ public static class MirQasmEmitter
                     $"sizeof({Render(size.Operand, bindings)})",
                 MirQasmUnsignedCastExpression cast =>
                     $"uint[{cast.Width}]({Render(cast.Operand, bindings)})",
+                MirQasmFloatCastExpression cast =>
+                    $"float({Render(cast.Operand, bindings)})",
                 MirQasmFunctionCallExpression call =>
                     $"{RenderFunctionTarget(call.Target)}" +
                     $"({string.Join(", ", call.Arguments.Select(argument => Render(argument, bindings)))})",
@@ -505,7 +512,8 @@ public static class MirQasmEmitter
                 },
                 MirQasmUnaryExpression => 70,
                 MirQasmIndexExpression or MirQasmFunctionCallExpression
-                    or MirQasmSizeOfExpression or MirQasmUnsignedCastExpression => 80,
+                    or MirQasmSizeOfExpression or MirQasmUnsignedCastExpression
+                    or MirQasmFloatCastExpression => 80,
                 _ => 90,
             };
     }

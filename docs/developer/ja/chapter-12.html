@@ -4,8 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>12. 配列 Storage と値状態 — Qora コンパイラ開発者マニュアル</title>
-<link rel="stylesheet" href="developer.css">
-<script src="developer-syntax.js" defer></script>
+<link rel="stylesheet" href="developer.css?v=20260924-layout-review-r49">
+<link rel="stylesheet" href="../section-heading.css?v=20260826-section-tab-standard">
+<script src="developer-syntax.js?v=20260828-localized-format-r1" defer></script>
 </head>
 <body>
 <nav class="language-switch" aria-label="言語"><a href="../en/chapter-12.html">English</a><span aria-hidden="true">·</span><a href="../ko/chapter-12.html">한국어</a><span aria-hidden="true">·</span><strong>日本語</strong></nav>
@@ -28,7 +29,7 @@
     この章では、下のコードで配列を作り、更新し、再び読む流れだけを追跡して両者の違いを確認します。
   </p>
 
-  <h2 id="source">確認する Qora コード</h2>
+  <h2 id="source" class="trace-section-heading"><span>確認する Qora コード</span></h2>
 
 <pre><code class="language-qora">function Next(value: int): int
 {
@@ -56,9 +57,9 @@ operation Work()
     ソースは同じ名前 <code>values</code> を使い続けますが、MIR は更新前と更新後を別の値として区別します。
   </p>
 
-  <h2 id="overview">MIR 結果の全体像</h2>
+  <h2 id="overview" class="trace-section-heading"><span>MIR 結果の全体像</span></h2>
 
-<pre><code class="language-plaintext">Qora の values
+<figure class="structure-figure"><svg class="structure-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 252" role="img" aria-labelledby="flow-chapter-12-1-title flow-chapter-12-1-desc"><title id="flow-chapter-12-1-title">Qora の values</title><desc id="flow-chapter-12-1-desc">Qora の values
     │
     ├─ 配列の identity: $s0
     │   └─ 最初から最後まで変わらない
@@ -69,7 +70,7 @@ operation Work()
                          └─ %v5 は Next の呼び出し結果
 
 条件式 values[0] == 1
-    └─ 最新状態 %v6 を読む</code></pre>
+    └─ 最新状態 %v6 を読む</desc><defs><marker id="flow-chapter-12-1-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0 L10 5 L0 10 Z" fill="#354bff"/></marker></defs><g font-family="Consolas, Malgun Gothic, sans-serif"><rect x="12" y="8" width="616" height="62" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="24" y="34" font-size="14" fill="#111936" text-anchor="start" font-weight="700">配列の同一性 · 変更なし</text><text x="24" y="56" font-size="14" fill="#111936" text-anchor="start">$s0 · values</text><rect x="12" y="104" width="266" height="62" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="24" y="130" font-size="14" fill="#111936" text-anchor="start" font-weight="700">最初の値</text><text x="24" y="152" font-size="14" fill="#111936" text-anchor="start">%v1 = [0]</text><rect x="362" y="104" width="266" height="62" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="374" y="130" font-size="14" fill="#152581" text-anchor="start" font-weight="700">更新後の値</text><text x="374" y="152" font-size="14" fill="#152581" text-anchor="start">%v6 = [%v5]</text><path d="M278 135.0 H320.0 V135.0 H360" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-12-1-arrow)"/><text x="12" y="207" font-size="14" fill="#111936" text-anchor="start">%v5 は Next の呼び出し結果です。</text><text x="12" y="236" font-size="14" fill="#111936" text-anchor="start">条件式 values[0] == 1 は最新の値 %v6 を読みます。</text></g></svg></figure>
 
   <p>
     <code>$s0</code> と <code>%v1</code> は同じ情報を二重に保存しているわけではありません。<br>
@@ -77,7 +78,7 @@ operation Work()
     要素を更新すると名前札は残り、値状態だけが <code>%v6</code> へ変わります。
   </p>
 
-  <h2 id="creation-lowering-code">宣言：<code>$s0</code> と <code>%v1</code> を同時に作る</h2>
+  <h2 id="creation-lowering-code" class="trace-section-heading"><span>宣言：<code>$s0</code> と <code>%v1</code> を同時に作る</span></h2>
 
   <p>
     最初の文 <code>var values: int[] = [0];</code> を lower すると、MIR に次の二種類の情報が生まれます。
@@ -99,10 +100,10 @@ operation Work()
     したがって、この時点の関係は単純です。
   </p>
 
-<pre><code class="language-plaintext">$s0  → どの配列か？       → values
-%v1  → 現在の配列値は何か？ → [0]</code></pre>
+<figure class="structure-figure"><svg class="structure-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 144" role="img" aria-labelledby="flow-chapter-12-3-title flow-chapter-12-3-desc"><title id="flow-chapter-12-3-title">$s0  → どの配列か？       → values</title><desc id="flow-chapter-12-3-desc">$s0  → どの配列か？       → values
+%v1  → 現在の配列値は何か？ → [0]</desc><defs><marker id="flow-chapter-12-3-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0 L10 5 L0 10 Z" fill="#354bff"/></marker></defs><g font-family="Consolas, Malgun Gothic, sans-serif"><rect x="12" y="8" width="110" height="40" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="24" y="34" font-size="14" fill="#111936" text-anchor="start" font-weight="700">$s0</text><rect x="178" y="8" width="250" height="40" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="190" y="34" font-size="14" fill="#111936" text-anchor="start" font-weight="700">どの配列か？</text><rect x="490" y="8" width="138" height="40" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="502" y="34" font-size="14" fill="#111936" text-anchor="start" font-weight="700">values</text><path d="M122 28.0 H150.0 V28.0 H176" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-12-3-arrow)"/><path d="M428 28.0 H459.0 V28.0 H488" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-12-3-arrow)"/><rect x="12" y="86" width="110" height="40" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="24" y="112" font-size="14" fill="#111936" text-anchor="start" font-weight="700">%v1</text><rect x="178" y="86" width="250" height="40" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="190" y="112" font-size="14" fill="#111936" text-anchor="start" font-weight="700">現在の配列の値は？</text><rect x="490" y="86" width="138" height="40" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="502" y="112" font-size="14" fill="#111936" text-anchor="start" font-weight="700">[0]</text><path d="M122 106.0 H150.0 V106.0 H176" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-12-3-arrow)"/><path d="M428 106.0 H459.0 V106.0 H488" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-12-3-arrow)"/></g></svg></figure>
 
-  <h2 id="next-call">更新：同じ <code>$s0</code> に新しい値状態を作る</h2>
+  <h2 id="next-call" class="trace-section-heading"><span>更新：同じ <code>$s0</code> に新しい値状態を作る</span></h2>
 
 <pre><code class="language-qora">values[0] = Next(values[0]);</code></pre>
 
@@ -113,7 +114,7 @@ operation Work()
     間にある <code>%v2</code> と <code>%v3</code> はそれぞれ位置 0 を表す MIR 値です。この章では配列状態 <code>%v1</code> と <code>%v6</code> にだけ集中します。
   </p>
 
-<pre><code class="language-plaintext">以前の状態 %v1 = [0]
+<figure class="structure-figure"><svg class="structure-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 346" role="img" aria-labelledby="flow-chapter-12-5-title flow-chapter-12-5-desc"><title id="flow-chapter-12-5-title">以前の状態 %v1 = [0]</title><desc id="flow-chapter-12-5-desc">以前の状態 %v1 = [0]
        │
        ├─ 要素 0 を読む → %v4
        ├─ Next(%v4)     → %v5
@@ -121,7 +122,7 @@ operation Work()
               ↓
 新しい状態 %v6 = [%v5]
 
-配列の identity は引き続き $s0</code></pre>
+配列の identity は引き続き $s0</desc><defs><marker id="flow-chapter-12-5-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0 L10 5 L0 10 Z" fill="#354bff"/></marker></defs><g font-family="Consolas, Malgun Gothic, sans-serif"><rect x="156" y="8" width="328" height="40" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="168" y="34" font-size="14" fill="#111936" text-anchor="start" font-weight="700">%v1 = [0]</text><rect x="156" y="86" width="328" height="40" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="168" y="112" font-size="14" fill="#111936" text-anchor="start" font-weight="700">%v4 = %v1[0]</text><path d="M320.0 48 V67.0 H320.0 V84" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-12-5-arrow)"/><rect x="156" y="164" width="328" height="40" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="168" y="190" font-size="14" fill="#111936" text-anchor="start" font-weight="700">%v5 = Next(%v4)</text><path d="M320.0 126 V145.0 H320.0 V162" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-12-5-arrow)"/><rect x="156" y="242" width="328" height="40" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="168" y="268" font-size="14" fill="#152581" text-anchor="start" font-weight="700">%v6 = [%v5]</text><path d="M320.0 204 V223.0 H320.0 V240" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-12-5-arrow)"/><text x="90" y="330" font-size="15" fill="#111936" text-anchor="start">配列の同一性は $s0 のままです。</text></g></svg></figure>
 
   <p>
     ここで重要なのは、<code>%v1</code> を書き換えないことです。<br>
@@ -129,7 +130,7 @@ operation Work()
     後の解析は、<code>%v1</code> から更新前の配列を、<code>%v6</code> から更新後の配列を正確に把握できます。
   </p>
 
-  <h2 id="latest-state">次の文は最新状態 <code>%v6</code> を読む</h2>
+  <h2 id="latest-state" class="trace-section-heading"><span>次の文は最新状態 <code>%v6</code> を読む</span></h2>
 
   <p>
     次の条件式 <code>if (values[0] == 1)</code> にも、引き続き <code>values</code> とだけ書かれています。<br>
@@ -137,16 +138,16 @@ operation Work()
     したがって条件式は最初の状態 <code>%v1</code> ではなく、更新状態 <code>%v6</code> の要素 0 を読みます。
   </p>
 
-<pre><code class="language-plaintext">宣言直後       values → %v1 → [0]
+<figure class="structure-figure"><svg class="structure-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 208" role="img" aria-labelledby="flow-chapter-12-6-title flow-chapter-12-6-desc"><title id="flow-chapter-12-6-title">宣言直後       values → %v1 → [0]</title><desc id="flow-chapter-12-6-desc">宣言直後       values → %v1 → [0]
 代入後         values → %v6 → [%v5]
-条件式で読む   values → %v6[0]</code></pre>
+条件式で読む   values → %v6[0]</desc><defs><marker id="flow-chapter-12-6-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0 L10 5 L0 10 Z" fill="#354bff"/></marker></defs><g font-family="Consolas, Malgun Gothic, sans-serif"><text x="12" y="28" font-size="14" fill="#111936" text-anchor="start">宣言直後</text><rect x="230" y="6" width="398" height="40" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="242" y="32" font-size="14" fill="#111936" text-anchor="start" font-weight="700">values → %v1 → [0]</text><text x="12" y="100" font-size="14" fill="#111936" text-anchor="start">代入直後</text><rect x="230" y="78" width="398" height="40" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="242" y="104" font-size="14" fill="#152581" text-anchor="start" font-weight="700">values → %v6 → [%v5]</text><text x="12" y="172" font-size="14" fill="#111936" text-anchor="start">条件式で読み取り</text><rect x="230" y="150" width="398" height="40" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="242" y="176" font-size="14" fill="#152581" text-anchor="start" font-weight="700">values → %v6[0]</text></g></svg></figure>
 
   <p>
     この例を実行すると <code>Next(0)</code> の結果は 1 です。<br>
     ただし MIR はその結果を事前に 1 と決めず、<code>%v5</code> という呼び出し結果として保持します。ここで重要なのは数値を事前に知ることではなく、次の文が最新の配列状態 <code>%v6</code> を読むことです。
   </p>
 
-  <h2 id="summary">まとめ</h2>
+  <h2 id="summary" class="trace-section-heading"><span>まとめ</span></h2>
 
   <div class="callout good">
     <span class="h">二種類の番号が答える問い</span>

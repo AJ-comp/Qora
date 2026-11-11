@@ -8,10 +8,22 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="BlazorBlueprint.Components" Version="3.12.1" />
-    <PackageReference Include="BlazorMonaco" Version="3.4.0" />
-    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly" Version="10.0.9" />
-    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.DevServer" Version="10.0.9" PrivateAssets="all" />
+    <PackageReference Include="BlazorBlueprint.Components" Version="4.2.0" />
+    <PackageReference Include="BlazorMonaco" Version="3.5.0" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly" Version="10.0.15" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.DevServer" Version="10.0.15" PrivateAssets="all" />
+  </ItemGroup>
+
+  <!-- Pin verified current Blueprint dependencies; its minimum HtmlSanitizer version is affected by GHSA-x83r-fr5c-qqvj. -->
+  <ItemGroup>
+    <PackageReference Include="AngleSharp" Version="1.10.1" />
+    <PackageReference Include="AngleSharp.Css" Version="1.4.1" />
+    <PackageReference Include="BlazorBlueprint.Icons.Lucide" Version="2.0.2" />
+    <PackageReference Include="HtmlSanitizer" Version="11.0.26" />
+    <PackageReference Include="Ical.Net" Version="5.2.4" />
+    <PackageReference Include="Markdig" Version="1.6.0" />
+    <PackageReference Include="NodaTime" Version="3.3.7" />
+    <PackageReference Include="TailwindMerge.NET" Version="1.5.0" />
   </ItemGroup>
 
   <ItemGroup>

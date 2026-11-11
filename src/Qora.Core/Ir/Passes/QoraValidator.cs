@@ -91,7 +91,7 @@ namespace Qora.Ir.Passes;
 ///         after a branch on which it may have been moved or on a later loop iteration.</item>
 ///   <item><b>QSEM040</b> — the source set contains no runnable operation. Functions cannot own the
 ///         program entry point.</item>
-///   <item><b>QSEM041</b> — an expression violates its HIR type context: a non-integral truth value,
+///   <item><b>QSEM041</b> — an expression violates its HIR type context: a non-bool condition,
 ///         a non-<c>int</c> range bound, or invalid scalar/array operator operands.</item>
 /// </list>
 /// Earlier pipeline steps own the remaining codes, and each step's errors preempt this validator:
@@ -326,7 +326,7 @@ internal static class QoraValidator
                 }
 
                 if (p.Access == QAccessMode.Mutable
-                    && (!p.IsArray || p.Type is not (QType.Int or QType.Float or QType.Angle or QType.Bit)))
+                    && (!p.IsArray || p.Type is not (QType.Int or QType.Float or QType.Angle or QType.Bit or QType.Bool)))
                 {
                     Add(errors, "QSEM038", $"in `{opDisplayName}`: parameter `{p.Name}` cannot use `{contract}`; mutable parameter access is supported only for whole classical-array operation parameters", p.Span);
                     continue;
@@ -387,6 +387,8 @@ internal static class QoraValidator
                 invalidOwnershipStatements,
                 DeferUnknownControlFlow: IsGenericOp(op) && willBeRechecked));
             if (op.IsFunction) ValidateFunctionShape(op, ctx);
+            if (op.ReturnType is { } returnType && !AlwaysReturns(op.Body))
+                Add(errors, "QSEM035", $"{(op.IsFunction ? "function" : "operation")} `{Simple(op.Name)}` must return a value of type `{TypeName(returnType)}` on every path (an `if` that returns must also cover the other path — with an `else`, or with a `return` after it)", op.Span);
         }
 
         // Rung B'/P4 disposition, derived from the recorded facts. First PROPAGATE: a caller that hands its
@@ -431,8 +433,7 @@ internal static class QoraValidator
         // already decidable and must be checked now; specialization preserves their original symbol reads.
         foreach (var work in ownershipWork)
         {
-            foreach (var statementId in work.InvalidStatements)
-                work.ValidMoves.Remove(statementId);
+            RemoveInvalidMoves(work.Callable);
             OwnershipValidation.Validate(
                 work.Callable,
                 work.Root,
@@ -440,6 +441,16 @@ internal static class QoraValidator
                 work.ValidMoves,
                 errors,
                 work.DeferUnknownControlFlow);
+
+            void RemoveInvalidMoves(HirNode node)
+            {
+                if (node is HirStatement statement && work.InvalidStatements.Contains(statement.Id))
+                    foreach (var call in HirExpressions.DirectExpressionSites(statement)
+                                 .SelectMany(HirExpressions.CallsIn))
+                        work.ValidMoves.Remove(call.Id);
+                foreach (var child in node.Children())
+                    RemoveInvalidMoves(child);
+            }
         }
 
         // The settled per-op requirement table is a validation FACT — each operation's array-argument
@@ -790,7 +801,7 @@ internal static class QoraValidator
                              }
                              && declaredScalarType != QType.Qubit)
                     {
-                        if (ContainsFunctionResult(d.Value, ctx))
+                        if (ContainsCallableResult(d.Value, ctx))
                             RecordStrictScalarConversion(d.Value, declaredScalarType, ctx);
                         else
                             RecordLooseScalarConversion(d.Value, declaredScalarType, ctx);
@@ -919,7 +930,7 @@ internal static class QoraValidator
                     if (target is { Type: { } assignedType, IsArray: false }
                         && assignedType != QType.Qubit)
                     {
-                        if (ContainsFunctionResult(a.Value, ctx))
+                        if (ContainsCallableResult(a.Value, ctx))
                             RecordStrictScalarConversion(a.Value, assignedType, ctx);
                         else
                             RecordLooseScalarConversion(a.Value, assignedType, ctx);
@@ -928,7 +939,7 @@ internal static class QoraValidator
                               && arrayElementType != QType.Qubit
                               && a.Target is HirIndexExpression)
                     {
-                        if (ContainsFunctionResult(a.Value, ctx))
+                        if (ContainsCallableResult(a.Value, ctx))
                             RecordStrictScalarConversion(a.Value, arrayElementType, ctx);
                         else
                             RecordLooseScalarConversion(a.Value, arrayElementType, ctx);
@@ -965,7 +976,7 @@ internal static class QoraValidator
                     break;
 
                 case HirIfStatement i:
-                    CheckCondition(i.Condition, ctx, opName, i.Span);
+                    CheckCondition(i.Condition, ctx, opName, i.Span, i.Id);
                     CheckExpressionIndexes(
                         i.Condition,
                         scope,
@@ -1081,7 +1092,7 @@ internal static class QoraValidator
                 case HirWhileStatement w:
                     // The condition re-evaluates after EVERY pass through the body, so it too must hold with
                     // the body's reassignments invalidated — not just on the pre-loop first evaluation.
-                    CheckCondition(w.Condition, ctx, opName, w.Span);
+                    CheckCondition(w.Condition, ctx, opName, w.Span, w.Id);
                     // Back-edge: pre-loop facts about a name the body reassigns cannot survive into the body.
                     var whileBody = At(w, HirScopeSiteRole.WhileBody);
                     var whileWiped = WithoutBodyAssigned(flow, w.Body, ctx.SemanticModel);
@@ -1112,7 +1123,7 @@ internal static class QoraValidator
                     // declared, exactly as the symbol table records it (and as CheckExpressionIndexes already
                     // did). Checking it against the enclosing scope made a legal body-local argument look like
                     // an undeclared one.
-                    CheckCondition(r.Until, ctx, opName, r.Span);
+                    CheckCondition(r.Until, ctx, opName, r.Span, r.Id);
                     CheckExpressionIndexes(
                         r.Until,
                         repeatBody,
@@ -1122,33 +1133,35 @@ internal static class QoraValidator
                         repeatFlow);
                     break;
                 case HirReturnStatement ret:
+                    if (ret.Value is not { } returnedValue)
+                    {
+                        if (ctx.Op.ReturnType is not null)
+                            Add(ctx.Errors, "QSEM035", $"in `{opName}`: this callable declares a return type, so `return` must supply a value", ret.Span);
+                        break;
+                    }
                     CheckExpressionTypeContracts(
-                        ret.Value,
+                        returnedValue,
                         ctx,
                         ret.Span,
                         out var returnExpressionOwnsTypeError,
                         reportArrayOperatorErrors: false);
-                    if (ctx.Op.IsFunction && ctx.Op.ReturnType is { } returnType)
-                        RecordStrictScalarConversion(ret.Value, returnType, ctx);
-                    // QSEM035 — `return` is only meaningful inside a function (an operation is void).
-                    if (!ctx.Op.IsFunction)
-                        Add(ctx.Errors, "QSEM035", $"in `{opName}`: `return` is only allowed inside a function; an operation is void", ret.Span);
-                    // The returned value is an ordinary classical expression: a function call is a legal value,
-                    // a measurement/operation call is not. (A `return M(q)` is caught as impure by
-                    // ValidateFunctionShape too — this covers a return nested in a returned sub-expression.)
+                    if (ctx.Op.ReturnType is { } returnType)
+                        RecordStrictScalarConversion(returnedValue, returnType, ctx);
+                    else
+                        Add(ctx.Errors, "QSEM035", $"in `{opName}`: an operation without a return type can use `return;`, but cannot return a value", ret.Span);
                     var returnCallsAreValid = true;
-                    if (ContainsMeasurement(ret.Value))
+                    if (ContainsMisplacedMeasurement(returnedValue))
                     {
-                        Add(ctx.Errors, "QSEM005", $"in `{opName}`: a returned expression cannot contain a measurement; measure in an operation and pass the classical result to a function", ret.Span);
+                        Add(ctx.Errors, "QSEM005", $"in `{opName}`: return a measurement directly (`return M(q);`), or assign it before using it in a larger returned expression", ret.Span);
                         returnCallsAreValid = false;
                     }
                     else
                     {
                         returnCallsAreValid =
-                            CheckExprCalls(ret.Value, ctx, opName, ret.Span, ret.Id);
+                            CheckExprCalls(returnedValue, ctx, opName, ret.Span, ret.Id);
                     }
                     CheckExpressionIndexes(
-                        ret.Value,
+                        returnedValue,
                         scope,
                         opName,
                         ctx,
@@ -1407,19 +1420,23 @@ internal static class QoraValidator
                     Add(ctx.Errors, "QINTERNAL",
                         $"in `{opName}`: `{c.Name}` carries dangling CalleeId {operationId}; name resolution produced an invalid semantic reference",
                         span);
-                else if (!callee.IsFunction)
-                    Add(ctx.Errors, "QSEM005", $"in `{opName}`: `{Simple(c.Name)}` is an operation (void) — only a `function` returns a value that an expression can use", span);
+                else if (ctx.Op.IsFunction && !callee.IsFunction)
+                    Add(ctx.Errors, "QSEM033", $"in function `{opName}`: an operation call `{Simple(c.Name)}` is not allowed; a function may only call other functions", span);
+                else if (callee.ReturnType is null)
+                    Add(ctx.Errors, "QSEM005", $"in `{opName}`: `{Simple(c.Name)}` does not return a value and cannot be used in an expression", span);
+                else if (callee.Id == ctx.EntryOpId)
+                    Add(ctx.Errors, "QSEM009", $"in `{opName}`: the entry operation `{ctx.EntryName}` is the program's execution root and cannot be called", span);
                 else
                     CheckCall(callee, c.Arguments, "",
                         opName, ctx.Errors, span, ctx, ctx.Floors,
-                        statementId: owningStatementId);
+                        statementId: owningStatementId, callId: c.Id);
             }
             else if (QoraGates.Functions.TryGetValue(c.Name, out var builtin))
                 CheckBuiltinCall(c, builtin, ctx, opName, span);
             else if (QoraGates.MeasureLike.Contains(c.Name))
                 Add(ctx.Errors, "QSEM005", $"in `{opName}`: a measurement `M(q[i])` can only be a whole assignment (`var r: bit = M(q[i]);`), never part of a larger expression", span);
             else if (QoraGates.Names.ContainsKey(c.Name))
-                Add(ctx.Errors, "QSEM005", $"in `{opName}`: `{c.Name}` is a gate (void) — only a `function` returns a value that an expression can use", span);
+                Add(ctx.Errors, "QSEM005", $"in `{opName}`: `{c.Name}` is a gate and does not return an expression value", span);
             else if (ctx.OpNames.Contains(c.Name))
                 Add(ctx.Errors, "QINTERNAL",
                     $"in `{opName}`: user callable `{c.Name}` reached expression validation without CalleeId",
@@ -1499,13 +1516,12 @@ internal static class QoraValidator
             } unary:
             {
                 var operandType = ExpressionTypes.TypeOf(unary.Operand, ctx.SemanticModel, ctx.OpById);
-                if (operandType is { IsArray: false, Type: QType.Bit or QType.Int } logicalOperand)
-                    RecordImplicitScalarConversion(unary.Operand, logicalOperand, QType.Bit, ctx);
-                else if (reportArrayOperatorErrors || operandType is not { IsArray: true })
+                if (operandType is not { IsArray: false, Type: QType.Bool }
+                    && (reportArrayOperatorErrors || operandType is not { IsArray: true }))
                     expressionOwnsTypeError |= TryReportExpressionContractError(
                         unary.Operand,
                         operandType,
-                        "logical `!` requires one bit or int operand",
+                        "logical `!` requires one bool operand",
                         ctx,
                         fallbackSpan);
                 break;
@@ -1517,7 +1533,14 @@ internal static class QoraValidator
             } unary:
             {
                 var operandType = ExpressionTypes.TypeOf(unary.Operand, ctx.SemanticModel, ctx.OpById);
-                if (operandType is { IsArray: false, Type: QType.Bit } bitOperand)
+                if (operandType is { IsArray: false, Type: QType.Bool })
+                    expressionOwnsTypeError |= TryReportExpressionContractError(
+                        unary.Operand,
+                        operandType,
+                        "numeric `-` cannot consume a bool value",
+                        ctx,
+                        fallbackSpan);
+                else if (operandType is { IsArray: false, Type: QType.Bit } bitOperand)
                     RecordImplicitScalarConversion(unary.Operand, bitOperand, QType.Int, ctx);
                 else if (reportArrayOperatorErrors && operandType is { IsArray: true })
                     expressionOwnsTypeError |= TryReportExpressionContractError(
@@ -1536,8 +1559,8 @@ internal static class QoraValidator
             {
                 var leftType = ExpressionTypes.TypeOf(logical.Left, ctx.SemanticModel, ctx.OpById);
                 var rightType = ExpressionTypes.TypeOf(logical.Right, ctx.SemanticModel, ctx.OpById);
-                var leftValid = RecordLogicalOperandConversion(logical.Left, leftType, ctx);
-                var rightValid = RecordLogicalOperandConversion(logical.Right, rightType, ctx);
+                var leftValid = leftType is { IsArray: false, Type: QType.Bool };
+                var rightValid = rightType is { IsArray: false, Type: QType.Bool };
                 if (!leftValid || !rightValid)
                 {
                     var invalidExpression = !leftValid ? logical.Left : logical.Right;
@@ -1547,7 +1570,7 @@ internal static class QoraValidator
                         expressionOwnsTypeError |= TryReportExpressionContractError(
                             invalidExpression,
                             invalidType,
-                            "logical `&&` and `||` require bit or int operands",
+                            "logical `&&` and `||` require bool operands",
                             ctx,
                             fallbackSpan);
                     }
@@ -1604,6 +1627,20 @@ internal static class QoraValidator
             return false;
         }
 
+        if (left.Type == QType.Bool || right.Type == QType.Bool)
+        {
+            if (left.Type == QType.Bool && right.Type == QType.Bool
+                && binary.Operator is HirBinaryOperator.Equal or HirBinaryOperator.NotEqual)
+                return false;
+
+            return TryReportExpressionContractError(
+                binary,
+                new QValueShape(QType.Bool, IsArray: false),
+                "bool values support only logical operators and `==`/`!=` with another bool; they cannot be used as numbers",
+                ctx,
+                fallbackSpan);
+        }
+
         var isComparison = binary.Operator is
             HirBinaryOperator.Equal
             or HirBinaryOperator.NotEqual
@@ -1620,18 +1657,6 @@ internal static class QoraValidator
         return false;
     }
 
-    private static bool RecordLogicalOperandConversion(
-        HirExpression expression,
-        QValueShape? source,
-        Ctx ctx)
-    {
-        if (source is not { IsArray: false, Type: QType.Bit or QType.Int } scalar)
-            return false;
-
-        RecordImplicitScalarConversion(expression, scalar, QType.Bit, ctx);
-        return true;
-    }
-
     private static void RecordLooseScalarConversion(
         HirExpression expression,
         QType targetType,
@@ -1639,6 +1664,12 @@ internal static class QoraValidator
     {
         var source = ExpressionTypes.TypeOf(expression, ctx.SemanticModel, ctx.OpById);
         if (source is not { IsArray: false, Type: not QType.Qubit } scalar)
+            return;
+
+        // SymbolTable reports this mismatch through the statement's diagnostic candidate. Do not
+        // publish a conversion approval while call/expression validation decides who owns the error.
+        if (scalar.Type == QType.Float && targetType == QType.Int
+            || scalar.Type != targetType && (scalar.Type == QType.Bool || targetType == QType.Bool))
             return;
 
         RecordImplicitScalarConversion(expression, scalar, targetType, ctx);
@@ -1660,18 +1691,6 @@ internal static class QoraValidator
         RecordImplicitScalarConversion(expression, scalar, targetType, ctx);
     }
 
-    private static bool ApproveTruthValue(
-        HirExpression expression,
-        Ctx ctx)
-    {
-        var source = ExpressionTypes.TypeOf(expression, ctx.SemanticModel, ctx.OpById);
-        if (source is not { IsArray: false, Type: QType.Bit or QType.Int } scalar)
-            return false;
-
-        RecordImplicitScalarConversion(expression, scalar, QType.Bit, ctx);
-        return true;
-    }
-
     private static bool RequireExactScalarType(
         HirExpression expression,
         QType requiredType,
@@ -1683,12 +1702,12 @@ internal static class QoraValidator
         }
         && actualType == requiredType;
 
-    private static bool ContainsFunctionResult(
+    private static bool ContainsCallableResult(
         HirExpression expression,
         Ctx ctx) =>
         HirExpressions.CallsIn(expression).Any(call =>
             QoraGates.Functions.ContainsKey(call.Name)
-            || ExpressionTypes.TryGetFunction(call, ctx.OpById, out _));
+            || ExpressionTypes.TryGetValueCallable(call, ctx.OpById, out _));
 
     private static void RecordImplicitScalarConversion(
         HirExpression expression,
@@ -1755,18 +1774,15 @@ internal static class QoraValidator
     /// <summary>
     /// Validate a <c>function</c>'s shape: its parameters and return are classical (QSEM034), its body is
     /// pure — no gates, no <c>use</c>, no measurement, no operation calls (QSEM033, a function may only call
-    /// other functions) — and it returns a value (QSEM035). Purity is what makes a function call a safe
-    /// expression value: with no quantum side effect, its position in an expression carries no ordering.
+    /// other functions). Value-returning operations share the return contract, but not this purity rule.
     /// </summary>
     private static void ValidateFunctionShape(HirCallable fn, Ctx ctx)
     {
         foreach (var p in fn.Parameters)
             if (p.Type == QType.Qubit)
-                Add(ctx.Errors, "QSEM034", $"in function `{Simple(fn.Name)}`: parameter `{p.Name}` cannot be a qubit; a function is classical (its parameters and return are `int`/`bit`/`float`/`angle`)", p.Span ?? fn.Span);
+                Add(ctx.Errors, "QSEM034", $"in function `{Simple(fn.Name)}`: parameter `{p.Name}` cannot be a qubit; a function is classical (its parameters and return are `bool`/`int`/`bit`/`float`/`angle`)", p.Span ?? fn.Span);
 
         CheckFunctionPurity(fn.Body, fn, ctx);
-        if (!ReturnTerminal(fn.Body, fn, ctx) && fn.ReturnType is { } rt)
-            Add(ctx.Errors, "QSEM035", $"function `{Simple(fn.Name)}` must return a value of type `{TypeName(rt)}` on every path (an `if` that returns must also cover the other path — with an `else`, or with a `return` after it)", fn.Span);
     }
 
     /// <summary>Recursively flag any QUANTUM statement in a function body (QSEM033). A statement-form call
@@ -1841,20 +1857,14 @@ internal static class QoraValidator
             _ => false,
         });
 
-    private static bool ReturnTerminal(
-        IReadOnlyList<HirStatement> body,
-        HirCallable fn,
-        Ctx ctx) =>
-        AlwaysReturns(body);
-
-    // QSEM005 — a measurement in a condition is a canonical effectful expression. MIR lowers it at its
-    // exact evaluation point (including short-circuit RHS blocks), so a call here is either a FUNCTION call
-    // (a legal value) or a non-measurement operation call (rejected). CheckExprCalls sorts them out.
+    // Measurements and value-returning operation calls execute at their exact condition evaluation point,
+    // including short-circuit RHS blocks. Void calls still cannot supply a condition value.
     private static void CheckCondition(
         HirExpression condition,
         Ctx ctx,
         string opName,
-        SourceSpan? span)
+        SourceSpan? span,
+        HirNodeId owningStatementId)
     {
         var conditionType = CheckExpressionTypeContracts(
             condition,
@@ -1863,15 +1873,15 @@ internal static class QoraValidator
             out var conditionExpressionOwnsTypeError,
             reportArrayOperatorErrors: false);
         if (!conditionExpressionOwnsTypeError
-            && !ApproveTruthValue(condition, ctx))
+            && !RequireExactScalarType(condition, QType.Bool, ctx))
             TryReportExpressionContractError(
                 condition,
                 conditionType,
-                "a condition must produce one bit or int value",
+                "a condition must produce one bool value; compare a bit with `1` or an int with `0` explicitly",
                 ctx,
                 span);
         if (HirExpressions.ContainsCall(condition))
-            CheckExprCalls(condition, ctx, opName, span);
+            CheckExprCalls(condition, ctx, opName, span, owningStatementId);
     }
 
     private static void CheckCallStatement(
@@ -1905,8 +1915,8 @@ internal static class QoraValidator
             return;
         }
 
-        // A gate argument may contain a function call (`Rx(angleOf(k), q[0])` — a classical value), while
-        // a measurement remains an effectful boundary and an operation call remains void.
+        // Arguments may contain value-returning calls. Direct measurements retain their own boundary:
+        // assign their result to a bit before passing it as an argument.
         if (g.Call.Arguments.Any(argument =>
                 ContainsMeasurement(argument.Expression)))
         {
@@ -1939,63 +1949,8 @@ internal static class QoraValidator
                 g.Span,
                 bounds);
 
-        // QSEM014 — the same qubit twice in one gate. Whole registers count: `CNOT(q, q)` broadcasts to
-        // duplicate operands, and `CNOT(q, q[0])` overlaps the register with its own element. Indexes are
-        // compared by FOLDED VALUE, never by spelling: `CNOT(q[k], q[2])` with `const k: int = 2` is the
-        // same qubit twice — the same calculator the bounds prover uses, so no two spellings of one index
-        // can slip past as "different" qubits.
-        // Each qubit operand's index resolves to a DOMAIN of possible values: a const/literal folds to one
-        // point; a loop variable folds to its header range [From..To]; a whole register (Index null) or an
-        // unresolved index covers everything / itself. Two operands on one register alias when their domains
-        // overlap — so `CNOT(q[i], q[2])` both under `for i in 2..2` (singleton) and under `for i in 0..2`
-        // (i reaches 2) is caught, not just literal duplicates — and at most one QSEM014 is reported per gate.
-        var refs = new List<(
-            SymbolId SymbolId,
-            string DisplayName,
-            HirExpression? Index,
-            (long Lo, long Hi)? Domain)>();
-        foreach (var argument in g.Call.Arguments)
-        {
-            var reference = QubitRefOf(argument, ctx);
-            if (reference is null)
-                continue;
-
-            var index = reference.Value.Index;
-            var domain = index is null
-                ? null
-                : IndexDomain(
-                    index,
-                    scope,
-                    ctx,
-                    bounds,
-                    ctx.WillBeRechecked);
-            refs.Add((
-                reference.Value.SymbolId,
-                reference.Value.DisplayName,
-                index,
-                domain));
-        }
-        // An empty loop makes runtime aliasing impossible, but it does not make malformed source valid:
-        // continue through callee, type, and ownership-contract checks below. Only the execution-dependent
-        // alias verdict is skipped.
-        if (!GateNeverRuns(refs, ctx, bounds))
-            for (var ai = 0; ai < refs.Count; ai++)
-                for (var bi = ai + 1; bi < refs.Count; bi++)
-                {
-                    var (aSymbolId, aReg, aIdx, aDom) = refs[ai];
-                    var (bSymbolId, _, bIdx, bDom) = refs[bi];
-                    if (aSymbolId != bSymbolId) continue;
-                    if (aIdx is null || bIdx is null)   // a whole register overlaps anything on it (or another whole)
-                        Add(errors, "QSEM014", aIdx is null && bIdx is null
-                            ? $"in `{opName}`: `{g.Call.Name}` receives the qubit `{aReg}` more than once; gate operands must be distinct"
-                            : $"in `{opName}`: `{g.Call.Name}` receives the register `{aReg}` and one of its own qubits; operands must not overlap", g.Span);
-                    else if (aDom is { } da && bDom is { } db
-                                 ? da.Lo <= db.Hi && db.Lo <= da.Hi
-                                 : HirExpressions.Render(aIdx) == HirExpressions.Render(bIdx))
-                        Add(errors, "QSEM014", $"in `{opName}`: `{g.Call.Name}` receives the qubit `{Show(aReg, aIdx)}` more than once; gate operands must be distinct", g.Span);
-                    else continue;
-                    return;   // one aliasing pair is enough — one diagnostic per gate
-                }
+        if (!CheckQubitAliases(g.Call, scope, ctx, bounds, g.Span))
+            return;
 
         // QSEM009 — the program entry is an execution root, not an ordinary callable declaration.
         if (ctx.EntryOpId is { } entryOperationId && userCallee?.Id == entryOperationId)
@@ -2023,7 +1978,7 @@ internal static class QoraValidator
             // QSEM006 — the callee declaration is the identity bound by Resolver; its spelling is
             // diagnostic data only.
             CheckCall(userCallee, g.Call.Arguments, "", opName, errors, g.Span, ctx, ctx.Floors, g.Id,
-                callErrorCountBeforeChecks);
+                callErrorCountBeforeChecks, callId: g.Call.Id);
             return;
         }
 
@@ -2054,6 +2009,51 @@ internal static class QoraValidator
                 initialErrorCount: callErrorCountBeforeChecks);
     }
 
+    /// <summary>Statement and expression calls must obey the same distinct-qubit contract.</summary>
+    private static bool CheckQubitAliases(
+        HirCallExpression call,
+        Scope scope,
+        Ctx ctx,
+        BoundsCtx bounds,
+        SourceSpan? span)
+    {
+        var refs = new List<(
+            SymbolId SymbolId,
+            string DisplayName,
+            HirExpression? Index,
+            (long Lo, long Hi)? Domain)>();
+        foreach (var argument in call.Arguments)
+        {
+            var reference = QubitRefOf(argument, ctx);
+            if (reference is null) continue;
+            var index = reference.Value.Index;
+            var domain = index is null
+                ? null
+                : IndexDomain(index, scope, ctx, bounds, ctx.WillBeRechecked);
+            refs.Add((reference.Value.SymbolId, reference.Value.DisplayName, index, domain));
+        }
+        // A folded index, including a loop range, denotes storage rather than a source spelling.
+        // Empty loops cannot execute the call, but still undergo the other argument/type checks.
+        if (GateNeverRuns(refs, ctx, bounds)) return true;
+        for (var left = 0; left < refs.Count; left++)
+            for (var right = left + 1; right < refs.Count; right++)
+            {
+                var (leftSymbol, register, leftIndex, leftDomain) = refs[left];
+                var (rightSymbol, _, rightIndex, rightDomain) = refs[right];
+                if (leftSymbol != rightSymbol) continue;
+                var overlap = leftIndex is null || rightIndex is null
+                    || (leftDomain is { } a && rightDomain is { } b
+                        ? a.Lo <= b.Hi && b.Lo <= a.Hi
+                        : HirExpressions.Render(leftIndex) == HirExpressions.Render(rightIndex));
+                if (!overlap) continue;
+                Add(ctx.Errors, "QSEM014",
+                    $"in `{ctx.CallableDisplayName}`: `{call.Name}` receives overlapping qubit operands from `{register}`; operands must be distinct",
+                    span);
+                return false;
+            }
+        return true;
+    }
+
     /// <summary>
     /// QSEM006 for ANY call — a built-in gate or a user callable — against its <see cref="ICallableSig"/>:
     /// argument count, then per-slot shape and type. A VALUE slot rejects a qubit; a user callable's scalar
@@ -2072,7 +2072,8 @@ internal static class QoraValidator
         Ctx ctx,
         ArrayFloorSink? floors = null,
         HirNodeId? statementId = null,
-        int? initialErrorCount = null)
+        int? initialErrorCount = null,
+        HirNodeId? callId = null)
     {
         var calleeName = sig.CalleeName;
         var calleeContractValid = sig is not HirCallable declared
@@ -2104,7 +2105,7 @@ internal static class QoraValidator
 
             // Intrinsic gates follow Qora's permissive scalar-to-parameter conversion rule. HIR records the
             // exact approved conversion so MIR does not choose language semantics a second time.
-            if (sig.IsBuiltin)
+            if (sig.IsBuiltin && actualShape.Type != QType.Bool && parameter.Type != QType.Bool)
             {
                 RecordLooseScalarConversion(value, parameter.Type, ctx);
                 return;
@@ -2169,7 +2170,7 @@ internal static class QoraValidator
                 && argSym is not
                    {
                        IsArray: true,
-                       Type: QType.Int or QType.Float or QType.Angle or QType.Bit
+                       Type: QType.Int or QType.Float or QType.Angle or QType.Bit or QType.Bool
                    })
             {
                 Add(errors, "QSEM038", $"in `{opName}`: a `{ContractSyntax(arg.Ownership, arg.Access)}` argument of `{calleeName}` must name a whole classical-array binding; mutable scalars and qubits are not supported", span);
@@ -2340,7 +2341,7 @@ internal static class QoraValidator
         // including exclusivity, is valid.
         if (floors is not null && pendingFloorFacts.Count > 0)
             floors.Calls.AddRange(pendingFloorFacts);
-        if (statementId is HirNodeId id && movedCandidates.Count > 0)
+        if (callId is HirNodeId id && movedCandidates.Count > 0)
             ctx.ValidMoves[id] = movedCandidates
                 .GroupBy(symbol => symbol.Id)
                 .Select(group => group.First())
@@ -2365,7 +2366,7 @@ internal static class QoraValidator
         if (operation.IsFunction) return false;
         if (parameter.Access == QAccessMode.Mutable
             && (!parameter.IsArray
-                || parameter.Type is not (QType.Int or QType.Float or QType.Angle or QType.Bit)))
+                || parameter.Type is not (QType.Int or QType.Float or QType.Angle or QType.Bit or QType.Bool)))
             return false;
         return parameter.Ownership != QOwnershipMode.Moved
                || parameter.IsArray
@@ -2425,11 +2426,9 @@ internal static class QoraValidator
             HirIndexExpression index =>
                 FirstQubitIn(index.Receiver, ctx)
                 ?? FirstQubitIn(index.Index, ctx),
-            HirCallExpression call =>
-                call.Arguments
-                    .Select(argument =>
-                        FirstQubitIn(argument.Expression, ctx))
-                    .FirstOrDefault(name => name is not null),
+            // A call's arguments have their own parameter contracts. Its classical result does not
+            // become a qubit just because the callee consumes a qubit operand.
+            HirCallExpression => null,
             HirArrayLiteralExpression literal =>
                 literal.Elements
                     .Select(element => FirstQubitIn(element, ctx))
@@ -2461,8 +2460,8 @@ internal static class QoraValidator
             } =>
                 ctx.SemanticModel.FindReferencedSymbol(name.Id) is { Type: { } type }
                 && type != QType.Qubit,
-            HirCallExpression =>
-                false,
+            HirCallExpression call =>
+                ExpressionTypes.TypeOf(call, ctx.SemanticModel, ctx.OpById) is { Type: not QType.Qubit },
             _ =>
                 true,
         };
@@ -2505,9 +2504,9 @@ internal static class QoraValidator
                 case HirNameExpression name:
                     AddName(name);
                     break;
-                case HirCallExpression call:
-                    foreach (var callArgument in call.Arguments)
-                        Walk(callArgument.Expression);
+                case HirCallExpression:
+                    // Scalar call results are copied values. Their nested borrows have ended before
+                    // the outer call begins; their own call site validates any overlapping accesses.
                     break;
                 default:
                     foreach (var child in expression.Children())
@@ -2618,6 +2617,14 @@ internal static class QoraValidator
                     callResult = MergeIndexValidationResults(
                         callResult,
                         argumentResult);
+                }
+
+                if (call.CalleeId is not null
+                    && ctx.CallValidity.GetValueOrDefault(call.Id, true)
+                    && !CheckQubitAliases(call, scope, ctx, bounds, span))
+                {
+                    ctx.CallValidity[call.Id] = false;
+                    ctx.ValidMoves.Remove(call.Id);
                 }
 
                 return callResult;

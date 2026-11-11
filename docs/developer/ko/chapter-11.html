@@ -4,8 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>11. 고전 값과 SSA 버전 — Qora 컴파일러 개발자 매뉴얼</title>
-<link rel="stylesheet" href="developer.css">
-<script src="developer-syntax.js" defer></script>
+<link rel="stylesheet" href="developer.css?v=20260924-layout-review-r49">
+<link rel="stylesheet" href="../section-heading.css?v=20260826-section-tab-standard">
+<script src="developer-syntax.js?v=20260828-localized-format-r1" defer></script>
 </head>
 <body>
 <nav class="language-switch" aria-label="언어"><a href="../en/chapter-11.html">English</a><span aria-hidden="true">·</span><strong>한국어</strong><span aria-hidden="true">·</span><a href="../ja/chapter-11.html">日本語</a></nav>
@@ -27,7 +28,7 @@
     MIR은 이전 값과 새 값을 구분하기 위해 값을 덮어쓰지 않고, 새 MIR 값이 생길 때마다 새로운 번호를 붙입니다. 이번 장에서는 이 규칙이 공통 예제에 어떻게 적용되는지만 살펴봅니다.
   </p>
 
-  <h2 id="source">값이 바뀌는 소스 문장</h2>
+  <h2 id="source" class="trace-section-heading"><span>값이 바뀌는 소스 문장</span></h2>
 
 <pre><code class="language-qora">function Next(value: int): int
 {
@@ -55,9 +56,9 @@ operation Work()
     선언 직후의 0번 원소는 <code>0</code>이고, 대입 뒤에는 <code>Next</code>가 반환한 값으로 바뀝니다. 조건문은 반드시 갱신된 두 번째 상태를 읽어야 합니다.
   </p>
 
-  <h2 id="idea">이름은 유지하고 값에 새 번호를 붙입니다</h2>
+  <h2 id="idea" class="trace-section-heading"><span>이름은 유지하고 값에 새 번호를 붙입니다</span></h2>
 
-<pre><code class="language-plaintext">Qora 소스
+<figure class="structure-figure"><svg class="structure-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 134" role="img" aria-labelledby="flow-chapter-11-1-title flow-chapter-11-1-desc"><title id="flow-chapter-11-1-title">Qora 소스</title><desc id="flow-chapter-11-1-desc">Qora 소스
 values = 처음 만든 배열
 values = 원소를 갱신한 배열
 
@@ -66,7 +67,7 @@ MIR
 %v6 = %v1의 0번 원소를 갱신한 새 배열 상태
 
 현재 values가 가리키는 값
-%v1  ──대입 이후──▶  %v6</code></pre>
+%v1  ──대입 이후──▶  %v6</desc><defs><marker id="flow-chapter-11-1-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0 L10 5 L0 10 Z" fill="#354bff"/></marker></defs><g font-family="Consolas, Malgun Gothic, sans-serif"><rect x="12" y="12" width="270" height="62" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="24" y="38" font-size="14" fill="#111936" text-anchor="start" font-weight="700">values · 대입 전</text><text x="24" y="60" font-size="14" fill="#111936" text-anchor="start">%v1 = [0]</text><rect x="354" y="12" width="270" height="62" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="366" y="38" font-size="14" fill="#152581" text-anchor="start" font-weight="700">values · 대입 후</text><text x="366" y="60" font-size="14" fill="#152581" text-anchor="start">%v6 = [%v5]</text><path d="M282 43.0 H318.0 V43.0 H352" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-11-1-arrow)"/><text x="12" y="118" font-size="14" fill="#111936" text-anchor="start">이름은 같고, 현재 가리키는 MIR 값이 바뀝니다.</text></g></svg></figure>
 
   <p>
     MIR의 <code>%v1</code>과 <code>%v6</code>은 서로 다른 소스 변수가 아닙니다.<br>
@@ -78,7 +79,7 @@ MIR
     각 ID는 한 번만 정의되며 나중에 다른 값으로 덮어쓰지 않습니다. 한 값이 한 번만 정의된다는 것은 SSA의 핵심 규칙입니다.
   </p>
 
-  <h2 id="next-values">Next 안에서는 입력과 결과가 분리됩니다</h2>
+  <h2 id="next-values" class="trace-section-heading"><span>Next 안에서는 입력과 결과가 분리됩니다</span></h2>
 
 <pre><code class="language-plaintext">function Next(value: int): int
 
@@ -97,7 +98,7 @@ return %v2</code></pre>
     따라서 <code>Next</code>의 <code>%v1</code>과 아래에 나오는 <code>Work</code>의 <code>%v1</code>은 서로 다른 값이며 충돌하지 않습니다.
   </p>
 
-  <h2 id="work-start">배열 선언에서 첫 상태가 만들어집니다</h2>
+  <h2 id="work-start" class="trace-section-heading"><span>배열 선언에서 첫 상태가 만들어집니다</span></h2>
 
 <pre><code class="language-plaintext">var values: int[] = [0];
 
@@ -116,7 +117,7 @@ return %v2</code></pre>
     쉽게 말해 storage는 “어느 배열 자리인가”를 나타내고, <code>%v1</code> 같은 SSA 값은 “그 배열이 지금 어떤 내용을 가지는가”를 나타냅니다. 이 구분은 12장에서 더 자세히 살펴봅니다.
   </p>
 
-  <h2 id="work-assignment">배열 대입은 새 배열 상태를 만듭니다</h2>
+  <h2 id="work-assignment" class="trace-section-heading"><span>배열 대입은 새 배열 상태를 만듭니다</span></h2>
 
 <pre><code class="language-plaintext">values[0] = Next(values[0]);
 
@@ -138,9 +139,9 @@ return %v2</code></pre>
     컴파일러는 값이 바뀐 시점을 잃지 않으면서도, 소스의 변수 이름은 하나로 유지할 수 있습니다.
   </p>
 
-  <h2 id="work-condition">조건문은 가장 최근 값을 읽습니다</h2>
+  <h2 id="work-condition" class="trace-section-heading"><span>조건문은 가장 최근 값을 읽습니다</span></h2>
 
-<pre><code class="language-plaintext">if (values[0] == 1)
+<figure class="structure-figure"><svg class="structure-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 408" role="img" aria-labelledby="flow-chapter-11-5-title flow-chapter-11-5-desc"><title id="flow-chapter-11-5-title">if (values[0] == 1)</title><desc id="flow-chapter-11-5-desc">if (values[0] == 1)
 
 현재 values = %v6
         │
@@ -152,7 +153,7 @@ return %v2</code></pre>
              두 값 비교 → %v10
                   │
                   ▼
-             %v10에 따라 분기</code></pre>
+             %v10에 따라 분기</desc><defs><marker id="flow-chapter-11-5-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0 L10 5 L0 10 Z" fill="#354bff"/></marker></defs><g font-family="Consolas, Malgun Gothic, sans-serif"><rect x="170" y="8" width="300" height="40" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="182" y="34" font-size="14" fill="#111936" text-anchor="start" font-weight="700">values → %v6</text><rect x="12" y="88" width="280" height="40" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="24" y="114" font-size="14" fill="#111936" text-anchor="start" font-weight="700">%v7 = 0</text><rect x="350" y="88" width="278" height="40" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="362" y="114" font-size="14" fill="#111936" text-anchor="start" font-weight="700">%v9 = 1</text><rect x="12" y="174" width="280" height="40" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="24" y="200" font-size="14" fill="#111936" text-anchor="start" font-weight="700">%v8 = %v6[%v7]</text><rect x="170" y="264" width="300" height="40" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="182" y="290" font-size="14" fill="#152581" text-anchor="start" font-weight="700">%v10 = (%v8 == %v9)</text><path d="M320.0 48 V68.0 H152.0 V86" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-11-5-arrow)"/><path d="M152.0 128 V151.0 H152.0 V172" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-11-5-arrow)"/><path d="M489.0 128 V196.0 H320.0 V262" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-11-5-arrow)"/><path d="M152.0 214 V239.0 H320.0 V262" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-11-5-arrow)"/><rect x="170" y="350" width="300" height="40" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="182" y="376" font-size="14" fill="#152581" text-anchor="start" font-weight="700">%v10에 따라 분기</text><path d="M320.0 304 V327.0 H320.0 V348" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-11-5-arrow)"/></g></svg></figure>
 
   <p>
     조건식은 처음 배열 상태 <code>%v1</code>이 아니라 최신 상태 <code>%v6</code>을 읽습니다.<br>
@@ -160,7 +161,7 @@ return %v2</code></pre>
     따라서 조건 비교 결과도 미리 <code>true</code>로 고정하지 않으며, 실행할 때 계산되는 <code>%v10</code>이 어느 block으로 이동할지 결정합니다.
   </p>
 
-  <h2 id="definition">정리</h2>
+  <h2 id="definition" class="trace-section-heading"><span>정리</span></h2>
 
   <div class="callout good">
     <span class="h">같은 이름, 서로 다른 시점의 값</span>

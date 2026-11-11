@@ -4,11 +4,12 @@ gate x a { U(pi, 0, pi) a; gphase(-pi/2); }
 gate y a { U(pi, pi/2, pi/2) a; gphase(-pi/2); }
 gate z a { p(pi) a; }
 gate h a { U(pi/2, 0, pi) a; gphase(-pi/4); }
-gate s a { pow(1/2) @ z a; }
-gate sdg a { inv @ pow(1/2) @ z a; }
-gate t a { pow(1/2) @ s a; }
-gate tdg a { inv @ pow(1/2) @ s a; }
-gate sx a { pow(1/2) @ x a; }
+// Fractional powers need a floating-point value: integer 1/2 evaluates to zero.
+gate s a { pow(0.5) @ z a; }
+gate sdg a { inv @ pow(0.5) @ z a; }
+gate t a { pow(0.5) @ s a; }
+gate tdg a { inv @ pow(0.5) @ s a; }
+gate sx a { pow(0.5) @ x a; }
 gate rx(theta) a { U(theta, -pi/2, pi/2) a; gphase(-theta/2); }
 gate ry(theta) a { U(theta, 0, 0) a; gphase(-theta/2); }
 gate rz(lambda) a { gphase(-lambda/2); U(0, 0, lambda) a; }

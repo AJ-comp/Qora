@@ -6,6 +6,124 @@ h1:focus {
     outline: none;
 }
 
+/* Page styles are owned by Qora; Blueprint v4's prefixed utilities are internal to its components. */
+.playground-layout {
+    min-height: 100vh;
+    background: var(--background, #fff);
+    color: var(--foreground, #111827);
+}
+
+.playground {
+    max-width: 72rem;
+    margin-inline: auto;
+    padding: 1.5rem;
+}
+
+.playground > * + * {
+    margin-top: 1.5rem;
+}
+
+.playground-header > * + * {
+    margin-top: 0.25rem;
+}
+
+.playground-title {
+    font-size: 1.875rem;
+    line-height: 2.25rem;
+    font-weight: 700;
+    letter-spacing: -0.025em;
+}
+
+.playground-description,
+.playground-status,
+.playground-hint,
+.playground-token-count,
+.playground-token-kind {
+    color: var(--muted-foreground, #64748b);
+}
+
+.playground-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 1.5rem;
+}
+
+@media (min-width: 768px) {
+    .playground-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+.playground-actions,
+.playground-result-heading,
+.playground-tabs,
+.playground-token-list {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.playground-tabs {
+    gap: 0.25rem;
+    margin-bottom: 0.75rem;
+}
+
+.playground-token-list {
+    gap: 0.375rem;
+}
+
+.playground-status,
+.playground-error,
+.playground-token-count {
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+}
+
+.playground-hint,
+.playground-output,
+.playground .playground-token {
+    font-size: 0.75rem;
+    line-height: 1rem;
+}
+
+.playground-error {
+    color: var(--destructive, #b91c1c);
+}
+
+.playground-diagnostics {
+    margin-bottom: 0.75rem;
+}
+
+.playground-diagnostics > * + * {
+    margin-top: 0.5rem;
+}
+
+.playground-output,
+.playground .playground-token {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.playground-output {
+    overflow: auto;
+    white-space: pre;
+    border-radius: 0.375rem;
+    background: var(--muted, #f1f5f9);
+    padding: 0.75rem;
+}
+
+.playground-output-wrap {
+    white-space: pre-wrap;
+}
+
+.playground-token-count {
+    font-weight: 400;
+}
+
+.playground-token-kind {
+    margin-left: 0.375rem;
+}
+
 a, .btn-link {
     color: #0071c1;
 }

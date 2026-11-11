@@ -87,23 +87,23 @@ public sealed class HirTypeBoundaryTests
         var callable = Assert.Single(mir.Program.Callables);
         Assert.Equal(MirType.Array(QType.Int, 1), callable.RequireValue(comparison.Left).Type);
         Assert.Equal(MirType.Array(QType.Int, 2), callable.RequireValue(comparison.Right).Type);
-        Assert.Equal(MirType.Scalar(QType.Bit), callable.RequireValue(comparison.Result.Id).Type);
+        Assert.Equal(MirType.Scalar(QType.Bool), callable.RequireValue(comparison.Result.Id).Type);
     }
 
     [Fact]
-    public void ExistingLooseAssignmentsAndIntegralConditionsRemainAccepted() =>
+    public void OtherExistingConversionsAndExplicitConditionsRemainAccepted() =>
         Compiler.Accepts("""
             operation Main() {
-                const c: int = 0.5;
-                var i: int = 0.5;
-                i = 0.5;
+                const c: int = 1;
+                var i: int = 0;
+                i = c;
                 var b: bit = 2;
                 var a: angle = 1;
-                var ints: int[] = [0.5];
+                var ints: int[] = [1];
                 var bits: bit[] = [2];
                 var angles: angle[] = [1];
-                ints[0] = 0.5;
-                if (i) {
+                ints[0] = i;
+                if (i != 0) {
                     i = 1;
                 }
             }
@@ -164,11 +164,12 @@ public sealed class HirTypeBoundaryTests
         var compilation = Compiler.Compile("""
             operation Main() {
                 use q = Qubit[1];
-                var i: int = true;
+                var source: bit = 1;
+                var i: int = source;
                 var f: float = i;
                 var a: angle = f;
                 var b: bit = 1;
-                if (i) {}
+                if (i != 0) {}
                 Rx(1, q[0]);
             }
             """);

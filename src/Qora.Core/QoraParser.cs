@@ -73,6 +73,16 @@ public static class QoraParser
         string? sourcePath = null)
     {
         var compilationId = CompilationId.New();
+        var document = new SourceDocumentSnapshot(
+            new SourceDocumentRef(
+                compilationId,
+                new CompilationRevision(0),
+                new SourceDocumentId(0)),
+            source ?? string.Empty,
+            sourcePath);
+        if (OperatingSystem.IsBrowser())
+            return ParseOnCurrentThread(document);
+
         SyntaxParseProduct? parsed = null;
         Exception? failure = null;
         var worker = new Thread(
@@ -80,14 +90,7 @@ public static class QoraParser
             {
                 try
                 {
-                    parsed = ParseOnCurrentThread(
-                        new SourceDocumentSnapshot(
-                            new SourceDocumentRef(
-                                compilationId,
-                                new CompilationRevision(0),
-                                new SourceDocumentId(0)),
-                            source ?? string.Empty,
-                            sourcePath));
+                    parsed = ParseOnCurrentThread(document);
                 }
                 catch (Exception ex)
                 {

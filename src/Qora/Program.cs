@@ -67,6 +67,12 @@ if (args.Contains("--json"))
         var resolvedValidation = compilation.Hir.ResolvedValidation;
         var mir = compilation.Mir;
         var openQasm = compilation.Targets.OpenQasm;
+        var entryResult = openQasm is null ? null : new
+        {
+            type = openQasm.Source.Program.EntryPoint.ReturnType?.ElementType.ToString().ToLowerInvariant() ?? "void",
+            outputName = openQasm.Program.EntryOutput?.EmittedName
+                ?? throw new InvalidOperationException("OpenQASM entry output is missing."),
+        };
         var diagnostics = compilation.Diagnostics
             .Select(diagnostic =>
             {
@@ -95,6 +101,7 @@ if (args.Contains("--json"))
             {
                 success = compilation.Succeeded,
                 qasm = openQasm?.Text ?? string.Empty,
+                entryResult,
                 errors = diagnostics,
                 ast = compilation.Sources.EntrySyntax.AstText,
                 ir = resolved is null
@@ -117,6 +124,7 @@ if (args.Contains("--json"))
             {
                 success = compilation.Succeeded,
                 qasm = openQasm?.Text ?? string.Empty,
+                entryResult,
                 errors = diagnostics,
             }));
         }

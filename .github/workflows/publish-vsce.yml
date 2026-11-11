@@ -45,7 +45,10 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
+
+      - name: Install extension packaging dependencies
+        run: npm ci --prefix vscode
 
       - id: check
         shell: bash
@@ -53,7 +56,7 @@ jobs:
           local_v="$(node -p "require('./vscode/package.json').version")"
           # Latest version currently on the Marketplace ('' if the extension is not published yet or the
           # query fails — which then counts as "different" so the first publish still goes through).
-          meta="$(npx --yes @vscode/vsce show qora-lang.qora-language --json 2>/dev/null || echo '{}')"
+          meta="$(./vscode/node_modules/.bin/vsce show qora-lang.qora-language --json 2>/dev/null || echo '{}')"
           published_v="$(printf '%s' "$meta" | node -e "let s='';process.stdin.on('data',c=>s+=c).on('end',()=>{try{process.stdout.write(((JSON.parse(s).versions||[])[0]||{}).version||'')}catch(e){process.stdout.write('')}})")"
           echo "local='$local_v'  marketplace='$published_v'"
           if [ "$local_v" != "$published_v" ]; then
@@ -101,7 +104,10 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
+
+      - name: Install extension packaging dependencies
+        run: npm ci
 
       # Self-contained single-file CLI, built natively on each target's own runner (most reliable for
       # single-file apphost generation). The Janglim engine comes from the published NuGet package.
@@ -119,11 +125,11 @@ jobs:
         run: chmod +x "bin/${{ matrix.target }}/Qora"
 
       - name: Package .vsix
-        run: npx --yes @vscode/vsce package --target ${{ matrix.target }} -o "qora-${{ matrix.target }}.vsix"
+        run: npx --no-install vsce package --target ${{ matrix.target }} -o "qora-${{ matrix.target }}.vsix"
 
       - name: Publish to Marketplace
         if: ${{ !inputs.dry_run }}
-        run: npx --yes @vscode/vsce publish --packagePath "qora-${{ matrix.target }}.vsix"
+        run: npx --no-install vsce publish --packagePath "qora-${{ matrix.target }}.vsix"
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
 

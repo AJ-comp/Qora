@@ -16,6 +16,7 @@ internal static class AstToHirLowering
             "Qubit",
             "int",
             "bit",
+            "bool",
             "float",
             "angle",
         };
@@ -180,17 +181,13 @@ internal static class AstToHirLowering
             BlockSpan(statements)
             ?? AstExpressionLowering.SpanOf(syntax, session));
 
-        QType? returnType = null;
-        if (isFunction)
-        {
-            var keyword = syntax.Items
-                .OfType<AstTerminal>()
-                .Select(TerminalText)
-                .FirstOrDefault(TypeKeywords.Contains);
-            returnType = ParseType(keyword)
-                ?? throw QInternal(
-                    "received a function without an explicit return type");
-        }
+        var returnKeyword = syntax.Items
+            .OfType<AstTerminal>()
+            .Select(TerminalText)
+            .FirstOrDefault(TypeKeywords.Contains);
+        var returnType = ParseType(returnKeyword);
+        if (isFunction && returnType is null)
+            throw QInternal("received a function without an explicit return type");
 
         return session.Callable(
             CallableName(syntax),
@@ -276,9 +273,9 @@ internal static class AstToHirLowering
             "While" => LowerWhile(syntax, session, span),
             "Repeat" => LowerRepeat(syntax, session, span),
             "Return" => session.Return(
-                LowerValueExpression(
-                    ExpressionOf(syntax),
-                    session),
+                ExpressionOf(syntax) is { } returnedExpression
+                    ? LowerValueExpression(returnedExpression, session)
+                    : null,
                 span),
             _ => throw QInternal(
                 $"found unsupported statement AST node `{syntax.Name}`"),
@@ -350,7 +347,7 @@ internal static class AstToHirLowering
             statementSpan);
     }
 
-    private static HirArgument LowerArgument(
+    internal static HirArgument LowerArgument(
         AstSymbol syntax,
         AstToHirLoweringSession session)
     {
@@ -701,6 +698,7 @@ internal static class AstToHirLowering
             "Qubit" => QType.Qubit,
             "int" => QType.Int,
             "bit" => QType.Bit,
+            "bool" => QType.Bool,
             "float" => QType.Float,
             "angle" => QType.Angle,
             _ => null,

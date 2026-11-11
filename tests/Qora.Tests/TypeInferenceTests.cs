@@ -68,16 +68,14 @@ public class TypeInferenceTests
     }
 
     [Fact]
-    public void UntypedBooleanLiteralIsBit()
+    public void UntypedBooleanLiteralIsBool()
     {
         var compilation = AssertVariableType(
             "operation Main(){ use q=Qubit[1]; var truth = true; if (truth) { X(q[0]); } }",
             "truth",
-            QType.Bit);
+            QType.Bool);
 
-        Assert.Contains(
-            TargetValueTypes(compilation),
-            type => type is MirQasmBitType { Width: 1 });
+        AssertTargetScalar(compilation, MirQasmScalarKind.Bool);
     }
 
     [Theory]
@@ -93,6 +91,10 @@ public class TypeInferenceTests
         "function giveAngle(): angle { return pi; }\noperation Main(){ var result = giveAngle(); }",
         QType.Angle,
         MirQasmScalarKind.Angle)]
+    [InlineData(
+        "function giveBool(): bool { return true; }\noperation Main(){ var result = giveBool(); }",
+        QType.Bool,
+        MirQasmScalarKind.Bool)]
     public void UntypedVarTakesAFunctionReturnType(
         string source,
         QType expectedSourceType,

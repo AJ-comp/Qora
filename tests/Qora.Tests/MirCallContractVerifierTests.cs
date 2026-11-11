@@ -29,9 +29,9 @@ public sealed class MirCallContractVerifierTests
         var entry = new MirCallable(
             new MirCallableId(0),
             "Main",
+            kind: MirCallableKind.Operation,
             returnType: null,
             parameters: Array.Empty<IMirParameter>(),
-            entryBlock,
             new[] { entryBlock },
             origin);
         var program = context.Program(entry, new[] { entry });
@@ -123,6 +123,7 @@ public sealed class MirCallContractVerifierTests
         return new MirCallable(
             callableId,
             name,
+            kind: MirCallableKind.Operation,
             returnType: null,
             parameters: new IMirParameter[]
             {
@@ -132,7 +133,6 @@ public sealed class MirCallContractVerifierTests
                     parameterStorage,
                     minimumLength: minimumLength),
             },
-            entryBlock: entryBlock,
             blocks: new[] { entryBlock },
             origin);
     }
@@ -197,9 +197,9 @@ public sealed class MirCallContractVerifierTests
         return new MirCallable(
             callableId,
             "Main",
+            kind: MirCallableKind.Operation,
             returnType: null,
             parameters: Array.Empty<IMirParameter>(),
-            entryBlock: entryBlock,
             blocks: new[] { entryBlock },
             origin);
     }
@@ -246,6 +246,7 @@ public sealed class MirCallContractVerifierTests
         return new MirCallable(
             callableId,
             "Forward",
+            kind: MirCallableKind.Operation,
             returnType: null,
             parameters: new IMirParameter[]
             {
@@ -255,7 +256,6 @@ public sealed class MirCallContractVerifierTests
                     parameterStorage,
                     minimumLength: minimumLength),
             },
-            entryBlock: entryBlock,
             blocks: new[] { entryBlock },
             origin);
     }
@@ -276,9 +276,9 @@ public sealed class MirCallContractVerifierTests
         return new MirCallable(
             callableId,
             "Main",
+            kind: MirCallableKind.Operation,
             returnType: null,
             parameters: Array.Empty<IMirParameter>(),
-            entryBlock: entryBlock,
             blocks: new[] { entryBlock },
             origin);
     }

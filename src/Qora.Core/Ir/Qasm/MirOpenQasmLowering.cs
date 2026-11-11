@@ -75,6 +75,7 @@ internal static class MirOpenQasmLowering
         private readonly IReadOnlyDictionary<MirCallableId, MirQasmCallableId> _targetCallables;
         private readonly IReadOnlyDictionary<MirCallableId, string> _callableNames;
         private readonly HiddenArrayPlan _hiddenArrays;
+        private readonly NameAllocator _names;
 
         public ProgramLowerer(MirSnapshot source)
         {
@@ -96,6 +97,10 @@ internal static class MirOpenQasmLowering
             _targetCallables = targetCallables;
             _callableNames = AllocateCallableNames(source.Program.Callables);
             _hiddenArrays = HiddenArrayPlan.Build(source);
+            // Braket's interpreter can alias a def-local binding with a caller binding of the
+            // same spelling. Globally distinct spellings avoid that interpreter defect without
+            // changing the target's scoped IDs, source names, or evaluation order.
+            _names = new NameAllocator(QoraGates.QasmReserved.Concat(_callableNames.Values));
         }
 
         public MirOpenQasmTargetProgram Lower()
@@ -106,7 +111,8 @@ internal static class MirOpenQasmLowering
                 entrySource,
                 _targetCallables,
                 _callableNames,
-                _hiddenArrays);
+                _hiddenArrays,
+                _names);
             var entryBody = entryLowerer.LowerEntry();
 
             var definitions = new List<MirQasmCallableDefinition>(
@@ -121,7 +127,8 @@ internal static class MirOpenQasmLowering
                     callable,
                     _targetCallables,
                     _callableNames,
-                    _hiddenArrays);
+                    _hiddenArrays,
+                    _names);
                 var definition = lowerer.LowerDefinition();
 
                 definitions.Add(definition);
@@ -182,7 +189,8 @@ internal static class MirOpenQasmLowering
             MirCallable callable,
             IReadOnlyDictionary<MirCallableId, MirQasmCallableId> targetCallables,
             IReadOnlyDictionary<MirCallableId, string> callableNames,
-            HiddenArrayPlan hiddenArrays)
+            HiddenArrayPlan hiddenArrays,
+            NameAllocator names)
         {
             _program = snapshot.Program;
             _callable = _program.RequireCallable(callable);
@@ -192,14 +200,7 @@ internal static class MirOpenQasmLowering
             _controlFlow = snapshot.Analyses.ControlFlow(callable);
             _regions = snapshot.Analyses.ControlRegions(callable);
             _storageProvenance = snapshot.Analyses.StorageProvenance(callable);
-
-            var targetReserved = callable.Id == _program.EntryPoint.Id
-                ? QoraGates.QasmReserved
-                : QoraGates.QasmKeywords;
-            var reserved = new HashSet<string>(
-                targetReserved.Concat(callableNames.Values),
-                StringComparer.Ordinal);
-            _names = new NameAllocator(reserved);
+            _names = names;
             PrepareBindings();
         }
 
@@ -207,7 +208,20 @@ internal static class MirOpenQasmLowering
         {
             if (_callable.Id != _program.EntryPoint.Id)
                 throw Internal("a definition lowerer was asked for an entry point");
-            return LowerBody();
+
+            var returnType = _callable.ReturnType;
+            var outputType = returnType is null
+                ? new MirQasmScalarType(MirQasmScalarKind.Int)
+                : returnType.Value.ElementType == QType.Angle
+                    ? new MirQasmScalarType(MirQasmScalarKind.Float)
+                    : TargetType(returnType.Value);
+            var output = new MirQasmValueDeclarationStatement(
+                NextDeclaration(),
+                _names.Fresh(returnType is null ? "__qora_completed" : "__qora_result"),
+                outputType,
+                isOutput: true);
+            _prologue.Add(output);
+            return LowerBody(output);
         }
 
         public MirQasmCallableDefinition LowerDefinition()
@@ -225,7 +239,8 @@ internal static class MirOpenQasmLowering
                 body);
         }
 
-        private IReadOnlyList<MirQasmStatement> LowerBody()
+        private IReadOnlyList<MirQasmStatement> LowerBody(
+            MirQasmValueDeclarationStatement? entryOutput = null)
         {
             RejectOversizedArrayComparisonExpansions();
 
@@ -252,7 +267,21 @@ internal static class MirOpenQasmLowering
                     $"{string.Join(", ", missing)}");
             }
 
-            if (_returnStorage is MirQasmDeclarationId returnStorage)
+            if (entryOutput is not null)
+            {
+                // Void has no language result. Its completion marker prevents the execution
+                // engine from treating internal measurements as implicit program outputs.
+                MirQasmExpression value = _returnStorage is MirQasmDeclarationId result
+                    ? new MirQasmDeclarationReferenceExpression(result)
+                    : new MirQasmLiteralExpression("1");
+                if (_callable.ReturnType is { ElementType: QType.Angle })
+                    value = new MirQasmFloatCastExpression(value);
+                flow.Add(
+                    new MirQasmAssignmentStatement(
+                        new MirQasmDeclarationReferenceExpression(entryOutput.Declaration),
+                        value));
+            }
+            else if (_returnStorage is MirQasmDeclarationId returnStorage)
             {
                 flow.Add(
                     new MirQasmReturnStatement(
@@ -305,7 +334,7 @@ internal static class MirOpenQasmLowering
             PrepareLocalQubitBindings();
             PrepareScalarValues();
             PrepareEdgeTemporaries();
-            PrepareFunctionReturnState();
+            PrepareReturnState();
         }
 
         private void PrepareOriginalParameters()
@@ -557,18 +586,18 @@ internal static class MirOpenQasmLowering
             }
         }
 
-        private void PrepareFunctionReturnState()
+        private void PrepareReturnState()
         {
-            if (_callable.ReturnType is not MirType returnType) return;
-
-            var returnStorage = NextDeclaration();
-            _returnStorage = returnStorage;
-            _prologue.Add(
-                new MirQasmValueDeclarationStatement(
-                    returnStorage,
-                    _names.Fresh("ret"),
-                    TargetType(returnType),
-                    DefaultLiteral(returnType.ElementType)));
+            if (_callable.ReturnType is MirType returnType)
+            {
+                var returnStorage = NextDeclaration();
+                _returnStorage = returnStorage;
+                _prologue.Add(
+                    new MirQasmValueDeclarationStatement(
+                        returnStorage,
+                        _names.Fresh("ret"),
+                        TargetType(returnType)));
+            }
 
             // The flag is needed only to propagate a return across one or more target while scopes.
             // Keeping the decision structural avoids a source-language heuristic.
@@ -654,10 +683,7 @@ internal static class MirOpenQasmLowering
                         throw UnsupportedCfg(
                             $"loop {nested.Header} reached an unowned join");
                     }
-                    output.Add(
-                        new MirQasmWhileStatement(
-                            new MirQasmLiteralExpression("true"),
-                            loopBody));
+                    EmitStructuredLoop(loopBody, output);
 
                     if (nested.NormalExit is not MirBlockId loopExit)
                         return new PathOutcome(
@@ -744,6 +770,81 @@ internal static class MirOpenQasmLowering
                             $"unknown MIR terminator {block.Terminator.GetType().Name}");
                 }
             }
+        }
+
+        private void EmitStructuredLoop(
+            IReadOnlyList<MirQasmStatement> body,
+            List<MirQasmStatement> output)
+        {
+            // A measurement-dependent break currently discards sibling shots in Braket's
+            // interpreter. A loop-local flag expresses the same control flow with ordinary
+            // assignments and conditions; it neither repeats predicates nor adds measurements.
+            var active = NextDeclaration();
+            _prologue.Add(new MirQasmValueDeclarationStatement(
+                active,
+                _names.Fresh("loop_active"),
+                new MirQasmScalarType(MirQasmScalarKind.Int)));
+            var activeReference = new MirQasmDeclarationReferenceExpression(active);
+            var activeCondition = new MirQasmBinaryExpression(
+                MirQasmBinaryOperator.Equal,
+                activeReference,
+                new MirQasmLiteralExpression("1"));
+            var rewrittenBody = ReplaceLoopBreaks(
+                body, 0, activeReference, activeCondition, out _);
+
+            // Reset on every dynamic entry, including re-entry to a nested loop.
+            output.Add(new MirQasmAssignmentStatement(
+                activeReference, new MirQasmLiteralExpression("1")));
+            output.Add(new MirQasmWhileStatement(activeCondition, rewrittenBody));
+        }
+
+        private static IReadOnlyList<MirQasmStatement> ReplaceLoopBreaks(
+            IReadOnlyList<MirQasmStatement> statements,
+            int start,
+            MirQasmDeclarationReferenceExpression active,
+            MirQasmExpression activeCondition,
+            out bool mayExit)
+        {
+            var result = new List<MirQasmStatement>();
+            mayExit = false;
+            for (var index = start; index < statements.Count; index++)
+            {
+                switch (statements[index])
+                {
+                    case MirQasmBreakStatement:
+                        result.Add(new MirQasmAssignmentStatement(
+                            active, new MirQasmLiteralExpression("0")));
+                        mayExit = true;
+                        return result;
+
+                    case MirQasmIfStatement conditional:
+                        var thenBody = ReplaceLoopBreaks(
+                            conditional.Then, 0, active, activeCondition, out var thenExits);
+                        var elseBody = ReplaceLoopBreaks(
+                            conditional.Else, 0, active, activeCondition, out var elseExits);
+                        result.Add(new MirQasmIfStatement(
+                            conditional.Condition, thenBody, elseBody));
+                        if (thenExits || elseExits)
+                        {
+                            mayExit = true;
+                            if (index + 1 < statements.Count)
+                            {
+                                var continuation = ReplaceLoopBreaks(
+                                    statements, index + 1, active, activeCondition, out _);
+                                result.Add(new MirQasmIfStatement(activeCondition, continuation));
+                            }
+                            return result;
+                        }
+                        break;
+
+                    default:
+                        // Nested loops have already been rewritten with their own flag.
+                        // Their normal exits must never disable this enclosing loop.
+                        result.Add(statements[index]);
+                        break;
+                }
+            }
+            return result;
         }
 
         private PathOutcome EmitBranch(
@@ -987,19 +1088,15 @@ internal static class MirOpenQasmLowering
             MirNaturalLoopRegion? breakableLoop,
             List<MirQasmStatement> output)
         {
-            if (returned.Value is not MirValueId returnedValue)
+            if (returned.Value is MirValueId returnedValue)
             {
-                return new PathOutcome(
-                    PathOutcomeKind.Terminated,
-                    ContainsReturn: false);
+                if (_returnStorage is not MirQasmDeclarationId returnStorage)
+                    throw Internal($"callable `{_callable.Name}` has no return storage");
+                output.Add(
+                    new MirQasmAssignmentStatement(
+                        new MirQasmDeclarationReferenceExpression(returnStorage),
+                        ValueExpression(returnedValue)));
             }
-            if (_returnStorage is not MirQasmDeclarationId returnStorage)
-                throw Internal($"function `{_callable.Name}` has no return storage");
-
-            output.Add(
-                new MirQasmAssignmentStatement(
-                    new MirQasmDeclarationReferenceExpression(returnStorage),
-                    ValueExpression(returnedValue)));
 
             if (_returnDone is MirQasmDeclarationId done)
             {
@@ -1232,7 +1329,7 @@ internal static class MirOpenQasmLowering
             }
         }
 
-        private MirQasmQuantumApplyStatement LowerQuantumApply(
+        private MirQasmStatement LowerQuantumApply(
             MirQuantumApply apply)
         {
             var allArguments = apply.Operands
@@ -1256,6 +1353,14 @@ internal static class MirOpenQasmLowering
                             apply.Origin);
                     }
                     allArguments.AddRange(HiddenArgumentsFor(user.Callable));
+                    if (apply.Result is MirValue result)
+                    {
+                        return new MirQasmAssignmentStatement(
+                            ValueExpression(result.Id),
+                            new MirQasmFunctionCallExpression(
+                                new MirQasmUserFunctionTarget(TargetCallable(user.Callable)),
+                                allArguments));
+                    }
                     return new MirQasmQuantumApplyStatement(
                         new MirQasmUserQuantumTarget(TargetCallable(user.Callable)),
                         Array.Empty<MirQasmExpression>(),
@@ -1453,7 +1558,7 @@ internal static class MirOpenQasmLowering
 
             if (leftLength != rightLength)
             {
-                var result = binary.Operator == MirBinaryOperator.Equal ? "0" : "1";
+                var result = binary.Operator == MirBinaryOperator.Equal ? "false" : "true";
                 Assign(binary.Result.Id, new MirQasmLiteralExpression(result), output);
                 return;
             }
@@ -1500,7 +1605,7 @@ internal static class MirOpenQasmLowering
             if (length == 0)
             {
                 return new MirQasmLiteralExpression(
-                    comparison == MirBinaryOperator.Equal ? "1" : "0");
+                    comparison == MirBinaryOperator.Equal ? "true" : "false");
             }
 
             var elementComparison = BinaryOperator(comparison);
@@ -1832,13 +1937,13 @@ internal static class MirOpenQasmLowering
                 QType.Int => MirQasmScalarKind.Int,
                 QType.Float => MirQasmScalarKind.Float,
                 QType.Angle => MirQasmScalarKind.Angle,
-                QType.Bit => MirQasmScalarKind.Bool,
+                QType.Bool => MirQasmScalarKind.Bool,
                 _ => throw Internal(
                     $"Qora type `{type}` is not an OpenQASM classical scalar"),
             });
 
     private static MirQasmLiteralExpression DefaultLiteral(QType type) =>
-        new(type is QType.Float or QType.Angle ? "0.0" : "0");
+        new(type == QType.Bool ? "false" : type is QType.Float or QType.Angle ? "0.0" : "0");
 
     private static InvalidOperationException Internal(string detail) =>
         new($"QINTERNAL: MIR OpenQASM lowering: {detail}");

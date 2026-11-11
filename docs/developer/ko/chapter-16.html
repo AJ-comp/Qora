@@ -4,8 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>16. MirSnapshot과 분석 기준 — Qora 컴파일러 개발자 매뉴얼</title>
-<link rel="stylesheet" href="developer.css">
-<script src="developer-syntax.js" defer></script>
+<link rel="stylesheet" href="developer.css?v=20261004-svg-trees-r56">
+<link rel="stylesheet" href="../section-heading.css?v=20260826-section-tab-standard">
+<script src="developer-syntax.js?v=20260828-localized-format-r1" defer></script>
 </head>
 <body>
 <nav class="language-switch" aria-label="언어"><a href="../en/chapter-16.html">English</a><span aria-hidden="true">·</span><strong>한국어</strong><span aria-hidden="true">·</span><a href="../ja/chapter-16.html">日本語</a></nav>
@@ -27,35 +28,79 @@
     이번 장에서는 snapshot이 프로그램과 분석을 같은 기준에 묶는다는 한 가지 역할만 살펴봅니다.
   </p>
 
-  <h2 id="snapshot">MirSnapshot이 현재 MIR 상태를 나타냅니다</h2>
+  <h2 id="snapshot" class="trace-section-heading"><span>MirSnapshot이 현재 MIR 상태를 나타냅니다</span></h2>
 
   <p>
     <code>MirProgram</code>이 실행 구조 자체라면, <code>MirSnapshot</code>은 그 프로그램과 해당 프로그램 전용 분석 창구를 함께 보관하는 불변 결과입니다.<br>
     HIR에서 처음 내려온 프로그램은 <code>MirSnapshot.CreateLowered(program)</code>으로 최초 snapshot이 됩니다.
   </p>
 
-<pre><code class="language-plaintext">MirSnapshot
-├─ Program
-│  ├─ EntryPoint: Work
-│  └─ Callables: [Next, Work]
-└─ Analyses: 이 Program 전용 분석 창구</code></pre>
+<figure class="structure-figure"><div class="item-tree-diagram item-tree-diagram--native" data-item-tree="structure-chapter-16-0" style="--item-tree-width:541px">
+  <svg class="native-item-tree" xmlns="http://www.w3.org/2000/svg" width="541" height="258" viewBox="0 0 541 258" role="img" aria-labelledby="structure-chapter-16-0-title structure-chapter-16-0-desc">
+    <title id="structure-chapter-16-0-title">MirSnapshot</title>
+    <desc id="structure-chapter-16-0-desc">MirSnapshot
+├─ Program ──▶ MirProgram
+│  ├─ Callables
+│  │  ├─ [0] ──▶ MirCallable Next
+│  │  └─ [1] ──▶ MirCallable Work
+│  └─ EntryPoint ──▶ Callables[1]과 같은 MirCallable Work 객체
+└─ Analyses ──▶ MirAnalysisStore
+   └─ _program ──▶ Program과 같은 MirProgram 객체</desc>
+    <path class="native-item-tree__guides" d="M 22 34 V 201 M 22 51 H 40 M 22 201 H 40 M 50 64 V 171 M 50 81 H 68 M 50 171 H 68 M 78 94 V 141 M 78 111 H 96 M 78 141 H 96 M 50 214 V 231 M 50 231 H 68"/>
+    <text x="16" y="26" data-tree-depth="0" data-tree-row="0" data-continuation="false"><tspan class="native-item-tree__field">MirSnapshot</tspan></text>
+    <text x="44" y="56" data-tree-depth="1" data-tree-row="1" data-continuation="false"><tspan class="native-item-tree__field">Program</tspan><tspan class="native-item-tree__wire"> → </tspan><tspan class="native-item-tree__reference">MirProgram</tspan></text>
+    <text x="72" y="86" data-tree-depth="2" data-tree-row="2" data-continuation="false"><tspan class="native-item-tree__field">Callables</tspan></text>
+    <text x="100" y="116" data-tree-depth="3" data-tree-row="3" data-continuation="false">[0]<tspan class="native-item-tree__wire"> → </tspan><tspan class="native-item-tree__reference">MirCallable Next</tspan></text>
+    <text x="100" y="146" data-tree-depth="3" data-tree-row="4" data-continuation="false">[1]<tspan class="native-item-tree__wire"> → </tspan><tspan class="native-item-tree__reference">MirCallable Work</tspan></text>
+    <text x="72" y="176" data-tree-depth="2" data-tree-row="5" data-continuation="false">EntryPoint<tspan class="native-item-tree__wire"> → </tspan><tspan class="native-item-tree__reference">Callables[1]과 같은 MirCallable Work 객체</tspan></text>
+    <text x="44" y="206" data-tree-depth="1" data-tree-row="6" data-continuation="false"><tspan class="native-item-tree__field">Analyses</tspan><tspan class="native-item-tree__wire"> → </tspan><tspan class="native-item-tree__reference">MirAnalysisStore</tspan></text>
+    <text x="72" y="236" data-tree-depth="2" data-tree-row="7" data-continuation="false">_program<tspan class="native-item-tree__wire"> → </tspan><tspan class="native-item-tree__reference">Program과 같은 MirProgram 객체</tspan></text>
+  </svg>
+</div>
+<div class="item-tree-legend" data-legend-for="structure-chapter-16-0" aria-label="그림 범례">
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">→</span><span>객체 참조</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">[]</span><span>빈 목록</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">{}</span><span>비어 있는 집합 또는 맵</span></span>
+</div></figure>
 
   <p>
     <code>Program</code>은 HIR에서 내려온 MIR 실행 구조입니다.<br>
     <code>Analyses</code>는 바로 그 <code>Program</code>을 기준으로 필요한 MIR 분석을 제공합니다.
   </p>
 
-  <h2 id="analysis-store">Snapshot은 MIR 분석의 기준이 됩니다</h2>
+  <h2 id="analysis-store" class="trace-section-heading"><span>Snapshot은 MIR 분석의 기준이 됩니다</span></h2>
 
   <p>
     <code>MirSnapshot</code>에는 이 프로그램을 분석하는 창구인 <code>Analyses</code>가 있습니다.<br>
     예를 들어 <code>Work</code>의 제어 흐름을 요청하면 바로 이 snapshot의 <code>Work</code>를 기준으로 CFG를 구합니다.
   </p>
 
-<pre><code class="language-plaintext">MirSnapshot
-├─ Program: [Next, Work]
-└─ Analyses
-   └─ Work의 제어 흐름 → Work의 CFG</code></pre>
+<figure class="structure-figure"><div class="item-tree-diagram item-tree-diagram--native" data-item-tree="structure-chapter-16-1" style="--item-tree-width:376px">
+  <svg class="native-item-tree" xmlns="http://www.w3.org/2000/svg" width="376" height="228" viewBox="0 0 376 228" role="img" aria-labelledby="structure-chapter-16-1-title structure-chapter-16-1-desc">
+    <title id="structure-chapter-16-1-title">MirSnapshot</title>
+    <desc id="structure-chapter-16-1-desc">MirSnapshot
+├─ Program ──▶ MirProgram
+│  └─ Callables
+│     └─ [1] ──▶ MirCallable Work
+└─ Analyses ──▶ MirAnalysisStore
+   └─ ControlFlow(Program.Callables[1])
+      └─ 반환값 ──▶ MirControlFlowSnapshot</desc>
+    <path class="native-item-tree__guides" d="M 22 34 V 141 M 22 51 H 40 M 22 141 H 40 M 50 64 V 81 M 50 81 H 68 M 78 94 V 111 M 78 111 H 96 M 50 154 V 171 M 50 171 H 68 M 78 184 V 201 M 78 201 H 96"/>
+    <text x="16" y="26" data-tree-depth="0" data-tree-row="0" data-continuation="false"><tspan class="native-item-tree__field">MirSnapshot</tspan></text>
+    <text x="44" y="56" data-tree-depth="1" data-tree-row="1" data-continuation="false"><tspan class="native-item-tree__field">Program</tspan><tspan class="native-item-tree__wire"> → </tspan><tspan class="native-item-tree__reference">MirProgram</tspan></text>
+    <text x="72" y="86" data-tree-depth="2" data-tree-row="2" data-continuation="false"><tspan class="native-item-tree__field">Callables</tspan></text>
+    <text x="100" y="116" data-tree-depth="3" data-tree-row="3" data-continuation="false">[1]<tspan class="native-item-tree__wire"> → </tspan><tspan class="native-item-tree__reference">MirCallable Work</tspan></text>
+    <text x="44" y="146" data-tree-depth="1" data-tree-row="4" data-continuation="false"><tspan class="native-item-tree__field">Analyses</tspan><tspan class="native-item-tree__wire"> → </tspan><tspan class="native-item-tree__reference">MirAnalysisStore</tspan></text>
+    <text x="72" y="176" data-tree-depth="2" data-tree-row="5" data-continuation="false"><tspan class="native-item-tree__field">ControlFlow(Program.Callables[1])</tspan></text>
+    <text x="100" y="206" data-tree-depth="3" data-tree-row="6" data-continuation="false">반환값<tspan class="native-item-tree__wire"> → </tspan><tspan class="native-item-tree__reference">MirControlFlowSnapshot</tspan></text>
+  </svg>
+</div>
+<div class="item-tree-legend" data-legend-for="structure-chapter-16-1" aria-label="그림 범례">
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">→</span><span>객체 참조</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">[]</span><span>빈 목록</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">{}</span><span>비어 있는 집합 또는 맵</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">ControlFlow(...)</span><span>아래는 조회 결과</span></span>
+</div></figure>
 
   <p>
     분석 결과는 별도의 프로그램을 만들지 않습니다.<br>

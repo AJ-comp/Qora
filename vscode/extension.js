@@ -7,7 +7,8 @@
 // per-platform binary BUNDLED in bin/<platform>-<arch>/ (Qora.exe on Windows, Qora on unix) — no .NET
 // install needed; `qora.command` overrides it, and `qora.args` (+ dotnet) is a fallback. Whatever runs,
 // it gets `--json`, the document is fed on stdin, and it replies with one line of JSON:
-//   { success: bool, qasm: string, errors: [ { message, code, start, end, path, document } ] }
+//   { success: bool, qasm: string, entryResult: { type, outputName },
+//     errors: [ { message, code, start, end, path, document } ] }
 // (start/end are half-open offsets in `path`; -1 when the error has no located token.)
 // This spawns one short-lived process per change; a long-running LSP server is the future upgrade.
 const vscode = require('vscode');
@@ -39,15 +40,16 @@ const DOCS = {
   'AsInt': '**AsInt(f)** \u2014 \ube44\ud2b8 \ub808\uc9c0\uc2a4\ud130\ub97c \uc22b\uc790\ub85c \uc77d\uae30\n\n\ud1b5\uc9dc `bit[]`\ub294 **\ube44\ud2b8 \ubb36\uc74c\uc774\uc9c0 \uc22b\uc790\uac00 \uc544\ub2c8\uc5d0\uc694** \u2014 \ubd80\ud638\uac00 \uc5c6\uc5b4\uc11c \uac19\uc740 \ube44\ud2b8\uac00 2\ub85c\ub3c4 \u22122\ub85c\ub3c4 \uc77d\ud790 \uc218 \uc788\uac70\ub4e0\uc694. \uadf8\ub798\uc11c \uc22b\uc790\ub85c \uc4f8 \ub550 **\ubb34\ubd80\ud638\ub85c \uc77d\uaca0\ub2e4\uace0 \uba85\uc2dc**\ud574\uc57c \ud574\uc694.\n\n`if (AsInt(f) == 2)` \u2192 `if (uint[2](f) == 2)`',
   // constants & keywords
   'pi': '**pi** — 원주율 π ≈ 3.14159\n\n회전 각도에 써요: `Rx(pi/2, q)`(90°), `Rz(pi/4, q)`(45°).',
-  'operation': '**operation** — 양자 연산(서브루틴) 정의\n\n`operation 이름(파라미터) { … }`\n`Main`이 진입점, 나머지는 OpenQASM `def`가 돼요. 반환값이 없어요(void).',
+  'operation': '**operation** — 양자 연산(서브루틴) 정의\n\n`operation 이름(파라미터): 반환타입 { … return 값; }`\n반환타입을 생략하면 void예요. 실행 결과에는 진입 operation의 반환값만 표시하고, 내부 측정값은 자동으로 표시하지 않아요.',
   'function': '**function** — 고전 순수 함수\n\n`function 이름(파라미터): 반환타입 { … return 값; }`. 값을 돌려줘서 식 어디에나 쓸 수 있어요(`Rx(angleOf(4), q[0])`). 큐비트·게이트·측정은 못 써요(순수 고전).',
-  'return': '**return** — 함수의 반환\n\n`return 식;` — `function` 안에서만. 모든 경로가 return해야 하고, 블록의 마지막 문이어야 해요.',
+  'return': '**return** — callable의 반환\n\n`return 식;` — 값을 반환하는 `function`이나 `operation`에서 사용해요. 값 반환 callable은 모든 경로에서 값을 반환해야 해요. `return;`은 void operation을 끝내요.',
   'use': '**use** — 큐비트 할당\n\n`use q = Qubit[n];` — 큐비트 n개를 빌려 q로.\n\n→ `qubit[n] q;`',
   'Qubit': '**Qubit** — 양자 비트 타입\n\n연산 파라미터는 `q: Qubit[]`, 할당은 `use q = Qubit[2];`처럼 써요. 파라미터의 크기는 `q.Count`로 확인해요.',
-  'new': '**new T[N]** — 고전 배열 만들기\n\n`var values: int[] = new int[3];`처럼 쓰면 0으로 초기화된 원소 N개를 만들어요.',
+  'new': '**new T[N]** — 고전 배열 만들기\n\n`var values: int[] = new int[3];`처럼 쓰면 원소 N개를 만들어요. `bool[]` 원소는 `false`, 나머지 고전 타입의 원소는 0으로 초기화해요.',
   'const': '**const** — 불변 변수\n\n`const n: int = 3;` / `const k = 5`. 한 번 정하면 못 바꿔요.',
-  'var': '**var** — 변경 권한\n\n변수를 선언할 때는 `var i = 0;`처럼 가변 바인딩을 만들어요. 연산의 파라미터와 호출 인자 앞에서는 전체 `int[]`, `float[]`, `angle[]`에 대한 가변 빌림을 뜻해요: `operation Clear(var values: int[])` / `Clear(var values);`. 함수 파라미터는 기본 읽기 전용 빌림만 허용해요.',
-  'move': '**move** — 소유권 이전\n\n연산의 파라미터와 호출 양쪽에 표시해요. `move values`는 모든 전체 배열과 전체 `Qubit` 바인딩의 읽기 전용 소유권 이전이고, `move var values`는 전체 `int[]`, `float[]`, `angle[]`의 변경 가능한 소유권 이전이에요. 호출 뒤에는 호출자가 그 바인딩을 다시 사용할 수 없어요(QSEM039). `const` 배열도 `move var`로 넘길 수 있는데, 빌려주는 것이 아니라 바인딩 자체를 이전하기 때문이에요.',
+  'var': '**var** — 변경 권한\n\n변수를 선언할 때는 `var i = 0;`처럼 가변 바인딩을 만들어요. 연산의 파라미터와 호출 인자 앞에서는 전체 고전 배열(`bool[]`, `int[]`, `bit[]`, `float[]`, `angle[]`)에 대한 가변 빌림을 뜻해요: `operation Clear(var values: int[])` / `Clear(var values);`. 다만 현재 OpenQASM 대상은 빌린 `var bit[]`를 지원하지 않아요(QASM002). 함수 파라미터는 기본 읽기 전용 빌림만 허용해요.',
+  'move': '**move** — 소유권 이전\n\n연산의 파라미터와 호출 양쪽에 표시해요. `move values`는 모든 전체 배열과 전체 `Qubit` 바인딩의 읽기 전용 소유권 이전이고, `move var values`는 전체 `bool[]`, `int[]`, `bit[]`, `float[]`, `angle[]`의 변경 가능한 소유권 이전이에요. 호출 뒤에는 호출자가 그 바인딩을 다시 사용할 수 없어요(QSEM039). `const` 배열도 `move var`로 넘길 수 있는데, 빌려주는 것이 아니라 바인딩 자체를 이전하기 때문이에요.',
+  'bool': '**bool** — 논리값 (true/false)\n\n비교 결과와 조건문에 써요. `var ready: bool = 1 == 1;`\n측정 결과를 담는 `bit`와는 별도 타입이며, 서로 암묵적으로 변환하지 않아요.',
   'bit': '**bit** — 고전 비트 (0/1)\n\n측정 결과를 담아요. `var r: bit = M(q[0]);`',
   'int': '**int** — 정수\n\n`var i: int = 0;` / `const n: int = 3;`',
   'float': '**float** — 실수\n\n`var values: float[] = [0.25, 0.5];`처럼 스칼라나 배열 원소에 써요.',
@@ -66,12 +68,14 @@ const BELL_EXAMPLE = `operation Bell(q: Qubit[]) {
     CNOT(q[0], q[1]);
 }
 
-operation Main() {
+operation Main(): int {
     use q = Qubit[2];
     Bell(q);
 
     var r0: bit = M(q[0]);
     var r1: bit = M(q[1]);
+    var result: bit[] = [r0, r1];
+    return AsInt(result);
 }
 `;
 
@@ -189,7 +193,7 @@ function docArgs(document) {
 // loops, even `while`). Python resolution order:
 //   1. the `qora.python` setting (trusted override)
 //   2. the env this extension provisioned earlier (remembered in globalState)
-//   3. a suitable system Python (3.10–3.13 with amazon-braket-sdk importable)
+//   3. a suitable system Python (3.11–3.13 with the pinned amazon-braket-sdk version)
 //   4. one-time auto-provisioning into the extension's own storage: `uv` (a single static binary)
 //      installs Python 3.12 + amazon-braket-sdk (~200 MB). The user never touches pip, and nothing
 //      outside the extension's storage is modified.
@@ -222,6 +226,8 @@ const RUN_L10N = {
     compiled: (s) => `compiled — ${s.qubits} qubits, ${s.gates} gates, ${s.measures} measurements`,
     executing: (shots) => `running ${shots} shots on Braket LocalSimulator…`,
     doneIn: (secs) => `done in ${secs}s`,
+    noResult: 'Entry point returns void; no result values.',
+    resultType: (type) => `Entry return values: ${type}${type === 'angle' ? ' (radians)' : ''}`,
     runFailed: (m) => `Qora: run failed — ${m}`,
     openFirst: 'Qora: open a .qor file first.',
     cannotRun: (m) => `Qora: cannot run — ${m}`,
@@ -247,6 +253,8 @@ const RUN_L10N = {
     compiled: (s) => `컴파일 완료 — 큐빗 ${s.qubits}개 · 게이트 ${s.gates}개 · 측정 ${s.measures}개`,
     executing: (shots) => `Braket LocalSimulator에서 ${shots} shots 실행 중…`,
     doneIn: (secs) => `완료 (${secs}초)`,
+    noResult: '진입 operation이 void이므로 반환값이 없습니다.',
+    resultType: (type) => `진입 operation 반환값: ${type}${type === 'angle' ? ' (라디안)' : ''}`,
     runFailed: (m) => `Qora: 실행 실패 — ${m}`,
     openFirst: 'Qora: 먼저 .qor 파일을 열어주세요.',
     cannotRun: (m) => `Qora: 실행할 수 없어요 — ${m}`,
@@ -272,6 +280,8 @@ const RUN_L10N = {
     compiled: (s) => `コンパイル完了 — 量子ビット ${s.qubits} · ゲート ${s.gates} · 測定 ${s.measures}`,
     executing: (shots) => `Braket LocalSimulator で ${shots} ショット実行中…`,
     doneIn: (secs) => `完了 (${secs}秒)`,
+    noResult: 'エントリーポイントは void のため、戻り値はありません。',
+    resultType: (type) => `エントリーポイントの戻り値: ${type}${type === 'angle' ? ' (ラジアン)' : ''}`,
     runFailed: (m) => `Qora: 実行に失敗しました — ${m}`,
     openFirst: 'Qora: まず .qor ファイルを開いてください。',
     cannotRun: (m) => `Qora: 実行できません — ${m}`,
@@ -297,6 +307,8 @@ const RUN_L10N = {
     compiled: (s) => `biên dịch xong — ${s.qubits} qubit · ${s.gates} cổng · ${s.measures} phép đo`,
     executing: (shots) => `chạy ${shots} shots trên Braket LocalSimulator…`,
     doneIn: (secs) => `xong (${secs}s)`,
+    noResult: 'Điểm vào trả về void; không có giá trị kết quả.',
+    resultType: (type) => `Giá trị trả về của điểm vào: ${type}${type === 'angle' ? ' (radian)' : ''}`,
     runFailed: (m) => `Qora: chạy thất bại — ${m}`,
     openFirst: 'Qora: hãy mở một tệp .qor trước.',
     cannotRun: (m) => `Qora: không thể chạy — ${m}`,
@@ -348,10 +360,26 @@ function execP(command, args, options = {}, stdinText, onLine) {
   });
 }
 
-/** Is this python a 3.10–3.13 with the Braket SDK importable? (The SDK doesn't support 3.14 yet.) */
+/** Is this Python supported and does its installed Braket runtime match the shipped requirements? */
 async function pythonUsable(python) {
+  const requirements = fs.readFileSync(path.join(runnerDir(), 'requirements.txt'), 'utf8');
+  const pins = requirements.split(/\r?\n/).map(line => line.trim())
+    .filter(line => line && !line.startsWith('#'));
+  const versions = {};
+  for (const pin of pins) {
+    const match = pin.match(/^([a-zA-Z0-9-]+)==([^\s]+)$/);
+    if (!match) throw new Error('the packaged Braket runtime requirement is invalid');
+    versions[match[1]] = match[2];
+  }
+  if (!versions['amazon-braket-sdk'] || !versions['amazon-braket-default-simulator']) {
+    throw new Error('the packaged Braket runtime requirements are missing');
+  }
   const probe = await execP(python, ['-c',
-    'import sys; assert (3,10) <= sys.version_info < (3,14); import braket.devices; print("ok")']);
+    'import sys; from importlib.metadata import version; ' +
+    'assert (3,11) <= sys.version_info < (3,14); ' +
+    `expected = ${JSON.stringify(versions)}; ` +
+    'assert all(version(package) == required for package, required in expected.items()); ' +
+    'import braket.devices; print("ok")']);
   return probe.code === 0 && probe.stdout.includes('ok');
 }
 
@@ -420,7 +448,7 @@ async function provisionEnv(progress) {
     let found = fs.existsSync(uvDir) ? findFile(uvDir, exeName) : null;
     if (!found) {
       const asset = uvAsset();
-      if (!asset) throw new Error(`no uv build for ${process.platform}-${process.arch}; set "qora.python" to a Python 3.10–3.13 with amazon-braket-sdk instead`);
+      if (!asset) throw new Error(`no uv build for ${process.platform}-${process.arch}; set "qora.python" to a Python 3.11–3.13 with amazon-braket-sdk instead`);
       fs.mkdirSync(uvDir, { recursive: true });
       const archive = path.join(uvDir, asset);
       await download(`https://github.com/astral-sh/uv/releases/latest/download/${asset}`, archive);
@@ -445,12 +473,15 @@ async function provisionEnv(progress) {
   // ANSI): "Resolved 40 packages…", "Prepared…", "Installed 40 packages in 8s".
   const live = (label) => (l) => progress.report({ message: `${label} · ${l}` });
 
-  progress.report({ message: t.stepPython });
-  let r = await execP(uv, ['venv', envDir, '--python', '3.12'], { env: uvEnv }, undefined, live(t.stepPython));
-  if (r.code !== 0) throw new Error(`Python install failed: ${(r.stderr || '').slice(-300)}`);
+  if (!fs.existsSync(python)) {
+    progress.report({ message: t.stepPython });
+    const created = await execP(uv, ['venv', envDir, '--python', '3.12'], { env: uvEnv }, undefined, live(t.stepPython));
+    if (created.code !== 0) throw new Error(`Python install failed: ${(created.stderr || '').slice(-300)}`);
+  }
 
   progress.report({ message: t.stepBraket });
-  r = await execP(uv, ['pip', 'install', '--python', python, 'amazon-braket-sdk'], { env: uvEnv }, undefined, live(t.stepBraket));
+  const r = await execP(uv, ['pip', 'install', '--upgrade', '--python', python,
+    '--requirement', path.join(runnerDir(), 'requirements.txt')], { env: uvEnv }, undefined, live(t.stepBraket));
   if (r.code !== 0) throw new Error(`Braket SDK install failed: ${(r.stderr || '').slice(-300)}`);
 
   progress.report({ message: t.stepVerify });
@@ -460,9 +491,8 @@ async function provisionEnv(progress) {
 
 /**
  * A python that can run Braket — resolving through override → remembered → consent → probe/provision.
- * CRITICAL for latency: everything BEFORE the consent dialog is a cheap synchronous check (settings,
- * a file-exists test). NO process is spawned until AFTER the user consents, so the dialog appears
- * instantly on click. Probing system pythons and provisioning happen under the progress bar, later.
+ * A remembered interpreter is checked once per session against the actual installed SDK version.
+ * On first setup, system-Python probing and provisioning still happen only AFTER consent.
  */
 async function ensureBraketPython() {
   if (braketPythonCache) return braketPythonCache;
@@ -472,11 +502,13 @@ async function ensureBraketPython() {
   const override = (vscode.workspace.getConfiguration('qora').get('python') || '').trim();
   if (override) return (braketPythonCache = override);
 
-  // (2) a previously chosen/provisioned env — trust its existence (a cheap fs check, NO spawn).
+  // (2) verify the actual installed version before reusing a remembered environment.
   const remembered = extContext.globalState.get('qora.braketPython');
-  if (remembered && fs.existsSync(remembered)) return (braketPythonCache = remembered);
+  if (remembered && fs.existsSync(remembered) && await pythonUsable(remembered)) {
+    return (braketPythonCache = remembered);
+  }
 
-  // (3) nothing known yet → ask consent NOW, before spawning anything, so the dialog is instant.
+  // (3) setup or an SDK update needs consent; never install into a user's system Python.
   const pick = await vscode.window.showInformationMessage(
     t.setupTitle,
     { modal: true, detail: t.setupDetail },
@@ -518,6 +550,10 @@ async function runProgram() {
   const t = runL10n();
   const name = path.basename(document.fileName);
   const shots = vscode.workspace.getConfiguration('qora').get('shots', 1000);
+  if (!Number.isSafeInteger(shots) || shots <= 0) {
+    vscode.window.showErrorMessage(t.cannotRun('qora.shots must be a positive integer'));
+    return;
+  }
   const ch = ensureRunChannel();
   ch.appendLine('');
   ch.appendLine(`▶ ${name}  ·  ${new Date().toLocaleTimeString()}`);
@@ -538,6 +574,12 @@ async function runProgram() {
         ch.appendLine(`  ✗ ${first}`);
         return;
       }
+      try { validateEntryResultMetadata(result.entryResult); }
+      catch (e) {
+        vscode.window.showErrorMessage(t.cannotRun(e.message));
+        ch.appendLine(`  ✗ ${e.message}`);
+        return;
+      }
       const summary = qasmSummary(result.qasm);
       ch.appendLine(`  ✓ ${t.compiled(summary)}  (${((Date.now() - t0) / 1000).toFixed(1)}s)`);
 
@@ -546,18 +588,23 @@ async function runProgram() {
       ch.appendLine(`  · ${t.executing(shots)}`);
       const t1 = Date.now();
       const reply = await execP(python, [path.join(runnerDir(), 'braket_run.py'), '--shots', String(shots)],
-        { cwd: runnerDir() }, result.qasm);
+        { cwd: runnerDir() }, JSON.stringify({ qasm: result.qasm, entryResult: result.entryResult }));
 
       let parsed;
-      try { parsed = JSON.parse(reply.stdout.trim().split('\n').pop()); }
-      catch { parsed = { error: (reply.stderr || reply.stdout || 'no output from the runner').slice(0, 300) }; }
-      if (parsed.error) {
-        vscode.window.showErrorMessage(t.runFailed(parsed.error));
-        ch.appendLine(`  ✗ ${parsed.error}`);
+      try { parsed = parseRunnerReply(reply); }
+      catch (e) {
+        vscode.window.showErrorMessage(t.runFailed(e.message));
+        ch.appendLine(`  ✗ ${e.message}`);
         return;
       }
-      ch.appendLine(`  ✓ ${t.doneIn(((Date.now() - t1) / 1000).toFixed(1))}`);
-      appendHistogram(ch, parsed.counts, parsed.shots);
+      try {
+        validateRunResult(parsed, result.entryResult.type, shots);
+        ch.appendLine(`  ✓ ${t.doneIn(((Date.now() - t1) / 1000).toFixed(1))}`);
+        appendEntryResult(ch, parsed, t);
+      } catch (e) {
+        vscode.window.showErrorMessage(t.runFailed(e.message));
+        ch.appendLine(`  ✗ ${e.message}`);
+      }
     });
 }
 
@@ -579,7 +626,7 @@ function qasmSummary(qasm) {
     if (!line || line.startsWith('//') || line.startsWith('OPENQASM') || line.startsWith('include')) continue;
     const q = line.match(/^qubit(?:\[(\d+)\])?\s/);
     if (q) { qubits += q[1] ? parseInt(q[1], 10) : 1; continue; }
-    if (/^(bit|int|uint|float|angle|const|def|gate)\b/.test(line)) continue;   // decls / definitions
+    if (/^(output|bool|bit|int|uint|float|angle|array|const|def|gate)\b/.test(line)) continue;   // decls / definitions
     if (/\bmeasure\b/.test(line)) { measures++; continue; }
     if (line === '{' || line === '}') continue;
     gates++;
@@ -587,15 +634,69 @@ function qasmSummary(qasm) {
   return { qubits, gates, measures };
 }
 
-/** Append the measurement histogram to the run channel (bars only; the header line is logged above). */
-function appendHistogram(ch, counts, shots) {
-  const total = Object.values(counts).reduce((a, b) => a + b, 0) || 1;
+/** Reject malformed output and failed processes before presenting any execution result. */
+function parseRunnerReply(reply) {
+  let parsed;
+  try { parsed = JSON.parse(reply.stdout.trim()); }
+  catch { throw new Error((reply.stderr || reply.stdout || 'no output from the runner').slice(0, 300)); }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('Runner returned an invalid JSON result object.');
+  }
+  if (parsed.error) throw new Error(String(parsed.error));
+  if (reply.code !== 0) throw new Error(`Runner exited with code ${reply.code}`);
+  return parsed;
+}
+
+function validateEntryResultMetadata(metadata) {
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+    throw new Error('Incompatible Qora compiler: entryResult metadata is missing. Update the extension or rebuild the configured Qora CLI.');
+  }
+  if (!['void', 'bool', 'bit', 'int', 'float', 'angle'].includes(metadata.type)
+      || typeof metadata.outputName !== 'string' || !metadata.outputName.trim()) {
+    throw new Error('Invalid entryResult metadata from the Qora compiler.');
+  }
+}
+
+function validateRunResult(reply, expectedType, expectedShots) {
+  if (!reply || reply.shots !== expectedShots || !reply.result || reply.result.type !== expectedType) {
+    throw new Error('Runner result type or shot count does not match the compilation.');
+  }
+  const result = reply.result;
+  if (result.type === 'void') {
+    if ('values' in result) throw new Error('A void entry point cannot return result values.');
+    return;
+  }
+  if (!Array.isArray(result.values) || result.values.length !== expectedShots) {
+    throw new Error('Runner must return one entry value per shot.');
+  }
+  for (const value of result.values) {
+    const valid = result.type === 'bool' ? typeof value === 'boolean'
+      : result.type === 'bit' ? value === 0 || value === 1
+      : result.type === 'int' ? typeof value === 'string' && /^-?(0|[1-9][0-9]*)$/.test(value)
+        : typeof value === 'number' && Number.isFinite(value);
+    if (!valid) throw new Error(`Invalid ${result.type} entry return value from the runner.`);
+  }
+}
+
+/** Group scalar entry return values for display; void never becomes a measurement histogram. */
+function appendEntryResult(ch, reply, t) {
+  ch.appendLine(`  ── ${reply.shots} shots ──`);
+  if (reply.result.type === 'void') {
+    ch.appendLine(`     ${t.noResult}`);
+    return;
+  }
+  ch.appendLine(`     ${t.resultType(reply.result.type)}`);
+  const counts = new Map();
+  for (const value of reply.result.values) {
+    // int values stay decimal strings; never convert them to Number.
+    const label = Object.is(value, -0) ? '-0' : String(value);
+    counts.set(label, (counts.get(label) || 0) + 1);
+  }
   const width = 40;
-  const rows = Object.entries(counts).sort((a, b) => b[1] - a[1]);
-  ch.appendLine(`  ── ${shots} shots ──`);
+  const rows = [...counts].sort((a, b) => b[1] - a[1]);
   for (const [key, n] of rows) {
-    const bar = '█'.repeat(Math.max(1, Math.round(width * n / total)));
-    ch.appendLine(`     ${key}  ${bar}  ${n}  (${(100 * n / total).toFixed(1)}%)`);
+    const bar = '█'.repeat(Math.max(1, Math.round(width * n / reply.shots)));
+    ch.appendLine(`     ${key}  ${bar}  ${n}  (${(100 * n / reply.shots).toFixed(1)}%)`);
   }
 }
 

@@ -7,7 +7,9 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Janglim" Version="0.3.0-preview.2" />
+    <PackageReference Include="Janglim" Version="0.6.0" />
+    <!-- ConsoleTables (via Janglim) remains compatible with the current width implementation. -->
+    <PackageReference Include="Wcwidth" Version="4.0.1" />
   </ItemGroup>
 
   <ItemGroup>

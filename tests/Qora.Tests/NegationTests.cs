@@ -9,19 +9,19 @@ namespace Qora.Tests;
 public class NegationTests
 {
     [Fact]
-    public void NotOnBitRemainsTypedLogicalNot() =>
+    public void NotOnMeasuredBitComparisonRemainsTypedLogicalNot() =>
         AssertConditionContainsLogicalNot(
-            "operation Main(){ use q=Qubit[1]; var r: bit = M(q[0]); if(!r){ X(q[0]); } }");
+            "operation Main(){ use q=Qubit[1]; var r: bit = M(q[0]); if(!(r == 1)){ X(q[0]); } }");
 
     [Fact]
-    public void NotOnIntVarRemainsTypedLogicalNot() =>
+    public void NotOnIntegerComparisonRemainsTypedLogicalNot() =>
         AssertConditionContainsLogicalNot(
-            "operation Main(){ use q=Qubit[1]; var n: int = 0; if(!n){ X(q[0]); } }");
+            "operation Main(){ use q=Qubit[1]; var n: int = 0; if(!(n != 0)){ X(q[0]); } }");
 
     [Fact]
-    public void NotOnLoopVarRemainsTypedLogicalNot() =>
+    public void NotOnLoopVariableComparisonRemainsTypedLogicalNot() =>
         AssertConditionContainsLogicalNot(
-            "operation Main(){ use q=Qubit[1]; for i in 0..2 { if(!i){ X(q[0]); } } }");
+            "operation Main(){ use q=Qubit[1]; for i in 0..2 { if(!(i != 0)){ X(q[0]); } } }");
 
     [Fact]
     public void LoopVarEqualityRemainsIntegerEquality()
@@ -44,27 +44,16 @@ public class NegationTests
             "QSEM026");
 
     [Fact]
-    public void NegationUnderARelationalKeepsItsDependencyGrouping()
-    {
-        var (body, conditions) = Conditions(
-            "operation Main(){ use q=Qubit[1]; var a: int = 0; if (!a < 2) { X(q[0]); } }");
-        var relational = conditions
-            .SelectMany(condition => body.DependencyClosure(condition))
-            .OfType<MirQasmBinaryExpression>()
-            .First(
-                expression =>
-                    expression.Operator == MirQasmBinaryOperator.Less);
-
-        Assert.True(
-            ContainsLogicalNot(body, relational.Left),
-            "the relational left operand must depend on the lowered logical negation");
-    }
+    public void NegatedBoolCannotBecomeARelationalNumericOperand() =>
+        Compiler.Rejects(
+            "operation Main(){ use q=Qubit[1]; var a: bool = false; if (!a < 2) { X(q[0]); } }",
+            "QSEM041");
 
     [Fact]
     public void NegationAsTheRightOperandOfEqualityKeepsItsDependencyGrouping()
     {
         var (body, conditions) = Conditions(
-            "operation Main(){ use q=Qubit[1]; var n: int = 2; var m: int = 5; if (n == !m) { X(q[0]); } }");
+            "operation Main(){ use q=Qubit[1]; var n: bool = true; var m: bool = false; if (n == !m) { X(q[0]); } }");
         var outer = conditions
             .SelectMany(condition => body.DependencyClosure(condition))
             .OfType<MirQasmBinaryExpression>()

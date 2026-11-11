@@ -67,7 +67,7 @@ public sealed class Symbol
     /// can never be reassigned (QSEM024), so this value has no time axis: true wherever the symbol is visible.</summary>
     internal Bound? FoldedBound { get; init; }
     /// <summary>The const's compile-time boolean value, folded once at its declaration. This is kept
-    /// separately from <see cref="FoldedBound"/> because a bit-valued comparison is not an integer bound,
+    /// separately from <see cref="FoldedBound"/> because a bool-valued comparison is not an integer bound,
     /// while control-flow analysis still needs to know that an impossible branch cannot consume ownership.</summary>
     internal bool? FoldedBoolean { get; init; }
     /// <summary>The <see cref="HirParameter.NeedsMonoSizing"/> answer, stamped ONCE at declaration — true only
@@ -307,14 +307,16 @@ internal static class SymbolTableBuilder
         var order = 0;
         var reported026 = new HashSet<SourceSpan?>();   // one diagnostic per document-qualified statement span
 
-        bool ContainsFunctionCall(HirExpression value) =>
+        bool ContainsValueCall(HirExpression value) =>
             HirExpressions.CallsIn(value).Any(call =>
                 QoraGates.Functions.ContainsKey(call.Name)
-                || ExpressionTypes.TryGetFunction(call, opById, out _));
+                || ExpressionTypes.TryGetValueCallable(call, opById, out _));
 
-        // QSEM037 belongs to the contracts introduced by functions: every return value, and a declared or
-        // assigned scalar that consumes a function result. Ordinary scalar declarations keep Qora's
-        // historical loose model. Shape is never loose: a whole T[] cannot silently become one T value.
+        // QSEM037 checks every return value and a declared or assigned scalar that consumes a callable
+        // result. Float-to-int narrowing and implicit bool conversions are also forbidden for ordinary
+        // assignments and array elements.
+        // Other historical scalar conversions remain unchanged. Shape is never loose: a whole T[]
+        // cannot silently become one T value.
         void CheckAssignable(HirNodeId statementId, QValueShape target, HirExpression value, Scope valueScope, SourceSpan? span,
             string targetDescription, bool isReturn = false)
         {
@@ -326,8 +328,10 @@ internal static class SymbolTableBuilder
                 return;   // QSEM036 gives the precise AsInt guidance
 
             var shapeMismatch = target.IsArray != source.IsArray;
-            var functionContract = isReturn || ContainsFunctionCall(value);
-            if ((!shapeMismatch && !functionContract) || ExpressionTypes.CanAssign(target, source, value))
+            var narrowsFloatToInt = target.Type == QType.Int && source.Type == QType.Float;
+            var involvesBool = target.Type == QType.Bool || source.Type == QType.Bool;
+            var valueContract = isReturn || ContainsValueCall(value) || narrowsFloatToInt || involvesBool;
+            if ((!shapeMismatch && !valueContract) || ExpressionTypes.CanAssign(target, source, value))
                 return;
 
             var reason = shapeMismatch
@@ -562,14 +566,24 @@ internal static class SymbolTableBuilder
                     // Arguments are ordinary expressions, except that a whole register IS a legal ARGUMENT:
                     // the callee's signature decides what it may consume (QSEM006). The allowance covers the
                     // argument itself only — `AsInt(f + 1)` still reports because that register is nested.
-                    foreach (var argument in call.Arguments)
+                    var callee = call.CalleeId is { } calleeId
+                        && opById.TryGetValue(calleeId, out var resolvedCallee)
+                            ? resolvedCallee
+                            : null;
+                    for (var argumentIndex = 0; argumentIndex < call.Arguments.Count; argumentIndex++)
+                    {
+                        var argument = call.Arguments[argumentIndex];
+                        var acceptsQubit = callee is not null
+                            && argumentIndex < callee.Parameters.Count
+                            && callee.Parameters[argumentIndex].Type == QType.Qubit;
                         RecordExpr(
                             scope,
                             argument.Expression,
                             detail,
                             span,
-                            classicalOnly,
+                            classicalOnly && !acceptsQubit,
                             registerOk: true);
+                    }
                     return;
                 case HirMeasurementExpression measurement:
                     RecordMeasurementTarget(scope, measurement.Target, span);
@@ -748,9 +762,38 @@ internal static class SymbolTableBuilder
                             declaration.Value,
                             scope,
                             opById);
-                        // Aggregate initializers and array declarations already have the more precise QSEM029
-                        // owner. This shared check handles a bare array used as a scalar and every expression
-                        // that consumes a declared function result.
+                        // QSEM029 owns aggregate shape errors. Check restricted scalar conversions before
+                        // declaring the new name, so they use the same assignment rule and diagnostic
+                        // ownership as scalar initializers. A malformed call can still suppress this
+                        // candidate during validation instead of producing a second, cascading error.
+                        if (declaration is
+                            {
+                                IsArray: true,
+                                Type: { } declaredElementType,
+                                Value: HirArrayLiteralExpression literal,
+                            })
+                        {
+                            foreach (var element in literal.Elements)
+                            {
+                                if (element is HirMeasurementExpression
+                                    || ExpressionTypes.TypeOf(element, scope, opById) is not
+                                        { IsArray: false } elementType)
+                                    continue; // Direct measurement mismatches belong to QSEM017.
+                                var restrictsElement = declaredElementType == QType.Bool
+                                    || elementType.Type == QType.Bool
+                                    || declaredElementType == QType.Int && elementType.Type == QType.Float;
+                                if (!restrictsElement)
+                                    continue;
+
+                                CheckAssignable(
+                                    declaration.Id,
+                                    new QValueShape(declaredElementType, IsArray: false),
+                                    element,
+                                    scope,
+                                    element.Span ?? declaration.Span,
+                                    $"element of array `{declaration.Name}`");
+                            }
+                        }
                         if (declaration.Value is not (
                                 HirArrayLiteralExpression
                                 or HirArrayCreationExpression)
@@ -911,24 +954,26 @@ internal static class SymbolTableBuilder
                         break;
                     }
                     case HirReturnStatement returnStatement:
+                        if (returnStatement.Value is not { } returnedValue)
+                            break;
                         // A `return` value is an ordinary value position. Without this case it was walked by
                         // nothing here, so QSEM025 (unknown name), QSEM026 (qubit as a value), QSEM028
                         // (operation as a value) and QSEM036 all silently skipped every returned expression.
                         RecordValue(
                             scope,
-                            returnStatement.Value,
+                            returnedValue,
                             "return",
                             returnStatement.Span);
-                        if (op.IsFunction && op.ReturnType is { } returnType)
+                        if (op.ReturnType is { } returnType)
                             CheckAssignable(
                                 returnStatement.Id,
                                 new QValueShape(
                                     returnType,
                                     IsArray: false),
-                                returnStatement.Value,
+                                returnedValue,
                                 scope,
                                 returnStatement.Span,
-                                "function return",
+                                "callable return",
                                 isReturn: true);
                         break;
                     case HirForStatement loopStatement:

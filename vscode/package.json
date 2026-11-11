@@ -2,7 +2,7 @@
   "name": "qora-language",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.32.0",
+  "version": "0.33.0",
   "publisher": "qora-lang",
   "icon": "icon.png",
   "license": "MIT",
@@ -29,11 +29,17 @@
   ],
   "main": "./extension.js",
   "scripts": {
+    "test": "node --test scripts/test-results.js",
     "package": "bash scripts/build-vsix.sh",
     "package:win": "bash scripts/build-vsix.sh win32-x64"
   },
   "devDependencies": {
-    "@vscode/vsce": "^3.2.0"
+    "@vscode/vsce": "4.1.0"
+  },
+  "overrides": {
+    "@vscode/vsce": {
+      "minimatch": "11.0.6"
+    }
   },
   "activationEvents": [],
   "contributes": {
@@ -187,12 +193,13 @@
         "qora.python": {
           "type": "string",
           "default": "",
-          "markdownDescription": "Python used by **Qora: Run Program** (needs 3.10–3.13 with `amazon-braket-sdk` installed). **Leave empty to let the extension handle it**: it uses a suitable system Python when one exists, and otherwise provisions a private one automatically on first run (one-time ~200 MB download into the extension's own storage)."
+          "markdownDescription": "Python used by **Qora: Run Program** (supported versions: 3.11–3.13; Python 3.12 is provisioned automatically). **Leave empty to let the extension handle it**: it uses a suitable system Python with the required `amazon-braket-sdk` version when one exists, and otherwise provisions a private environment in the extension's own storage."
         },
         "qora.shots": {
-          "type": "number",
+          "type": "integer",
+          "minimum": 1,
           "default": 1000,
-          "markdownDescription": "How many shots (repeated executions) **Qora: Run Program** measures."
+          "markdownDescription": "How many times **Qora: Run Program** executes the entry operation. Only its explicit return values are shown; void operations produce no result histogram."
         }
       }
     }

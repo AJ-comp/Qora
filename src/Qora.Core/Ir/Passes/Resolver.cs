@@ -182,7 +182,7 @@ internal static class Resolver
                 HirReturnStatement returned =>
                     _rewrite.RewriteReturn(
                         returned,
-                        ResolveExpression(returned.Value)),
+                        returned.Value is { } value ? ResolveExpression(value) : null),
                 HirIfStatement branch =>
                     _rewrite.RewriteIf(
                         branch,

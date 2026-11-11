@@ -117,6 +117,10 @@ internal static class MirQasmTestModel
                 foreach (var nested in Expressions(cast.Operand))
                     yield return nested;
                 break;
+            case MirQasmFloatCastExpression cast:
+                foreach (var nested in Expressions(cast.Operand))
+                    yield return nested;
+                break;
             case MirQasmFunctionCallExpression call:
                 foreach (var nested in call.Arguments.SelectMany(Expressions))
                     yield return nested;
@@ -224,6 +228,7 @@ internal static class MirQasmTestModel
             MirQasmIndexExpression index => new[] { index.Base, index.Index },
             MirQasmSizeOfExpression size => new[] { size.Operand },
             MirQasmUnsignedCastExpression cast => new[] { cast.Operand },
+            MirQasmFloatCastExpression cast => new[] { cast.Operand },
             MirQasmFunctionCallExpression call => call.Arguments,
             _ => Array.Empty<MirQasmExpression>(),
         };
