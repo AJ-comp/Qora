@@ -17,10 +17,9 @@ emitted as **OpenQASM 3.0**.
 > named there may have been retired by a later release; the newest release notes and current architecture
 > documents define the present pipeline.
 
-## 0.40.0 — Unreleased
+## 0.40.0 — 2026-11-11
 
-Prepared together with VS Code extension **0.33.0**. These notes describe the pending release;
-no release tag or package publication is implied.
+Accompanied by VS Code extension **0.33.0**, which bundles the Qora 0.40.0 compiler.
 
 ### Added
 

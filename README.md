@@ -19,8 +19,8 @@ Write quantum circuits in Q#/C#-like syntax and emit verified **OpenQASM 3**.
 
 [Documentation](#documentation) · [Quick start](#quick-start) · [Compiler pipeline](#how-the-compiler-works) · [Roadmap](#roadmap--releases)
 
-This branch prepares **Qora 0.40.0** and **VS Code extension 0.33.0**; neither version is published yet.
-See the [release notes and migration guide](CHANGELOG.md#0400--unreleased) for the new return-result
+Current versions: **Qora 0.40.0** and **VS Code extension 0.33.0**.
+See the [release notes and migration guide](CHANGELOG.md#0400--2026-11-11) for the new return-result
 contract, separate `bool`/`bit` types, and known backend restrictions.
 
 ---
@@ -478,7 +478,7 @@ finally prints the result out as OpenQASM text. Each row below is one of those s
 
 - Direction and priorities: [docs/TODO.md](docs/TODO.md) — the planned automatic-uncomputation work will
   add a MIR scheduler that computes the global cleanup order and generates the required inverse operations.
-- Language release notes: [CHANGELOG.md](CHANGELOG.md) (v0.1 → pending v0.40.0). The VS Code extension is
+- Language release notes: [CHANGELOG.md](CHANGELOG.md) (v0.1 → v0.40.0). The VS Code extension is
   versioned separately: [vscode/CHANGELOG.md](vscode/CHANGELOG.md).
 
 ## License

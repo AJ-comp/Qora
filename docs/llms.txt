@@ -1,4 +1,4 @@
-# Qora v0.40.0 (unreleased) — complete language reference for AI assistants
+# Qora v0.40.0 — complete language reference for AI assistants
 
 Qora is a quantum programming language (Q#/C#-flavored syntax) that compiles to OpenQASM 3.
 File extension: `.qor`. This file is the full, authoritative surface spec: everything below is

@@ -64,7 +64,7 @@ declared at `Main` top level and lowers to OpenQASM general arrays. (clean)
   classical-only signatures, and the operation/function call boundary. The entry callable becomes the
   OpenQASM top-level body, while every non-entry function or operation lowers to a `def`.
 - **Return values + typed returns** — ✅ Function returns shipped in v0.30; operation returns and
-  the separate `bool` type are implemented for unreleased v0.40.0. Both kinds of callable now support
+  the separate `bool` type shipped in v0.40.0. Both kinds of callable now support
   one scalar `bool` / `int` / `bit` / `float` / `angle` return type with `return expr;`.
   An operation's omitted return type remains void. Only the entry operation's returned value
   is an execution result, with no implicit measurement or export of internal measurement records.
@@ -73,7 +73,7 @@ declared at `Main` top level and lowers to OpenQASM general arrays. (clean)
   preserves nested function calls in values, conditions, arguments, and returns. Resolver binds each
   call to its typed `CalleeId`; validation,
   monomorphization, MIR lowering, and OpenQASM emission consume that identity.
-- **`bool` classical type** — ✅ IMPLEMENTED for unreleased v0.40.0: logical values and comparison results are `bool`,
+- **`bool` classical type** — ✅ SHIPPED in v0.40.0: logical values and comparison results are `bool`,
   separate from measurement-oriented `bit`. Conditions accept only `bool`, implicit conversion to or
   from numeric types is rejected, and `bool[]` maps to OpenQASM classical arrays. Execution results
   preserve `true`/`false` rather than converting them to measurement bits.

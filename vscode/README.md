@@ -7,9 +7,9 @@ parser engine. You write circuits in a Q#/C#-flavored syntax and it transpiles t
 extension gives `.qor` files syntax highlighting, hover docs, **live error diagnostics**, and a
 **transpile** command, and local execution with typed entry-return results.
 
-This branch prepares extension **0.33.0**, bundling **Qora 0.40.0**; it is not yet published.
-See the [extension release notes](CHANGELOG.md#0330--unreleased) and
-[language migration guide](https://github.com/AJ-comp/Qora/blob/main/CHANGELOG.md#0400--unreleased).
+Extension **0.33.0** bundles **Qora 0.40.0**.
+See the [extension release notes](CHANGELOG.md#0330--2026-11-11) and
+[language migration guide](https://github.com/AJ-comp/Qora/blob/main/CHANGELOG.md#0400--2026-11-11).
 
 ## Features
 

@@ -6,9 +6,9 @@
 Q#/C# 느낌의 문법으로 회로를 적고 **OpenQASM 3**로 변환해요. 이 확장은 `.qor` 파일에 대해 문법
 하이라이팅·설명·**실시간 오류 표시**·**변환 명령**과 반환 타입을 보존하는 로컬 실행을 제공해요.
 
-현재 브랜치는 **Qora 0.40.0**을 포함하는 확장 **0.33.0**을 준비하며, 아직 배포 전입니다.
-[확장 릴리스 노트](CHANGELOG.md#0330--unreleased)와
-[언어 마이그레이션 안내](https://github.com/AJ-comp/Qora/blob/main/CHANGELOG.md#0400--unreleased)를 함께 확인해 주세요.
+확장 **0.33.0**은 **Qora 0.40.0**을 포함합니다.
+[확장 릴리스 노트](CHANGELOG.md#0330--2026-11-11)와
+[언어 마이그레이션 안내](https://github.com/AJ-comp/Qora/blob/main/CHANGELOG.md#0400--2026-11-11)를 함께 확인해 주세요.
 
 ## 기능
 

@@ -25,6 +25,26 @@ test('bool hover documents logical values separately from measured bits', () => 
   assert.match(DOCS.bool, /bit/);
 });
 
+test('mutable-array hover documentation includes Boolean arrays', () => {
+  assert.match(DOCS.var, /bool\[\]/);
+  assert.match(DOCS.move, /bool\[\]/);
+  assert.match(DOCS.var, /var bit\[\].*QASM002/);
+  assert.match(DOCS.move, /bit\[\]/);
+  assert.match(DOCS.new, /bool\[\].*false/);
+});
+
+test('function and array snippet type choices include bool', () => {
+  const snippets = JSON.parse(fs.readFileSync(
+    path.join(__dirname, '..', 'snippets', 'qora.code-snippets'), 'utf8'));
+  const returnTypes = snippets.function.body[0].match(/\$\{3\|([^|]+)\|\}/)[1].split(',');
+  const elementTypes = snippets['classical array'].body[0].match(/\$\{1\|([^|]+)\|\}/)[1].split(',');
+  for (const type of ['bool', 'bit', 'int', 'float', 'angle']) {
+    assert.ok(returnTypes.includes(type), `missing function return type: ${type}`);
+    assert.ok(elementTypes.includes(type), `missing array element type: ${type}`);
+  }
+  assert.match(snippets['classical array'].description, /bool.*false/);
+});
+
 test('program summary does not count Boolean or array declarations as gates', () => {
   const summary = qasmSummary(`OPENQASM 3.0;
 include "stdgates.inc";

@@ -19,9 +19,9 @@ Q#·C#에 가까운 문법으로 양자 회로를 작성하고, 검증된 **Open
 
 [문서](#문서) · [바로 시작하기](#바로-시작하기) · [컴파일러 흐름](#컴파일러-흐름) · [로드맵](#로드맵과-릴리스)
 
-현재 브랜치는 **Qora 0.40.0**과 **VS Code 확장 0.33.0**을 준비하며, 두 버전 모두 아직 배포 전입니다.
+현재 버전은 **Qora 0.40.0**과 **VS Code 확장 0.33.0**입니다.
 반환값 기반 실행 결과, `bool`/`bit` 분리, 백엔드 제한과 기존 코드의 변경 방법은
-[릴리스 노트와 마이그레이션 안내](CHANGELOG.md#0400--unreleased)에서 확인할 수 있습니다.
+[릴리스 노트와 마이그레이션 안내](CHANGELOG.md#0400--2026-11-11)에서 확인할 수 있습니다.
 
 ---
 
@@ -456,7 +456,7 @@ Qora 없이 직접 작성한 OpenQASM `array[bool, 2]`에서도 같은 문제가
 
 - 방향과 우선순위는 [docs/TODO.md](docs/TODO.md)에 있습니다. 향후 자동 uncomputation 작업에서는
   전역 cleanup 순서를 계산하고 필요한 역연산을 생성하는 MIR scheduler를 추가할 계획입니다.
-- 언어 릴리스 노트는 [CHANGELOG.md](CHANGELOG.md)에서 볼 수 있습니다(v0.1 → 미배포 v0.40.0).
+- 언어 릴리스 노트는 [CHANGELOG.md](CHANGELOG.md)에서 볼 수 있습니다(v0.1 → v0.40.0).
   VS Code 확장은 따로 버전이 올라가며, 기록은 [vscode/CHANGELOG.md](vscode/CHANGELOG.md)에 있습니다.
 
 ## 라이선스

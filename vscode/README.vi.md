@@ -7,9 +7,9 @@
 đổi sang **OpenQASM 3**. Tiện ích này cung cấp cho tệp `.qor` khả năng tô sáng cú pháp, chú thích khi di
 chuột, **báo lỗi thời gian thực**, một lệnh **chuyển đổi** và thực thi cục bộ giữ nguyên kiểu của giá trị trả về.
 
-Nhánh này chuẩn bị tiện ích **0.33.0** với **Qora 0.40.0**; cả hai phiên bản đều chưa được phát hành.
-Xem [ghi chú phát hành tiện ích](CHANGELOG.md#0330--unreleased) và
-[hướng dẫn chuyển đổi mã nguồn](https://github.com/AJ-comp/Qora/blob/main/CHANGELOG.md#0400--unreleased).
+Tiện ích **0.33.0** đi kèm **Qora 0.40.0**.
+Xem [ghi chú phát hành tiện ích](CHANGELOG.md#0330--2026-11-11) và
+[hướng dẫn chuyển đổi mã nguồn](https://github.com/AJ-comp/Qora/blob/main/CHANGELOG.md#0400--2026-11-11).
 
 ## Tính năng
 
