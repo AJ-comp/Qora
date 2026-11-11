@@ -4,8 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>16. MirSnapshot and the Analysis Basis — Qora Compiler Developer Manual</title>
-<link rel="stylesheet" href="developer.css">
-<script src="developer-syntax.js" defer></script>
+<link rel="stylesheet" href="developer.css?v=20261004-svg-trees-r56">
+<link rel="stylesheet" href="../section-heading.css?v=20260826-section-tab-standard">
+<script src="developer-syntax.js?v=20260828-localized-format-r1" defer></script>
 </head>
 <body>
 <nav class="language-switch" aria-label="Language"><strong>English</strong><span aria-hidden="true">·</span><a href="../ko/chapter-16.html">한국어</a><span aria-hidden="true">·</span><a href="../ja/chapter-16.html">日本語</a></nav>
@@ -27,35 +28,66 @@
     This chapter focuses on one role of a snapshot: binding a program and its analyses to the same basis.
   </p>
 
-  <h2 id="snapshot">MirSnapshot represents the current MIR state</h2>
+  <h2 id="snapshot" class="trace-section-heading"><span>MirSnapshot represents the current MIR state</span></h2>
 
   <p>
     A <code>MirProgram</code> is the executable structure itself. A <code>MirSnapshot</code> is an immutable result that stores that program together with the analysis entry point dedicated to it.<br>
     A program initially lowered from HIR becomes the first snapshot through <code>MirSnapshot.CreateLowered(program)</code>.
   </p>
 
-<pre><code class="language-plaintext">MirSnapshot
+<figure class="structure-figure"><div class="item-tree-diagram item-tree-diagram--native" data-item-tree="structure-chapter-16-0" style="--item-tree-width:461px">
+  <svg class="native-item-tree" xmlns="http://www.w3.org/2000/svg" width="461" height="168" viewBox="0 0 461 168" role="img" aria-labelledby="structure-chapter-16-0-title structure-chapter-16-0-desc">
+    <title id="structure-chapter-16-0-title">MirSnapshot</title>
+    <desc id="structure-chapter-16-0-desc">MirSnapshot
 ├─ Program
 │  ├─ EntryPoint: Work
 │  └─ Callables: [Next, Work]
-└─ Analyses: analysis entry point for this Program</code></pre>
+└─ Analyses: analysis entry point for this Program</desc>
+    <path class="native-item-tree__guides" d="M 22 34 V 141 M 22 51 H 40 M 22 141 H 40 M 50 64 V 111 M 50 81 H 68 M 50 111 H 68"/>
+    <text x="16" y="26" data-tree-depth="0" data-tree-row="0" data-continuation="false"><tspan class="native-item-tree__field">MirSnapshot</tspan></text>
+    <text x="44" y="56" data-tree-depth="1" data-tree-row="1" data-continuation="false"><tspan class="native-item-tree__field">Program</tspan></text>
+    <text x="72" y="86" data-tree-depth="2" data-tree-row="2" data-continuation="false">EntryPoint: <tspan class="native-item-tree__type">Work</tspan></text>
+    <text x="72" y="116" data-tree-depth="2" data-tree-row="3" data-continuation="false">Callables: <tspan class="native-item-tree__type">[Next, Work]</tspan></text>
+    <text x="44" y="146" data-tree-depth="1" data-tree-row="4" data-continuation="false">Analyses: <tspan class="native-item-tree__type">analysis entry point for this Program</tspan></text>
+  </svg>
+</div>
+<div class="item-tree-legend" data-legend-for="structure-chapter-16-0" aria-label="Diagram legend">
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">→</span><span>Object reference</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">[]</span><span>Empty list</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">{}</span><span>Empty set or map</span></span>
+</div></figure>
 
   <p>
     <code>Program</code> is the MIR execution structure lowered from HIR.<br>
     <code>Analyses</code> provides the required MIR analyses using that exact <code>Program</code> as its basis.
   </p>
 
-  <h2 id="analysis-store">The snapshot is the basis for MIR analysis</h2>
+  <h2 id="analysis-store" class="trace-section-heading"><span>The snapshot is the basis for MIR analysis</span></h2>
 
   <p>
     A <code>MirSnapshot</code> contains <code>Analyses</code>, the entry point for analyzing its program.<br>
     For example, requesting the control flow of <code>Work</code> computes the CFG from the <code>Work</code> contained in this snapshot.
   </p>
 
-<pre><code class="language-plaintext">MirSnapshot
+<figure class="structure-figure"><div class="item-tree-diagram item-tree-diagram--native" data-item-tree="structure-chapter-16-1" style="--item-tree-width:379px">
+  <svg class="native-item-tree" xmlns="http://www.w3.org/2000/svg" width="379" height="138" viewBox="0 0 379 138" role="img" aria-labelledby="structure-chapter-16-1-title structure-chapter-16-1-desc">
+    <title id="structure-chapter-16-1-title">MirSnapshot</title>
+    <desc id="structure-chapter-16-1-desc">MirSnapshot
 ├─ Program: [Next, Work]
 └─ Analyses
-   └─ control flow of Work → CFG of Work</code></pre>
+   └─ control flow of Work → CFG of Work</desc>
+    <path class="native-item-tree__guides" d="M 22 34 V 81 M 22 51 H 40 M 22 81 H 40 M 50 94 V 111 M 50 111 H 68"/>
+    <text x="16" y="26" data-tree-depth="0" data-tree-row="0" data-continuation="false"><tspan class="native-item-tree__field">MirSnapshot</tspan></text>
+    <text x="44" y="56" data-tree-depth="1" data-tree-row="1" data-continuation="false">Program: <tspan class="native-item-tree__type">[Next, Work]</tspan></text>
+    <text x="44" y="86" data-tree-depth="1" data-tree-row="2" data-continuation="false"><tspan class="native-item-tree__field">Analyses</tspan></text>
+    <text x="72" y="116" data-tree-depth="2" data-tree-row="3" data-continuation="false">control flow of Work<tspan class="native-item-tree__wire"> → </tspan><tspan class="native-item-tree__reference">CFG of Work</tspan></text>
+  </svg>
+</div>
+<div class="item-tree-legend" data-legend-for="structure-chapter-16-1" aria-label="Diagram legend">
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">→</span><span>Analysis query result</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">[]</span><span>Empty list</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">{}</span><span>Empty set or map</span></span>
+</div></figure>
 
   <p>
     Analysis results do not create another program.<br>

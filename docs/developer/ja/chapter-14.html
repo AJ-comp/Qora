@@ -4,8 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>14. Basic Block と Terminator — Qora コンパイラ開発者マニュアル</title>
-<link rel="stylesheet" href="developer.css">
-<script src="developer-syntax.js" defer></script>
+<link rel="stylesheet" href="developer.css?v=20261004-svg-trees-r56">
+<link rel="stylesheet" href="../section-heading.css?v=20260826-section-tab-standard">
+<script src="developer-syntax.js?v=20260828-localized-format-r1" defer></script>
 </head>
 <body>
 <nav class="language-switch" aria-label="言語"><a href="../en/chapter-14.html">English</a><span aria-hidden="true">·</span><a href="../ko/chapter-14.html">한국어</a><span aria-hidden="true">·</span><strong>日本語</strong></nav>
@@ -28,7 +29,7 @@
     共通例の <code>if</code> は <code>b0</code>、<code>b1</code>、<code>b2</code>、<code>b3</code> の四つの block になります。
   </p>
 
-  <h2 id="source">確認する Qora コード</h2>
+  <h2 id="source" class="trace-section-heading"><span>確認する Qora コード</span></h2>
 
 <pre><code class="language-qora">function Next(value: int): int
 {
@@ -56,11 +57,11 @@ operation Work()
     MIR はこの三つの区間を分け、制御フローを明示します。
   </p>
 
-  <h2 id="overview">四つの block の接続全体</h2>
+  <h2 id="overview" class="trace-section-heading"><span>四つの block の接続全体</span></h2>
 
-<pre><code class="language-plaintext">                    ┌─ true ─▶ b1: X 実行 ─┐
+<figure class="structure-figure"><svg class="structure-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 350" role="img" aria-labelledby="flow-chapter-14-1-title flow-chapter-14-1-desc"><title id="flow-chapter-14-1-title">                    ┌─ true ─▶ b1: X 実行 ─┐</title><desc id="flow-chapter-14-1-desc">                    ┌─ true ─▶ b1: X 実行 ─┐
 b0: 条件計算と branch                       ├─▶ b3: H 実行と return
-                    └─ false ▶ b2: 空経路 ─┘</code></pre>
+                    └─ false ▶ b2: 空経路 ─┘</desc><defs><marker id="flow-chapter-14-1-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0 L10 5 L0 10 Z" fill="#354bff"/></marker></defs><g font-family="Consolas, Malgun Gothic, sans-serif"><rect x="186" y="8" width="268" height="62" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="198" y="34" font-size="14" fill="#111936" text-anchor="start" font-weight="700">b0</text><text x="198" y="56" font-size="14" fill="#111936" text-anchor="start">条件計算 · branch</text><rect x="12" y="142" width="270" height="62" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="24" y="168" font-size="14" fill="#152581" text-anchor="start" font-weight="700">b1</text><text x="24" y="190" font-size="14" fill="#152581" text-anchor="start">X(q[0]);</text><rect x="358" y="142" width="270" height="62" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="370" y="168" font-size="14" fill="#111936" text-anchor="start" font-weight="700">b2</text><text x="370" y="190" font-size="14" fill="#111936" text-anchor="start">空の経路</text><rect x="186" y="270" width="268" height="62" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="198" y="296" font-size="14" fill="#152581" text-anchor="start" font-weight="700">b3</text><text x="198" y="318" font-size="14" fill="#152581" text-anchor="start">H(q[0]); · return</text><path d="M320.0 70 V106.0 H147.0 V140" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-14-1-arrow)"/><text x="239.5" y="100.0" font-size="12" fill="#111936" text-anchor="middle">true</text><path d="M320.0 70 V106.0 H493.0 V140" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-14-1-arrow)"/><text x="412.5" y="100.0" font-size="12" fill="#111936" text-anchor="middle">false</text><path d="M147.0 204 V237.0 H320.0 V268" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-14-1-arrow)"/><path d="M493.0 204 V237.0 H320.0 V268" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-14-1-arrow)"/></g></svg></figure>
 
   <p>
     <code>b0</code> は条件を計算し、二つの経路から一つを選びます。<br>
@@ -68,18 +69,34 @@ b0: 条件計算と branch                       ├─▶ b3: H 実行と retur
     両方の経路は <code>b3</code> で再び合流し、その後に共通して実行する <code>H</code> が続きます。
   </p>
 
-  <h2 id="b0"><code>b0</code>：条件を計算して経路を選ぶ</h2>
+  <h2 id="b0" class="trace-section-heading"><span><code>b0</code>：条件を計算して経路を選ぶ</span></h2>
 
   <p>
     <code>b0</code> には <code>if</code> より前に実行する配列宣言と更新も入りますが、ここでは最後の部分だけを見れば十分です。<br>
     MIR は <code>values[0] == 1</code> を計算して <code>%v10</code> を作り、<code>branch</code> がその値から次の block を決めます。
   </p>
 
-<pre><code class="language-plaintext">b0
+<figure class="structure-figure"><div class="item-tree-diagram item-tree-diagram--native" data-item-tree="structure-chapter-14-2" style="--item-tree-width:280px">
+  <svg class="native-item-tree" xmlns="http://www.w3.org/2000/svg" width="280" height="168" viewBox="0 0 280 168" role="img" aria-labelledby="structure-chapter-14-2-title structure-chapter-14-2-desc">
+    <title id="structure-chapter-14-2-title">b0</title>
+    <desc id="structure-chapter-14-2-desc">b0
 ├─ %v10 = values[0] == 1
 └─ branch %v10
    ├─ true  → b1
-   └─ false → b2</code></pre>
+   └─ false → b2</desc>
+    <path class="native-item-tree__guides" d="M 22 34 V 81 M 22 51 H 40 M 22 81 H 40 M 50 94 V 141 M 50 111 H 68 M 50 141 H 68"/>
+    <text x="16" y="26" data-tree-depth="0" data-tree-row="0" data-continuation="false"><tspan class="native-item-tree__field">b0</tspan></text>
+    <text x="44" y="56" data-tree-depth="1" data-tree-row="1" data-continuation="false">%v10 = <tspan class="native-item-tree__value">values[0] == 1</tspan></text>
+    <text x="44" y="86" data-tree-depth="1" data-tree-row="2" data-continuation="false"><tspan class="native-item-tree__field">branch %v10</tspan></text>
+    <text x="72" y="116" data-tree-depth="2" data-tree-row="3" data-continuation="false">true<tspan class="native-item-tree__wire"> → </tspan><tspan class="native-item-tree__reference">b1</tspan></text>
+    <text x="72" y="146" data-tree-depth="2" data-tree-row="4" data-continuation="false">false<tspan class="native-item-tree__wire"> → </tspan><tspan class="native-item-tree__reference">b2</tspan></text>
+  </svg>
+</div>
+<div class="item-tree-legend" data-legend-for="structure-chapter-14-2" aria-label="図の凡例">
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">→</span><span>条件に応じた移動先ブロック</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">[]</span><span>空のリスト</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">{}</span><span>空の集合またはマップ</span></span>
+</div></figure>
 
   <p>
     block の最後で次の移動先を決める命令を Terminator と呼びます。<br>
@@ -87,14 +104,30 @@ b0: 条件計算と branch                       ├─▶ b3: H 実行と retur
     条件が true なら <code>b1</code>、false なら <code>b2</code> へ移動するため、実行が二つに分かれます。
   </p>
 
-  <h2 id="branch-blocks"><code>b1</code> と <code>b2</code>：各経路を実行して合流点へ進む</h2>
+  <h2 id="branch-blocks" class="trace-section-heading"><span><code>b1</code> と <code>b2</code>：各経路を実行して合流点へ進む</span></h2>
 
-<pre><code class="language-plaintext">b1
+<figure class="structure-figure"><div class="item-tree-diagram item-tree-diagram--native" data-item-tree="structure-chapter-14-3" style="--item-tree-width:280px">
+  <svg class="native-item-tree" xmlns="http://www.w3.org/2000/svg" width="280" height="184" viewBox="0 0 280 184" role="img" aria-labelledby="structure-chapter-14-3-title structure-chapter-14-3-desc">
+    <title id="structure-chapter-14-3-title">b1</title>
+    <desc id="structure-chapter-14-3-desc">b1
 ├─ X(q0.v0) → q0.v1
 └─ jump b3
 
 b2
-└─ jump b3</code></pre>
+└─ jump b3</desc>
+    <path class="native-item-tree__guides" d="M 22 34 V 81 M 22 51 H 40 M 22 81 H 40 M 22 140 V 157 M 22 157 H 40"/>
+    <text x="16" y="26" data-tree-depth="0" data-tree-row="0" data-continuation="false"><tspan class="native-item-tree__field">b1</tspan></text>
+    <text x="44" y="56" data-tree-depth="1" data-tree-row="1" data-continuation="false">X(q0.v0)<tspan class="native-item-tree__wire"> → </tspan><tspan class="native-item-tree__reference">q0.v1</tspan></text>
+    <text x="44" y="86" data-tree-depth="1" data-tree-row="2" data-continuation="false">jump b3</text>
+    <text x="16" y="132" data-tree-depth="0" data-tree-row="3" data-continuation="false"><tspan class="native-item-tree__field">b2</tspan></text>
+    <text x="44" y="162" data-tree-depth="1" data-tree-row="4" data-continuation="false">jump b3</text>
+  </svg>
+</div>
+<div class="item-tree-legend" data-legend-for="structure-chapter-14-3" aria-label="図の凡例">
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">→</span><span>演算結果のキュービットバージョン</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">[]</span><span>空のリスト</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">{}</span><span>空の集合またはマップ</span></span>
+</div></figure>
 
   <p>
     <code>b1</code> は true 本文にあった <code>X(q[0])</code> を実行します。<br>
@@ -112,12 +145,27 @@ b2
     <code>branch</code> は条件によって行き先を選びますが、<code>jump</code> は決められた一つの行き先へ移動します。
   </p>
 
-  <h2 id="b3"><code>b3</code>：経路を合流し、残りのコードを実行する</h2>
+  <h2 id="b3" class="trace-section-heading"><span><code>b3</code>：経路を合流し、残りのコードを実行する</span></h2>
 
-<pre><code class="language-plaintext">b3
+<figure class="structure-figure"><div class="item-tree-diagram item-tree-diagram--native" data-item-tree="structure-chapter-14-4" style="--item-tree-width:342px">
+  <svg class="native-item-tree" xmlns="http://www.w3.org/2000/svg" width="342" height="138" viewBox="0 0 342 138" role="img" aria-labelledby="structure-chapter-14-4-title structure-chapter-14-4-desc">
+    <title id="structure-chapter-14-4-title">b3</title>
+    <desc id="structure-chapter-14-4-desc">b3
 ├─ q0.v2 = phi(b1: q0.v1, b2: q0.v0)
 ├─ H(q0.v2) → q0.v3
-└─ return</code></pre>
+└─ return</desc>
+    <path class="native-item-tree__guides" d="M 22 34 V 111 M 22 51 H 40 M 22 81 H 40 M 22 111 H 40"/>
+    <text x="16" y="26" data-tree-depth="0" data-tree-row="0" data-continuation="false"><tspan class="native-item-tree__field">b3</tspan></text>
+    <text x="44" y="56" data-tree-depth="1" data-tree-row="1" data-continuation="false">q0.v2 = <tspan class="native-item-tree__value">phi(b1: q0.v1, b2: q0.v0)</tspan></text>
+    <text x="44" y="86" data-tree-depth="1" data-tree-row="2" data-continuation="false">H(q0.v2)<tspan class="native-item-tree__wire"> → </tspan><tspan class="native-item-tree__reference">q0.v3</tspan></text>
+    <text x="44" y="116" data-tree-depth="1" data-tree-row="3" data-continuation="false">return</text>
+  </svg>
+</div>
+<div class="item-tree-legend" data-legend-for="structure-chapter-14-4" aria-label="図の凡例">
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">→</span><span>演算結果のキュービットバージョン</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">[]</span><span>空のリスト</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">{}</span><span>空の集合またはマップ</span></span>
+</div></figure>
 
   <p>
     <code>b1</code> と <code>b2</code> はどちらも <code>b3</code> へ到着します。<br>
@@ -130,25 +178,25 @@ b2
     <code>H</code> が合流バージョン <code>q0.v2</code> を受けて <code>q0.v3</code> を作った後、<code>Work</code> に残る文がないため、MIR が追加した暗黙の <code>return</code> が block と callable を終えます。
   </p>
 
-  <h2 id="execution">MIR には両方の経路が残る</h2>
+  <h2 id="execution" class="trace-section-heading"><span>MIR には両方の経路が残る</span></h2>
 
   <p>
     MIR 内には四つの block がすべて存在しますが、一回の実行は条件に合う一つの経路だけを通ります。<br>
     lowering は <code>Next</code> の呼び出し結果を事前計算しないため、次の二つの可能性を両方表現します。
   </p>
 
-<pre><code class="language-plaintext">true 経路
+<figure class="structure-figure"><svg class="structure-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 208" role="img" aria-labelledby="flow-chapter-14-5-title flow-chapter-14-5-desc"><title id="flow-chapter-14-5-title">true 経路</title><desc id="flow-chapter-14-5-desc">true 経路
 b0 → b1 → b3 → return
 
 false 経路
-b0 → b2 → b3 → return</code></pre>
+b0 → b2 → b3 → return</desc><defs><marker id="flow-chapter-14-5-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0 L10 5 L0 10 Z" fill="#354bff"/></marker></defs><g font-family="Consolas, Malgun Gothic, sans-serif"><text x="12" y="24" font-size="15" fill="#111936" text-anchor="start">真の経路</text><rect x="12" y="40" width="132" height="40" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="24" y="66" font-size="14" fill="#111936" text-anchor="start" font-weight="700">b0</text><rect x="172" y="40" width="132" height="40" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="184" y="66" font-size="14" fill="#111936" text-anchor="start" font-weight="700">b1</text><path d="M144 60.0 H158.0 V60.0 H170" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-14-5-arrow)"/><rect x="332" y="40" width="132" height="40" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="344" y="66" font-size="14" fill="#111936" text-anchor="start" font-weight="700">b3</text><path d="M304 60.0 H318.0 V60.0 H330" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-14-5-arrow)"/><rect x="492" y="40" width="132" height="40" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="504" y="66" font-size="14" fill="#152581" text-anchor="start" font-weight="700">return</text><path d="M464 60.0 H478.0 V60.0 H490" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-14-5-arrow)"/><text x="12" y="134" font-size="15" fill="#111936" text-anchor="start">偽の経路</text><rect x="12" y="150" width="132" height="40" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="24" y="176" font-size="14" fill="#111936" text-anchor="start" font-weight="700">b0</text><rect x="172" y="150" width="132" height="40" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="184" y="176" font-size="14" fill="#111936" text-anchor="start" font-weight="700">b2</text><path d="M144 170.0 H158.0 V170.0 H170" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-14-5-arrow)"/><rect x="332" y="150" width="132" height="40" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="344" y="176" font-size="14" fill="#111936" text-anchor="start" font-weight="700">b3</text><path d="M304 170.0 H318.0 V170.0 H330" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-14-5-arrow)"/><rect x="492" y="150" width="132" height="40" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="504" y="176" font-size="14" fill="#152581" text-anchor="start" font-weight="700">return</text><path d="M464 170.0 H478.0 V170.0 H490" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-14-5-arrow)"/></g></svg></figure>
 
   <p>
     前章で確認したとおり、この正確な例を実行すると true 経路を選びます。<br>
     false 経路 <code>b2</code> は実行結果を予測して削除された経路ではなく、lowering 段階が保持した制御フローの別の可能性です。
   </p>
 
-  <h2 id="summary">まとめ</h2>
+  <h2 id="summary" class="trace-section-heading"><span>まとめ</span></h2>
 
   <div class="callout good">
     <span class="h">一文で見る制御フロー</span>

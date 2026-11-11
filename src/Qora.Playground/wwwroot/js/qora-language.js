@@ -1,6 +1,6 @@
 // Registers a "qora" language with Monaco: syntax highlighting + hover docs.
 //   keywords (operation/use/const/var/if/for/…) -> blue
-//   types    (Qubit/int/float/bit/angle)          -> teal
+//   types    (Qubit/int/float/bool/bit/angle)     -> teal
 //   gates    (H/X/CNOT/Rx/…/M)                    -> purple
 //   pi -> constant (green);  numbers / identifiers / operators
 //   hover a gate/keyword -> a short Korean description tooltip
@@ -15,7 +15,7 @@
 
     monaco.languages.setMonarchTokensProvider('qora', {
         keywords: ['operation', 'use', 'new', 'const', 'var', 'move', 'if', 'for', 'in', 'while', 'repeat', 'until'],
-        types: ['Qubit', 'int', 'float', 'bit', 'angle'],
+        types: ['Qubit', 'int', 'float', 'bool', 'bit', 'angle'],
         gates: ['H', 'X', 'Y', 'Z', 'S', 'T', 'CNOT', 'CX', 'CZ', 'SWAP', 'CCX', 'Rx', 'Ry', 'Rz', 'M', 'AsInt'],
         constants: ['pi'],
         tokenizer: {
@@ -43,7 +43,7 @@
         inherit: true,
         rules: [
             { token: 'keyword', foreground: '0000FF', fontStyle: 'bold' },  // blue
-            { token: 'type', foreground: '267F99' },                         // teal   (Qubit/int/float/bit/angle)
+            { token: 'type', foreground: '267F99' },                         // teal   (Qubit/int/float/bool/bit/angle)
             { token: 'gate', foreground: 'AF00DB', fontStyle: 'bold' },      // purple (gates)
             { token: 'number', foreground: '098658' },                       // green  (numbers, pi)
             { token: 'identifier', foreground: '001080' },                   // dark blue
@@ -87,6 +87,7 @@
         'var': '**var** — 변경 권한\n\n변수를 선언할 때는 `var i = 0;`처럼 가변 바인딩을 만들어요. 연산의 파라미터와 호출 인자 앞에서는 전체 `int[]`, `float[]`, `angle[]`에 대한 가변 빌림을 뜻해요: `operation Clear(var values: int[])` / `Clear(var values);`. 함수 파라미터는 기본 읽기 전용 빌림만 허용해요.',
         'move': '**move** — 소유권 이전\n\n연산의 파라미터와 호출 양쪽에 표시해요. `move values`는 모든 전체 배열과 전체 `Qubit` 바인딩의 읽기 전용 소유권 이전이고, `move var values`는 전체 `int[]`, `float[]`, `angle[]`의 변경 가능한 소유권 이전이에요. 호출 뒤에는 호출자가 그 바인딩을 다시 사용할 수 없어요(QSEM039). `const` 배열도 `move var`로 넘길 수 있는데, 빌려주는 것이 아니라 바인딩 자체를 이전하기 때문이에요.',
         'bit': '**bit** — 고전 비트 (0/1)\n\n측정 결과를 담아요. `var r: bit = M(q[0]);`',
+        'bool': '**bool** — 논리값 (true/false)\n\n비교 결과와 조건문에 사용해요. `var isOne: bool = r == 1;`처럼 비트를 비교해서 논리값을 만들어요. bool과 bit·int 사이에는 암묵적 변환이 없어요.',
         'int': '**int** — 정수\n\n`var i: int = 0;` / `const n: int = 3;`',
         'float': '**float** — 실수\n\n`var values: float[] = [0.25, 0.5];`처럼 스칼라나 배열 원소에 써요.',
         'angle': '**angle** — 회전 각도\n\n`var theta: angle = pi/2;`처럼 양자 게이트의 각도를 나타내요.',

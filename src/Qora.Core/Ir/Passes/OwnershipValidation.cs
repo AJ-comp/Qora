@@ -27,23 +27,13 @@ internal static class OwnershipValidation
                 $"QINTERNAL: callable `{op.Name}` has no semantic symbol");
         var callableName =
             op.DisplayName ?? scopeGraph.QualifiedName(callableSymbol);
-        var symbols = root.AllSymbols().ToDictionary(symbol => symbol.Id);
-        var usesByStatement = new Dictionary<HirNodeId, HashSet<SymbolId>>();
-        foreach (var symbol in symbols.Values)
-            foreach (var use in symbol.Uses)
-            {
-                if (!usesByStatement.TryGetValue(use.NodeId, out var uses))
-                    usesByStatement[use.NodeId] = uses = new HashSet<SymbolId>();
-                uses.Add(symbol.Id);
-            }
-
         // Loops revisit the same statement while finding their ownership fixed point. One source use should
         // still produce one diagnostic, not one per abstract iteration.
         var reported = new HashSet<(HirNodeId StatementId, SymbolId SymbolId)>();
-        AnalyzeBlock(op.Body, new HashSet<SymbolId>(), inLoop: false);
+        AnalyzeBlock(op.Body, new HashSet<SymbolId>(), root);
         return;
 
-        Flow AnalyzeBlock(IReadOnlyList<HirStatement> body, HashSet<SymbolId> incoming, bool inLoop)
+        Flow AnalyzeBlock(IReadOnlyList<HirStatement> body, HashSet<SymbolId> incoming, Scope scope)
         {
             HashSet<SymbolId>? state = Copy(incoming);
             var breaks = new List<HashSet<SymbolId>>();
@@ -52,31 +42,25 @@ internal static class OwnershipValidation
             {
                 if (state is null) break;
 
-                // A repeat condition runs after its body. Every other statement-owned expression (an if or
-                // while condition, for bounds, an initializer, an assignment, and call arguments) runs first.
-                if (statement is not HirRepeatStatement)
-                    CheckUses(statement, state);
-
                 switch (statement)
                 {
-                    case HirCallStatement:
-                        ApplyMoves(statement.Id, state);
-                        break;
-
                     case HirIfStatement conditional:
                     {
                         var conditionScope = scopeGraph.RequireScope(new HirScopeSite(
                             conditional.Id,
                             HirScopeSiteRole.IfCondition));
+                        Evaluate(conditional.Condition, statement, state, conditionScope);
                         var condition = ConditionValue(conditional.Condition, conditionScope);
                         if (deferUnknownControlFlow && condition is null)
                             break;
                         var thenFlow = condition == false
                             ? new Flow(null, Array.Empty<HashSet<SymbolId>>())
-                            : AnalyzeBlock(conditional.Then, state, inLoop);
+                            : AnalyzeBlock(conditional.Then, state, scopeGraph.RequireScope(
+                                new HirScopeSite(conditional.Id, HirScopeSiteRole.IfThen)));
                         var elseFlow = condition == true
                             ? new Flow(null, Array.Empty<HashSet<SymbolId>>())
-                            : AnalyzeBlock(conditional.Else, state, inLoop);
+                            : AnalyzeBlock(conditional.Else, state, scopeGraph.RequireScope(
+                                new HirScopeSite(conditional.Id, HirScopeSiteRole.IfElse)));
                         state = Join(thenFlow.Next, elseFlow.Next);
                         breaks.AddRange(thenFlow.Breaks.Select(Copy));
                         breaks.AddRange(elseFlow.Breaks.Select(Copy));
@@ -85,6 +69,8 @@ internal static class OwnershipValidation
 
                     case HirForStatement loop:
                     {
+                        Evaluate(loop.From, statement, state, scope);
+                        Evaluate(loop.To, statement, state, scope);
                         var loopFlow = AnalyzeLoop(loop.Body, state, loop, conditionAfterBody: false);
                         state = loopFlow.Next;
                         breaks.AddRange(loopFlow.Breaks);
@@ -93,6 +79,8 @@ internal static class OwnershipValidation
 
                     case HirWhileStatement loop:
                     {
+                        Evaluate(loop.Condition, statement, state, scopeGraph.RequireScope(
+                            new HirScopeSite(loop.Id, HirScopeSiteRole.WhileCondition)));
                         var loopFlow = AnalyzeLoop(loop.Body, state, loop, conditionAfterBody: false);
                         state = loopFlow.Next;
                         breaks.AddRange(loopFlow.Breaks);
@@ -107,10 +95,23 @@ internal static class OwnershipValidation
                         break;
                     }
 
-                    case HirReturnStatement:
+                    case HirReturnStatement returned:
+                        if (returned.Value is { } value)
+                            Evaluate(value, statement, state, scope);
                         state = null;
                         break;
-
+                    case HirAssignmentStatement assignment:
+                        Evaluate(assignment.Target, statement, state, scope);
+                        Evaluate(assignment.Value, statement, state, scope);
+                        if (assignment.Target is HirNameExpression assignedName)
+                            CheckName(assignedName, statement, state);
+                        else if (assignment.Target is HirIndexExpression { Receiver: HirNameExpression assignedArray })
+                            CheckName(assignedArray, statement, state);
+                        break;
+                    default:
+                        foreach (var expression in HirExpressions.DirectExpressionSites(statement))
+                            Evaluate(expression, statement, state, scope);
+                        break;
                 }
             }
 
@@ -192,33 +193,33 @@ internal static class OwnershipValidation
                 return new Flow(Copy(incoming), Array.Empty<HashSet<SymbolId>>());
 
             var locals = LoopLocalIds(body, owner);
-            var first = AnalyzeBlock(body, incoming, inLoop: true);
+            var first = AnalyzeBlock(body, incoming, bodyScope);
 
             // The repeat condition sees body-local bindings and runs before the next iteration recreates
             // them, so inspect the unprojected state first.
             if (first.Next is not null && conditionAfterBody)
-                CheckUses(owner, first.Next);
+                Evaluate(((HirRepeatStatement)owner).Until, owner, first.Next, conditionScope);
 
             var firstNext = ProjectOuter(first.Next, locals);
             var exits = first.Breaks.Select(state => ProjectOuter(state, locals)!).ToList();
 
             // while evaluates its condition both before entry (already checked by the caller) and on every
             // back edge. A repeat-until condition was checked above while body locals were still visible.
-            if (firstNext is not null && owner is HirWhileStatement)
-                CheckUses(owner, firstNext);
+            if (firstNext is not null && owner is HirWhileStatement firstWhile)
+                Evaluate(firstWhile.Condition, owner, firstNext, conditionScope);
 
             // One extra abstract iteration reaches the fixed point because ownership facts only grow from
             // available to unavailable. Body-local symbols are projected out: each iteration declares a fresh
             // binding, while outer symbols retain moves made by an earlier iteration.
             if (firstNext is not null && iterationCap > 1)
             {
-                var second = AnalyzeBlock(body, firstNext, inLoop: true);
+                var second = AnalyzeBlock(body, firstNext, bodyScope);
                 if (second.Next is not null && conditionAfterBody)
-                    CheckUses(owner, second.Next);
+                    Evaluate(((HirRepeatStatement)owner).Until, owner, second.Next, conditionScope);
                 var secondNext = ProjectOuter(second.Next, locals);
                 exits.AddRange(second.Breaks.Select(state => ProjectOuter(state, locals)!));
-                if (secondNext is not null && owner is HirWhileStatement)
-                    CheckUses(owner, secondNext);
+                if (secondNext is not null && owner is HirWhileStatement secondWhile)
+                    Evaluate(secondWhile.Condition, owner, secondNext, conditionScope);
             }
 
             HashSet<SymbolId>? after;
@@ -276,22 +277,79 @@ internal static class OwnershipValidation
             return ids;
         }
 
-        void CheckUses(HirStatement statement, HashSet<SymbolId> state)
+        void Evaluate(
+            HirExpression expression,
+            HirStatement owner,
+            HashSet<SymbolId> state,
+            Scope scope)
         {
-            if (!usesByStatement.TryGetValue(statement.Id, out var uses)) return;
-            foreach (var symbolId in uses)
+            switch (expression)
             {
-                if (!state.Contains(symbolId) || !reported.Add((statement.Id, symbolId))) continue;
-                if (!symbols.TryGetValue(symbolId, out var symbol)) continue;
-                Add(errors, "QSEM039",
-                    $"in `{callableName}`: `{symbol.SourceName}` cannot be used here because ownership was moved on an earlier execution path; create or receive a new binding before using it again",
-                    statement.Span);
+                case HirNameExpression name:
+                    CheckName(name, owner, state);
+                    break;
+                case HirCallExpression call:
+                    // Argument evaluation precedes the call itself. A nested call can consume storage
+                    // before a later argument reads it, even when both occur in the same source statement.
+                    foreach (var argument in call.Arguments)
+                        Evaluate(argument.Expression, owner, state, scope);
+                    // A borrowed/moved reference captured by an earlier argument must still be available
+                    // when the callee begins, after every later argument has finished evaluating.
+                    foreach (var argument in call.Arguments)
+                    {
+                        if (argument.Expression is HirNameExpression whole)
+                            CheckName(whole, owner, state);
+                        else if (argument.Expression is HirIndexExpression { Receiver: HirNameExpression receiver }
+                                 && scopeGraph.FindReferencedSymbol(receiver.Id)?.Type == QType.Qubit)
+                            CheckName(receiver, owner, state);
+                    }
+                    ApplyMoves(call.Id, state);
+                    break;
+                case HirIndexExpression index:
+                    Evaluate(index.Receiver, owner, state, scope);
+                    Evaluate(index.Index, owner, state, scope);
+                    if (index.Receiver is HirNameExpression indexedArray)
+                        CheckName(indexedArray, owner, state);
+                    break;
+                case HirBinaryExpression binary when binary.Operator is
+                    HirBinaryOperator.LogicalAnd or HirBinaryOperator.LogicalOr:
+                {
+                    Evaluate(binary.Left, owner, state, scope);
+                    var left = ConditionValue(binary.Left, scope);
+                    var skipRight = binary.Operator == HirBinaryOperator.LogicalAnd ? left == false : left == true;
+                    if (skipRight) break;
+                    if (left is not null)
+                    {
+                        Evaluate(binary.Right, owner, state, scope);
+                        break;
+                    }
+                    if (deferUnknownControlFlow) break;
+                    var rightPath = Copy(state);
+                    Evaluate(binary.Right, owner, rightPath, scope);
+                    state.UnionWith(rightPath);
+                    break;
+                }
+                default:
+                    foreach (var child in expression.Children().OfType<HirExpression>())
+                        Evaluate(child, owner, state, scope);
+                    break;
             }
         }
 
-        void ApplyMoves(HirNodeId statementId, HashSet<SymbolId> state)
+        void CheckName(HirNameExpression name, HirStatement owner, HashSet<SymbolId> state)
         {
-            if (!validMoves.TryGetValue(statementId, out var moves)) return;
+            if (scopeGraph.FindReferencedSymbol(name.Id) is not { } symbol
+                || !state.Contains(symbol.Id)
+                || !reported.Add((owner.Id, symbol.Id)))
+                return;
+            Add(errors, "QSEM039",
+                $"in `{callableName}`: `{symbol.SourceName}` cannot be used here because ownership was moved on an earlier execution path; create or receive a new binding before using it again",
+                name.Span ?? owner.Span);
+        }
+
+        void ApplyMoves(HirNodeId callId, HashSet<SymbolId> state)
+        {
+            if (!validMoves.TryGetValue(callId, out var moves)) return;
             foreach (var symbol in moves) state.Add(symbol.Id);
         }
     }

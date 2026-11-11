@@ -4,8 +4,8 @@ namespace Qora.Tests;
 
 /// <summary>
 /// <c>function</c> — a classical, pure, value-returning subroutine (Q#'s <c>function</c> vs the quantum,
-/// void <c>operation</c>). Its call is a VALUE, usable anywhere in an expression; a measurement stays the
-/// one side-effecting value form (whole <c>var r: bit = M(q[i]);</c> only), and an operation stays void.
+/// effectful <c>operation</c>). Both kinds can return classical scalar values; only a function guarantees
+/// that its body contains no quantum effects or operation calls.
 /// A function emits an OpenQASM <c>def Name(...) -&gt; T { … return e; }</c>. Verifies acceptance of the
 /// value positions, the emitted shape, and every purity / return / arity rule.
 /// </summary>
@@ -142,7 +142,7 @@ public class FunctionTests
     public void RejectsQubitParameterInFunction(string source) => Compiler.Rejects(source, "QSEM034");
 
     [Fact]
-    public void RejectsReturnOutsideFunction() =>
+    public void RejectsAValueReturnFromAVoidOperation() =>
         Compiler.Rejects("operation Main(){ use q=Qubit[1]; return 5; }", "QSEM035");
 
     [Theory]
@@ -152,7 +152,7 @@ public class FunctionTests
     public void RejectsFunctionThatMayNotReturn(string source) => Compiler.Rejects(source, "QSEM035");
 
     [Theory]
-    // an OPERATION call has no value — only a function's does (QSEM005):
+    // An operation without a declared return type has no expression value (QSEM005):
     [InlineData("operation g(a: Qubit){ X(a); }\noperation Main(){ use q=Qubit[1]; var k: int = g(q[0]) + 1; }")]
     // a measurement is a value only as a whole RHS, never inside a larger expression (QSEM005):
     [InlineData("operation Main(){ use q=Qubit[1]; var k: int = M(q[0]) + 1; }")]
@@ -208,9 +208,8 @@ public class FunctionTests
             "QSEM037");
 
     [Fact]
-    public void OperationCannotDeclareAReturnType() =>
-        // only a `function` carries a `): T`; `operation Foo(): int` is a parse error (operations are void).
-        Compiler.Rejects("operation Foo(): int { return 1; }\noperation Main(){ use q=Qubit[1]; }", "CE0001");
+    public void OperationMayDeclareAReturnType() =>
+        Compiler.Accepts("operation Foo(): int { return 1; }\noperation Main(){ var value: int = Foo(); }");
 
     [Fact]
     public void FunctionsCannotRecurse() =>
@@ -406,8 +405,12 @@ public class FunctionTests
             function.Body,
             loop);
         var returnFlag = ReturnFlag(propagationGuard);
+        var loopFlag = LoopFlag(loop);
 
         Assert.Contains(
+            MirQasmTestModel.Statements(loop.Body),
+            statement => StopsLoop(statement, loopFlag));
+        Assert.DoesNotContain(
             MirQasmTestModel.Statements(loop.Body),
             statement => statement is MirQasmBreakStatement);
         Assert.True(
@@ -459,7 +462,8 @@ public class FunctionTests
     [Fact]
     public void AReturnInsideNestedLoopsLeavesEveryLevel()
     {
-        // `break` leaves only the INNERMOST loop, so each enclosing one is left as well once the result exists.
+        // Each loop has its own active flag. A return disables the inner flag first,
+        // then the enclosing loop's propagation guard disables the outer flag.
         var program = CompileTarget("""
             function grid(n: int): int {
                 for i in 0..2 {
@@ -475,14 +479,17 @@ public class FunctionTests
             MirQasmTestModel.Statements(outer.Body)
                 .OfType<MirQasmWhileStatement>());
         var returnFlag = FindReturnFlag(function.Body, inner);
-        var outerBreakGuard = Assert.Single(
+        var innerFlag = LoopFlag(inner);
+        var outerFlag = LoopFlag(outer);
+        Assert.NotEqual(innerFlag, outerFlag);
+        var outerExitGuard = Assert.Single(
             MirQasmTestModel.Statements(outer.Body)
                 .OfType<MirQasmIfStatement>(),
             branch =>
                 IsReturnFlagCondition(branch.Condition, returnFlag)
                 && MirQasmTestModel.Statements(branch.Then)
                     .Concat(MirQasmTestModel.Statements(branch.Else))
-                    .Any(statement => statement is MirQasmBreakStatement));
+                    .Any(statement => StopsLoop(statement, outerFlag)));
         var innerReturnBranch = Assert.Single(
             MirQasmTestModel.Statements(inner.Body)
                 .OfType<MirQasmIfStatement>(),
@@ -499,15 +506,17 @@ public class FunctionTests
                                 is MirQasmLiteralExpression { Text: "1" })
                 && branch.Then
                     .Concat(branch.Else)
-                    .Any(statement => statement is MirQasmBreakStatement));
-        _ = Assert.Single(
+                    .Any(statement => StopsLoop(statement, innerFlag)));
+        Assert.Single(
             MirQasmTestModel.Statements(innerReturnBranch.Then)
-                .Concat(MirQasmTestModel.Statements(innerReturnBranch.Else))
-                .OfType<MirQasmBreakStatement>());
-        _ = Assert.Single(
-            MirQasmTestModel.Statements(outerBreakGuard.Then)
-                .Concat(MirQasmTestModel.Statements(outerBreakGuard.Else))
-                .OfType<MirQasmBreakStatement>());
+                .Concat(MirQasmTestModel.Statements(innerReturnBranch.Else)),
+            statement => StopsLoop(statement, innerFlag));
+        Assert.Single(
+            MirQasmTestModel.Statements(outerExitGuard.Then)
+                .Concat(MirQasmTestModel.Statements(outerExitGuard.Else)),
+            statement => StopsLoop(statement, outerFlag));
+        Assert.Empty(MirQasmTestModel.Statements(function.Body)
+            .OfType<MirQasmBreakStatement>());
     }
 
     [Theory]
@@ -561,6 +570,21 @@ public class FunctionTests
                 .Declaration,
         };
     }
+
+    private static MirQasmDeclarationId LoopFlag(MirQasmWhileStatement loop)
+    {
+        var condition = Assert.IsType<MirQasmBinaryExpression>(loop.Condition);
+        Assert.Equal(MirQasmBinaryOperator.Equal, condition.Operator);
+        Assert.Equal(new MirQasmLiteralExpression("1"), condition.Right);
+        return Assert.IsType<MirQasmDeclarationReferenceExpression>(condition.Left).Declaration;
+    }
+
+    private static bool StopsLoop(MirQasmStatement statement, MirQasmDeclarationId flag) =>
+        statement is MirQasmAssignmentStatement
+        {
+            Target: MirQasmDeclarationReferenceExpression target,
+            Value: MirQasmLiteralExpression { Text: "0" },
+        } && target.Declaration == flag;
 
     private static MirQasmDeclarationId FindReturnFlag(
         IReadOnlyList<MirQasmStatement> body,

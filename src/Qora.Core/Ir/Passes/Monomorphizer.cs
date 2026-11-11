@@ -500,10 +500,9 @@ internal static class Monomorphizer
 
                     case HirReturnStatement returned:
                     {
-                        var value = RewriteExpression(
-                            returned.Value,
-                            registers,
-                            copy);
+                        var value = returned.Value is { } returnedValue
+                            ? RewriteExpression(returnedValue, registers, copy)
+                            : null;
                         rewritten = copy
                             ? rewrite.DeriveReturn(returned, value)
                             : ReferenceEquals(value, returned.Value)

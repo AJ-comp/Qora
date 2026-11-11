@@ -4,8 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>11. Classical Values and SSA Versions — Qora Compiler Developer Manual</title>
-<link rel="stylesheet" href="developer.css">
-<script src="developer-syntax.js" defer></script>
+<link rel="stylesheet" href="developer.css?v=20260924-layout-review-r49">
+<link rel="stylesheet" href="../section-heading.css?v=20260826-section-tab-standard">
+<script src="developer-syntax.js?v=20260828-localized-format-r1" defer></script>
 </head>
 <body>
 <nav class="language-switch" aria-label="Language"><strong>English</strong><span aria-hidden="true">·</span><a href="../ko/chapter-11.html">한국어</a><span aria-hidden="true">·</span><a href="../ja/chapter-11.html">日本語</a></nav>
@@ -27,7 +28,7 @@
     MIR distinguishes old and new values by never overwriting a value and assigning a new number whenever a new MIR value is created. This chapter shows how that rule applies to the running example.
   </p>
 
-  <h2 id="source">Source statements that change values</h2>
+  <h2 id="source" class="trace-section-heading"><span>Source statements that change values</span></h2>
 
 <pre><code class="language-qora">function Next(value: int): int
 {
@@ -55,9 +56,9 @@ operation Work()
     Immediately after declaration, element 0 is <code>0</code>. After the assignment, it contains the value returned by <code>Next</code>. The conditional must read this updated second state.
   </p>
 
-  <h2 id="idea">Keep the name and assign a new number to each value</h2>
+  <h2 id="idea" class="trace-section-heading"><span>Keep the name and assign a new number to each value</span></h2>
 
-<pre><code class="language-plaintext">Qora source
+<figure class="structure-figure"><svg class="structure-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 134" role="img" aria-labelledby="flow-chapter-11-1-title flow-chapter-11-1-desc"><title id="flow-chapter-11-1-title">Qora source</title><desc id="flow-chapter-11-1-desc">Qora source
 values = initial array
 values = array after updating an element
 
@@ -66,7 +67,7 @@ MIR
 %v6 = new array state after updating element 0 of %v1
 
 Value currently referenced by values
-%v1  ──after assignment──▶  %v6</code></pre>
+%v1  ──after assignment──▶  %v6</desc><defs><marker id="flow-chapter-11-1-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0 L10 5 L0 10 Z" fill="#354bff"/></marker></defs><g font-family="Consolas, Malgun Gothic, sans-serif"><rect x="12" y="12" width="270" height="62" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="24" y="38" font-size="14" fill="#111936" text-anchor="start" font-weight="700">values · before assignment</text><text x="24" y="60" font-size="14" fill="#111936" text-anchor="start">%v1 = [0]</text><rect x="354" y="12" width="270" height="62" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="366" y="38" font-size="14" fill="#152581" text-anchor="start" font-weight="700">values · after assignment</text><text x="366" y="60" font-size="14" fill="#152581" text-anchor="start">%v6 = [%v5]</text><path d="M282 43.0 H318.0 V43.0 H352" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-11-1-arrow)"/><text x="12" y="118" font-size="14" fill="#111936" text-anchor="start">The name stays the same; the current MIR value changes.</text></g></svg></figure>
 
   <p>
     MIR values <code>%v1</code> and <code>%v6</code> are not different source variables.<br>
@@ -78,7 +79,7 @@ Value currently referenced by values
     Each ID is defined once and is never overwritten with another value. This single-definition property is the central rule of SSA.
   </p>
 
-  <h2 id="next-values">Next keeps its input separate from its result</h2>
+  <h2 id="next-values" class="trace-section-heading"><span>Next keeps its input separate from its result</span></h2>
 
 <pre><code class="language-plaintext">function Next(value: int): int
 
@@ -97,7 +98,7 @@ return %v2</code></pre>
     Therefore, <code>%v1</code> in <code>Next</code> and <code>%v1</code> in <code>Work</code> below are different values and do not conflict.
   </p>
 
-  <h2 id="work-start">The array declaration creates the first state</h2>
+  <h2 id="work-start" class="trace-section-heading"><span>The array declaration creates the first state</span></h2>
 
 <pre><code class="language-plaintext">var values: int[] = [0];
 
@@ -116,7 +117,7 @@ current values → %v1</code></pre>
     Put simply, storage identifies “which array location this is,” while an SSA value such as <code>%v1</code> describes “what that array contains now.” Chapter 12 examines this distinction in detail.
   </p>
 
-  <h2 id="work-assignment">An array assignment creates a new array state</h2>
+  <h2 id="work-assignment" class="trace-section-heading"><span>An array assignment creates a new array state</span></h2>
 
 <pre><code class="language-plaintext">values[0] = Next(values[0]);
 
@@ -138,9 +139,9 @@ current values: %v1 → %v6</code></pre>
     The compiler preserves the exact point at which the value changed while keeping one variable name in the source.
   </p>
 
-  <h2 id="work-condition">The conditional reads the latest value</h2>
+  <h2 id="work-condition" class="trace-section-heading"><span>The conditional reads the latest value</span></h2>
 
-<pre><code class="language-plaintext">if (values[0] == 1)
+<figure class="structure-figure"><svg class="structure-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 408" role="img" aria-labelledby="flow-chapter-11-5-title flow-chapter-11-5-desc"><title id="flow-chapter-11-5-title">if (values[0] == 1)</title><desc id="flow-chapter-11-5-desc">if (values[0] == 1)
 
 current values = %v6
         │
@@ -152,7 +153,7 @@ current values = %v6
              compare values → %v10
                   │
                   ▼
-             branch on %v10</code></pre>
+             branch on %v10</desc><defs><marker id="flow-chapter-11-5-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0 L10 5 L0 10 Z" fill="#354bff"/></marker></defs><g font-family="Consolas, Malgun Gothic, sans-serif"><rect x="170" y="8" width="300" height="40" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="182" y="34" font-size="14" fill="#111936" text-anchor="start" font-weight="700">values → %v6</text><rect x="12" y="88" width="280" height="40" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="24" y="114" font-size="14" fill="#111936" text-anchor="start" font-weight="700">%v7 = 0</text><rect x="350" y="88" width="278" height="40" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="362" y="114" font-size="14" fill="#111936" text-anchor="start" font-weight="700">%v9 = 1</text><rect x="12" y="174" width="280" height="40" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="24" y="200" font-size="14" fill="#111936" text-anchor="start" font-weight="700">%v8 = %v6[%v7]</text><rect x="170" y="264" width="300" height="40" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="182" y="290" font-size="14" fill="#152581" text-anchor="start" font-weight="700">%v10 = (%v8 == %v9)</text><path d="M320.0 48 V68.0 H152.0 V86" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-11-5-arrow)"/><path d="M152.0 128 V151.0 H152.0 V172" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-11-5-arrow)"/><path d="M489.0 128 V196.0 H320.0 V262" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-11-5-arrow)"/><path d="M152.0 214 V239.0 H320.0 V262" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-11-5-arrow)"/><rect x="170" y="350" width="300" height="40" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="182" y="376" font-size="14" fill="#152581" text-anchor="start" font-weight="700">Branch on %v10</text><path d="M320.0 304 V327.0 H320.0 V348" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-11-5-arrow)"/></g></svg></figure>
 
   <p>
     The condition reads the latest array state, <code>%v6</code>, rather than the initial state <code>%v1</code>.<br>
@@ -160,7 +161,7 @@ current values = %v6
     The comparison result is therefore not fixed to <code>true</code> ahead of time. At execution, the computed <code>%v10</code> determines which block is selected.
   </p>
 
-  <h2 id="definition">Summary</h2>
+  <h2 id="definition" class="trace-section-heading"><span>Summary</span></h2>
 
   <div class="callout good">
     <span class="h">One name, values from different points in time</span>

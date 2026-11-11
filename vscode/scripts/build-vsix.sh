@@ -13,6 +13,9 @@ set -euo pipefail
 here="$(cd "$(dirname "$0")/.." && pwd)"            # qora-vscode/
 qora_csproj="$here/../src/Qora/Qora.csproj"
 
+# Keep local packaging on the same dependency versions as CI.
+npm --prefix "$here" ci
+
 # vsce target (= process.platform-process.arch, the folder the extension looks in)  ->  dotnet RID
 targets_all=(win32-x64 darwin-arm64 linux-x64)
 rid_for() {
@@ -40,7 +43,7 @@ for t in "${targets[@]}"; do
   rm -f "$here/bin/$t"/*.pdb                        # debug symbols aren't needed to ship
   [ "$t" = win32-x64 ] || chmod +x "$here/bin/$t/Qora"   # set exec bit for unix targets at pack time
 
-  npx --yes @vscode/vsce package --target "$t" --allow-missing-repository \
+  "$here/node_modules/.bin/vsce" package --target "$t" --allow-missing-repository \
     -o "$here/dist/qora-$t-$ver.vsix"
 done
 

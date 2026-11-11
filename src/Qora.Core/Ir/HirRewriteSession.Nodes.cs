@@ -208,9 +208,10 @@ internal sealed partial class HirRewriteSession
 
     public HirReturnStatement RewriteReturn(
         HirReturnStatement source,
-        HirExpression value)
+        HirExpression? value)
     {
-        RequireOwned(value, nameof(value));
+        if (value is not null)
+            RequireOwned(value, nameof(value));
         return new HirReturnStatement(
             PreserveStamp(source),
             value);
@@ -515,7 +516,7 @@ internal sealed partial class HirRewriteSession
             HirReturnStatement @return =>
                 new HirReturnStatement(
                     DeriveStamp(@return),
-                    Expr(@return.Value)),
+                    @return.Value is { } returnedValue ? Expr(returnedValue) : null),
             HirForStatement loop =>
                 new HirForStatement(
                     DeriveStamp(loop),
@@ -813,9 +814,10 @@ internal sealed partial class HirRewriteSession
 
     public HirReturnStatement DeriveReturn(
         HirReturnStatement source,
-        HirExpression value)
+        HirExpression? value)
     {
-        RequireOwned(value, nameof(value));
+        if (value is not null)
+            RequireOwned(value, nameof(value));
         return new HirReturnStatement(
             DeriveStamp(source),
             value);

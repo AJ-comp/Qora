@@ -17,6 +17,114 @@ emitted as **OpenQASM 3.0**.
 > named there may have been retired by a later release; the newest release notes and current architecture
 > documents define the present pipeline.
 
+## 0.40.0 — Unreleased
+
+Prepared together with VS Code extension **0.33.0**. These notes describe the pending release;
+no release tag or package publication is implied.
+
+### Added
+
+- **Distinct `bool` and `bit` types.** `true`/`false`, comparisons, and logical conditions use `bool`;
+  measurements retain `bit` with 0/1 values. Implicit conversions between `bool` and other classical
+  scalar types are rejected in initializers, assignments, arguments, and returns. Conditions require
+  `bool`; measured bits and integers must be explicitly compared. `bool[]` uses ordinary classical
+  array storage. Returned `bool` values remain JSON booleans and display as `true`/`false`.
+- **Comparison expressions produce `bool` values.** `==`, `!=`, `<`, `<=`, `>`, and `>=`
+  now work in variable/constant initializers, assignments, array elements, callable arguments, and
+  returns. Arithmetic binds before ordering comparisons, which bind before equality; parentheses
+  can group comparison values. Measurement placement is unchanged; logical operators (`!`, `&&`, `||`)
+  remain condition-only syntax rather than general-value expressions.
+- **Arithmetic expressions support parentheses.** Nested groups such as `(1 + 2) * 3`,
+  `8 / (4 / 2)`, and `-(1 + 2)` preserve grouping in declarations, returns, call arguments,
+  array elements and indices, loop bounds, and arithmetic operands of conditions. Grouping does not
+  change type-conversion rules.
+- **Operations may return a classical scalar** (`bool`, `int`, `bit`, `float`, or `angle`), including a measured
+  bit. Calls retain their quantum effects; functions still cannot call operations. Typed callables must
+  return on every path, and void operations support `return;` for early exit.
+
+### Changed
+
+- **Developer-manual structure diagrams and navigation have been rebuilt.** English, Korean, and
+  Japanese call-flow pages use readable inline SVG item trees with consistent 15.5px text, 30px rows,
+  and 28px indentation. Before/after panels are distinct, caller-return links are corrected, and each
+  detailed flow ends with a summary and code-based navigation to its own helper flows. The manuals
+  also explain `CloseCallableBody` and distinguish the `Next` and `Work` examples.
+- **Execution results are explicit entry returns.** Braket runners display only the entry operation's
+  returned value for each shot, with a typed compiler-to-runner contract. Internal measurements and
+  helper returns are not automatically exported, and no final measurements are appended. A void entry
+  reports successful execution without a result histogram. This intentionally replaces the previous
+  backend-dependent measurement-count display; existing examples must explicitly return intended results.
+- **Refreshed dependencies while retaining .NET 10.** Playground now uses BlazorBlueprint 4.2.0,
+  BlazorMonaco 3.5.0, and ASP.NET WebAssembly 10.0.15. The test projects use Microsoft.NET.Test.Sdk
+  18.11.0, coverlet.collector 10.1.0, and xunit.runner.visualstudio 4.0.1. The Blueprint update removes
+  the vulnerable AngleSharp 0.17.1 dependency; page-owned layout styles and explicit theme tokens
+  preserve the Playground layout with Blueprint 4's prefixed CSS utilities. Vendored Bootstrap is
+  updated to 5.3.8, and verified transitive dependencies are pinned explicitly.
+- **Python execution and diagnostic dependencies are reproducible.** The shared runner requirements
+  pin Braket SDK 1.127.8 and default simulator 1.43.1. Tool requirements additionally pin Qiskit 2.6.2,
+  Qiskit Aer 0.18.2, and qiskit-qasm3-import 0.6.0; the Qiskit script is an importer diagnostic, not a
+  replacement implementation of Qora's returned-value results.
+- **Updated the Janglim parser engine from `0.3.0-preview.2` to `0.6.0`.** Core and CLI use the same
+  stable dependency. Regression tests cover keyword-prefix identifiers, numeric token boundaries,
+  multi-character operators, line comments, and quoted import paths.
+- **Empty, whitespace-only, and comment-only source now fails at the syntax stage.** The updated engine
+  checks end-of-input against Qora's existing requirement for at least one top-level item. These inputs
+  report `CE0001` instead of reaching the no-AST `QSEM040` preflight fallback.
+
+### Fixed
+
+- **Fractional standard-gate powers no longer evaluate to zero.** Both bundled `stdgates.inc`
+  files now use `pow(0.5)` for `s`, `sdg`, `t`, `tdg`, and `sx`; integer `1/2` previously made
+  these definitions act as identity operations. Execution regressions cover both shipped libraries,
+  the roots' phase directions, and compiled Qora S/T return values through the tools and VS Code runners.
+- **Implicit `float` → `int` conversion is rejected consistently.** Variable and constant initializers,
+  reassignment, and array elements now reject float values just as callable arguments and returns do.
+  This includes `1.0`, inferred float variables, and compound expressions. Invalid programs stop during
+  HIR validation instead of receiving a truncating MIR/OpenQASM conversion. `int` → `float` and unrelated
+  existing conversion rules are unchanged.
+- **Browser compilation no longer tries to start an unsupported `Thread`.** WebAssembly runs the same
+  compiler/parser pipeline on the current thread, while desktop builds retain the 64 MB worker stack.
+
+### Migration from 0.39.0
+
+- **Return the result that should be displayed.** A measurement stored in a local variable is no
+  longer an implicit execution output. A void entry still executes, but has no result histogram.
+
+  ```qora
+  operation Main(): bit {
+      use q = Qubit[1];
+      H(q[0]);
+      return M(q[0]);
+  }
+  ```
+
+- **Use `bool` for logic and compare measured bits explicitly.** For example,
+  `var same: bool = 1 == 1;` stores a comparison, while `if (result == 1)` tests a measured bit.
+  `var same: bit = 1 == 1;` and `if (result)` are compile errors.
+- **Keep fractional values in `float` storage.** Use `var value: float = 0.5;` or `var value = 0.5;`,
+  not `var value: int = 0.5;`. Qora does not silently truncate a float to an integer.
+- **Update custom compiler and runner installations together.** The runner requires the compiler's
+  typed `entryResult` metadata; it does not fall back to exposing internal measurement registers.
+
+### Known execution limitations
+
+- **Braket Boolean-array fix awaits upstream merge/release.** The unpatched local simulator raises
+  `AttributeError: 'BoolType' object has no attribute 'size'` when reading a `bool[]` element or passing
+  a Boolean array to a helper. Standalone OpenQASM `array[bool, 2]` reproduces the failure without Qora.
+  Reported in [issue #429](https://github.com/amazon-braket/amazon-braket-default-simulator-python/issues/429)
+  and addressed by [PR #430](https://github.com/amazon-braket/amazon-braket-default-simulator-python/pull/430).
+  The fix combined with PRs #425/#426/#428 passes the current 54-case Qora execution suite locally,
+  including S/T regressions, without replacing Boolean arrays with numeric arrays. This result applies
+  to that combined-patch environment, not an ordinary package install; the fixes are not yet released.
+  With the pinned SDK 1.127.8 / simulator 1.43.1 packages, the same suite currently passes 49 cases and
+  fails 5 (readonly-array parsing, helper-loop execution, and Boolean arrays). These failures remain
+  enabled and are recorded separately from the passing Qora compiler and runner-contract tests.
+- **Additional Braket failures remain outside that passing suite.** Measuring an element of a
+  `Qubit[]` helper parameter can fail, and controlled gates can produce incorrect results for certain
+  noncontiguous qubit layouts. These were reproduced without Qora in OpenQASM and remain unresolved,
+  including in the combined-patch environment. Passing the 54 cases does not establish support for
+  every Qora program or remove these execution restrictions.
+
 ## 0.39.0 — 2026-08-25
 
 ### Added

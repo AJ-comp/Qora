@@ -1008,7 +1008,6 @@ public sealed class QoraMirTests
         var error = Assert.Throws<ArgumentException>(
             () => CopyCallable(
                 callable,
-                entryBlock: callable.EntryBlock,
                 blocks: new MirBlock[] { callable.EntryBlock, null! }));
 
         Assert.Contains("null", error.Message, StringComparison.OrdinalIgnoreCase);
@@ -1093,7 +1092,6 @@ public sealed class QoraMirTests
         var error = Assert.Throws<ArgumentException>(
             () => CopyCallable(
                 callable,
-                entryBlock: entryBlock,
                 blocks: new[] { entryBlock, entryBlock }));
 
         Assert.Contains("block identity", error.Message, StringComparison.Ordinal);
@@ -1114,7 +1112,6 @@ public sealed class QoraMirTests
         var error = Assert.Throws<ArgumentException>(
             () => CopyCallable(
                 callable,
-                entryBlock: duplicateEntryBlock,
                 blocks: new[] { duplicateEntryBlock }));
 
         Assert.Contains("instruction identity", error.Message, StringComparison.Ordinal);
@@ -1139,7 +1136,6 @@ public sealed class QoraMirTests
         var error = Assert.Throws<ArgumentException>(
             () => CopyCallable(
                 callable,
-                entryBlock: duplicateEntryBlock,
                 blocks: new[] { duplicateEntryBlock }));
 
         Assert.Contains("SSA value identity", error.Message, StringComparison.Ordinal);
@@ -1170,7 +1166,6 @@ public sealed class QoraMirTests
         var error = Assert.Throws<ArgumentException>(
             () => CopyCallable(
                 callable,
-                entryBlock: duplicateEntryBlock,
                 blocks: new[] { duplicateEntryBlock }));
 
         Assert.Contains("array storage identity", error.Message, StringComparison.Ordinal);
@@ -1267,7 +1262,6 @@ public sealed class QoraMirTests
         AssertRejected(
             CopyCallable(
                 second,
-                entryBlock: first.EntryBlock,
                 blocks: new[] { first.EntryBlock }),
             "block");
         AssertRejected(
@@ -1357,7 +1351,6 @@ public sealed class QoraMirTests
         var error = Assert.Throws<ArgumentException>(
             () => CopyCallable(
                 callable,
-                entryBlock: duplicateEntryBlock,
                 blocks: new[] { duplicateEntryBlock }));
 
         Assert.Contains("qubit version identity", error.Message, StringComparison.Ordinal);
@@ -1985,18 +1978,17 @@ public sealed class QoraMirTests
     }
 
     [Fact]
-    public void MirCallableConstructionRejectsAnEntryBlockItDoesNotOwn()
+    public void MirCallableConstructionRejectsAnEmptyBlockList()
     {
         var (program, _) = CompileMir("operation Main() {}");
         var callable = Assert.Single(program.Callables);
-        var detachedEntryBlock = callable.EntryBlock with { };
 
         var error = Assert.Throws<ArgumentException>(
             () => CopyCallable(
                 callable,
-                entryBlock: detachedEntryBlock));
+                blocks: Array.Empty<MirBlock>()));
 
-        Assert.Contains("exact object", error.Message, StringComparison.Ordinal);
+        Assert.Contains("at least one block", error.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -2015,7 +2007,6 @@ public sealed class QoraMirTests
         var error = Assert.Throws<ArgumentException>(
             () => CopyCallable(
                 callable,
-                entryBlock: malformedEntry,
                 blocks: new[] { malformedEntry }));
 
         Assert.Contains("unique CFG root", error.Message, StringComparison.Ordinal);
@@ -2039,7 +2030,6 @@ public sealed class QoraMirTests
         var error = Assert.Throws<ArgumentException>(
             () => CopyCallable(
                 callable,
-                entryBlock: malformedEntry,
                 blocks: new[] { malformedEntry }));
 
         Assert.Contains("does not belong", error.Message, StringComparison.Ordinal);
@@ -2072,7 +2062,6 @@ public sealed class QoraMirTests
         var error = Assert.Throws<ArgumentException>(
             () => CopyCallable(
                 callable,
-                entryBlock: entry,
                 blocks: new[] { entry, target }));
 
         Assert.Contains("supplies 0 value(s)", error.Message, StringComparison.Ordinal);
@@ -2106,7 +2095,6 @@ public sealed class QoraMirTests
         var error = Assert.Throws<ArgumentException>(
             () => CopyCallable(
                 callable,
-                entryBlock: entry,
                 blocks: new[] { entry, target }));
 
         Assert.Contains("does not belong", error.Message, StringComparison.Ordinal);
@@ -2149,7 +2137,6 @@ public sealed class QoraMirTests
         var error = Assert.Throws<ArgumentException>(
             () => CopyCallable(
                 callable,
-                entryBlock: entry,
                 blocks: new[] { entry, target }));
 
         Assert.Contains("is bit", error.Message, StringComparison.OrdinalIgnoreCase);
@@ -2353,20 +2340,17 @@ public sealed class QoraMirTests
 
     private static MirCallable CopyCallable(
         MirCallable source,
-        MirBlock? entryBlock = null,
         IReadOnlyList<MirBlock>? blocks = null,
         IReadOnlyList<IMirParameter>? parameters = null,
         string? name = null)
     {
         var copiedBlocks = blocks ?? source.Blocks;
-        var copiedEntryBlock = entryBlock
-            ?? copiedBlocks.Single(block => block.Id == source.EntryBlock.Id);
         return new MirCallable(
             source.Id,
             name ?? source.Name,
+            source.Kind,
             source.ReturnType,
             parameters ?? source.Parameters,
-            copiedEntryBlock,
             copiedBlocks,
             source.Origin);
     }

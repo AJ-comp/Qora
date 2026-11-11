@@ -303,6 +303,15 @@ public sealed record MirQasmUnsignedCastExpression : MirQasmExpression
     public MirQasmExpression Operand { get; }
 }
 
+/// <summary>Explicit floating-point conversion, including angle-valued entry results.</summary>
+public sealed record MirQasmFloatCastExpression : MirQasmExpression
+{
+    public MirQasmFloatCastExpression(MirQasmExpression operand) =>
+        Operand = operand ?? throw new ArgumentNullException(nameof(operand));
+
+    public MirQasmExpression Operand { get; }
+}
+
 public abstract record MirQasmFunctionTarget;
 
 public sealed record MirQasmBuiltinFunctionTarget : MirQasmFunctionTarget
@@ -361,17 +370,23 @@ public sealed record MirQasmValueDeclarationStatement : MirQasmStatement
         string emittedName,
         MirQasmType type,
         MirQasmExpression? initializer = null,
-        bool isConst = false)
+        bool isConst = false,
+        bool isOutput = false)
     {
         if (type is not (MirQasmScalarType or MirQasmBitType))
             throw new ArgumentException(
                 "a value declaration requires a scalar or bit/register type",
                 nameof(type));
+        if (isOutput && (isConst || initializer is not null))
+            throw new ArgumentException(
+                "an output declaration cannot be const or have an initializer",
+                nameof(isOutput));
         Declaration = declaration;
         EmittedName = MirQasmNames.RequireIdentifier(emittedName, nameof(emittedName));
         Type = type;
         Initializer = initializer;
         IsConst = isConst;
+        IsOutput = isOutput;
     }
 
     public MirQasmDeclarationId Declaration { get; }
@@ -379,6 +394,7 @@ public sealed record MirQasmValueDeclarationStatement : MirQasmStatement
     public MirQasmType Type { get; }
     public MirQasmExpression? Initializer { get; }
     public bool IsConst { get; }
+    public bool IsOutput { get; }
 }
 
 public sealed record MirQasmArrayDeclarationStatement : MirQasmStatement
@@ -545,6 +561,10 @@ public sealed record MirQasmReturnStatement : MirQasmStatement
 
 public sealed record MirQasmBreakStatement : MirQasmStatement;
 
+/// <summary>
+/// OpenQASM call shape: a void statement or a value-returning expression. This does not classify
+/// source-language purity; a value-returning OpenQASM def may perform quantum operations.
+/// </summary>
 public enum MirQasmCallableKind
 {
     Operation,
@@ -617,6 +637,11 @@ public sealed class MirOpenQasmTargetProgram
     public ImmutableArray<MirQasmStatement> EntryBody { get; }
     public ImmutableArray<MirQasmCallableDefinition> Definitions { get; }
     public ImmutableArray<string> Notes { get; }
+
+    /// <summary>The entry result transport declaration, if this target has one.</summary>
+    public MirQasmValueDeclarationStatement? EntryOutput =>
+        EntryBody.OfType<MirQasmValueDeclarationStatement>()
+            .SingleOrDefault(declaration => declaration.IsOutput);
 }
 
 internal static class MirQasmCollections
@@ -698,6 +723,13 @@ internal static class MirQasmTargetVerifier
                 throw new ArgumentException(
                     $"global declaration `{definition.EmittedName}` collides with a callable definition",
                     nameof(program));
+        if (program.EntryBody.OfType<MirQasmValueDeclarationStatement>()
+                .Count(declaration => declaration.IsOutput) > 1)
+        {
+            throw new ArgumentException(
+                "the target supports one entry output declaration",
+                nameof(program));
+        }
     }
 
     private static void VerifyBody(
@@ -721,7 +753,7 @@ internal static class MirQasmTargetVerifier
         var declarations = new Dictionary<MirQasmDeclarationId, string>();
         var declarationNames = new HashSet<string>(parameterNames, StringComparer.Ordinal);
         CollectDeclarations(body);
-        VerifyStatements(body, loopDepth: 0);
+        VerifyStatements(body, loopDepth: 0, isTopLevel: true);
         return;
 
         void CollectDeclarations(IReadOnlyList<MirQasmStatement> statements)
@@ -760,13 +792,16 @@ internal static class MirQasmTargetVerifier
 
         void VerifyStatements(
             IReadOnlyList<MirQasmStatement> statements,
-            int loopDepth)
+            int loopDepth,
+            bool isTopLevel)
         {
             foreach (var statement in statements)
             {
                 switch (statement)
                 {
                     case MirQasmValueDeclarationStatement declaration:
+                        if (declaration.IsOutput && (allowReturn || !isTopLevel))
+                            throw Invalid(callableName, "output declarations require the entry top-level");
                         if (declaration.Initializer is { } value)
                             VerifyExpression(value);
                         break;
@@ -811,12 +846,12 @@ internal static class MirQasmTargetVerifier
                         break;
                     case MirQasmIfStatement branch:
                         VerifyExpression(branch.Condition);
-                        VerifyStatements(branch.Then, loopDepth);
-                        VerifyStatements(branch.Else, loopDepth);
+                        VerifyStatements(branch.Then, loopDepth, isTopLevel: false);
+                        VerifyStatements(branch.Else, loopDepth, isTopLevel: false);
                         break;
                     case MirQasmWhileStatement loop:
                         VerifyExpression(loop.Condition);
-                        VerifyStatements(loop.Body, checked(loopDepth + 1));
+                        VerifyStatements(loop.Body, checked(loopDepth + 1), isTopLevel: false);
                         break;
                     case MirQasmReturnStatement returned:
                         if (!allowReturn)
@@ -873,6 +908,9 @@ internal static class MirQasmTargetVerifier
                     VerifyExpression(size.Operand);
                     break;
                 case MirQasmUnsignedCastExpression cast:
+                    VerifyExpression(cast.Operand);
+                    break;
+                case MirQasmFloatCastExpression cast:
                     VerifyExpression(cast.Operand);
                     break;
                 case MirQasmFunctionCallExpression call:

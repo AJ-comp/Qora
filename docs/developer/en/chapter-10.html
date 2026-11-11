@@ -4,36 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>10. Lowering One Callable to MIR — Qora Compiler Developer Manual</title>
-<link rel="stylesheet" href="developer.css?v=20260815-3">
-<script src="developer-syntax.js" defer></script>
-<script type="module">
-  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11.16.0/dist/mermaid.esm.min.mjs";
-
-  mermaid.initialize({
-    startOnLoad: false,
-    securityLevel: "strict",
-    htmlLabels: false,
-    theme: "base",
-    fontFamily: "-apple-system, BlinkMacSystemFont, Segoe UI, Apple SD Gothic Neo, Malgun Gothic, sans-serif",
-    themeVariables: {
-      background: "#fbfcff",
-      primaryColor: "#f4f1ff",
-      primaryTextColor: "#2c2350",
-      primaryBorderColor: "#7660c8",
-      lineColor: "#64748b",
-      edgeLabelBackground: "#ffffff",
-      fontSize: "15px"
-    },
-    flowchart: {
-      curve: "linear",
-      nodeSpacing: 24,
-      rankSpacing: 34,
-      useMaxWidth: true
-    }
-  });
-
-  await mermaid.run({ querySelector: ".chapter-10-mermaid" });
-</script>
+<link rel="stylesheet" href="developer.css?v=20261004-svg-trees-r56">
+<link rel="stylesheet" href="../section-heading.css?v=20260826-section-tab-standard">
+<script src="developer-syntax.js?v=20260828-localized-format-r1" defer></script>
 </head>
 <body>
 <nav class="language-switch" aria-label="Language"><strong>English</strong><span aria-hidden="true">·</span><a href="../ko/chapter-10.html">한국어</a><span aria-hidden="true">·</span><a href="../ja/chapter-10.html">日本語</a></nav>
@@ -46,7 +19,7 @@
 
 <main class="wrap" id="main-content">
   <nav class="chapter-nav" aria-label="Chapter navigation (top)">
-    <div class="group"><a href="chapter-09.html">← Previous: HIR→MIR boundary</a><a href="index.html#chapters">All chapters</a><a href="chapter-10-call-flow.html#lower-hir-artifact"><code>LowerHirArtifact()</code> detailed trace</a></div>
+    <div class="group"><a href="chapter-09.html">← Previous: HIR→MIR boundary</a><a href="index.html#chapters">All chapters</a><a href="chapter-10-call-flow.html?v=20261004-svg-trees-r56#lower-hir-artifact"><code>LowerHirArtifact()</code> detailed trace</a></div>
     <div class="group"><a href="chapter-11.html">Next: Classical values and SSA versions →</a></div>
   </nav>
 
@@ -55,7 +28,7 @@
     This chapter shows what is created first when lowering one callable, where its source body goes, and what the final result looks like.
   </p>
 
-  <h2 id="input">The two callables compared in this chapter</h2>
+  <h2 id="input" class="trace-section-heading"><span>The two callables compared in this chapter</span></h2>
 
 <pre><code class="language-qora">function Next(value: int): int
 {
@@ -87,87 +60,55 @@ operation Work()
     MIR preserves the same numeric IDs, producing <code>Next c6</code> and <code>Work c44</code>. The code comments below continue to use these IDs.
   </p>
 
-  <h2 id="why-mir">Why lower HIR to MIR?</h2>
+  <h2 id="why-mir" class="trace-section-heading"><span>Why lower HIR to MIR?</span></h2>
 
   <p>
     HIR is a tree that preserves the nested structure of user-written code.<br>
     For example, <code>Work</code> contains the array declaration, assignment, <code>if</code>, and <code>H</code> call, while the <code>if</code> contains its condition and the <code>X</code> call. This structure is well suited to checking names and types and understanding the original code.
   </p>
 
-  <p>
-    A tree alone is inconvenient for tracking which value is current at a particular point.<br>
-    The source repeatedly uses the same name <code>values</code>, while MIR distinguishes the pre-update array <code>%v1</code>, loaded element <code>%v4</code>, result of <code>Next</code> <code>%v5</code>, and updated array <code>%v6</code> as separate values.
-  </p>
-
   <div class="mermaid-overview">
     <figure class="mermaid-card mermaid-card--hir">
       <figcaption><span>HIR</span> Preserved source structure (simplified)</figcaption>
-<pre class="mermaid chapter-10-mermaid">
-flowchart TB
-  accTitle: Simplified Work source structure preserved in HIR
-  accDescr: Shows the values declaration, q declaration, values assignment, if, H call, and the condition and X call inside the if; intermediate HIR block nodes are omitted.
-
-  work["Work"]
-  values["declare values"]
-  qubit["declare q"]
-  assign["assign values[0]"]
-  ifNode["if"]
-  condition["condition: values[0] == 1"]
-  xCall["X(q[0])"]
-  hCall["H(q[0])"]
-
-  work --- values
-  work --- qubit
-  work --- assign
-  work --- ifNode
-  work --- hCall
-  ifNode --- condition
-  ifNode --- xCall
-</pre>
+<div class="item-tree-diagram item-tree-diagram--native" data-item-tree="chapter-10-diagram-0" style="--item-tree-width:302px">
+  <svg class="native-item-tree" xmlns="http://www.w3.org/2000/svg" width="302" height="258" viewBox="0 0 302 258" role="img" aria-labelledby="chapter-10-diagram-0-title chapter-10-diagram-0-desc">
+    <title id="chapter-10-diagram-0-title">Work</title>
+    <desc id="chapter-10-diagram-0-desc">Simplified Work source structure preserved in HIR
+Shows the values declaration, q declaration, values assignment, if, H call, and the condition and X call inside the if; intermediate HIR block nodes are omitted.</desc>
+    <path class="native-item-tree__guides" d="M 22 34 V 231 M 22 51 H 40 M 22 81 H 40 M 22 111 H 40 M 22 141 H 40 M 22 231 H 40 M 50 154 V 201 M 50 171 H 68 M 50 201 H 68"/>
+    <text x="16" y="26" data-tree-depth="0" data-tree-row="0" data-continuation="false"><tspan class="native-item-tree__field">Work</tspan></text>
+    <text x="44" y="56" data-tree-depth="1" data-tree-row="1" data-continuation="false">declare values</text>
+    <text x="44" y="86" data-tree-depth="1" data-tree-row="2" data-continuation="false">declare q</text>
+    <text x="44" y="116" data-tree-depth="1" data-tree-row="3" data-continuation="false">assign values[0]</text>
+    <text x="44" y="146" data-tree-depth="1" data-tree-row="4" data-continuation="false"><tspan class="native-item-tree__field">if</tspan></text>
+    <text x="72" y="176" data-tree-depth="2" data-tree-row="5" data-continuation="false">condition: <tspan class="native-item-tree__type">values[0] == 1</tspan></text>
+    <text x="72" y="206" data-tree-depth="2" data-tree-row="6" data-continuation="false">X(q[0])</text>
+    <text x="44" y="236" data-tree-depth="1" data-tree-row="7" data-continuation="false">H(q[0])</text>
+  </svg>
+</div>
+<div class="item-tree-legend" data-legend-for="chapter-10-diagram-0" aria-label="Diagram legend">
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">→</span><span>Object reference</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">[]</span><span>Empty list</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">{}</span><span>Empty set or map</span></span>
+</div>
     </figure>
+
+    <p>
+      A tree alone is inconvenient for tracking which value is current at a particular point.<br>
+      The source repeatedly uses the same name <code>values</code>, while MIR distinguishes the pre-update array <code>%v1</code>, loaded element <code>%v4</code>, result of <code>Next</code> <code>%v5</code>, and updated array <code>%v6</code> as separate values.
+    </p>
 
     <div class="mermaid-stack">
       <figure class="mermaid-card">
         <figcaption><span>MIR</span> Value and qubit creation and dependencies</figcaption>
-<pre class="mermaid chapter-10-mermaid mermaid--vertical">
-flowchart TB
-  accTitle: Creation and dependency relationships of MIR values and qubits
-  accDescr: Shows the classical value flow from pre-update array v1 through element v4 and Next return v5 to updated array v6, together with initial qubit q0.v0, which is independent of this array update.
-
-  v1["%v1<br/>var values: int[] = [0];"]:::sourceCode
-  v4["%v4<br/>values[0]"]:::sourceCode
-  v5["%v5<br/>Next(values[0])"]:::sourceCode
-  v6["%v6<br/>values[0] = Next(values[0]);"]:::sourceCode
-  q0["&amp;q0.v0<br/>use q = Qubit[1];"]:::sourceCode
-
-  v1 --> v4
-  v4 --> v5
-  v1 --> v6
-  v5 --> v6
-
-  classDef sourceCode font-family:monospace,font-size:14px;
-</pre>
+<svg class="structure-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 446" role="img" aria-labelledby="chapter-10-diagram-1-title chapter-10-diagram-1-desc"><title id="chapter-10-diagram-1-title">Creation and dependency relationships of MIR values and qubits</title><desc id="chapter-10-diagram-1-desc">Creation and dependency relationships of MIR values and qubits
+Shows the classical value flow from pre-update array v1 through element v4 and Next return v5 to updated array v6, together with initial qubit q0.v0, which is independent of this array update.</desc><defs><marker id="chapter-10-diagram-1-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0 L10 5 L0 10 Z" fill="#354bff"/></marker></defs><g font-family="Consolas, Malgun Gothic, sans-serif"><rect x="12" y="8" width="370" height="62" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="24" y="34" font-size="14" fill="#111936" text-anchor="start" font-weight="700">%v1</text><text x="24" y="56" font-size="14" fill="#111936" text-anchor="start">var values: int[] = [0];</text><rect x="430" y="8" width="198" height="62" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="442" y="34" font-size="14" fill="#111936" text-anchor="start" font-weight="700">&amp;q0.v0</text><text x="442" y="56" font-size="14" fill="#111936" text-anchor="start">use q = Qubit[1];</text><rect x="12" y="134" width="370" height="62" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="24" y="160" font-size="14" fill="#111936" text-anchor="start" font-weight="700">%v4</text><text x="24" y="182" font-size="14" fill="#111936" text-anchor="start">values[0]</text><rect x="12" y="250" width="370" height="62" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="24" y="276" font-size="14" fill="#111936" text-anchor="start" font-weight="700">%v5</text><text x="24" y="298" font-size="14" fill="#111936" text-anchor="start">Next(values[0])</text><rect x="12" y="366" width="370" height="62" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="24" y="392" font-size="14" fill="#152581" text-anchor="start" font-weight="700">%v6</text><text x="24" y="414" font-size="14" fill="#152581" text-anchor="start">values[0] = Next(values[0]);</text><path d="M197.0 70 V102.0 H197.0 V132" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#chapter-10-diagram-1-arrow)"/><path d="M197.0 196 V223.0 H197.0 V248" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#chapter-10-diagram-1-arrow)"/><path d="M197.0 312 V339.0 H197.0 V364" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#chapter-10-diagram-1-arrow)"/><path d="M382 39.0 H406 V397.0 H384" fill="none" stroke="#354bff" stroke-width="1.5" marker-end="url(#chapter-10-diagram-1-arrow)"/></g></svg>
       </figure>
 
       <figure class="mermaid-card">
         <figcaption><span>MIR</span> Execution-path CFG</figcaption>
-<pre class="mermaid chapter-10-mermaid mermaid--vertical">
-flowchart TB
-  accTitle: MIR execution-path CFG
-  accDescr: A true condition in b0 moves to b1, a false condition moves to b2, and both paths join at b3.
-
-  b0["b0<br/>var values: int[] = [0];<br/>use q = Qubit[1];<br/>values[0] = Next(values[0]);<br/>if (values[0] == 1)"]:::sourceCode
-  b1["b1<br/>X(q[0]);"]:::sourceCode
-  b2["b2"]:::sourceCode
-  b3["b3<br/>H(q[0]);"]:::sourceCode
-
-  b0 -->|true| b1
-  b0 -->|false| b2
-  b1 --> b3
-  b2 --> b3
-
-  classDef sourceCode font-family:monospace,font-size:14px;
-</pre>
+<svg class="structure-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 418" role="img" aria-labelledby="chapter-10-diagram-2-title chapter-10-diagram-2-desc"><title id="chapter-10-diagram-2-title">MIR execution-path CFG</title><desc id="chapter-10-diagram-2-desc">MIR execution-path CFG
+A true condition in b0 moves to b1, a false condition moves to b2, and both paths join at b3.</desc><defs><marker id="chapter-10-diagram-2-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0 L10 5 L0 10 Z" fill="#354bff"/></marker></defs><g font-family="Consolas, Malgun Gothic, sans-serif"><rect x="80" y="8" width="480" height="128" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="92" y="34" font-size="14" fill="#111936" text-anchor="start" font-weight="700">b0</text><text x="92" y="56" font-size="14" fill="#111936" text-anchor="start">var values: int[] = [0];</text><text x="92" y="78" font-size="14" fill="#111936" text-anchor="start">use q = Qubit[1];</text><text x="92" y="100" font-size="14" fill="#111936" text-anchor="start">values[0] = Next(values[0]);</text><text x="92" y="122" font-size="14" fill="#111936" text-anchor="start">if (values[0] == 1)</text><rect x="12" y="206" width="270" height="62" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="24" y="232" font-size="14" fill="#152581" text-anchor="start" font-weight="700">b1</text><text x="24" y="254" font-size="14" fill="#152581" text-anchor="start">X(q[0]);</text><rect x="358" y="206" width="270" height="40" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="370" y="232" font-size="14" fill="#111936" text-anchor="start" font-weight="700">b2</text><rect x="186" y="338" width="268" height="62" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="198" y="364" font-size="14" fill="#152581" text-anchor="start" font-weight="700">b3</text><text x="198" y="386" font-size="14" fill="#152581" text-anchor="start">H(q[0]);</text><path d="M320.0 136 V171.0 H147.0 V204" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#chapter-10-diagram-2-arrow)"/><text x="239.5" y="165.0" font-size="12" fill="#111936" text-anchor="middle">true</text><path d="M320.0 136 V171.0 H493.0 V204" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#chapter-10-diagram-2-arrow)"/><text x="412.5" y="165.0" font-size="12" fill="#111936" text-anchor="middle">false</text><path d="M147.0 268 V303.0 H320.0 V336" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#chapter-10-diagram-2-arrow)"/><path d="M493.0 246 V292.0 H320.0 V336" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#chapter-10-diagram-2-arrow)"/></g></svg>
       </figure>
     </div>
   </div>
@@ -178,27 +119,12 @@ flowchart TB
     Later analyses can therefore follow the graph to inspect value changes and branch joins without reinterpreting the source tree. HIR preserves source meaning, while MIR makes execution flow and value tracking explicit.
   </p>
 
-  <h2 id="constructor">Create one dedicated lowerer per callable</h2>
+  <h2 id="constructor" class="trace-section-heading"><span>Create one dedicated lowerer per callable</span></h2>
 
   <figure class="mermaid-card">
     <figcaption><span>HIR → MIR</span> Independent lowering for each callable</figcaption>
-<pre class="mermaid chapter-10-mermaid mermaid--wide">
-flowchart TB
-  accTitle: Independent HIR-to-MIR lowering of Next and Work
-  accDescr: Next and Work pass through separate callable lowerers and become distinct MirCallable objects.
-
-  subgraph nextFlow["First lowering"]
-    direction LR
-    nextHir["HIR Next"] --> nextLowerer["callable lowerer<br/>for Next"] --> nextMir["MirCallable Next"]
-  end
-
-  subgraph workFlow["Second lowering"]
-    direction LR
-    workHir["HIR Work"] --> workLowerer["callable lowerer<br/>for Work"] --> workMir["MirCallable Work"]
-  end
-
-  nextFlow ~~~ workFlow
-</pre>
+<svg class="structure-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 276" role="img" aria-labelledby="chapter-10-diagram-3-title chapter-10-diagram-3-desc"><title id="chapter-10-diagram-3-title">Independent HIR-to-MIR lowering of Next and Work</title><desc id="chapter-10-diagram-3-desc">Independent HIR-to-MIR lowering of Next and Work
+Next and Work pass through separate callable lowerers and become distinct MirCallable objects.</desc><defs><marker id="chapter-10-diagram-3-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0 L10 5 L0 10 Z" fill="#354bff"/></marker></defs><g font-family="Consolas, Malgun Gothic, sans-serif"><text x="12" y="28" font-size="16" fill="#111936" text-anchor="start" font-weight="700">First lowering</text><rect x="12" y="46" width="170" height="40" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="24" y="72" font-size="14" fill="#111936" text-anchor="start" font-weight="700">HIR Next</text><rect x="230" y="46" width="170" height="62" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="242" y="72" font-size="14" fill="#111936" text-anchor="start" font-weight="700">callable lowerer</text><text x="242" y="94" font-size="14" fill="#111936" text-anchor="start">for Next</text><rect x="448" y="46" width="180" height="40" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="460" y="72" font-size="14" fill="#152581" text-anchor="start" font-weight="700">MirCallable Next</text><path d="M182 66.0 H206.0 V77.0 H228" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#chapter-10-diagram-3-arrow)"/><path d="M400 77.0 H424.0 V66.0 H446" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#chapter-10-diagram-3-arrow)"/><text x="12" y="178" font-size="16" fill="#111936" text-anchor="start" font-weight="700">Second lowering</text><rect x="12" y="196" width="170" height="40" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="24" y="222" font-size="14" fill="#111936" text-anchor="start" font-weight="700">HIR Work</text><rect x="230" y="196" width="170" height="62" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="242" y="222" font-size="14" fill="#111936" text-anchor="start" font-weight="700">callable lowerer</text><text x="242" y="244" font-size="14" fill="#111936" text-anchor="start">for Work</text><rect x="448" y="196" width="180" height="40" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="460" y="222" font-size="14" fill="#152581" text-anchor="start" font-weight="700">MirCallable Work</text><path d="M182 216.0 H206.0 V227.0 H228" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#chapter-10-diagram-3-arrow)"/><path d="M400 227.0 H424.0 V216.0 H446" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#chapter-10-diagram-3-arrow)"/></g></svg>
   </figure>
 
   <p>
@@ -206,7 +132,7 @@ flowchart TB
     While processing <code>Next</code>, it manages only the parameters, current block, and values of <code>Next</code>. After that work completes, a new lowerer processes <code>Work</code> separately.
   </p>
 
-  <h3 id="lower-hir-artifact-source">The code that takes callables one at a time</h3>
+  <h3 id="lower-hir-artifact-source" class="trace-section-heading"><span>The code that takes callables one at a time</span></h3>
 
   <p>
     The code below is the complete current <code>LowerHirArtifact()</code>.<br>
@@ -241,14 +167,14 @@ flowchart TB
         // First iteration: hirCallable = Next h6
         // Second iteration: hirCallable = Work h44
         // A new lowerer is created for each iteration, so callable state cannot mix.
-        var mirCallableLowerer = new <a class="code-call-link" href="chapter-10-call-flow.html#callable-lowerer-constructor" title="HirCallableToMirLowerer constructor execution trace">HirCallableToMirLowerer</a>(
+        var mirCallableLowerer = new HirCallableToMirLowerer(
             hirCallable,
             hirArtifact,
             traceSink);
 
         // First result: mirCallable = Next c6
         // Second result: mirCallable = Work c44
-        var mirCallable = mirCallableLowerer.<a class="code-call-link" href="chapter-10-call-flow.html#lower-to-mir-callable" title="LowerToMirCallable execution trace">LowerToMirCallable</a>();
+        var mirCallable = mirCallableLowerer.<a class="code-call-link" href="chapter-10-call-flow.html?v=20261004-svg-trees-r56#lower-to-mir-callable" title="LowerToMirCallable execution trace">LowerToMirCallable</a>();
         mirCallables.Add(mirCallable);
 
         // Next is not the entry operation, so this is false in the first iteration.
@@ -301,24 +227,12 @@ flowchart TB
     Each callable also has its own block ID allocator, so both <code>Next</code> and <code>Work</code> can name their first block <code>b0</code>.
   </p>
 
-  <h2 id="lower-method">Common sequence for creating one callable</h2>
+  <h2 id="lower-method" class="trace-section-heading"><span>Common sequence for creating one callable</span></h2>
 
   <figure class="mermaid-card">
     <figcaption><span>HIR → MIR</span> Common sequence for creating one callable</figcaption>
-<pre class="mermaid chapter-10-mermaid mermaid--vertical">
-flowchart TB
-  accTitle: Five stages that turn one HIR callable into a MirCallable
-  accDescr: LowerToMirCallable checks callable information, CreateMirBlock creates the entry block, LowerParameters registers parameters, LowerStatements and LowerStatement process the body, and LowerToMirCallable with MirBlockBuilder.Build completes the MirCallable.
-
-  input["One HIR callable"]
-  step1["1<br/>Resolve origin, declaration symbol, and name<br/><br/>LowerToMirCallable()"]
-  step2["2<br/>Create entry block<br/><br/>CreateMirBlock()"]
-  step3["3<br/>Register parameters as MIR values or qubits<br/><br/>LowerParameters()"]
-  step4["4<br/>Lower body statements in order<br/><br/>LowerStatements()<br/>→ LowerStatement()"]
-  step5["5<br/>Close remaining paths · finalize blocks<br/>Return MirCallable<br/><br/>LowerToMirCallable()<br/>+ MirBlockBuilder.Build()"]
-
-  input --> step1 --> step2 --> step3 --> step4 --> step5
-</pre>
+<svg class="structure-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 818" role="img" aria-labelledby="chapter-10-diagram-4-title chapter-10-diagram-4-desc"><title id="chapter-10-diagram-4-title">Six stages that turn one HIR callable into a MirCallable</title><desc id="chapter-10-diagram-4-desc">Six stages that turn one HIR callable into a MirCallable
+LowerToMirCallable checks callable information, CreateMirBlock creates the entry block, LowerParameters registers parameters, LowerStatements and LowerStatement process the body, CloseCallableBody closes any remaining open path, BuildMirBlocks finalizes every builder as a MirBlock, and LowerToMirCallable completes the MirCallable.</desc><defs><marker id="chapter-10-diagram-4-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0 L10 5 L0 10 Z" fill="#354bff"/></marker></defs><g font-family="Consolas, Malgun Gothic, sans-serif"><rect x="70" y="8" width="500" height="40" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="82" y="34" font-size="14" fill="#111936" text-anchor="start" font-weight="700">One HIR callable</text><rect x="70" y="82" width="500" height="84" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="82" y="108" font-size="14" fill="#152581" text-anchor="start" font-weight="700">1</text><text x="82" y="130" font-size="14" fill="#152581" text-anchor="start">Resolve origin, declaration symbol, and name</text><text x="82" y="152" font-size="14" fill="#152581" text-anchor="start">LowerToMirCallable()</text><path d="M320.0 48 V65.0 H320.0 V80" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#chapter-10-diagram-4-arrow)"/><rect x="70" y="200" width="500" height="84" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="82" y="226" font-size="14" fill="#152581" text-anchor="start" font-weight="700">2</text><text x="82" y="248" font-size="14" fill="#152581" text-anchor="start">Create entry block</text><text x="82" y="270" font-size="14" fill="#152581" text-anchor="start">CreateMirBlock()</text><path d="M320.0 166 V183.0 H320.0 V198" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#chapter-10-diagram-4-arrow)"/><rect x="70" y="318" width="500" height="84" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="82" y="344" font-size="14" fill="#152581" text-anchor="start" font-weight="700">3</text><text x="82" y="366" font-size="14" fill="#152581" text-anchor="start">Register parameters as MIR values or qubits</text><text x="82" y="388" font-size="14" fill="#152581" text-anchor="start">LowerParameters()</text><path d="M320.0 284 V301.0 H320.0 V316" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#chapter-10-diagram-4-arrow)"/><rect x="70" y="436" width="500" height="106" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="82" y="462" font-size="14" fill="#152581" text-anchor="start" font-weight="700">4</text><text x="82" y="484" font-size="14" fill="#152581" text-anchor="start">Lower body statements in order</text><text x="82" y="506" font-size="14" fill="#152581" text-anchor="start">LowerStatements()</text><text x="82" y="528" font-size="14" fill="#152581" text-anchor="start">→ LowerStatement()</text><path d="M320.0 402 V419.0 H320.0 V434" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#chapter-10-diagram-4-arrow)"/><rect x="70" y="576" width="500" height="84" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="82" y="602" font-size="14" fill="#152581" text-anchor="start" font-weight="700">5</text><text x="82" y="624" font-size="14" fill="#152581" text-anchor="start">Close any block left open after the body</text><text x="82" y="646" font-size="14" fill="#152581" text-anchor="start">CloseCallableBody()</text><path d="M320.0 542 V559.0 H320.0 V574" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#chapter-10-diagram-4-arrow)"/><rect x="70" y="694" width="500" height="106" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="82" y="720" font-size="14" fill="#152581" text-anchor="start" font-weight="700">6</text><text x="82" y="742" font-size="14" fill="#152581" text-anchor="start">Finalize blocks · return MirCallable</text><text x="82" y="764" font-size="14" fill="#152581" text-anchor="start">BuildMirBlocks()</text><text x="82" y="786" font-size="14" fill="#152581" text-anchor="start">+ LowerToMirCallable()</text><path d="M320.0 660 V677.0 H320.0 V692" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#chapter-10-diagram-4-arrow)"/></g></svg>
   </figure>
 
   <p>
@@ -326,215 +240,7 @@ flowchart TB
     Differences come from their parameters and body. A simple function may require one block, while an operation with a conditional splits into multiple blocks.
   </p>
 
-  <h3 id="lower-callable-source">Tracing the function with <code>Next</code> and <code>Work</code> substituted</h3>
-
-  <p>
-    <code>LowerToMirCallable()</code> runs once on the lowerer for <code>Next h6</code> and once on the lowerer for <code>Work h44</code>.<br>
-    The comments below show how values and branches differ for both inputs within the same code.
-  </p>
-
-<pre><code class="language-csharp">public MirCallable LowerToMirCallable()
-{
-    // First run: _hirCallable = Next h6
-    // Second run: _hirCallable = Work h44
-    var mirCallableOrigin = MirOriginFor(_hirCallable);
-
-    // Result: declaration symbol for the current Next or Work
-    var hirCallableSymbol = RequireHirDeclarationSymbol(
-        _hirCallable.Id,
-        $"callable `{_hirCallable.Name}`");
-
-    // HIR name structure that records the namespace containing the current callable.
-    var hirScopeGraph = _hirArtifact.Model.ScopeGraph
-        ?? throw MirLoweringError(
-            "the final HIR semantic model has no scope graph");
-
-    // Next run: qualifiedSourceCallableName = "Next"
-    // Work run: qualifiedSourceCallableName = "Work"
-    var qualifiedSourceCallableName =
-        hirScopeGraph.QualifiedName(hirCallableSymbol);
-
-    // Each lowerer creates its own first block, so each has a distinct b0.
-    _currentMirBlockBuilder = CreateMirBlock(mirCallableOrigin);
-
-    // Next run: register parameter value as %v0.
-    // Work run: no parameters, so _mirParameters = [].
-    <a class="code-call-link" href="chapter-10-call-flow.html#lower-parameters" title="LowerParameters execution trace">LowerParameters</a>();
-
-    /* LowerStatements() processes the complete body of the current callable.
-
-    Next
-    - Processing return value + 1; adds calculation instructions and a MirReturn terminator to b0, then closes b0.
-    - Because current block b0 is closed, _currentMirBlockBuilder becomes null.
-    - _mirBlockBuilders = [b0]
-
-    Work
-    - b0 processes the variable declaration, qubit preparation, array assignment, and if condition,
-      then closes by branching to b1 or b2.
-    - b1 processes X(q[0]); on the true path, then closes by moving to b3.
-    - b2 is the false path with no source statement to process; it closes by moving to b3.
-    - b3 is the join of b1 and b2 and processes the final H(q[0]);.
-    - H(q[0]); does not close the block, and no explicit return follows it,
-      so b3 remains the open current block.
-
-    After processing
-    ├─ _mirBlockBuilders = [b0, b1, b2, b3]
-    └─ _currentMirBlockBuilder = b3 */
-    <a class="code-call-link" href="chapter-10-call-flow.html#lower-statements" title="LowerStatements execution trace">LowerStatements</a>(_hirCallable.Body.Statements);
-
-    // Next: the current block is null, so skip the if below.
-    // Work: the current block is b3, so the if below closes b3.
-    if (_currentMirBlockBuilder is not null)
-    {
-        if (_hirCallable.IsFunction)
-        {
-            // Neither callable in this example selects this branch.
-            MarkCurrentMirBlockUnreachable(
-                MirOrigin.GeneratedFrom(
-                    mirCallableOrigin,
-                    "missing validated function return"));
-        }
-        else
-        {
-            // Work run: attach a valueless implicit return to b3.
-            ReturnFromCurrentMirBlock(
-                value: null,
-                MirOrigin.GeneratedFrom(
-                    mirCallableOrigin,
-                    "implicit operation return"));
-        }
-    }
-
-    // Next run: builder list [b0]
-    // Work run: builder list [b0,b1,b2,b3]
-    // Finalize each builder as an immutable MirBlock.
-    var mirBlocks = new List&lt;MirBlock&gt;(_mirBlockBuilders.Count);
-    foreach (var mirBlockBuilder in _mirBlockBuilders)
-    {
-        var mirBlock = mirBlockBuilder.Build();
-        mirBlocks.Add(mirBlock);
-    }
-
-    // The first block created, b0, is always the entry block.
-    var mirEntryBlock = mirBlocks[0];
-
-    // Next return: c6, "Next", int, [%v0], b0, [b0]
-    // Work return: c44, "Work", null, [], b0, [b0,b1,b2,b3]
-    return new MirCallable(
-        _mirCallableId,
-        qualifiedSourceCallableName,
-        _hirCallable.ReturnType is { } returns
-            ? MirType.Scalar(returns)
-            : null,
-        _mirParameters,
-        mirEntryBlock,
-        mirBlocks,
-        mirCallableOrigin);
-}</code></pre>
-
-  <p>
-    This function performs the same sequence shown in the diagram above.<br>
-    It creates the entry block and processes the body. <code>Next</code> ends with an explicit return; <code>Work</code> closes its remaining operation path with a valueless return. They become <code>MirCallable Next c6</code> and <code>MirCallable Work c44</code>, respectively.
-  </p>
-
-  <h3 id="statement-dispatch-source">Where the body statements of both callables go</h3>
-
-  <p>
-    <code>LowerStatements()</code> above traverses the body from beginning to end, and <code>LowerStatement()</code> selects one lowering helper that matches the current statement kind.<br>
-    The complete current code of both functions follows. The comments show the actual values supplied by <code>Next</code> and <code>Work</code>.
-  </p>
-
-<pre><code class="language-csharp">private void LowerStatements(IReadOnlyList&lt;HirStatement&gt; hirStatements)
-{
-    // Next body: [return value + 1], starts at b0
-    // Work top level: [var, use, assignment, if, H], starts at b0
-    // true body of if: [X(q[0])], starts at b1
-    // false body of if: [], starts at b2
-    for (var hirStatementIndex = 0;
-         hirStatementIndex &lt; hirStatements.Count;
-         hirStatementIndex++)
-    {
-        // If the current path is already closed at the start of an iteration,
-        // do not emit the remaining statements. None of the four calls in this example select this branch.
-        if (_currentMirBlockBuilder is null)
-        {
-            for (;
-                 hirStatementIndex &lt; hirStatements.Count;
-                 hirStatementIndex++)
-            {
-                MarkUnreachableDeclarations(
-                    hirStatements[hirStatementIndex]);
-            }
-            return;
-        }
-
-        <a class="code-call-link" href="chapter-10-call-flow.html#lower-statement" title="LowerStatement execution trace">LowerStatement</a>(hirStatements[hirStatementIndex]);
-    }
-}</code></pre>
-
-  <p>
-    The loop calls <code>LowerStatement()</code> below each time it takes one statement.
-  </p>
-
-<pre><code class="language-csharp">private void LowerStatement(HirStatement hirStatement)
-{
-    switch (hirStatement)
-    {
-        // Selected by Work's use q statement.
-        case HirQubitDeclarationStatement hirQubitDeclaration:
-            LowerQubitDeclaration(hirQubitDeclaration);
-            return;
-
-        // Selected by Work's var values statement.
-        case HirVariableDeclarationStatement hirDeclaration:
-            LowerDeclaration(hirDeclaration);
-            return;
-
-        // Selected by Work's assignment to values[0].
-        case HirAssignmentStatement hirAssignment:
-            LowerAssignment(hirAssignment);
-            return;
-
-        // Selected by Work's H call.
-        // The X call inside the if selects the same branch while processing the nested body.
-        case HirCallStatement hirCallStatement:
-            LowerStatementCall(hirCallStatement);
-            return;
-
-        // Selected by Work's if statement.
-        case HirIfStatement hirIf:
-            LowerIf(hirIf);
-            return;
-
-        case HirForStatement hirFor:
-            LowerFor(hirFor);
-            return;
-
-        case HirWhileStatement hirWhile:
-            LowerWhile(hirWhile);
-            return;
-
-        case HirRepeatStatement hirRepeat:
-            LowerRepeat(hirRepeat);
-            return;
-
-        // Selected by Next's return statement.
-        case HirReturnStatement hirReturn:
-            LowerReturn(hirReturn);
-            return;
-
-        default:
-            throw MirLoweringError(
-                $"unsupported HIR statement {hirStatement.GetType().Name}");
-    }
-}</code></pre>
-
-  <p>
-    This switch does not determine statement meaning again.<br>
-    It reads the statement kind already classified in HIR, calls the matching helper, and returns immediately.
-  </p>
-
-  <h2 id="next">Next is completed with one block</h2>
+  <h2 id="next" class="trace-section-heading"><span>Next is completed with one block</span></h2>
 
   <p>
     <code>Next</code> has one <code>int</code> parameter named <code>value</code>.<br>
@@ -543,22 +249,29 @@ flowchart TB
 
   <figure class="mermaid-card">
     <figcaption><span>MIR</span> Structure of MirCallable Next</figcaption>
-<pre class="mermaid chapter-10-mermaid mermaid--vertical">
-flowchart TB
-  accTitle: Structure of MirCallable Next
-  accDescr: Next has parameter value and entry block b0, where it creates the number 1, performs the addition, and returns in order.
-
-  next["MirCallable Next"]
-  parameter["Parameter<br/>%v0 value"]
-  block["b0<br/>EntryBlock · Blocks[0]"]
-  constant["create number 1"]
-  add["compute %v0 + 1"]
-  result["return result"]
-
-  next --- parameter
-  next --- block
-  block --> constant --> add --> result
-</pre>
+<div class="item-tree-diagram item-tree-diagram--native" data-item-tree="chapter-10-diagram-5" style="--item-tree-width:513px">
+  <svg class="native-item-tree" xmlns="http://www.w3.org/2000/svg" width="513" height="318" viewBox="0 0 513 318" role="img" aria-labelledby="chapter-10-diagram-5-title chapter-10-diagram-5-desc">
+    <title id="chapter-10-diagram-5-title">MirCallable Next</title>
+    <desc id="chapter-10-diagram-5-desc">Structure of MirCallable Next
+Next has parameter value and entry block b0, where it creates the number 1, performs the addition, and returns in order.</desc>
+    <path class="native-item-tree__guides" d="M 22 34 V 291 M 22 51 H 40 M 22 141 H 40 M 22 291 H 40 M 50 64 V 81 M 50 81 H 68 M 78 94 V 111 M 78 111 H 96 M 50 154 V 171 M 50 171 H 68 M 78 184 V 261 M 78 201 H 96 M 78 231 H 96 M 78 261 H 96"/>
+    <text x="16" y="26" data-tree-depth="0" data-tree-row="0" data-continuation="false"><tspan class="native-item-tree__field">MirCallable Next</tspan></text>
+    <text x="44" y="56" data-tree-depth="1" data-tree-row="1" data-continuation="false"><tspan class="native-item-tree__field">Parameters</tspan></text>
+    <text x="72" y="86" data-tree-depth="2" data-tree-row="2" data-continuation="false"><tspan class="native-item-tree__field">[0]</tspan><tspan class="native-item-tree__wire"> → </tspan><tspan class="native-item-tree__reference">MirClassicalParameter value</tspan></text>
+    <text x="100" y="116" data-tree-depth="3" data-tree-row="3" data-continuation="false">Value<tspan class="native-item-tree__wire"> → </tspan><tspan class="native-item-tree__reference">MirValue %v0</tspan></text>
+    <text x="44" y="146" data-tree-depth="1" data-tree-row="4" data-continuation="false"><tspan class="native-item-tree__field">Blocks</tspan></text>
+    <text x="72" y="176" data-tree-depth="2" data-tree-row="5" data-continuation="false"><tspan class="native-item-tree__field">[0]</tspan><tspan class="native-item-tree__wire"> → </tspan><tspan class="native-item-tree__reference">MirBlock b0</tspan></text>
+    <text x="100" y="206" data-tree-depth="3" data-tree-row="6" data-continuation="false">create number 1</text>
+    <text x="100" y="236" data-tree-depth="3" data-tree-row="7" data-continuation="false">compute %v0 + 1</text>
+    <text x="100" y="266" data-tree-depth="3" data-tree-row="8" data-continuation="false">return result</text>
+    <text x="44" y="296" data-tree-depth="1" data-tree-row="9" data-continuation="false">EntryBlock<tspan class="native-item-tree__wire"> → </tspan><tspan class="native-item-tree__reference">the same MirBlock b0 object as Blocks[0]</tspan></text>
+  </svg>
+</div>
+<div class="item-tree-legend" data-legend-for="chapter-10-diagram-5" aria-label="Diagram legend">
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">→</span><span>Object reference</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">[]</span><span>Empty list</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">{}</span><span>Empty set or map</span></span>
+</div>
   </figure>
 
   <p>
@@ -566,37 +279,57 @@ flowchart TB
     The return ends the block, so no additional terminating statement is needed.
   </p>
 
-  <h2 id="work">Work splits into multiple blocks because of the conditional</h2>
+  <h2 id="work" class="trace-section-heading"><span>Work splits into multiple blocks because of the conditional</span></h2>
 
   <p>
     <code>Work</code> has no parameters, but it has a local array and a qubit.<br>
     It first creates the array and prepares the qubit in the entry block, then updates the array and evaluates the condition.
   </p>
 
-  <figure class="mermaid-card">
-    <figcaption><span>MIR</span> Structure of MirCallable Work</figcaption>
-<pre class="mermaid chapter-10-mermaid mermaid--wide">
-flowchart TB
-  accTitle: Structure of MirCallable Work
-  accDescr: Work has entry block b0, local array values, local qubit q, and four blocks from b0 through b3.
-
-  work["MirCallable Work"]
-  values["local array<br/>values"]
-  qubit["local qubit<br/>q"]
-  blocks["Blocks"]
-  b0["b0<br/>EntryBlock · initialize · update array · evaluate condition"]
-  b1["b1<br/>execute X when condition is true"]
-  b2["b2<br/>no gate when condition is false"]
-  b3["b3<br/>join paths · execute H · return"]
-
-  work --- values
-  work --- qubit
-  work --- blocks
-  blocks --- b0
-  blocks --- b1
-  blocks --- b2
-  blocks --- b3
-</pre>
+  <figure class="state-tree state-tree--standalone state-tree--readable callable-structure-tree" aria-labelledby="work-callable-structure">
+    <figcaption id="work-callable-structure"><span>MIR</span> Structure of <code>MirCallable Work c44</code></figcaption>
+<div class="item-tree-diagram item-tree-diagram--native item-tree-diagram--detailed" data-item-tree="structure-chapter-10-9" style="--item-tree-width:560px">
+  <svg class="native-item-tree" xmlns="http://www.w3.org/2000/svg" width="560" height="562" viewBox="0 0 560 562" role="img" aria-labelledby="structure-chapter-10-9-title structure-chapter-10-9-desc">
+    <title id="structure-chapter-10-9-title">MirCallable Work c44</title>
+    <desc id="structure-chapter-10-9-desc">MirCallable Work c44
+├─ Parameters = []
+├─ Storages
+│  └─ [0] MirArrayStorage values
+├─ Qubits
+│  ├─ [0] MirQubit q0.v0
+│  ├─ [1] MirQubit q0.v1
+│  ├─ [2] MirQubit q0.v2
+│  └─ [3] MirQubit q0.v3
+├─ Blocks
+│  ├─ [0] MirBlock b0  initialization · array update · condition evaluation
+│  ├─ [1] MirBlock b1  true path · X(q[0]);
+│  ├─ [2] MirBlock b2  false path · empty body
+│  └─ [3] MirBlock b3  path join · H(q[0]); · return
+└─ EntryBlock ──▶ Blocks[0] (MirBlock b0)</desc>
+    <path class="native-item-tree__guides" d="M 22 34 V 535 M 22 51 H 40 M 22 97 H 40 M 22 173 H 40 M 22 339 H 40 M 22 535 H 40 M 50 110 V 127 M 50 127 H 68 M 50 186 V 293 M 50 203 H 68 M 50 233 H 68 M 50 263 H 68 M 50 293 H 68 M 50 352 V 489 M 50 369 H 68 M 50 429 H 68 M 50 459 H 68 M 50 489 H 68"/>
+    <text x="16" y="26" data-tree-depth="0" data-tree-row="0" data-continuation="false"><tspan class="native-item-tree__field">MirCallable Work c44</tspan></text>
+    <text x="44" y="56" data-tree-depth="1" data-tree-row="1" data-continuation="false">Parameters = <tspan class="native-item-tree__value">[]</tspan></text>
+    <text x="44" y="102" data-tree-depth="1" data-tree-row="2" data-continuation="false"><tspan class="native-item-tree__field">Storages</tspan></text>
+    <text x="72" y="132" data-tree-depth="2" data-tree-row="3" data-continuation="false">[0] MirArrayStorage values</text>
+    <text x="44" y="178" data-tree-depth="1" data-tree-row="4" data-continuation="false"><tspan class="native-item-tree__field">Qubits</tspan></text>
+    <text x="72" y="208" data-tree-depth="2" data-tree-row="5" data-continuation="false">[0] MirQubit q0.v0</text>
+    <text x="72" y="238" data-tree-depth="2" data-tree-row="6" data-continuation="false">[1] MirQubit q0.v1</text>
+    <text x="72" y="268" data-tree-depth="2" data-tree-row="7" data-continuation="false">[2] MirQubit q0.v2</text>
+    <text x="72" y="298" data-tree-depth="2" data-tree-row="8" data-continuation="false">[3] MirQubit q0.v3</text>
+    <text x="44" y="344" data-tree-depth="1" data-tree-row="9" data-continuation="false"><tspan class="native-item-tree__field">Blocks</tspan></text>
+    <text x="72" y="374" data-tree-depth="2" data-tree-row="10" data-continuation="false">[0] MirBlock b0 initialization · array update ·</text>
+    <text x="72" y="404" data-tree-depth="2" data-tree-row="10" data-continuation="true">condition evaluation</text>
+    <text x="72" y="434" data-tree-depth="2" data-tree-row="11" data-continuation="false">[1] MirBlock b1 true path · X(q[0]);</text>
+    <text x="72" y="464" data-tree-depth="2" data-tree-row="12" data-continuation="false">[2] MirBlock b2 false path · empty body</text>
+    <text x="72" y="494" data-tree-depth="2" data-tree-row="13" data-continuation="false">[3] MirBlock b3 path join · H(q[0]); · return</text>
+    <text x="44" y="540" data-tree-depth="1" data-tree-row="14" data-continuation="false">EntryBlock<tspan class="native-item-tree__wire"> → </tspan><tspan class="native-item-tree__reference">Blocks[0] (MirBlock b0)</tspan></text>
+  </svg>
+</div>
+<div class="item-tree-legend" data-legend-for="structure-chapter-10-9" aria-label="Diagram legend">
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">→</span><span>Object reference</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">[]</span><span>Empty list</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">{}</span><span>Empty set or map</span></span>
+</div>
   </figure>
 
   <p>
@@ -606,10 +339,10 @@ flowchart TB
 
   <p id="implicit-return">
     The source of <code>Work</code> has no <code>return</code> statement.<br>
-    Because an operation returns no value, the lowerer automatically appends a valueless return to the final <code>b3</code>, closing the block normally. This is called an implicit return.
+    This example's <code>Work</code> declares no return type, so the lowerer automatically appends a valueless return to the final <code>b3</code>, closing the block normally.<br>This is called an implicit return.<br>An operation with a declared return type must explicitly return a value on every path, just like a function.
   </p>
 
-  <h2 id="result">What the completed MirCallable stores</h2>
+  <h2 id="result" class="trace-section-heading"><span>What the completed MirCallable stores</span></h2>
 
   <p>
     When callable lowering finishes, the working lists are collected into one <code>MirCallable</code>.<br>
@@ -634,12 +367,62 @@ flowchart TB
 
   <p>
     In summary, a callable lowerer takes one HIR declaration and turns it into a block structure with explicit execution order.<br>
-    The next chapter focuses on the classical values inside those blocks and explains why one source variable name becomes multiple SSA values in MIR.
+    The prepared lowerer now executes the actual conversion inside <code>LowerToMirCallable()</code>.
   </p>
 
+  <section class="function-route-next" aria-labelledby="chapter-10-detail-call-title">
+    <div class="function-route-next__summary">
+      <p>This chapter followed how <code>LowerHirArtifact()</code> takes <code>Next h6</code> and <code>Work h44</code> in order and prepares a dedicated lowerer for each callable.</p>
+      <p>Select the code region below whose detailed execution flow you want to inspect.</p>
+    </div>
+    <span class="function-route-next__label">Select a detailed flow</span>
+    <h3 id="chapter-10-detail-call-title">Detailed calls inside <code>LowerHirArtifact()</code></h3>
+<pre><code class="language-csharp">private static MirSnapshot LowerHirArtifact(
+    HirSemanticArtifact hirArtifact,
+    IMirLoweringTraceSink? traceSink)
+{
+    ArgumentNullException.ThrowIfNull(hirArtifact);
+
+    var hirSnapshot = hirArtifact.Source;
+    var hirProgram = hirSnapshot.Program;
+    var hirEntryCallable = hirProgram.EntryCallable
+        ?? throw new InvalidOperationException(
+            "validated HIR must contain an operation before MIR lowering");
+
+    var mirCallables = new List&lt;MirCallable&gt;();
+    MirCallable? mirEntryCallable = null;
+
+    foreach (var hirCallable in hirProgram.Callables)
+    {
+        var mirCallableLowerer = new HirCallableToMirLowerer(
+            hirCallable,
+            hirArtifact,
+            traceSink);
+
+<a id="lower-to-mir-callable-callsite"
+   class="code-detail-region"
+   href="chapter-10-call-flow.html?v=20261004-svg-trees-r56#lower-to-mir-callable"
+   data-detail-label="View detailed flow"
+   aria-label="View the detailed LowerToMirCallable execution and result-storage flow">        var mirCallable = mirCallableLowerer.LowerToMirCallable();
+        mirCallables.Add(mirCallable);</a>
+
+        if (ReferenceEquals(hirCallable, hirEntryCallable))
+            mirEntryCallable = mirCallable;
+    }
+
+    var mirProgram = new MirProgram(
+        mirEntryCallable
+            ?? throw new InvalidOperationException(
+                "validated HIR entry callable must be lowered into MIR"),
+        mirCallables);
+
+    return MirSnapshot.CreateLowered(mirProgram);
+}</code></pre>
+  </section>
+
   <nav class="chapter-nav" aria-label="Chapter navigation (bottom)">
-    <div class="group"><a href="chapter-09.html">← Previous: HIR→MIR boundary</a><a href="index.html#chapters">All chapters</a><a href="chapter-10-call-flow.html#lower-hir-artifact"><code>LowerHirArtifact()</code> detailed trace</a></div>
-    <div class="group"><a href="chapter-11.html">Next: Classical values and SSA versions →</a></div>
+    <div class="group"><a href="chapter-09.html">← Previous: HIR→MIR boundary</a><a href="index.html#chapters">All chapters</a><a href="chapter-10-call-flow.html?v=20261004-svg-trees-r56#lower-hir-artifact"><code>LowerHirArtifact()</code> detailed trace</a></div>
+    <div class="group"><a href="chapter-10-call-flow.html?v=20261004-svg-trees-r56#lower-to-mir-callable"><code>LowerToMirCallable()</code> detailed flow</a></div>
   </nav>
 
   <footer>Qora Compiler Developer Manual · Chapter 10</footer>

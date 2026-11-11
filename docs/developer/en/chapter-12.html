@@ -4,8 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>12. Array Storage and Value State — Qora Compiler Developer Manual</title>
-<link rel="stylesheet" href="developer.css">
-<script src="developer-syntax.js" defer></script>
+<link rel="stylesheet" href="developer.css?v=20260924-layout-review-r49">
+<link rel="stylesheet" href="../section-heading.css?v=20260826-section-tab-standard">
+<script src="developer-syntax.js?v=20260828-localized-format-r1" defer></script>
 </head>
 <body>
 <nav class="language-switch" aria-label="Language"><strong>English</strong><span aria-hidden="true">·</span><a href="../ko/chapter-12.html">한국어</a><span aria-hidden="true">·</span><a href="../ja/chapter-12.html">日本語</a></nav>
@@ -28,7 +29,7 @@
     This chapter follows only the creation, update, and subsequent read of the array to make this distinction clear.
   </p>
 
-  <h2 id="source">Qora code under examination</h2>
+  <h2 id="source" class="trace-section-heading"><span>Qora code under examination</span></h2>
 
 <pre><code class="language-qora">function Next(value: int): int
 {
@@ -56,9 +57,9 @@ operation Work()
     The source keeps using the same name, <code>values</code>, while MIR distinguishes its state before and after the update as separate values.
   </p>
 
-  <h2 id="overview">MIR result at a glance</h2>
+  <h2 id="overview" class="trace-section-heading"><span>MIR result at a glance</span></h2>
 
-<pre><code class="language-plaintext">values in Qora
+<figure class="structure-figure"><svg class="structure-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 252" role="img" aria-labelledby="flow-chapter-12-1-title flow-chapter-12-1-desc"><title id="flow-chapter-12-1-title">values in Qora</title><desc id="flow-chapter-12-1-desc">values in Qora
     │
     ├─ array identity: $s0
     │   └─ unchanged from beginning to end
@@ -69,7 +70,7 @@ operation Work()
                          └─ %v5 is the result of calling Next
 
 condition values[0] == 1
-    └─ reads the latest state, %v6</code></pre>
+    └─ reads the latest state, %v6</desc><defs><marker id="flow-chapter-12-1-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0 L10 5 L0 10 Z" fill="#354bff"/></marker></defs><g font-family="Consolas, Malgun Gothic, sans-serif"><rect x="12" y="8" width="616" height="62" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="24" y="34" font-size="14" fill="#111936" text-anchor="start" font-weight="700">Array identity · unchanged</text><text x="24" y="56" font-size="14" fill="#111936" text-anchor="start">$s0 · values</text><rect x="12" y="104" width="266" height="62" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="24" y="130" font-size="14" fill="#111936" text-anchor="start" font-weight="700">Initial value</text><text x="24" y="152" font-size="14" fill="#111936" text-anchor="start">%v1 = [0]</text><rect x="362" y="104" width="266" height="62" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="374" y="130" font-size="14" fill="#152581" text-anchor="start" font-weight="700">Updated value</text><text x="374" y="152" font-size="14" fill="#152581" text-anchor="start">%v6 = [%v5]</text><path d="M278 135.0 H320.0 V135.0 H360" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-12-1-arrow)"/><text x="12" y="207" font-size="14" fill="#111936" text-anchor="start">%v5 is the result of Next.</text><text x="12" y="236" font-size="14" fill="#111936" text-anchor="start">values[0] == 1 reads the latest value, %v6.</text></g></svg></figure>
 
   <p>
     <code>$s0</code> and <code>%v1</code> do not store the same information twice.<br>
@@ -77,7 +78,7 @@ condition values[0] == 1
     Updating an element leaves the identity unchanged but changes the value state to <code>%v6</code>.
   </p>
 
-  <h2 id="creation-lowering-code">Declaration: <code>$s0</code> and <code>%v1</code> are created together</h2>
+  <h2 id="creation-lowering-code" class="trace-section-heading"><span>Declaration: <code>$s0</code> and <code>%v1</code> are created together</span></h2>
 
   <p>
     Lowering the first statement, <code>var values: int[] = [0];</code>, creates the following two kinds of information in MIR.
@@ -99,10 +100,10 @@ condition values[0] == 1
     The relationship at this point is therefore straightforward.
   </p>
 
-<pre><code class="language-plaintext">$s0  → Which array is it?          → values
-%v1  → What is its current value?  → [0]</code></pre>
+<figure class="structure-figure"><svg class="structure-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 144" role="img" aria-labelledby="flow-chapter-12-3-title flow-chapter-12-3-desc"><title id="flow-chapter-12-3-title">$s0  → Which array is it?          → values</title><desc id="flow-chapter-12-3-desc">$s0  → Which array is it?          → values
+%v1  → What is its current value?  → [0]</desc><defs><marker id="flow-chapter-12-3-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0 L10 5 L0 10 Z" fill="#354bff"/></marker></defs><g font-family="Consolas, Malgun Gothic, sans-serif"><rect x="12" y="8" width="110" height="40" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="24" y="34" font-size="14" fill="#111936" text-anchor="start" font-weight="700">$s0</text><rect x="178" y="8" width="250" height="40" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="190" y="34" font-size="14" fill="#111936" text-anchor="start" font-weight="700">Which array?</text><rect x="490" y="8" width="138" height="40" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="502" y="34" font-size="14" fill="#111936" text-anchor="start" font-weight="700">values</text><path d="M122 28.0 H150.0 V28.0 H176" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-12-3-arrow)"/><path d="M428 28.0 H459.0 V28.0 H488" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-12-3-arrow)"/><rect x="12" y="86" width="110" height="40" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="24" y="112" font-size="14" fill="#111936" text-anchor="start" font-weight="700">%v1</text><rect x="178" y="86" width="250" height="40" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="190" y="112" font-size="14" fill="#111936" text-anchor="start" font-weight="700">Current array value?</text><rect x="490" y="86" width="138" height="40" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="502" y="112" font-size="14" fill="#111936" text-anchor="start" font-weight="700">[0]</text><path d="M122 106.0 H150.0 V106.0 H176" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-12-3-arrow)"/><path d="M428 106.0 H459.0 V106.0 H488" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-12-3-arrow)"/></g></svg></figure>
 
-  <h2 id="next-call">Update: the same <code>$s0</code> receives a new value state</h2>
+  <h2 id="next-call" class="trace-section-heading"><span>Update: the same <code>$s0</code> receives a new value state</span></h2>
 
 <pre><code class="language-qora">values[0] = Next(values[0]);</code></pre>
 
@@ -113,7 +114,7 @@ condition values[0] == 1
     The intermediate values <code>%v2</code> and <code>%v3</code> each represent index 0. This chapter focuses only on the array states <code>%v1</code> and <code>%v6</code>.
   </p>
 
-<pre><code class="language-plaintext">previous state %v1 = [0]
+<figure class="structure-figure"><svg class="structure-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 346" role="img" aria-labelledby="flow-chapter-12-5-title flow-chapter-12-5-desc"><title id="flow-chapter-12-5-title">previous state %v1 = [0]</title><desc id="flow-chapter-12-5-desc">previous state %v1 = [0]
        │
        ├─ read element 0 → %v4
        ├─ Next(%v4)     → %v5
@@ -121,7 +122,7 @@ condition values[0] == 1
               ↓
 new state %v6 = [%v5]
 
-array identity remains $s0</code></pre>
+array identity remains $s0</desc><defs><marker id="flow-chapter-12-5-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0 L10 5 L0 10 Z" fill="#354bff"/></marker></defs><g font-family="Consolas, Malgun Gothic, sans-serif"><rect x="156" y="8" width="328" height="40" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="168" y="34" font-size="14" fill="#111936" text-anchor="start" font-weight="700">%v1 = [0]</text><rect x="156" y="86" width="328" height="40" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="168" y="112" font-size="14" fill="#111936" text-anchor="start" font-weight="700">%v4 = %v1[0]</text><path d="M320.0 48 V67.0 H320.0 V84" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-12-5-arrow)"/><rect x="156" y="164" width="328" height="40" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="168" y="190" font-size="14" fill="#111936" text-anchor="start" font-weight="700">%v5 = Next(%v4)</text><path d="M320.0 126 V145.0 H320.0 V162" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-12-5-arrow)"/><rect x="156" y="242" width="328" height="40" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="168" y="268" font-size="14" fill="#152581" text-anchor="start" font-weight="700">%v6 = [%v5]</text><path d="M320.0 204 V223.0 H320.0 V240" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-12-5-arrow)"/><text x="90" y="330" font-size="15" fill="#111936" text-anchor="start">Array identity remains $s0.</text></g></svg></figure>
 
   <p>
     The important point is that <code>%v1</code> is never rewritten.<br>
@@ -129,7 +130,7 @@ array identity remains $s0</code></pre>
     Later analysis can therefore identify the array before the update from <code>%v1</code> and after the update from <code>%v6</code>.
   </p>
 
-  <h2 id="latest-state">The next statement reads the latest state, <code>%v6</code></h2>
+  <h2 id="latest-state" class="trace-section-heading"><span>The next statement reads the latest state, <code>%v6</code></span></h2>
 
   <p>
     The next condition, <code>if (values[0] == 1)</code>, still uses only the source name <code>values</code>.<br>
@@ -137,16 +138,16 @@ array identity remains $s0</code></pre>
     The condition therefore reads element 0 from updated state <code>%v6</code>, not initial state <code>%v1</code>.
   </p>
 
-<pre><code class="language-plaintext">after declaration  values → %v1 → [0]
+<figure class="structure-figure"><svg class="structure-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 208" role="img" aria-labelledby="flow-chapter-12-6-title flow-chapter-12-6-desc"><title id="flow-chapter-12-6-title">after declaration  values → %v1 → [0]</title><desc id="flow-chapter-12-6-desc">after declaration  values → %v1 → [0]
 after assignment   values → %v6 → [%v5]
-read in condition  values → %v6[0]</code></pre>
+read in condition  values → %v6[0]</desc><defs><marker id="flow-chapter-12-6-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0 L10 5 L0 10 Z" fill="#354bff"/></marker></defs><g font-family="Consolas, Malgun Gothic, sans-serif"><text x="12" y="28" font-size="14" fill="#111936" text-anchor="start">After declaration</text><rect x="230" y="6" width="398" height="40" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="242" y="32" font-size="14" fill="#111936" text-anchor="start" font-weight="700">values → %v1 → [0]</text><text x="12" y="100" font-size="14" fill="#111936" text-anchor="start">After assignment</text><rect x="230" y="78" width="398" height="40" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="242" y="104" font-size="14" fill="#152581" text-anchor="start" font-weight="700">values → %v6 → [%v5]</text><text x="12" y="172" font-size="14" fill="#111936" text-anchor="start">Read in condition</text><rect x="230" y="150" width="398" height="40" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="242" y="176" font-size="14" fill="#152581" text-anchor="start" font-weight="700">values → %v6[0]</text></g></svg></figure>
 
   <p>
     Running this example makes <code>Next(0)</code> return 1.<br>
     MIR does not assume that result in advance; it preserves it as call result <code>%v5</code>. The important fact here is not whether the number is known ahead of time, but that the next statement reads the latest array state, <code>%v6</code>.
   </p>
 
-  <h2 id="summary">Summary</h2>
+  <h2 id="summary" class="trace-section-heading"><span>Summary</span></h2>
 
   <div class="callout good">
     <span class="h">Questions answered by the two kinds of numbers</span>

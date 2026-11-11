@@ -386,7 +386,8 @@ public sealed class MirProgram
 /// <summary>
 /// One lowered function or operation. Classical SSA values, array storages, and versioned qubits stay
 /// at their semantic definition sites. The callable derives immutable lookup indexes from those owned
-/// definitions instead of accepting parallel value or storage tables.
+/// definitions instead of accepting parallel value or storage tables. <see cref="Blocks"/> must contain
+/// at least one block, and <c>Blocks[0]</c> is always the <see cref="EntryBlock"/>.
 /// </summary>
 public sealed class MirCallable
 {
@@ -409,33 +410,44 @@ public sealed class MirCallable
     internal MirCallable(
         MirCallableId id,
         string name,
+        MirCallableKind kind,
         MirType? returnType,
         IReadOnlyList<IMirParameter> parameters,
-        MirBlock entryBlock,
         IReadOnlyList<MirBlock> blocks,
         MirOrigin origin)
     {
-        ArgumentNullException.ThrowIfNull(entryBlock);
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         ArgumentNullException.ThrowIfNull(origin);
+        if (!Enum.IsDefined(kind))
+            throw new ArgumentOutOfRangeException(nameof(kind));
+        if (kind == MirCallableKind.Function && returnType is null)
+            throw new ArgumentException("a MIR function must declare a return type", nameof(returnType));
 
         Id = id;
         Name = name;
+        Kind = kind;
         ReturnType = returnType;
         Parameters = MirCollections.Freeze(parameters);
-        ValidateParameters(Parameters, returnType);
+        ValidateParameters(Parameters, kind);
         Blocks = MirCollections.Freeze(blocks);
         _blocks = IndexUnique(Blocks, block => block.Id, nameof(blocks), "block");
 
-        if (!_blocks.TryGetValue(entryBlock.Id, out var ownedEntryBlock)
-            || !ReferenceEquals(ownedEntryBlock, entryBlock))
+        if (Blocks.Count == 0)
         {
             throw new ArgumentException(
-                $"entry block {entryBlock.Id} must be the exact object owned by this MIR callable",
-                nameof(entryBlock));
+                "a MIR callable must contain at least one block",
+                nameof(blocks));
+        }
+        if (kind == MirCallableKind.Function
+            && Blocks.SelectMany(block => block.Instructions)
+                .Any(instruction => instruction is MirQuantumApply or MirMeasure or MirQubitAllocate))
+        {
+            throw new ArgumentException(
+                "a MIR function cannot contain quantum operations or effectful operation calls",
+                nameof(blocks));
         }
 
-        EntryBlock = entryBlock;
+        EntryBlock = Blocks[0];
         _instructions = IndexInstructions(Blocks);
         (Values, _valueSites) = CollectValues(Parameters, Blocks);
         ValidateControlFlow();
@@ -447,10 +459,7 @@ public sealed class MirCallable
 
     public MirCallableId Id { get; }
     public string Name { get; }
-    public MirCallableKind Kind =>
-        ReturnType is null
-            ? MirCallableKind.Operation
-            : MirCallableKind.Function;
+    public MirCallableKind Kind { get; }
     public MirType? ReturnType { get; }
     public IReadOnlyList<IMirParameter> Parameters { get; }
     public MirBlock EntryBlock { get; }
@@ -882,14 +891,14 @@ public sealed class MirCallable
 
     private static void ValidateParameters(
         IReadOnlyList<IMirParameter> parameters,
-        MirType? returnType)
+        MirCallableKind kind)
     {
         foreach (var parameter in parameters)
         {
             switch (parameter)
             {
                 case MirClassicalParameter classical:
-                    if (returnType is not null
+                    if (kind == MirCallableKind.Function
                         && (classical.Ownership != QOwnershipMode.Borrowed
                             || classical.Access != QAccessMode.ReadOnly))
                     {
@@ -899,7 +908,7 @@ public sealed class MirCallable
                     }
                     break;
 
-                case MirQubitParameter qubit when returnType is not null:
+                case MirQubitParameter qubit when kind == MirCallableKind.Function:
                     throw new ArgumentException(
                         $"function parameter `{qubit.Name}` cannot be a qubit",
                         nameof(parameters));
@@ -1848,10 +1857,10 @@ public sealed record MirUnary(
     {
         RequireScalarResult(result, "unary instruction");
         if (unaryOperator == MirUnaryOperator.LogicalNot
-            && result.Type != MirType.Scalar(QType.Bit))
+            && result.Type != MirType.Scalar(QType.Bool))
         {
             throw new ArgumentException(
-                $"logical-not result must be bit, not {result.Type}",
+                $"logical-not result must be bool, not {result.Type}",
                 nameof(result));
         }
         return result;
@@ -1894,10 +1903,10 @@ public sealed record MirBinary(
                 or MirBinaryOperator.LessOrEqual
                 or MirBinaryOperator.Greater
                 or MirBinaryOperator.GreaterOrEqual
-            && result.Type != MirType.Scalar(QType.Bit))
+            && result.Type != MirType.Scalar(QType.Bool))
         {
             throw new ArgumentException(
-                $"{binaryOperator} result must be bit, not {result.Type}",
+                $"{binaryOperator} result must be bool, not {result.Type}",
                 nameof(result));
         }
         return result;
@@ -2163,10 +2172,14 @@ public sealed record MirQuantumApply : MirInstruction
         IReadOnlyList<MirQubitAfterInstruction> qubitResults,
         IReadOnlyList<MirMutableArrayResult> mutableArrayResults,
         IReadOnlyList<MirFunctor> functors,
-        MirOrigin origin)
+        MirOrigin origin,
+        MirValue? result = null)
         : base(id, origin)
     {
         ArgumentNullException.ThrowIfNull(target);
+        if (result is not null && (target is not MirUserCallableTarget || result.Type.IsArray))
+            throw new ArgumentException("only a user operation can return a scalar value", nameof(result));
+        Result = result;
         Target = target;
         _operands = MirCollections.Freeze(operands);
         _qubitResults = MirCollections.Freeze(qubitResults);
@@ -2179,6 +2192,7 @@ public sealed record MirQuantumApply : MirInstruction
     }
 
     public MirCallTarget Target { get; }
+    public MirValue? Result { get; }
     public IReadOnlyList<MirCallOperand> Operands => _operands;
     public override IReadOnlyList<MirQubitAfterInstruction> QubitResults => _qubitResults;
     public IReadOnlyList<MirMutableArrayResult> MutableArrayResults => _mutableArrayResults;
@@ -2188,7 +2202,9 @@ public sealed record MirQuantumApply : MirInstruction
         Operands.SelectMany(operand => operand.InputValues).ToArray();
 
     public override IReadOnlyList<MirValue> Results =>
-        MutableArrayResults.Select(result => result.Result).ToArray();
+        Result is { } value
+            ? new[] { value }.Concat(MutableArrayResults.Select(result => result.Result)).ToArray()
+            : MutableArrayResults.Select(result => result.Result).ToArray();
 
     public override IReadOnlyList<MirQubitAccess> QubitAccesses =>
         Operands.SelectMany(operand => operand.QubitAccesses).ToArray();

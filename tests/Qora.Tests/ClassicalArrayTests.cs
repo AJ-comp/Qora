@@ -665,8 +665,8 @@ public class ClassicalArrayTests
     /// <summary>Structural array equality compares lengths before elements, so different-width registers
     /// have a constant result without asking OpenQASM to compare incompatible register types.</summary>
     [Theory]
-    [InlineData("==", "0")]
-    [InlineData("!=", "1")]
+    [InlineData("==", "false")]
+    [InlineData("!=", "true")]
     public void DifferentWidthRegistersFoldTheirStructuralComparison(
         string comparison,
         string expectedResult)
@@ -716,8 +716,8 @@ public class ClassicalArrayTests
     }
 
     [Theory]
-    [InlineData("==", "0")]
-    [InlineData("!=", "1")]
+    [InlineData("==", "false")]
+    [InlineData("!=", "true")]
     public void DifferentLengthGeneralArraysFoldTheirStructuralComparison(
         string comparison,
         string expectedResult)

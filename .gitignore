@@ -22,5 +22,15 @@ Thumbs.db
 *.nupkg
 packages/
 
+# Python runner/test bytecode
+__pycache__/
+*.pyc
+
 # Research notes — not for publication
 docs/papers/
+
+# Local documentation-server logs
+/.local-docs-*.log
+
+# Local diagram-generation prompts and historical review records (not rendered assets)
+/docs/developer/assets/item-trees/

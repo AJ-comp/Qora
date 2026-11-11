@@ -4,8 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>9. From Final HIR to Initial MIR — Qora Compiler Developer Manual</title>
-<link rel="stylesheet" href="developer.css">
-<script src="developer-syntax.js" defer></script>
+<link rel="stylesheet" href="developer.css?v=20261004-svg-trees-r56">
+<link rel="stylesheet" href="../section-heading.css?v=20260826-section-tab-standard">
+<script src="developer-syntax.js?v=20260828-localized-format-r1" defer></script>
 </head>
 <body>
 <nav class="language-switch" aria-label="Language"><strong>English</strong><span aria-hidden="true">·</span><a href="../ko/chapter-09.html">한국어</a><span aria-hidden="true">·</span><a href="../ja/chapter-09.html">日本語</a></nav>
@@ -27,7 +28,7 @@
     It postpones the lowering of individual statements and expressions so that the input and output of the whole-program transformation are clear first.
   </p>
 
-  <h2 id="example">Example program</h2>
+  <h2 id="example" class="trace-section-heading"><span>Example program</span></h2>
 
 <pre><code class="language-qora">function Next(value: int): int
 {
@@ -54,33 +55,68 @@ operation Work()
     <code>Work</code> is the operation that starts execution, and <code>Next</code> is the function called from it.
   </p>
 
-  <h2 id="compile-on-current-thread">HIR → MIR boundary at a glance</h2>
+  <h2 id="compile-on-current-thread" class="trace-section-heading"><span>HIR → MIR boundary at a glance</span></h2>
 
-<pre><code class="language-plaintext">Final HIR compilation
+<figure class="structure-figure"><div class="item-tree-flow" data-item-tree-flow="flow-chapter-09-1">
+<div class="item-tree-diagram item-tree-diagram--native" data-item-tree="flow-chapter-09-1-input" style="--item-tree-width:280px">
+  <svg class="native-item-tree" xmlns="http://www.w3.org/2000/svg" width="280" height="108" viewBox="0 0 280 108" role="img" aria-labelledby="flow-chapter-09-1-input-title flow-chapter-09-1-input-desc">
+    <title id="flow-chapter-09-1-input-title">Final HIR compilation</title>
+    <desc id="flow-chapter-09-1-input-desc">Final HIR compilation
 ├─ Next
 └─ Work  ← entry operation
-        │
-        │ ToMir()
-        ▼
+        </desc>
+    <path class="native-item-tree__guides" d="M 22 34 V 81 M 22 51 H 40 M 22 81 H 40"/>
+    <text x="16" y="26" data-tree-depth="0" data-tree-row="0" data-continuation="false"><tspan class="native-item-tree__field">Final HIR compilation</tspan></text>
+    <text x="44" y="56" data-tree-depth="1" data-tree-row="1" data-continuation="false">Next</text>
+    <text x="44" y="86" data-tree-depth="1" data-tree-row="2" data-continuation="false">Work ← entry operation</text>
+  </svg>
+</div>
+<div class="item-tree-legend" data-legend-for="flow-chapter-09-1-input" aria-label="Diagram legend">
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">←</span><span>Entry operation</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">[]</span><span>Empty list</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">{}</span><span>Empty set or map</span></span>
+</div>
+<div class="item-tree-transition"><span aria-hidden="true">↓</span><code>ToMir()</code></div>
+<div class="item-tree-diagram item-tree-diagram--native" data-item-tree="flow-chapter-09-1-output" style="--item-tree-width:280px">
+  <svg class="native-item-tree" xmlns="http://www.w3.org/2000/svg" width="280" height="168" viewBox="0 0 280 168" role="img" aria-labelledby="flow-chapter-09-1-output-title flow-chapter-09-1-output-desc">
+    <title id="flow-chapter-09-1-output-title">Initial MIR snapshot</title>
+    <desc id="flow-chapter-09-1-output-desc">
 Initial MIR snapshot
 └─ MirProgram
    ├─ Next  (MirCallable)
    ├─ Work  (MirCallable)
-   └─ EntryPoint = Work</code></pre>
+   └─ EntryPoint = Work</desc>
+    <path class="native-item-tree__guides" d="M 22 34 V 51 M 22 51 H 40 M 50 64 V 141 M 50 81 H 68 M 50 111 H 68 M 50 141 H 68"/>
+    <text x="16" y="26" data-tree-depth="0" data-tree-row="0" data-continuation="false"><tspan class="native-item-tree__field">Initial MIR snapshot</tspan></text>
+    <text x="44" y="56" data-tree-depth="1" data-tree-row="1" data-continuation="false"><tspan class="native-item-tree__field">MirProgram</tspan></text>
+    <text x="72" y="86" data-tree-depth="2" data-tree-row="2" data-continuation="false">Next (MirCallable)</text>
+    <text x="72" y="116" data-tree-depth="2" data-tree-row="3" data-continuation="false">Work (MirCallable)</text>
+    <text x="72" y="146" data-tree-depth="2" data-tree-row="4" data-continuation="false">EntryPoint = <tspan class="native-item-tree__value">Work</tspan></text>
+  </svg>
+</div>
+<div class="item-tree-legend" data-legend-for="flow-chapter-09-1-output" aria-label="Diagram legend">
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">→</span><span>Object reference</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">[]</span><span>Empty list</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">{}</span><span>Empty set or map</span></span>
+</div>
+</div></figure>
 
   <p>
     The essential flow is simple.<br>
     <code>ToMir()</code> lowers each callable in final HIR to a MIR callable, collects the completed callables into one <code>MirProgram</code>, and returns that program wrapped in the initial <code>MirSnapshot</code>.
   </p>
 
-  <h2 id="lower-artifact">Collecting two callables into a MirProgram</h2>
+  <h2 id="lower-artifact" class="trace-section-heading"><span>Collecting two callables into a MirProgram</span></h2>
 
   <p>
     The lowerer traverses the callable list in final HIR from beginning to end.<br>
     In this example it lowers <code>Next</code> first, followed by <code>Work</code>.
   </p>
 
-<pre><code class="language-plaintext">HIR callable list
+<figure class="structure-figure"><div class="item-tree-diagram item-tree-diagram--native" data-item-tree="structure-chapter-09-2" style="--item-tree-width:396px">
+  <svg class="native-item-tree" xmlns="http://www.w3.org/2000/svg" width="396" height="274" viewBox="0 0 396 274" role="img" aria-labelledby="structure-chapter-09-2-title structure-chapter-09-2-desc">
+    <title id="structure-chapter-09-2-title">HIR callable list</title>
+    <desc id="structure-chapter-09-2-desc">HIR callable list
 ├─ Next
 │  └─ callable lowering → MirCallable Next
 └─ Work
@@ -88,7 +124,23 @@ Initial MIR snapshot
 
 Completed MIR callable list
 ├─ MirCallable Next
-└─ MirCallable Work</code></pre>
+└─ MirCallable Work</desc>
+    <path class="native-item-tree__guides" d="M 22 34 V 111 M 22 51 H 40 M 22 111 H 40 M 50 64 V 81 M 50 81 H 68 M 50 124 V 141 M 50 141 H 68 M 22 200 V 247 M 22 217 H 40 M 22 247 H 40"/>
+    <text x="16" y="26" data-tree-depth="0" data-tree-row="0" data-continuation="false"><tspan class="native-item-tree__field">HIR callable list</tspan></text>
+    <text x="44" y="56" data-tree-depth="1" data-tree-row="1" data-continuation="false"><tspan class="native-item-tree__field">Next</tspan></text>
+    <text x="72" y="86" data-tree-depth="2" data-tree-row="2" data-continuation="false">callable lowering<tspan class="native-item-tree__wire"> → </tspan><tspan class="native-item-tree__reference">MirCallable Next</tspan></text>
+    <text x="44" y="116" data-tree-depth="1" data-tree-row="3" data-continuation="false"><tspan class="native-item-tree__field">Work</tspan></text>
+    <text x="72" y="146" data-tree-depth="2" data-tree-row="4" data-continuation="false">callable lowering<tspan class="native-item-tree__wire"> → </tspan><tspan class="native-item-tree__reference">MirCallable Work</tspan></text>
+    <text x="16" y="192" data-tree-depth="0" data-tree-row="5" data-continuation="false"><tspan class="native-item-tree__field">Completed MIR callable list</tspan></text>
+    <text x="44" y="222" data-tree-depth="1" data-tree-row="6" data-continuation="false">MirCallable Next</text>
+    <text x="44" y="252" data-tree-depth="1" data-tree-row="7" data-continuation="false">MirCallable Work</text>
+  </svg>
+</div>
+<div class="item-tree-legend" data-legend-for="structure-chapter-09-2" aria-label="Diagram legend">
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">→</span><span>Lowering result</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">[]</span><span>Empty list</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">{}</span><span>Empty set or map</span></span>
+</div></figure>
 
   <p>
     Here, callable lowering converts the parameters, body, and blocks of one function or operation into MIR form.<br>
@@ -100,32 +152,64 @@ Completed MIR callable list
     It records both the callable list and the callable where execution begins. In this example, the entry point is the <code>Work</code> operation.
   </p>
 
-  <h2 id="snapshot">Creating the initial MirSnapshot</h2>
+  <h2 id="snapshot" class="trace-section-heading"><span>Creating the initial MirSnapshot</span></h2>
 
-<pre><code class="language-plaintext">MirProgram
+<figure class="structure-figure"><div class="item-tree-flow" data-item-tree-flow="flow-chapter-09-3">
+<div class="item-tree-diagram item-tree-diagram--native" data-item-tree="flow-chapter-09-3-input" style="--item-tree-width:280px">
+  <svg class="native-item-tree" xmlns="http://www.w3.org/2000/svg" width="280" height="168" viewBox="0 0 280 168" role="img" aria-labelledby="flow-chapter-09-3-input-title flow-chapter-09-3-input-desc">
+    <title id="flow-chapter-09-3-input-title">MirProgram</title>
+    <desc id="flow-chapter-09-3-input-desc">MirProgram
 ├─ Callables
 │  ├─ Next
 │  └─ Work
 └─ EntryPoint = Work
-        │
-        │ CreateLowered(program)
-        ▼
+        </desc>
+    <path class="native-item-tree__guides" d="M 22 34 V 141 M 22 51 H 40 M 22 141 H 40 M 50 64 V 111 M 50 81 H 68 M 50 111 H 68"/>
+    <text x="16" y="26" data-tree-depth="0" data-tree-row="0" data-continuation="false"><tspan class="native-item-tree__field">MirProgram</tspan></text>
+    <text x="44" y="56" data-tree-depth="1" data-tree-row="1" data-continuation="false"><tspan class="native-item-tree__field">Callables</tspan></text>
+    <text x="72" y="86" data-tree-depth="2" data-tree-row="2" data-continuation="false">Next</text>
+    <text x="72" y="116" data-tree-depth="2" data-tree-row="3" data-continuation="false">Work</text>
+    <text x="44" y="146" data-tree-depth="1" data-tree-row="4" data-continuation="false">EntryPoint = <tspan class="native-item-tree__value">Work</tspan></text>
+  </svg>
+</div>
+<div class="item-tree-legend" data-legend-for="flow-chapter-09-3-input" aria-label="Diagram legend">
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">→</span><span>Object reference</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">[]</span><span>Empty list</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">{}</span><span>Empty set or map</span></span>
+</div>
+<div class="item-tree-transition"><span aria-hidden="true">↓</span><code>CreateLowered(program)</code></div>
+<div class="item-tree-diagram item-tree-diagram--native" data-item-tree="flow-chapter-09-3-output" style="--item-tree-width:470px">
+  <svg class="native-item-tree" xmlns="http://www.w3.org/2000/svg" width="470" height="108" viewBox="0 0 470 108" role="img" aria-labelledby="flow-chapter-09-3-output-title flow-chapter-09-3-output-desc">
+    <title id="flow-chapter-09-3-output-title">MirSnapshot</title>
+    <desc id="flow-chapter-09-3-output-desc">
 MirSnapshot
 ├─ Program = MirProgram above
-└─ Analyses = analysis entry point for that Program</code></pre>
+└─ Analyses = analysis entry point for that Program</desc>
+    <path class="native-item-tree__guides" d="M 22 34 V 81 M 22 51 H 40 M 22 81 H 40"/>
+    <text x="16" y="26" data-tree-depth="0" data-tree-row="0" data-continuation="false"><tspan class="native-item-tree__field">MirSnapshot</tspan></text>
+    <text x="44" y="56" data-tree-depth="1" data-tree-row="1" data-continuation="false">Program = <tspan class="native-item-tree__value">MirProgram above</tspan></text>
+    <text x="44" y="86" data-tree-depth="1" data-tree-row="2" data-continuation="false">Analyses = <tspan class="native-item-tree__value">analysis entry point for that Program</tspan></text>
+  </svg>
+</div>
+<div class="item-tree-legend" data-legend-for="flow-chapter-09-3-output" aria-label="Diagram legend">
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">→</span><span>Object reference</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">[]</span><span>Empty list</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">{}</span><span>Empty set or map</span></span>
+</div>
+</div></figure>
 
   <p>
     When the <code>MirProgram</code> is complete, <code>MirSnapshot.CreateLowered(program)</code> creates the initial MIR snapshot.<br>
     The returned snapshot stores the newly created <code>MirProgram</code> together with the <code>Analyses</code> entry point that analyzes that exact program.
   </p>
 
-  <h2 id="summary">Summary</h2>
+  <h2 id="summary" class="trace-section-heading"><span>Summary</span></h2>
 
-<pre><code class="language-plaintext">ToMir()
+<figure class="structure-figure"><svg class="structure-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 362" role="img" aria-labelledby="flow-chapter-09-4-title flow-chapter-09-4-desc"><title id="flow-chapter-09-4-title">ToMir()</title><desc id="flow-chapter-09-4-desc">ToMir()
 → Select semantically analyzed HIR
 → Lower Next and Work into separate MirCallable objects
 → Create a MirProgram whose EntryPoint is Work
-→ Return a MirSnapshot containing that MirProgram and its Analyses</code></pre>
+→ Return a MirSnapshot containing that MirProgram and its Analyses</desc><defs><marker id="flow-chapter-09-4-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0 L10 5 L0 10 Z" fill="#354bff"/></marker></defs><g font-family="Consolas, Malgun Gothic, sans-serif"><rect x="60" y="8" width="520" height="40" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="72" y="34" font-size="14" fill="#111936" text-anchor="start" font-weight="700">ToMir()</text><rect x="60" y="82" width="520" height="40" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="72" y="108" font-size="14" fill="#152581" text-anchor="start" font-weight="700">Select semantically analyzed HIR</text><path d="M320.0 48 V65.0 H320.0 V80" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-09-4-arrow)"/><rect x="60" y="156" width="520" height="40" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="72" y="182" font-size="14" fill="#152581" text-anchor="start" font-weight="700">Lower Next and Work into separate MirCallable objects</text><path d="M320.0 122 V139.0 H320.0 V154" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-09-4-arrow)"/><rect x="60" y="230" width="520" height="40" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="72" y="256" font-size="14" fill="#152581" text-anchor="start" font-weight="700">Create a MirProgram whose EntryPoint is Work</text><path d="M320.0 196 V213.0 H320.0 V228" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-09-4-arrow)"/><rect x="60" y="304" width="520" height="40" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="72" y="330" font-size="14" fill="#152581" text-anchor="start" font-weight="700">Return a MirSnapshot containing that MirProgram and its Analyses</text><path d="M320.0 270 V287.0 H320.0 V302" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-09-4-arrow)"/></g></svg></figure>
 
   <p>
     This is the complete boundary from HIR to MIR.<br>

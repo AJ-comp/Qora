@@ -101,7 +101,10 @@
     for (const arrow of arrows.querySelectorAll(".annotated-code-arrow"))
       arrow.remove();
 
-    if (window.matchMedia("(max-width: 980px)").matches) {
+    // Follow the actual card layout, including narrow content containers.
+    const notesAreStacked = noteElements.length === 0
+      || getComputedStyle(noteElements[0]).position === "static";
+    if (notesAreStacked) {
       notes.style.height = "";
       map.style.minHeight = "";
       for (const note of noteElements)
@@ -188,6 +191,177 @@
     }
   }
 
+  function initializeCallerReturnButtons() {
+    const callerStackStorageKey = `qoraDetailCallerStack:v2:${window.location.pathname}`;
+    const detailFlowLinkSelector = 'a.code-detail-region[href^="#"]';
+
+    function parseUrl(href) {
+      try {
+        return new URL(href, window.location.href);
+      } catch {
+        return null;
+      }
+    }
+
+    function selectedHash(url) {
+      return url.hash || "#lower-hir-artifact";
+    }
+
+    function isSameDocumentPath(left, right) {
+      return left.origin === right.origin
+        && left.pathname === right.pathname;
+    }
+
+    function isSameSelectedFunction(leftHref, rightHref) {
+      const left = parseUrl(leftHref);
+      const right = parseUrl(rightHref);
+      return left !== null
+        && right !== null
+        && isSameDocumentPath(left, right)
+        && selectedHash(left) === selectedHash(right);
+    }
+
+    function readCallerStack() {
+      try {
+        const storedValue = window.sessionStorage.getItem(callerStackStorageKey);
+        if (storedValue === null)
+          return [];
+
+        const callerStack = JSON.parse(storedValue);
+        return Array.isArray(callerStack)
+          ? callerStack.filter(callerHref => typeof callerHref === "string")
+          : [];
+      } catch {
+        return [];
+      }
+    }
+
+    function writeCallerStack(callerStack) {
+      try {
+        if (callerStack.length === 0)
+          window.sessionStorage.removeItem(callerStackStorageKey);
+        else
+          window.sessionStorage.setItem(callerStackStorageKey, JSON.stringify(callerStack));
+      } catch {
+        // 저장소를 사용할 수 없는 환경에서도 기본 링크 이동은 유지합니다.
+      }
+    }
+
+    function callerHrefForLink(link) {
+      const callerArticle = link.closest(".function-trace");
+      const targetUrl = parseUrl(link.href);
+      if (callerArticle === null
+        || callerArticle.id.length === 0
+        || targetUrl === null) {
+        return null;
+      }
+
+      const callerUrl = new URL(window.location.href);
+      callerUrl.hash = callerArticle.id;
+      return isSameSelectedFunction(callerUrl.href, targetUrl.href)
+        ? null
+        : callerUrl.href;
+    }
+
+    function inferredCallerHref() {
+      const currentUrl = new URL(window.location.href);
+      for (const link of document.querySelectorAll(detailFlowLinkSelector)) {
+        const targetUrl = parseUrl(link.href);
+        if (targetUrl === null
+          || !isSameDocumentPath(targetUrl, currentUrl)
+          || selectedHash(targetUrl) !== selectedHash(currentUrl)) {
+          continue;
+        }
+
+        return callerHrefForLink(link);
+      }
+
+      return null;
+    }
+
+    const currentUrl = new URL(window.location.href);
+    const referrerUrl = document.referrer.length > 0
+      ? parseUrl(document.referrer)
+      : null;
+    const navigationType = window.performance
+      .getEntriesByType("navigation")[0]?.type;
+
+    if (referrerUrl !== null
+      && !isSameDocumentPath(referrerUrl, currentUrl)) {
+      writeCallerStack([referrerUrl.href]);
+    } else if (navigationType !== "reload") {
+      writeCallerStack([]);
+    }
+
+    for (const link of document.querySelectorAll(detailFlowLinkSelector)) {
+      link.addEventListener("click", event => {
+        if (event.defaultPrevented
+          || event.button !== 0
+          || event.ctrlKey
+          || event.metaKey
+          || event.shiftKey
+          || event.altKey) {
+          return;
+        }
+
+        const callerHref = callerHrefForLink(link);
+        if (callerHref === null)
+          return;
+
+        const callerStack = readCallerStack();
+        const previousCallerHref = callerStack.at(-1);
+        if (previousCallerHref === undefined
+          || !isSameSelectedFunction(previousCallerHref, callerHref)) {
+          callerStack.push(callerHref);
+        }
+        writeCallerStack(callerStack);
+      });
+    }
+
+    const buttons = document.querySelectorAll("[data-return-to-caller]");
+    for (const button of buttons) {
+      button.addEventListener("click", () => {
+        const callerStack = readCallerStack();
+        let callerHref = null;
+        while (callerStack.length > 0) {
+          const candidateHref = callerStack.pop();
+          if (candidateHref
+            && !isSameSelectedFunction(candidateHref, window.location.href)) {
+            callerHref = candidateHref;
+            break;
+          }
+        }
+        writeCallerStack(callerStack);
+
+        if (callerHref !== null) {
+          window.location.href = callerHref;
+          return;
+        }
+
+        const currentButtonUrl = new URL(window.location.href);
+        const currentReferrerUrl = document.referrer.length > 0
+          ? parseUrl(document.referrer)
+          : null;
+        if (currentReferrerUrl !== null
+          && !isSameDocumentPath(currentReferrerUrl, currentButtonUrl)) {
+          window.location.href = currentReferrerUrl.href;
+          return;
+        }
+
+        const inferredHref = inferredCallerHref();
+        if (inferredHref !== null
+          && !isSameSelectedFunction(inferredHref, window.location.href)) {
+          window.location.href = inferredHref;
+          return;
+        }
+
+        const fallbackHref = button.dataset.fallbackHref;
+        if (fallbackHref)
+          window.location.href = fallbackHref;
+      });
+    }
+  }
+
   function moveToSelectedFunction() {
     const functionId = decodeURIComponent(window.location.hash.slice(1));
     if (functionId.length === 0)
@@ -203,7 +377,8 @@
       const documentRoot = document.documentElement;
       const previousScrollBehavior = documentRoot.style.scrollBehavior;
       documentRoot.style.scrollBehavior = "auto";
-      selectedFunction.scrollIntoView({ block: "start", behavior: "auto" });
+      const topReturnNavigation = document.querySelector(".caller-return-nav");
+      (topReturnNavigation ?? selectedFunction).scrollIntoView({ block: "start", behavior: "auto" });
       documentRoot.style.scrollBehavior = previousScrollBehavior;
 
       const heading = selectedFunction.querySelector("h2");
@@ -221,6 +396,7 @@
   window.addEventListener("hashchange", moveToSelectedFunction);
 
   addCodeCopyButtons();
+  initializeCallerReturnButtons();
 
   if (document.readyState === "loading")
     window.addEventListener("DOMContentLoaded", initializeAnnotatedCodeMaps, { once: true });

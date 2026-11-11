@@ -4,8 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>15. Conditional Lowering and Branch Joins — Qora Compiler Developer Manual</title>
-<link rel="stylesheet" href="developer.css">
-<script src="developer-syntax.js" defer></script>
+<link rel="stylesheet" href="developer.css?v=20260924-layout-review-r49">
+<link rel="stylesheet" href="../section-heading.css?v=20260826-section-tab-standard">
+<script src="developer-syntax.js?v=20260828-localized-format-r1" defer></script>
 </head>
 <body>
 <nav class="language-switch" aria-label="Language"><strong>English</strong><span aria-hidden="true">·</span><a href="../ko/chapter-15.html">한국어</a><span aria-hidden="true">·</span><a href="../ja/chapter-15.html">日本語</a></nav>
@@ -27,7 +28,7 @@
     This chapter focuses only on keeping the current qubit version separate on each path and joining those versions again.
   </p>
 
-  <h2 id="source">Qora code under examination</h2>
+  <h2 id="source" class="trace-section-heading"><span>Qora code under examination</span></h2>
 
 <pre><code class="language-qora">function Next(value: int): int
 {
@@ -60,33 +61,33 @@ operation Work()
     MIR tracks current state independently for each path and compares the states at the join point.
   </div>
 
-  <h2 id="two-states">Both paths start independently from the same input</h2>
+  <h2 id="two-states" class="trace-section-heading"><span>Both paths start independently from the same input</span></h2>
 
   <p>
     Immediately before the <code>if</code>, current <code>q</code> refers to <code>q0.v0</code>.<br>
     The lowerer copies this record into the true and false paths, then processes each path independently.
   </p>
 
-<pre><code class="language-plaintext">before branch: q → q0.v0
+<figure class="structure-figure"><svg class="structure-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 196" role="img" aria-labelledby="flow-chapter-15-1-title flow-chapter-15-1-desc"><title id="flow-chapter-15-1-title">before branch: q → q0.v0</title><desc id="flow-chapter-15-1-desc">before branch: q → q0.v0
         │
         ├─ true-path record:  q → q0.v0 ── X ──▶ q0.v1
-        └─ false-path record: q → q0.v0 ─────────▶ q0.v0</code></pre>
+        └─ false-path record: q → q0.v0 ─────────▶ q0.v0</desc><defs><marker id="flow-chapter-15-1-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0 L10 5 L0 10 Z" fill="#354bff"/></marker></defs><g font-family="Consolas, Malgun Gothic, sans-serif"><text x="12" y="27" font-size="16" fill="#111936" text-anchor="start">Before branching: q → q0.v0</text><text x="12" y="76" font-size="14" fill="#111936" text-anchor="start">True branch</text><rect x="160" y="50" width="160" height="40" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="172" y="76" font-size="14" fill="#111936" text-anchor="start" font-weight="700">q0.v0</text><rect x="468" y="50" width="160" height="40" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="480" y="76" font-size="14" fill="#152581" text-anchor="start" font-weight="700">q0.v1</text><path d="M320 70.0 H394.0 V70.0 H466" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-15-1-arrow)"/><text x="394.0" y="61.0" font-size="12" fill="#111936" text-anchor="middle">X</text><text x="12" y="164" font-size="14" fill="#111936" text-anchor="start">False branch</text><rect x="160" y="138" width="160" height="40" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="172" y="164" font-size="14" fill="#111936" text-anchor="start" font-weight="700">q0.v0</text><rect x="468" y="138" width="160" height="40" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="480" y="164" font-size="14" fill="#111936" text-anchor="start" font-weight="700">q0.v0</text><path d="M320 158.0 H394.0 V158.0 H466" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-15-1-arrow)"/></g></svg></figure>
 
   <p>
     Processing <code>X</code> on the true path therefore changes only the true-path record to <code>q0.v1</code>.<br>
     The false path uses a separate record and continues to refer to <code>q0.v0</code>.
   </p>
 
-  <h2 id="qubit-phi">Compare both records once at the join point</h2>
+  <h2 id="qubit-phi" class="trace-section-heading"><span>Compare both records once at the join point</span></h2>
 
   <p>
     At the join point, the lowerer compares the current versions recorded by both paths.<br>
     If they match, it uses that version directly. If they differ as <code>q0.v1</code> and <code>q0.v0</code> do here, it creates Phi version <code>q0.v2</code>.
   </p>
 
-<pre><code class="language-plaintext">current q on true path:  q0.v1 ──┐
+<figure class="structure-figure"><svg class="structure-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 198" role="img" aria-labelledby="flow-chapter-15-2-title flow-chapter-15-2-desc"><title id="flow-chapter-15-2-title">current q on true path:  q0.v1 ──┐</title><desc id="flow-chapter-15-2-desc">current q on true path:  q0.v1 ──┐
                                  ├─ different → current q after join: q0.v2
-current q on false path: q0.v0 ──┘</code></pre>
+current q on false path: q0.v0 ──┘</desc><defs><marker id="flow-chapter-15-2-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0 L10 5 L0 10 Z" fill="#354bff"/></marker></defs><g font-family="Consolas, Malgun Gothic, sans-serif"><rect x="12" y="8" width="270" height="62" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="24" y="34" font-size="14" fill="#152581" text-anchor="start" font-weight="700">True branch b1</text><text x="24" y="56" font-size="14" fill="#152581" text-anchor="start">X: q0.v0 → q0.v1</text><rect x="358" y="8" width="270" height="62" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="370" y="34" font-size="14" fill="#111936" text-anchor="start" font-weight="700">False branch b2</text><text x="370" y="56" font-size="14" fill="#111936" text-anchor="start">q0.v0</text><rect x="190" y="140" width="260" height="40" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="202" y="166" font-size="14" fill="#152581" text-anchor="start" font-weight="700">Phi → q0.v2</text><path d="M147.0 70 V105.0 H320.0 V138" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-15-2-arrow)"/><path d="M493.0 70 V105.0 H320.0 V138" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-15-2-arrow)"/></g></svg></figure>
 
   <p>
     After the comparison, the current <code>q</code> record after the join is the single version <code>q0.v2</code>.<br>

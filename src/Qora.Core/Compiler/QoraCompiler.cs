@@ -47,6 +47,19 @@ public static class QoraCompiler
         CompilationRevision? parentRevision)
     {
         ArgumentNullException.ThrowIfNull(session);
+        // The browser runtime cannot create the wide-stack worker used by desktop compilation.
+        // Run the same pipeline on its current thread without changing stage ownership or ordering.
+        if (OperatingSystem.IsBrowser())
+        {
+            return CompileOnCurrentThread(
+                source ?? string.Empty,
+                options,
+                instrumentation,
+                session,
+                compilationRevision,
+                parentRevision);
+        }
+
         Compilation? compilation = null;
         Exception? failure = null;
         var worker = new Thread(

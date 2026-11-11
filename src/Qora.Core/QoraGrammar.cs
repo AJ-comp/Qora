@@ -6,7 +6,7 @@ using Janglim.FrontEnd.RegularGrammar;
 namespace Qora;
 
 /// <summary>
-/// Qora v0.39.0 — a Q#/C#-flavored quantum language on the Janglim engine.
+/// Qora v0.40.0 — a Q#/C#-flavored quantum language on the Janglim engine.
 ///
 ///   operation Bell(q: Qubit[]) {        // a subroutine, with trailing-type parameters (name: T)
 ///       H(q[0]);
@@ -27,7 +27,7 @@ namespace Qora;
 /// v0.8 added: the single-gate modifier <c>Controlled G(...)</c> (-> OpenQASM <c>ctrl @</c>),
 /// richer conditions (== != &lt; &lt;= &gt; &gt;= &amp;&amp; || !),
 /// <c>if/else</c> (and <c>else if</c>), and first-class <c>Reset</c>.
-/// v0.9 added: <c>//</c> line comments (block <c>/* */</c> comments still pending engine support).
+/// v0.9 added: <c>//</c> line comments (block <c>/* */</c> comments remain unimplemented in Qora).
 /// v0.10 added unary minus in expressions and zero-argument gate/operation calls.
 /// v0.11 added: hardened validation (argument kinds for built-ins, full user-op call signatures,
 /// index bounds QSEM016, measure-into-bit QSEM017; QSEM013 relaxed so def-locals may shadow stdgates
@@ -169,14 +169,13 @@ public class QoraGrammar : Grammar
     public Terminal Qubit { get; } = new Terminal(TokenType.Keyword, "Qubit", "Qubit", true, false);
     public Terminal Int { get; } = new Terminal(TokenType.Keyword, "int", "int", true, false);
     public Terminal Bit { get; } = new Terminal(TokenType.Keyword, "bit", "bit", true, false);
+    public Terminal Bool { get; } = new Terminal(TokenType.Keyword, "bool", "bool", true, false);
     public Terminal FloatType { get; } = new Terminal(TokenType.Keyword, "float", "float", true, false);
     public Terminal AngleType { get; } = new Terminal(TokenType.Keyword, "angle", "angle", true, false);
 
-    // Line comments: `//` to end of line. Value is a RAW regex — Janglim >=0.2.0-preview.3 uses a
-    // comment terminal's Value verbatim (no \b wrapping), so "//.*$" wins the lexer's longest-match over
-    // the "/" operator; meaning=false + TokenType.SpecialToken.Comment -> the lexer filters it out of the
-    // parse stream. (Block comments `/* */` still need the engine's ScopeInfo path wired into this Lexer,
-    // so they stay deferred — see AJPGS/docs/TODO.md.)
+    // Line comments: `//` to end of line. Janglim uses this raw regex with longest-match selection,
+    // so the whole comment wins over the "/" operator. TokenType.SpecialToken.Comment keeps it out of
+    // the parse stream. The engine also supports block-comment matching; Qora has no such terminal yet.
     public Terminal LineComment { get; } = new Terminal(TokenType.SpecialToken.Comment, "//.*$", false, true);
 
     // --- identifier + numbers (meaning=true -> kept in AST). Float must out-length Num so the lexer's
@@ -202,8 +201,8 @@ public class QoraGrammar : Grammar
     public Terminal DotDot { get; } = new Terminal(TokenType.Operator, "..", false);
     // single dot for qualified names (Lib.Op); ".." wins by longest match, "0.5" lexes as one Float.
     public Terminal Dot { get; } = new Terminal(TokenType.Operator, ".", "." , true, false);
-    // Quote-delimited string (raw regex — Janglim >=0.3.0-preview.1's StringLiteral token type skips
-    // the \b wrapping that made this impossible before; see docs/janglim-request-raw-regex-terminal.md).
+    // Quote-delimited string. Janglim uses the raw regex without adding word boundaries, so punctuation
+    // and comment-like text inside a quoted import path remain part of the string token.
     public Terminal StringLit { get; } = new Terminal(TokenType.Literal.StringLiteral, "\"[^\"]*\"", "string", true, true);
 
     // comparison + boolean operators (meaning=true; the lexer's longest-match keeps == / != / <= / >= whole)
@@ -257,6 +256,7 @@ public class QoraGrammar : Grammar
     private NonTerminal condition = new NonTerminal("condition");
     private NonTerminal condAtom = new NonTerminal("condAtom");
     private NonTerminal expr = new NonTerminal("expr");
+    private NonTerminal arithmetic = new NonTerminal("arithmetic");
     private NonTerminal primary = new NonTerminal("primary");
     private NonTerminal memberAccess = new NonTerminal("memberAccess");
     private NonTerminal call = new NonTerminal("call");
@@ -312,14 +312,16 @@ public class QoraGrammar : Grammar
         openStmt.AddItem(Open + qname + Semicolon, OpenM);
         qname.AddItem(Ident + (Dot + Ident).ZeroOrMore());
 
-        // operation Name() { … }   /   operation Name(params) { … }
+        // Operations may omit the return annotation (void) or return one classical scalar.
         operation.AddItem(Operation + Ident + LParen + RParen + LBrace + statement.ZeroOrMore() + RBrace, OperationM);
         operation.AddItem(Operation + Ident + LParen + paramList + RParen + LBrace + statement.ZeroOrMore() + RBrace, OperationM);
+        operation.AddItem(Operation + Ident + LParen + RParen + Colon + typeName + LBrace + statement.ZeroOrMore() + RBrace, OperationM);
+        operation.AddItem(Operation + Ident + LParen + paramList + RParen + Colon + typeName + LBrace + statement.ZeroOrMore() + RBrace, OperationM);
 
         // function Name(): T { … }  /  function Name(params): T { … } — a classical, pure, value-returning
         // subroutine (Q#'s `function`). The return type is TRAILING (`): T`), a scalar classical type only
-        // (int/bit/float/angle). Unlike an operation, a function may be CALLED inside an expression (its call
-        // is a value); the validator enforces its purity (no gates / use / measurement / operation calls).
+        // (bool/int/bit/float/angle). Both value-returning kinds can be called in expressions; a function remains
+        // pure (no gates / use / measurement / operation calls), independently of its return type.
         functionDecl.AddItem(Function + Ident + LParen + RParen + Colon + typeName + LBrace + statement.ZeroOrMore() + RBrace, FunctionM);
         functionDecl.AddItem(Function + Ident + LParen + paramList + RParen + Colon + typeName + LBrace + statement.ZeroOrMore() + RBrace, FunctionM);
 
@@ -346,8 +348,9 @@ public class QoraGrammar : Grammar
 
         statement.AddItem(useStmt | gateStmt | constDecl | varDecl | assignStmt | ifStmt | forStmt | whileStmt | repeatStmt | returnStmt);
 
-        // return e;  — only meaningful inside a function (the validator rejects it elsewhere).
+        // A value-returning callable uses return e; a void operation may exit with return;.
         returnStmt.AddItem(Return + expr + Semicolon, ReturnM);
+        returnStmt.AddItem(Return + Semicolon, ReturnM);
 
         // use q = Qubit[2];
         useStmt.AddItem(Use + Ident + Assign + Qubit + LBracket + Num + RBracket + Semicolon, UseM);
@@ -393,7 +396,7 @@ public class QoraGrammar : Grammar
         whileStmt.AddItem(While + LParen + condition + RParen + LBrace + statement.ZeroOrMore() + RBrace, WhileM);
         repeatStmt.AddItem(Repeat + LBrace + statement.ZeroOrMore() + RBrace + Until + LParen + condition + RParen + Semicolon, RepeatM);
 
-        typeName.AddItem(Int | Bit | FloatType | AngleType);
+        typeName.AddItem(Int | Bit | Bool | FloatType | AngleType);
         arrayType.AddItem(typeName + LBracket + RBracket, ArrayTypeM);
         qubitArrayType.AddItem(Qubit + LBracket + RBracket, ArrayTypeM);
         arrayInitializer.AddItem(arrayLiteral | arrayNew);
@@ -403,23 +406,26 @@ public class QoraGrammar : Grammar
         // condition: the parser retains a flat operator sequence. AST-to-HIR lowering reduces that sequence
         // with Qora's precedence rules, so the resulting HIR and every later stage see one explicit tree.
         condition.AddItem(condAtom + ((Eq | Neq | Le | Ge | Lt | Gt | And | Or) + condAtom).ZeroOrMore(), ConditionM);
-        condAtom.AddItem(expr);
-        condAtom.AddItem(Not + expr);
+        // Keep the existing condition operand boundary: !a == b means (!a) == b, not !(a == b).
+        condAtom.AddItem(arithmetic);
+        condAtom.AddItem(Not + arithmetic);
 
-        // expression: atoms joined by + - * /   (e.g.  i + 1 ,  pi / 2 ,  2 * pi ,  0.5 ,  M(q[0]) ).
+        // A comparison is an ordinary bool-valued expression. The lowering boundary restores ordering
+        // before equality precedence; arithmetic operands retain their existing Expr-shaped AST.
+        expr.AddItem(arithmetic + ((Eq | Neq | Le | Ge | Lt | Gt) + arithmetic).ZeroOrMore(), ExprM);
         // A leading unary minus is its own production (e.g. -pi/2 for rotation angles).
-        expr.AddItem(primary + ((Plus | Minus | Mul | Div) + primary).ZeroOrMore(), ExprM);
+        arithmetic.AddItem(primary + ((Plus | Minus | Mul | Div) + primary).ZeroOrMore(), ExprM);
         primary.AddItem(Num | Float | Ident | call | memberAccess | indexAccess);
         primary.AddItem(Minus + primary);
+        // Keep a grouped expression as one operand, including a grouped comparison.
+        primary.AddItem(LParen + expr + RParen, ExprM);
         // Semantic validation currently exposes exactly one member, Array.Count. Keeping the grammar
         // general lets it produce a precise diagnostic for `q.Length` instead of a low-level parse error.
         memberAccess.AddItem(Ident + Dot + Ident);
-        // A call in expression position: the measurement `M(q[0])` (one indexed argument) OR a function call
-        // `Foo(a, b)` / `Lib.Foo(a, b)` (classical value arguments). One production covers both — the
-        // lowering/validator tell them apart by name. The shared qname production preserves any namespace
-        // path, while `M(q[0])`'s argument is an `expr` that is a lone index access.
+        // Expression and statement calls share argument ownership/access syntax. Resolution decides
+        // whether the callee returns a value; the expression lowerer recognizes the measurement intrinsic.
         call.AddItem(qname + LParen + RParen, CallM);                                       // Foo() / Lib.Foo()
-        call.AddItem(qname + LParen + expr + (Comma + expr).ZeroOrMore() + RParen, CallM);   // Foo(a, b) / M(q[0])
+        call.AddItem(qname + LParen + arg + (Comma + arg).ZeroOrMore() + RParen, CallM);     // Foo(var a, move b) / M(q[0])
 
         // Type-neutral indexed access. Its index is the same full expression accepted elsewhere, so a
         // call or arithmetic expression (`xs[idx()]`, `q[i + 1]`) reaches the common expression resolver

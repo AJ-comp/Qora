@@ -47,8 +47,11 @@ internal static partial class QoraMirVerifier
                     var operand = TypeOf(unary.Operand);
                     RequireScalar(operand, "unary operand");
                     if (unary.Operator == MirUnaryOperator.LogicalNot
-                        && operand is { ElementType: not QType.Bit })
-                        AddAtInstruction("MIR075", "logical-not requires a bit operand", callable, unary);
+                        && operand is { ElementType: not QType.Bool })
+                        AddAtInstruction("MIR075", "logical-not requires a bool operand", callable, unary);
+                    if (unary.Operator == MirUnaryOperator.Negate
+                        && operand is { ElementType: QType.Bool })
+                        AddAtInstruction("MIR075", "numeric negation cannot consume bool", callable, unary);
                     if (unary.Operator == MirUnaryOperator.Negate
                         && operand is { } operandType
                         && unary.Result.Type != operandType)
@@ -97,6 +100,11 @@ internal static partial class QoraMirVerifier
                     }
                     else
                     {
+                        if ((left is { ElementType: QType.Bool } || right is { ElementType: QType.Bool })
+                            && binary.Operator is not (MirBinaryOperator.Equal or MirBinaryOperator.NotEqual))
+                        {
+                            AddAtInstruction("MIR076", "bool operands support only equality comparisons", callable, binary);
+                        }
                         if (left is { } lhs && right is { } rhs && lhs != rhs)
                         {
                             AddAtInstruction("MIR076",
@@ -118,6 +126,11 @@ internal static partial class QoraMirVerifier
                 {
                     var operand = TypeOf(convert.Operand);
                     RequireScalar(operand, "conversion operand");
+                    if (operand is { ElementType: QType.Bool }
+                        || convert.Result.Type.ElementType == QType.Bool)
+                    {
+                        AddAtInstruction("MIR075", "implicit conversions cannot involve bool", callable, convert);
+                    }
                     break;
                 }
                 case MirArrayCreate create:
@@ -311,6 +324,10 @@ internal static partial class QoraMirVerifier
                         }
                         else if (instruction is MirQuantumApply apply)
                         {
+                            if (apply.Result?.Type != callee.ReturnType)
+                                AddAtInstruction("MIR095",
+                                    $"operation-call result does not match `{callee.Name}` return type",
+                                    caller, apply);
                             VerifyMutableResults(caller, apply, callee);
                         }
                     }
@@ -495,29 +512,29 @@ internal static partial class QoraMirVerifier
             {
                 case MirBranch branch:
                     if (callable.FindValue(branch.Condition) is { } condition
-                        && condition.Type != MirType.Scalar(QType.Bit))
+                        && condition.Type != MirType.Scalar(QType.Bool))
                     {
                         AddAtTerminator(
                             "MIR124",
-                            $"branch condition {branch.Condition} is {condition.Type}, expected bit",
+                            $"branch condition {branch.Condition} is {condition.Type}, expected bool",
                             callable,
                             block);
                     }
                     break;
                 case MirReturn ret:
-                    if (callable.Kind == MirCallableKind.Operation)
+                    if (callable.ReturnType is null)
                     {
                         if (ret.Value is not null)
-                            AddAtTerminator("MIR125", "operation returns a value", callable, block);
+                            AddAtTerminator("MIR125", "void callable returns a value", callable, block);
                     }
                     else if (ret.Value is not MirValueId returnValue)
-                        AddAtTerminator("MIR126", "function return has no value", callable, block);
+                        AddAtTerminator("MIR126", "value-returning callable return has no value", callable, block);
                     else if (callable.FindValue(returnValue) is { } value
                              && value.Type != callable.ReturnType!.Value)
                     {
                         AddAtTerminator(
                             "MIR127",
-                            $"function returns {value.Type}, expected {callable.ReturnType.Value}",
+                            $"callable returns {value.Type}, expected {callable.ReturnType.Value}",
                             callable,
                             block);
                     }

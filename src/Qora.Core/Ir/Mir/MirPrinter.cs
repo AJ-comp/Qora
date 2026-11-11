@@ -231,6 +231,7 @@ public static class MirPrinter
         {
             var results = apply.QubitResults
                 .Select(result => Qubit(result.Key))
+                .Concat(apply.Result is { } value ? new[] { ResultName(value.Id) } : Array.Empty<string>())
                 .Concat(apply.MutableArrayResults.Select(result => ResultName(result.Result.Id)))
                 .ToArray();
             return results.Length == 0

@@ -1,0 +1,23 @@
+/* Public Blazor Blueprint theme tokens used by the Playground's cards, buttons and badges. */
+:root {
+    --background: #ffffff;
+    --foreground: #111827;
+    --card: #ffffff;
+    --card-foreground: #111827;
+    --popover: #ffffff;
+    --popover-foreground: #111827;
+    --primary: #1f2937;
+    --primary-foreground: #ffffff;
+    --secondary: #f1f5f9;
+    --secondary-foreground: #1f2937;
+    --muted: #f1f5f9;
+    --muted-foreground: #64748b;
+    --accent: #f1f5f9;
+    --accent-foreground: #1f2937;
+    --destructive: #b91c1c;
+    --destructive-foreground: #ffffff;
+    --border: #e2e8f0;
+    --input: #e2e8f0;
+    --ring: #94a3b8;
+    --radius: 0.625rem;
+}

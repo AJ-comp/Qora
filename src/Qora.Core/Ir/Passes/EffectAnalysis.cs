@@ -89,23 +89,16 @@ internal static class EffectAnalysis
             HirStatement statement)
         {
             var modified = new HashSet<QubitRef>();
+            foreach (var expression in HirExpressions.DirectExpressionSites(statement))
+                AddExpressionEffects(expression, modified);
 
             switch (statement)
             {
-                case HirCallStatement call:
-                    modified.UnionWith(AnalyzeCall(call));
-                    break;
-
-                case HirVariableDeclarationStatement declaration:
-                    AddMeasurements(declaration.Value, modified);
-                    break;
-
-                case HirAssignmentStatement assignment:
-                    AddMeasurements(assignment.Value, modified);
+                case HirCallStatement call when call.Call.CalleeId is null:
+                    modified.UnionWith(AnalyzeIntrinsicCall(call));
                     break;
 
                 case HirIfStatement @if:
-                    AddMeasurements(@if.Condition, modified);
                     modified.UnionWith(AnalyzeBlock(@if.Then));
                     modified.UnionWith(AnalyzeBlock(@if.Else));
                     break;
@@ -115,51 +108,25 @@ internal static class EffectAnalysis
                     break;
 
                 case HirWhileStatement @while:
-                    AddMeasurements(@while.Condition, modified);
                     modified.UnionWith(AnalyzeBlock(@while.Body));
                     break;
 
                 case HirRepeatStatement repeat:
                     modified.UnionWith(AnalyzeBlock(repeat.Body));
-                    AddMeasurements(repeat.Until, modified);
                     break;
             }
 
             return modified;
         }
 
-        private HashSet<QubitRef> AnalyzeCall(
+        private static HashSet<QubitRef> AnalyzeIntrinsicCall(
             HirCallStatement statement)
         {
             var call = statement.Call;
-
-            if (call.CalleeId is HirNodeId calleeId)
-            {
-                if (!_callableById.TryGetValue(calleeId, out var callee))
-                {
-                    throw new InvalidOperationException(
-                        $"effect analysis: call `{call.Name}` binds CalleeId {calleeId}, "
-                        + "but no such callable exists");
-                }
-
-                if (statement.Modifiers.Count > 0)
-                {
-                    throw new InvalidOperationException(
-                        $"effect analysis: user-call `{call.Name}` carries unsupported "
-                        + $"source modifiers [{string.Join(", ", statement.Modifiers)}]");
-                }
-
-                return Project(
-                    Summarize(calleeId).ParamModified,
-                    callee,
-                    call.Arguments);
-            }
-
             if (!QoraGates.Gates.TryGetValue(call.Name, out var gate))
             {
                 throw new InvalidOperationException(
-                    $"effect analysis: `{call.Name}` is neither a resolved user callable "
-                    + "nor a built-in gate");
+                    $"effect analysis: unresolved intrinsic call `{call.Name}` is not a built-in gate");
             }
 
             var qubitArguments =
@@ -239,16 +206,24 @@ internal static class EffectAnalysis
             return result;
         }
 
-        private static void AddMeasurements(
+        private void AddExpressionEffects(
             HirExpression expression,
             HashSet<QubitRef> modified)
         {
-            foreach (var measurement in
-                     HirExpressions
-                         .DescendantsAndSelf(expression)
-                         .OfType<HirMeasurementExpression>())
+            foreach (var node in HirExpressions.DescendantsAndSelf(expression))
             {
-                modified.Add(RefOf(measurement.Target));
+                if (node is HirMeasurementExpression measurement)
+                    modified.Add(RefOf(measurement.Target));
+                else if (node is HirCallExpression { CalleeId: { } calleeId } call)
+                {
+                    if (!_callableById.TryGetValue(calleeId, out var callee))
+                        throw new InvalidOperationException(
+                            $"effect analysis: call `{call.Name}` binds missing callable {calleeId}");
+                    modified.UnionWith(Project(
+                        Summarize(calleeId).ParamModified,
+                        callee,
+                        call.Arguments));
+                }
             }
         }
 

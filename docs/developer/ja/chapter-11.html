@@ -4,8 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>11. 古典値と SSA バージョン — Qora コンパイラ開発者マニュアル</title>
-<link rel="stylesheet" href="developer.css">
-<script src="developer-syntax.js" defer></script>
+<link rel="stylesheet" href="developer.css?v=20260924-layout-review-r49">
+<link rel="stylesheet" href="../section-heading.css?v=20260826-section-tab-standard">
+<script src="developer-syntax.js?v=20260828-localized-format-r1" defer></script>
 </head>
 <body>
 <nav class="language-switch" aria-label="言語"><a href="../en/chapter-11.html">English</a><span aria-hidden="true">·</span><a href="../ko/chapter-11.html">한국어</a><span aria-hidden="true">·</span><strong>日本語</strong></nav>
@@ -27,7 +28,7 @@
     MIR は古い値と新しい値を区別するために値を上書きせず、新しい MIR 値が生まれるたびに新しい番号を付けます。この章では、この規則が共通例へどう適用されるかを確認します。
   </p>
 
-  <h2 id="source">値が変わるソース文</h2>
+  <h2 id="source" class="trace-section-heading"><span>値が変わるソース文</span></h2>
 
 <pre><code class="language-qora">function Next(value: int): int
 {
@@ -55,9 +56,9 @@ operation Work()
     宣言直後の要素 0 は <code>0</code> であり、代入後は <code>Next</code> の戻り値に変わります。条件文は更新後の二つ目の状態を読まなければなりません。
   </p>
 
-  <h2 id="idea">名前は維持し、値に新しい番号を付ける</h2>
+  <h2 id="idea" class="trace-section-heading"><span>名前は維持し、値に新しい番号を付ける</span></h2>
 
-<pre><code class="language-plaintext">Qora ソース
+<figure class="structure-figure"><svg class="structure-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 134" role="img" aria-labelledby="flow-chapter-11-1-title flow-chapter-11-1-desc"><title id="flow-chapter-11-1-title">Qora ソース</title><desc id="flow-chapter-11-1-desc">Qora ソース
 values = 最初に作った配列
 values = 要素を更新した配列
 
@@ -66,7 +67,7 @@ MIR
 %v6 = %v1 の要素 0 を更新した新しい配列状態
 
 現在 values が指す値
-%v1  ──代入後──▶  %v6</code></pre>
+%v1  ──代入後──▶  %v6</desc><defs><marker id="flow-chapter-11-1-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0 L10 5 L0 10 Z" fill="#354bff"/></marker></defs><g font-family="Consolas, Malgun Gothic, sans-serif"><rect x="12" y="12" width="270" height="62" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="24" y="38" font-size="14" fill="#111936" text-anchor="start" font-weight="700">values · 代入前</text><text x="24" y="60" font-size="14" fill="#111936" text-anchor="start">%v1 = [0]</text><rect x="354" y="12" width="270" height="62" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="366" y="38" font-size="14" fill="#152581" text-anchor="start" font-weight="700">values · 代入後</text><text x="366" y="60" font-size="14" fill="#152581" text-anchor="start">%v6 = [%v5]</text><path d="M282 43.0 H318.0 V43.0 H352" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-11-1-arrow)"/><text x="12" y="118" font-size="14" fill="#111936" text-anchor="start">名前は同じで、現在参照する MIR の値が変わります。</text></g></svg></figure>
 
   <p>
     MIR の <code>%v1</code> と <code>%v6</code> は、別々のソース変数ではありません。<br>
@@ -78,7 +79,7 @@ MIR
     各 ID は一度だけ定義され、後から別の値で上書きされません。一つの値が一度だけ定義されることが SSA の中心規則です。
   </p>
 
-  <h2 id="next-values">Next では入力と結果を分ける</h2>
+  <h2 id="next-values" class="trace-section-heading"><span>Next では入力と結果を分ける</span></h2>
 
 <pre><code class="language-plaintext">function Next(value: int): int
 
@@ -97,7 +98,7 @@ return %v2</code></pre>
     したがって、<code>Next</code> の <code>%v1</code> と、下に出てくる <code>Work</code> の <code>%v1</code> は別の値であり、衝突しません。
   </p>
 
-  <h2 id="work-start">配列宣言で最初の状態を作る</h2>
+  <h2 id="work-start" class="trace-section-heading"><span>配列宣言で最初の状態を作る</span></h2>
 
 <pre><code class="language-plaintext">var values: int[] = [0];
 
@@ -116,7 +117,7 @@ return %v2</code></pre>
     簡単に言えば、storage は「どの配列領域か」を表し、<code>%v1</code> のような SSA 値は「その配列が今どの内容を持つか」を表します。この区別は第12章で詳しく確認します。
   </p>
 
-  <h2 id="work-assignment">配列代入は新しい配列状態を作る</h2>
+  <h2 id="work-assignment" class="trace-section-heading"><span>配列代入は新しい配列状態を作る</span></h2>
 
 <pre><code class="language-plaintext">values[0] = Next(values[0]);
 
@@ -138,9 +139,9 @@ return %v2</code></pre>
     コンパイラは値が変わった時点を失わずに、ソースの変数名を一つのまま維持できます。
   </p>
 
-  <h2 id="work-condition">条件文は最新の値を読む</h2>
+  <h2 id="work-condition" class="trace-section-heading"><span>条件文は最新の値を読む</span></h2>
 
-<pre><code class="language-plaintext">if (values[0] == 1)
+<figure class="structure-figure"><svg class="structure-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 408" role="img" aria-labelledby="flow-chapter-11-5-title flow-chapter-11-5-desc"><title id="flow-chapter-11-5-title">if (values[0] == 1)</title><desc id="flow-chapter-11-5-desc">if (values[0] == 1)
 
 現在の values = %v6
         │
@@ -152,7 +153,7 @@ return %v2</code></pre>
              二つの値を比較 → %v10
                   │
                   ▼
-             %v10 に従って分岐</code></pre>
+             %v10 に従って分岐</desc><defs><marker id="flow-chapter-11-5-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0 L10 5 L0 10 Z" fill="#354bff"/></marker></defs><g font-family="Consolas, Malgun Gothic, sans-serif"><rect x="170" y="8" width="300" height="40" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="182" y="34" font-size="14" fill="#111936" text-anchor="start" font-weight="700">values → %v6</text><rect x="12" y="88" width="280" height="40" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="24" y="114" font-size="14" fill="#111936" text-anchor="start" font-weight="700">%v7 = 0</text><rect x="350" y="88" width="278" height="40" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="362" y="114" font-size="14" fill="#111936" text-anchor="start" font-weight="700">%v9 = 1</text><rect x="12" y="174" width="280" height="40" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="24" y="200" font-size="14" fill="#111936" text-anchor="start" font-weight="700">%v8 = %v6[%v7]</text><rect x="170" y="264" width="300" height="40" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="182" y="290" font-size="14" fill="#152581" text-anchor="start" font-weight="700">%v10 = (%v8 == %v9)</text><path d="M320.0 48 V68.0 H152.0 V86" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-11-5-arrow)"/><path d="M152.0 128 V151.0 H152.0 V172" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-11-5-arrow)"/><path d="M489.0 128 V196.0 H320.0 V262" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-11-5-arrow)"/><path d="M152.0 214 V239.0 H320.0 V262" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-11-5-arrow)"/><rect x="170" y="350" width="300" height="40" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="182" y="376" font-size="14" fill="#152581" text-anchor="start" font-weight="700">%v10 に応じて分岐</text><path d="M320.0 304 V327.0 H320.0 V348" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-11-5-arrow)"/></g></svg></figure>
 
   <p>
     条件式は最初の配列状態 <code>%v1</code> ではなく、最新状態 <code>%v6</code> を読みます。<br>
@@ -160,7 +161,7 @@ return %v2</code></pre>
     したがって比較結果も事前に <code>true</code> へ固定せず、実行時に計算される <code>%v10</code> が移動先 block を決めます。
   </p>
 
-  <h2 id="definition">まとめ</h2>
+  <h2 id="definition" class="trace-section-heading"><span>まとめ</span></h2>
 
   <div class="callout good">
     <span class="h">同じ名前、異なる時点の値</span>

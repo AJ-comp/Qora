@@ -48,15 +48,12 @@ public sealed class MirImmutabilityTests
         var blocks = originalCallable.Blocks
             .Select(block => block.Id == originalBlock.Id ? clonedBlock : block)
             .ToList();
-        var entryBlock = Assert.Single(
-            blocks,
-            block => block.Id == originalCallable.EntryBlock.Id);
         var clonedCallable = new MirCallable(
             originalCallable.Id,
             originalCallable.Name,
+            originalCallable.Kind,
             originalCallable.ReturnType,
             parameters,
-            entryBlock,
             blocks,
             originalCallable.Origin);
 

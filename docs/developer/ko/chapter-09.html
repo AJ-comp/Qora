@@ -4,8 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>9. 최종 HIR에서 최초 MIR로 — Qora 컴파일러 개발자 매뉴얼</title>
-<link rel="stylesheet" href="developer.css">
-<script src="developer-syntax.js" defer></script>
+<link rel="stylesheet" href="developer.css?v=20261004-svg-trees-r56">
+<link rel="stylesheet" href="../section-heading.css?v=20260826-section-tab-standard">
+<script src="developer-syntax.js?v=20260828-localized-format-r1" defer></script>
 </head>
 <body>
 <nav class="language-switch" aria-label="언어"><a href="../en/chapter-09.html">English</a><span aria-hidden="true">·</span><strong>한국어</strong><span aria-hidden="true">·</span><a href="../ja/chapter-09.html">日本語</a></nav>
@@ -27,7 +28,7 @@
     개별 문장과 식을 어떻게 바꾸는지는 잠시 미뤄 두고, 프로그램 전체가 어떤 입력으로 들어와 어떤 결과로 나오는지 먼저 잡습니다.
   </p>
 
-  <h2 id="example">예제로 사용할 프로그램</h2>
+  <h2 id="example" class="trace-section-heading"><span>예제로 사용할 프로그램</span></h2>
 
 <pre><code class="language-qora">function Next(value: int): int
 {
@@ -54,33 +55,72 @@ operation Work()
     <code>Work</code>는 실행을 시작할 operation이고, <code>Next</code>는 그 안에서 호출하는 function입니다.
   </p>
 
-  <h2 id="compile-on-current-thread">한눈에 보는 HIR → MIR 경계</h2>
+  <h2 id="compile-on-current-thread" class="trace-section-heading"><span>한눈에 보는 HIR → MIR 경계</span></h2>
 
-<pre><code class="language-plaintext">최종 HIR compilation
+<figure class="structure-figure"><div class="item-tree-flow" data-item-tree-flow="flow-chapter-09-1">
+<div class="item-tree-diagram item-tree-diagram--native" data-item-tree="flow-chapter-09-1-input" style="--item-tree-width:280px">
+  <svg class="native-item-tree" xmlns="http://www.w3.org/2000/svg" width="280" height="108" viewBox="0 0 280 108" role="img" aria-labelledby="flow-chapter-09-1-input-title flow-chapter-09-1-input-desc">
+    <title id="flow-chapter-09-1-input-title">최종 HIR compilation</title>
+    <desc id="flow-chapter-09-1-input-desc">최종 HIR compilation
 ├─ Next
 └─ Work  ← 진입 operation
-        │
-        │ ToMir()
-        ▼
-최초 MIR snapshot
-└─ MirProgram
-   ├─ Next  (MirCallable)
-   ├─ Work  (MirCallable)
-   └─ EntryPoint = Work</code></pre>
+        </desc>
+    <path class="native-item-tree__guides" d="M 22 34 V 81 M 22 51 H 40 M 22 81 H 40"/>
+    <text x="16" y="26" data-tree-depth="0" data-tree-row="0" data-continuation="false"><tspan class="native-item-tree__field">최종 HIR compilation</tspan></text>
+    <text x="44" y="56" data-tree-depth="1" data-tree-row="1" data-continuation="false">Next</text>
+    <text x="44" y="86" data-tree-depth="1" data-tree-row="2" data-continuation="false">Work ← 진입 operation</text>
+  </svg>
+</div>
+<div class="item-tree-legend" data-legend-for="flow-chapter-09-1-input" aria-label="그림 범례">
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">←</span><span>진입 operation 표시</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">[]</span><span>빈 목록</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">{}</span><span>비어 있는 집합 또는 맵</span></span>
+</div>
+<div class="item-tree-transition"><span aria-hidden="true">↓</span><code>ToMir()</code></div>
+<div class="item-tree-diagram item-tree-diagram--native" data-item-tree="flow-chapter-09-1-output" style="--item-tree-width:541px">
+  <svg class="native-item-tree" xmlns="http://www.w3.org/2000/svg" width="541" height="228" viewBox="0 0 541 228" role="img" aria-labelledby="flow-chapter-09-1-output-title flow-chapter-09-1-output-desc">
+    <title id="flow-chapter-09-1-output-title">최초 MirSnapshot</title>
+    <desc id="flow-chapter-09-1-output-desc">
+최초 MirSnapshot
+├─ Program ──▶ MirProgram
+│  ├─ Callables
+│  │  ├─ [0] ──▶ MirCallable Next
+│  │  └─ [1] ──▶ MirCallable Work
+│  └─ EntryPoint ──▶ Callables[1]과 같은 MirCallable Work 객체
+└─ Analyses ──▶ MirAnalysisStore</desc>
+    <path class="native-item-tree__guides" d="M 22 34 V 201 M 22 51 H 40 M 22 201 H 40 M 50 64 V 171 M 50 81 H 68 M 50 171 H 68 M 78 94 V 141 M 78 111 H 96 M 78 141 H 96"/>
+    <text x="16" y="26" data-tree-depth="0" data-tree-row="0" data-continuation="false"><tspan class="native-item-tree__field">최초 MirSnapshot</tspan></text>
+    <text x="44" y="56" data-tree-depth="1" data-tree-row="1" data-continuation="false"><tspan class="native-item-tree__field">Program</tspan><tspan class="native-item-tree__wire"> → </tspan><tspan class="native-item-tree__reference">MirProgram</tspan></text>
+    <text x="72" y="86" data-tree-depth="2" data-tree-row="2" data-continuation="false"><tspan class="native-item-tree__field">Callables</tspan></text>
+    <text x="100" y="116" data-tree-depth="3" data-tree-row="3" data-continuation="false">[0]<tspan class="native-item-tree__wire"> → </tspan><tspan class="native-item-tree__reference">MirCallable Next</tspan></text>
+    <text x="100" y="146" data-tree-depth="3" data-tree-row="4" data-continuation="false">[1]<tspan class="native-item-tree__wire"> → </tspan><tspan class="native-item-tree__reference">MirCallable Work</tspan></text>
+    <text x="72" y="176" data-tree-depth="2" data-tree-row="5" data-continuation="false">EntryPoint<tspan class="native-item-tree__wire"> → </tspan><tspan class="native-item-tree__reference">Callables[1]과 같은 MirCallable Work 객체</tspan></text>
+    <text x="44" y="206" data-tree-depth="1" data-tree-row="6" data-continuation="false">Analyses<tspan class="native-item-tree__wire"> → </tspan><tspan class="native-item-tree__reference">MirAnalysisStore</tspan></text>
+  </svg>
+</div>
+<div class="item-tree-legend" data-legend-for="flow-chapter-09-1-output" aria-label="그림 범례">
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">→</span><span>객체 참조</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">[]</span><span>빈 목록</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">{}</span><span>비어 있는 집합 또는 맵</span></span>
+</div>
+</div></figure>
 
   <p>
     핵심은 간단합니다.<br>
     <code>ToMir()</code>는 최종 HIR에서 callable을 하나씩 MIR callable로 바꾸고, 완성된 callable들을 <code>MirProgram</code> 하나로 묶습니다. 그런 다음 그 프로그램을 최초 <code>MirSnapshot</code>으로 감싸 반환합니다.
   </p>
 
-  <h2 id="lower-artifact">두 callable을 MirProgram으로 묶기</h2>
+  <h2 id="lower-artifact" class="trace-section-heading"><span>두 callable을 MirProgram으로 묶기</span></h2>
 
   <p>
     의미 분석이 끝난 최종 HIR에서 callable 목록을 앞에서부터 순회합니다.<br>
     이 예제에서는 <code>Next</code>를 먼저 바꾸고, 이어서 <code>Work</code>를 바꿉니다.
   </p>
 
-<pre><code class="language-plaintext">HIR callable 목록
+<figure class="structure-figure"><div class="item-tree-diagram item-tree-diagram--native" data-item-tree="structure-chapter-09-2" style="--item-tree-width:396px">
+  <svg class="native-item-tree" xmlns="http://www.w3.org/2000/svg" width="396" height="274" viewBox="0 0 396 274" role="img" aria-labelledby="structure-chapter-09-2-title structure-chapter-09-2-desc">
+    <title id="structure-chapter-09-2-title">HIR callable 목록</title>
+    <desc id="structure-chapter-09-2-desc">HIR callable 목록
 ├─ Next
 │  └─ callable lowering → MirCallable Next
 └─ Work
@@ -88,7 +128,23 @@ operation Work()
 
 완성된 MIR callable 목록
 ├─ MirCallable Next
-└─ MirCallable Work</code></pre>
+└─ MirCallable Work</desc>
+    <path class="native-item-tree__guides" d="M 22 34 V 111 M 22 51 H 40 M 22 111 H 40 M 50 64 V 81 M 50 81 H 68 M 50 124 V 141 M 50 141 H 68 M 22 200 V 247 M 22 217 H 40 M 22 247 H 40"/>
+    <text x="16" y="26" data-tree-depth="0" data-tree-row="0" data-continuation="false"><tspan class="native-item-tree__field">HIR callable 목록</tspan></text>
+    <text x="44" y="56" data-tree-depth="1" data-tree-row="1" data-continuation="false"><tspan class="native-item-tree__field">Next</tspan></text>
+    <text x="72" y="86" data-tree-depth="2" data-tree-row="2" data-continuation="false">callable lowering<tspan class="native-item-tree__wire"> → </tspan><tspan class="native-item-tree__reference">MirCallable Next</tspan></text>
+    <text x="44" y="116" data-tree-depth="1" data-tree-row="3" data-continuation="false"><tspan class="native-item-tree__field">Work</tspan></text>
+    <text x="72" y="146" data-tree-depth="2" data-tree-row="4" data-continuation="false">callable lowering<tspan class="native-item-tree__wire"> → </tspan><tspan class="native-item-tree__reference">MirCallable Work</tspan></text>
+    <text x="16" y="192" data-tree-depth="0" data-tree-row="5" data-continuation="false"><tspan class="native-item-tree__field">완성된 MIR callable 목록</tspan></text>
+    <text x="44" y="222" data-tree-depth="1" data-tree-row="6" data-continuation="false">MirCallable Next</text>
+    <text x="44" y="252" data-tree-depth="1" data-tree-row="7" data-continuation="false">MirCallable Work</text>
+  </svg>
+</div>
+<div class="item-tree-legend" data-legend-for="structure-chapter-09-2" aria-label="그림 범례">
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">→</span><span>변환 결과</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">[]</span><span>빈 목록</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">{}</span><span>비어 있는 집합 또는 맵</span></span>
+</div></figure>
 
   <p>
     여기서 callable lowering은 함수나 operation 하나의 매개변수, 본문, block을 MIR 형태로 만드는 작업입니다.<br>
@@ -100,32 +156,66 @@ operation Work()
     이때 callable 목록뿐 아니라 어느 callable에서 실행을 시작할지도 함께 정하며, 예제의 진입점은 operation인 <code>Work</code>입니다.
   </p>
 
-  <h2 id="snapshot">최초 MirSnapshot이 되는 순간</h2>
+  <h2 id="snapshot" class="trace-section-heading"><span>최초 MirSnapshot이 되는 순간</span></h2>
 
-<pre><code class="language-plaintext">MirProgram
+<figure class="structure-figure"><div class="item-tree-flow" data-item-tree-flow="flow-chapter-09-3">
+<div class="item-tree-diagram item-tree-diagram--native" data-item-tree="flow-chapter-09-3-input" style="--item-tree-width:513px">
+  <svg class="native-item-tree" xmlns="http://www.w3.org/2000/svg" width="513" height="168" viewBox="0 0 513 168" role="img" aria-labelledby="flow-chapter-09-3-input-title flow-chapter-09-3-input-desc">
+    <title id="flow-chapter-09-3-input-title">MirProgram</title>
+    <desc id="flow-chapter-09-3-input-desc">MirProgram
 ├─ Callables
-│  ├─ Next
-│  └─ Work
-└─ EntryPoint = Work
-        │
-        │ CreateLowered(program)
-        ▼
+│  ├─ [0] ──▶ MirCallable Next
+│  └─ [1] ──▶ MirCallable Work
+└─ EntryPoint ──▶ Callables[1]과 같은 MirCallable Work 객체
+        </desc>
+    <path class="native-item-tree__guides" d="M 22 34 V 141 M 22 51 H 40 M 22 141 H 40 M 50 64 V 111 M 50 81 H 68 M 50 111 H 68"/>
+    <text x="16" y="26" data-tree-depth="0" data-tree-row="0" data-continuation="false"><tspan class="native-item-tree__field">MirProgram</tspan></text>
+    <text x="44" y="56" data-tree-depth="1" data-tree-row="1" data-continuation="false"><tspan class="native-item-tree__field">Callables</tspan></text>
+    <text x="72" y="86" data-tree-depth="2" data-tree-row="2" data-continuation="false">[0]<tspan class="native-item-tree__wire"> → </tspan><tspan class="native-item-tree__reference">MirCallable Next</tspan></text>
+    <text x="72" y="116" data-tree-depth="2" data-tree-row="3" data-continuation="false">[1]<tspan class="native-item-tree__wire"> → </tspan><tspan class="native-item-tree__reference">MirCallable Work</tspan></text>
+    <text x="44" y="146" data-tree-depth="1" data-tree-row="4" data-continuation="false">EntryPoint<tspan class="native-item-tree__wire"> → </tspan><tspan class="native-item-tree__reference">Callables[1]과 같은 MirCallable Work 객체</tspan></text>
+  </svg>
+</div>
+<div class="item-tree-legend" data-legend-for="flow-chapter-09-3-input" aria-label="그림 범례">
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">→</span><span>객체 참조</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">[]</span><span>빈 목록</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">{}</span><span>비어 있는 집합 또는 맵</span></span>
+</div>
+<div class="item-tree-transition"><span aria-hidden="true">↓</span><code>CreateLowered(program)</code></div>
+<div class="item-tree-diagram item-tree-diagram--native" data-item-tree="flow-chapter-09-3-output" style="--item-tree-width:430px">
+  <svg class="native-item-tree" xmlns="http://www.w3.org/2000/svg" width="430" height="138" viewBox="0 0 430 138" role="img" aria-labelledby="flow-chapter-09-3-output-title flow-chapter-09-3-output-desc">
+    <title id="flow-chapter-09-3-output-title">MirSnapshot</title>
+    <desc id="flow-chapter-09-3-output-desc">
 MirSnapshot
-├─ Program = 위 MirProgram
-└─ Analyses = 위 Program 전용 분석 창구</code></pre>
+├─ Program ──▶ 위 MirProgram과 같은 객체
+└─ Analyses ──▶ MirAnalysisStore
+   └─ _program ──▶ Program과 같은 MirProgram 객체</desc>
+    <path class="native-item-tree__guides" d="M 22 34 V 81 M 22 51 H 40 M 22 81 H 40 M 50 94 V 111 M 50 111 H 68"/>
+    <text x="16" y="26" data-tree-depth="0" data-tree-row="0" data-continuation="false"><tspan class="native-item-tree__field">MirSnapshot</tspan></text>
+    <text x="44" y="56" data-tree-depth="1" data-tree-row="1" data-continuation="false">Program<tspan class="native-item-tree__wire"> → </tspan><tspan class="native-item-tree__reference">위 MirProgram과 같은 객체</tspan></text>
+    <text x="44" y="86" data-tree-depth="1" data-tree-row="2" data-continuation="false"><tspan class="native-item-tree__field">Analyses</tspan><tspan class="native-item-tree__wire"> → </tspan><tspan class="native-item-tree__reference">MirAnalysisStore</tspan></text>
+    <text x="72" y="116" data-tree-depth="2" data-tree-row="3" data-continuation="false">_program<tspan class="native-item-tree__wire"> → </tspan><tspan class="native-item-tree__reference">Program과 같은 MirProgram 객체</tspan></text>
+  </svg>
+</div>
+<div class="item-tree-legend" data-legend-for="flow-chapter-09-3-output" aria-label="그림 범례">
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">→</span><span>객체 참조</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">[]</span><span>빈 목록</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">{}</span><span>비어 있는 집합 또는 맵</span></span>
+</div>
+</div></figure>
 
   <p>
     <code>MirProgram</code>이 완성되면 <code>MirSnapshot.CreateLowered(program)</code>이 최초 MIR snapshot을 만듭니다.<br>
     반환된 snapshot은 방금 만든 <code>MirProgram</code>과 그 프로그램을 분석하는 <code>Analyses</code>를 함께 보관합니다.
   </p>
 
-  <h2 id="summary">정리</h2>
+  <h2 id="summary" class="trace-section-heading"><span>정리</span></h2>
 
-<pre><code class="language-plaintext">ToMir()
+<figure class="structure-figure"><svg class="structure-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 362" role="img" aria-labelledby="flow-chapter-09-4-title flow-chapter-09-4-desc"><title id="flow-chapter-09-4-title">ToMir()</title><desc id="flow-chapter-09-4-desc">ToMir()
 → 의미 분석이 끝난 HIR 선택
 → Next와 Work를 각각 MirCallable로 변환
 → EntryPoint가 Work인 MirProgram 생성
-→ 그 MirProgram과 Analyses를 가진 MirSnapshot 반환</code></pre>
+→ 그 MirProgram과 Analyses를 가진 MirSnapshot 반환</desc><defs><marker id="flow-chapter-09-4-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0 L10 5 L0 10 Z" fill="#354bff"/></marker></defs><g font-family="Consolas, Malgun Gothic, sans-serif"><rect x="60" y="8" width="520" height="40" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="72" y="34" font-size="14" fill="#111936" text-anchor="start" font-weight="700">ToMir()</text><rect x="60" y="82" width="520" height="40" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="72" y="108" font-size="14" fill="#152581" text-anchor="start" font-weight="700">의미 분석이 끝난 HIR 선택</text><path d="M320.0 48 V65.0 H320.0 V80" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-09-4-arrow)"/><rect x="60" y="156" width="520" height="40" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="72" y="182" font-size="14" fill="#152581" text-anchor="start" font-weight="700">Next와 Work를 각각 MirCallable로 변환</text><path d="M320.0 122 V139.0 H320.0 V154" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-09-4-arrow)"/><rect x="60" y="230" width="520" height="40" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="72" y="256" font-size="14" fill="#152581" text-anchor="start" font-weight="700">EntryPoint가 Work인 MirProgram 생성</text><path d="M320.0 196 V213.0 H320.0 V228" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-09-4-arrow)"/><rect x="60" y="304" width="520" height="40" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="72" y="330" font-size="14" fill="#152581" text-anchor="start" font-weight="700">그 MirProgram과 Analyses를 가진 MirSnapshot 반환</text><path d="M320.0 270 V287.0 H320.0 V302" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-09-4-arrow)"/></g></svg></figure>
 
   <p>
     이것이 HIR에서 MIR로 넘어가는 전체 경계입니다.<br>

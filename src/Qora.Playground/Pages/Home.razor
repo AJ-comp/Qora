@@ -3,21 +3,21 @@
 
 <PageTitle>Qora Playground</PageTitle>
 
-<div class="max-w-6xl mx-auto p-6 space-y-6">
+<div class="playground">
 
-    <header class="space-y-1">
-        <h1 class="text-3xl font-bold tracking-tight">Qora Playground</h1>
-        <p class="text-muted-foreground">
-            Q# 스타일 양자 토이 언어 <span class="font-semibold">Qora</span>을 브라우저에서 바로 파싱·변환해보세요 —
-            <code class="font-mono">operation Foo(q: Qubit[])</code> · <code class="font-mono">호출 Foo(q)</code> · <code class="font-mono">q.Count</code> · <code class="font-mono">use … Qubit[n]</code> ·
-            <code class="font-mono">const/var/int</code> · <code class="font-mono">int[] / float[] / bit[] / angle[]</code> · <code class="font-mono">H / X / CNOT / S / T / CZ / SWAP / CCX</code> ·
-            <code class="font-mono">Rx / Ry / Rz (회전, pi/2)</code> ·
-            <code class="font-mono">var r: bit = M(…)</code> · <code class="font-mono">for … in</code> ·
-            <code class="font-mono">if</code> · <code class="font-mono">while</code> · <code class="font-mono">repeat … until</code>
+    <header class="playground-header">
+        <h1 class="playground-title">Qora Playground</h1>
+        <p class="playground-description">
+            Q# 스타일 양자 토이 언어 <strong>Qora</strong>을 브라우저에서 바로 파싱·변환해보세요 —
+            <code>operation Foo(q: Qubit[])</code> · <code>호출 Foo(q)</code> · <code>q.Count</code> · <code>use … Qubit[n]</code> ·
+            <code>const/var/int</code> · <code>bool[] / int[] / float[] / bit[] / angle[]</code> · <code>H / X / CNOT / S / T / CZ / SWAP / CCX</code> ·
+            <code>Rx / Ry / Rz (회전, pi/2)</code> ·
+            <code>var r: bit = M(…)</code> · <code>for … in</code> ·
+            <code>if</code> · <code>while</code> · <code>repeat … until</code>
         </p>
     </header>
 
-    <div class="grid gap-6 md:grid-cols-2">
+    <div class="playground-grid">
 
         @* --- input --- *@
         <BbCard>
@@ -33,16 +33,18 @@
                 </div>
             </BbCardContent>
             <BbCardFooter>
-                <BbButton OnClick="Run">Run</BbButton>
-                <BbButton Variant="ButtonVariant.Outline" Class="ml-2" OnClick="LoadBell">예제 불러오기</BbButton>
-                <BbButton Variant="ButtonVariant.Ghost" Class="ml-2" OnClick="Clear">지우기</BbButton>
+                <div class="playground-actions">
+                    <BbButton OnClick="Run">Run</BbButton>
+                    <BbButton Variant="ButtonVariant.Outline" OnClick="LoadBell">예제 불러오기</BbButton>
+                    <BbButton Variant="ButtonVariant.Ghost" OnClick="Clear">지우기</BbButton>
+                </div>
             </BbCardFooter>
         </BbCard>
 
         @* --- output --- *@
         <BbCard>
             <BbCardHeader>
-                <div class="flex items-center gap-2">
+                <div class="playground-result-heading">
                     <BbCardTitle>결과</BbCardTitle>
                     @if (_result is not null)
                     {
@@ -56,31 +58,31 @@
             <BbCardContent>
                 @if (_result is null)
                 {
-                    <p class="text-sm text-muted-foreground">아직 실행 전이에요.</p>
+                    <p class="playground-status">아직 실행 전이에요.</p>
                 }
                 else
                 {
                     @if (!_result.Succeeded)
                     {
-                        <div class="space-y-2 mb-3">
-                            <p class="text-sm text-destructive">
+                        <div class="playground-diagnostics">
+                            <p class="playground-error">
                                 @(_result.Diagnostics.Any(d => d.Stage == CompilationStage.Syntax)
                                     ? "파싱 실패 — 문법에 맞지 않아요."
                                     : "컴파일 실패 — 문법은 맞지만 이후 단계에서 오류가 발생했어요.")
                             </p>
                             @if (_result.Diagnostics.Count > 0)
                             {
-                                <pre class="text-xs font-mono whitespace-pre-wrap rounded-md bg-muted p-3">@string.Join("\n", _result.Diagnostics.Select(d => d.Error))</pre>
+                                <pre class="playground-output playground-output-wrap">@string.Join("\n", _result.Diagnostics.Select(d => d.Error))</pre>
                             }
                             else
                             {
-                                <p class="text-xs text-muted-foreground">아래 토큰을 보고 키워드/기호가 맞는지 확인해보세요.</p>
+                                <p class="playground-hint">아래 토큰을 보고 키워드/기호가 맞는지 확인해보세요.</p>
                             }
                         </div>
                     }
                     @if (_result.Sources.EntrySyntax.Ast is not null || _result.Sources.EntrySyntax.ParseTree is not null)
                     {
-                        <div class="flex gap-1 mb-3">
+                        <div class="playground-tabs">
                             <BbButton Size="ButtonSize.Small"
                                       Variant="@(_view == "ast" ? ButtonVariant.Default : ButtonVariant.Outline)"
                                       OnClick='@(() => SetView("ast"))'>AST</BbButton>
@@ -114,10 +116,10 @@
         <BbCard>
             <BbCardHeader>
                 <BbCardTitle>OpenQASM 3.0</BbCardTitle>
-                <BbCardDescription>이 Qora 코드를 표준 OpenQASM으로 변환한 결과 — Qiskit 등에 그대로 붙여넣을 수 있어요.</BbCardDescription>
+                <BbCardDescription>이 Qora 코드를 OpenQASM 3으로 변환한 결과입니다. 실행 도구에 따라 지원하는 문법과 기능이 다릅니다.</BbCardDescription>
             </BbCardHeader>
             <BbCardContent>
-                <pre class="text-xs font-mono whitespace-pre overflow-auto rounded-md bg-muted p-3" style="max-height: 40vh">@_result.Targets.OpenQasm!.Text</pre>
+                <pre class="playground-output" style="max-height: 40vh">@_result.Targets.OpenQasm!.Text</pre>
             </BbCardContent>
         </BbCard>
     }
@@ -127,15 +129,15 @@
     {
         <BbCard>
             <BbCardHeader>
-                <BbCardTitle>토큰 <span class="text-muted-foreground font-normal text-sm">(@(_result.Sources.EntrySyntax.Tokens.Count)개)</span></BbCardTitle>
+                <BbCardTitle>토큰 <span class="playground-token-count">(@(_result.Sources.EntrySyntax.Tokens.Count)개)</span></BbCardTitle>
                 <BbCardDescription>각 토큰이 어떤 종류로 인식됐는지</BbCardDescription>
             </BbCardHeader>
             <BbCardContent>
-                <div class="flex flex-wrap gap-1.5">
+                <div class="playground-token-list">
                     @foreach (var t in _result.Sources.EntrySyntax.Tokens)
                     {
-                        <BbBadge Variant="BadgeVariant.Outline" Class="font-mono text-xs">
-                            @t.Text<span class="text-muted-foreground ml-1.5">@t.Type</span>
+                        <BbBadge Variant="BadgeVariant.Outline" Class="playground-token">
+                            @t.Text<span class="playground-token-kind">@t.Type</span>
                         </BbBadge>
                     }
                 </div>

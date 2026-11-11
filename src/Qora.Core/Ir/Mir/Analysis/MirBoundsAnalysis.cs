@@ -450,15 +450,6 @@ internal static class MirBoundsAnalysis
                         active);
                 }
 
-                if (instruction is MirConvert convert
-                    && _callable.RequireValue(convert.Operand).Type == MirType.Scalar(QType.Bit))
-                {
-                    return RequiredConstraintsForTruth(
-                        convert.Operand,
-                        expected,
-                        active);
-                }
-
                 if (instruction is not MirBinary binary || !IsComparison(binary.Operator))
                     return null;
                 if (_callable.RequireValue(binary.Left).Type.IsArray
@@ -557,10 +548,6 @@ internal static class MirBoundsAnalysis
                         Operator: MirUnaryOperator.LogicalNot,
                     } unary)
                     return ProveTruth(unary.Operand, !expected, context, targets);
-
-                if (instruction is MirConvert convert
-                    && _callable.RequireValue(convert.Operand).Type == MirType.Scalar(QType.Bit))
-                    return ProveTruth(convert.Operand, expected, context, targets);
 
                 if (instruction is MirBinary binary
                     && IsComparison(binary.Operator))
@@ -1238,11 +1225,9 @@ internal static class MirBoundsAnalysis
         {
             switch (text)
             {
-                case "1":
                 case "true":
                     value = true;
                     return true;
-                case "0":
                 case "false":
                     value = false;
                     return true;

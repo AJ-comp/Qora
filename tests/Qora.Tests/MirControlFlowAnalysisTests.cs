@@ -70,9 +70,9 @@ public sealed class MirControlFlowAnalysisTests
         var callable = new MirCallable(
             C(0),
             "ParameterScope",
+            kind: MirCallableKind.Operation,
             returnType: null,
             parameters: new IMirParameter[] { parameter },
-            entryBlock: entryBlock,
             blocks: new[]
             {
                 entryBlock,
@@ -96,11 +96,11 @@ public sealed class MirControlFlowAnalysisTests
     {
         var context = MirTestContext.Create();
         var source = context.Origin();
-        var conditionValue = new MirValue(V(0), MirType.Scalar(QType.Bit), source);
+        var conditionValue = new MirValue(V(0), MirType.Scalar(QType.Bool), source);
         var condition = new MirConstant(
             I(0),
             conditionValue,
-            "1",
+            "true",
             source);
         var entryBlock = new MirBlock(
             B(0),
@@ -117,9 +117,9 @@ public sealed class MirControlFlowAnalysisTests
         var callable = new MirCallable(
             C(0),
             "MixedExits",
+            kind: MirCallableKind.Operation,
             returnType: null,
             parameters: Array.Empty<IMirParameter>(),
-            entryBlock: entryBlock,
             blocks: new[]
             {
                 entryBlock,
@@ -149,11 +149,11 @@ public sealed class MirControlFlowAnalysisTests
     {
         var context = MirTestContext.Create();
         var source = context.Origin();
-        var conditionValue = new MirValue(V(0), MirType.Scalar(QType.Bit), source);
+        var conditionValue = new MirValue(V(0), MirType.Scalar(QType.Bool), source);
         var condition = new MirConstant(
             I(0),
             conditionValue,
-            "1",
+            "true",
             source);
         var entryBlock = new MirBlock(
             B(0),
@@ -164,9 +164,9 @@ public sealed class MirControlFlowAnalysisTests
         var callable = new MirCallable(
             C(0),
             "Loop",
+            kind: MirCallableKind.Operation,
             returnType: null,
             parameters: Array.Empty<IMirParameter>(),
-            entryBlock: entryBlock,
             blocks: new[]
             {
                 entryBlock,
@@ -204,7 +204,7 @@ public sealed class MirControlFlowAnalysisTests
     {
         var context = MirTestContext.Create();
         var source = context.Origin();
-        var conditionValue = new MirValue(V(0), MirType.Scalar(QType.Bit), source);
+        var conditionValue = new MirValue(V(0), MirType.Scalar(QType.Bool), source);
         var leftValue = new MirValue(V(1), MirType.Scalar(QType.Int), source);
         var rightValue = new MirValue(V(2), MirType.Scalar(QType.Int), source);
         var joinValue = new MirValue(V(3), MirType.Scalar(QType.Int), source);
@@ -212,7 +212,7 @@ public sealed class MirControlFlowAnalysisTests
         var condition = new MirConstant(
             I(0),
             conditionValue,
-            "1",
+            "true",
             source);
         var left = new MirConstant(
             I(1),
@@ -245,9 +245,9 @@ public sealed class MirControlFlowAnalysisTests
         var callable = new MirCallable(
             C(0),
             "Diamond",
+            kind: MirCallableKind.Operation,
             returnType: null,
             parameters: Array.Empty<IMirParameter>(),
-            entryBlock: entryBlock,
             blocks: new[]
             {
                 entryBlock,
@@ -278,9 +278,9 @@ public sealed class MirControlFlowAnalysisTests
         return new MirCallable(
             id,
             "Main",
+            kind: MirCallableKind.Operation,
             returnType: null,
             parameters: Array.Empty<IMirParameter>(),
-            entryBlock: entryBlock,
             blocks: new[] { entryBlock },
             source);
     }

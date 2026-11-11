@@ -4,8 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>17. CFG の successor と predecessor — Qora コンパイラ開発者マニュアル</title>
-<link rel="stylesheet" href="developer.css">
-<script src="developer-syntax.js" defer></script>
+<link rel="stylesheet" href="developer.css?v=20261004-svg-trees-r56">
+<link rel="stylesheet" href="../section-heading.css?v=20260826-section-tab-standard">
+<script src="developer-syntax.js?v=20260828-localized-format-r1" defer></script>
 </head>
 <body>
 <nav class="language-switch" aria-label="言語"><a href="../en/chapter-17.html">English</a><span aria-hidden="true">·</span><a href="../ko/chapter-17.html">한국어</a><span aria-hidden="true">·</span><strong>日本語</strong></nav>
@@ -27,7 +28,7 @@
     Qora は新しい実行構造を作り直さず、各 block の末尾にある Terminator を読んでこのグラフを計算します。
   </p>
 
-  <h2 id="source">CFG を作る Qora コード</h2>
+  <h2 id="source" class="trace-section-heading"><span>CFG を作る Qora コード</span></h2>
 
 <pre><code class="language-qora">function Next(value: int): int
 {
@@ -54,42 +55,75 @@ operation Work()
     <code>b0</code> は条件を判断し、<code>b1</code> は true 本文を実行し、<code>b2</code> は false 経路を表します。最後の <code>b3</code> で両経路が合流し、<code>H</code> を実行します。
   </p>
 
-<pre><code class="language-plaintext">        ┌──→ b1: X ──┐
+<figure class="structure-figure"><svg class="structure-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 350" role="img" aria-labelledby="flow-chapter-17-1-title flow-chapter-17-1-desc"><title id="flow-chapter-17-1-title">        ┌──→ b1: X ──┐</title><desc id="flow-chapter-17-1-desc">        ┌──→ b1: X ──┐
 b0: 条件              ├──→ b3: H → return
-        └──→ b2 ─────┘</code></pre>
+        └──→ b2 ─────┘</desc><defs><marker id="flow-chapter-17-1-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0 L10 5 L0 10 Z" fill="#354bff"/></marker></defs><g font-family="Consolas, Malgun Gothic, sans-serif"><rect x="186" y="8" width="268" height="62" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="198" y="34" font-size="14" fill="#111936" text-anchor="start" font-weight="700">b0</text><text x="198" y="56" font-size="14" fill="#111936" text-anchor="start">条件計算 · branch</text><rect x="12" y="142" width="270" height="62" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="24" y="168" font-size="14" fill="#152581" text-anchor="start" font-weight="700">b1</text><text x="24" y="190" font-size="14" fill="#152581" text-anchor="start">X(q[0]);</text><rect x="358" y="142" width="270" height="62" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="370" y="168" font-size="14" fill="#111936" text-anchor="start" font-weight="700">b2</text><text x="370" y="190" font-size="14" fill="#111936" text-anchor="start">空の経路</text><rect x="186" y="270" width="268" height="62" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="198" y="296" font-size="14" fill="#152581" text-anchor="start" font-weight="700">b3</text><text x="198" y="318" font-size="14" fill="#152581" text-anchor="start">H(q[0]); · return</text><path d="M320.0 70 V106.0 H147.0 V140" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-17-1-arrow)"/><text x="239.5" y="100.0" font-size="12" fill="#111936" text-anchor="middle">true</text><path d="M320.0 70 V106.0 H493.0 V140" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-17-1-arrow)"/><text x="412.5" y="100.0" font-size="12" fill="#111936" text-anchor="middle">false</text><path d="M147.0 204 V237.0 H320.0 V268" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-17-1-arrow)"/><path d="M493.0 204 V237.0 H320.0 V268" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-17-1-arrow)"/></g></svg></figure>
 
-  <h2 id="terminators">矢印の元は Terminator</h2>
+  <h2 id="terminators" class="trace-section-heading"><span>矢印の元は Terminator</span></h2>
 
   <p>
     すべての block は最後に一つの Terminator を持ちます。<br>
     一般の MIR 命令が値を計算したりゲートを適用したりするのに対し、Terminator は block の終了後にどこへ移動するかを決めます。
   </p>
 
-<pre><code class="language-plaintext">b0.Terminator = Branch
+<figure class="structure-figure"><div class="item-tree-diagram item-tree-diagram--native" data-item-tree="structure-chapter-17-2" style="--item-tree-width:280px">
+  <svg class="native-item-tree" xmlns="http://www.w3.org/2000/svg" width="280" height="246" viewBox="0 0 280 246" role="img" aria-labelledby="structure-chapter-17-2-title structure-chapter-17-2-desc">
+    <title id="structure-chapter-17-2-title">b0.Terminator = Branch</title>
+    <desc id="structure-chapter-17-2-desc">b0.Terminator = Branch
 ├─ 条件が true  → b1
 └─ 条件が false → b2
 
 b1.Terminator = Jump → b3
 b2.Terminator = Jump → b3
-b3.Terminator = Return</code></pre>
+b3.Terminator = Return</desc>
+    <path class="native-item-tree__guides" d="M 22 34 V 81 M 22 51 H 40 M 22 81 H 40"/>
+    <text x="16" y="26" data-tree-depth="0" data-tree-row="0" data-continuation="false"><tspan class="native-item-tree__field">b0.Terminator</tspan> = <tspan class="native-item-tree__value">Branch</tspan></text>
+    <text x="44" y="56" data-tree-depth="1" data-tree-row="1" data-continuation="false">条件が true<tspan class="native-item-tree__wire"> → </tspan><tspan class="native-item-tree__reference">b1</tspan></text>
+    <text x="44" y="86" data-tree-depth="1" data-tree-row="2" data-continuation="false">条件が false<tspan class="native-item-tree__wire"> → </tspan><tspan class="native-item-tree__reference">b2</tspan></text>
+    <text x="16" y="132" data-tree-depth="0" data-tree-row="3" data-continuation="false">b1.Terminator = Jump<tspan class="native-item-tree__wire"> → </tspan><tspan class="native-item-tree__reference">b3</tspan></text>
+    <text x="16" y="178" data-tree-depth="0" data-tree-row="4" data-continuation="false">b2.Terminator = Jump<tspan class="native-item-tree__wire"> → </tspan><tspan class="native-item-tree__reference">b3</tspan></text>
+    <text x="16" y="224" data-tree-depth="0" data-tree-row="5" data-continuation="false"><tspan class="native-item-tree__field">b3.Terminator</tspan> = <tspan class="native-item-tree__value">Return</tspan></text>
+  </svg>
+</div>
+<div class="item-tree-legend" data-legend-for="structure-chapter-17-2" aria-label="図の凡例">
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">→</span><span>次に実行するブロック</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">[]</span><span>空のリスト</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">{}</span><span>空の集合またはマップ</span></span>
+</div></figure>
 
   <p>
     <code>Branch</code> は行き先が二つ、<code>Jump</code> は一つです。<br>
     <code>Return</code> は callable 実行を終えるため、次の block はありません。CFG はこれらの事実を表にした結果です。
   </p>
 
-  <h2 id="successors">次の block を集めると successor 表になる</h2>
+  <h2 id="successors" class="trace-section-heading"><span>次の block を集めると successor 表になる</span></h2>
 
   <p>
     successor は「現在の block の次に進める block」です。<br>
     解析は各 block の Terminator が指す行き先を読み、次の表を作ります。
   </p>
 
-<pre><code class="language-plaintext">Successors
+<figure class="structure-figure"><div class="item-tree-diagram item-tree-diagram--native" data-item-tree="structure-chapter-17-3" style="--item-tree-width:280px">
+  <svg class="native-item-tree" xmlns="http://www.w3.org/2000/svg" width="280" height="168" viewBox="0 0 280 168" role="img" aria-labelledby="structure-chapter-17-3-title structure-chapter-17-3-desc">
+    <title id="structure-chapter-17-3-title">Successors</title>
+    <desc id="structure-chapter-17-3-desc">Successors
 ├─ b0 → [b1, b2]
 ├─ b1 → [b3]
 ├─ b2 → [b3]
-└─ b3 → []</code></pre>
+└─ b3 → []</desc>
+    <path class="native-item-tree__guides" d="M 22 34 V 141 M 22 51 H 40 M 22 81 H 40 M 22 111 H 40 M 22 141 H 40"/>
+    <text x="16" y="26" data-tree-depth="0" data-tree-row="0" data-continuation="false"><tspan class="native-item-tree__field">Successors</tspan></text>
+    <text x="44" y="56" data-tree-depth="1" data-tree-row="1" data-continuation="false">b0<tspan class="native-item-tree__wire"> → </tspan><tspan class="native-item-tree__reference">[b1, b2]</tspan></text>
+    <text x="44" y="86" data-tree-depth="1" data-tree-row="2" data-continuation="false">b1<tspan class="native-item-tree__wire"> → </tspan><tspan class="native-item-tree__reference">[b3]</tspan></text>
+    <text x="44" y="116" data-tree-depth="1" data-tree-row="3" data-continuation="false">b2<tspan class="native-item-tree__wire"> → </tspan><tspan class="native-item-tree__reference">[b3]</tspan></text>
+    <text x="44" y="146" data-tree-depth="1" data-tree-row="4" data-continuation="false">b3<tspan class="native-item-tree__wire"> → </tspan><tspan class="native-item-tree__reference">[]</tspan></text>
+  </svg>
+</div>
+<div class="item-tree-legend" data-legend-for="structure-chapter-17-3" aria-label="図の凡例">
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">→</span><span>後続ブロックの一覧</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">[]</span><span>空のリスト</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">{}</span><span>空の集合またはマップ</span></span>
+</div></figure>
 
   <p>
     <code>b0</code> は条件に従って二か所のどちらかへ進めるため、successor が二つあります。<br>
@@ -102,14 +136,14 @@ b3.Terminator = Return</code></pre>
     CFG は実行中に選ばれ得る全経路を表し、実際の実行では条件に合う一経路だけを選びます。
   </div>
 
-  <h2 id="predecessors">矢印を反転すると predecessor 表になる</h2>
+  <h2 id="predecessors" class="trace-section-heading"><span>矢印を反転すると predecessor 表になる</span></h2>
 
   <p>
     predecessor は「現在の block へ入れる前の block」です。<br>
     別の情報源から再計算せず、完成した successor 矢印の向きだけを反転します。
   </p>
 
-<pre><code class="language-plaintext">Successor 矢印                   反転した Predecessor 関係
+<figure class="structure-figure"><svg class="structure-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 286" role="img" aria-labelledby="flow-chapter-17-4-title flow-chapter-17-4-desc"><title id="flow-chapter-17-4-title">Successor 矢印                   反転した Predecessor 関係</title><desc id="flow-chapter-17-4-desc">Successor 矢印                   反転した Predecessor 関係
 b0 → b1                          b1 ← b0
 b0 → b2                          b2 ← b0
 b1 → b3                          b3 ← b1
@@ -119,7 +153,7 @@ Predecessors
 ├─ b0 ← []
 ├─ b1 ← [b0]
 ├─ b2 ← [b0]
-└─ b3 ← [b1, b2]</code></pre>
+└─ b3 ← [b1, b2]</desc><defs><marker id="flow-chapter-17-4-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0 L10 5 L0 10 Z" fill="#354bff"/></marker></defs><g font-family="Consolas, Malgun Gothic, sans-serif"><text x="12" y="28" font-size="18" fill="#111936" text-anchor="start" font-weight="700">Successors</text><text x="346" y="28" font-size="18" fill="#111936" text-anchor="start" font-weight="700">Predecessors</text><rect x="12" y="48" width="278" height="40" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="24" y="74" font-size="14" fill="#111936" text-anchor="start" font-weight="700">b0 → [b1, b2]</text><rect x="346" y="48" width="278" height="40" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="358" y="74" font-size="14" fill="#152581" text-anchor="start" font-weight="700">b0 ← []</text><rect x="12" y="108" width="278" height="40" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="24" y="134" font-size="14" fill="#111936" text-anchor="start" font-weight="700">b1 → [b3]</text><rect x="346" y="108" width="278" height="40" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="358" y="134" font-size="14" fill="#152581" text-anchor="start" font-weight="700">b1 ← [b0]</text><rect x="12" y="168" width="278" height="40" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="24" y="194" font-size="14" fill="#111936" text-anchor="start" font-weight="700">b2 → [b3]</text><rect x="346" y="168" width="278" height="40" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="358" y="194" font-size="14" fill="#152581" text-anchor="start" font-weight="700">b2 ← [b0]</text><rect x="12" y="228" width="278" height="40" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="24" y="254" font-size="14" fill="#111936" text-anchor="start" font-weight="700">b3 → []</text><rect x="346" y="228" width="278" height="40" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="358" y="254" font-size="14" fill="#152581" text-anchor="start" font-weight="700">b3 ← [b1, b2]</text></g></svg></figure>
 
   <p>
     entry block <code>b0</code> へ入る block はないため、空の一覧です。<br>
@@ -131,20 +165,38 @@ Predecessors
     一方では <code>b1 → b3</code> なのに、他方では <code>b3 ← b1</code> が抜けるような不整合を避けられます。
   </p>
 
-  <h2 id="snapshot">二つの表が callable の CFG snapshot になる</h2>
+  <h2 id="snapshot" class="trace-section-heading"><span>二つの表が callable の CFG snapshot になる</span></h2>
 
   <p>
     現在の snapshot で <code>Work</code> の CFG を要求すると、解析ストアが <code>Work</code> の block と Terminator を読みます。<br>
     その結果、successor と predecessor を含む <code>MirControlFlowSnapshot</code> が作られます。
   </p>
 
-<pre><code class="language-plaintext">MirSnapshot
+<figure class="structure-figure"><div class="item-tree-diagram item-tree-diagram--native" data-item-tree="structure-chapter-17-5" style="--item-tree-width:364px">
+  <svg class="native-item-tree" xmlns="http://www.w3.org/2000/svg" width="364" height="228" viewBox="0 0 364 228" role="img" aria-labelledby="structure-chapter-17-5-title structure-chapter-17-5-desc">
+    <title id="structure-chapter-17-5-title">MirSnapshot</title>
+    <desc id="structure-chapter-17-5-desc">MirSnapshot
 └─ Work の CFG
    └─ MirControlFlowSnapshot
       ├─ SourceCallable = Work
       ├─ EntryBlock = b0
       ├─ SuccessorsOf(b0) = [b1, b2]
-      └─ PredecessorsOf(b3) = [b1, b2]</code></pre>
+      └─ PredecessorsOf(b3) = [b1, b2]</desc>
+    <path class="native-item-tree__guides" d="M 22 34 V 51 M 22 51 H 40 M 50 64 V 81 M 50 81 H 68 M 78 94 V 201 M 78 111 H 96 M 78 141 H 96 M 78 171 H 96 M 78 201 H 96"/>
+    <text x="16" y="26" data-tree-depth="0" data-tree-row="0" data-continuation="false"><tspan class="native-item-tree__field">MirSnapshot</tspan></text>
+    <text x="44" y="56" data-tree-depth="1" data-tree-row="1" data-continuation="false"><tspan class="native-item-tree__field">Work の CFG</tspan></text>
+    <text x="72" y="86" data-tree-depth="2" data-tree-row="2" data-continuation="false"><tspan class="native-item-tree__field">MirControlFlowSnapshot</tspan></text>
+    <text x="100" y="116" data-tree-depth="3" data-tree-row="3" data-continuation="false">SourceCallable = <tspan class="native-item-tree__value">Work</tspan></text>
+    <text x="100" y="146" data-tree-depth="3" data-tree-row="4" data-continuation="false">EntryBlock = <tspan class="native-item-tree__value">b0</tspan></text>
+    <text x="100" y="176" data-tree-depth="3" data-tree-row="5" data-continuation="false">SuccessorsOf(b0) = <tspan class="native-item-tree__value">[b1, b2]</tspan></text>
+    <text x="100" y="206" data-tree-depth="3" data-tree-row="6" data-continuation="false">PredecessorsOf(b3) = <tspan class="native-item-tree__value">[b1, b2]</tspan></text>
+  </svg>
+</div>
+<div class="item-tree-legend" data-legend-for="structure-chapter-17-5" aria-label="図の凡例">
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">├─</span><span>解析結果と取得値</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">[]</span><span>空のリスト</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">{}</span><span>空の集合またはマップ</span></span>
+</div></figure>
 
   <p>
     この CFG snapshot は、実行する二つ目の block ツリーではありません。<br>

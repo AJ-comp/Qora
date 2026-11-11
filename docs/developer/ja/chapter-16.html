@@ -4,8 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>16. MirSnapshot と解析基準 — Qora コンパイラ開発者マニュアル</title>
-<link rel="stylesheet" href="developer.css">
-<script src="developer-syntax.js" defer></script>
+<link rel="stylesheet" href="developer.css?v=20261004-svg-trees-r56">
+<link rel="stylesheet" href="../section-heading.css?v=20260826-section-tab-standard">
+<script src="developer-syntax.js?v=20260828-localized-format-r1" defer></script>
 </head>
 <body>
 <nav class="language-switch" aria-label="言語"><a href="../en/chapter-16.html">English</a><span aria-hidden="true">·</span><a href="../ko/chapter-16.html">한국어</a><span aria-hidden="true">·</span><strong>日本語</strong></nav>
@@ -27,35 +28,66 @@
     この章では、snapshot が program と解析を同じ基準へ結び付けるという一つの役割だけを確認します。
   </p>
 
-  <h2 id="snapshot">MirSnapshot が現在の MIR 状態を表す</h2>
+  <h2 id="snapshot" class="trace-section-heading"><span>MirSnapshot が現在の MIR 状態を表す</span></h2>
 
   <p>
     <code>MirProgram</code> が実行構造そのものなら、<code>MirSnapshot</code> はその program と専用の解析窓口を一緒に保持する不変の結果です。<br>
     HIR から最初に lower された program は <code>MirSnapshot.CreateLowered(program)</code> によって最初の snapshot になります。
   </p>
 
-<pre><code class="language-plaintext">MirSnapshot
+<figure class="structure-figure"><div class="item-tree-diagram item-tree-diagram--native" data-item-tree="structure-chapter-16-0" style="--item-tree-width:362px">
+  <svg class="native-item-tree" xmlns="http://www.w3.org/2000/svg" width="362" height="168" viewBox="0 0 362 168" role="img" aria-labelledby="structure-chapter-16-0-title structure-chapter-16-0-desc">
+    <title id="structure-chapter-16-0-title">MirSnapshot</title>
+    <desc id="structure-chapter-16-0-desc">MirSnapshot
 ├─ Program
 │  ├─ EntryPoint: Work
 │  └─ Callables: [Next, Work]
-└─ Analyses: この Program 専用の解析窓口</code></pre>
+└─ Analyses: この Program 専用の解析窓口</desc>
+    <path class="native-item-tree__guides" d="M 22 34 V 141 M 22 51 H 40 M 22 141 H 40 M 50 64 V 111 M 50 81 H 68 M 50 111 H 68"/>
+    <text x="16" y="26" data-tree-depth="0" data-tree-row="0" data-continuation="false"><tspan class="native-item-tree__field">MirSnapshot</tspan></text>
+    <text x="44" y="56" data-tree-depth="1" data-tree-row="1" data-continuation="false"><tspan class="native-item-tree__field">Program</tspan></text>
+    <text x="72" y="86" data-tree-depth="2" data-tree-row="2" data-continuation="false">EntryPoint: <tspan class="native-item-tree__type">Work</tspan></text>
+    <text x="72" y="116" data-tree-depth="2" data-tree-row="3" data-continuation="false">Callables: <tspan class="native-item-tree__type">[Next, Work]</tspan></text>
+    <text x="44" y="146" data-tree-depth="1" data-tree-row="4" data-continuation="false">Analyses: <tspan class="native-item-tree__type">この Program 専用の解析窓口</tspan></text>
+  </svg>
+</div>
+<div class="item-tree-legend" data-legend-for="structure-chapter-16-0" aria-label="図の凡例">
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">→</span><span>オブジェクト参照</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">[]</span><span>空のリスト</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">{}</span><span>空の集合またはマップ</span></span>
+</div></figure>
 
   <p>
     <code>Program</code> は HIR から lower された MIR 実行構造です。<br>
     <code>Analyses</code> はその <code>Program</code> を基準に必要な MIR 解析を提供します。
   </p>
 
-  <h2 id="analysis-store">Snapshot は MIR 解析の基準になる</h2>
+  <h2 id="analysis-store" class="trace-section-heading"><span>Snapshot は MIR 解析の基準になる</span></h2>
 
   <p>
     <code>MirSnapshot</code> には、この program を解析する窓口である <code>Analyses</code> があります。<br>
     たとえば <code>Work</code> の制御フローを要求すると、この snapshot 内の <code>Work</code> を基準に CFG を求めます。
   </p>
 
-<pre><code class="language-plaintext">MirSnapshot
+<figure class="structure-figure"><div class="item-tree-diagram item-tree-diagram--native" data-item-tree="structure-chapter-16-1" style="--item-tree-width:342px">
+  <svg class="native-item-tree" xmlns="http://www.w3.org/2000/svg" width="342" height="138" viewBox="0 0 342 138" role="img" aria-labelledby="structure-chapter-16-1-title structure-chapter-16-1-desc">
+    <title id="structure-chapter-16-1-title">MirSnapshot</title>
+    <desc id="structure-chapter-16-1-desc">MirSnapshot
 ├─ Program: [Next, Work]
 └─ Analyses
-   └─ Work の制御フロー → Work の CFG</code></pre>
+   └─ Work の制御フロー → Work の CFG</desc>
+    <path class="native-item-tree__guides" d="M 22 34 V 81 M 22 51 H 40 M 22 81 H 40 M 50 94 V 111 M 50 111 H 68"/>
+    <text x="16" y="26" data-tree-depth="0" data-tree-row="0" data-continuation="false"><tspan class="native-item-tree__field">MirSnapshot</tspan></text>
+    <text x="44" y="56" data-tree-depth="1" data-tree-row="1" data-continuation="false">Program: <tspan class="native-item-tree__type">[Next, Work]</tspan></text>
+    <text x="44" y="86" data-tree-depth="1" data-tree-row="2" data-continuation="false"><tspan class="native-item-tree__field">Analyses</tspan></text>
+    <text x="72" y="116" data-tree-depth="2" data-tree-row="3" data-continuation="false">Work の制御フロー<tspan class="native-item-tree__wire"> → </tspan><tspan class="native-item-tree__reference">Work の CFG</tspan></text>
+  </svg>
+</div>
+<div class="item-tree-legend" data-legend-for="structure-chapter-16-1" aria-label="図の凡例">
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">→</span><span>解析クエリの結果</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">[]</span><span>空のリスト</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">{}</span><span>空の集合またはマップ</span></span>
+</div></figure>
 
   <p>
     解析結果は別の program を作りません。<br>

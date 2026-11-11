@@ -4,8 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>9. 最終 HIR から最初の MIR へ — Qora コンパイラ開発者マニュアル</title>
-<link rel="stylesheet" href="developer.css">
-<script src="developer-syntax.js" defer></script>
+<link rel="stylesheet" href="developer.css?v=20261004-svg-trees-r56">
+<link rel="stylesheet" href="../section-heading.css?v=20260826-section-tab-standard">
+<script src="developer-syntax.js?v=20260828-localized-format-r1" defer></script>
 </head>
 <body>
 <nav class="language-switch" aria-label="言語"><a href="../en/chapter-09.html">English</a><span aria-hidden="true">·</span><a href="../ko/chapter-09.html">한국어</a><span aria-hidden="true">·</span><strong>日本語</strong></nav>
@@ -27,7 +28,7 @@
     個々の文や式をどう変換するかは後に回し、プログラム全体がどの入力からどの結果になるかを先に把握します。
   </p>
 
-  <h2 id="example">使用するサンプルプログラム</h2>
+  <h2 id="example" class="trace-section-heading"><span>使用するサンプルプログラム</span></h2>
 
 <pre><code class="language-qora">function Next(value: int): int
 {
@@ -54,33 +55,68 @@ operation Work()
     <code>Work</code> は実行を開始する operation、<code>Next</code> はその中で呼び出される function です。
   </p>
 
-  <h2 id="compile-on-current-thread">HIR → MIR 境界の全体像</h2>
+  <h2 id="compile-on-current-thread" class="trace-section-heading"><span>HIR → MIR 境界の全体像</span></h2>
 
-<pre><code class="language-plaintext">最終 HIR compilation
+<figure class="structure-figure"><div class="item-tree-flow" data-item-tree-flow="flow-chapter-09-1">
+<div class="item-tree-diagram item-tree-diagram--native" data-item-tree="flow-chapter-09-1-input" style="--item-tree-width:280px">
+  <svg class="native-item-tree" xmlns="http://www.w3.org/2000/svg" width="280" height="108" viewBox="0 0 280 108" role="img" aria-labelledby="flow-chapter-09-1-input-title flow-chapter-09-1-input-desc">
+    <title id="flow-chapter-09-1-input-title">最終 HIR compilation</title>
+    <desc id="flow-chapter-09-1-input-desc">最終 HIR compilation
 ├─ Next
 └─ Work  ← entry operation
-        │
-        │ ToMir()
-        ▼
+        </desc>
+    <path class="native-item-tree__guides" d="M 22 34 V 81 M 22 51 H 40 M 22 81 H 40"/>
+    <text x="16" y="26" data-tree-depth="0" data-tree-row="0" data-continuation="false"><tspan class="native-item-tree__field">最終 HIR compilation</tspan></text>
+    <text x="44" y="56" data-tree-depth="1" data-tree-row="1" data-continuation="false">Next</text>
+    <text x="44" y="86" data-tree-depth="1" data-tree-row="2" data-continuation="false">Work ← entry operation</text>
+  </svg>
+</div>
+<div class="item-tree-legend" data-legend-for="flow-chapter-09-1-input" aria-label="図の凡例">
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">←</span><span>エントリー operation</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">[]</span><span>空のリスト</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">{}</span><span>空の集合またはマップ</span></span>
+</div>
+<div class="item-tree-transition"><span aria-hidden="true">↓</span><code>ToMir()</code></div>
+<div class="item-tree-diagram item-tree-diagram--native" data-item-tree="flow-chapter-09-1-output" style="--item-tree-width:280px">
+  <svg class="native-item-tree" xmlns="http://www.w3.org/2000/svg" width="280" height="168" viewBox="0 0 280 168" role="img" aria-labelledby="flow-chapter-09-1-output-title flow-chapter-09-1-output-desc">
+    <title id="flow-chapter-09-1-output-title">最初の MIR snapshot</title>
+    <desc id="flow-chapter-09-1-output-desc">
 最初の MIR snapshot
 └─ MirProgram
    ├─ Next  (MirCallable)
    ├─ Work  (MirCallable)
-   └─ EntryPoint = Work</code></pre>
+   └─ EntryPoint = Work</desc>
+    <path class="native-item-tree__guides" d="M 22 34 V 51 M 22 51 H 40 M 50 64 V 141 M 50 81 H 68 M 50 111 H 68 M 50 141 H 68"/>
+    <text x="16" y="26" data-tree-depth="0" data-tree-row="0" data-continuation="false"><tspan class="native-item-tree__field">最初の MIR snapshot</tspan></text>
+    <text x="44" y="56" data-tree-depth="1" data-tree-row="1" data-continuation="false"><tspan class="native-item-tree__field">MirProgram</tspan></text>
+    <text x="72" y="86" data-tree-depth="2" data-tree-row="2" data-continuation="false">Next (MirCallable)</text>
+    <text x="72" y="116" data-tree-depth="2" data-tree-row="3" data-continuation="false">Work (MirCallable)</text>
+    <text x="72" y="146" data-tree-depth="2" data-tree-row="4" data-continuation="false">EntryPoint = <tspan class="native-item-tree__value">Work</tspan></text>
+  </svg>
+</div>
+<div class="item-tree-legend" data-legend-for="flow-chapter-09-1-output" aria-label="図の凡例">
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">→</span><span>オブジェクト参照</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">[]</span><span>空のリスト</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">{}</span><span>空の集合またはマップ</span></span>
+</div>
+</div></figure>
 
   <p>
     要点は単純です。<br>
     <code>ToMir()</code> は最終 HIR の callable を一つずつ MIR callable に変換し、完成した callable を一つの <code>MirProgram</code> にまとめます。その後、その program を最初の <code>MirSnapshot</code> で包んで返します。
   </p>
 
-  <h2 id="lower-artifact">二つの callable を MirProgram にまとめる</h2>
+  <h2 id="lower-artifact" class="trace-section-heading"><span>二つの callable を MirProgram にまとめる</span></h2>
 
   <p>
     意味解析済みの最終 HIR で callable 一覧を先頭から順に走査します。<br>
     この例では、まず <code>Next</code> を変換し、続いて <code>Work</code> を変換します。
   </p>
 
-<pre><code class="language-plaintext">HIR callable 一覧
+<figure class="structure-figure"><div class="item-tree-diagram item-tree-diagram--native" data-item-tree="structure-chapter-09-2" style="--item-tree-width:396px">
+  <svg class="native-item-tree" xmlns="http://www.w3.org/2000/svg" width="396" height="274" viewBox="0 0 396 274" role="img" aria-labelledby="structure-chapter-09-2-title structure-chapter-09-2-desc">
+    <title id="structure-chapter-09-2-title">HIR callable 一覧</title>
+    <desc id="structure-chapter-09-2-desc">HIR callable 一覧
 ├─ Next
 │  └─ callable lowering → MirCallable Next
 └─ Work
@@ -88,7 +124,23 @@ operation Work()
 
 完成した MIR callable 一覧
 ├─ MirCallable Next
-└─ MirCallable Work</code></pre>
+└─ MirCallable Work</desc>
+    <path class="native-item-tree__guides" d="M 22 34 V 111 M 22 51 H 40 M 22 111 H 40 M 50 64 V 81 M 50 81 H 68 M 50 124 V 141 M 50 141 H 68 M 22 200 V 247 M 22 217 H 40 M 22 247 H 40"/>
+    <text x="16" y="26" data-tree-depth="0" data-tree-row="0" data-continuation="false"><tspan class="native-item-tree__field">HIR callable 一覧</tspan></text>
+    <text x="44" y="56" data-tree-depth="1" data-tree-row="1" data-continuation="false"><tspan class="native-item-tree__field">Next</tspan></text>
+    <text x="72" y="86" data-tree-depth="2" data-tree-row="2" data-continuation="false">callable lowering<tspan class="native-item-tree__wire"> → </tspan><tspan class="native-item-tree__reference">MirCallable Next</tspan></text>
+    <text x="44" y="116" data-tree-depth="1" data-tree-row="3" data-continuation="false"><tspan class="native-item-tree__field">Work</tspan></text>
+    <text x="72" y="146" data-tree-depth="2" data-tree-row="4" data-continuation="false">callable lowering<tspan class="native-item-tree__wire"> → </tspan><tspan class="native-item-tree__reference">MirCallable Work</tspan></text>
+    <text x="16" y="192" data-tree-depth="0" data-tree-row="5" data-continuation="false"><tspan class="native-item-tree__field">完成した MIR callable 一覧</tspan></text>
+    <text x="44" y="222" data-tree-depth="1" data-tree-row="6" data-continuation="false">MirCallable Next</text>
+    <text x="44" y="252" data-tree-depth="1" data-tree-row="7" data-continuation="false">MirCallable Work</text>
+  </svg>
+</div>
+<div class="item-tree-legend" data-legend-for="structure-chapter-09-2" aria-label="図の凡例">
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">→</span><span>変換結果</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">[]</span><span>空のリスト</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">{}</span><span>空の集合またはマップ</span></span>
+</div></figure>
 
   <p>
     ここで callable lowering とは、一つの function または operation のパラメータ、本文、block を MIR 形式にする処理です。<br>
@@ -100,32 +152,64 @@ operation Work()
     callable 一覧だけでなく、どの callable から実行を始めるかも同時に決めます。この例の entry point は operation の <code>Work</code> です。
   </p>
 
-  <h2 id="snapshot">最初の MirSnapshot を作る時点</h2>
+  <h2 id="snapshot" class="trace-section-heading"><span>最初の MirSnapshot を作る時点</span></h2>
 
-<pre><code class="language-plaintext">MirProgram
+<figure class="structure-figure"><div class="item-tree-flow" data-item-tree-flow="flow-chapter-09-3">
+<div class="item-tree-diagram item-tree-diagram--native" data-item-tree="flow-chapter-09-3-input" style="--item-tree-width:280px">
+  <svg class="native-item-tree" xmlns="http://www.w3.org/2000/svg" width="280" height="168" viewBox="0 0 280 168" role="img" aria-labelledby="flow-chapter-09-3-input-title flow-chapter-09-3-input-desc">
+    <title id="flow-chapter-09-3-input-title">MirProgram</title>
+    <desc id="flow-chapter-09-3-input-desc">MirProgram
 ├─ Callables
 │  ├─ Next
 │  └─ Work
 └─ EntryPoint = Work
-        │
-        │ CreateLowered(program)
-        ▼
+        </desc>
+    <path class="native-item-tree__guides" d="M 22 34 V 141 M 22 51 H 40 M 22 141 H 40 M 50 64 V 111 M 50 81 H 68 M 50 111 H 68"/>
+    <text x="16" y="26" data-tree-depth="0" data-tree-row="0" data-continuation="false"><tspan class="native-item-tree__field">MirProgram</tspan></text>
+    <text x="44" y="56" data-tree-depth="1" data-tree-row="1" data-continuation="false"><tspan class="native-item-tree__field">Callables</tspan></text>
+    <text x="72" y="86" data-tree-depth="2" data-tree-row="2" data-continuation="false">Next</text>
+    <text x="72" y="116" data-tree-depth="2" data-tree-row="3" data-continuation="false">Work</text>
+    <text x="44" y="146" data-tree-depth="1" data-tree-row="4" data-continuation="false">EntryPoint = <tspan class="native-item-tree__value">Work</tspan></text>
+  </svg>
+</div>
+<div class="item-tree-legend" data-legend-for="flow-chapter-09-3-input" aria-label="図の凡例">
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">→</span><span>オブジェクト参照</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">[]</span><span>空のリスト</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">{}</span><span>空の集合またはマップ</span></span>
+</div>
+<div class="item-tree-transition"><span aria-hidden="true">↓</span><code>CreateLowered(program)</code></div>
+<div class="item-tree-diagram item-tree-diagram--native" data-item-tree="flow-chapter-09-3-output" style="--item-tree-width:371px">
+  <svg class="native-item-tree" xmlns="http://www.w3.org/2000/svg" width="371" height="108" viewBox="0 0 371 108" role="img" aria-labelledby="flow-chapter-09-3-output-title flow-chapter-09-3-output-desc">
+    <title id="flow-chapter-09-3-output-title">MirSnapshot</title>
+    <desc id="flow-chapter-09-3-output-desc">
 MirSnapshot
 ├─ Program = 上の MirProgram
-└─ Analyses = その Program 専用の解析窓口</code></pre>
+└─ Analyses = その Program 専用の解析窓口</desc>
+    <path class="native-item-tree__guides" d="M 22 34 V 81 M 22 51 H 40 M 22 81 H 40"/>
+    <text x="16" y="26" data-tree-depth="0" data-tree-row="0" data-continuation="false"><tspan class="native-item-tree__field">MirSnapshot</tspan></text>
+    <text x="44" y="56" data-tree-depth="1" data-tree-row="1" data-continuation="false">Program = <tspan class="native-item-tree__value">上の MirProgram</tspan></text>
+    <text x="44" y="86" data-tree-depth="1" data-tree-row="2" data-continuation="false">Analyses = <tspan class="native-item-tree__value">その Program 専用の解析窓口</tspan></text>
+  </svg>
+</div>
+<div class="item-tree-legend" data-legend-for="flow-chapter-09-3-output" aria-label="図の凡例">
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">→</span><span>オブジェクト参照</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">[]</span><span>空のリスト</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">{}</span><span>空の集合またはマップ</span></span>
+</div>
+</div></figure>
 
   <p>
     <code>MirProgram</code> が完成すると、<code>MirSnapshot.CreateLowered(program)</code> が最初の MIR snapshot を作ります。<br>
     返された snapshot は、今作った <code>MirProgram</code> と、その program を解析する <code>Analyses</code> を一緒に保持します。
   </p>
 
-  <h2 id="summary">まとめ</h2>
+  <h2 id="summary" class="trace-section-heading"><span>まとめ</span></h2>
 
-<pre><code class="language-plaintext">ToMir()
+<figure class="structure-figure"><svg class="structure-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 362" role="img" aria-labelledby="flow-chapter-09-4-title flow-chapter-09-4-desc"><title id="flow-chapter-09-4-title">ToMir()</title><desc id="flow-chapter-09-4-desc">ToMir()
 → 意味解析済みの HIR を選択
 → Next と Work を個別の MirCallable へ変換
 → EntryPoint が Work の MirProgram を作成
-→ その MirProgram と Analyses を持つ MirSnapshot を返す</code></pre>
+→ その MirProgram と Analyses を持つ MirSnapshot を返す</desc><defs><marker id="flow-chapter-09-4-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0 L10 5 L0 10 Z" fill="#354bff"/></marker></defs><g font-family="Consolas, Malgun Gothic, sans-serif"><rect x="60" y="8" width="520" height="40" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="72" y="34" font-size="14" fill="#111936" text-anchor="start" font-weight="700">ToMir()</text><rect x="60" y="82" width="520" height="40" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="72" y="108" font-size="14" fill="#152581" text-anchor="start" font-weight="700">意味解析済みの HIR を選択</text><path d="M320.0 48 V65.0 H320.0 V80" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-09-4-arrow)"/><rect x="60" y="156" width="520" height="40" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="72" y="182" font-size="14" fill="#152581" text-anchor="start" font-weight="700">Next と Work を個別の MirCallable へ変換</text><path d="M320.0 122 V139.0 H320.0 V154" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-09-4-arrow)"/><rect x="60" y="230" width="520" height="40" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="72" y="256" font-size="14" fill="#152581" text-anchor="start" font-weight="700">EntryPoint が Work の MirProgram を作成</text><path d="M320.0 196 V213.0 H320.0 V228" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-09-4-arrow)"/><rect x="60" y="304" width="520" height="40" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="72" y="330" font-size="14" fill="#152581" text-anchor="start" font-weight="700">その MirProgram と Analyses を持つ MirSnapshot を返す</text><path d="M320.0 270 V287.0 H320.0 V302" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-09-4-arrow)"/></g></svg></figure>
 
   <p>
     以上が HIR から MIR へ移る境界の全体です。<br>

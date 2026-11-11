@@ -4,8 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>17. CFG의 successor와 predecessor — Qora 컴파일러 개발자 매뉴얼</title>
-<link rel="stylesheet" href="developer.css">
-<script src="developer-syntax.js" defer></script>
+<link rel="stylesheet" href="developer.css?v=20261004-svg-trees-r56">
+<link rel="stylesheet" href="../section-heading.css?v=20260826-section-tab-standard">
+<script src="developer-syntax.js?v=20260828-localized-format-r1" defer></script>
 </head>
 <body>
 <nav class="language-switch" aria-label="언어"><a href="../en/chapter-17.html">English</a><span aria-hidden="true">·</span><strong>한국어</strong><span aria-hidden="true">·</span><a href="../ja/chapter-17.html">日本語</a></nav>
@@ -27,7 +28,7 @@
     Qora는 새로운 실행 구조를 다시 만드는 대신, 이미 각 block 끝에 놓인 Terminator를 읽어 이 그래프를 계산합니다.
   </p>
 
-  <h2 id="source">CFG를 만들 Qora 코드</h2>
+  <h2 id="source" class="trace-section-heading"><span>CFG를 만들 Qora 코드</span></h2>
 
 <pre><code class="language-qora">function Next(value: int): int
 {
@@ -54,42 +55,75 @@ operation Work()
     <code>b0</code>은 조건을 판단하고, <code>b1</code>은 참 본문을 실행하며, <code>b2</code>는 거짓 경로를 나타냅니다. 마지막 <code>b3</code>에서는 두 경로가 합쳐진 뒤 <code>H</code>를 실행합니다.
   </p>
 
-<pre><code class="language-plaintext">        ┌──→ b1: X ──┐
+<figure class="structure-figure"><svg class="structure-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 350" role="img" aria-labelledby="flow-chapter-17-1-title flow-chapter-17-1-desc"><title id="flow-chapter-17-1-title">        ┌──→ b1: X ──┐</title><desc id="flow-chapter-17-1-desc">        ┌──→ b1: X ──┐
 b0: 조건              ├──→ b3: H → return
-        └──→ b2 ─────┘</code></pre>
+        └──→ b2 ─────┘</desc><defs><marker id="flow-chapter-17-1-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0 L10 5 L0 10 Z" fill="#354bff"/></marker></defs><g font-family="Consolas, Malgun Gothic, sans-serif"><rect x="186" y="8" width="268" height="62" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="198" y="34" font-size="14" fill="#111936" text-anchor="start" font-weight="700">b0</text><text x="198" y="56" font-size="14" fill="#111936" text-anchor="start">조건 계산 · branch</text><rect x="12" y="142" width="270" height="62" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="24" y="168" font-size="14" fill="#152581" text-anchor="start" font-weight="700">b1</text><text x="24" y="190" font-size="14" fill="#152581" text-anchor="start">X(q[0]);</text><rect x="358" y="142" width="270" height="62" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="370" y="168" font-size="14" fill="#111936" text-anchor="start" font-weight="700">b2</text><text x="370" y="190" font-size="14" fill="#111936" text-anchor="start">빈 경로</text><rect x="186" y="270" width="268" height="62" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="198" y="296" font-size="14" fill="#152581" text-anchor="start" font-weight="700">b3</text><text x="198" y="318" font-size="14" fill="#152581" text-anchor="start">H(q[0]); · return</text><path d="M320.0 70 V106.0 H147.0 V140" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-17-1-arrow)"/><text x="239.5" y="100.0" font-size="12" fill="#111936" text-anchor="middle">true</text><path d="M320.0 70 V106.0 H493.0 V140" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-17-1-arrow)"/><text x="412.5" y="100.0" font-size="12" fill="#111936" text-anchor="middle">false</text><path d="M147.0 204 V237.0 H320.0 V268" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-17-1-arrow)"/><path d="M493.0 204 V237.0 H320.0 V268" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#flow-chapter-17-1-arrow)"/></g></svg></figure>
 
-  <h2 id="terminators">화살표의 원본은 Terminator입니다</h2>
+  <h2 id="terminators" class="trace-section-heading"><span>화살표의 원본은 Terminator입니다</span></h2>
 
   <p>
     모든 block은 마지막에 하나의 Terminator를 가집니다.<br>
     일반 MIR 명령이 값을 계산하거나 게이트를 적용한다면, Terminator는 이 block이 끝난 뒤 어디로 이동할지를 정합니다.
   </p>
 
-<pre><code class="language-plaintext">b0.Terminator = Branch
+<figure class="structure-figure"><div class="item-tree-diagram item-tree-diagram--native" data-item-tree="structure-chapter-17-2" style="--item-tree-width:280px">
+  <svg class="native-item-tree" xmlns="http://www.w3.org/2000/svg" width="280" height="246" viewBox="0 0 280 246" role="img" aria-labelledby="structure-chapter-17-2-title structure-chapter-17-2-desc">
+    <title id="structure-chapter-17-2-title">b0.Terminator = Branch</title>
+    <desc id="structure-chapter-17-2-desc">b0.Terminator = Branch
 ├─ 조건이 참  → b1
 └─ 조건이 거짓 → b2
 
 b1.Terminator = Jump → b3
 b2.Terminator = Jump → b3
-b3.Terminator = Return</code></pre>
+b3.Terminator = Return</desc>
+    <path class="native-item-tree__guides" d="M 22 34 V 81 M 22 51 H 40 M 22 81 H 40"/>
+    <text x="16" y="26" data-tree-depth="0" data-tree-row="0" data-continuation="false"><tspan class="native-item-tree__field">b0.Terminator</tspan> = <tspan class="native-item-tree__value">Branch</tspan></text>
+    <text x="44" y="56" data-tree-depth="1" data-tree-row="1" data-continuation="false">조건이 참<tspan class="native-item-tree__wire"> → </tspan><tspan class="native-item-tree__reference">b1</tspan></text>
+    <text x="44" y="86" data-tree-depth="1" data-tree-row="2" data-continuation="false">조건이 거짓<tspan class="native-item-tree__wire"> → </tspan><tspan class="native-item-tree__reference">b2</tspan></text>
+    <text x="16" y="132" data-tree-depth="0" data-tree-row="3" data-continuation="false">b1.Terminator = Jump<tspan class="native-item-tree__wire"> → </tspan><tspan class="native-item-tree__reference">b3</tspan></text>
+    <text x="16" y="178" data-tree-depth="0" data-tree-row="4" data-continuation="false">b2.Terminator = Jump<tspan class="native-item-tree__wire"> → </tspan><tspan class="native-item-tree__reference">b3</tspan></text>
+    <text x="16" y="224" data-tree-depth="0" data-tree-row="5" data-continuation="false"><tspan class="native-item-tree__field">b3.Terminator</tspan> = <tspan class="native-item-tree__value">Return</tspan></text>
+  </svg>
+</div>
+<div class="item-tree-legend" data-legend-for="structure-chapter-17-2" aria-label="그림 범례">
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">→</span><span>다음에 실행할 블록</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">[]</span><span>빈 목록</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">{}</span><span>비어 있는 집합 또는 맵</span></span>
+</div></figure>
 
   <p>
     <code>Branch</code>는 목적지가 두 개이고, <code>Jump</code>는 목적지가 하나입니다.<br>
     <code>Return</code>은 callable 실행을 끝내므로 다음 block이 없습니다. CFG는 바로 이 사실을 표로 정리한 결과입니다.
   </p>
 
-  <h2 id="successors">다음 block을 모으면 successor 표가 됩니다</h2>
+  <h2 id="successors" class="trace-section-heading"><span>다음 block을 모으면 successor 표가 됩니다</span></h2>
 
   <p>
     successor는 “현재 block 다음에 갈 수 있는 block”입니다.<br>
     분석기는 각 block의 Terminator가 가리키는 목적지를 읽어 다음 표를 만듭니다.
   </p>
 
-<pre><code class="language-plaintext">Successors
+<figure class="structure-figure"><div class="item-tree-diagram item-tree-diagram--native" data-item-tree="structure-chapter-17-3" style="--item-tree-width:280px">
+  <svg class="native-item-tree" xmlns="http://www.w3.org/2000/svg" width="280" height="168" viewBox="0 0 280 168" role="img" aria-labelledby="structure-chapter-17-3-title structure-chapter-17-3-desc">
+    <title id="structure-chapter-17-3-title">Successors</title>
+    <desc id="structure-chapter-17-3-desc">Successors
 ├─ b0 → [b1, b2]
 ├─ b1 → [b3]
 ├─ b2 → [b3]
-└─ b3 → []</code></pre>
+└─ b3 → []</desc>
+    <path class="native-item-tree__guides" d="M 22 34 V 141 M 22 51 H 40 M 22 81 H 40 M 22 111 H 40 M 22 141 H 40"/>
+    <text x="16" y="26" data-tree-depth="0" data-tree-row="0" data-continuation="false"><tspan class="native-item-tree__field">Successors</tspan></text>
+    <text x="44" y="56" data-tree-depth="1" data-tree-row="1" data-continuation="false">b0<tspan class="native-item-tree__wire"> → </tspan><tspan class="native-item-tree__reference">[b1, b2]</tspan></text>
+    <text x="44" y="86" data-tree-depth="1" data-tree-row="2" data-continuation="false">b1<tspan class="native-item-tree__wire"> → </tspan><tspan class="native-item-tree__reference">[b3]</tspan></text>
+    <text x="44" y="116" data-tree-depth="1" data-tree-row="3" data-continuation="false">b2<tspan class="native-item-tree__wire"> → </tspan><tspan class="native-item-tree__reference">[b3]</tspan></text>
+    <text x="44" y="146" data-tree-depth="1" data-tree-row="4" data-continuation="false">b3<tspan class="native-item-tree__wire"> → </tspan><tspan class="native-item-tree__reference">[]</tspan></text>
+  </svg>
+</div>
+<div class="item-tree-legend" data-legend-for="structure-chapter-17-3" aria-label="그림 범례">
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">→</span><span>후속 블록 목록</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">[]</span><span>빈 목록</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">{}</span><span>비어 있는 집합 또는 맵</span></span>
+</div></figure>
 
   <p>
     <code>b0</code>에서는 조건에 따라 두 곳 중 하나로 갈 수 있으므로 successor가 두 개입니다.<br>
@@ -102,14 +136,14 @@ b3.Terminator = Return</code></pre>
     CFG는 실행 중 선택될 수 있는 경로 전체를 나타내며, 실제 실행에서는 조건에 맞는 한 경로만 선택됩니다.
   </div>
 
-  <h2 id="predecessors">화살표를 뒤집으면 predecessor 표가 됩니다</h2>
+  <h2 id="predecessors" class="trace-section-heading"><span>화살표를 뒤집으면 predecessor 표가 됩니다</span></h2>
 
   <p>
     predecessor는 “현재 block으로 들어올 수 있는 이전 block”입니다.<br>
     별도의 소스에서 다시 계산하지 않고, 완성된 successor 화살표의 방향만 뒤집습니다.
   </p>
 
-<pre><code class="language-plaintext">Successor 화살표                 뒤집은 Predecessor 관계
+<figure class="structure-figure"><svg class="structure-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 286" role="img" aria-labelledby="flow-chapter-17-4-title flow-chapter-17-4-desc"><title id="flow-chapter-17-4-title">Successor 화살표                 뒤집은 Predecessor 관계</title><desc id="flow-chapter-17-4-desc">Successor 화살표                 뒤집은 Predecessor 관계
 b0 → b1                          b1 ← b0
 b0 → b2                          b2 ← b0
 b1 → b3                          b3 ← b1
@@ -119,7 +153,7 @@ Predecessors
 ├─ b0 ← []
 ├─ b1 ← [b0]
 ├─ b2 ← [b0]
-└─ b3 ← [b1, b2]</code></pre>
+└─ b3 ← [b1, b2]</desc><defs><marker id="flow-chapter-17-4-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0 L10 5 L0 10 Z" fill="#354bff"/></marker></defs><g font-family="Consolas, Malgun Gothic, sans-serif"><text x="12" y="28" font-size="18" fill="#111936" text-anchor="start" font-weight="700">Successors</text><text x="346" y="28" font-size="18" fill="#111936" text-anchor="start" font-weight="700">Predecessors</text><rect x="12" y="48" width="278" height="40" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="24" y="74" font-size="14" fill="#111936" text-anchor="start" font-weight="700">b0 → [b1, b2]</text><rect x="346" y="48" width="278" height="40" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="358" y="74" font-size="14" fill="#152581" text-anchor="start" font-weight="700">b0 ← []</text><rect x="12" y="108" width="278" height="40" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="24" y="134" font-size="14" fill="#111936" text-anchor="start" font-weight="700">b1 → [b3]</text><rect x="346" y="108" width="278" height="40" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="358" y="134" font-size="14" fill="#152581" text-anchor="start" font-weight="700">b1 ← [b0]</text><rect x="12" y="168" width="278" height="40" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="24" y="194" font-size="14" fill="#111936" text-anchor="start" font-weight="700">b2 → [b3]</text><rect x="346" y="168" width="278" height="40" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="358" y="194" font-size="14" fill="#152581" text-anchor="start" font-weight="700">b2 ← [b0]</text><rect x="12" y="228" width="278" height="40" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="24" y="254" font-size="14" fill="#111936" text-anchor="start" font-weight="700">b3 → []</text><rect x="346" y="228" width="278" height="40" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="358" y="254" font-size="14" fill="#152581" text-anchor="start" font-weight="700">b3 ← [b1, b2]</text></g></svg></figure>
 
   <p>
     진입 block <code>b0</code>으로 들어오는 block은 없으므로 빈 목록입니다.<br>
@@ -131,20 +165,47 @@ Predecessors
     한쪽에서는 <code>b1 → b3</code>인데 다른 쪽에서는 <code>b3 ← b1</code>이 빠지는 식의 불일치를 피할 수 있습니다.
   </p>
 
-  <h2 id="snapshot">두 표가 callable의 CFG snapshot이 됩니다</h2>
+  <h2 id="snapshot" class="trace-section-heading"><span>두 표가 callable의 CFG snapshot이 됩니다</span></h2>
 
   <p>
     현재 snapshot에서 <code>Work</code>의 CFG를 요청하면 분석 저장소가 <code>Work</code>의 block과 Terminator를 읽습니다.<br>
     그 결과 successor와 predecessor를 포함한 <code>MirControlFlowSnapshot</code>이 만들어집니다.
   </p>
 
-<pre><code class="language-plaintext">MirSnapshot
-└─ Work의 CFG
-   └─ MirControlFlowSnapshot
-      ├─ SourceCallable = Work
-      ├─ EntryBlock = b0
-      ├─ SuccessorsOf(b0) = [b1, b2]
-      └─ PredecessorsOf(b3) = [b1, b2]</code></pre>
+<figure class="structure-figure"><div class="item-tree-diagram item-tree-diagram--native" data-item-tree="structure-chapter-17-5" style="--item-tree-width:392px">
+  <svg class="native-item-tree" xmlns="http://www.w3.org/2000/svg" width="392" height="348" viewBox="0 0 392 348" role="img" aria-labelledby="structure-chapter-17-5-title structure-chapter-17-5-desc">
+    <title id="structure-chapter-17-5-title">MirSnapshot</title>
+    <desc id="structure-chapter-17-5-desc">MirSnapshot
+├─ Program ──▶ MirProgram
+│  └─ Callables
+│     └─ [1] ──▶ MirCallable Work c44
+└─ Analyses ──▶ MirAnalysisStore
+   └─ ControlFlow(Program.Callables[1])
+      └─ 반환값 ──▶ MirControlFlowSnapshot
+                    ├─ Callable = c44
+                    ├─ EntryBlock = b0
+                    ├─ SuccessorsOf(b0) = [b1, b2]
+                    └─ PredecessorsOf(b3) = [b1, b2]</desc>
+    <path class="native-item-tree__guides" d="M 22 34 V 141 M 22 51 H 40 M 22 141 H 40 M 50 64 V 81 M 50 81 H 68 M 78 94 V 111 M 78 111 H 96 M 50 154 V 171 M 50 171 H 68 M 78 184 V 201 M 78 201 H 96 M 106 214 V 321 M 106 231 H 124 M 106 261 H 124 M 106 291 H 124 M 106 321 H 124"/>
+    <text x="16" y="26" data-tree-depth="0" data-tree-row="0" data-continuation="false"><tspan class="native-item-tree__field">MirSnapshot</tspan></text>
+    <text x="44" y="56" data-tree-depth="1" data-tree-row="1" data-continuation="false"><tspan class="native-item-tree__field">Program</tspan><tspan class="native-item-tree__wire"> → </tspan><tspan class="native-item-tree__reference">MirProgram</tspan></text>
+    <text x="72" y="86" data-tree-depth="2" data-tree-row="2" data-continuation="false"><tspan class="native-item-tree__field">Callables</tspan></text>
+    <text x="100" y="116" data-tree-depth="3" data-tree-row="3" data-continuation="false">[1]<tspan class="native-item-tree__wire"> → </tspan><tspan class="native-item-tree__reference">MirCallable Work c44</tspan></text>
+    <text x="44" y="146" data-tree-depth="1" data-tree-row="4" data-continuation="false"><tspan class="native-item-tree__field">Analyses</tspan><tspan class="native-item-tree__wire"> → </tspan><tspan class="native-item-tree__reference">MirAnalysisStore</tspan></text>
+    <text x="72" y="176" data-tree-depth="2" data-tree-row="5" data-continuation="false"><tspan class="native-item-tree__field">ControlFlow(Program.Callables[1])</tspan></text>
+    <text x="100" y="206" data-tree-depth="3" data-tree-row="6" data-continuation="false"><tspan class="native-item-tree__field">반환값</tspan><tspan class="native-item-tree__wire"> → </tspan><tspan class="native-item-tree__reference">MirControlFlowSnapshot</tspan></text>
+    <text x="128" y="236" data-tree-depth="4" data-tree-row="7" data-continuation="false">Callable = <tspan class="native-item-tree__value">c44</tspan></text>
+    <text x="128" y="266" data-tree-depth="4" data-tree-row="8" data-continuation="false">EntryBlock = <tspan class="native-item-tree__value">b0</tspan></text>
+    <text x="128" y="296" data-tree-depth="4" data-tree-row="9" data-continuation="false">SuccessorsOf(b0) = <tspan class="native-item-tree__value">[b1, b2]</tspan></text>
+    <text x="128" y="326" data-tree-depth="4" data-tree-row="10" data-continuation="false">PredecessorsOf(b3) = <tspan class="native-item-tree__value">[b1, b2]</tspan></text>
+  </svg>
+</div>
+<div class="item-tree-legend" data-legend-for="structure-chapter-17-5" aria-label="그림 범례">
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">→</span><span>객체 참조</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">[]</span><span>빈 목록</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">{}</span><span>비어 있는 집합 또는 맵</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">ControlFlow(...)</span><span>아래는 조회 결과</span></span>
+</div></figure>
 
   <p>
     이 CFG snapshot은 실행할 두 번째 block 트리가 아닙니다.<br>

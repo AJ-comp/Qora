@@ -95,8 +95,8 @@ public sealed class MirShortCircuitLoweringTests
         var (program, main) = CompileMain($$"""
             operation Main() {
                 use target = Qubit[1];
-                var guard: bit = true;
-                if (guard {{logicalOperator}} M(target[0])) {
+                var guard: bool = true;
+                if (guard {{logicalOperator}} M(target[0]) == 1) {
                 }
                 X(target[0]);
             }
@@ -160,7 +160,7 @@ public sealed class MirShortCircuitLoweringTests
         var (program, main) = CompileMain("""
             operation Main() {
                 use target = Qubit[1];
-                while (M(target[0])) {
+                while (M(target[0]) == 1) {
                     X(target[0]);
                 }
                 Z(target[0]);

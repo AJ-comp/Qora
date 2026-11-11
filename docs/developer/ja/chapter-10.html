@@ -4,36 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>10. 1つの callable を MIR へ lower する — Qora コンパイラ開発者マニュアル</title>
-<link rel="stylesheet" href="developer.css?v=20260815-3">
-<script src="developer-syntax.js" defer></script>
-<script type="module">
-  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11.16.0/dist/mermaid.esm.min.mjs";
-
-  mermaid.initialize({
-    startOnLoad: false,
-    securityLevel: "strict",
-    htmlLabels: false,
-    theme: "base",
-    fontFamily: "-apple-system, BlinkMacSystemFont, Segoe UI, Apple SD Gothic Neo, Malgun Gothic, sans-serif",
-    themeVariables: {
-      background: "#fbfcff",
-      primaryColor: "#f4f1ff",
-      primaryTextColor: "#2c2350",
-      primaryBorderColor: "#7660c8",
-      lineColor: "#64748b",
-      edgeLabelBackground: "#ffffff",
-      fontSize: "15px"
-    },
-    flowchart: {
-      curve: "linear",
-      nodeSpacing: 24,
-      rankSpacing: 34,
-      useMaxWidth: true
-    }
-  });
-
-  await mermaid.run({ querySelector: ".chapter-10-mermaid" });
-</script>
+<link rel="stylesheet" href="developer.css?v=20261004-svg-trees-r56">
+<link rel="stylesheet" href="../section-heading.css?v=20260826-section-tab-standard">
+<script src="developer-syntax.js?v=20260828-localized-format-r1" defer></script>
 </head>
 <body>
 <nav class="language-switch" aria-label="言語"><a href="../en/chapter-10.html">English</a><span aria-hidden="true">·</span><a href="../ko/chapter-10.html">한국어</a><span aria-hidden="true">·</span><strong>日本語</strong></nav>
@@ -46,7 +19,7 @@
 
 <main class="wrap" id="main-content">
   <nav class="chapter-nav" aria-label="章ナビゲーション（上部）">
-    <div class="group"><a href="chapter-09.html">← 前章：HIR→MIR 境界</a><a href="index.html#chapters">全章一覧</a><a href="chapter-10-call-flow.html#lower-hir-artifact"><code>LowerHirArtifact()</code> 詳細トレース</a></div>
+    <div class="group"><a href="chapter-09.html">← 前章：HIR→MIR 境界</a><a href="index.html#chapters">全章一覧</a><a href="chapter-10-call-flow.html?v=20261004-svg-trees-r56#lower-hir-artifact"><code>LowerHirArtifact()</code> 詳細トレース</a></div>
     <div class="group"><a href="chapter-11.html">次章：古典値と SSA バージョン →</a></div>
   </nav>
 
@@ -55,7 +28,7 @@
     この章では、1つの callable を lower するときに最初に何が作られ、ソース本体がどこへ入り、最終結果がどのような形になるかを確認します。
   </p>
 
-  <h2 id="input">この章で比較する2つの callable</h2>
+  <h2 id="input" class="trace-section-heading"><span>この章で比較する2つの callable</span></h2>
 
 <pre><code class="language-qora">function Next(value: int): int
 {
@@ -87,87 +60,55 @@ operation Work()
     MIR は同じ数値 ID を保持するため、<code>Next c6</code> と <code>Work c44</code> が生成されます。以降のコードコメントでも、この ID を継続して使用します。
   </p>
 
-  <h2 id="why-mir">なぜ HIR を MIR へ lower するのか</h2>
+  <h2 id="why-mir" class="trace-section-heading"><span>なぜ HIR を MIR へ lower するのか</span></h2>
 
   <p>
     HIR は、ユーザーが書いたコードの入れ子構造を保持するツリーです。<br>
     たとえば <code>Work</code> は配列宣言・代入・<code>if</code>・<code>H</code> 呼び出しを含み、その <code>if</code> は条件式と <code>X</code> 呼び出しを含みます。この構造は、名前と型の検査や元コードの理解に適しています。
   </p>
 
-  <p>
-    しかしツリーだけでは、ある地点でどの値が現在値なのかを追跡しにくくなります。<br>
-    ソースでは同じ <code>values</code> という名前を繰り返し使いますが、MIR は更新前の配列 <code>%v1</code>、読み出した要素 <code>%v4</code>、<code>Next</code> の結果 <code>%v5</code>、更新後の配列 <code>%v6</code> を別々の値として区別します。
-  </p>
-
   <div class="mermaid-overview">
     <figure class="mermaid-card mermaid-card--hir">
       <figcaption><span>HIR</span> 保持されるソース構造（簡略化）</figcaption>
-<pre class="mermaid chapter-10-mermaid">
-flowchart TB
-  accTitle: HIR に保持される Work の簡略化されたソース構造
-  accDescr: values 宣言、q 宣言、values への代入、if、H 呼び出し、および if 内の条件と X 呼び出しを示します。中間の HIR block ノードは省略しています。
-
-  work["Work"]
-  values["values を宣言"]
-  qubit["q を宣言"]
-  assign["values[0] へ代入"]
-  ifNode["if"]
-  condition["条件: values[0] == 1"]
-  xCall["X(q[0])"]
-  hCall["H(q[0])"]
-
-  work --- values
-  work --- qubit
-  work --- assign
-  work --- ifNode
-  work --- hCall
-  ifNode --- condition
-  ifNode --- xCall
-</pre>
+<div class="item-tree-diagram item-tree-diagram--native" data-item-tree="chapter-10-diagram-0" style="--item-tree-width:280px">
+  <svg class="native-item-tree" xmlns="http://www.w3.org/2000/svg" width="280" height="258" viewBox="0 0 280 258" role="img" aria-labelledby="chapter-10-diagram-0-title chapter-10-diagram-0-desc">
+    <title id="chapter-10-diagram-0-title">Work</title>
+    <desc id="chapter-10-diagram-0-desc">HIR に保持される Work の簡略化されたソース構造
+values 宣言、q 宣言、values への代入、if、H 呼び出し、および if 内の条件と X 呼び出しを示します。中間の HIR block ノードは省略しています。</desc>
+    <path class="native-item-tree__guides" d="M 22 34 V 231 M 22 51 H 40 M 22 81 H 40 M 22 111 H 40 M 22 141 H 40 M 22 231 H 40 M 50 154 V 201 M 50 171 H 68 M 50 201 H 68"/>
+    <text x="16" y="26" data-tree-depth="0" data-tree-row="0" data-continuation="false"><tspan class="native-item-tree__field">Work</tspan></text>
+    <text x="44" y="56" data-tree-depth="1" data-tree-row="1" data-continuation="false">values を宣言</text>
+    <text x="44" y="86" data-tree-depth="1" data-tree-row="2" data-continuation="false">q を宣言</text>
+    <text x="44" y="116" data-tree-depth="1" data-tree-row="3" data-continuation="false">values[0] へ代入</text>
+    <text x="44" y="146" data-tree-depth="1" data-tree-row="4" data-continuation="false"><tspan class="native-item-tree__field">if</tspan></text>
+    <text x="72" y="176" data-tree-depth="2" data-tree-row="5" data-continuation="false">条件: <tspan class="native-item-tree__type">values[0] == 1</tspan></text>
+    <text x="72" y="206" data-tree-depth="2" data-tree-row="6" data-continuation="false">X(q[0])</text>
+    <text x="44" y="236" data-tree-depth="1" data-tree-row="7" data-continuation="false">H(q[0])</text>
+  </svg>
+</div>
+<div class="item-tree-legend" data-legend-for="chapter-10-diagram-0" aria-label="図の凡例">
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">→</span><span>オブジェクト参照</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">[]</span><span>空のリスト</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">{}</span><span>空の集合またはマップ</span></span>
+</div>
     </figure>
+
+    <p>
+      しかしツリーだけでは、ある地点でどの値が現在値なのかを追跡しにくくなります。<br>
+      ソースでは同じ <code>values</code> という名前を繰り返し使いますが、MIR は更新前の配列 <code>%v1</code>、読み出した要素 <code>%v4</code>、<code>Next</code> の結果 <code>%v5</code>、更新後の配列 <code>%v6</code> を別々の値として区別します。
+    </p>
 
     <div class="mermaid-stack">
       <figure class="mermaid-card">
         <figcaption><span>MIR</span> 値・qubit の生成と依存関係</figcaption>
-<pre class="mermaid chapter-10-mermaid mermaid--vertical">
-flowchart TB
-  accTitle: MIR の値と qubit の生成・依存関係
-  accDescr: 更新前の配列 v1 から要素 v4、Next の戻り値 v5、更新後の配列 v6 へ至る古典値の流れと、この配列更新から独立した初期 qubit q0.v0 を示します。
-
-  v1["%v1<br/>var values: int[] = [0];"]:::sourceCode
-  v4["%v4<br/>values[0]"]:::sourceCode
-  v5["%v5<br/>Next(values[0])"]:::sourceCode
-  v6["%v6<br/>values[0] = Next(values[0]);"]:::sourceCode
-  q0["&amp;q0.v0<br/>use q = Qubit[1];"]:::sourceCode
-
-  v1 --> v4
-  v4 --> v5
-  v1 --> v6
-  v5 --> v6
-
-  classDef sourceCode font-family:monospace,font-size:14px;
-</pre>
+<svg class="structure-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 446" role="img" aria-labelledby="chapter-10-diagram-1-title chapter-10-diagram-1-desc"><title id="chapter-10-diagram-1-title">MIR の値と qubit の生成・依存関係</title><desc id="chapter-10-diagram-1-desc">MIR の値と qubit の生成・依存関係
+更新前の配列 v1 から要素 v4、Next の戻り値 v5、更新後の配列 v6 へ至る古典値の流れと、この配列更新から独立した初期 qubit q0.v0 を示します。</desc><defs><marker id="chapter-10-diagram-1-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0 L10 5 L0 10 Z" fill="#354bff"/></marker></defs><g font-family="Consolas, Malgun Gothic, sans-serif"><rect x="12" y="8" width="370" height="62" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="24" y="34" font-size="14" fill="#111936" text-anchor="start" font-weight="700">%v1</text><text x="24" y="56" font-size="14" fill="#111936" text-anchor="start">var values: int[] = [0];</text><rect x="430" y="8" width="198" height="62" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="442" y="34" font-size="14" fill="#111936" text-anchor="start" font-weight="700">&amp;q0.v0</text><text x="442" y="56" font-size="14" fill="#111936" text-anchor="start">use q = Qubit[1];</text><rect x="12" y="134" width="370" height="62" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="24" y="160" font-size="14" fill="#111936" text-anchor="start" font-weight="700">%v4</text><text x="24" y="182" font-size="14" fill="#111936" text-anchor="start">values[0]</text><rect x="12" y="250" width="370" height="62" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="24" y="276" font-size="14" fill="#111936" text-anchor="start" font-weight="700">%v5</text><text x="24" y="298" font-size="14" fill="#111936" text-anchor="start">Next(values[0])</text><rect x="12" y="366" width="370" height="62" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="24" y="392" font-size="14" fill="#152581" text-anchor="start" font-weight="700">%v6</text><text x="24" y="414" font-size="14" fill="#152581" text-anchor="start">values[0] = Next(values[0]);</text><path d="M197.0 70 V102.0 H197.0 V132" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#chapter-10-diagram-1-arrow)"/><path d="M197.0 196 V223.0 H197.0 V248" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#chapter-10-diagram-1-arrow)"/><path d="M197.0 312 V339.0 H197.0 V364" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#chapter-10-diagram-1-arrow)"/><path d="M382 39.0 H406 V397.0 H384" fill="none" stroke="#354bff" stroke-width="1.5" marker-end="url(#chapter-10-diagram-1-arrow)"/></g></svg>
       </figure>
 
       <figure class="mermaid-card">
         <figcaption><span>MIR</span> 実行経路 CFG</figcaption>
-<pre class="mermaid chapter-10-mermaid mermaid--vertical">
-flowchart TB
-  accTitle: MIR の実行経路 CFG
-  accDescr: b0 の条件が true なら b1、false なら b2 へ進み、両方の経路が b3 で合流します。
-
-  b0["b0<br/>var values: int[] = [0];<br/>use q = Qubit[1];<br/>values[0] = Next(values[0]);<br/>if (values[0] == 1)"]:::sourceCode
-  b1["b1<br/>X(q[0]);"]:::sourceCode
-  b2["b2"]:::sourceCode
-  b3["b3<br/>H(q[0]);"]:::sourceCode
-
-  b0 -->|true| b1
-  b0 -->|false| b2
-  b1 --> b3
-  b2 --> b3
-
-  classDef sourceCode font-family:monospace,font-size:14px;
-</pre>
+<svg class="structure-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 418" role="img" aria-labelledby="chapter-10-diagram-2-title chapter-10-diagram-2-desc"><title id="chapter-10-diagram-2-title">MIR の実行経路 CFG</title><desc id="chapter-10-diagram-2-desc">MIR の実行経路 CFG
+b0 の条件が true なら b1、false なら b2 へ進み、両方の経路が b3 で合流します。</desc><defs><marker id="chapter-10-diagram-2-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0 L10 5 L0 10 Z" fill="#354bff"/></marker></defs><g font-family="Consolas, Malgun Gothic, sans-serif"><rect x="80" y="8" width="480" height="128" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="92" y="34" font-size="14" fill="#111936" text-anchor="start" font-weight="700">b0</text><text x="92" y="56" font-size="14" fill="#111936" text-anchor="start">var values: int[] = [0];</text><text x="92" y="78" font-size="14" fill="#111936" text-anchor="start">use q = Qubit[1];</text><text x="92" y="100" font-size="14" fill="#111936" text-anchor="start">values[0] = Next(values[0]);</text><text x="92" y="122" font-size="14" fill="#111936" text-anchor="start">if (values[0] == 1)</text><rect x="12" y="206" width="270" height="62" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="24" y="232" font-size="14" fill="#152581" text-anchor="start" font-weight="700">b1</text><text x="24" y="254" font-size="14" fill="#152581" text-anchor="start">X(q[0]);</text><rect x="358" y="206" width="270" height="40" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="370" y="232" font-size="14" fill="#111936" text-anchor="start" font-weight="700">b2</text><rect x="186" y="338" width="268" height="62" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="198" y="364" font-size="14" fill="#152581" text-anchor="start" font-weight="700">b3</text><text x="198" y="386" font-size="14" fill="#152581" text-anchor="start">H(q[0]);</text><path d="M320.0 136 V171.0 H147.0 V204" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#chapter-10-diagram-2-arrow)"/><text x="239.5" y="165.0" font-size="12" fill="#111936" text-anchor="middle">true</text><path d="M320.0 136 V171.0 H493.0 V204" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#chapter-10-diagram-2-arrow)"/><text x="412.5" y="165.0" font-size="12" fill="#111936" text-anchor="middle">false</text><path d="M147.0 268 V303.0 H320.0 V336" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#chapter-10-diagram-2-arrow)"/><path d="M493.0 246 V292.0 H320.0 V336" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#chapter-10-diagram-2-arrow)"/></g></svg>
       </figure>
     </div>
   </div>
@@ -178,27 +119,12 @@ flowchart TB
     そのため後続解析は、ソースツリーを再解釈せずにグラフをたどり、値の変化と分岐の合流を確認できます。HIR はソースの意味を保持し、MIR は実行フローと値の追跡を明示します。
   </p>
 
-  <h2 id="constructor">callable ごとに専用 lowerer を1つ作る</h2>
+  <h2 id="constructor" class="trace-section-heading"><span>callable ごとに専用 lowerer を1つ作る</span></h2>
 
   <figure class="mermaid-card">
     <figcaption><span>HIR → MIR</span> callable ごとの独立した lowering</figcaption>
-<pre class="mermaid chapter-10-mermaid mermaid--wide">
-flowchart TB
-  accTitle: Next と Work を HIR から MIR へ独立して lower する流れ
-  accDescr: Next と Work は別々の callable lowerer を通り、それぞれ異なる MirCallable オブジェクトになります。
-
-  subgraph nextFlow["1回目の lowering"]
-    direction LR
-    nextHir["HIR Next"] --> nextLowerer["Next 専用<br/>callable lowerer"] --> nextMir["MirCallable Next"]
-  end
-
-  subgraph workFlow["2回目の lowering"]
-    direction LR
-    workHir["HIR Work"] --> workLowerer["Work 専用<br/>callable lowerer"] --> workMir["MirCallable Work"]
-  end
-
-  nextFlow ~~~ workFlow
-</pre>
+<svg class="structure-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 276" role="img" aria-labelledby="chapter-10-diagram-3-title chapter-10-diagram-3-desc"><title id="chapter-10-diagram-3-title">Next と Work を HIR から MIR へ独立して lower する流れ</title><desc id="chapter-10-diagram-3-desc">Next と Work を HIR から MIR へ独立して lower する流れ
+Next と Work は別々の callable lowerer を通り、それぞれ異なる MirCallable オブジェクトになります。</desc><defs><marker id="chapter-10-diagram-3-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0 L10 5 L0 10 Z" fill="#354bff"/></marker></defs><g font-family="Consolas, Malgun Gothic, sans-serif"><text x="12" y="28" font-size="16" fill="#111936" text-anchor="start" font-weight="700">1回目の lowering</text><rect x="12" y="46" width="170" height="40" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="24" y="72" font-size="14" fill="#111936" text-anchor="start" font-weight="700">HIR Next</text><rect x="230" y="46" width="170" height="62" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="242" y="72" font-size="14" fill="#111936" text-anchor="start" font-weight="700">Next 専用</text><text x="242" y="94" font-size="14" fill="#111936" text-anchor="start">callable lowerer</text><rect x="448" y="46" width="180" height="40" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="460" y="72" font-size="14" fill="#152581" text-anchor="start" font-weight="700">MirCallable Next</text><path d="M182 66.0 H206.0 V77.0 H228" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#chapter-10-diagram-3-arrow)"/><path d="M400 77.0 H424.0 V66.0 H446" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#chapter-10-diagram-3-arrow)"/><text x="12" y="178" font-size="16" fill="#111936" text-anchor="start" font-weight="700">2回目の lowering</text><rect x="12" y="196" width="170" height="40" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="24" y="222" font-size="14" fill="#111936" text-anchor="start" font-weight="700">HIR Work</text><rect x="230" y="196" width="170" height="62" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="242" y="222" font-size="14" fill="#111936" text-anchor="start" font-weight="700">Work 専用</text><text x="242" y="244" font-size="14" fill="#111936" text-anchor="start">callable lowerer</text><rect x="448" y="196" width="180" height="40" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="460" y="222" font-size="14" fill="#152581" text-anchor="start" font-weight="700">MirCallable Work</text><path d="M182 216.0 H206.0 V227.0 H228" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#chapter-10-diagram-3-arrow)"/><path d="M400 227.0 H424.0 V216.0 H446" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#chapter-10-diagram-3-arrow)"/></g></svg>
   </figure>
 
   <p>
@@ -206,7 +132,7 @@ flowchart TB
     <code>Next</code> の処理中は、<code>Next</code> のパラメーター・現在の block・値だけを管理します。その処理が終わると、新しい lowerer が <code>Work</code> を別に処理します。
   </p>
 
-  <h3 id="lower-hir-artifact-source">callable を1つずつ取り出すコード</h3>
+  <h3 id="lower-hir-artifact-source" class="trace-section-heading"><span>callable を1つずつ取り出すコード</span></h3>
 
   <p>
     以下は現在の <code>LowerHirArtifact()</code> の完全なコードです。<br>
@@ -241,14 +167,14 @@ flowchart TB
         // 1回目: hirCallable = Next h6
         // 2回目: hirCallable = Work h44
         // 反復ごとに新しい lowerer を作るため、callable の作業状態は混ざりません。
-        var mirCallableLowerer = new <a class="code-call-link" href="chapter-10-call-flow.html#callable-lowerer-constructor" title="HirCallableToMirLowerer コンストラクターの実行トレース">HirCallableToMirLowerer</a>(
+        var mirCallableLowerer = new HirCallableToMirLowerer(
             hirCallable,
             hirArtifact,
             traceSink);
 
         // 1回目の結果: mirCallable = Next c6
         // 2回目の結果: mirCallable = Work c44
-        var mirCallable = mirCallableLowerer.<a class="code-call-link" href="chapter-10-call-flow.html#lower-to-mir-callable" title="LowerToMirCallable の実行トレース">LowerToMirCallable</a>();
+        var mirCallable = mirCallableLowerer.<a class="code-call-link" href="chapter-10-call-flow.html?v=20261004-svg-trees-r56#lower-to-mir-callable" title="LowerToMirCallable の実行トレース">LowerToMirCallable</a>();
         mirCallables.Add(mirCallable);
 
         // Next はエントリー operation ではないため、1回目は false です。
@@ -301,24 +227,12 @@ flowchart TB
     callable ごとに独立した block ID allocator を持つため、<code>Next</code> と <code>Work</code> はどちらも最初の block を <code>b0</code> と名付けられます。
   </p>
 
-  <h2 id="lower-method">1つの callable を作る共通手順</h2>
+  <h2 id="lower-method" class="trace-section-heading"><span>1つの callable を作る共通手順</span></h2>
 
   <figure class="mermaid-card">
     <figcaption><span>HIR → MIR</span> 1つの callable を作る共通手順</figcaption>
-<pre class="mermaid chapter-10-mermaid mermaid--vertical">
-flowchart TB
-  accTitle: 1つの HIR callable を MirCallable に変える5段階
-  accDescr: LowerToMirCallable が callable 情報を確認し、CreateMirBlock がエントリー block を作成し、LowerParameters がパラメーターを登録し、LowerStatements と LowerStatement が本体を処理し、LowerToMirCallable と MirBlockBuilder.Build が MirCallable を完成させます。
-
-  input["1つの HIR callable"]
-  step1["1<br/>Origin・宣言シンボル・名前を解決<br/><br/>LowerToMirCallable()"]
-  step2["2<br/>エントリー block を作成<br/><br/>CreateMirBlock()"]
-  step3["3<br/>パラメーターを MIR 値または qubit として登録<br/><br/>LowerParameters()"]
-  step4["4<br/>本体の文を順番に lower<br/><br/>LowerStatements()<br/>→ LowerStatement()"]
-  step5["5<br/>残りの経路を閉じて block を確定<br/>MirCallable を返す<br/><br/>LowerToMirCallable()<br/>+ MirBlockBuilder.Build()"]
-
-  input --> step1 --> step2 --> step3 --> step4 --> step5
-</pre>
+<svg class="structure-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 818" role="img" aria-labelledby="chapter-10-diagram-4-title chapter-10-diagram-4-desc"><title id="chapter-10-diagram-4-title">1つの HIR callable を MirCallable に変える6段階</title><desc id="chapter-10-diagram-4-desc">1つの HIR callable を MirCallable に変える6段階
+LowerToMirCallable が callable 情報を確認し、CreateMirBlock がエントリー block を作成し、LowerParameters がパラメーターを登録し、LowerStatements と LowerStatement が本体を処理します。続いて CloseCallableBody が未終了の経路を閉じ、BuildMirBlocks がすべての builder を MirBlock として確定し、LowerToMirCallable が MirCallable を完成させます。</desc><defs><marker id="chapter-10-diagram-4-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0 L10 5 L0 10 Z" fill="#354bff"/></marker></defs><g font-family="Consolas, Malgun Gothic, sans-serif"><rect x="70" y="8" width="500" height="40" rx="6" fill="#f0f3fd" stroke="#465472" stroke-width="1"/><text x="82" y="34" font-size="14" fill="#111936" text-anchor="start" font-weight="700">1つの HIR callable</text><rect x="70" y="82" width="500" height="84" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="82" y="108" font-size="14" fill="#152581" text-anchor="start" font-weight="700">1</text><text x="82" y="130" font-size="14" fill="#152581" text-anchor="start">Origin・宣言シンボル・名前を解決</text><text x="82" y="152" font-size="14" fill="#152581" text-anchor="start">LowerToMirCallable()</text><path d="M320.0 48 V65.0 H320.0 V80" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#chapter-10-diagram-4-arrow)"/><rect x="70" y="200" width="500" height="84" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="82" y="226" font-size="14" fill="#152581" text-anchor="start" font-weight="700">2</text><text x="82" y="248" font-size="14" fill="#152581" text-anchor="start">エントリー block を作成</text><text x="82" y="270" font-size="14" fill="#152581" text-anchor="start">CreateMirBlock()</text><path d="M320.0 166 V183.0 H320.0 V198" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#chapter-10-diagram-4-arrow)"/><rect x="70" y="318" width="500" height="84" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="82" y="344" font-size="14" fill="#152581" text-anchor="start" font-weight="700">3</text><text x="82" y="366" font-size="14" fill="#152581" text-anchor="start">パラメーターを MIR 値または qubit として登録</text><text x="82" y="388" font-size="14" fill="#152581" text-anchor="start">LowerParameters()</text><path d="M320.0 284 V301.0 H320.0 V316" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#chapter-10-diagram-4-arrow)"/><rect x="70" y="436" width="500" height="106" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="82" y="462" font-size="14" fill="#152581" text-anchor="start" font-weight="700">4</text><text x="82" y="484" font-size="14" fill="#152581" text-anchor="start">本体の文を順番に lower</text><text x="82" y="506" font-size="14" fill="#152581" text-anchor="start">LowerStatements()</text><text x="82" y="528" font-size="14" fill="#152581" text-anchor="start">→ LowerStatement()</text><path d="M320.0 402 V419.0 H320.0 V434" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#chapter-10-diagram-4-arrow)"/><rect x="70" y="576" width="500" height="84" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="82" y="602" font-size="14" fill="#152581" text-anchor="start" font-weight="700">5</text><text x="82" y="624" font-size="14" fill="#152581" text-anchor="start">本体に残った未終了の経路を閉じる</text><text x="82" y="646" font-size="14" fill="#152581" text-anchor="start">CloseCallableBody()</text><path d="M320.0 542 V559.0 H320.0 V574" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#chapter-10-diagram-4-arrow)"/><rect x="70" y="694" width="500" height="106" rx="6" fill="#e2e7ff" stroke="#354bff" stroke-width="1"/><text x="82" y="720" font-size="14" fill="#152581" text-anchor="start" font-weight="700">6</text><text x="82" y="742" font-size="14" fill="#152581" text-anchor="start">block を確定して MirCallable を返す</text><text x="82" y="764" font-size="14" fill="#152581" text-anchor="start">BuildMirBlocks()</text><text x="82" y="786" font-size="14" fill="#152581" text-anchor="start">+ LowerToMirCallable()</text><path d="M320.0 660 V677.0 H320.0 V692" fill="none" stroke="#354bff" stroke-width="1.5" stroke-linejoin="round" marker-end="url(#chapter-10-diagram-4-arrow)"/></g></svg>
   </figure>
 
   <p>
@@ -326,214 +240,7 @@ flowchart TB
     違いはパラメーターと本体から生じます。単純な function は1つの block で済みますが、条件分岐を持つ operation は複数の block に分かれます。
   </p>
 
-  <h3 id="lower-callable-source"><code>Next</code> と <code>Work</code> の実値を入れて関数を追跡する</h3>
-
-  <p>
-    <code>LowerToMirCallable()</code> は <code>Next h6</code> の lowerer で1回、<code>Work h44</code> の lowerer で1回実行されます。<br>
-    以下のコメントは、同じコード内で両方の入力に対する値と分岐がどのように異なるかを示します。
-  </p>
-
-<pre><code class="language-csharp">public MirCallable LowerToMirCallable()
-{
-    // 1回目: _hirCallable = Next h6
-    // 2回目: _hirCallable = Work h44
-    var mirCallableOrigin = MirOriginFor(_hirCallable);
-
-    // 結果: 現在の Next または Work の宣言シンボル
-    var hirCallableSymbol = RequireHirDeclarationSymbol(
-        _hirCallable.Id,
-        $"callable `{_hirCallable.Name}`");
-
-    // 現在の callable を含む namespace を記録した HIR の名前構造。
-    var hirScopeGraph = _hirArtifact.Model.ScopeGraph
-        ?? throw MirLoweringError(
-            "the final HIR semantic model has no scope graph");
-
-    // Next 実行: qualifiedSourceCallableName = "Next"
-    // Work 実行: qualifiedSourceCallableName = "Work"
-    var qualifiedSourceCallableName =
-        hirScopeGraph.QualifiedName(hirCallableSymbol);
-
-    // 各 lowerer が自身の最初の block を作るため、それぞれ別の b0 を持ちます。
-    _currentMirBlockBuilder = CreateMirBlock(mirCallableOrigin);
-
-    // Next 実行: パラメーター value を %v0 として登録します。
-    // Work 実行: パラメーターがないため _mirParameters = [] です。
-    <a class="code-call-link" href="chapter-10-call-flow.html#lower-parameters" title="LowerParameters の実行トレース">LowerParameters</a>();
-
-    /* LowerStatements() は現在の callable の本体全体を処理します。
-
-    Next
-    - return value + 1; の処理で計算 instruction と MirReturn terminator を b0 に追加し、b0 を閉じます。
-    - 現在 block b0 が閉じられるため、_currentMirBlockBuilder は null になります。
-    - _mirBlockBuilders = [b0]
-
-    Work
-    - b0 は変数宣言、qubit の準備、配列代入、if 条件を処理し、b1 または b2 への分岐で閉じます。
-    - b1 は true 経路の X(q[0]); を処理し、b3 への移動で閉じます。
-    - b2 は処理するソース文がない false 経路で、b3 への移動で閉じます。
-    - b3 は b1 と b2 の合流点で、最後の H(q[0]); を処理します。
-    - H(q[0]); は block を閉じず、その後に明示的な return もないため、
-      b3 が開いた現在 block のまま残ります。
-
-    処理後
-    ├─ _mirBlockBuilders = [b0, b1, b2, b3]
-    └─ _currentMirBlockBuilder = b3 */
-    <a class="code-call-link" href="chapter-10-call-flow.html#lower-statements" title="LowerStatements の実行トレース">LowerStatements</a>(_hirCallable.Body.Statements);
-
-    // Next: 現在 block が null なので、以下の if を飛ばします。
-    // Work: 現在 block が b3 なので、以下の if で b3 を閉じます。
-    if (_currentMirBlockBuilder is not null)
-    {
-        if (_hirCallable.IsFunction)
-        {
-            // この例のどちらの callable も、この分岐は選びません。
-            MarkCurrentMirBlockUnreachable(
-                MirOrigin.GeneratedFrom(
-                    mirCallableOrigin,
-                    "missing validated function return"));
-        }
-        else
-        {
-            // Work 実行: 値を持たない暗黙の return を b3 に追加します。
-            ReturnFromCurrentMirBlock(
-                value: null,
-                MirOrigin.GeneratedFrom(
-                    mirCallableOrigin,
-                    "implicit operation return"));
-        }
-    }
-
-    // Next 実行: builder リスト [b0]
-    // Work 実行: builder リスト [b0,b1,b2,b3]
-    // 各 builder を immutable な MirBlock として確定します。
-    var mirBlocks = new List&lt;MirBlock&gt;(_mirBlockBuilders.Count);
-    foreach (var mirBlockBuilder in _mirBlockBuilders)
-    {
-        var mirBlock = mirBlockBuilder.Build();
-        mirBlocks.Add(mirBlock);
-    }
-
-    // 最初に作られた b0 が常にエントリー block です。
-    var mirEntryBlock = mirBlocks[0];
-
-    // Next の戻り値: c6, "Next", int, [%v0], b0, [b0]
-    // Work の戻り値: c44, "Work", null, [], b0, [b0,b1,b2,b3]
-    return new MirCallable(
-        _mirCallableId,
-        qualifiedSourceCallableName,
-        _hirCallable.ReturnType is { } returns
-            ? MirType.Scalar(returns)
-            : null,
-        _mirParameters,
-        mirEntryBlock,
-        mirBlocks,
-        mirCallableOrigin);
-}</code></pre>
-
-  <p>
-    この関数は、上の図と同じ手順を実行します。<br>
-    エントリー block を作り、本体を処理します。<code>Next</code> は明示的な return で終了し、<code>Work</code> は残った operation 経路を値なしの return で閉じます。その結果、それぞれ <code>MirCallable Next c6</code> と <code>MirCallable Work c44</code> になります。
-  </p>
-
-  <h3 id="statement-dispatch-source">2つの callable の本体文が渡される先</h3>
-
-  <p>
-    上の <code>LowerStatements()</code> は本体を先頭から末尾まで走査し、<code>LowerStatement()</code> は現在の文種別に対応する lowering helper を1つ選びます。<br>
-    以下は両関数の現在の完全なコードです。コメントは <code>Next</code> と <code>Work</code> が実際に渡す値を示します。
-  </p>
-
-<pre><code class="language-csharp">private void LowerStatements(IReadOnlyList&lt;HirStatement&gt; hirStatements)
-{
-    // Next 本体: [return value + 1]、b0 から開始
-    // Work 最上位: [var, use, assignment, if, H]、b0 から開始
-    // if の true 本体: [X(q[0])]、b1 から開始
-    // if の false 本体: []、b2 から開始
-    for (var hirStatementIndex = 0;
-         hirStatementIndex &lt; hirStatements.Count;
-         hirStatementIndex++)
-    {
-        // 反復開始時に現在の経路がすでに閉じていれば、残りの文は出力しません。
-        // この例の4回の呼び出しでは、この分岐は選ばれません。
-        if (_currentMirBlockBuilder is null)
-        {
-            for (;
-                 hirStatementIndex &lt; hirStatements.Count;
-                 hirStatementIndex++)
-            {
-                MarkUnreachableDeclarations(
-                    hirStatements[hirStatementIndex]);
-            }
-            return;
-        }
-
-        <a class="code-call-link" href="chapter-10-call-flow.html#lower-statement" title="LowerStatement の実行トレース">LowerStatement</a>(hirStatements[hirStatementIndex]);
-    }
-}</code></pre>
-
-  <p>
-    ループは文を1つ取り出すたびに、以下の <code>LowerStatement()</code> を呼び出します。
-  </p>
-
-<pre><code class="language-csharp">private void LowerStatement(HirStatement hirStatement)
-{
-    switch (hirStatement)
-    {
-        // Work の use q 文が選びます。
-        case HirQubitDeclarationStatement hirQubitDeclaration:
-            LowerQubitDeclaration(hirQubitDeclaration);
-            return;
-
-        // Work の var values 文が選びます。
-        case HirVariableDeclarationStatement hirDeclaration:
-            LowerDeclaration(hirDeclaration);
-            return;
-
-        // Work の values[0] への代入文が選びます。
-        case HirAssignmentStatement hirAssignment:
-            LowerAssignment(hirAssignment);
-            return;
-
-        // Work の H 呼び出しが選びます。
-        // if 内の X 呼び出しも、入れ子の本体を処理するときに同じ分岐を選びます。
-        case HirCallStatement hirCallStatement:
-            LowerStatementCall(hirCallStatement);
-            return;
-
-        // Work の if 文が選びます。
-        case HirIfStatement hirIf:
-            LowerIf(hirIf);
-            return;
-
-        case HirForStatement hirFor:
-            LowerFor(hirFor);
-            return;
-
-        case HirWhileStatement hirWhile:
-            LowerWhile(hirWhile);
-            return;
-
-        case HirRepeatStatement hirRepeat:
-            LowerRepeat(hirRepeat);
-            return;
-
-        // Next の return 文が選びます。
-        case HirReturnStatement hirReturn:
-            LowerReturn(hirReturn);
-            return;
-
-        default:
-            throw MirLoweringError(
-                $"unsupported HIR statement {hirStatement.GetType().Name}");
-    }
-}</code></pre>
-
-  <p>
-    この switch は文の意味を再判定しません。<br>
-    HIR ですでに分類された文種別を読み、対応する helper を呼んですぐに戻ります。
-  </p>
-
-  <h2 id="next">Next は1つの block で完成する</h2>
+  <h2 id="next" class="trace-section-heading"><span>Next は1つの block で完成する</span></h2>
 
   <p>
     <code>Next</code> には <code>value</code> という1つの <code>int</code> パラメーターがあります。<br>
@@ -542,22 +249,29 @@ flowchart TB
 
   <figure class="mermaid-card">
     <figcaption><span>MIR</span> MirCallable Next の構造</figcaption>
-<pre class="mermaid chapter-10-mermaid mermaid--vertical">
-flowchart TB
-  accTitle: MirCallable Next の構造
-  accDescr: Next はパラメーター value とエントリー block b0 を持ち、b0 で数値 1 の生成、加算、return を順番に実行します。
-
-  next["MirCallable Next"]
-  parameter["パラメーター<br/>%v0 value"]
-  block["b0<br/>EntryBlock · Blocks[0]"]
-  constant["数値 1 を生成"]
-  add["%v0 + 1 を計算"]
-  result["結果を return"]
-
-  next --- parameter
-  next --- block
-  block --> constant --> add --> result
-</pre>
+<div class="item-tree-diagram item-tree-diagram--native" data-item-tree="chapter-10-diagram-5" style="--item-tree-width:398px">
+  <svg class="native-item-tree" xmlns="http://www.w3.org/2000/svg" width="398" height="318" viewBox="0 0 398 318" role="img" aria-labelledby="chapter-10-diagram-5-title chapter-10-diagram-5-desc">
+    <title id="chapter-10-diagram-5-title">MirCallable Next</title>
+    <desc id="chapter-10-diagram-5-desc">MirCallable Next の構造
+Next はパラメーター value とエントリー block b0 を持ち、b0 で数値 1 の生成、加算、return を順番に実行します。</desc>
+    <path class="native-item-tree__guides" d="M 22 34 V 291 M 22 51 H 40 M 22 141 H 40 M 22 291 H 40 M 50 64 V 81 M 50 81 H 68 M 78 94 V 111 M 78 111 H 96 M 50 154 V 171 M 50 171 H 68 M 78 184 V 261 M 78 201 H 96 M 78 231 H 96 M 78 261 H 96"/>
+    <text x="16" y="26" data-tree-depth="0" data-tree-row="0" data-continuation="false"><tspan class="native-item-tree__field">MirCallable Next</tspan></text>
+    <text x="44" y="56" data-tree-depth="1" data-tree-row="1" data-continuation="false"><tspan class="native-item-tree__field">Parameters</tspan></text>
+    <text x="72" y="86" data-tree-depth="2" data-tree-row="2" data-continuation="false"><tspan class="native-item-tree__field">[0]</tspan><tspan class="native-item-tree__wire"> → </tspan><tspan class="native-item-tree__reference">MirClassicalParameter value</tspan></text>
+    <text x="100" y="116" data-tree-depth="3" data-tree-row="3" data-continuation="false">Value<tspan class="native-item-tree__wire"> → </tspan><tspan class="native-item-tree__reference">MirValue %v0</tspan></text>
+    <text x="44" y="146" data-tree-depth="1" data-tree-row="4" data-continuation="false"><tspan class="native-item-tree__field">Blocks</tspan></text>
+    <text x="72" y="176" data-tree-depth="2" data-tree-row="5" data-continuation="false"><tspan class="native-item-tree__field">[0]</tspan><tspan class="native-item-tree__wire"> → </tspan><tspan class="native-item-tree__reference">MirBlock b0</tspan></text>
+    <text x="100" y="206" data-tree-depth="3" data-tree-row="6" data-continuation="false">数値 1 を生成</text>
+    <text x="100" y="236" data-tree-depth="3" data-tree-row="7" data-continuation="false">%v0 + 1 を計算</text>
+    <text x="100" y="266" data-tree-depth="3" data-tree-row="8" data-continuation="false">結果を return</text>
+    <text x="44" y="296" data-tree-depth="1" data-tree-row="9" data-continuation="false">EntryBlock<tspan class="native-item-tree__wire"> → </tspan><tspan class="native-item-tree__reference">Blocks[0] (同じオブジェクト)</tspan></text>
+  </svg>
+</div>
+<div class="item-tree-legend" data-legend-for="chapter-10-diagram-5" aria-label="図の凡例">
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">→</span><span>オブジェクト参照</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">[]</span><span>空のリスト</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">{}</span><span>空の集合またはマップ</span></span>
+</div>
   </figure>
 
   <p>
@@ -565,37 +279,56 @@ flowchart TB
     return が block を終了させるため、追加の終了文は必要ありません。
   </p>
 
-  <h2 id="work">Work は条件分岐によって複数の block に分かれる</h2>
+  <h2 id="work" class="trace-section-heading"><span>Work は条件分岐によって複数の block に分かれる</span></h2>
 
   <p>
     <code>Work</code> にはパラメーターがありませんが、ローカル配列と qubit があります。<br>
     まずエントリー block で配列を作って qubit を準備し、その後に配列を更新して条件を評価します。
   </p>
 
-  <figure class="mermaid-card">
-    <figcaption><span>MIR</span> MirCallable Work の構造</figcaption>
-<pre class="mermaid chapter-10-mermaid mermaid--wide">
-flowchart TB
-  accTitle: MirCallable Work の構造
-  accDescr: Work はエントリー block b0、ローカル配列 values、ローカル qubit q、b0 から b3 までの4つの block を持ちます。
-
-  work["MirCallable Work"]
-  values["ローカル配列<br/>values"]
-  qubit["ローカル qubit<br/>q"]
-  blocks["Blocks"]
-  b0["b0<br/>EntryBlock · 初期化 · 配列更新 · 条件評価"]
-  b1["b1<br/>条件が true のとき X を実行"]
-  b2["b2<br/>条件が false のとき gate なし"]
-  b3["b3<br/>経路合流 · H を実行 · return"]
-
-  work --- values
-  work --- qubit
-  work --- blocks
-  blocks --- b0
-  blocks --- b1
-  blocks --- b2
-  blocks --- b3
-</pre>
+  <figure class="state-tree state-tree--standalone state-tree--readable callable-structure-tree" aria-labelledby="work-callable-structure">
+    <figcaption id="work-callable-structure"><span>MIR</span> <code>MirCallable Work c44</code> の構造</figcaption>
+<div class="item-tree-diagram item-tree-diagram--native item-tree-diagram--detailed" data-item-tree="structure-chapter-10-9" style="--item-tree-width:458px">
+  <svg class="native-item-tree" xmlns="http://www.w3.org/2000/svg" width="458" height="532" viewBox="0 0 458 532" role="img" aria-labelledby="structure-chapter-10-9-title structure-chapter-10-9-desc">
+    <title id="structure-chapter-10-9-title">MirCallable Work c44</title>
+    <desc id="structure-chapter-10-9-desc">MirCallable Work c44
+├─ Parameters = []
+├─ Storages
+│  └─ [0] MirArrayStorage values
+├─ Qubits
+│  ├─ [0] MirQubit q0.v0
+│  ├─ [1] MirQubit q0.v1
+│  ├─ [2] MirQubit q0.v2
+│  └─ [3] MirQubit q0.v3
+├─ Blocks
+│  ├─ [0] MirBlock b0  初期化 · 配列更新 · 条件評価
+│  ├─ [1] MirBlock b1  true 経路 · X(q[0]);
+│  ├─ [2] MirBlock b2  false 経路 · 本体なし
+│  └─ [3] MirBlock b3  経路合流 · H(q[0]); · return
+└─ EntryBlock ──▶ Blocks[0] (MirBlock b0)</desc>
+    <path class="native-item-tree__guides" d="M 22 34 V 505 M 22 51 H 40 M 22 97 H 40 M 22 173 H 40 M 22 339 H 40 M 22 505 H 40 M 50 110 V 127 M 50 127 H 68 M 50 186 V 293 M 50 203 H 68 M 50 233 H 68 M 50 263 H 68 M 50 293 H 68 M 50 352 V 459 M 50 369 H 68 M 50 399 H 68 M 50 429 H 68 M 50 459 H 68"/>
+    <text x="16" y="26" data-tree-depth="0" data-tree-row="0" data-continuation="false"><tspan class="native-item-tree__field">MirCallable Work c44</tspan></text>
+    <text x="44" y="56" data-tree-depth="1" data-tree-row="1" data-continuation="false">Parameters = <tspan class="native-item-tree__value">[]</tspan></text>
+    <text x="44" y="102" data-tree-depth="1" data-tree-row="2" data-continuation="false"><tspan class="native-item-tree__field">Storages</tspan></text>
+    <text x="72" y="132" data-tree-depth="2" data-tree-row="3" data-continuation="false">[0] MirArrayStorage values</text>
+    <text x="44" y="178" data-tree-depth="1" data-tree-row="4" data-continuation="false"><tspan class="native-item-tree__field">Qubits</tspan></text>
+    <text x="72" y="208" data-tree-depth="2" data-tree-row="5" data-continuation="false">[0] MirQubit q0.v0</text>
+    <text x="72" y="238" data-tree-depth="2" data-tree-row="6" data-continuation="false">[1] MirQubit q0.v1</text>
+    <text x="72" y="268" data-tree-depth="2" data-tree-row="7" data-continuation="false">[2] MirQubit q0.v2</text>
+    <text x="72" y="298" data-tree-depth="2" data-tree-row="8" data-continuation="false">[3] MirQubit q0.v3</text>
+    <text x="44" y="344" data-tree-depth="1" data-tree-row="9" data-continuation="false"><tspan class="native-item-tree__field">Blocks</tspan></text>
+    <text x="72" y="374" data-tree-depth="2" data-tree-row="10" data-continuation="false">[0] MirBlock b0 初期化 · 配列更新 · 条件評価</text>
+    <text x="72" y="404" data-tree-depth="2" data-tree-row="11" data-continuation="false">[1] MirBlock b1 true 経路 · X(q[0]);</text>
+    <text x="72" y="434" data-tree-depth="2" data-tree-row="12" data-continuation="false">[2] MirBlock b2 false 経路 · 本体なし</text>
+    <text x="72" y="464" data-tree-depth="2" data-tree-row="13" data-continuation="false">[3] MirBlock b3 経路合流 · H(q[0]); · return</text>
+    <text x="44" y="510" data-tree-depth="1" data-tree-row="14" data-continuation="false">EntryBlock<tspan class="native-item-tree__wire"> → </tspan><tspan class="native-item-tree__reference">Blocks[0] (MirBlock b0)</tspan></text>
+  </svg>
+</div>
+<div class="item-tree-legend" data-legend-for="structure-chapter-10-9" aria-label="図の凡例">
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">→</span><span>オブジェクト参照</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">[]</span><span>空のリスト</span></span>
+  <span class="item-tree-legend__item"><span class="item-tree-legend__symbol">{}</span><span>空の集合またはマップ</span></span>
+</div>
   </figure>
 
   <p>
@@ -604,11 +337,11 @@ flowchart TB
   </p>
 
   <p id="implicit-return">
-    <code>Work</code> のソースには <code>return</code> 文がありません。<br>
-    operation は値を返さないため、lowerer は最後の <code>b3</code> に値なしの return を自動で追加し、block を正常に閉じます。これを暗黙の return と呼びます。
+    この例の <code>Work</code> は戻り値の型を宣言しておらず、ソースにも <code>return</code> 文がありません。<br>
+    <code>CloseCallableBody()</code> を呼び出すと、最後の <code>b3</code> に値を返さない <code>return</code> が追加され、block が終了します。これはソースに書かれていないため、暗黙の <code>return</code> と呼びます。<br>戻り値の型を宣言した operation は、function と同様にすべての経路で値を明示的に返す必要があります。
   </p>
 
-  <h2 id="result">完成した MirCallable が保持するもの</h2>
+  <h2 id="result" class="trace-section-heading"><span>完成した MirCallable が保持するもの</span></h2>
 
   <p>
     callable の lowering が終わると、作業中のリストが1つの <code>MirCallable</code> にまとめられます。<br>
@@ -633,12 +366,62 @@ flowchart TB
 
   <p>
     まとめると、callable lowerer は1つの HIR 宣言を受け取り、実行順序が明示された block 構造へ変換します。<br>
-    次章では、その block 内の古典値に注目し、1つのソース変数名が MIR で複数の SSA 値になる理由を説明します。
+    次に、準備した lowerer で実際の変換を実行する <code>LowerToMirCallable()</code> の内部へ進みます。
   </p>
 
+  <section class="function-route-next" aria-labelledby="chapter-10-detail-call-title">
+    <div class="function-route-next__summary">
+      <p>この章では、<code>LowerHirArtifact()</code> が <code>Next h6</code> と <code>Work h44</code> を順番に取り出し、それぞれを担当する専用 lowerer を準備する流れを確認しました。</p>
+      <p>以下の関数全体から、詳細な実行フローを確認するコード領域を選択できます。</p>
+    </div>
+    <span class="function-route-next__label">詳細フローを選択</span>
+    <h3 id="chapter-10-detail-call-title"><code>LowerHirArtifact()</code> の詳細呼び出し</h3>
+<pre><code class="language-csharp">private static MirSnapshot LowerHirArtifact(
+    HirSemanticArtifact hirArtifact,
+    IMirLoweringTraceSink? traceSink)
+{
+    ArgumentNullException.ThrowIfNull(hirArtifact);
+
+    var hirSnapshot = hirArtifact.Source;
+    var hirProgram = hirSnapshot.Program;
+    var hirEntryCallable = hirProgram.EntryCallable
+        ?? throw new InvalidOperationException(
+            "validated HIR must contain an operation before MIR lowering");
+
+    var mirCallables = new List&lt;MirCallable&gt;();
+    MirCallable? mirEntryCallable = null;
+
+    foreach (var hirCallable in hirProgram.Callables)
+    {
+        var mirCallableLowerer = new HirCallableToMirLowerer(
+            hirCallable,
+            hirArtifact,
+            traceSink);
+
+<a id="lower-to-mir-callable-callsite"
+   class="code-detail-region"
+   href="chapter-10-call-flow.html?v=20261004-svg-trees-r56#lower-to-mir-callable"
+   data-detail-label="詳細フローを見る"
+   aria-label="LowerToMirCallable の実行と結果保存の詳細フローを見る">        var mirCallable = mirCallableLowerer.LowerToMirCallable();
+        mirCallables.Add(mirCallable);</a>
+
+        if (ReferenceEquals(hirCallable, hirEntryCallable))
+            mirEntryCallable = mirCallable;
+    }
+
+    var mirProgram = new MirProgram(
+        mirEntryCallable
+            ?? throw new InvalidOperationException(
+                "validated HIR entry callable must be lowered into MIR"),
+        mirCallables);
+
+    return MirSnapshot.CreateLowered(mirProgram);
+}</code></pre>
+  </section>
+
   <nav class="chapter-nav" aria-label="章ナビゲーション（下部）">
-    <div class="group"><a href="chapter-09.html">← 前章：HIR→MIR 境界</a><a href="index.html#chapters">全章一覧</a><a href="chapter-10-call-flow.html#lower-hir-artifact"><code>LowerHirArtifact()</code> 詳細トレース</a></div>
-    <div class="group"><a href="chapter-11.html">次章：古典値と SSA バージョン →</a></div>
+    <div class="group"><a href="chapter-09.html">← 前章：HIR→MIR 境界</a><a href="index.html#chapters">全章一覧</a><a href="chapter-10-call-flow.html?v=20261004-svg-trees-r56#lower-hir-artifact"><code>LowerHirArtifact()</code> 詳細トレース</a></div>
+    <div class="group"><a href="chapter-10-call-flow.html?v=20261004-svg-trees-r56#lower-to-mir-callable"><code>LowerToMirCallable()</code> 詳細フロー</a></div>
   </nav>
 
   <footer>Qora コンパイラ開発者マニュアル · 第10章</footer>

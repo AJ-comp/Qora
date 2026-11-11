@@ -15,29 +15,29 @@ internal readonly record struct QValueShape(
 }
 
 /// <summary>
-/// The single type reader for the unified HIR expression tree. User-function calls follow the resolved
+/// The single type reader for the unified HIR expression tree. Value-returning calls follow the resolved
 /// <see cref="HirCallExpression.CalleeId"/> reference; a spelling is never used to recover a missing
 /// semantic link.
 /// </summary>
 internal static class ExpressionTypes
 {
-    internal static bool TryGetFunction(
+    internal static bool TryGetValueCallable(
         HirCallExpression call,
         IReadOnlyDictionary<HirNodeId, HirCallable> callableById,
-        out HirCallable function)
+        out HirCallable callable)
     {
-        function = null!;
+        callable = null!;
         if (call.CalleeId is not HirNodeId callableId)
             return false;
 
-        if (!callableById.TryGetValue(callableId, out var callable))
+        if (!callableById.TryGetValue(callableId, out var found))
             throw new InvalidOperationException(
-                $"QINTERNAL: function call `{call.Name}` carries dangling CalleeId {callableId}");
+                $"QINTERNAL: value call `{call.Name}` carries dangling CalleeId {callableId}");
 
-        if (!callable.IsFunction)
+        if (found.ReturnType is null)
             return false;
 
-        function = callable;
+        callable = found;
         return true;
     }
 
@@ -106,11 +106,11 @@ internal static class ExpressionTypes
 
             HirCallExpression call
                 when call.CalleeId is not null
-                && TryGetFunction(
+                && TryGetValueCallable(
                     call,
                     callableById,
-                    out var function)
-                && function.ReturnType is { } returns =>
+                    out var callable)
+                && callable.ReturnType is { } returns =>
                 new QValueShape(returns, IsArray: false),
 
             HirCallExpression call
@@ -137,7 +137,7 @@ internal static class ExpressionTypes
             return false;
         if (target.Type == source.Type)
             return true;
-        if (target.Type == QType.Qubit || source.Type == QType.Qubit)
+        if (target.Type is QType.Qubit or QType.Bool || source.Type is QType.Qubit or QType.Bool)
             return false;
 
         return (target.Type, source.Type) switch
@@ -167,6 +167,12 @@ internal static class ExpressionTypes
     {
         if (left == QType.Qubit || right == QType.Qubit)
             throw new ArgumentException("a classical operator cannot consume a qubit");
+        if (left == QType.Bool || right == QType.Bool)
+        {
+            if (left == right && isComparison)
+                return QType.Bool;
+            throw new ArgumentException("bool operands have no numeric promotion");
+        }
         if (left == right)
             return !isComparison && left == QType.Bit
                 ? QType.Int
@@ -186,7 +192,7 @@ internal static class ExpressionTypes
         if (name.Name is "pi" or "tau" or "euler")
             return new QValueShape(QType.Float, IsArray: false);
         if (name.Name is "true" or "false")
-            return new QValueShape(QType.Bit, IsArray: false);
+            return new QValueShape(QType.Bool, IsArray: false);
 
         var symbol = semanticModel is null
             ? scope!.Lookup(name.Name)
@@ -206,7 +212,7 @@ internal static class ExpressionTypes
 
     internal static QValueShape LiteralType(string text) =>
         text is "true" or "false"
-            ? new QValueShape(QType.Bit, IsArray: false)
+            ? new QValueShape(QType.Bool, IsArray: false)
             : text is "pi" or "tau" or "euler"
               || text.Contains('.')
                 ? new QValueShape(QType.Float, IsArray: false)
@@ -229,7 +235,7 @@ internal static class ExpressionTypes
             return scalar;
 
         if (unary.Operator == HirUnaryOperator.LogicalNot)
-            return new QValueShape(QType.Bit, IsArray: false);
+            return new QValueShape(QType.Bool, IsArray: false);
 
         return unary.Operator == HirUnaryOperator.Negate
                && scalar.Type == QType.Bit
@@ -257,7 +263,7 @@ internal static class ExpressionTypes
                 && lhs.Type != QType.Qubit
                 && lhs.Type == rhs.Type)
             {
-                return new QValueShape(QType.Bit, IsArray: false);
+                return new QValueShape(QType.Bool, IsArray: false);
             }
 
             // Preserve the offending shape so the boundary diagnostic can report array-vs-scalar.
@@ -276,8 +282,13 @@ internal static class ExpressionTypes
             or HirBinaryOperator.LogicalAnd
             or HirBinaryOperator.LogicalOr)
         {
-            return new QValueShape(QType.Bit, IsArray: false);
+            return new QValueShape(QType.Bool, IsArray: false);
         }
+
+        // Keep an invalid bool arithmetic expression readable by validation rather than inventing a
+        // numeric promotion. The operator contract owns the diagnostic before any value is consumed.
+        if (lhs.Type == QType.Bool || rhs.Type == QType.Bool)
+            return new QValueShape(QType.Bool, IsArray: false);
 
         return new QValueShape(
             CommonScalarOperandType(
@@ -327,7 +338,7 @@ internal static class ExpressionTypes
     {
         if (left == right)
             return left;
-        if (left == QType.Qubit || right == QType.Qubit)
+        if (left is QType.Qubit or QType.Bool || right is QType.Qubit or QType.Bool)
             return null;
         return CommonScalarOperandType(
             left,

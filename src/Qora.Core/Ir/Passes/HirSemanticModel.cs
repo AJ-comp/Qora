@@ -389,11 +389,11 @@ public sealed class HirSemanticModel
         QType targetType)
     {
         RequireValidationOpen();
-        if (!Enum.IsDefined(targetType) || targetType == QType.Qubit)
+        if (!Enum.IsDefined(targetType) || targetType is QType.Qubit or QType.Bool)
             throw new ArgumentOutOfRangeException(
                 nameof(targetType),
                 targetType,
-                "an implicit HIR conversion requires a classical scalar target");
+                "an implicit HIR conversion requires a non-boolean classical scalar target");
         if (_validation.ImplicitConversionTargets.TryGetValue(expressionId, out var existingTarget))
         {
             if (existingTarget == targetType) return;

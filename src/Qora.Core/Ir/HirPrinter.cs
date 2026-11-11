@@ -83,7 +83,9 @@ public static class HirPrinter
                     sb.AppendLine($"{indent}HirAssignment({PrintExpr(a.Target)} = {PrintExpr(a.Value)})");
                     break;
                 case HirReturnStatement r:
-                    sb.AppendLine($"{indent}HirReturn({PrintExpr(r.Value)})");
+                    sb.AppendLine(r.Value is { } returnedValue
+                        ? $"{indent}HirReturn({PrintExpr(returnedValue)})"
+                        : $"{indent}HirReturn()");
                     break;
                 case HirIfStatement i:
                     sb.AppendLine($"{indent}HirIf(cond=\"{HirExpressions.Render(i.Condition)}\")");

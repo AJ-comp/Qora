@@ -20,6 +20,7 @@ public class AstExpressionLoweringTests
                 var a: int[] = [1, 2, 3];
                 var b: bit = M(q[0]);
                 var n: int = b;
+                var flag: bool = true;
                 if ({{condition}}) { H(q[0]); }
             }
             """);
@@ -144,13 +145,13 @@ public class AstExpressionLoweringTests
     [Fact]
     public void ParsesRelationalAboveEquality()
     {
-        // n == 1 < 2  ==  n == (1 < 2). Folding both comparison families at one level once made HIR claim
-        // (n == 1) < 2, so later consumers could disagree about one source expression.
+        // flag == 1 < 2 == flag == (1 < 2). The relational comparison must form the bool operand
+        // before equality combines it with flag.
         var eq = Assert.IsType<HirBinaryExpression>(
-            ConditionTree("n == 1 < 2"));
+            ConditionTree("flag == 1 < 2"));
         Assert.Equal(HirBinaryOperator.Equal, eq.Operator);
         Assert.Equal(
-            "n",
+            "flag",
             Assert.IsType<HirNameExpression>(eq.Left).Name);
         var lt = Assert.IsType<HirBinaryExpression>(eq.Right);
         Assert.Equal(HirBinaryOperator.LessThan, lt.Operator);

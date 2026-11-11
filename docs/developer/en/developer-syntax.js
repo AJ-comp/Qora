@@ -30,7 +30,7 @@
   ]);
 
   const qoraTypes = new Set([
-    "angle", "bit", "float", "int", "Qubit"
+    "angle", "bit", "bool", "float", "int", "Qubit"
   ]);
 
   const qoraLiterals = new Set();
@@ -309,7 +309,31 @@
     code.dataset.syntaxHighlighted = "true";
   }
 
+  function addQoraCodeContextBadges() {
+    const labels = {
+      en: "Qora example code",
+      ja: "Qora サンプルコード",
+      ko: "Qora 예제 코드"
+    };
+    const language = document.documentElement.lang.split("-")[0];
+    const label = labels[language] ?? labels.en;
+    const codeBlocks = document.querySelectorAll("pre > code.language-qora");
+
+    for (const code of codeBlocks) {
+      const pre = code.parentElement;
+      if (pre === null || pre.classList.contains("has-code-context-badge"))
+        continue;
+
+      const badge = document.createElement("span");
+      badge.className = "code-context-badge";
+      badge.textContent = label;
+      pre.classList.add("has-code-context-badge");
+      pre.prepend(badge);
+    }
+  }
+
   function highlightAll() {
+    addQoraCodeContextBadges();
     const codeBlocks = document.querySelectorAll(
       "pre > code.language-csharp, pre > code.language-qora");
     for (const code of codeBlocks)
