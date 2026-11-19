@@ -596,13 +596,13 @@
 
   <p>
     この状態を測定すると、必ず測定値0が出ます。<br>
-    Qoraで新しく準備したキュービットは、基本的に <code>|0⟩</code> 状態から始まります。
+    この本のコード例を実行するシミュレーターは、新しく準備したキュービットを <code>|0⟩</code> 状態から始めます。そのため、この本では新しく準備したキュービットが <code>|0⟩</code> から始まると読めば大丈夫です。この約束の根拠は、第10章であらためて確認します。
   </p>
 
   <div class="practice">
     <span class="practice-label">Qoraで実習してみよう</span>
     <h3>準備した直後のキュービットを測定してみよう</h3>
-    <pre><code>operation Main() {
+    <pre><code>operation Main(): bit {
     // キュービットを1つ準備
     // 準備直後の q[0] は |0⟩ 状態
     // 測定値0の振幅 = 1
@@ -610,8 +610,11 @@
     use q = Qubit[1];
 
     // q[0] を測定
-    // 理想的な実行環境: 測定値0
+    // 理想的な実行環境（ノイズなし）: 実行するたびに測定値0
     var result: bit = M(q[0]);
+
+    // 測定値を実行結果として返す
+    return result;
 }</code></pre>
   </div>
 
@@ -648,7 +651,7 @@
   <div class="practice">
     <span class="practice-label">Qoraで実習してみよう</span>
     <h3>Xゲートで <code>|1⟩</code> 状態を作ってみよう</h3>
-    <pre><code>operation Main() {
+    <pre><code>operation Main(): bit {
     // キュービットを1つ準備
     // 準備直後の q[0] は |0⟩ 状態
     use q = Qubit[1];
@@ -657,8 +660,11 @@
     // |0⟩ 状態が |1⟩ 状態に変わる
     X(q[0]);
 
-    // 理想的な実行環境: 測定値1
+    // 理想的な実行環境（ノイズなし）: 実行するたびに測定値1
     var result: bit = M(q[0]);
+
+    // 測定値を実行結果として返す
+    return result;
 }</code></pre>
   </div>
 

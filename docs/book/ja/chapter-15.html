@@ -557,7 +557,7 @@
   <div class="practice">
     <span class="practice-label">Qoraで実習してみよう</span>
     <h3>ベル状態回路を Qora で書いてみましょう</h3>
-    <pre><code>operation Main() {
+    <pre><code>operation Main(): int {
     // キュービットを 2 つ準備
     // 準備直後、q[0]q[1] は |00⟩ の状態
     use q = Qubit[2];
@@ -571,9 +571,15 @@
     CNOT(q[0], q[1]);
 
     // 2 つのキュービットを測定
-    // 理想的な実行環境では 00 または 11
+    // 理想的な実行環境（ノイズなし）: 何回も実行すると 00 と 11 だけがおよそ半々ずつ出る
     var first: bit = M(q[0]);
     var second: bit = M(q[1]);
+
+    // 2 つの測定値を 1 つの整数にまとめて実行結果として返す
+    // 左の桁が q[0]: 00 → 0, 01 → 1, 10 → 2, 11 → 3
+    // そのため実行結果には 0 と 3 だけが現れる
+    var result: bit[] = [first, second];
+    return AsInt(result);
 }</code></pre>
   </div>
 

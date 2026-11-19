@@ -715,7 +715,7 @@
   <div class="practice">
     <span class="practice-label">Qoraで実習してみよう</span>
     <h3>Hゲートを2回適用してみよう</h3>
-    <pre><code>operation Main() {
+    <pre><code>operation Main(): bit {
     // キュービットを1つ準備
     // 準備直後の q[0] は |0⟩ 状態
     use q = Qubit[1];
@@ -728,8 +728,11 @@
     // 強め合いと打ち消し合いが起きて再び |0⟩ 状態になる
     H(q[0]);
 
-    // 理想的な実行環境: 測定値 0
+    // 理想的な実行環境（ノイズなし）: 実行するたびに測定値 0
     var result: bit = M(q[0]);
+
+    // 測定値を実行結果として返す
+    return result;
 }</code></pre>
   </div>
                         <nav class="page-nav" aria-label="章の移動">
