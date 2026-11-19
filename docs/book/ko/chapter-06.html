@@ -638,7 +638,7 @@
   <div class="practice">
     <span class="practice-label">Qora로 실습해보기</span>
     <h3>H 게이트를 두 번 적용해보자</h3>
-    <pre><code>operation Main() {
+    <pre><code>operation Main(): bit {
     // 큐비트 하나 준비
     // 준비 직후 q[0]은 |0⟩ 상태
     use q = Qubit[1];
@@ -652,8 +652,11 @@
     // 측정 결과값 1의 진폭 기여는 상쇄
     H(q[0]);
 
-    // 이상적인 실행 환경: 측정 결과값 0
+    // 이상적인 실행 환경(노이즈 없음): 실행할 때마다 측정 결과값 0
     var result: bit = M(q[0]);
+
+    // 측정 결과값을 실행 결과로 돌려줌
+    return result;
 }</code></pre>
   </div>
 
@@ -678,7 +681,7 @@
 
   <p>
     그래서 최종 상태는 다시 <code>|0⟩</code> 상태로 돌아오게 돼요.<br>
-    이 계산은 11장에서 H 게이트의 변환 규칙을 놓고 더 자세히 다시 살펴봐요.
+    이 계산은 12장에서 H 게이트의 변환 규칙을 놓고 더 자세히 다시 살펴봐요.
   </p>
   <figure class="concept-figure">
     <img src="../../images/part1-quantum-concepts-overview-accurate.png" alt="큐비트 상태 벡터에서 진폭과 확률을 분리해 보여주고, 진폭이 H 게이트를 지나 출력 진폭과 확률로 이어지는 개요 그림">

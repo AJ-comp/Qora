@@ -642,7 +642,7 @@
   <div class="practice">
     <span class="practice-label">Qora로 실습해보기</span>
     <h3>X 게이트를 한 번 적용해보자</h3>
-    <pre><code>operation Main() {
+    <pre><code>operation Main(): bit {
     // 큐비트 하나 준비
     // 준비 직후 q[0]은 |0⟩ 상태
     use q = Qubit[1];
@@ -651,8 +651,11 @@
     // |0⟩ 상태가 |1⟩ 상태로 바뀜
     X(q[0]);
 
-    // 이상적인 실행 환경: 측정 결과값 1
+    // 이상적인 실행 환경(노이즈 없음): 실행할 때마다 측정 결과값 1
     var result: bit = M(q[0]);
+
+    // 측정 결과값을 실행 결과로 돌려줌
+    return result;
 }</code></pre>
   </div>
 <nav class="page-nav" aria-label="기존 초안 이동">

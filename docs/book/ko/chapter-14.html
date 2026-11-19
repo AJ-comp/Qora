@@ -577,22 +577,27 @@
   <h2 id="cnot-gate">14장. CNOT 게이트는 두 큐비트를 어떻게 연결할까?</h2>
   <p>
     CNOT 게이트는 두 큐비트에 작용하는 게이트예요.<br>
-    두 큐비트 상태는 <code>|00⟩</code>, <code>|01⟩</code>, <code>|10⟩</code>, <code>|11⟩</code>처럼 두 자리로 적었어요.<br>
-    CNOT을 읽을 때는 이 두 자리 중 첫 번째 자리를 먼저 보고, 그 값에 따라 두 번째 자리를 바꿀지 말지 결정해요.
+    두 큐비트 상태는 <code>|00⟩</code>, <code>|01⟩</code>, <code>|10⟩</code>, <code>|11⟩</code>처럼 두 자리로 적었고, 왼쪽 자리가 <code>q[0]</code>, 오른쪽 자리가 <code>q[1]</code>이었어요.<br>
+    CNOT은 두 큐비트를 인수로 받아요. 어느 큐비트가 어떤 역할을 하는지는 <strong>인수의 순서</strong>로 정해져요.
   </p>
 
   <div class="point-list">
     <div class="point">
-      <span class="marker">첫 번째 자리</span>
+      <span class="marker">첫 번째 인수</span>
       <span><strong>제어 큐비트</strong>라고 불러요.<br>이 큐비트의 값이 0 쪽이면 아무 일도 하지 않고, 1 쪽이면 대상 큐비트를 뒤집으라는 조건이 돼요.</span>
     </div>
     <div class="point">
-      <span class="marker">두 번째 자리</span>
+      <span class="marker">두 번째 인수</span>
       <span><strong>대상 큐비트</strong>라고 불러요.<br>제어 큐비트가 1인 경우에만 이 큐비트가 0에서 1로, 또는 1에서 0으로 바뀌어요.</span>
     </div>
   </div>
 
   <div class="rule">CNOT 게이트는 제어 큐비트가 1일 때만 대상 큐비트를 뒤집어요.</div>
+
+  <p>
+    이 장에서는 <code>CNOT(q[0], q[1])</code>처럼 써요. 그래서 상태의 첫 번째 자리(<code>q[0]</code>)를 먼저 보고, 그 값에 따라 두 번째 자리(<code>q[1]</code>)를 바꿀지 말지 결정하면 돼요.<br>
+    인수 순서를 바꿔 <code>CNOT(q[1], q[0])</code>이라고 쓰면 <code>q[1]</code>이 제어 큐비트, <code>q[0]</code>이 대상 큐비트가 돼요. 아래 표는 <code>CNOT(q[0], q[1])</code>의 경우예요.
+  </p>
 
   <div class="panel">
     <table>
@@ -629,7 +634,7 @@
   <div class="practice">
     <span class="practice-label">Qora로 실습해보기</span>
     <h3>CNOT 게이트로 두 큐비트를 연결해보자</h3>
-    <pre><code>operation Main() {
+    <pre><code>operation Main(): int {
     // 큐비트 두 개 준비
     // 준비 직후 q[0]q[1]은 |00⟩ 상태
     use q = Qubit[2];
@@ -642,9 +647,15 @@
     // q[0]이 제어 큐비트, q[1]이 대상 큐비트
     CNOT(q[0], q[1]);
 
-    // 이상적인 실행 환경: 00 또는 11
+    // 이상적인 실행 환경(노이즈 없음): 여러 번 실행하면 00과 11만 약 반반씩 나옴
     var first: bit = M(q[0]);
     var second: bit = M(q[1]);
+
+    // 두 측정 결과값을 정수 하나로 묶어 실행 결과로 돌려줌
+    // 왼쪽 자리가 q[0]: 00 → 0, 01 → 1, 10 → 2, 11 → 3
+    // 그래서 실행 결과에는 0과 3만 보임
+    var result: bit[] = [first, second];
+    return AsInt(result);
 }</code></pre>
   </div>
 <nav class="page-nav" aria-label="기존 초안 이동">
