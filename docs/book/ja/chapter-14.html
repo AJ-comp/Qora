@@ -550,11 +550,27 @@
 
   <p>
     CNOTゲートは、2つのキュービットに作用するゲートです。<br>
-    1つ目のキュービットを制御キュービットと呼び、2つ目のキュービットをターゲットキュービットと呼びます。<br>
-    制御キュービットが測定値1の側にあるときだけ、ターゲットキュービットにXゲートが適用されます。
+    2キュービットの状態は <code>|00⟩</code>、<code>|01⟩</code>、<code>|10⟩</code>、<code>|11⟩</code> のように2桁で書き、左の桁が <code>q[0]</code>、右の桁が <code>q[1]</code> でした。<br>
+    CNOTは2つのキュービットを引数として受け取ります。どのキュービットがどの役割を担うかは、<strong>引数の順序</strong>で決まります。
   </p>
 
+  <div class="point-list">
+    <div class="point">
+      <span class="marker">1つ目の引数</span>
+      <span><strong>制御キュービット</strong>と呼びます。<br>このキュービットの値が0の側なら何もせず、1の側ならターゲットキュービットを反転させるという条件になります。</span>
+    </div>
+    <div class="point">
+      <span class="marker">2つ目の引数</span>
+      <span><strong>ターゲットキュービット</strong>と呼びます。<br>制御キュービットが1の場合にだけ、このキュービットが0から1へ、または1から0へ変わります。</span>
+    </div>
+  </div>
+
   <div class="rule">CNOTゲートは、制御キュービットが1のときだけターゲットキュービットを反転させます。</div>
+
+  <p>
+    この章では <code>CNOT(q[0], q[1])</code> のように書きます。そのため、状態の1つ目の桁（<code>q[0]</code>）を先に見て、その値に応じて2つ目の桁（<code>q[1]</code>）を変えるかどうかを決めれば大丈夫です。<br>
+    引数の順序を入れ替えて <code>CNOT(q[1], q[0])</code> と書くと、<code>q[1]</code> が制御キュービット、<code>q[0]</code> がターゲットキュービットになります。下の表は <code>CNOT(q[0], q[1])</code> の場合です。
+  </p>
 
   <div class="panel">
     <table>
@@ -591,7 +607,7 @@
   <div class="practice">
     <span class="practice-label">Qoraで実習してみよう</span>
     <h3>CNOTゲートで2つのキュービットをつないでみよう</h3>
-    <pre><code>operation Main() {
+    <pre><code>operation Main(): int {
     // キュービットを2つ準備
     // 準備直後の q[0]q[1] は |00⟩ 状態
     use q = Qubit[2];
@@ -604,9 +620,15 @@
     // q[0] が制御キュービット、q[1] がターゲットキュービット
     CNOT(q[0], q[1]);
 
-    // 理想的な実行環境: 00 または 11
+    // 理想的な実行環境（ノイズなし）: 何回も実行すると 00 と 11 だけがおよそ半々ずつ出る
     var first: bit = M(q[0]);
     var second: bit = M(q[1]);
+
+    // 2つの測定値を1つの整数にまとめて実行結果として返す
+    // 左の桁が q[0]: 00 → 0, 01 → 1, 10 → 2, 11 → 3
+    // そのため実行結果には 0 と 3 だけが現れる
+    var result: bit[] = [first, second];
+    return AsInt(result);
 }</code></pre>
   </div>
                         <nav class="page-nav" aria-label="章の移動">

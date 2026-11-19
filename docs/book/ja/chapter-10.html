@@ -555,7 +555,8 @@
   </p>
 
   <p>
-    Qora プログラムは <code>operation</code> で始まり、最初に実行される操作にはふつう <code>Main</code> という名前を付けます。
+    Qora では、量子操作を <code>operation</code> として書きます。そのうち <code>Main</code> という名前の operation が、プログラムの始まる場所、つまり<strong>エントリーポイント</strong>です。<br>
+    これは慣例ではなく、言語の規則です。そのため <code>Main</code> は引数を持つことができず、ほかの場所から呼び出すこともできません。
   </p>
 
   <div class="practice">
@@ -576,7 +577,8 @@
     このコードはキュービットを1つ準備し、そのキュービットの束に <code>q</code> という名前を付けます。<br>
     <code>Qubit[1]</code> はキュービットが1個という意味で、
     そのキュービットは <code>q[0]</code> で指し示します。<br>
-    この本では、新しく準備したキュービットは計算基底状態 <code>|0⟩</code> から始まるものとして読んでいきます。
+    この本のコード例を実行するシミュレーターは、新しく準備したキュービットを計算基底状態 <code>|0⟩</code> から始めます。そのため、この本では新しく準備したキュービットは <code>|0⟩</code> から始まるものとして読んでいきます。<br>
+    ただし、Qora が生成する OpenQASM 3 の仕様そのものは、新しいキュービットの初期状態を定めていません。どの実行環境でも確実に <code>|0⟩</code> から始まるようにしたいときは、<code>Reset(q[0]);</code> のように初期化する方法があります。
   </p>
 
   <h3>ゲートを適用する</h3>
@@ -604,6 +606,24 @@
     測定した後には測定値 0 または測定値 1 のどちらかが古典ビットに保存されます。
   </p>
 
+  <h3>結果を返す</h3>
+
+  <p>測定結果を実行結果として見るには、<code>Main</code> がその値を返す必要があります。</p>
+
+  <div class="math mono">operation Main(): bit { … return result; }</div>
+
+  <p>
+    <code>Main()</code> のあとの <code>: bit</code> は、Main が測定値を1つ返すという印で、<code>return result;</code> がその値を返す行です。<br>
+    Qora は <code>Main</code> が返した値だけを実行結果として表示します。プログラムの中で測定しただけで返さなかった値は、実行結果に現れません。<br>
+    VS Code の Qora 拡張機能でプログラムを実行すると、同じプログラムを何回も実行して、返ってきた値がそれぞれ何回出たかを表示します。
+  </p>
+
+  <p>
+    2つのキュービットの結果を一緒に返すときは、2つの測定値を <code>var result: bit[] = [first, second];</code> のようにビット配列にまとめてから、<code>return AsInt(result);</code> で1つの整数として読んで返します。<br>
+    このとき <code>Main()</code> のあとには、整数を返すという意味で <code>: int</code> を書きます。<br>
+    左の桁を <code>q[0]</code> として読むので、<code>00</code> は 0、<code>01</code> は 1、<code>10</code> は 2、<code>11</code> は 3 になります。
+  </p>
+
   <h3>コメントを書く</h3>
 
   <p>
@@ -615,7 +635,7 @@
   <div class="practice">
     <span class="practice-label">コメント付きの Qora コード</span>
     <h3>コードの行ごとに状態の変化を書いてみましょう</h3>
-    <pre><code>operation Main() {
+    <pre><code>operation Main(): bit {
     // キュービットを1つ準備
     use q = Qubit[1];
 
@@ -624,6 +644,10 @@
 
     // q[0] を測定
     var result: bit = M(q[0]);
+
+    // 測定値を実行結果として返す
+    // 何回も実行すると 0 と 1 がおよそ半々ずつ出る
+    return result;
 }</code></pre>
   </div>
                         <nav class="page-nav" aria-label="章の移動">

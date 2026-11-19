@@ -616,7 +616,7 @@
   <div class="practice">
     <span class="practice-label">Qoraで実習してみよう</span>
     <h3>Xゲートを一度適用してみましょう</h3>
-    <pre><code>operation Main() {
+    <pre><code>operation Main(): bit {
     // キュービットを1つ準備
     // 準備直後、q[0]は|0⟩状態
     use q = Qubit[1];
@@ -625,8 +625,11 @@
     // |0⟩状態が|1⟩状態に変わる
     X(q[0]);
 
-    // 理想的な実行環境: 測定値 1
+    // 理想的な実行環境（ノイズなし）: 実行するたびに測定値 1
     var result: bit = M(q[0]);
+
+    // 測定値を実行結果として返す
+    return result;
 }</code></pre>
   </div>
                         <nav class="page-nav" aria-label="章の移動">

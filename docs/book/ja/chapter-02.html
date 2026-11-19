@@ -810,7 +810,7 @@
   <div class="practice">
     <span class="practice-label">Qoraで試してみよう</span>
     <h3>キュービットを1つ準備して測定してみよう</h3>
-    <pre><code>operation Main() {
+    <pre><code>operation Main(): bit {
     // キュービットを1つ準備
     // 準備直後の q[0] は |0⟩ 状態
     // 測定結果0の振幅 = 1
@@ -819,8 +819,11 @@
 
     // q[0] を測定
     // 測定は現在の振幅を確率として読み、結果を1つ得る段階
-    // 理想的な実行環境: 測定結果0
+    // 理想的な実行環境（ノイズなし）: 実行するたびに測定結果0
     var result: bit = M(q[0]);
+
+    // 測定結果を実行結果として返す
+    return result;
 }</code></pre>
   </div>
 

@@ -645,7 +645,7 @@
   <div class="practice">
     <span class="practice-label">Qoraで実習してみよう</span>
     <h3>キュービットを2つ準備してみよう</h3>
-    <pre><code>operation Main() {
+    <pre><code>operation Main(): int {
     // キュービットを2つ準備
     // 準備直後の全体状態は |00⟩
     // 測定結果00の振幅 = 1
@@ -657,6 +657,12 @@
 
     // 2つ目のキュービットを測定
     var second: bit = M(q[1]);
+
+    // 2つの測定結果を1つの整数にまとめて実行結果として返す
+    // 左の桁が q[0]: 00 → 0, 01 → 1, 10 → 2, 11 → 3
+    // 理想的な実行環境（ノイズなし）: 実行するたびに 00、つまり 0
+    var result: bit[] = [first, second];
+    return AsInt(result);
 }</code></pre>
   </div>
 
