@@ -1,6 +1,6 @@
 {
   "displayName": "Qora 언어",
-  "description": "Qora 양자 프로그래밍: 실시간 진단, 문법 하이라이팅, OpenQASM 3 변환과 반환값의 타입을 보존하는 로컬 실행.",
+  "description": "Qora 양자 회로를 작성하고 실시간 진단, OpenQASM 3 변환, 로컬 시뮬레이션을 사용하세요. 논리식과 상수식 기반 큐비트 크기를 지원합니다.",
   "command.transpile.title": "Qora: OpenQASM으로 변환",
   "command.showStages.title": "Qora: 컴파일 단계 보기 (AST / HIR / MIR / OpenQASM)",
   "command.openExample.title": "Qora: 예제 열기",

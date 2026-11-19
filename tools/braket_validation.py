@@ -2,8 +2,8 @@
 """Release-gate validation: compiled Qora entry return values on Braket's LocalSimulator.
 
 Requires: python -m pip install -r tools/requirements.txt  (Python 3.11-3.13) and a Debug build of
-src/Qora. Complements tools/qiskit_validation.py: Qiskit's importer covers the FLAT subset, Braket's
-local simulator covers the rich target. Only explicit entry returns are observable results. stdgates.inc in
+src/Qora. tools/qiskit_validation.py separately probes importer compatibility; it does not test the
+entry-return contract. Here only explicit entry returns are observable results. stdgates.inc in
 this directory is resolved from the cwd, so this script chdirs here first.
 """
 import os
@@ -576,6 +576,390 @@ operation Main(): bit {
     return M(q[0]);
 }
 """, {1}, shots=16)
+
+# The same approved scalar conversions must survive every value boundary at runtime.
+# These cases use deterministic values so every shot must have the one declared result.
+load_and_run("V1 bit-to-int across initialization, assignment, calls and array elements", """
+function Echo(value: int): int { return value; }
+function Widen(value: bit): int { return value; }
+operation WidenOperation(value: bit): int { return value; }
+operation Main(): int {
+    var source: bit = 1;
+    const initial: int = source;
+    var assigned: int = 0;
+    assigned = source;
+    var values: int[] = [source, Echo(source), Widen(source), WidenOperation(source)];
+    values[0] = source;
+    return initial * 100000 + assigned * 10000 + values[0] * 1000
+        + values[1] * 100 + values[2] * 10 + values[3];
+}
+""", {"111111"}, shots=32)
+
+load_and_run("V2 direct measurements widen into const and var int initializers", """
+operation Main(): int {
+    use q = Qubit[2];
+    X(q[1]);
+    const zero: int = M(q[0]);
+    var one: int = M(q[1]);
+    return zero * 10 + one;
+}
+""", {"1"}, shots=32)
+
+load_and_run("V3 direct measurements widen into scalar and array assignments", """
+operation Main(): int {
+    use q = Qubit[2];
+    X(q[0]);
+    var assigned: int = 0;
+    assigned = M(q[0]);
+    var values: int[] = new int[2];
+    values[0] = M(q[0]);
+    values[1] = M(q[1]);
+    return assigned * 100 + values[0] * 10 + values[1];
+}
+""", {"110"}, shots=32)
+
+load_and_run("V4 direct measurements widen into int array literal elements", """
+operation Main(): int {
+    use q = Qubit[2];
+    X(q[0]);
+    var values: int[] = [M(q[0]), M(q[1])];
+    return values[0] * 10 + values[1];
+}
+""", {"10"}, shots=32)
+
+load_and_run("V5 direct entry measurement widens into the returned int", """
+operation Main(): int {
+    use q = Qubit[1];
+    X(q[0]);
+    return M(q[0]);
+}
+""", {"1"}, shots=32)
+
+load_and_run("V6 direct helper measurement widens into the returned int", """
+operation Read(value: Qubit): int { return M(value); }
+operation Main(): int {
+    use q = Qubit[1];
+    X(q[0]);
+    return Read(q[0]);
+}
+""", {"1"}, shots=32)
+
+load_and_run("V7 int-to-float across initialization, assignment, calls and array elements", """
+function Echo(value: float): float { return value; }
+function Widen(value: int): float { return value; }
+operation WidenOperation(value: int): float { return value; }
+operation Main(): float {
+    var source: int = 2;
+    const initial: float = source;
+    var assigned: float = 0.0;
+    assigned = source;
+    var values: float[] = [source, Echo(source), Widen(source), WidenOperation(source)];
+    values[0] = source;
+    return initial + assigned + values[0] + values[1] + values[2] + values[3];
+}
+""", {12.0}, shots=32)
+
+load_and_run("V8 float-to-angle conversions preserve pi rotations", """
+function Echo(value: angle): angle { return value; }
+function Phase(value: float): angle { return value; }
+operation Main(): int {
+    use q = Qubit[6];
+    var source: float = pi;
+    const initial: angle = source;
+    var assigned: angle = 0.0;
+    assigned = source;
+    var values: angle[] = [source, Phase(source), Echo(source)];
+    values[0] = source;
+    Rx(initial, q[0]);
+    Rx(assigned, q[1]);
+    Rx(values[0], q[2]);
+    Rx(values[1], q[3]);
+    Rx(values[2], q[4]);
+    Rx(source, q[5]);
+    var result: bit[] = [M(q[0]), M(q[1]), M(q[2]), M(q[3]), M(q[4]), M(q[5])];
+    return AsInt(result);
+}
+""", {"63"}, shots=32)
+
+load_and_run("V9 integer literals zero and one remain valid bit values", """
+function Echo(value: bit): bit { return value; }
+function One(): bit { return 1; }
+operation Zero(): bit { return 0; }
+operation Main(): int {
+    const zero: bit = 0;
+    var one: bit = 1;
+    var assigned: bit = 1;
+    assigned = 0;
+    var values: bit[] = [zero, one, assigned, zero, Echo(1), One(), Zero()];
+    values[0] = 1;
+    return AsInt(values);
+}
+""", {"102"}, shots=32)
+
+# Logical values use the same short-circuit control flow in every expression position.
+# Encode mutations in the returned value so eager or repeated RHS evaluation is observable.
+load_and_run("L1 logical initializers skip unnecessary operation calls", """
+operation Stamp(var trace: int[], digit: int, result: bool): bool {
+    trace[0] = trace[0] * 10 + digit;
+    return result;
+}
+operation Main(): int {
+    var trace: int[] = [0];
+    const left: bool = false && Stamp(var trace, 1, true);
+    var right: bool = true || Stamp(var trace, 2, false);
+    if (!left && right) { return trace[0]; }
+    return -1;
+}
+""", {"0"}, shots=32)
+
+load_and_run("L2 logical initializers evaluate necessary operation calls once", """
+operation Stamp(var trace: int[], digit: int, result: bool): bool {
+    trace[0] = trace[0] * 10 + digit;
+    return result;
+}
+operation Main(): int {
+    var trace: int[] = [0];
+    var left = true && Stamp(var trace, 1, true);
+    const right = false || Stamp(var trace, 2, true);
+    if (left && right) { return trace[0]; }
+    return -1;
+}
+""", {"12"}, shots=32)
+
+load_and_run("L3 bool reassignment preserves skipped and executed RHS state", """
+operation Stamp(var trace: int[], digit: int, result: bool): bool {
+    trace[0] = trace[0] * 10 + digit;
+    return result;
+}
+operation Main(): int {
+    var trace: int[] = [0];
+    var ready: bool = true;
+    ready = false && Stamp(var trace, 1, true);
+    ready = ready || Stamp(var trace, 2, true);
+    ready = ready && Stamp(var trace, 3, true);
+    if (ready) { return trace[0]; }
+    return -1;
+}
+""", {"23"}, shots=32)
+
+load_and_run("L4 nested logical precedence preserves left-to-right call order", """
+operation Stamp(var trace: int[], digit: int, result: bool): bool {
+    trace[0] = trace[0] * 10 + digit;
+    return result;
+}
+operation Main(): int {
+    var trace: int[] = [0];
+    var ready = Stamp(var trace, 1, false)
+        || Stamp(var trace, 2, true) && Stamp(var trace, 3, false)
+        || Stamp(var trace, 4, true);
+    if (ready) { return trace[0]; }
+    return -1;
+}
+""", {"1234"}, shots=32)
+
+load_and_run("L5 function arguments and callable returns accept logical values", """
+operation Stamp(var trace: int[], digit: int, result: bool): bool {
+    trace[0] = trace[0] * 10 + digit;
+    return result;
+}
+function Keep(value: bool): bool { return value || false; }
+operation Predicate(var trace: int[]): bool {
+    return Stamp(var trace, 1, true) && !Stamp(var trace, 2, false);
+}
+operation Main(): int {
+    var trace: int[] = [0];
+    var ready = Keep(Predicate(var trace) && !false);
+    if (ready) { return trace[0]; }
+    return -1;
+}
+""", {"12"}, shots=32)
+
+load_and_run("L6 logical arguments capture earlier scalar values before later mutations", """
+operation Stamp(var trace: int[], digit: int, result: bool): bool {
+    trace[0] = trace[0] * 10 + digit;
+    return result;
+}
+function Encode(first: bool, second: bool, trace: int): int {
+    if (first) {
+        if (second) { return trace * 10 + 1; }
+        return trace * 10 + 2;
+    }
+    return trace * 10 + 3;
+}
+operation Main(): int {
+    var trace: int[] = [0];
+    return Encode(
+        trace[0] == 0 || Stamp(var trace, 1, true),
+        Stamp(var trace, 2, true) && Stamp(var trace, 3, true),
+        trace[0]);
+}
+""", {"231"}, shots=32)
+
+load_and_run("L7 indexed bool assignment keeps RHS mutations to the same array", """
+operation SetSecond(var flags: bool[]): bool {
+    flags[1] = true;
+    return true;
+}
+operation Main(): int {
+    var flags: bool[] = [false, false];
+    flags[0] = true && SetSecond(var flags);
+    if (flags[0] && flags[1]) { return 3; }
+    return -1;
+}
+""", {"3"}, shots=32)
+
+load_and_run("L8 bool array literal elements and writes preserve short-circuit order", """
+operation Stamp(var trace: int[], digit: int, result: bool): bool {
+    trace[0] = trace[0] * 10 + digit;
+    return result;
+}
+operation Main(): int {
+    var trace: int[] = [0];
+    var flags: bool[] = [
+        false && Stamp(var trace, 1, true),
+        true || Stamp(var trace, 2, false),
+        true && Stamp(var trace, 3, true)];
+    flags[0] = false || Stamp(var trace, 4, true);
+    if (flags[0] && flags[1] && flags[2]) { return trace[0]; }
+    return -1;
+}
+""", {"34"}, shots=32)
+
+load_and_run("L9 earlier readonly array arguments see later logical RHS mutations", """
+function Read(values: int[], ready: bool): int {
+    if (ready) { return values[0]; }
+    return -1;
+}
+operation Set(var values: int[]): bool {
+    values[0] = 7;
+    return true;
+}
+operation Main(): int {
+    var values: int[] = [0];
+    return Read(values, false || Set(var values));
+}
+""", {"7"}, shots=32)
+
+load_and_run("L10 loop assignments re-evaluate logical values and stop RHS effects", """
+operation Increment(var values: int[]): bool {
+    values[0] = values[0] + 1;
+    return true;
+}
+operation Main(): int {
+    var values: int[] = [0];
+    var active: bool = true;
+    while (active) {
+        active = values[0] < 3 && Increment(var values);
+    }
+    return values[0];
+}
+""", {"3"}, shots=32)
+
+load_and_run("L11 quantum RHS effects follow the taken logical edge", """
+operation Flip(target: Qubit): bool {
+    X(target);
+    return true;
+}
+operation Main(): int {
+    use q = Qubit[3];
+    var first = false && Flip(q[0]);
+    var second = true || Flip(q[1]);
+    var third = false || Flip(q[2]);
+    X(q[2]);
+    if (first || !second || !third) { return -1; }
+    var measured: bit[] = [M(q[0]), M(q[1]), M(q[2])];
+    return AsInt(measured);
+}
+""", {"0"}, shots=32)
+
+load_and_run("L12 returned logical values skip division by zero and compose negations", """
+function And(left: bool, divisor: int): bool {
+    return left && 10 / divisor > 0;
+}
+function Or(left: bool, divisor: int): bool {
+    return left || 10 / divisor > 0;
+}
+operation Main(): bool {
+    var left = And(false, 0);
+    var right = Or(true, 0);
+    var nested = !!true && !false || false;
+    return !left && right && nested;
+}
+""", {True}, shots=32)
+
+# Allocation sizes are evaluated before execution; only their concrete lengths reach the backend.
+load_and_run("S1 chained constants size qubits and measurement storage", """
+operation Main(): int {
+    const base: int = 2;
+    const width = base + 1;
+    use q = Qubit[width];
+    X(q[0]);
+    X(q[1]);
+    X(q[2]);
+    var results: bit[] = new bit[width];
+    results[0] = M(q[0]);
+    results[1] = M(q[1]);
+    results[2] = M(q[2]);
+    return AsInt(results);
+}
+""", {"7"}, shots=32)
+
+load_and_run("S2 arithmetic-sized classical arrays retain length and zero initialization", """
+operation Main(): int {
+    const count: int = (8 - 2) / 2;
+    var values: int[] = new int[count];
+    var weights: float[] = new float[count + 1];
+    var phases: angle[] = new angle[-(-count)];
+    var bits: bit[] = new bit[count * 2 / 3];
+    if (values[2] != 0 || weights[3] != 0.0 || phases[2] != 0.0 || bits[1] != 0) {
+        return -1;
+    }
+    return values.Count * 100 + weights.Count * 10 + phases.Count + bits.Count;
+}
+""", {"345"}, shots=32)
+
+load_and_run("S3 helper-local constants size classical array storage", """
+operation Local(): int {
+    const size: int = 3;
+    var values: int[] = new int[size + 1];
+    values[3] = 7;
+    return values.Count * 10 + values[3];
+}
+operation Main(): int {
+    return Local();
+}
+""", {"47"}, shots=32)
+
+load_and_run("S4 shadowed sizes and repeated array allocation preserve lexical scope", """
+operation Main(): int {
+    const size: int = 2;
+    var total: int = 0;
+    for i in 0..1 {
+        const size: int = 3;
+        var values: int[] = new int[size];
+        total = total + values[0] + values.Count;
+        values[0] = 100;
+    }
+    var outer: int[] = new int[size];
+    return total * 10 + outer.Count;
+}
+""", {"62"}, shots=32)
+
+load_and_run("S5 concrete Count values size subsequent qubits and arrays", """
+operation Main(): int {
+    const size: int = 2;
+    var initial: int[] = new int[size];
+    const width: int = initial.Count + 1;
+    use q = Qubit[width];
+    X(q[2]);
+    var results: bit[] = new bit[q.Count];
+    results[0] = M(q[0]);
+    results[1] = M(q[1]);
+    results[2] = M(q[2]);
+    var expanded: int[] = new int[initial.Count * 2];
+    return q.Count * 100 + expanded.Count * 10 + AsInt(results);
+}
+""", {"341"}, shots=32)
 
 print()
 print(f"{PASS} passed, {FAIL} failed")

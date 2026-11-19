@@ -322,7 +322,7 @@ public static class QoraCompiler
             resolved,
             nameof(Monomorphizer));
         var specialization = Monomorphizer.Run(
-            resolved.Program,
+            resolvedValidation,
             specializationRewrite);
         var specializedProgram = specialization.Program;
         HirSemanticArtifact specializedValidation;

@@ -32,7 +32,7 @@ public sealed class BoolTypeTests
     [InlineData("var value: float = true;")]
     [InlineData("var value: angle = false;")]
     [InlineData("var value: bool = 0.5;")]
-    [InlineData("var number: angle = 1; var value: bool = number;")]
+    [InlineData("var number: angle = 1.0; var value: bool = number;")]
     [InlineData("var source: bit = 1; var value: bool = source;")]
     [InlineData("var source: int = 1; var value: bool = source;")]
     [InlineData("var source = true; var value: bit = source;")]
@@ -219,7 +219,7 @@ public sealed class BoolTypeTests
     [InlineData("var value: bool = M(q[0]);")]
     [InlineData("var values: bool[] = [M(q[0])];")]
     public void MeasurementStillProducesBit(string body) =>
-        AssertRejected($"operation Main() {{ use q = Qubit[1]; {body} }}", "QSEM017");
+        AssertRejected($"operation Main() {{ use q = Qubit[1]; {body} }}", "QSEM037");
 
     [Fact]
     public void PredicateAndMeasurementTypesRemainDistinctInHirAndMir()

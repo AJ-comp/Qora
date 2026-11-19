@@ -349,7 +349,11 @@ public class GeneralIndexExpressionSemanticTests
                 var value: int = xs[CountBits(flags)];
             }
             """);
-        Assert.Contains(compiled.Diagnostics.Select(diagnostic => diagnostic.Error).ToList(), error => error.Code == "QSEM030");
+        Assert.Contains(compiled.Diagnostics, diagnostic =>
+            diagnostic.Stage == CompilationStage.OpenQasm
+            && diagnostic.Error.Code == "QSEM030");
+        Assert.DoesNotContain(compiled.Diagnostics, diagnostic =>
+            diagnostic.Stage == CompilationStage.HirValidation);
 
         var mono = HirTestFactory.Monomorphize(
             Assert.IsType<HirSnapshot>(

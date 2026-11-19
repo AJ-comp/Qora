@@ -307,18 +307,11 @@ internal static class SymbolTableBuilder
         var order = 0;
         var reported026 = new HashSet<SourceSpan?>();   // one diagnostic per document-qualified statement span
 
-        bool ContainsValueCall(HirExpression value) =>
-            HirExpressions.CallsIn(value).Any(call =>
-                QoraGates.Functions.ContainsKey(call.Name)
-                || ExpressionTypes.TryGetValueCallable(call, opById, out _));
-
-        // QSEM037 checks every return value and a declared or assigned scalar that consumes a callable
-        // result. Float-to-int narrowing and implicit bool conversions are also forbidden for ordinary
-        // assignments and array elements.
-        // Other historical scalar conversions remain unchanged. Shape is never loose: a whole T[]
-        // cannot silently become one T value.
+        // Initializers, assignments, returns, and array elements share one compatibility rule,
+        // independent of whether the value is a literal, measurement, or callable result.
+        // Shape is never loose: a whole T[] cannot silently become one T value.
         void CheckAssignable(HirNodeId statementId, QValueShape target, HirExpression value, Scope valueScope, SourceSpan? span,
-            string targetDescription, bool isReturn = false)
+            string targetDescription)
         {
             if (ExpressionTypes.TypeOf(value, valueScope, opById) is not { } source)
                 return;   // an existing unknown/call/qubit diagnostic owns the malformed expression
@@ -328,10 +321,7 @@ internal static class SymbolTableBuilder
                 return;   // QSEM036 gives the precise AsInt guidance
 
             var shapeMismatch = target.IsArray != source.IsArray;
-            var narrowsFloatToInt = target.Type == QType.Int && source.Type == QType.Float;
-            var involvesBool = target.Type == QType.Bool || source.Type == QType.Bool;
-            var valueContract = isReturn || ContainsValueCall(value) || narrowsFloatToInt || involvesBool;
-            if ((!shapeMismatch && !valueContract) || ExpressionTypes.CanAssign(target, source, value))
+            if (ExpressionTypes.CanAssign(target, source, value))
                 return;
 
             var reason = shapeMismatch
@@ -686,6 +676,12 @@ internal static class SymbolTableBuilder
                 switch (statement)
                 {
                     case HirQubitDeclarationStatement declaration:
+                        RecordExpr(
+                            scope,
+                            declaration.Size,
+                            $"size of {declaration.Name}",
+                            declaration.Size.Span ?? declaration.Span,
+                            classicalOnly: true);
                         ReportUsesBeforeShadow(
                             scope,
                             declaration.Name,
@@ -699,7 +695,8 @@ internal static class SymbolTableBuilder
                                 SymbolKind.Register,
                                 QType.Qubit,
                                 declSpan: declaration.Span,
-                                registerSize: declaration.Size,
+                                registerSize: ExpressionTypes.ConstantAllocationLength(
+                                    declaration.Size, scope, opById),
                                 isArray: true,
                                 declarationNodeId: declaration.Id));
                         break;
@@ -722,36 +719,9 @@ internal static class SymbolTableBuilder
                                 callStatement.Span,
                                 registerOk: true);
                         break;
-                    case HirVariableDeclarationStatement
-                    {
-                        Value: HirMeasurementExpression measurement,
-                    } declaration:
-                        // Record the measured target FIRST — before the bit is in scope — so `var r: bit = M(r[0])`
-                        // resolves the target `r` to the register (chain lookup), not the bit declared here.
-                        RecordMeasurementTarget(
-                            scope,
-                            measurement.Target,
-                            declaration.Span);
-                        // A measurement result follows the same point-of-declaration lexical scope as any
-                        // other classical binding. Same-scope duplicates are rejected by Declare; nested
-                        // bindings have distinct symbol identities and may shadow one another.
-                        ReportUsesBeforeShadow(
-                            scope,
-                            declaration.Name,
-                            scopeStart,
-                            declaration.Span);
-                        Declare(
-                            scope,
-                            scopeGraph.CreateSymbol(
-                                scope.Id,
-                                declaration.Name,
-                                SymbolKind.MeasureBit,
-                                QType.Bit,
-                                isConst: declaration.IsConst,
-                                declSpan: declaration.Span,
-                                declarationNodeId: declaration.Id));
-                        break;
                     case HirVariableDeclarationStatement declaration:
+                        // Record the initializer before declaring its binding, including a measurement's
+                        // target, so a nested declaration can still read the binding it shadows.
                         RecordValue(
                             scope,
                             declaration.Value,
@@ -762,7 +732,7 @@ internal static class SymbolTableBuilder
                             declaration.Value,
                             scope,
                             opById);
-                        // QSEM029 owns aggregate shape errors. Check restricted scalar conversions before
+                        // QSEM029 owns aggregate shape errors. Check scalar conversions before
                         // declaring the new name, so they use the same assignment rule and diagnostic
                         // ownership as scalar initializers. A malformed call can still suppress this
                         // candidate during validation instead of producing a second, cascading error.
@@ -775,14 +745,8 @@ internal static class SymbolTableBuilder
                         {
                             foreach (var element in literal.Elements)
                             {
-                                if (element is HirMeasurementExpression
-                                    || ExpressionTypes.TypeOf(element, scope, opById) is not
-                                        { IsArray: false } elementType)
-                                    continue; // Direct measurement mismatches belong to QSEM017.
-                                var restrictsElement = declaredElementType == QType.Bool
-                                    || elementType.Type == QType.Bool
-                                    || declaredElementType == QType.Int && elementType.Type == QType.Float;
-                                if (!restrictsElement)
+                                if (ExpressionTypes.TypeOf(element, scope, opById) is not
+                                    { IsArray: false })
                                     continue;
 
                                 CheckAssignable(
@@ -829,23 +793,25 @@ internal static class SymbolTableBuilder
                             declaration.Name,
                             scopeStart,
                             declaration.Span);
+                        var symbolType = declaration.Type ?? inferred?.Type;
+                        var symbolKind = declaration.IsConst ? SymbolKind.Const : SymbolKind.Var;
+                        if (declaration.Value is HirMeasurementExpression && symbolType == QType.Bit)
+                            symbolKind = SymbolKind.MeasureBit;
                         // A const's initializer folds HERE — the owner's site, the owner's scope (earlier
                         // consts are already in scope, so chains like `const m: int = k + 1` settle too).
                         // From now on the value is DATA on the symbol; no consumer re-reads the text.
                         Declare(scope, scopeGraph.CreateSymbol(
                             scope.Id,
                             declaration.Name,
-                            declaration.IsConst
-                                ? SymbolKind.Const
-                                : SymbolKind.Var,
-                            declaration.Type ?? inferred?.Type,
+                            symbolKind,
+                            symbolType,
                             declaration.IsConst,
                             declaration.IsConst
                                 ? HirExpressions.Render(declaration.Value)
                                 : null,
                             declaration.Span,
                             isArray: declaration.IsArray,
-                            arrayLength: ArrayLengthOf(declaration),
+                            arrayLength: ArrayLengthOf(declaration, scope),
                             declarationNodeId: declaration.Id,
                             foldedBound:
                                 declaration.IsConst
@@ -862,42 +828,6 @@ internal static class SymbolTableBuilder
                                         scope)
                                     : null));
                         break;
-                    case HirAssignmentStatement
-                    {
-                        Value: HirMeasurementExpression measurement,
-                    } assignment:
-                    {
-                        var assignedReference = assignment.Target switch
-                        {
-                            HirNameExpression name => name,
-                            HirIndexExpression
-                            {
-                                Receiver: HirNameExpression name,
-                            } => name,
-                            _ => null,
-                        }
-                            ?? throw new InvalidOperationException(
-                                "QINTERNAL: semantic binding received an unsupported assignment target");
-                        var assignedName = assignedReference.Name;
-                        var assignedIndex =
-                            HirExpressions.AssignmentIndexOf(assignment.Target);
-                        Record(
-                            scope,
-                            assignedReference,
-                            $"assign {assignedName}",
-                            assignment.Span);
-                        RecordExpr(
-                            scope,
-                            assignedIndex,
-                            $"assign index {assignedName}[{HirExpressions.Render(assignedIndex)}]",
-                            assignment.Span,
-                            classicalOnly: true);
-                        RecordMeasurementTarget(
-                            scope,
-                            measurement.Target,
-                            assignment.Span);
-                        break;
-                    }
                     case HirAssignmentStatement assignment:
                     {
                         var assignedReference = assignment.Target switch
@@ -973,8 +903,7 @@ internal static class SymbolTableBuilder
                                 returnedValue,
                                 scope,
                                 returnStatement.Span,
-                                "callable return",
-                                isReturn: true);
+                                "callable return");
                         break;
                     case HirForStatement loopStatement:
                         RecordExpr(
@@ -1126,13 +1055,14 @@ internal static class SymbolTableBuilder
             }
         }
 
-        static int? ArrayLengthOf(
-            HirVariableDeclarationStatement declaration) =>
+        int? ArrayLengthOf(
+            HirVariableDeclarationStatement declaration,
+            Scope scope) =>
             declaration.Value switch
         {
             HirArrayLiteralExpression literal => literal.Elements.Count,
-            HirArrayCreationExpression allocation when allocation.Length >= 0 =>
-                allocation.Length,
+            HirArrayCreationExpression allocation =>
+                ExpressionTypes.ConstantAllocationLength(allocation.Length, scope, opById),
             _ => null,
         };
     }

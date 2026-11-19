@@ -23,7 +23,7 @@ public class ConstTests
     public void CompileTimeConstRemainsAConstSymbolAndALiteralTargetValue()
     {
         var integer = AssertConstSymbol(
-            "operation Main(){ use q=Qubit[1]; const c: int = 5; Rx(c, q[0]); }",
+            "operation Main(){ use q=Qubit[1]; const c: int = 5; var radians: float = c; Rx(radians, q[0]); }",
             "c",
             QType.Int);
         var real = AssertConstSymbol(
@@ -45,7 +45,7 @@ public class ConstTests
     public void RuntimeBoundConstStaysImmutableInTheSourceModelAndLowersToSsa()
     {
         var artifact = AssertConstSymbol(
-            "operation Main(){ use q=Qubit[1]; var x: int=5; const c: int = x; Rx(c, q[0]); }",
+            "operation Main(){ use q=Qubit[1]; var x: int=5; const c: int = x; var radians: float = c; Rx(radians, q[0]); }",
             "c",
             QType.Int);
 
@@ -59,8 +59,8 @@ public class ConstTests
 
     [Theory]
     [InlineData("operation Main(){ use q=Qubit[2]; const a = M(q[0]); if(a==1){ X(q[1]); } }")]
-    [InlineData("operation Main(){ use q=Qubit[1]; var x: int=5; const c: int=x; Rx(c, q[0]); }")]
-    [InlineData("operation Main(){ use q=Qubit[1]; var x=5; x=10; Rx(x, q[0]); }")]
+    [InlineData("operation Main(){ use q=Qubit[1]; var x: int=5; const c: int=x; var radians: float = c; Rx(radians, q[0]); }")]
+    [InlineData("operation Main(){ use q=Qubit[1]; var x=5; x=10; var radians: float = x; Rx(radians, q[0]); }")]
     public void AcceptsValidBindings(string source) =>
         Compiler.Accepts(source);
 

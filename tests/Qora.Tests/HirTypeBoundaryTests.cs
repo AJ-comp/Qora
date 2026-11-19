@@ -97,11 +97,11 @@ public sealed class HirTypeBoundaryTests
                 const c: int = 1;
                 var i: int = 0;
                 i = c;
-                var b: bit = 2;
-                var a: angle = 1;
+                var b: bit = 1;
+                var a: angle = 1.0;
                 var ints: int[] = [1];
-                var bits: bit[] = [2];
-                var angles: angle[] = [1];
+                var bits: bit[] = [1];
+                var angles: angle[] = [1.0];
                 ints[0] = i;
                 if (i != 0) {
                     i = 1;
@@ -170,7 +170,7 @@ public sealed class HirTypeBoundaryTests
                 var a: angle = f;
                 var b: bit = 1;
                 if (i != 0) {}
-                Rx(1, q[0]);
+                Rx(1.0, q[0]);
             }
             """);
         Assert.True(compilation.Succeeded);
@@ -191,7 +191,7 @@ public sealed class HirTypeBoundaryTests
         Assert.Contains((MirType.Scalar(QType.Int), MirType.Scalar(QType.Float)), conversions);
         Assert.Contains((MirType.Scalar(QType.Float), MirType.Scalar(QType.Angle)), conversions);
         Assert.Contains((MirType.Scalar(QType.Int), MirType.Scalar(QType.Bit)), conversions);
-        Assert.Contains((MirType.Scalar(QType.Int), MirType.Scalar(QType.Angle)), conversions);
+        Assert.DoesNotContain((MirType.Scalar(QType.Int), MirType.Scalar(QType.Angle)), conversions);
 
         var hirArtifact = Assert.IsType<HirSemanticArtifact>(compilation.Hir.EffectAnalysis);
         foreach (var conversion in conversionInstructions)

@@ -1,4 +1,3 @@
-using System.Globalization;
 using Janglim.FrontEnd.Ast;
 
 namespace Qora.Ir;
@@ -296,10 +295,9 @@ internal static class AstToHirLowering
                     !TypeKeywords.Contains(text)
                     && !IsNumber(text))
             ?? string.Empty;
-        var size = terms.FirstOrDefault(IsNumber) ?? string.Empty;
         return session.QubitDeclaration(
             name,
-            Count(size),
+            LowerValueExpression(ExpressionOf(syntax), session),
             span);
     }
 
@@ -461,11 +459,9 @@ internal static class AstToHirLowering
         var type = ParseType(
                 terms.FirstOrDefault(TypeKeywords.Contains))
             ?? QType.Int;
-        var length = terms.FirstOrDefault(IsNumber)
-            ?? string.Empty;
         return session.ArrayCreation(
             type,
-            Count(length),
+            LowerValueExpression(ExpressionOf(syntax), session),
             AstExpressionLowering.SpanOf(syntax, session));
     }
 
@@ -474,8 +470,7 @@ internal static class AstToHirLowering
         AstToHirLoweringSession session,
         SourceSpan? span)
     {
-        var condition = ConditionOf(syntax)
-            .ToHirCondition(session);
+        var condition = LowerValueExpression(ExpressionOf(syntax), session);
         var elseIndex = -1;
         for (var index = 0; index < syntax.Items.Count; index++)
         {
@@ -492,7 +487,7 @@ internal static class AstToHirLowering
         for (var index = 0; index < syntax.Items.Count; index++)
         {
             if (syntax.Items[index] is not AstNonTerminal statement
-                || statement.Name == "Condition")
+                || statement.Name == "Expr")
             {
                 continue;
             }
@@ -571,8 +566,7 @@ internal static class AstToHirLowering
         AstToHirLoweringSession session,
         SourceSpan? span)
     {
-        var condition = ConditionOf(syntax)
-            .ToHirCondition(session);
+        var condition = LowerValueExpression(ExpressionOf(syntax), session);
         var statements = BodyStatements(syntax)
             .Select(statement => LowerStatement(statement, session))
             .ToArray();
@@ -596,7 +590,7 @@ internal static class AstToHirLowering
             session.Block(
                 statements,
                 BlockSpan(statements) ?? span),
-            ConditionOf(syntax).ToHirCondition(session),
+            LowerValueExpression(ExpressionOf(syntax), session),
             span);
     }
 
@@ -611,15 +605,6 @@ internal static class AstToHirLowering
         IEnumerable<HirStatement> statements) =>
         AstExpressionLowering.Cover(
             statements.Select(statement => statement.Span));
-
-    private static int Count(string text) =>
-        int.TryParse(
-            text,
-            NumberStyles.None,
-            CultureInfo.InvariantCulture,
-            out var value)
-            ? value
-            : -1;
 
     private static string QualifiedText(AstNonTerminal syntax) =>
         string.Concat(
@@ -657,15 +642,7 @@ internal static class AstToHirLowering
         AstNonTerminal syntax) =>
         syntax.Items
             .OfType<AstNonTerminal>()
-            .Where(item =>
-                item.Name != "Condition"
-                && item.Name != "Expr");
-
-    private static AstNonTerminal? ConditionOf(
-        AstNonTerminal syntax) =>
-        syntax.Items
-            .OfType<AstNonTerminal>()
-            .FirstOrDefault(item => item.Name == "Condition");
+            .Where(item => item.Name != "Expr");
 
     private static AstNonTerminal? ExpressionOf(
         AstNonTerminal syntax) =>

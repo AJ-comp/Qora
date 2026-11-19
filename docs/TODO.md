@@ -81,12 +81,19 @@ declared at `Main` top level and lowers to OpenQASM general arrays. (clean)
   arguments (`BoolType.size` is missing), also reproducible without Qora using `array[bool, 2]`.
   Reported in [issue #429](https://github.com/amazon-braket/amazon-braket-default-simulator-python/issues/429),
   fixed by [PR #430](https://github.com/amazon-braket/amazon-braket-default-simulator-python/pull/430).
-  This fix plus PRs #425/#426/#428 passes the current 54-case Qora execution suite locally; the fixes
+  This fix plus PRs #425/#426/#428 passes the current 80-case Qora execution suite locally; the fixes
   still await upstream merge and release and are not included in an ordinary package install.
+  The pinned stock simulator 1.43.1 passes 71 cases and fails 9. In addition to the existing readonly-array,
+  helper-loop, and Boolean-array failures, a helper returning a measured bit as `int` can produce 0
+  instead of 1. Published Qora 0.40.0 emits the same instructions and result metadata for that added case;
+  standalone OpenQASM reproduces the stock failure and passes with the combined patches.
+  Three logical-value cases also hit the already-known Boolean-array and readonly-array limitations;
+  these are additional regressions for existing backend bugs, not new bug categories.
+  All five compile-time allocation cases pass on both stock and combined-patch environments.
   The affected regressions remain enabled.
 - **Additional Braket execution bugs — unresolved:** measuring a `Qubit[]` helper-parameter element
   can fail, and certain noncontiguous controlled-gate layouts can return incorrect results. Both
-  reproduce in standalone OpenQASM and remain outside the passing 54-case suite, including with
+  reproduce in standalone OpenQASM and remain outside the passing 80-case suite, including with
   the four pending patches combined. Do not treat the passing suite as support for these cases.
 - **`within { } apply { }` conjugation (auto-uncompute)** ⚛️ — run U, then V, then automatically
   run U† — the U·V·U† scratch/ancilla pattern; one of the most important quantum lessons. OpenQASM
@@ -103,9 +110,13 @@ declared at `Main` top level and lowers to OpenQASM general arrays. (clean)
   the pass cannot handle yet are loud errors, never silent skips. The allocation-lowering pass must
   consume the scope-exit guarantee from the exact MIR cleanup result; no parallel HIR event, liveness,
   verdict, or placement ledger is retained. Decided as a goal 2026-07-10. (hard)
-- **Expression-sized qubit allocation** — loop bounds now accept expressions, and `Qubit[]` helpers can
-  iterate with `.Count`. However, `use q = Qubit[N]` still requires a positive literal size; accepting a
-  const/expression there needs compile-time evaluation before allocation. (workable)
+- **Compile-time expression-sized allocation** — implemented in v0.41.0: `Qubit[N]` and `new T[N]`
+  accept integer literals, earlier compile-time integer `const` bindings, arithmetic, parentheses,
+  and known concrete `.Count` values. The shared rule requires a positive 32-bit final size and
+  checked signed 64-bit arithmetic; zero, negatives, out-of-range results, division by zero,
+  non-integer values, and runtime-dependent sizes are compile errors. This does not execute functions
+  at compile time or defer allocation sizes to parameter specialization. Runtime-sized allocation
+  and local qubit allocation remain separate work. (clean)
 - **Register measurement + `MResetZ`** ⚛️ — measure a whole register (`M(q)` → `c = measure q;`) and add
   a measure-and-reset combinator. Today a whole declaration or assignment RHS accepts one single-qubit
   reference, either `M(a)` or `M(q[i])`, and conditions also accept indexed `M(q[i])`; whole-register

@@ -1,4 +1,4 @@
-# Qora v0.40.0 — complete language reference for AI assistants
+# Qora v0.41.0 — complete language reference for AI assistants
 
 Qora is a quantum programming language (Q#/C#-flavored syntax) that compiles to OpenQASM 3.
 File extension: `.qor`. This file is the full, authoritative surface spec: everything below is
@@ -133,11 +133,32 @@ operation Main()                // global namespace; the entry point; takes NO p
   which holds a 0/1 result. `true`/`false` and comparisons produce `bool`. There is no implicit conversion
   between `bool` and any other classical scalar type, in either direction. This rule applies to
   initializers, assignments, array elements, callable arguments, and returns.
+- Scalar assignment compatibility is identical in variable/constant initializers, assignments,
+  function/operation arguments, returns, array literal elements, and indexed element writes. The allowed
+  cases are the same type, `bit` → `int`, `int` → `float`, `float` → `angle`, and the integer literals
+  `0` or `1` → `bit`. These conversions are not implicitly chained. All other source/destination pairs
+  are rejected, including `float` → `int`, `angle` → `int`, `bit` → `float`, and arbitrary `int` → `bit`.
+  An `int` variable holding 0 or 1 is not a literal and does not qualify for conversion to `bit`.
+  Array arguments require exact element types; these scalar rules do not convert or reinterpret whole
+  array storage. For example, `int[]` cannot be passed as `float[]`, but individual integer values may
+  initialize or be assigned to elements of a `float[]`.
+  Built-in gate arguments use the same contract: `Rx(1.0, q[0])` and `Rx(pi/2, q[0])` accept `float` →
+  `angle`, but `Rx(1, q[0])` is QSEM006; there is no implicit `int` → `float` → `angle` chain.
 - `use name = Qubit[N];` — allocate a register. The name becomes visible at this declaration point,
   and the declaration is allowed only at the entry operation's top level, not inside loops/branches.
+  `N` uses the same compile-time size rule as `new T[N]`: one scalar `int` expression that resolves to
+  1..2,147,483,647. Integer literals, earlier compile-time integer `const` bindings, parentheses,
+  unary `-`, `+`/`-`/`*`/`/`, and a concrete array's `.Count` are supported. For example,
+  `const n: int = 3; use q = Qubit[n]; var xs: int[] = new int[n + 1];` allocates lengths 3 and 4.
+  Integer arithmetic is checked at signed 64-bit width, and the final size must fit the positive
+  32-bit range. Zero, negative or oversized results, arithmetic overflow, division by zero, and
+  non-`int` sizes are compile errors. Mutable variables, scalar parameters, calls, and unresolved
+  symbolic array lengths are not compile-time sizes. `const` means immutable, not compile-time:
+  `const n: int = ReadSize();` does not permit `Qubit[n]` or `new int[n]`. There is no function execution
+  at compile time, deferred allocation-size specialization, or runtime-sized allocation.
 - Classical arrays use `bool[]`, `int[]`, `float[]`, `bit[]`, or `angle[]`. Declare them anywhere a scalar
   declaration goes — `Main`, helper operations, loops, branches — either with a non-empty literal
-  (`var xs: int[] = [1, 2, 3];`) or a positive literal-sized, zero-initialized allocation
+  (`var xs: int[] = [1, 2, 3];`) or a compile-time-sized, zero-initialized allocation
   (`var xs: int[] = new int[3];`); the compiler handles OpenQASM's global-scope rule automatically. Helper
   operations may also receive matching `T[]` parameters. Read/write elements with `xs[i]`, and read
   the length with `xs.Count`. A pure function call is a valid literal element, for example
@@ -145,8 +166,16 @@ operation Main()                // global namespace; the entry point; takes NO p
   Backend limitation: the unpatched Braket local simulator used for validation crashes when reading `bool[]`
   elements or passing Boolean arrays (`BoolType.size` is missing). This also reproduces with standalone
   OpenQASM `array[bool, 2]`. Issue #429 and PR #430 in amazon-braket-default-simulator-python track the fix.
-  Combining PR #430 with #425/#426/#428 passes the current 54-case Qora execution suite locally. Upstream merge and
+  Combining PR #430 with #425/#426/#428 passes the current 80-case Qora execution suite locally. Upstream merge and
   release remain pending; do not claim an ordinary package install includes these fixes or change Boolean semantics.
+  The pinned stock simulator 1.43.1 passes 71 cases and fails 9. Alongside the existing readonly-array,
+  helper-loop, and Boolean-array failures, a helper returning a measured bit as `int` can yield 0 instead
+  of 1. That case emits the same instructions and result metadata with published Qora 0.40.0 and the current
+  compiler; standalone OpenQASM also fails on stock and succeeds with the combined patches. It is not
+  a newly introduced Qora regression.
+  Three logical-value cases additionally hit known backend limitations: two Boolean-array failures
+  (`BoolType.size`) and one readonly-array parser failure, not three new underlying bugs.
+  The five compile-time allocation cases pass with both the stock simulator and combined patches.
   Additional Braket failures remain outside that passing suite even with those patches: measuring a
   Qubit[] helper-parameter element can fail, and some noncontiguous controlled-gate layouts produce
   wrong results. Both reproduce in standalone OpenQASM; passing the suite does not establish universal simulator support.
@@ -205,13 +234,26 @@ operation Main()                // global namespace; the entry point; takes NO p
 - When the type is omitted, the declaration keeps the initializer's semantic type through emission.
   Literals, referenced variables, operators, array elements, and function calls use the same rule:
   `var truth = true` and `var same = 1 == 1` are `bool`, `var copy = anAngle` is `angle`,
-  and `var x = f()` uses `f`'s return type. Comparisons can be stored, assigned, passed, and returned;
-  logical `!`, `&&`, and `||` remain condition-only syntax.
+  and `var x = f()` uses `f`'s return type. Comparisons and logical `!`, `&&`, and `||` expressions can be
+  stored, assigned, passed, returned, and used as array elements. Conditions use this same expression
+  grammar; logical operators require `bool` operands and produce `bool`.
+  Logical evaluation is left to right and short-circuited: `a && b` evaluates `b` only if `a` is true,
+  while `a || b` evaluates `b` only if `a` is false. Skipped operands perform no calls, array reads,
+  quantum effects, or mutable-array writes. This applies in value positions as well as conditions.
+  Short-circuiting does not suppress compile-time name or type errors in either operand.
+  Precedence, high to low: unary `!`/`-`, `*`/`/`, `+`/`-`, ordering comparisons, equality comparisons,
+  `&&`, then `||`. Groups such as `(a || b) && !c` and repeated negation `!!a` are valid. Existing
+  measurement-placement rules below still apply; this does not make `M(...)` an ordinary composable
+  logical value expression.
 - `var r: bit = M(q[i]);` — measure qubit i into a fresh bit. `r = M(q[i]);` re-measures.
   A whole declaration/assignment RHS may instead use `M(a)` when `a` is one `Qubit`. An indexed
   measurement is also legal inside an `if`/`while`/`repeat` condition as `M(q[i]) == 1`; the common lowering
   pass hoists it to a fresh bit at the condition's evaluation point. Measurement is not a value for
   ordinary arithmetic or call arguments (measure into a bit first).
+  In already-supported measurement positions, the produced `bit` follows ordinary scalar compatibility:
+  `var count: int = M(q[i]);` is valid, and an operation returning `int` may `return M(q[i]);`.
+  A `float`, `angle`, or `bool` destination is incompatible (QSEM037), not an automatic reinterpretation
+  of the measurement result. This changes destination compatibility, not measurement placement.
 - `operation Name(params): T { ... return value; }` may return one scalar `bool`/`int`/`bit`/`float`/`angle`.
   Omitting `: T` keeps it void; a void operation can exit with `return;` but cannot return a value.
   Typed operations must return a compatible value on every path. They can be used in expressions inside
@@ -221,7 +263,6 @@ operation Main()                // global namespace; the entry point; takes NO p
   a void entry exposes no measurement results. The runner never adds final measurements.
   Array/tuple return types are not supported. Angle execution results are radians.
   Boolean execution results remain JSON `true`/`false`; bit results remain integer `0`/`1`.
-  Qubit allocation sizes and `new T[N]` array lengths must be positive literal integers.
 - CLI JSON includes `entryResult: { type, outputName }` from the same compilation as `qasm`.
   Runners read only that declared OpenQASM output, never guess from names or expose all measurements.
   For void entries, OpenQASM carries an internal completion marker set to 1 so Braket does not fall back
@@ -272,7 +313,8 @@ operation Main()                // global namespace; the entry point; takes NO p
 - `if (cond) { } else { }` (else-if allowed), `while`, and `until` require a `bool` condition.
   Compare bits or numbers explicitly, such as `r == 1` or `count != 0`; `if (r)` and `if (count)` are errors.
   Equality accepts two booleans or compatible numeric operands; ordering comparisons require numbers.
-  Logical `&&`, `||`, and `!` accept only booleans and are available only in conditions.
+  Logical `&&`, `||`, and `!` accept only booleans; the same expressions are also available in ordinary
+  value positions. `&&` and `||` retain short-circuit evaluation in both contexts.
 - `for i in start..stop { }` — inclusive range; bounds are expressions, so
   `for i in 0..values.Count-1 { }` and `for i in 0..end() { }` are valid when the bound is one `int`.
 - `while (cond) { }` · `repeat { } until (cond);`
@@ -334,8 +376,10 @@ QSEM012 `use` outside the entry operation's top level
 QSEM013 name shadows a built-in where qualification cannot disambiguate
 QSEM014 same qubit (or overlapping register/element) twice in one gate; overlapping exclusive storage access
 QSEM015 duplicate declared names in one operation
-QSEM016 non-integer or proven-out-of-range array/qubit index / indexing a scalar or single qubit
-QSEM017 measurement assigned to a non-bit     QSEM018 ambiguous unqualified name (candidates listed)
+QSEM016 invalid compile-time allocation size; non-integer or proven-out-of-range array/qubit index;
+        indexing a scalar or single qubit
+QSEM017 retired/reserved; measurement results use the ordinary scalar compatibility checks
+QSEM018 ambiguous unqualified name (candidates listed)
 QSEM019 unknown namespace/member in qualified name or `open`
 QSEM020 import file not found/unreadable/no file context
 QSEM021 retired/reserved; cyclic back-edges reuse the canonical `SourceDocumentRef` and are visited once
@@ -352,7 +396,7 @@ QSEM033 impure function body (a gate, `use`, measurement, or operation call insi
 QSEM034 a qubit in a function signature (function parameters/return are classical)
 QSEM035 a void callable returns a value, a typed callable returns no value, or a typed callable has a path with no return
 QSEM036 a whole `bit[]` register used as a number or ordered (use `AsInt(f)`)
-QSEM037 incompatible function return/result type, or a whole classical array used as one scalar
+QSEM037 incompatible scalar initializer/assignment/return/array-element type, or array/scalar shape mismatch
 QSEM038 invalid ownership/access contract (unsupported shape, marker mismatch, or read-only mutation)
 QSEM039 use of a caller binding after its ownership was transferred with `move`
 QSEM040 the program contains no callable at all, or contains functions but no runnable operation
@@ -376,7 +420,7 @@ qora --json [file] [--stages] [--base-dir <dir>] [--source-path <path>]
   original/FQN source names unmangled. These views are read from the same completed immutable
   `Compilation`; the CLI does not rerun compiler passes to reconstruct them. A stage not reached
   because of an earlier error is returned as an empty string.
-- Emitted QASM starts with `// generated by Qora v0.40.0`.
+- Emitted QASM starts with `// generated by Qora v0.41.0`.
 
 ## Executing programs
 
@@ -433,6 +477,8 @@ operation Main() {
 - `var n: int = f;` / `f + 1` / `if (f)` / `f == 1` on a `bit[]` (QSEM036) — a whole register is not a
   number; write `AsInt(f)`. (A single bit `f[i]` is already a value and needs no conversion.)
 - `Rx(q[0], pi/2)` (QSEM006) — rotations take the ANGLE first.
+- `Rx(1, q[0])` (QSEM006) — an integer is not implicitly converted to `angle`; use `1.0` for the
+  permitted `float` → `angle` conversion. The same rule applies to user-callable `angle` parameters.
 - `qubit` lowercase as a type — the keyword is `Qubit` (capital Q).
 - Type BEFORE the name (`int n`, `Qubit[] q`) — annotations are trailing: `n: int`, `q: Qubit[]`.
 - Writing an ordinary array parameter, omitting `var` at either the declaration or call site, or adding an

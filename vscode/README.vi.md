@@ -7,9 +7,9 @@
 đổi sang **OpenQASM 3**. Tiện ích này cung cấp cho tệp `.qor` khả năng tô sáng cú pháp, chú thích khi di
 chuột, **báo lỗi thời gian thực**, một lệnh **chuyển đổi** và thực thi cục bộ giữ nguyên kiểu của giá trị trả về.
 
-Tiện ích **0.33.0** đi kèm **Qora 0.40.0**.
-Xem [ghi chú phát hành tiện ích](CHANGELOG.md#0330--2026-11-11) và
-[hướng dẫn chuyển đổi mã nguồn](https://github.com/AJ-comp/Qora/blob/main/CHANGELOG.md#0400--2026-11-11).
+Tiện ích **0.34.0** đi kèm **Qora 0.41.0**. Bạn có thể dùng biểu thức logic đoản mạch làm giá trị `bool` và dùng biểu thức nguyên tính được lúc biên dịch để xác định kích thước thanh ghi qubit hoặc mảng cổ điển.
+Xem [ghi chú phát hành tiện ích](CHANGELOG.md#0340--2026-11-19) và
+[hướng dẫn chuyển đổi mã nguồn](https://github.com/AJ-comp/Qora/blob/main/CHANGELOG.md#0410--2026-11-19).
 
 ## Tính năng
 
@@ -38,7 +38,7 @@ Số nguyên lớn được giữ chính xác dưới dạng thập phân. Trìn
 ## Giới hạn đã biết của trình mô phỏng
 
 Thiết lập tiêu chuẩn dùng Braket SDK 1.127.8 và default simulator 1.43.1, không chứa các bản sửa chưa phát hành dùng khi kiểm chứng cục bộ.
-Bộ kiểm thử thực thi Qora gồm 54 trường hợp chỉ vượt qua khi kết hợp bốn bản sửa Braket; cài đặt thông thường vẫn bị hạn chế ở mảng Boolean và các đường thực thi bị ảnh hưởng khác.
+Trình mô phỏng mặc định vượt qua 71 trong 80 trường hợp kiểm thử. Khi kết hợp bốn bản sửa Braket, cả 80 trường hợp đều đạt; bản cài đặt tiêu chuẩn vẫn có hạn chế với mảng Boolean và một số trường hợp khác.
 Ngay cả khi kết hợp các bản sửa, việc đo phần tử của tham số helper `Qubit[]` và một số bố trí qubit không liên tiếp của cổng có điều khiển vẫn chưa được sửa.
 Hãy xem [giới hạn backend](https://github.com/AJ-comp/Qora/blob/main/CHANGELOG.md#known-execution-limitations) trước khi dùng các chương trình bị ảnh hưởng.
 Biên dịch thành công không đảm bảo trình mô phỏng luôn trả về kết quả đúng.

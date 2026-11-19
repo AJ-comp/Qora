@@ -58,7 +58,7 @@ public class AstToHirLoweringTests
         var use = Assert.IsType<HirQubitDeclarationStatement>(
             Assert.Single(main.Body));
         Assert.Equal("work", use.Name);
-        Assert.Equal(3, use.Size);
+        Assert.Equal(3, Assert.IsType<HirIntegerLiteralExpression>(use.Size).Value);
     }
 
     [Fact]

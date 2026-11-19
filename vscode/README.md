@@ -7,9 +7,9 @@ parser engine. You write circuits in a Q#/C#-flavored syntax and it transpiles t
 extension gives `.qor` files syntax highlighting, hover docs, **live error diagnostics**, and a
 **transpile** command, and local execution with typed entry-return results.
 
-Extension **0.33.0** bundles **Qora 0.40.0**.
-See the [extension release notes](CHANGELOG.md#0330--2026-11-11) and
-[language migration guide](https://github.com/AJ-comp/Qora/blob/main/CHANGELOG.md#0400--2026-11-11).
+Extension **0.34.0** bundles **Qora 0.41.0**. Use short-circuit expressions as Boolean values and size qubit registers or classical arrays with compile-time integer expressions.
+See the [extension release notes](CHANGELOG.md#0340--2026-11-19) and
+[language migration guide](https://github.com/AJ-comp/Qora/blob/main/CHANGELOG.md#0410--2026-11-19).
 
 ## Features
 
@@ -38,8 +38,8 @@ Large integers remain exact decimal values. A custom compiler must provide the c
 ## Known simulator limitations
 
 The standard setup pins Braket SDK 1.127.8 and default simulator 1.43.1; it does not include the pending
-upstream fixes used in local verification. The 54-case Qora execution suite passes with four Braket
-patches combined, not with the ordinary installation. Boolean arrays and other affected paths therefore
+upstream fixes used in local verification. The pinned simulator passes 71 of 80 execution cases;
+with four Braket patches combined, all 80 pass. Boolean arrays and other affected paths therefore
 remain restricted in the standard setup. Measuring `Qubit[]` helper-parameter elements and some
 noncontiguous controlled-gate layouts remain unresolved even with those patches. See the
 [backend limitations](https://github.com/AJ-comp/Qora/blob/main/CHANGELOG.md#known-execution-limitations)

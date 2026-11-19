@@ -359,18 +359,20 @@ public sealed class HirQubitDeclarationStatement : HirStatement
     internal HirQubitDeclarationStatement(
         HirNodeStamp stamp,
         string name,
-        int size)
+        HirExpression size)
         : base(stamp)
     {
         Name = name ?? throw new ArgumentNullException(nameof(name));
-        Size = size;
+        Size = size ?? throw new ArgumentNullException(nameof(size));
     }
 
     public string Name { get; }
-    public int Size { get; }
+    public HirExpression Size { get; }
 
-    internal override IEnumerable<HirNode> Children() =>
-        Array.Empty<HirNode>();
+    internal override IEnumerable<HirNode> Children()
+    {
+        yield return Size;
+    }
 }
 
 /// <summary>
@@ -924,16 +926,18 @@ public sealed class HirArrayCreationExpression : HirExpression
     internal HirArrayCreationExpression(
         HirNodeStamp stamp,
         QType elementType,
-        int length)
+        HirExpression length)
         : base(stamp)
     {
         ElementType = elementType;
-        Length = length;
+        Length = length ?? throw new ArgumentNullException(nameof(length));
     }
 
     public QType ElementType { get; }
-    public int Length { get; }
+    public HirExpression Length { get; }
 
-    internal override IEnumerable<HirNode> Children() =>
-        Array.Empty<HirNode>();
+    internal override IEnumerable<HirNode> Children()
+    {
+        yield return Length;
+    }
 }

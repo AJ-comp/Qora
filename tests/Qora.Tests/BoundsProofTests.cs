@@ -579,18 +579,17 @@ public class BoundsProofTests
         Assert.Equal("a[i]", TextAt(r, fact.Origin));
     }
 
-    // --- a measurement into a NON-bit array-literal element is a type error (QSEM017), like every other
-    //     measure-into-non-bit position — it would otherwise emit `measure` inside a classical initializer ---
+    // A measurement produces bit; array elements use the same bit-to-int conversion as scalar storage.
 
     [Fact]
-    public void RejectsAMeasurementIntoANonBitArrayLiteral() =>
-        Compiler.Rejects("""
+    public void AcceptsAMeasurementIntoAnIntArrayLiteral() =>
+        Compiler.Accepts("""
             operation Main() {
                 use q = Qubit[2];
                 var a: int[] = [M(q[0]), M(q[1])];
                 H(q[0]);
             }
-            """, "QSEM017");
+            """);
 
     [Fact]
     public void AcceptsAMeasurementIntoABitArrayLiteral() =>

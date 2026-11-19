@@ -71,7 +71,7 @@ public static class HirPrinter
             switch (stmt)
             {
                 case HirQubitDeclarationStatement u:
-                    sb.AppendLine($"{indent}HirQubitDeclaration(name={u.Name}, size={u.Size})");
+                    sb.AppendLine($"{indent}HirQubitDeclaration(name={u.Name}, size={HirExpressions.Render(u.Size)})");
                     break;
                 case HirCallStatement g:
                     sb.AppendLine($"{indent}HirCall(modifiers=[{string.Join(",", g.Modifiers)}], name={g.Call.Name}, args=[{string.Join(", ", g.Call.Arguments.Select(PrintArg))}])");

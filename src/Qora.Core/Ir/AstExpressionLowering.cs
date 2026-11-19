@@ -17,7 +17,7 @@ internal static class AstExpressionLowering
 
     /// <summary>
     /// Lowers one expression-shaped nonterminal. A flat grammar <c>Expr</c> additionally
-    /// recovers arithmetic and comparison precedence before it is materialized as HIR.
+    /// recovers unary, arithmetic, comparison, and logical precedence before it is materialized as HIR.
     /// </summary>
     internal static HirExpression ToHirExpression(
         this AstNonTerminal syntax,
@@ -61,7 +61,7 @@ internal static class AstExpressionLowering
         AstToHirLoweringSession session)
     {
         var position = 0;
-        var expression = ParseEquality(syntax.Items, ref position, session)
+        var expression = ParseLogicalOr(syntax.Items, ref position, session)
             ?? throw QInternal("received an empty `Expr`");
         if (position != syntax.Items.Count)
         {
@@ -70,95 +70,6 @@ internal static class AstExpressionLowering
         }
 
         return expression;
-    }
-
-    /// <summary>
-    /// Lowers one grammar <c>Condition</c>. Relational operators bind more tightly
-    /// than equality, followed by logical-and and logical-or.
-    /// </summary>
-    internal static HirExpression ToHirCondition(
-        this AstNonTerminal? syntax,
-        AstToHirLoweringSession session)
-    {
-        ArgumentNullException.ThrowIfNull(session);
-        if (syntax is null)
-            return session.Missing();
-        if (syntax.Name != "Condition")
-            throw QInternal($"received `{syntax.Name}` where a `Condition` was required");
-
-        // The HIR operand omits grouping, but its condition parent still needs the
-        // original syntax extent for an exact source range.
-        var operands = new List<(HirExpression Expression, SourceSpan? Span)>();
-        var operators = new List<ConditionOperator>();
-        SourceSpan? pendingNot = null;
-
-        foreach (var item in syntax.Items)
-        {
-            if (item is AstNonTerminal { Name: "Expr" } operandSyntax)
-            {
-                var operand = operandSyntax.ToHirExpression(session);
-                var operandSpan = SpanOf(operandSyntax, session);
-                if (pendingNot is { } notSpan)
-                {
-                    operandSpan = Cover(notSpan, operandSpan);
-                    operand = session.Unary(
-                        HirUnaryOperator.LogicalNot,
-                        operand,
-                        operandSpan);
-                    pendingNot = null;
-                }
-
-                operands.Add((operand, operandSpan));
-                continue;
-            }
-
-            if (item is not AstTerminal terminal)
-                throw QInternal($"found `{item}` inside a `Condition`");
-
-            var token = terminal.ToString() ?? string.Empty;
-            if (token == "!")
-            {
-                if (pendingNot is not null)
-                    throw QInternal("found consecutive condition negations");
-                pendingNot = SpanOf(terminal, session);
-            }
-            else
-            {
-                operators.Add(new ConditionOperator(
-                    token,
-                    SpanOf(terminal, session)));
-            }
-        }
-
-        if (pendingNot is not null)
-            throw QInternal("found a condition negation without an operand");
-        if (operands.Count == 0)
-            throw QInternal("received an empty `Condition`");
-        if (operators.Count != operands.Count - 1)
-        {
-            throw QInternal(
-                $"found {operands.Count} operands but {operators.Count} binary operators");
-        }
-
-        ReduceCondition(
-            operands,
-            operators,
-            session,
-            "<",
-            "<=",
-            ">",
-            ">=");
-        ReduceCondition(operands, operators, session, "==", "!=");
-        ReduceCondition(operands, operators, session, "&&");
-        ReduceCondition(operands, operators, session, "||");
-
-        if (operands.Count != 1 || operators.Count != 0)
-        {
-            throw QInternal(
-                $"left {operators.Count} unclassified condition operator(s)");
-        }
-
-        return operands[0].Expression;
     }
 
     /// <summary>
@@ -322,6 +233,56 @@ internal static class AstExpressionLowering
             closingParentheses[^1].EndIndex + 1);
     }
 
+    private static HirExpression? ParseLogicalOr(
+        IReadOnlyList<AstSymbol> items,
+        ref int position,
+        AstToHirLoweringSession session)
+    {
+        var startSpan = position < items.Count ? SpanOf(items[position], session) : null;
+        var left = ParseLogicalAnd(items, ref position, session);
+        while (left is not null
+               && position < items.Count
+               && IsValueOperator(items[position], out var token)
+               && token == "||")
+        {
+            position++;
+            var right = ParseLogicalAnd(items, ref position, session)
+                ?? throw QInternal("found binary `||` without a right operand");
+            left = session.Binary(
+                HirBinaryOperator.LogicalOr,
+                left,
+                right,
+                Cover(startSpan, SpanOf(items[position - 1], session)));
+        }
+
+        return left;
+    }
+
+    private static HirExpression? ParseLogicalAnd(
+        IReadOnlyList<AstSymbol> items,
+        ref int position,
+        AstToHirLoweringSession session)
+    {
+        var startSpan = position < items.Count ? SpanOf(items[position], session) : null;
+        var left = ParseEquality(items, ref position, session);
+        while (left is not null
+               && position < items.Count
+               && IsValueOperator(items[position], out var token)
+               && token == "&&")
+        {
+            position++;
+            var right = ParseEquality(items, ref position, session)
+                ?? throw QInternal("found binary `&&` without a right operand");
+            left = session.Binary(
+                HirBinaryOperator.LogicalAnd,
+                left,
+                right,
+                Cover(startSpan, SpanOf(items[position - 1], session)));
+        }
+
+        return left;
+    }
+
     private static HirExpression? ParseEquality(
         IReadOnlyList<AstSymbol> items,
         ref int position,
@@ -431,13 +392,13 @@ internal static class AstExpressionLowering
     {
         if (position < items.Count
             && IsValueOperator(items[position], out var token)
-            && token == "-")
+            && token is "-" or "!")
         {
             var operatorSyntax = items[position++];
             var operand = ParseUnary(items, ref position, session)
-                ?? throw QInternal("found unary `-` without an operand");
+                ?? throw QInternal($"found unary `{token}` without an operand");
             return session.Unary(
-                HirUnaryOperator.Negate,
+                token == "!" ? HirUnaryOperator.LogicalNot : HirUnaryOperator.Negate,
                 operand,
                 Cover(
                     SpanOf(operatorSyntax, session),
@@ -477,11 +438,11 @@ internal static class AstExpressionLowering
         if (item is AstNonTerminal nonTerminal)
         {
             throw QInternal(
-                $"found `{nonTerminal.Name}` in arithmetic primary position");
+                $"found `{nonTerminal.Name}` in expression primary position");
         }
 
         if (item is not AstTerminal terminal)
-            throw QInternal("found an unknown AST symbol in arithmetic primary position");
+            throw QInternal("found an unknown AST symbol in expression primary position");
 
         position++;
         var expression = LowerTerminalToHir(terminal, session);
@@ -581,36 +542,6 @@ internal static class AstExpressionLowering
         return text;
     }
 
-    private static void ReduceCondition(
-        List<(HirExpression Expression, SourceSpan? Span)> operands,
-        List<ConditionOperator> operators,
-        AstToHirLoweringSession session,
-        params string[] level)
-    {
-        var position = 0;
-        while (position < operators.Count)
-        {
-            var current = operators[position];
-            if (!level.Contains(current.Token))
-            {
-                position++;
-                continue;
-            }
-
-            var left = operands[position];
-            var right = operands[position + 1];
-            var span = Cover(left.Span, current.Span, right.Span);
-            var expression = session.Binary(
-                HirExpressions.ParseBinaryOperator(current.Token),
-                left.Expression,
-                right.Expression,
-                span);
-            operands[position] = (expression, span);
-            operands.RemoveAt(position + 1);
-            operators.RemoveAt(position);
-        }
-    }
-
     private static bool IsValueOperator(
         AstSymbol syntax,
         out string token)
@@ -619,10 +550,7 @@ internal static class AstExpressionLowering
             ? syntax.ToString() ?? string.Empty
             : string.Empty;
         return token is "+" or "-" or "*" or "/"
-            or "==" or "!=" or "<" or "<=" or ">" or ">=";
+            or "==" or "!=" or "<" or "<=" or ">" or ">="
+            or "!" or "&&" or "||";
     }
-
-    private readonly record struct ConditionOperator(
-        string Token,
-        SourceSpan? Span);
 }

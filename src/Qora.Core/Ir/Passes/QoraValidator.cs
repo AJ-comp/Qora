@@ -40,7 +40,7 @@ namespace Qora.Ir.Passes;
 ///         symbol table's one insertion door, which rejects any same-scope collision.</item>
 ///   <item><b>QSEM016</b> — an invalid array/qubit index, indexing a scalar or single qubit, or an
 ///         allocation/specialization size that is not a positive 32-bit integer.</item>
-///   <item><b>QSEM017</b> — a measurement assigned to a non-<c>bit</c> declaration.</item>
+///   <item><b>QSEM017</b> — retired; measurement values follow the shared scalar conversion rules.</item>
 ///   <item><b>QSEM022</b> — the same operation name defined more than once WITHIN one namespace
 ///         (namespaced twin of QSEM008; the same simple name in two different namespaces is fine).</item>
 ///   <item><b>QSEM024</b> — mutation of a <c>const</c> value: reassignment, indexed array update, or taking
@@ -81,9 +81,8 @@ namespace Qora.Ir.Passes;
 ///         place that pairs each position with its own scope, so no position can be forgotten; the four spots
 ///         where a whole register IS legitimate (index base, <c>.Count</c> base, an argument, and structural
 ///         <c>==</c>/<c>!=</c> against another bit array) are carved out by the PARENT node.</item>
-///   <item><b>QSEM037</b> — a function return violates its declared scalar return type, a function result is
-///         stored in an incompatible explicitly typed scalar, or a whole classical array is used where one
-///         scalar value is required.</item>
+///   <item><b>QSEM037</b> — an initializer, assignment, return, or array element violates the shared scalar
+///         conversion contract, or a whole classical array is used where one scalar value is required.</item>
 ///   <item><b>QSEM038</b> — an invalid parameter contract: unsupported <c>var</c>/<c>move</c> declaration,
 ///         declaration/call-site ownership or access mismatch, write through a read-only parameter, or
 ///         forwarding a borrowed/read-only parameter into a stronger slot.</item>
@@ -731,10 +730,11 @@ internal static class QoraValidator
                 // QSEM012 — Qora v1 permits `use` only at the top level of the entry operation. Same-scope
                 // duplicate names are already owned by the symbol table's `Declare` door.
                 case HirQubitDeclarationStatement u:
-                    if (u.Size < 1)   // 0, or -1 from a size that overflowed a 32-bit int (`Qubit[99999999999]`)
-                        Add(ctx.Errors, "QSEM016", $"in `{opName}`: `use {u.Name} = Qubit[…];` has an invalid register size; it must be a whole number from 1 to {int.MaxValue}", u.Span);
+                    CheckExpressionTypeContracts(u.Size, ctx, u.Span, out _);
+                    CheckAllocationSize(u.Size, ctx.SemanticModel.FindSymbol(u.Id)?.RegisterSize,
+                        $"qubit register `{u.Name}`", u.Span, ctx);
                     if (ctx.EntryOpId is HirNodeId entryOperationId && ctx.Op.Id != entryOperationId)
-                        Add(ctx.Errors, "QSEM012", $"in `{opName}`: `use {u.Name} = Qubit[{u.Size}];` is not supported inside an operation; allocate in `{ctx.EntryName}` and pass the qubits as a parameter", u.Span);
+                        Add(ctx.Errors, "QSEM012", $"in `{opName}`: `use {u.Name} = Qubit[{HirExpressions.Render(u.Size)}];` is not supported inside an operation; allocate in `{ctx.EntryName}` and pass the qubits as a parameter", u.Span);
                     else if (inControlFlow)
                         Add(ctx.Errors, "QSEM012", $"in `{opName}`: `use {u.Name} = ...` inside a loop or branch is not supported; allocate once at the top level", u.Span);
                     break;
@@ -764,8 +764,8 @@ internal static class QoraValidator
                             Add(ctx.Errors, "QSEM029", $"in `{opName}`: array `{d.Name}` cannot use an empty initializer", d.Span);
                         if (d.Value is HirArrayCreationExpression allocation)
                         {
-                            if (allocation.Length < 1)
-                                Add(ctx.Errors, "QSEM016", $"in `{opName}`: `new {TypeName(allocation.ElementType)}[{allocation.Length}]` needs a positive literal length", d.Span);
+                            CheckAllocationSize(allocation.Length, ctx.SemanticModel.FindSymbol(d.Id)?.ArrayLength,
+                                $"array `{d.Name}`", d.Span, ctx);
                             if (d.Type is { } declared && declared != allocation.ElementType)
                                 Add(ctx.Errors, "QSEM029", $"in `{opName}`: `{d.Name}` is `{TypeName(declared)}[]` but its initializer creates `{TypeName(allocation.ElementType)}[]`", d.Span);
                         }
@@ -787,7 +787,7 @@ internal static class QoraValidator
                                     continue;
                                 }
 
-                                RecordLooseScalarConversion(element, declaredElementType, ctx);
+                                RecordScalarConversion(element, declaredElementType, ctx);
                             }
                         }
                     }
@@ -801,20 +801,16 @@ internal static class QoraValidator
                              }
                              && declaredScalarType != QType.Qubit)
                     {
-                        if (ContainsCallableResult(d.Value, ctx))
-                            RecordStrictScalarConversion(d.Value, declaredScalarType, ctx);
-                        else
-                            RecordLooseScalarConversion(d.Value, declaredScalarType, ctx);
+                        RecordScalarConversion(d.Value, declaredScalarType, ctx);
                     }
 
-                    // A function call is a legal scalar value wherever an expression is accepted, including
-                    // an array-literal element. Measurements remain restricted to their explicit whole-value
-                    // forms, and operation calls remain void.
+                    // Value-returning calls are legal in array-literal elements too. Measurements remain
+                    // restricted to their explicit whole-value and direct-element forms.
                     var declarationHasMisplacedMeasurement =
                         ContainsMisplacedMeasurement(d.Value);
                     if (declarationHasMisplacedMeasurement)
                     {
-                        Add(ctx.Errors, "QSEM005", $"in `{opName}`: the initializer of `{d.Name}` uses a measurement inside another expression; use `M(...)` as the whole bit value or as a direct element of a bit-array literal", d.Span);
+                        Add(ctx.Errors, "QSEM005", $"in `{opName}`: the initializer of `{d.Name}` uses a measurement inside another expression; use `M(...)` as the whole value or as a direct element of an array literal", d.Span);
                         declarationCallsAreValid = false;
                     }
                     else if (d.Value is not HirMeasurementExpression)
@@ -834,12 +830,6 @@ internal static class QoraValidator
                         ctx,
                         d.Span,
                         flow);
-                    // QSEM017 — a measurement result is a `bit`, so measuring into a non-bit target is a type
-                    // error, whether the measurement is the whole value (`var x: int = M(q)`) or an element
-                    // of an array literal (`var a: int[] = [M(q)]`).
-                    if (d.Type is not null && d.Type != QType.Bit
-                        && ContainsDirectMeasurementValue(d.Value))
-                        Add(ctx.Errors, "QSEM017", $"in `{opName}`: `{d.Name}` is declared `{d.Type.ToString()!.ToLowerInvariant()}` but a measurement result is a `bit`", d.Span);
                     CommitTypeMismatch(
                         d.Id,
                         declarationCallsAreValid && !declarationExpressionOwnsTypeError,
@@ -921,34 +911,22 @@ internal static class QoraValidator
                     // only through quantum operations and measurement.
                     else if (target is { Type: QType.Qubit })
                         Add(ctx.Errors, "QSEM026", $"in `{opName}`: `{targetName}` is a qubit and cannot be assigned to — a qubit is not a classical variable; change its state with a gate or measurement", a.Span);
-                    // QSEM017 — a measurement result is a `bit`; assigning it to a non-bit classical is the
-                    // same type error as declaring `var r: int = M(...)`.
-                    else if (a.Value is HirMeasurementExpression
-                             && target is { Type: { } tt }
-                             && tt != QType.Bit)
-                        Add(ctx.Errors, "QSEM017", $"in `{opName}`: `{targetName}` is `{TypeName(tt)}` but a measurement result is a `bit`", a.Span);
                     if (target is { Type: { } assignedType, IsArray: false }
                         && assignedType != QType.Qubit)
                     {
-                        if (ContainsCallableResult(a.Value, ctx))
-                            RecordStrictScalarConversion(a.Value, assignedType, ctx);
-                        else
-                            RecordLooseScalarConversion(a.Value, assignedType, ctx);
+                        RecordScalarConversion(a.Value, assignedType, ctx);
                     }
                     else if (target is { Type: { } arrayElementType, IsArray: true }
                               && arrayElementType != QType.Qubit
                               && a.Target is HirIndexExpression)
                     {
-                        if (ContainsCallableResult(a.Value, ctx))
-                            RecordStrictScalarConversion(a.Value, arrayElementType, ctx);
-                        else
-                            RecordLooseScalarConversion(a.Value, arrayElementType, ctx);
+                        RecordScalarConversion(a.Value, arrayElementType, ctx);
                     }
                     var assignmentHasMisplacedMeasurement =
                         ContainsMisplacedMeasurement(a.Value);
                     if (assignmentHasMisplacedMeasurement)
                     {
-                        Add(ctx.Errors, "QSEM005", $"in `{opName}`: the value assigned to `{targetName}` uses a measurement inside another expression; use `M(...)` as the whole bit value or as a direct element of a bit-array literal", a.Span);
+                        Add(ctx.Errors, "QSEM005", $"in `{opName}`: the value assigned to `{targetName}` uses a measurement inside another expression; use `M(...)` as the whole value or as a direct element of an array literal", a.Span);
                         assignmentCallsAreValid = false;
                     }
                     else if (a.Value is not HirMeasurementExpression)
@@ -1146,7 +1124,7 @@ internal static class QoraValidator
                         out var returnExpressionOwnsTypeError,
                         reportArrayOperatorErrors: false);
                     if (ctx.Op.ReturnType is { } returnType)
-                        RecordStrictScalarConversion(returnedValue, returnType, ctx);
+                        RecordScalarConversion(returnedValue, returnType, ctx);
                     else
                         Add(ctx.Errors, "QSEM035", $"in `{opName}`: an operation without a return type can use `return;`, but cannot return a value", ret.Span);
                     var returnCallsAreValid = true;
@@ -1365,7 +1343,7 @@ internal static class QoraValidator
 
     /// <summary>
     /// A measurement is a value-producing boundary, not an ordinary composable expression. It is legal
-    /// when it is the complete scalar value, and in the existing bit-register initializer form where each
+    /// when it is the complete scalar value, and in an array initializer where each
     /// measured result is a direct array element. A measurement below any other expression node is misplaced.
     /// </summary>
     private static bool ContainsMisplacedMeasurement(HirExpression expression) =>
@@ -1378,12 +1356,6 @@ internal static class QoraValidator
                     && ContainsMeasurement(element)),
             _ => ContainsMeasurement(expression),
         };
-
-    /// <summary>True when the value directly carries one or more measurement results whose type is bit.</summary>
-    private static bool ContainsDirectMeasurementValue(HirExpression expression) =>
-        expression is HirMeasurementExpression
-        || expression is HirArrayLiteralExpression literal
-        && literal.Elements.Any(element => element is HirMeasurementExpression);
 
     /// <summary>
     /// Validate every call inside an expression that sits in a VALUE position (a decl/assign RHS, a
@@ -1464,6 +1436,24 @@ internal static class QoraValidator
     {
         if (!ctx.TypeMismatchCandidates.Remove(statementId, out var candidate) || !callsAreValid) return;
         ctx.Errors.Add(candidate);
+    }
+
+    /// <summary>
+    /// Both allocation forms consume the same size contract computed at their declaration scope.
+    /// </summary>
+    private static void CheckAllocationSize(
+        HirExpression expression,
+        int? length,
+        string subject,
+        SourceSpan? statementSpan,
+        Ctx ctx)
+    {
+        if (length is >= 1)
+            return;
+
+        Add(ctx.Errors, "QSEM016",
+            $"in `{Simple(ctx.Op.Name)}`: the size of {subject} must be a compile-time `int` constant from 1 to {int.MaxValue}; runtime values, invalid types, division by zero, and integer overflow are not allowed",
+            expression.Span ?? statementSpan);
     }
 
     /// <summary>
@@ -1657,25 +1647,7 @@ internal static class QoraValidator
         return false;
     }
 
-    private static void RecordLooseScalarConversion(
-        HirExpression expression,
-        QType targetType,
-        Ctx ctx)
-    {
-        var source = ExpressionTypes.TypeOf(expression, ctx.SemanticModel, ctx.OpById);
-        if (source is not { IsArray: false, Type: not QType.Qubit } scalar)
-            return;
-
-        // SymbolTable reports this mismatch through the statement's diagnostic candidate. Do not
-        // publish a conversion approval while call/expression validation decides who owns the error.
-        if (scalar.Type == QType.Float && targetType == QType.Int
-            || scalar.Type != targetType && (scalar.Type == QType.Bool || targetType == QType.Bool))
-            return;
-
-        RecordImplicitScalarConversion(expression, scalar, targetType, ctx);
-    }
-
-    private static void RecordStrictScalarConversion(
+    private static void RecordScalarConversion(
         HirExpression expression,
         QType targetType,
         Ctx ctx)
@@ -1701,13 +1673,6 @@ internal static class QoraValidator
             Type: var actualType,
         }
         && actualType == requiredType;
-
-    private static bool ContainsCallableResult(
-        HirExpression expression,
-        Ctx ctx) =>
-        HirExpressions.CallsIn(expression).Any(call =>
-            QoraGates.Functions.ContainsKey(call.Name)
-            || ExpressionTypes.TryGetValueCallable(call, ctx.OpById, out _));
 
     private static void RecordImplicitScalarConversion(
         HirExpression expression,
@@ -2056,11 +2021,11 @@ internal static class QoraValidator
 
     /// <summary>
     /// QSEM006 for ANY call — a built-in gate or a user callable — against its <see cref="ICallableSig"/>:
-    /// argument count, then per-slot shape and type. A VALUE slot rejects a qubit; a user callable's scalar
+    /// argument count, then per-slot shape and type. A VALUE slot rejects a qubit; every scalar
     /// slot also applies the shared <see cref="ExpressionTypes.CanAssign"/> conversion contract. A QUBIT slot
     /// rejects a classical, and — for a user op — checks whether the parameter expects one qubit or a whole
-    /// <c>Qubit[]</c>. An internally specialized array also checks its concrete size. A built-in gate keeps
-    /// its established angle-value rules, while its qubit slots broadcast (a whole register applies
+    /// <c>Qubit[]</c>. An internally specialized array also checks its concrete size. A built-in gate's
+    /// qubit slots broadcast (a whole register applies
     /// element-wise), so they only require "is a qubit".
     /// Every source reference has already been bound to its exact symbol by HIR semantic analysis.
     /// </summary>
@@ -2100,14 +2065,6 @@ internal static class QoraValidator
                 Add(errors, "QSEM006",
                     $"in `{opName}`: parameter `{parameter.Name}` of `{calleeName}` expects one `{TypeName(parameter.Type)}` value, but argument `{HirExpressions.Render(value)}` is `{actual}`",
                     span);
-                return;
-            }
-
-            // Intrinsic gates follow Qora's permissive scalar-to-parameter conversion rule. HIR records the
-            // exact approved conversion so MIR does not choose language semantics a second time.
-            if (sig.IsBuiltin && actualShape.Type != QType.Bool && parameter.Type != QType.Bool)
-            {
-                RecordLooseScalarConversion(value, parameter.Type, ctx);
                 return;
             }
 

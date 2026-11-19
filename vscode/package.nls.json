@@ -1,6 +1,6 @@
 {
   "displayName": "Qora Language",
-  "description": "Qora quantum programming: live diagnostics, syntax highlighting, OpenQASM 3 transpilation, and local execution with typed return results.",
+  "description": "Qora quantum circuits with typed expressions and compile-time register sizes: live diagnostics, OpenQASM 3 output, and local simulation.",
   "command.transpile.title": "Qora: Transpile to OpenQASM",
   "command.showStages.title": "Qora: Show Compilation Stages (AST / HIR / MIR / OpenQASM)",
   "command.openExample.title": "Qora: Open Example",

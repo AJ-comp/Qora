@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>개요. Qora로 배우는 양자 게이트 — Qora</title>
+<title>Qora로 처음 만나는 양자컴퓨팅 — 초판 목차</title>
 <style>
 :root {
     --bg: #ffffff;
@@ -511,129 +511,267 @@
       grid-template-columns: 1fr;
     }
   }
+
+  .side-nav summary {
+    cursor: pointer;
+    padding: 8px;
+    font-size: .94rem;
+    font-weight: 700;
+  }
+  .side-nav details[open] { margin-bottom: 12px; }
+  .plan-chapter { border-bottom: 1px solid var(--line); padding: 18px 0; scroll-margin-top: 80px; }
+  .plan-chapter h3 { margin: 0 0 10px; }
+  .plan-chapter ul { margin: 8px 0 0; padding-left: 22px; }
+  .plan-chapter li + li { margin-top: 6px; }
+  .chapter-status { color: var(--muted); font-size: .84rem; margin: 0 0 6px; }
+  .chapter-status.ready { color: var(--good); font-weight: 700; }
+  .draft-directory { margin: 28px 0; scroll-margin-top: 80px; }
+  .draft-directory summary { cursor: pointer; font-weight: 700; padding: 12px 0; }
+  .draft-directory li + li { margin-top: 8px; }
+  .article p { max-width: none; }
 </style>
 </head>
 <body>
 <div class="qora-lang-switch" style="position:sticky;top:0;z-index:99;text-align:right;padding:8px 16px;background:rgba(255,255,255,.92);backdrop-filter:blur(4px);border-bottom:1px solid #e6e8ee;font-size:13px;font-family:sans-serif;"><a href="../en/index.html" onclick="try{localStorage.setItem(&quot;qora-lang&quot;,&quot;en&quot;)}catch(e){}">English</a> · <strong>한국어</strong> · <a href="../ja/index.html" onclick="try{localStorage.setItem(&quot;qora-lang&quot;,&quot;ja&quot;)}catch(e){}">日本語</a></div>
 
 <header class="hero">
-  <div class="tag">Qora · 양자 게이트 문서</div>
-  <h1>개요. Qora로 배우는 양자 게이트</h1>
-  <p>Qora 코드와 양자 게이트 설명을 어떻게 함께 읽을지 잡아보자</p>
+  <div class="tag">Qora · 한국어 초판 원고</div>
+  <h1>Qora로 처음 만나는 양자컴퓨팅</h1>
+  <p>작은 회로를 직접 계산하고, 코드로 확인하는 첫걸음</p>
 </header>
 
 <div class="book-shell">
-                        <aside class="side-nav" aria-label="책 차례">
-    <strong>Qora로 배우는 양자 게이트</strong>
-      <a class="current" href="index.html">개요</a>
-      <a href="intro.html">들어가며. 왜 Qora로 양자 게이트를 배울까?</a>
-      <a href="chapter-01.html">1장. 큐비트 상태와 진폭에 대해 알아보자</a>
-      <a href="chapter-02.html">2장. 진폭과 확률은 어떻게 연결될까?</a>
-      <a href="chapter-03.html">3장. |0⟩ 상태와 |1⟩ 상태를 직접 읽어보자</a>
-      <a href="chapter-04.html">4장. 중첩은 무엇이고 간섭은 무엇일까?</a>
-      <a href="chapter-05.html">5장. 중첩은 그냥 "모르는 상태"일까?</a>
-      <a href="chapter-06.html">6장. 간섭은 언제 생길까?</a>
-      <a href="chapter-07.html">7장. 두 큐비트 상태는 어떻게 읽을까?</a>
-      <a href="chapter-08.html">8장. 얽힘은 무엇이 함께 묶인다는 뜻일까?</a>
-      <a href="chapter-09.html">9장. 양자 게이트는 되돌릴 수 있어야 한다.</a>
-      <a href="chapter-10.html">10장. Qora 코드는 어떻게 읽을까?</a>
-      <a href="summary.html">정리. 1부에서 배운 것을 정리해보자</a>
-      <a href="chapter-11.html">11장. X 게이트는 무엇을 뒤집을까?</a>
-      <a href="chapter-12.html">12장. H 게이트는 진폭을 어떻게 나눌까?</a>
-      <a href="chapter-13.html">13장. Z 게이트는 무엇의 부호를 바꿀까?</a>
-      <a href="chapter-14.html">14장. CNOT 게이트는 두 큐비트를 어떻게 연결할까?</a>
-      <a href="chapter-15.html">15장. 작은 회로 하나를 끝까지 읽어보자</a>
+<aside class="side-nav" aria-label="책 차례">
+    <strong>Qora로 처음 만나는 양자컴퓨팅</strong>
+    <a class="current" aria-current="page" href="index.html">초판 개요와 목차</a>
+    <a href="intro.html">들어가며. 작은 회로에서 시작하기</a>
+    <a href="chapter-01.html">1장. 양자컴퓨터는 무엇을 계산할까?</a>
+    <details class="book-toc">
+      <summary>초판 전체 차례 · 12장</summary>
+      <div class="group">
+        <strong>1부. 양자컴퓨팅과 첫 만남</strong>
+        <a href="chapter-01.html">1장. 양자컴퓨터는 무엇을 계산할까?</a>
+        <a href="index.html#plan-chapter-02">2장. Qora로 첫 프로그램 실행하기 (예정)</a>
+        <a href="index.html#plan-chapter-03">3장. 큐비트의 상태는 어떻게 적을까? (예정)</a>
+      </div>
+      <div class="group">
+        <strong>2부. 큐비트 하나의 상태를 바꿔보자</strong>
+        <a href="index.html#plan-chapter-04">4장. 확률진폭과 측정 확률 (예정)</a>
+        <a href="index.html#plan-chapter-05">5장. X와 H는 상태를 어떻게 바꿀까? (예정)</a>
+        <a href="index.html#plan-chapter-06">6장. 부호와 복소수가 왜 중요할까? (예정)</a>
+      </div>
+      <div class="group">
+        <strong>3부. 큐비트 두 개를 함께 읽어보자</strong>
+        <a href="index.html#plan-chapter-07">7장. 텐서곱으로 공동 상태 만들기 (예정)</a>
+        <a href="index.html#plan-chapter-08">8장. CNOT과 얽힘 (예정)</a>
+        <a href="index.html#plan-chapter-09">9장. 측정하면 공동 상태는 어떻게 바뀔까? (예정)</a>
+      </div>
+      <div class="group">
+        <strong>4부. 배운 내용을 Qora 회로로 완성하기</strong>
+        <a href="index.html#plan-chapter-10">10장. 되돌리기와 초기화는 무엇이 다를까? (예정)</a>
+        <a href="index.html#plan-chapter-11">11장. 작은 회로를 읽기 좋은 Qora 코드로 만들기 (예정)</a>
+        <a href="index.html#plan-chapter-12">12장. 예측하고 실행하고 설명하기 (예정)</a>
+      </div>
+    </details>
+    <a href="index.html#appendices">부록 구성 (예정)</a>
+    <a href="index.html#previous-drafts">참고용 기존 초안</a>
   </aside>
-  <main class="article">
-    <div class="breadcrumb">Qora로 배우는 양자 게이트 / 개요</div>
-  <p class="lead">
-    이 문서는 Qora 코드로 양자 회로를 써 보면서, 그 코드가 실제로 어떤 양자역학 개념을 건드리는지 차례대로 읽는 문서예요.<br>
-    목표는 게이트 이름을 외우는 것이 아니라, 한 줄의 코드가 큐비트 상태 벡터의 진폭을 어떻게 바꾸는지 직접 따라갈 수 있게 되는 거예요.
-  </p>
+<main class="article">
+    <div class="breadcrumb">Qora로 처음 만나는 양자컴퓨팅 / 초판 개요와 목차</div>
+    <p class="lead">
+      양자컴퓨팅과 프로그래밍을 처음 접하는 분을 위한 책입니다.<br>
+      작은 양자 회로 하나를 놓고, 코드 한 줄이 무엇을 바꾸며 왜 그런 결과가 나오는지 차근차근 살펴보겠습니다.
+    </p>
+    <div class="call why">
+      <span class="h">이 책을 마치고 할 수 있는 일</span>
+      짧은 Qora 프로그램을 읽고 직접 실행하면서, 각 단계에서 큐비트의 상태가 어떻게 바뀌고 어떤 측정 결과가 나오는지 설명하는 것이 목표입니다.
+    </div>
+    <p>
+      수학과 프로그래밍을 따로 공부하지 않은 분도 따라갈 수 있도록 구성합니다.<br>
+      분수와 제곱근부터 복소수, 벡터와 행렬까지 실제 계산에 필요해지는 지점에서 소개합니다.<br>
+      코드도 처음 등장한 줄부터 무엇을 뜻하는지 하나씩 설명하겠습니다.
+    </p>
 
-  <div class="call why">
-    <span class="h">이 문서의 기준점</span>
-    <p>아래 용어가 낯설어도 괜찮아요.<br>
-    지금은 이 책이 어디를 향해 가는지 알려주는 표지판처럼만 보면 돼요.<br>
-    큐비트는 <strong>복소수 벡터 공간</strong>의 상태 벡터로 다루고, 측정 확률은 <strong>Born 규칙</strong>으로 계산해요. 양자 게이트는 상태 벡터에 작용하는 <strong>유니터리 선형 변환</strong>으로 설명하고, Qora 코드는 그 변환 순서를 회로 형태로 적는 도구로 사용해요.</p>
-  </div>
+    <h2 id="first-edition-scope">초판에서 함께 살펴볼 범위</h2>
+    <p>
+      초판에서는 주로 큐비트 한 개와 두 개를 다룹니다.<br>
+      X·H·Z·S·CNOT이라는 기본 게이트를 적용했을 때 무엇이 바뀌는지, 작은 예제에 실제 값을 넣어 계산합니다.<br>
+      그 과정에서 측정, 초기화, 역연산을 함께 살펴보며 서로 어떤 차이가 있는지 구별하겠습니다.
+    </p>
+    <p>
+      계산으로 예측한 결과는 Qora 코드를 실행하여 확인합니다.<br>
+      2장에서 첫 프로그램을 실행하고, 이후에도 새로운 개념을 배울 때마다 같은 도구로 작은 실험을 이어갑니다.
+    </p>
+    <div class="call">
+      <span class="h">한국어 초판 원고 작성 현황</span>
+      현재는 새 목차에 맞춘 1장을 읽을 수 있습니다.<br>
+      2~12장과 부록은 작성 예정이며, 아래 항목은 각 장에서 다룰 내용입니다.<br>
+      이전에 작성한 문서는 페이지 아래의 <a href="#previous-drafts">참고용 기존 초안</a>에 따로 모아두었습니다.<br>
+      다른 언어판도 아직 기존 구성을 유지하고 있습니다.
+    </div>
+    <div class="doc-links">
+      <a class="doc-link" href="chapter-01.html">1장 읽기 →</a>
+      <a class="doc-link" href="intro.html">들어가며 읽기</a>
+    </div>
 
-  <h2>전체 흐름</h2>
+    <h2 id="part-1">1부. 양자컴퓨팅과 첫 만남</h2>
+    <section class="plan-chapter" id="plan-chapter-01" aria-labelledby="chapter-title-01">
+      <p class="chapter-status ready">본문 읽기</p>
+      <h3 id="chapter-title-01"><a href="chapter-01.html">1장. 양자컴퓨터는 무엇을 계산할까?</a></h3>
+      <ul>
+        <li>비트와 큐비트, 준비 → 게이트 적용 → 측정이라는 기본 흐름</li>
+        <li>양자컴퓨터와 시뮬레이터의 차이, 이 책에서 따라갈 작은 실험</li>
+      </ul>
+    </section>
+    <section class="plan-chapter" id="plan-chapter-02" aria-labelledby="chapter-title-02">
+      <p class="chapter-status">작성 예정</p>
+      <h3 id="chapter-title-02">2장. Qora로 첫 프로그램 실행하기</h3>
+      <ul>
+        <li>실행 환경을 준비하고, 첫 프로그램의 모든 줄을 읽기</li>
+        <li>큐비트 준비, 측정, 반환값과 실행 결과 연결하기</li>
+      </ul>
+    </section>
+    <section class="plan-chapter" id="plan-chapter-03" aria-labelledby="chapter-title-03">
+      <p class="chapter-status">작성 예정</p>
+      <h3 id="chapter-title-03">3장. 큐비트의 상태는 어떻게 적을까?</h3>
+      <ul>
+        <li>상태와 측정 결과를 구별하고, 상태를 나타내는 기호 읽기</li>
+        <li>기준 상태, 계수, 숫자를 나열한 벡터 표현을 하나씩 연결하기</li>
+      </ul>
+    </section>
 
-  <div class="point-list">
-    <div class="point">
-      <span class="marker">1단계</span>
-      <span><strong>상태를 벡터로 보기</strong><br>한 큐비트 상태는 <code>|0⟩</code>와 <code>|1⟩</code>라는 계산 기저에 붙은 두 진폭으로 표현해요.</span>
-    </div>
-    <div class="point">
-      <span class="marker">2단계</span>
-      <span><strong>진폭에서 확률 얻기</strong><br>진폭 자체가 확률은 아니고, 진폭의 절댓값을 제곱해야 측정 확률이 돼요.</span>
-    </div>
-    <div class="point">
-      <span class="marker">3단계</span>
-      <span><strong>중첩과 간섭을 먼저 이해하기</strong><br>진폭이 여러 기준 상태 방향에 함께 놓이는 상황과, 그 진폭 기여들이 다시 만나 더해지거나 상쇄되는 상황을 먼저 구분해요.</span>
-    </div>
-    <div class="point">
-      <span class="marker">4단계</span>
-      <span><strong>두 큐비트 상태로 넓히기</strong><br>측정 결과값이 <code>00</code>, <code>01</code>, <code>10</code>, <code>11</code> 네 가지로 늘어날 때 상태 벡터가 어떤 진폭을 담는지 봐요.</span>
-    </div>
-    <div class="point">
-      <span class="marker">5단계</span>
-      <span><strong>얽힘을 정석적으로 구분하기</strong><br>두 큐비트 전체 상태가 각 큐비트의 상태로 분리되지 않는 경우를 얽힘으로 읽어요.</span>
-    </div>
-    <div class="point">
-      <span class="marker">6단계</span>
-      <span><strong>게이트를 선형 변환으로 읽기</strong><br>X, H, Z, CNOT 같은 게이트가 상태 벡터의 진폭을 어떻게 바꾸는지 계산해요.</span>
-    </div>
-    <div class="point">
-      <span class="marker">7단계</span>
-      <span><strong>작은 회로를 끝까지 읽기</strong><br>여러 게이트가 이어질 때 상태가 어떻게 변하고, 마지막 측정 확률이 어떻게 정해지는지 따라가봐요.</span>
-    </div>
-  </div>
+    <h2 id="part-2">2부. 큐비트 하나의 상태를 바꿔보자</h2>
+    <section class="plan-chapter" id="plan-chapter-04" aria-labelledby="chapter-title-04">
+      <p class="chapter-status">작성 예정</p>
+      <h3 id="chapter-title-04">4장. 확률진폭과 측정 확률</h3>
+      <ul>
+        <li>실수 진폭으로 시작해 측정 확률과 전체 확률 계산하기</li>
+        <li>반반 확률에 필요한 계수, 한 번의 결과와 반복 실행의 비율 구별하기</li>
+      </ul>
+    </section>
+    <section class="plan-chapter" id="plan-chapter-05" aria-labelledby="chapter-title-05">
+      <p class="chapter-status">작성 예정</p>
+      <h3 id="chapter-title-05">5장. X와 H는 상태를 어떻게 바꿀까?</h3>
+      <ul>
+        <li>입력 진폭에 X와 H의 계산 규칙을 차례대로 적용하기</li>
+        <li>H를 두 번 적용하는 계산에서 강화와 상쇄 확인하기</li>
+      </ul>
+    </section>
+    <section class="plan-chapter" id="plan-chapter-06" aria-labelledby="chapter-title-06">
+      <p class="chapter-status">작성 예정</p>
+      <h3 id="chapter-title-06">6장. 부호와 복소수가 왜 중요할까?</h3>
+      <ul>
+        <li>Z로 진폭의 부호를 바꾸고 H로 그 차이 확인하기</li>
+        <li>복소수의 크기와 확률을 계산하고, S로 허수 진폭 만들기</li>
+      </ul>
+    </section>
 
-  <div class="panel">
-    <table>
-      <tr><th>정석 개념</th><th>이 문서에서 하는 일</th><th>Qora에서 보이는 형태</th></tr>
-      <tr><td>상태 벡터</td><td>큐비트가 어떤 진폭을 가지고 있는지 읽어요</td><td><code>use q = Qubit[1];</code></td></tr>
-      <tr><td>유니터리 게이트</td><td>상태 벡터를 보존 가능한 방식으로 바꿔요</td><td><code>H(q[0]);</code>, <code>X(q[0]);</code></td></tr>
-      <tr><td>측정</td><td>진폭의 절댓값 제곱으로 결과 확률을 얻어요</td><td><code>var r: bit = M(q[0]);</code></td></tr>
-      <tr><td>여러 큐비트와 얽힘</td><td>기저 상태 수가 늘어나고, 전체 상태가 각 큐비트로 분리되지 않을 수도 있다는 점을 봐요</td><td><code>CNOT(q[0], q[1]);</code></td></tr>
-    </table>
-  </div>
+    <h2 id="part-3">3부. 큐비트 두 개를 함께 읽어보자</h2>
+    <section class="plan-chapter" id="plan-chapter-07" aria-labelledby="chapter-title-07">
+      <p class="chapter-status">작성 예정</p>
+      <h3 id="chapter-title-07">7장. 텐서곱으로 공동 상태 만들기</h3>
+      <ul>
+        <li>두 큐비트의 자리 순서와 네 가지 기준 상태 정하기</li>
+        <li>텐서곱을 네 항으로 전개하고, 공통 부분을 묶는 계산 따라가기</li>
+      </ul>
+    </section>
+    <section class="plan-chapter" id="plan-chapter-08" aria-labelledby="chapter-title-08">
+      <p class="chapter-status">작성 예정</p>
+      <h3 id="chapter-title-08">8장. CNOT과 얽힘</h3>
+      <ul>
+        <li>각 기준 상태에 CNOT을 적용하고, 중첩된 항의 변화 계산하기</li>
+        <li>H와 CNOT으로 벨 상태를 만들고, 각 큐비트의 상태로 분리할 수 있는지 살펴보기</li>
+      </ul>
+    </section>
+    <section class="plan-chapter" id="plan-chapter-09" aria-labelledby="chapter-title-09">
+      <p class="chapter-status">작성 예정</p>
+      <h3 id="chapter-title-09">9장. 측정하면 공동 상태는 어떻게 바뀔까?</h3>
+      <ul>
+        <li>한 큐비트의 측정 결과를 0과 1로 나누어 계산하고 정규화하기</li>
+        <li>중첩과 확률적 섞임, 측정 결과를 아는 경우와 모르는 경우 구별하기</li>
+      </ul>
+    </section>
 
-  <h2>차례</h2>
-  <div class="overview-list">
-    <a class="overview-item" href="intro.html"><span class="num">들어가며</span><span class="title">왜 Qora로 양자 게이트를 배울까?</span></a>
-    <a class="overview-item" href="chapter-01.html"><span class="num">1장</span><span class="title">큐비트 상태와 진폭에 대해 알아보자</span></a>
-    <a class="overview-item" href="chapter-02.html"><span class="num">2장</span><span class="title">진폭과 확률은 어떻게 연결될까?</span></a>
-    <a class="overview-item" href="chapter-03.html"><span class="num">3장</span><span class="title">|0⟩ 상태와 |1⟩ 상태를 직접 읽어보자</span></a>
-    <a class="overview-item" href="chapter-04.html"><span class="num">4장</span><span class="title">중첩은 무엇이고 간섭은 무엇일까?</span></a>
-    <a class="overview-item" href="chapter-05.html"><span class="num">5장</span><span class="title">중첩은 그냥 "모르는 상태"일까?</span></a>
-    <a class="overview-item" href="chapter-06.html"><span class="num">6장</span><span class="title">간섭은 언제 생길까?</span></a>
-    <a class="overview-item" href="chapter-07.html"><span class="num">7장</span><span class="title">두 큐비트 상태는 어떻게 읽을까?</span></a>
-    <a class="overview-item" href="chapter-08.html"><span class="num">8장</span><span class="title">얽힘은 무엇이 함께 묶인다는 뜻일까?</span></a>
-    <a class="overview-item" href="chapter-09.html"><span class="num">9장</span><span class="title">양자 게이트는 되돌릴 수 있어야 한다.</span></a>
-    <a class="overview-item" href="chapter-10.html"><span class="num">10장</span><span class="title">Qora 코드는 어떻게 읽을까?</span></a>
-    <a class="overview-item" href="summary.html"><span class="num">정리</span><span class="title">1부에서 배운 것을 정리해보자</span></a>
-    <a class="overview-item" href="chapter-11.html"><span class="num">11장</span><span class="title">X 게이트는 무엇을 뒤집을까?</span></a>
-    <a class="overview-item" href="chapter-12.html"><span class="num">12장</span><span class="title">H 게이트는 진폭을 어떻게 나눌까?</span></a>
-    <a class="overview-item" href="chapter-13.html"><span class="num">13장</span><span class="title">Z 게이트는 무엇의 부호를 바꿀까?</span></a>
-    <a class="overview-item" href="chapter-14.html"><span class="num">14장</span><span class="title">CNOT 게이트는 두 큐비트를 어떻게 연결할까?</span></a>
-    <a class="overview-item" href="chapter-15.html"><span class="num">15장</span><span class="title">작은 회로 하나를 끝까지 읽어보자</span></a>
-  </div>
+    <h2 id="part-4">4부. 배운 내용을 Qora 회로로 완성하기</h2>
+    <section class="plan-chapter" id="plan-chapter-10" aria-labelledby="chapter-title-10">
+      <p class="chapter-status">작성 예정</p>
+      <h3 id="chapter-title-10">10장. 되돌리기와 초기화는 무엇이 다를까?</h3>
+      <ul>
+        <li>역연산과 측정 후 초기화를 같은 예제로 비교하기</li>
+        <li>CNOT을 되돌려 보조 큐비트를 정리하고, 남길 상태가 보존되는지 확인하기</li>
+      </ul>
+    </section>
+    <section class="plan-chapter" id="plan-chapter-11" aria-labelledby="chapter-title-11">
+      <p class="chapter-status">작성 예정</p>
+      <h3 id="chapter-title-11">11장. 작은 회로를 읽기 좋은 Qora 코드로 만들기</h3>
+      <ul>
+        <li>큐비트와 측정값, bit와 bool, 조건문과 CNOT 구별하기</li>
+        <li>반복되는 회로를 operation으로 묶고, 전달하는 값과 반환하는 값 이해하기</li>
+      </ul>
+    </section>
+    <section class="plan-chapter" id="plan-chapter-12" aria-labelledby="chapter-title-12">
+      <p class="chapter-status">작성 예정</p>
+      <h3 id="chapter-title-12">12장. 예측하고 실행하고 설명하기</h3>
+      <ul>
+        <li>H·Z의 간섭 실험과 벨 상태의 공동 측정 결과 확인하기</li>
+        <li>측정 후 초기화와 CNOT 역연산을 직접 비교하고 계산과 실행 결과 설명하기</li>
+      </ul>
+    </section>
 
-  <h2>Qora 언어 전체 사양</h2>
-  <div class="overview-list">
-    <a class="overview-item" href="../../llms.txt"><span class="num">언어 사양</span><span class="title">구현된 Qora 문법과 컴파일 모델 전체 보기</span></a>
-  </div>
-        <nav class="page-nav" aria-label="장 이동">
-    <span class="disabled"><span class="k">이전</span><span class="t">첫 페이지예요</span></span>
-    <a class="home" href="index.html"><span class="k">개요</span><span class="t">전체 차례로 돌아가기</span></a>
-    <a href="intro.html"><span class="k">다음</span><span class="t">들어가며. 왜 Qora로 양자 게이트를 배울까?</span></a>
-  </nav>
-    <footer>
-      <p>Qora — 직접 만드는 양자 토이 언어</p>
-    </footer>
+    <h2 id="appendices">필요할 때 찾아보는 부록 <span class="chapter-status">(작성 예정)</span></h2>
+    <ul>
+      <li><strong>수학 다시 보기:</strong> 분수, 제곱, 제곱근, 복소수, 분배법칙</li>
+      <li><strong>기호 찾아보기:</strong> 상태 표기, 진폭, 텐서곱, 행렬</li>
+      <li><strong>Qora 문법 찾아보기:</strong> 본문에서 사용한 문법</li>
+      <li><strong>실행 문제 해결:</strong> 설치, 오류 메시지, 결과가 표시되지 않는 경우</li>
+      <li><strong>연습문제 해설:</strong> 정답에 이르는 계산 과정</li>
+    </ul>
+    <p>부록은 본문을 읽다가 계산이나 기호의 뜻을 다시 확인하고 싶을 때 참고할 수 있도록 구성합니다.</p>
+
+    <h2 id="reading-method">한 가지 질문을 끝까지 따라가는 방법</h2>
+    <p>
+      각 절에서는 같은 예제를 유지하면서 코드, 계산, 결과를 연결합니다.<br>
+      새 기호는 뜻을 설명한 뒤 사용하고, 식을 전개하거나 묶을 때도 중간 단계를 보여드리겠습니다.<br>
+      계산을 마치면 Qora로 실행하여, 예측한 확률과 실제로 얻은 결과의 비율을 비교합니다.
+    </p>
+    <p>
+      초판의 범위는 작은 양자 회로를 이해하고 직접 실행하는 데까지입니다.<br>
+      본격적인 양자 알고리즘, 잡음과 오류 정정, 컴파일러 내부 구현과 자동 uncompute 알고리즘은 다루지 않습니다.<br>
+      본문에 포함한 회로는 각 단계에서 무엇이 달라지는지 끝까지 설명하겠습니다.
+    </p>
+
+    <details class="draft-directory" id="previous-drafts">
+      <summary>참고용 기존 초안 보기 — 새 초판 목차와 별도</summary>
+      <p>
+        아래 문서는 새 목차로 정리하기 전에 작성한 초안입니다.<br>
+        장 번호와 설명 순서가 새 초판과 다르며, 예제도 초판의 실행 기준으로 다시 점검하기 전 상태입니다.<br>
+        기존 내용을 참고할 수 있도록 보존한 문서이므로, 처음 읽는 분은 <a href="chapter-01.html">새 1장</a>부터 읽으시면 됩니다.
+      </p>
+      <ul>
+        <li><a href="summary.html">기존 초안 · 1부에서 배운 것을 정리해보자</a></li>
+        <li><a href="chapter-02.html">기존 초안 · 2장. 진폭과 확률은 어떻게 연결될까?</a></li>
+        <li><a href="chapter-03.html">기존 초안 · 3장. |0⟩ 상태와 |1⟩ 상태를 직접 읽어보자</a></li>
+        <li><a href="chapter-04.html">기존 초안 · 4장. 중첩은 무엇이고 간섭은 무엇일까?</a></li>
+        <li><a href="chapter-05.html">기존 초안 · 5장. 중첩은 그냥 "모르는 상태"일까?</a></li>
+        <li><a href="chapter-06.html">기존 초안 · 6장. 간섭은 언제 생길까?</a></li>
+        <li><a href="chapter-07.html">기존 초안 · 7장. 두 큐비트 상태는 어떻게 읽을까?</a></li>
+        <li><a href="chapter-08.html">기존 초안 · 8장. 얽힘은 무엇이 함께 묶인다는 뜻일까?</a></li>
+        <li><a href="chapter-09.html">기존 초안 · 9장. 양자 게이트는 되돌릴 수 있어야 한다.</a></li>
+        <li><a href="chapter-10.html">기존 초안 · 10장. Qora 코드는 어떻게 읽을까?</a></li>
+        <li><a href="chapter-11.html">기존 초안 · 11장. X 게이트는 무엇을 뒤집을까?</a></li>
+        <li><a href="chapter-12.html">기존 초안 · 12장. H 게이트는 진폭을 어떻게 나눌까?</a></li>
+        <li><a href="chapter-13.html">기존 초안 · 13장. Z 게이트는 무엇의 부호를 바꿀까?</a></li>
+        <li><a href="chapter-14.html">기존 초안 · 14장. CNOT 게이트는 두 큐비트를 어떻게 연결할까?</a></li>
+        <li><a href="chapter-15.html">기존 초안 · 15장. 작은 회로 하나를 끝까지 읽어보자</a></li>
+      </ul>
+    </details>
+    <p><a href="../../llms.txt">Qora 언어 전체 사양 보기</a> — 본문보다 자세한 문법이 필요할 때 참고할 수 있습니다.</p>
+    <nav class="page-nav" aria-label="장 이동">
+      <span class="disabled"><span class="k">시작</span><span class="t">초판 개요와 목차</span></span>
+      <a href="intro.html"><span class="k">들어가며</span><span class="t">작은 회로에서 시작하기</span></a>
+      <a href="chapter-01.html"><span class="k">본문 읽기</span><span class="t">1장. 양자컴퓨터는 무엇을 계산할까?</span></a>
+    </nav>
+    <footer><p>Qora로 처음 만나는 양자컴퓨팅 · 한국어 초판 원고</p></footer>
   </main>
 </div>
 

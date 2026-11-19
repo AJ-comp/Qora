@@ -144,8 +144,11 @@ internal sealed partial class HirRewriteSession
     public HirQubitDeclarationStatement RewriteQubitDeclaration(
         HirQubitDeclarationStatement source,
         string name,
-        int size) =>
-        new(PreserveStamp(source), name, size);
+        HirExpression size)
+    {
+        RequireOwned(size, nameof(size));
+        return new HirQubitDeclarationStatement(PreserveStamp(source), name, size);
+    }
 
     public HirCallStatement RewriteCallStatement(
         HirCallStatement source,
@@ -301,8 +304,8 @@ internal sealed partial class HirRewriteSession
             HirArrayLiteralExpression literal =>
                 RewriteArrayLiteral(literal, literal.Elements),
             HirArrayCreationExpression creation =>
-                new HirArrayCreationExpression(
-                    PreserveStamp(source),
+                RewriteArrayCreation(
+                    creation,
                     creation.ElementType,
                     creation.Length),
             _ => throw Unhandled(source),
@@ -416,6 +419,15 @@ internal sealed partial class HirRewriteSession
             elements);
     }
 
+    public HirArrayCreationExpression RewriteArrayCreation(
+        HirArrayCreationExpression source,
+        QType elementType,
+        HirExpression length)
+    {
+        RequireOwned(length, nameof(length));
+        return new HirArrayCreationExpression(PreserveStamp(source), elementType, length);
+    }
+
     public HirCallable DeriveCallable(
         HirCallable source,
         string name,
@@ -488,7 +500,7 @@ internal sealed partial class HirRewriteSession
                 new HirQubitDeclarationStatement(
                     DeriveStamp(qubit),
                     qubit.Name,
-                    qubit.Size),
+                    Expr(qubit.Size)),
             HirCallStatement call =>
                 new HirCallStatement(
                     DeriveStamp(call),
@@ -599,7 +611,7 @@ internal sealed partial class HirRewriteSession
                 new HirArrayCreationExpression(
                     DeriveStamp(source),
                     creation.ElementType,
-                    creation.Length),
+                    DeriveExpression(creation.Length)),
             _ => throw Unhandled(source),
         };
     }
@@ -756,7 +768,7 @@ internal sealed partial class HirRewriteSession
 
     public HirQubitDeclarationStatement DeriveQubitDeclaration(
         HirQubitDeclarationStatement source) =>
-        new(DeriveStamp(source), source.Name, source.Size);
+        new(DeriveStamp(source), source.Name, DeriveExpression(source.Size));
 
     public HirCallStatement DeriveCallStatement(
         HirCallStatement source,
@@ -884,6 +896,15 @@ internal sealed partial class HirRewriteSession
         return new HirArrayLiteralExpression(
             DeriveStamp(source),
             elements);
+    }
+
+    public HirArrayCreationExpression DeriveArrayCreation(
+        HirArrayCreationExpression source,
+        QType elementType,
+        HirExpression length)
+    {
+        RequireOwned(length, nameof(length));
+        return new HirArrayCreationExpression(DeriveStamp(source), elementType, length);
     }
 
     public HirExpression SynthesizeName(

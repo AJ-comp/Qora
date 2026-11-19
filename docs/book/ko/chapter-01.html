@@ -3,837 +3,894 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>1장. 큐비트 상태와 진폭에 대해 알아보자 - Qora</title>
+<meta name="description" content="큐비트 하나를 준비하고 X 게이트를 적용한 뒤 측정하는 과정을 설명합니다. 같은 동작을 Qora 코드로 읽으며 큐비트의 상태, 측정값, 반환값의 차이를 살펴봅니다.">
+<title>1장. 양자컴퓨터는 무엇을 계산할까? — Qora로 처음 만나는 양자컴퓨팅</title>
 <style>
 :root {
-    --bg: #ffffff;
-    --ink: #1f2430;
-    --muted: #5b6472;
-    --line: #e6e8ee;
-    --panel: #f7f8fb;
-    --accent: #6b3fd4;
-    --plus: #1457d6;
-    --minus: #d62b39;
-    --good: #11875b;
-  }
-  * { box-sizing: border-box; }
-  html { scroll-behavior: smooth; }
-  body {
-    margin: 0;
-    background: var(--bg);
-    color: var(--ink);
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo",
-      "Malgun Gothic", "Noto Sans KR", "Segoe UI Symbol", "Cambria Math", sans-serif;
-    line-height: 1.78;
-    font-size: 17px;
-    word-break: keep-all;
-  }
-  header.hero {
-    padding: 64px 20px 42px;
-    text-align: center;
-    border-bottom: 1px solid var(--line);
-    background: linear-gradient(180deg, #faf9ff, #ffffff);
-  }
-  .tag {
-    display: inline-block;
-    color: var(--accent);
-    font-size: .78rem;
-    font-weight: 800;
-    letter-spacing: .12em;
-    margin-bottom: 14px;
-    text-transform: uppercase;
-  }
-  h1 {
-    margin: 0 0 10px;
-    font-size: 2.15rem;
-    line-height: 1.25;
-  }
-  header.hero p {
-    margin: 0;
-    color: var(--muted);
-    font-size: 1.05rem;
-  }
-  .wrap {
-    max-width: 860px;
-    margin: 0 auto;
-    padding: 0 20px 120px;
-  }
-  h2 {
-    margin: 58px 0 14px;
-    padding-top: 14px;
-    border-top: 2px solid var(--line);
-    font-size: 1.52rem;
-    line-height: 1.45;
-  }
-  h3 {
-    margin: 34px 0 10px;
-    font-size: 1.18rem;
-    line-height: 1.45;
-  }
-  h4 {
-    margin: 0 0 8px;
-    font-size: 1.03rem;
-    line-height: 1.45;
-  }
-  p { margin: 14px 0; }
-  .card p {
-    max-width: 68ch;
-  }
-  strong { color: #11203a; }
-  code,
-  .mono {
-    font-family: "SF Mono", "JetBrains Mono", "D2Coding", Consolas, "Segoe UI Symbol", monospace;
-  }
-  code {
-    background: var(--panel);
-    border: 1px solid var(--line);
-    border-radius: 5px;
-    padding: 1px 6px;
-    font-size: .9em;
-  }
-  .nowrap {
-    white-space: nowrap;
-  }
-  .lead {
-    margin-top: 28px;
-    font-size: 1.08rem;
-  }
-  .toc {
-    background: var(--panel);
-    border: 1px solid var(--line);
-    border-radius: 10px;
-    margin: 26px 0;
-    padding: 16px 18px;
-  }
-  .toc strong { display: block; margin-bottom: 6px; }
-  .toc ol { margin: 0; padding-left: 22px; }
-  .toc a {
-    color: var(--ink);
-    text-decoration: none;
-  }
-  .toc a:hover { color: var(--accent); }
-  .doc-links {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 10px;
-    margin: 20px 0 28px;
-  }
-  .doc-link {
-    align-items: center;
-    background: #f6f9ff;
-    border: 1px solid #cddcff;
-    border-radius: 999px;
-    color: #1745b5;
-    display: inline-flex;
-    font-weight: 800;
-    gap: 8px;
-    padding: 8px 14px;
-    text-decoration: none;
-  }
-  .doc-link:hover {
-    background: #eef4ff;
-    border-color: #9bb8ff;
-  }
-  .part {
-    margin: 52px 0 18px;
-    padding: 18px 20px;
-    border-radius: 10px;
-    background: #f3efff;
-    border: 1px solid #e2d8ff;
-  }
-  .part .label {
-    display: inline-block;
-    color: var(--accent);
-    font-size: .78rem;
-    font-weight: 900;
-    letter-spacing: .08em;
-    margin-bottom: 8px;
-  }
-  .part h2 {
-    margin: 0 0 8px;
-    padding: 0;
-    border: 0;
-  }
-  .panel {
-    background: var(--panel);
-    border: 1px solid var(--line);
-    border-radius: 10px;
-    margin: 18px 0;
-    padding: 16px 18px;
-    overflow-x: auto;
-  }
-  .call {
-    border-left: 4px solid var(--accent);
-    background: #faf8ff;
-    border-radius: 0 8px 8px 0;
-    margin: 20px 0;
-    padding: 14px 18px;
-  }
-  .call.why {
-    border-color: var(--good);
-    background: #f2fbf7;
-  }
-  .call.warn {
-    border-color: #e6a417;
-    background: #fff9ec;
-  }
-  .call .h {
-    display: block;
-    font-weight: 800;
-    margin-bottom: 4px;
-  }
-  .point-list {
-    display: grid;
-    gap: 10px;
-    margin: 14px 0 22px;
-  }
-  .point {
-    display: grid;
-    grid-template-columns: auto 1fr;
-    gap: 10px;
-    align-items: start;
-    background: var(--panel);
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    padding: 11px 13px;
-  }
-  .point .marker {
-    color: var(--accent);
-    font-weight: 900;
-    white-space: nowrap;
-  }
-  .rule {
-    background: #f3efff;
-    border: 1px solid #e2d8ff;
-    border-radius: 10px;
-    color: #1a1140;
-    font-size: 1.08rem;
-    font-weight: 800;
-    margin: 20px 0;
-    padding: 16px;
-    text-align: center;
-  }
-  table {
-    width: 100%;
-    border-collapse: collapse;
-  }
-  th,
-  td {
-    border-bottom: 1px solid var(--line);
-    padding: 9px 12px;
-    text-align: center;
-    white-space: nowrap;
-  }
-  th {
-    color: var(--muted);
-    font-size: .82rem;
-    font-weight: 700;
-  }
-  td:first-child,
-  th:first-child {
-    text-align: left;
-    font-weight: 700;
-  }
-  tr:last-child td { border-bottom: 0; }
-  .math {
-    background: #fff;
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    font-weight: 800;
-    margin: 14px 0;
-    padding: 12px 14px;
-    text-align: center;
-  }
-  .math-line + .math-line {
-    margin-top: 4px;
-  }
-  .concept-flow {
-    display: grid;
-    gap: 16px;
-    margin: 20px 0 26px;
-  }
-  .concept-step {
-    background: #fff;
-    border: 1px solid var(--line);
-    border-radius: 10px;
-    overflow: hidden;
-  }
-  .concept-step.basis { border-top: 5px solid #6b7280; }
-  .concept-step.vector { border-top: 5px solid var(--plus); }
-  .concept-step.amplitude { border-top: 5px solid var(--good); }
-  .concept-body {
-    padding: 16px 18px 18px;
-  }
-  .concept-title {
-    align-items: center;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 10px;
-    margin: 0 0 10px;
-  }
-  .concept-title h3 {
-    margin: 0;
-  }
-  .step-badge {
-    background: var(--panel);
-    border: 1px solid var(--line);
-    border-radius: 999px;
-    color: var(--muted);
-    display: inline-flex;
-    font-size: .76rem;
-    font-weight: 900;
-    line-height: 1;
-    padding: 6px 10px;
-    white-space: nowrap;
-  }
-  .visual-grid {
-    display: grid;
-    gap: 10px;
-    margin-top: 12px;
-  }
-  .visual-grid.two {
-    grid-template-columns: 1fr;
-  }
-  @media (min-width: 720px) {
-    .visual-grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  }
-  .basis-tile,
-  .component-tile,
-  .amplitude-tile {
-    background: var(--panel);
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    padding: 13px 14px;
-  }
-  .basis-line {
-    align-items: center;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    justify-content: center;
-    min-height: 44px;
-  }
-  .basis-line .from {
-    color: var(--muted);
-    font-size: .9rem;
-    font-weight: 700;
-  }
-  .basis-line .arrow {
-    color: var(--accent);
-    font-weight: 900;
-  }
-  .tile-note {
-    color: var(--muted);
-    display: block;
-    font-size: .88rem;
-    margin-top: 6px;
-    text-align: center;
-  }
-  .component-equation {
-    align-items: center;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    justify-content: center;
-    margin-top: 12px;
-  }
-  .component-part,
-  .formula-part {
-    background: #fff;
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    font-weight: 900;
-    padding: 9px 12px;
-  }
-  .component-part.x { color: var(--plus); }
-  .component-part.y { color: var(--accent); }
-  .formula-part.zero { color: var(--plus); }
-  .formula-part.one { color: var(--good); }
-  .operator {
-    color: var(--muted);
-    font-weight: 900;
-  }
-  .formula-final {
-    background: #f2fbf7;
-    border: 1px solid #b8e5d2;
-    border-radius: 8px;
-    font-size: 1.04rem;
-    font-weight: 900;
-    margin-top: 12px;
-    padding: 13px 14px;
-    text-align: center;
-  }
-  .meaning-list {
-    display: grid;
-    gap: 8px;
-    margin-top: 12px;
-  }
-  .meaning-row {
-    align-items: center;
-    display: grid;
-    gap: 8px;
-    grid-template-columns: minmax(96px, auto) 1fr;
-  }
-  .meaning-row strong {
-    background: #fff;
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    padding: 6px 9px;
-    text-align: center;
-  }
-  .compare-grid,
-  .summary-grid {
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: 14px;
-    margin: 16px 0 22px;
-  }
-  @media (min-width: 760px) {
-    .compare-grid,
-    .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  }
-  .card {
-    background: #fff;
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    padding: 15px 16px;
-  }
-  .card.good { border-top: 5px solid var(--good); }
-  .card.warn { border-top: 5px solid #e6a417; }
-  .card.plus { border-top: 5px solid var(--plus); }
-  .card.minus { border-top: 5px solid var(--minus); }
-  .card.accent { border-top: 5px solid var(--accent); }
-  .tag-small {
-    display: inline-block;
-    background: var(--panel);
-    border: 1px solid var(--line);
-    border-radius: 999px;
-    color: var(--muted);
-    font-size: .76rem;
-    font-weight: 900;
-    margin-bottom: 8px;
-    padding: 2px 9px;
-  }
-  .practice {
-    background: #f8fbff;
-    border: 1px solid #cfe0ff;
-    border-left: 8px solid var(--plus);
-    border-radius: 8px;
-    margin: 28px 0 34px;
-    padding: 18px;
-  }
-  .practice .practice-label {
-    display: inline-block;
-    color: var(--plus);
-    background: #edf4ff;
-    border: 1px solid #cfe0ff;
-    border-radius: 999px;
-    font-size: .78rem;
-    font-weight: 900;
-    margin-bottom: 10px;
-    padding: 3px 11px;
-  }
-  .practice h3 { margin-top: 0; }
-  pre {
-    background: #111827;
-    border-radius: 8px;
-    color: #eef4ff;
-    font-size: .88rem;
-    line-height: 1.55;
-    margin: 12px 0 0;
-    overflow-x: auto;
-    padding: 14px 15px;
-  }
-  pre code {
-    background: transparent;
-    border: 0;
-    color: inherit;
-    padding: 0;
-  }
-  .next {
-    background: #f2fbf7;
-    border: 1px solid #b8e5d2;
-    border-radius: 10px;
-    margin-top: 42px;
-    padding: 16px 18px;
-  }
-  .chapter-nav {
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: 10px;
-    margin: 34px 0 46px;
-  }
-  @media (min-width: 680px) {
-    .chapter-nav { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  }
-  .chapter-nav a {
-    display: block;
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    padding: 12px 14px;
-    text-decoration: none;
-    color: var(--ink);
-    background: #fff;
-  }
-  .chapter-nav a:hover {
-    border-color: #c9d6ff;
-    background: #f8fbff;
-  }
-  .chapter-nav .k {
-    display: block;
-    color: var(--muted);
-    font-size: .78rem;
-    font-weight: 900;
-    margin-bottom: 3px;
-  }
-  .chapter-nav .t {
-    display: block;
-    font-weight: 900;
-  }
-  .chapter-nav .disabled {
-    background: var(--panel);
-    color: var(--muted);
-  }
-  footer {
-    border-top: 1px solid var(--line);
-    color: var(--muted);
-    font-size: .9rem;
-    margin-top: 60px;
-    padding-top: 24px;
-    text-align: center;
-  }
-  .book-shell {
-    display: grid;
-    gap: 44px;
-    grid-template-columns: 300px minmax(0, 1060px);
-    margin: 0 auto;
-    max-width: 1600px;
-    padding: 0 24px 120px;
-  }
-  .side-nav {
-    align-self: start;
-    background: var(--panel);
-    border: 1px solid var(--line);
-    border-radius: 10px;
-    margin-top: 28px;
-    max-height: calc(100vh - 36px);
-    overflow: auto;
-    padding: 14px;
-    position: sticky;
-    top: 18px;
-  }
-  .side-nav strong {
-    display: block;
-    font-size: .9rem;
-    margin: 0 0 8px;
-  }
-  .side-nav a {
-    border-radius: 7px;
-    color: var(--ink);
-    display: block;
-    font-size: .94rem;
-    line-height: 1.35;
-    padding: 7px 8px;
-    text-decoration: none;
-  }
-  .side-nav a:hover,
-  .side-nav a.current {
-    background: #eef4ff;
-    color: #1745b5;
-    font-weight: 800;
-  }
-  .side-nav .group {
-    border-top: 1px solid var(--line);
-    margin-top: 10px;
-    padding-top: 10px;
-  }
-  .article {
-    min-width: 0;
-    padding-bottom: 120px;
-  }
-  .article > h2:first-child,
-  .article > .part:first-child + h2 {
-    margin-top: 28px;
-  }
-  .breadcrumb {
-    color: var(--muted);
-    font-size: .9rem;
-    font-weight: 700;
-    margin: 26px 0 0;
-  }
-  .overview-list {
-    display: grid;
-    gap: 10px;
-    margin: 18px 0 28px;
-  }
-  .overview-item {
-    align-items: baseline;
-    background: #fff;
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    color: var(--ink);
-    display: grid;
-    gap: 8px;
-    grid-template-columns: 92px minmax(0, 1fr);
-    padding: 12px 14px;
-    text-decoration: none;
-  }
-  .overview-item:hover {
-    border-color: #c9d6ff;
-    background: #f8fbff;
-  }
-  .overview-item .num {
-    color: var(--accent);
-    font-size: .86rem;
-    font-weight: 900;
-  }
-  .overview-item .title {
-    font-weight: 900;
-  }
-  .page-nav {
-    display: grid;
-    gap: 12px;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    margin-top: 46px;
-  }
-  .page-nav > a,
-  .page-nav > span {
-    background: #fff;
-    border: 1px solid var(--line);
-    border-radius: 10px;
-    color: var(--ink);
-    min-height: 78px;
-    padding: 13px 14px;
-    text-decoration: none;
-  }
-  .page-nav a:hover {
-    border-color: #c9d6ff;
-    background: #f8fbff;
-  }
-  .page-nav .k {
-    color: var(--muted);
-    display: block;
-    font-size: .78rem;
-    font-weight: 900;
-    margin-bottom: 4px;
-  }
-  .page-nav .t {
-    display: block;
-    font-weight: 900;
-    line-height: 1.35;
-  }
-  .page-nav .disabled {
-    background: var(--panel);
-    color: var(--muted);
-  }
-  .page-nav .home {
-    text-align: center;
-  }
-  @media (max-width: 860px) {
-    .book-shell {
-      display: block;
-      padding: 0 18px 90px;
-    }
-    .side-nav {
-      max-height: none;
-      position: static;
-    }
-    .page-nav {
-      grid-template-columns: 1fr;
-    }
-    .overview-item {
-      grid-template-columns: 1fr;
-    }
-  }
+  --bg:#fff; --ink:#19243a; --muted:#5c687b; --line:#dfe4ec;
+  --panel:#f4f6fa; --accent:#4b48cb; --blue:#3d45bd; --green:#126d61;
+  --paper:#f7f6f2; --lavender:#f0effb; --code:#172238;
+}
+* { box-sizing:border-box; }
+html { scroll-behavior:smooth; scroll-padding-top:28px; }
+body { margin:0; color:var(--ink); background:var(--bg); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR",sans-serif; font-size:17px; line-height:1.9; word-break:keep-all; overflow-wrap:break-word; }
+a { color:var(--blue); text-underline-offset:4px; }
+button { font:inherit; cursor:pointer; }
+a:focus-visible,button:focus-visible,summary:focus-visible { outline:3px solid #7973e8; outline-offset:4px; }
+[hidden] { display:none !important; }
+.skip-link { position:absolute; top:-80px; left:16px; z-index:100; padding:8px 14px; background:#fff; }
+.skip-link:focus { top:8px; }
+.qora-lang-switch { display:flex; justify-content:space-between; align-items:center; gap:16px; max-width:1280px; margin:auto; padding:14px 28px; color:var(--muted); font-size:12px; line-height:1.6; }
+.qora-wordmark { color:var(--ink); font-size:17px; font-weight:800; letter-spacing:.18em; text-decoration:none; }
+.hero { background:var(--paper); border-block:1px solid #e9e8e3; }
+.hero-inner { max-width:1280px; margin:auto; padding:48px 28px; display:grid; grid-template-columns:1.2fr 1fr; align-items:center; gap:52px; }
+.tag { display:block; margin-bottom:16px; color:var(--accent); font-size:13px; font-weight:700; letter-spacing:.06em; }
+h1 { margin:0 0 20px; font-size:clamp(32px,3.6vw,46px); line-height:1.35; letter-spacing:-.045em; font-weight:800; }
+.hero p { margin:0; font-size:17px; color:var(--muted); }
+.hero-art { margin:0; max-width:460px; justify-self:end; width:100%; }
+.hero-art svg { display:block; width:100%; height:auto; }
+.hero-art figcaption { margin:10px 0 0; text-align:center; font-size:12px; color:var(--muted); }
+.hero-bottom { display:flex; flex-wrap:wrap; align-items:center; gap:12px 24px; margin-top:24px; font-size:13px; color:var(--muted); }
+.hero-bottom a { font-size:14px; text-decoration:none; color:var(--ink); font-weight:700; border-bottom:1px solid var(--ink); padding-bottom:3px; }
+.book-shell { display:grid; grid-template-columns:202px minmax(0,940px); gap:64px; max-width:1280px; margin:auto; padding:0 28px 80px; }
+.side-nav { align-self:start; position:sticky; top:24px; margin-top:42px; max-height:calc(100vh - 48px); overflow:auto; font-size:13px; line-height:1.6; }
+.side-nav strong { display:block; margin:14px 0 8px; font-size:13px; }
+.side-nav a { display:block; padding:7px 8px; color:var(--muted); text-decoration:none; border-radius:5px; font-size:13px; }
+.side-nav a:hover,.side-nav a.current { color:var(--accent); background:var(--lavender); }
+.side-nav a.current { font-weight:700; }
+.side-nav .group { border-top:1px solid var(--line); margin-top:12px; padding-top:4px; }
+.side-nav summary { cursor:pointer; padding:10px 0; color:var(--ink); font-size:13px; font-weight:700; }
+.book-navigation { border-block:1px solid var(--line); }
+.book-navigation > summary { display:list-item; font-size:14px; padding:14px 0; }
+.nav-current { font-weight:400; color:var(--muted); margin-left:8px; }
+.chapter-navigation { margin-top:28px; }
+.chapter-navigation .nav-label { font-size:11px; letter-spacing:.12em; color:var(--muted); font-weight:700; margin-bottom:12px; }
+.chapter-navigation a { display:flex; align-items:baseline; gap:10px; padding:10px 0; }
+.chapter-navigation a span { color:#9098ac; font:12px Consolas,monospace; }
+.article { min-width:0; }
+.breadcrumb { margin:38px 0 24px; color:var(--muted); font-size:12px; }
+.lead { margin:24px 0; font-size:20px; line-height:1.8; letter-spacing:-.02em; }
+p { margin:19px 0; }
+strong { color:var(--ink); }
+h2 { display:flex; gap:14px; align-items:baseline; margin:74px 0 26px; padding-top:24px; border-top:1px solid var(--line); font-size:27px; line-height:1.5; letter-spacing:-.035em; }
+.section-number { flex:none; color:var(--accent); font:500 13px Consolas,monospace; letter-spacing:.04em; }
+h3 { margin:34px 0 14px; font-size:20px; line-height:1.6; letter-spacing:-.02em; }
+ol,ul { padding-left:1.5em; }
+li { margin:9px 0; }
+code { padding:1px 5px; color:#303b61; background:#f3f4fa; border-radius:4px; font:.92em Consolas,"D2Coding","SF Mono",monospace; overflow-wrap:anywhere; }
+pre { margin:22px 0; padding:22px 24px; overflow-x:auto; border-radius:12px; background:var(--code); color:#f0f4ff; font:15.5px/1.9 Consolas,"D2Coding","SF Mono",monospace; tab-size:4; }
+pre code { color:inherit; font:inherit; padding:0; background:transparent; overflow-wrap:normal; }
+.note { margin:28px 0; padding:18px 22px; border-left:3px solid #a2a7be; background:var(--panel); font-size:15px; }
+.note p { margin:0; }
+.chapter-toc { margin:28px 0 38px; padding:16px 0; border-block:1px solid var(--line); font-size:14px; }
+.chapter-toc summary { cursor:pointer; font-weight:700; }
+.chapter-toc ol { margin:16px 0 0; columns:2; column-gap:36px; }
+.chapter-toc li { break-inside:avoid; padding-right:8px; }
+.chapter-toc a { text-decoration:none; color:var(--muted); }
+figure { margin:30px 0; container-type:inline-size; }
+figure svg { display:block; width:100%; height:auto; font-family:inherit; }
+figure .diagram-mobile { display:none; }
+figcaption { margin-top:14px; color:var(--muted); font-size:13px; line-height:1.7; }
+.bit-illustration { max-width:560px; margin:26px auto 34px; }
+.bit-pair { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+.bit-case { display:flex; align-items:center; gap:14px; padding:24px; background:#f3f5f9; border-radius:12px; }
+.bit-case-on { background:#faf4e6; }
+.bit-case svg { flex:none; width:68px; height:68px; }
+.bit-case span { font-size:15px; }
+.bit-case strong { display:block; font-size:32px; line-height:1.4; }
+.bit-illustration figcaption { text-align:center; }
+.table-wrap { margin:24px 0; overflow-x:auto; }
+table { width:100%; border-collapse:collapse; font-size:16px; line-height:1.75; }
+caption { text-align:left; color:var(--muted); font-size:13px; margin-bottom:12px; }
+th,td { padding:15px 14px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; }
+th { background:var(--panel); }
+th[scope="row"] { background:transparent; }
+.key-distinction { margin:28px 0; padding:2px 0 2px 22px; border-left:3px solid var(--accent); }
+.circuit-step { position:relative; padding-left:56px; margin:28px 0; }
+.circuit-step::before { content:attr(data-step); position:absolute; left:0; top:0; display:grid; place-items:center; width:34px; height:34px; border:1px solid #cbd0df; border-radius:50%; color:var(--accent); font:14px Consolas,monospace; }
+.circuit-step h3 { margin:0 0 12px; }
+.circuit-step p:last-child { margin-bottom:0; }
+.experiment { margin:34px 0; border:1px solid #d8dbec; background:#f5f5fc; border-radius:18px; overflow:hidden; }
+.experiment-head { padding:22px 26px 18px; }
+.eyebrow { display:block; color:var(--accent); font-size:11px; font-weight:800; letter-spacing:.12em; margin-bottom:6px; }
+.experiment h3 { margin:0 0 6px; font-size:22px; }
+.experiment-head p { margin:0; font-size:14px; color:var(--muted); }
+.scene-controls { display:flex; gap:8px; padding:0 26px 22px; }
+.scene-controls button { flex:1; min-height:44px; padding:9px 10px; border:1px solid #d8dced; border-radius:7px; background:#fff; color:#4d5872; font-size:14px; line-height:1.5; }
+.scene-controls button[aria-pressed="true"] { color:#fff; background:var(--accent); border-color:var(--accent); }
+.lab-display { display:grid; grid-template-columns:1fr 1fr; margin:0 26px; background:white; border:1px solid #e0e3ef; border-radius:12px; }
+.lab-state,.lab-result { padding:20px; text-align:center; }
+.lab-result { border-left:1px solid #e0e3ef; background:#fafbfe; border-radius:0 12px 12px 0; display:flex; flex-direction:column; align-items:center; justify-content:center; }
+.lab-label { font-size:13px; color:var(--muted); }
+.lab-state svg { width:100px; height:100px; margin:10px auto 0; display:block; }
+.lab-state strong { display:block; font-size:16px; font-weight:600; }
+.lab-result output { font-size:34px; line-height:1.5; font-weight:700; letter-spacing:-.04em; margin:17px 0 8px; }
+.lab-result p { font-size:13px; color:var(--muted); margin:0; }
+.scene-explanation { padding:18px 26px 22px; }
+.scene-explanation p { margin:0; font-size:15px; }
+.experiment .simulation-note { padding:13px 26px; border-top:1px solid #d8dbec; margin:0; color:var(--muted); font-size:12px; line-height:1.7; }
+.program-demo { margin:28px 0 32px; display:grid; grid-template-columns:minmax(0,1.4fr) minmax(200px,.8fr); background:var(--code); border-radius:14px; overflow:hidden; color:#eaf0ff; }
+.program-source { min-width:0; padding:22px 0; }
+.program-label { padding:0 24px; font-size:12px; letter-spacing:.04em; color:#a8b7d8; }
+.program-source pre { margin:12px 0 0; border-radius:0; padding:0 24px; font-size:15px; }
+.code-row { position:relative; }
+.code-row[data-code-step]::before { content:attr(data-code-step); position:absolute; left:-16px; color:#a9a7ec; font:11px/28.5px Consolas,monospace; }
+.program-map { margin:0; padding:22px; background:#1f2d46; }
+.program-map p { margin:0 0 14px; font-size:13px; color:#b4c3e0; }
+.program-map a { display:flex; gap:12px; align-items:baseline; padding:10px 0; color:#f2f5ff; text-decoration:none; font-size:14px; border-bottom:1px solid #37435d; }
+.program-map a:last-child { border:0; }
+.program-map a span { color:#a7a5ff; font:13px Consolas,monospace; }
+.program-map a:hover { color:#c4c0ff; }
+.code-row.highlight { background:#2f3a63; box-shadow:-7px 0 #aaa6ff; }
+.code-explanation { margin:40px 0; padding-left:24px; border-left:2px solid #e6e8f1; }
+.code-explanation h3 { display:flex; gap:12px; margin:0 0 14px; align-items:baseline; }
+.code-explanation h3::before { content:attr(data-step); color:var(--accent); font:13px Consolas,monospace; flex:none; }
+.code-explanation > pre { padding:13px 18px; background:#f0f2f8; color:#283454; border:1px solid #e1e5ef; border-radius:7px; font-size:15px; }
+.result-line { margin:28px 0; padding:20px 24px; border-left:4px solid var(--green); background:#eef7f3; border-radius:0 10px 10px 0; }
+.result-line .label { display:block; font-size:12px; color:#4b685f; margin-bottom:7px; }
+.result-line strong { color:#155c50; font-size:24px; }
+.check { margin:10px 0; padding:18px 0; border-bottom:1px solid var(--line); }
+.check summary { cursor:pointer; font-size:16px; font-weight:600; }
+.check p:last-child { margin-bottom:0; }
+section[aria-labelledby="what-is-different"] > .check { padding:22px 24px; background:var(--lavender); border:0; border-radius:12px; margin:26px 0; }
+.pipeline { list-style:none; padding:0; margin:30px 0; counter-reset:steps; }
+.pipeline li { counter-increment:steps; position:relative; padding:0 0 24px 52px; margin:0; border-left:1px solid #dce1ed; margin-left:15px; font-size:16px; }
+.pipeline li:last-child { border-color:transparent; padding-bottom:0; }
+.pipeline li::before { content:counter(steps,decimal-leading-zero); position:absolute; top:0; left:-16px; width:32px; height:32px; display:grid; place-items:center; background:#fff; border:1px solid #dce1ed; color:var(--accent); border-radius:50%; font:12px Consolas,monospace; }
+.pipeline strong { display:inline-block; margin-bottom:7px; }
+.prediction { padding:26px; margin:28px 0 34px; background:var(--paper); border:1px solid #e6e3da; border-radius:16px; }
+.prediction h3 { margin:0 0 10px; font-size:22px; }
+.prediction .eyebrow { color:#776149; }
+.prediction-intro { color:var(--muted); font-size:14px; margin:0 0 20px; }
+.quiz-rows { display:grid; gap:0; }
+.quiz-row { display:grid; grid-template-columns:112px 1fr; gap:8px 20px; padding:18px 0; border-top:1px solid #e0ddd4; align-items:center; }
+.quiz-question { margin:0; font-size:16px; }
+.quiz-question strong { display:block; }
+.quiz-question span { font-size:12px; color:var(--muted); }
+.quiz-choices { display:flex; gap:10px; }
+.quiz-choices button { background:#fff; border:1px solid #c9c8c1; color:var(--ink); border-radius:7px; min-height:44px; min-width:64px; padding:6px 18px; font-size:18px; }
+.quiz-choices button[aria-pressed="true"] { background:var(--ink); border-color:var(--ink); color:white; }
+.quiz-feedback { grid-column:2; font-size:14px; color:#535961; min-height:0; }
+.quiz-feedback[data-correct="true"] { color:#126356; }
+.quiz-feedback[data-correct="false"] { color:#8c4b26; }
+.next { margin:44px 0 28px; padding:28px; background:#f1f2fa; border-radius:14px; border-top:3px solid var(--accent); }
+.next h3 { margin:0 0 14px; }
+.next p { margin:12px 0; }
+.page-nav { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; margin:32px 0; }
+.page-nav a { padding:18px 14px; border-top:1px solid var(--line); color:var(--ink); text-decoration:none; line-height:1.6; font-size:14px; }
+.page-nav a:hover { background:var(--panel); }
+.page-nav .k { display:block; margin-bottom:7px; color:var(--muted); font-size:12px; }
+.page-nav .t { display:block; font-weight:600; }
+.references { margin:32px 0; color:var(--muted); font-size:14px; }
+.references summary { cursor:pointer; }
+footer { border-top:1px solid var(--line); padding-top:24px; margin-top:40px; color:var(--muted); font-size:12px; }
+@media(max-width:1100px) {
+ .book-shell { grid-template-columns:176px minmax(0,1fr); gap:36px; }
+ .hero-inner { gap:24px; }
+ .program-demo { grid-template-columns:1fr; }
+ .program-map { display:flex; flex-wrap:wrap; gap:4px 22px; padding:14px 24px; }
+ .program-map p { width:100%; margin:0; }
+ .program-map a { border:0; padding:6px 0; }
+}
+@media(max-width:900px) {
+ .book-shell { display:block; padding:0 24px 60px; }
+ .side-nav { position:static; max-height:none; margin:22px 0 0; }
+ .chapter-navigation { display:none; }
+ .hero-inner { padding:34px 24px; }
+ .hero-art { max-width:330px; }
+ .breadcrumb { margin-top:26px; }
+}
+@media(max-width:650px) {
+ body { font-size:16px; line-height:1.85; }
+ .qora-lang-switch { padding:12px 18px; font-size:11px; }
+ .qora-wordmark { font-size:15px; }
+ .hero-inner { grid-template-columns:1fr; gap:24px; padding:30px 20px; }
+ h1 { font-size:34px; }
+ .hero-art { max-width:340px; justify-self:center; }
+ .hero p { font-size:15px; }
+ .hero-bottom { margin-top:18px; }
+ .hero-art figcaption { display:none; }
+ .book-shell { padding:0 20px 44px; }
+ .lead { font-size:18px; }
+ .bit-pair { gap:12px; }
+ .bit-case { flex-direction:column; gap:7px; padding:18px 10px; text-align:center; }
+ .bit-case svg { width:60px; height:60px; }
+ h2 { margin-top:54px; font-size:23px; gap:12px; }
+ h3 { font-size:18px; }
+ .chapter-toc ol { columns:1; }
+ .circuit-step { padding-left:44px; }
+ .circuit-step::before { width:29px; height:29px; }
+ .experiment-head { padding:20px 18px 16px; }
+ .scene-controls { padding:0 16px 18px; gap:6px; }
+ .scene-controls button { padding:8px 5px; font-size:12px; }
+ .lab-display { margin:0 16px; }
+ .lab-state,.lab-result { padding:16px 10px; }
+ .lab-state svg { width:80px; height:80px; }
+ .lab-state strong { font-size:14px; }
+ .lab-result output { font-size:27px; }
+ .lab-label { font-size:12px; }
+ .scene-explanation { padding:18px; }
+ .experiment .simulation-note { padding:12px 18px; }
+ .program-source pre { font-size:14px; padding-inline:18px; }
+ .program-label { padding-inline:18px; }
+ .program-map { gap:4px 18px; padding:14px 18px; }
+ .program-map a { font-size:13px; gap:7px; }
+ .code-explanation { padding-left:14px; margin-block:32px; }
+ .code-explanation > pre { padding:12px; font-size:14px; }
+ .prediction { padding:20px 18px; }
+ .quiz-row { grid-template-columns:90px 1fr; gap:10px 12px; }
+ .quiz-choices button { min-width:55px; padding:6px 14px; }
+ .pipeline li { padding-left:35px; }
+ .page-nav { grid-template-columns:1fr; gap:0; }
+ .page-nav a { padding:14px 0; }
+ .next { padding:22px; }
+ pre { padding:18px; font-size:14px; }
+ th,td { padding:12px 8px; }
+}
+@media(max-width:370px) {
+ .lab-display { grid-template-columns:1fr; }
+ .lab-result { border-left:0; border-top:1px solid #e0e3ef; border-radius:0 0 12px 12px; padding:14px; }
+ .lab-result output { margin:5px 0; }
+ .lab-state { padding:14px 10px; }
+ .hero-art { max-width:290px; }
+ .quiz-row { grid-template-columns:1fr; }
+ .quiz-feedback { grid-column:1; }
+}
+@container(max-width:759px) { figure .diagram-wide { display:none; } figure .diagram-mobile { display:block; max-width:320px; margin:auto; } }
+@media(prefers-reduced-motion:reduce) { html { scroll-behavior:auto; } }
+@media print {
+ .side-nav,.qora-lang-switch,.skip-link,.page-nav,.hero-bottom,.scene-controls,.prediction { display:none !important; }
+ .book-shell { display:block; padding:0; }
+ .hero-inner { padding:10pt 0; }
+ .hero-art { max-width:240px; }
+ body { font-size:11pt; }
+ h2,h3 { break-after:avoid; }
+ .experiment,.program-demo,figure,pre { break-inside:avoid; }
+ .static-flow[hidden] { display:block !important; }
+ .experiment { display:none !important; }
+}
 </style>
 </head>
 <body>
-<div class="qora-lang-switch" style="position:sticky;top:0;z-index:99;text-align:right;padding:8px 16px;background:rgba(255,255,255,.92);backdrop-filter:blur(4px);border-bottom:1px solid #e6e8ee;font-size:13px;font-family:sans-serif;"><a href="../en/chapter-01.html" onclick="try{localStorage.setItem(&quot;qora-lang&quot;,&quot;en&quot;)}catch(e){}">English</a> · <strong>한국어</strong> · <a href="../ja/chapter-01.html" onclick="try{localStorage.setItem(&quot;qora-lang&quot;,&quot;ja&quot;)}catch(e){}">日本語</a></div>
-
-<header class="hero">
-  <div class="tag">Qora · 양자 게이트 문서</div>
-  <h1>1장. 큐비트 상태와 진폭에 대해 알아보자</h1>
-  <p>큐비트 상태와 진폭이 어떤 뜻인지 먼저 차근차근 잡아보자</p>
+<a class="skip-link" href="#chapter-content">본문 바로가기</a>
+<div class="qora-lang-switch"><a class="qora-wordmark" href="index.html" aria-label="Qora 책 목차">QORA</a><span>한국어 초판 · 이전 구성: <a href="../en/index.html" lang="en">English</a> · <a href="../ja/index.html" lang="ja">日本語</a></span></div>
+<header class="hero" id="part1">
+  <div class="hero-inner">
+    <div>
+      <span class="tag">1장 · Qora로 처음 만나는 양자컴퓨팅</span>
+      <h1>양자컴퓨터는<br>무엇을 계산할까?</h1>
+      <p>큐비트 하나로 따라가는 첫 번째 실험</p>
+      <div class="hero-bottom"><a href="#chapter-content">처음부터 읽기 ↓</a><span>준비 → 상태 변경 → 측정</span></div>
+    </div>
+    <figure class="hero-art">
+      <svg viewBox="0 0 450 216" role="img" aria-labelledby="hero-art-title">
+        <title id="hero-art-title">이번 장의 목표: 0이 나오는 상태를 준비해 바꾼 다음, 측정 결과 1을 얻는 과정</title>
+        <rect x="1" y="1" width="448" height="214" rx="20" fill="#fff" stroke="#e3e3e9"/>
+        <text x="26" y="34" fill="#647088" font-size="12" letter-spacing="1">이번 장의 실험</text>
+        <path d="M 63 104 H 379" fill="none" stroke="#bcc3d5" stroke-width="2"/>
+        <circle cx="72" cy="104" r="31" fill="#eeedf9" stroke="#c7c7e3"/>
+        <text x="72" y="114" text-anchor="middle" font-size="30" font-weight="600" fill="#4946b5">0</text>
+        <rect x="174" y="70" width="100" height="68" rx="12" fill="#4b48cb"/>
+        <text x="224" y="110" text-anchor="middle" font-size="17" font-weight="600" fill="#fff">바꾸기</text>
+        <rect x="342" y="72" width="64" height="64" rx="12" fill="#edf7f1" stroke="#b5d9c9"/>
+        <text x="374" y="115" text-anchor="middle" font-size="34" font-weight="600" fill="#146956">1</text>
+        <path d="M 160 99 l8 5 -8 5 M 327 99 l8 5 -8 5" fill="none" stroke="#8a93ae" stroke-width="2"/>
+        <g fill="#4d5a70" text-anchor="middle" font-size="18"><text x="72" y="172">처음 상태</text><text x="224" y="172">상태 변경</text><text x="374" y="172">측정 결과</text></g>
+      </svg>
+      <figcaption>설명용 도식 · 장치 오류가 없는 경우</figcaption>
+    </figure>
+  </div>
 </header>
-
 <div class="book-shell">
-                        <aside class="side-nav" aria-label="책 차례">
-    <strong>Qora로 배우는 양자 게이트</strong>
-      <a href="index.html">개요</a>
-      <a href="intro.html">들어가며. 왜 Qora로 양자 게이트를 배울까?</a>
-      <a class="current" href="chapter-01.html">1장. 큐비트 상태와 진폭에 대해 알아보자</a>
-      <a href="chapter-02.html">2장. 진폭과 확률은 어떻게 연결될까?</a>
-      <a href="chapter-03.html">3장. |0⟩ 상태와 |1⟩ 상태를 직접 읽어보자</a>
-      <a href="chapter-04.html">4장. 중첩은 무엇이고 간섭은 무엇일까?</a>
-      <a href="chapter-05.html">5장. 중첩은 그냥 "모르는 상태"일까?</a>
-      <a href="chapter-06.html">6장. 간섭은 언제 생길까?</a>
-      <a href="chapter-07.html">7장. 두 큐비트 상태는 어떻게 읽을까?</a>
-      <a href="chapter-08.html">8장. 얽힘은 무엇이 함께 묶인다는 뜻일까?</a>
-      <a href="chapter-09.html">9장. 양자 게이트는 되돌릴 수 있어야 한다.</a>
-      <a href="chapter-10.html">10장. Qora 코드는 어떻게 읽을까?</a>
-      <a href="summary.html">정리. 1부에서 배운 것을 정리해보자</a>
-      <a href="chapter-11.html">11장. X 게이트는 무엇을 뒤집을까?</a>
-      <a href="chapter-12.html">12장. H 게이트는 진폭을 어떻게 나눌까?</a>
-      <a href="chapter-13.html">13장. Z 게이트는 무엇의 부호를 바꿀까?</a>
-      <a href="chapter-14.html">14장. CNOT 게이트는 두 큐비트를 어떻게 연결할까?</a>
-      <a href="chapter-15.html">15장. 작은 회로 하나를 끝까지 읽어보자</a>
+  <aside class="side-nav" aria-label="책 차례">
+    <details class="book-navigation">
+    <summary>책 차례<span class="nav-current">현재 1장</span></summary>
+    <strong>Qora로 처음 만나는 양자컴퓨팅</strong>
+    <a href="index.html">초판 개요와 목차</a>
+    <a href="intro.html">들어가며. 작은 회로에서 시작하기</a>
+    <a class="current" aria-current="page" href="chapter-01.html">1장. 양자컴퓨터는 무엇을 계산할까?</a>
+    <details class="book-toc">
+      <summary>초판 전체 차례 · 12장</summary>
+      <div class="group"><strong>1부. 양자컴퓨팅과 첫 만남</strong>
+        <a href="chapter-01.html">1장. 양자컴퓨터는 무엇을 계산할까?</a>
+        <a href="index.html#plan-chapter-02">2장. Qora로 첫 프로그램 실행하기 (예정)</a>
+        <a href="index.html#plan-chapter-03">3장. 큐비트의 상태는 어떻게 적을까? (예정)</a>
+      </div>
+      <div class="group"><strong>2부. 큐비트 하나의 상태를 바꿔보자</strong>
+        <a href="index.html#plan-chapter-04">4장. 확률진폭과 측정 확률 (예정)</a>
+        <a href="index.html#plan-chapter-05">5장. X와 H는 상태를 어떻게 바꿀까? (예정)</a>
+        <a href="index.html#plan-chapter-06">6장. 부호와 복소수가 왜 중요할까? (예정)</a>
+      </div>
+      <div class="group"><strong>3부. 큐비트 두 개를 함께 읽어보자</strong>
+        <a href="index.html#plan-chapter-07">7장. 텐서곱으로 공동 상태 만들기 (예정)</a>
+        <a href="index.html#plan-chapter-08">8장. CNOT과 얽힘 (예정)</a>
+        <a href="index.html#plan-chapter-09">9장. 측정하면 공동 상태는 어떻게 바뀔까? (예정)</a>
+      </div>
+      <div class="group"><strong>4부. 배운 내용을 Qora 회로로 완성하기</strong>
+        <a href="index.html#plan-chapter-10">10장. 되돌리기와 초기화는 무엇이 다를까? (예정)</a>
+        <a href="index.html#plan-chapter-11">11장. 작은 회로를 읽기 좋은 Qora 코드로 만들기 (예정)</a>
+        <a href="index.html#plan-chapter-12">12장. 예측하고 실행하고 설명하기 (예정)</a>
+      </div>
+    </details>
+    <a href="index.html#appendices">부록 구성 (예정)</a>
+    <a href="index.html#previous-drafts">참고용 기존 초안</a>
+    </details>
+    <nav class="chapter-navigation" aria-label="1장 주요 구간">
+      <div class="nav-label">이 장의 여정</div>
+      <a href="#classical-bit"><span>01–02</span> 비트에서 큐비트로</a>
+      <a href="#first-circuit"><span>03</span> 첫 회로 따라가기</a>
+      <a href="#qora-program"><span>04</span> 코드 한 줄씩 읽기</a>
+      <a href="#what-is-different"><span>05–07</span> 무엇이 다른 계산일까?</a>
+      <a href="#check-understanding"><span>08</span> 예측하고 확인하기</a>
+    </nav>
   </aside>
-  <main class="article">
-    <div class="breadcrumb">Qora로 배우는 양자 게이트 / 1장</div>
-<section id="part1" class="part">
-    <span class="label">1부</span>
-    <h2>양자를 읽기 위한 준비를 해보자</h2>
-    <p>
-      1부에서는 게이트 설명에 들어가기 전에 필요한 공통 언어를 먼저 만들어볼게요.<br>
-      모든 양자역학을 다루려는 자리는 아니에요.<br>
-      H 게이트, X 게이트, Z 게이트, CNOT 게이트 설명을 읽기 위해 꼭 필요한 개념만 먼저 잡고 갈 거예요.
+  <main class="article" id="chapter-content">
+    <div class="breadcrumb"><a href="index.html">초판 목차</a> / 양자컴퓨팅과 첫 만남 / 1장</div>
+    <p class="lead">
+      양자컴퓨터가 계산하는 과정을 작은 예제로 살펴보겠습니다.<br>
+      <strong>큐비트 하나를 준비한 뒤 상태를 바꾸고, 마지막에 측정해서 결과를 얻는 예제</strong>입니다.
     </p>
-  </section>
-  <h2 id="qubit-state">1장. 큐비트 상태와 진폭에 대해 알아보자</h2>
-  <p>
-    한 큐비트 상태를 처음부터 어렵게 생각할 필요는 없어요.<br>
-    먼저 “측정 결과값을 어떻게 상태 방향으로 적고, 그 방향 앞에 왜 수가 붙는지”를 순서대로 봐요.
-  </p>
+    <p>
+      지금은 ‘큐비트’나 ‘측정’이라는 말이 낯설어도 괜찮아요.<br>
+      먼저 각 동작이 무엇을 뜻하는지 설명하고, 같은 동작을 Qora 코드로 옮겨보겠습니다.<br>
+      코드에 나오는 기호와 명령도 한 줄씩 설명하므로, 프로그래밍을 처음 접하더라도 순서대로 읽으면 됩니다.
+    </p>
+    <details class="chapter-toc">
+      <summary>이번 장에서 따라갈 순서</summary>
+      <ol>
+        <li><a href="#classical-bit">0과 1로 무엇을 표현할 수 있을까?</a></li>
+        <li><a href="#qubit-state">큐비트와 측정 결과 구별하기</a></li>
+        <li><a href="#first-circuit">큐비트 하나로 계산을 끝까지 따라가기</a></li>
+        <li><a href="#qora-program">같은 동작을 Qora로 적어보기</a></li>
+        <li><a href="#what-is-different">결과는 0과 1인데, 무엇이 다를까?</a></li>
+        <li><a href="#simulator">내 컴퓨터에서 어떻게 실행할까?</a></li>
+        <li><a href="#purpose">어떤 문제를 풀기 위한 계산일까?</a></li>
+        <li><a href="#check-understanding">직접 확인하고 다음 장으로</a></li>
+      </ol>
+    </details>
 
-  <div class="concept-flow">
-    <section class="concept-step basis">
-      <div class="concept-body">
-        <div class="concept-title">
-          <span class="step-badge">1단계</span>
-          <h3>측정 결과값에 상태 방향 이름을 붙여요</h3>
-        </div>
-        <p>
-          한 큐비트를 측정하면 결과값 0 또는 결과값 1이 나와요.<br>
-          이 결과값을 그냥 숫자 <code>0</code>, <code>1</code>로만 적을 수도 있을 것 같지만, 그렇게 쓰면 “측정 결과값”이라는 뜻만 보이고 상태 벡터의 기준 방향이라는 뜻은 잘 드러나지 않아요.<br>
-          그래서 양자역학에서는 한 큐비트 상태를 벡터로 다룰 수 있도록, 측정 결과값 0에 대응하는 기준 상태를 <code>|0⟩</code>라고 쓰고 측정 결과값 1에 대응하는 기준 상태를 <code>|1⟩</code>라고 써요.
-        </p>
-        <div class="visual-grid two">
-          <div class="basis-tile">
-            <div class="basis-line">
-              <span class="from">측정 결과값 0</span>
-              <span class="arrow">→</span>
-              <code>|0⟩</code>
-            </div>
-            <span class="tile-note">0 쪽 상태 방향</span>
+    <section aria-labelledby="classical-bit">
+<h2 id="classical-bit"><span class="section-number">01</span><span>0과 1로 무엇을 표현할 수 있을까?</span></h2>
+      <p>
+        먼저 작은 표시등 하나를 생각해보겠습니다.<br>
+        표시등이 꺼져 있으면 0, 켜져 있으면 1이라고 기록하기로 정하면, 두 상태를 숫자로 구별할 수 있습니다.
+      </p>
+<figure class="bit-illustration">
+        <div class="bit-pair">
+          <div class="bit-case">
+            <svg viewBox="0 0 100 100" role="img" aria-label="꺼진 표시등"><circle cx="50" cy="50" r="29" fill="#dce1eb" stroke="#a4adbf" stroke-width="2"/></svg>
+            <div><span>꺼져 있음</span><strong>0</strong></div>
           </div>
-          <div class="basis-tile">
-            <div class="basis-line">
-              <span class="from">측정 결과값 1</span>
-              <span class="arrow">→</span>
-              <code>|1⟩</code>
-            </div>
-            <span class="tile-note">1 쪽 상태 방향</span>
+          <div class="bit-case bit-case-on">
+            <svg viewBox="0 0 100 100" role="img" aria-label="켜진 표시등"><circle cx="50" cy="50" r="25" fill="#edbd58" stroke="#d3a03c" stroke-width="2"/><path d="M 50 14 V 5 M 50 95 V 86 M 14 50 H 5 M 95 50 H 86 M 24 24 l-6 -6 M 76 76 l6 6 M 24 76 l-6 6 M 76 24 l6 -6" fill="none" stroke="#d1a048" stroke-width="2"/></svg>
+            <div><span>켜져 있음</span><strong>1</strong></div>
           </div>
         </div>
-        <p>
-          이 두 기호 <code>|0⟩</code>와 <code>|1⟩</code>를 한 큐비트의 <strong>계산 기저</strong>라고 불러요.
-        </p>
-      </div>
+        <figcaption>표시등의 상태에 따라 기록할 비트 값을 정합니다.</figcaption>
+      </figure>
+      <p>
+        이렇게 0 또는 1 중 하나를 담는 정보의 단위를 <strong>비트(bit)</strong>라고 합니다.<br>
+        표시등은 두 상태를 구별하는 예로 든 것이며, 실제 컴퓨터가 비트를 표시등으로 저장한다는 뜻은 아닙니다.<br>
+        컴퓨터에서는 전자 회로 등의 구별 가능한 상태를 이용해 0과 1을 표현합니다.
+      </p>
+      <p>
+        비트 하나로 표현할 수 있는 값은 0과 1, 두 가지입니다.<br>
+        그렇다면 비트 두 개를 함께 쓰면 어떨까요?<br>
+        두 비트를 나란히 놓으면 00, 01, 10, 11이라는 네 가지 조합을 만들 수 있습니다.<br>
+        비트가 많아질수록 가능한 조합도 늘어납니다.<br>글자나 사진도 정해진 규칙에 따라 이런 비트의 조합으로 표현합니다.
+      </p>
+      <p>
+        컴퓨터는 이렇게 표현한 값을 정해진 규칙에 따라 바꾸면서 계산합니다.<br>
+        가장 간단한 예로 “0이면 1로, 1이면 0으로 바꾸기”를 생각할 수 있습니다.<br>
+        0에서 시작해 이 동작을 한 번 적용하면 1이 되고, 한 번 더 적용하면 다시 0이 됩니다.
+      </p>
+      <p>다음에는 큐비트에도 이와 비슷한 동작을 적용해보겠습니다.<br>무엇을 준비하고, 무엇이 바뀌며, 어떤 결과를 얻는지 구별하는 것이 이번 장의 목표입니다.</p>
     </section>
 
-    <section class="concept-step vector">
-      <div class="concept-body">
-        <div class="concept-title">
-          <span class="step-badge">2단계</span>
-          <h3>기준 방향 앞에는 성분의 크기를 나타내는 수가 붙어요</h3>
-        </div>
+    <section aria-labelledby="qubit-state">
+<h2 id="qubit-state"><span class="section-number">02</span><span>큐비트와 측정 결과 구별하기</span></h2>
+      <p>
+        양자컴퓨터가 다루는 기본 정보 단위를 <strong>큐비트(qubit)</strong>라고 합니다.<br>
+        실제 장치에서는 원자나 아주 작은 전기 회로 등을 이용해 큐비트를 만듭니다.<br>
+        이런 대상의 상태와 변화를 설명하는 이론이 양자역학입니다.<br>이 책에서는 양자역학 전체를 배우기보다, 큐비트에 동작을 적용하면 무엇이 달라지는지부터 살펴봅니다.
+      </p>
+      <p>
+        큐비트를 이용해 계산한 뒤에는 결과를 읽어야 합니다.<br>이때 사용하는 동작이 <strong>측정</strong>입니다.<br>
+        이 책에서 먼저 다룰 측정 방법은 큐비트 하나에서 0 또는 1을 얻는 방식입니다.<br>
+        예를 들어 측정 결과가 1이라면, 그 1은 일반 컴퓨터에서도 저장하고 비교할 수 있는 비트 값입니다.
+      </p>
+      <p class="key-distinction">
+        여기서 <strong>큐비트의 상태</strong>와 <strong>측정 결과</strong>는 구별해야 합니다.<br>
+        같은 방법으로 측정하더라도, 큐비트가 어떤 상태에 있었는지에 따라 0과 1이 나올 확률이 달라질 수 있습니다.<br>
+        반면에 측정 결과는 실제로 측정했을 때 얻은 0 또는 1입니다.<br>이 숫자 하나가 측정 전 상태의 모든 정보를 알려주는 것은 아닙니다.<br>
+        또한 측정은 큐비트의 상태를 바꿀 수도 있습니다.
+      </p>
+      <p>
+        이번 장에서는 수식 대신 “측정하면 0이 나오는 상태”처럼 말로 상태를 설명하겠습니다.<br>
+        상태를 수식으로 나타내는 방법은 3장에서 배우고, 그때부터 각 동작의 결과를 직접 계산합니다.
+      </p>
+      <aside class="note">
         <p>
-          앞에서 <code>|0⟩</code>와 <code>|1⟩</code>를 상태 벡터의 기준 방향이라고 했어요.<br>
-          이 말이 아직 낯설 수 있으니, 먼저 우리가 더 익숙한 평면 벡터로 같은 구조를 잠깐 확인해봐요.<br>
-          평면 벡터는 x축 방향 성분과 y축 방향 성분으로 나누어 적을 수 있어요.
+          아래 예제는 <strong>장치의 오류가 없는 이상적인 경우</strong>를 기준으로 설명합니다.<br>
+          “확실히 0이 나온다”는 표현은 이 조건에서 측정 결과가 0일 확률이 100%라는 뜻입니다.<br>
+          실제 장치에서는 준비, 연산, 측정 과정의 오류로 다른 결과가 나올 수 있습니다.
         </p>
-        <div class="component-equation mono">
-          <span class="component-part x">3·x방향</span>
-          <span class="operator">+</span>
-          <span class="component-part y">2·y방향</span>
-        </div>
-        <p>
-          여기서 3은 x축 방향 성분의 계수이고, 2는 y축 방향 성분의 계수예요.<br>
-          즉 벡터를 기준 방향으로 나누어 적으려면, 각 기준 방향 앞에 “그 방향 성분이 얼마나 있는지”를 나타내는 수가 붙어요.
-        </p>
-      </div>
+      </aside>
     </section>
 
-    <section class="concept-step amplitude">
-      <div class="concept-body">
-        <div class="concept-title">
-          <span class="step-badge">3단계</span>
-          <h3>큐비트 상태도 기준 방향별 성분으로 적어요</h3>
-        </div>
-        <p>
-          큐비트 상태에서는 <code>|0⟩</code>와 <code>|1⟩</code>가 기준 방향 역할을 해요.<br>
-          그래서 각 방향 앞에 붙는 수가 필요하고, 그 수를 양자역학에서는 <strong>진폭</strong>이라고 불러요.
-        </p>
-        <div class="component-equation mono">
-          <span class="formula-part zero">α|0⟩</span>
-          <span class="operator">+</span>
-          <span class="formula-part one">β|1⟩</span>
-        </div>
-        <div class="meaning-list">
-          <div class="meaning-row">
-            <strong class="mono">α</strong>
-            <span><code>|0⟩</code> 방향 성분이 얼마나 들어 있는지 나타내는 진폭이에요.</span>
-          </div>
-          <div class="meaning-row">
-            <strong class="mono">β</strong>
-            <span><code>|1⟩</code> 방향 성분이 얼마나 들어 있는지 나타내는 진폭이에요.</span>
-          </div>
-        </div>
-        <div class="formula-final mono">|ψ⟩ = α|0⟩ + β|1⟩</div>
-        <p>
-          따라서 이 식은 “이 큐비트 상태에는 0 쪽 진폭 <span class="mono">α</span>와 1 쪽 진폭 <span class="mono">β</span>가 함께 들어 있다”는 뜻이에요.
-        </p>
+    <section aria-labelledby="first-circuit">
+<h2 id="first-circuit"><span class="section-number">03</span><span>큐비트 하나로 계산을 끝까지 따라가기</span></h2>
+      <p>
+        이번 예제의 목표는 <strong>0이 나오는 상태로 큐비트를 준비한 뒤, 상태를 바꿔서 측정 결과 1을 얻는 것</strong>입니다.<br>
+        준비, 상태 변경, 측정의 세 단계로 나누어 살펴보겠습니다.
+      </p>
+
+      <div class="circuit-step" data-step="1">
+      <h3>0이 나오는 상태로 준비하기</h3>
+      <p>
+        먼저 큐비트 하나를 0이 확실히 나오는 상태로 준비합니다.<br>
+        즉, 지금 측정하면 결과가 0이라는 뜻입니다.<br>
+        다만 이번에는 바로 측정하지 않고, 다음 단계에서 상태를 바꾸겠습니다.
+      </p>
+
       </div>
+      <div class="circuit-step" data-step="2">
+      <h3>X 게이트로 상태 바꾸기</h3>
+      <p>
+        큐비트의 상태를 정해진 규칙에 따라 바꾸는 기본 연산을 <strong>양자 게이트</strong>라고 합니다.<br>
+        지금 사용할 게이트의 이름은 <strong>X</strong>이며, “엑스 게이트”라고 읽습니다.
+      </p>
+      <p>
+        X는 0이 확실히 나오는 상태를 1이 확실히 나오는 상태로 바꿉니다.<br>반대로, 1이 확실히 나오는 상태에 적용하면 0이 확실히 나오는 상태가 됩니다.<br>
+        앞에서 큐비트를 0이 나오는 상태로 준비했으므로, X를 한 번 적용한 뒤에는 1이 나오는 상태가 됩니다.
+      </p>
+      <p>
+        그렇다면 측정 결과 1을 이미 얻은 것일까요?<br>
+        아직 측정한 것은 아닙니다.<br><strong>측정할 대상의 상태를 바꾼 것입니다.</strong>
+      </p>
+
+      </div>
+      <div class="circuit-step" data-step="3">
+      <h3>측정해서 결과 얻기</h3>
+      <p>
+        마지막으로 큐비트를 측정합니다.<br>
+        앞 단계에서 1이 확실히 나오는 상태로 바꿨으므로, 측정 결과는 1입니다.
+      </p>
+
+      </div>
+      <div class="experiment" id="circuit-experiment" hidden>
+        <div class="experiment-head"><span class="eyebrow">그림으로 따라가기</span><h3>상태를 바꾸고, 결과를 얻기까지</h3><p>각 장면을 선택해 방금 읽은 세 단계를 비교해보세요.</p></div>
+        <div class="scene-controls" role="group" aria-label="설명 장면 선택">
+          <button type="button" data-scene="0" aria-pressed="true">① 준비 후</button>
+          <button type="button" data-scene="1" aria-pressed="false">② X 적용 후</button>
+          <button type="button" data-scene="2" aria-pressed="false">③ 측정 후</button>
+        </div>
+        <div class="lab-display">
+          <div class="lab-state"><div class="lab-label">큐비트의 상태</div>
+            <svg viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="39" fill="#f0effb" stroke="#cecced" stroke-width="1.5"/><text id="scene-state-number" x="50" y="64" text-anchor="middle" fill="#4b48cb" font-size="40" font-weight="600">0</text></svg>
+            <strong id="scene-state-caption">지금 측정하면 0</strong>
+          </div>
+          <div class="lab-result"><div class="lab-label">얻은 측정 결과</div><output id="scene-result">미측정</output><p id="scene-result-caption">아직 측정하지 않았습니다.</p></div>
+        </div>
+        <div class="scene-explanation" aria-live="polite"><p id="scene-description">0이 나오는 상태로 준비했습니다. 지금은 상태만 준비했으며, 측정 결과를 얻은 것은 아닙니다.</p></div>
+        <p class="simulation-note">원리를 설명하는 시각화이며 실제 프로그램 실행 결과는 아닙니다.<br>장면 선택은 설명을 다시 보는 동작이지, 측정을 취소하는 연산이 아닙니다. 장치 오류는 없다고 가정합니다.</p>
+      </div>
+      <figure class="static-flow" aria-labelledby="first-flow-caption">
+        <svg class="diagram-wide" viewBox="0 0 760 156" role="img" aria-labelledby="first-flow-title">
+          <title id="first-flow-title">0이 나오는 상태로 준비한 큐비트에 X를 적용하면 1이 나오는 상태가 됩니다. 그다음 측정하면 비트 값 1을 얻습니다.</title>
+          <defs><marker id="flow-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#7784a6"/></marker></defs>
+          <rect x="1" y="14" width="216" height="124" rx="10" fill="#f5f6ff" stroke="#c6cde1"/>
+          <rect x="271" y="14" width="216" height="124" rx="10" fill="#f5f6ff" stroke="#c6cde1"/>
+          <rect x="541" y="14" width="218" height="124" rx="10" fill="#eff3ff" stroke="#aebce5"/>
+          <g fill="#172644" text-anchor="middle">
+            <text x="109" y="48" font-size="16">① 큐비트 준비</text><text x="109" y="84" font-size="19" font-weight="700">0이 나오는 상태</text><text x="109" y="114" font-size="15">아직 측정하지 않음</text>
+            <text x="379" y="48" font-size="16">② X 적용</text><text x="379" y="84" font-size="19" font-weight="700">1이 나오는 상태</text><text x="379" y="114" font-size="15">상태를 바꿈</text>
+            <text x="650" y="48" font-size="16">③ 측정</text><text x="650" y="86" font-size="25" font-weight="700">결과 1</text><text x="650" y="114" font-size="15">비트 값으로 기록</text>
+          </g>
+          <path d="M 222 76 H 262" fill="none" stroke="#7784a6" stroke-width="2" marker-end="url(#flow-arrow)"/>
+          <path d="M 492 76 H 532" fill="none" stroke="#7784a6" stroke-width="2" marker-end="url(#flow-arrow)"/>
+        </svg>
+        <svg class="diagram-mobile" viewBox="0 0 320 322" role="img" aria-labelledby="first-flow-mobile-title">
+          <title id="first-flow-mobile-title">준비, X 적용, 측정의 세 단계를 위에서 아래로 나타낸 그림입니다. 0이 나오는 상태에서 1이 나오는 상태로 바뀐 뒤, 측정 결과 1을 얻습니다.</title>
+          <defs><marker id="flow-arrow-mobile" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#7784a6"/></marker></defs>
+          <rect x="1" y="1" width="318" height="84" rx="10" fill="#f5f6ff" stroke="#c6cde1"/>
+          <rect x="1" y="119" width="318" height="84" rx="10" fill="#f5f6ff" stroke="#c6cde1"/>
+          <rect x="1" y="237" width="318" height="84" rx="10" fill="#eff3ff" stroke="#aebce5"/>
+          <g text-anchor="middle" fill="#172644" font-size="17">
+            <text x="160" y="30">① 큐비트 준비</text><text x="160" y="60" font-weight="700">0이 나오는 상태</text>
+            <text x="160" y="148">② X 적용</text><text x="160" y="178" font-weight="700">1이 나오는 상태</text>
+            <text x="160" y="266">③ 측정</text><text x="160" y="298" font-weight="700">비트 값 1을 얻음</text>
+          </g>
+          <path d="M 160 90 V 111" fill="none" stroke="#7784a6" stroke-width="2" marker-end="url(#flow-arrow-mobile)"/>
+          <path d="M 160 208 V 229" fill="none" stroke="#7784a6" stroke-width="2" marker-end="url(#flow-arrow-mobile)"/>
+        </svg>
+        <figcaption id="first-flow-caption">앞의 두 칸은 큐비트의 상태를 나타내고, 마지막 칸은 측정으로 얻은 숫자를 나타냅니다.</figcaption>
+      </figure>
+
+      <p>
+        이처럼 큐비트에 어떤 연산을 어떤 순서로 적용하는지 나타낸 것을 <strong>양자 회로</strong>라고 합니다.<br>
+        여기서 회로를 작성한다는 것은 전자 부품을 직접 연결한다는 뜻이 아닙니다.<br>프로그램에 동작의 순서를 적으면, 실행 도구가 그 순서에 따라 계산을 진행합니다.
+      </p>
+      <p>
+        이 예제만 보면 앞에서 비트를 0에서 1로 바꾼 것과 비슷합니다.<br>실제로 이것만으로 양자컴퓨터의 계산 능력이나 속도의 차이를 보여줄 수는 없습니다.
+      </p>
     </section>
-  </div>
 
-  <p>
-    여기서 <code>|ψ⟩</code>는 이 큐비트의 상태 전체를 가리키는 기호예요.<br>
-    <span class="mono">ψ</span>는 그리스 문자 <strong>프사이</strong>이고, <code>|ψ⟩</code>는 보통 <strong>켓 프사이</strong> 또는 <strong>프사이 상태</strong>라고 읽어요.<br>
-    정식으로 말하면, <code>|ψ⟩</code>는 <code>|0⟩</code> 방향의 진폭과 <code>|1⟩</code> 방향의 진폭을 함께 담은 <strong>상태 벡터</strong>예요.<br>
-    즉 큐비트 상태는 “나중에 0이 나올지 1이 나올지”라는 결과 하나가 아니라, 가능한 측정 결과값마다 붙어 있는 진폭 전체를 담고 있어요.
-  </p>
-
-  <div class="call">
-    <span class="h"><code>|0⟩</code>와 <code>|1⟩</code>는 계산 기저 상태예요</span>
-    <code>|0⟩</code>는 측정하면 결과값 0이 확실히 나오는 기준 상태이고, <code>|1⟩</code>는 측정하면 결과값 1이 확실히 나오는 기준 상태예요.<br>
-    지금은 두 기호를 “0 쪽 방향”과 “1 쪽 방향”으로 읽어도 충분해요.<br>
-    수학적으로는 <code>|0⟩</code>와 <code>|1⟩</code>가 한 큐비트 상태 공간의 서로 직교하는 두 기준 벡터 역할을 해요.
-  </div>
-
-  <div class="call why">
-    <span class="h">이번 장에서 잡은 것</span>
-    한 큐비트 상태는 <code>|0⟩</code> 방향 성분과 <code>|1⟩</code> 방향 성분을 함께 담은 상태 벡터예요.<br>
-    그리고 <span class="mono">α</span>와 <span class="mono">β</span>는 각 방향 성분 앞에 붙는 수이며, 양자역학에서는 이 수를 진폭이라고 불러요.
-  </div>
-
-  <div class="practice">
-    <span class="practice-label">Qora로 실습해보기</span>
-    <h3>큐비트 하나를 준비해보자</h3>
-    <pre><code>operation Main() {
-    // 큐비트 하나 준비
-    // 준비 직후 q[0]은 |0⟩ 상태
-    // |0⟩ 방향 진폭 = 1
-    // |1⟩ 방향 진폭 = 0
-    use q = Qubit[1];
+    <section aria-labelledby="qora-program">
+<h2 id="qora-program"><span class="section-number">04</span><span>같은 동작을 Qora로 적어보기</span></h2>
+      <p>
+        이제 앞의 동작을 컴퓨터에 전달할 명령으로 적어보겠습니다.<br>
+        컴퓨터에 시킬 일을 정해진 문법으로 표현하는 언어를 <strong>프로그래밍 언어</strong>라고 하며, 그 언어로 적은 명령문을 <strong>코드</strong>라고 합니다.<br>
+        이 책에서는 양자 회로를 작성할 수 있는 프로그래밍 언어인 <strong>Qora</strong>를 사용합니다.
+      </p>
+      <p>
+        아래는 앞의 회로를 Qora로 작성한 전체 코드입니다.<br>
+        큐비트를 준비하고, X를 적용하고, 측정한 다음 그 결과를 돌려줍니다.<br>
+        이번 장에서는 각 줄의 뜻을 먼저 읽고, 실행 환경 설치와 직접 실행은 2장에서 진행하겠습니다.
+      </p>
+<div class="program-demo">
+        <div class="program-source">
+          <div class="program-label">Qora · 전체 예제</div>
+          <pre><code class="language-qora">operation Main(): bit
+{
+<span class="code-row" data-code-step="1">    use q = Qubit[1];</span>
+<span class="code-row" data-code-step="2">    X(q[0]);</span>
+<span class="code-row" data-code-step="3">    var result: bit = M(q[0]);</span>
+<span class="code-row" data-code-step="4">    return result;</span>
 }</code></pre>
-  </div>
+        </div>
+        <div class="program-map">
+          <p>번호를 누르면 해당 설명으로 이동합니다.</p>
+          <a href="#code-step-1" data-code-link="1"><span>01</span> 큐비트 준비</a>
+          <a href="#code-step-2" data-code-link="2"><span>02</span> X 적용</a>
+          <a href="#code-step-3" data-code-link="3"><span>03</span> 측정값 저장</a>
+          <a href="#code-step-4" data-code-link="4"><span>04</span> 반환</a>
+        </div>
+      </div>
 
-  <div class="call why">
-    <span class="h">다음 장에서 할 일</span>
-    이번 장에서는 큐비트 상태와 진폭이 무엇인지 먼저 잡았어요.<br>
-    다음 장에서는 진폭을 측정 확률로 어떻게 바꾸어 읽는지 살펴볼 거예요.
-  </div>
-                <nav class="page-nav" aria-label="장 이동">
-    <a href="intro.html"><span class="k">이전</span><span class="t">들어가며. 왜 Qora로 양자 게이트를 배울까?</span></a>
-    <a class="home" href="index.html"><span class="k">개요</span><span class="t">전체 차례로 돌아가기</span></a>
-    <a href="chapter-02.html"><span class="k">다음</span><span class="t">2장. 진폭과 확률은 어떻게 연결될까?</span></a>
-  </nav>
-    <footer>
-      <p>Qora — 직접 만드는 양자 토이 언어</p>
-    </footer>
+      <h3>바깥 부분: 어디서 시작하고 무엇을 돌려줄까?</h3>
+      <p>
+        첫 줄의 <code>operation</code>은 양자 연산을 담을 수 있는 작업을 정의하는 말입니다.<br>
+        그 뒤의 <code>Main</code>은 작업의 이름이며, 이 예제에서는 프로그램이 여기서 시작합니다.<br>
+        이름 뒤의 <code>()</code>가 비어 있는 것은 작업을 시작할 때 따로 전달받을 값이 없다는 뜻입니다.<br>
+        마지막의 <code>: bit</code>는 작업을 마칠 때 비트 값 하나, 즉 0 또는 1을 돌려준다는 표시입니다.
+      </p>
+      <p>
+        여는 중괄호 <code>{</code>와 닫는 중괄호 <code>}</code> 사이에는 실제로 수행할 명령이 들어 있습니다.<br>
+        이 예제에서는 위에서 아래로 한 줄씩 실행하며, 각 명령 끝의 세미콜론 <code>;</code>은 명령이 끝나는 위치를 표시합니다.
+      </p>
+
+      <div class="code-explanation" id="code-step-1">
+      <h3 data-step="01">큐비트 하나 준비하기</h3>
+      <pre><code class="language-qora">use q = Qubit[1];</code></pre>
+      <p>
+        이 명령은 큐비트 한 개를 준비하고, 그 큐비트가 들어 있는 묶음에 <code>q</code>라는 이름을 붙입니다.<br>
+        <code>Qubit[1]</code>에서 대괄호 안의 1은 준비할 큐비트의 개수입니다.<br>
+        새로 준비한 큐비트는 측정하면 0이 확실히 나오는 상태에서 시작합니다.
+      </p>
+      <p>
+        큐비트를 하나 준비했는데, 왜 <code>q[1]</code>이 아니라 <code>q[0]</code>이라고 쓸까요?<br>
+        묶음 안의 큐비트를 가리킬 때는 위치 번호를 사용하며, Qora에서는 그 번호를 0부터 세기 때문입니다.<br>
+        따라서 첫 번째 큐비트는 <code>q[0]</code>으로 가리킵니다.
+      </p>
+      <p>
+        <strong><code>Qubit[1]</code>의 1은 개수이고, <code>q[0]</code>의 0은 위치 번호</strong>입니다.<br>
+        여기의 0은 측정 결과를 뜻하는 것이 아니에요.
+      </p>
+
+      </div>
+      <div class="code-explanation" id="code-step-2">
+      <h3 data-step="02">준비한 큐비트에 X 적용하기</h3>
+      <pre><code class="language-qora">X(q[0]);</code></pre>
+      <p>
+        이 명령은 <code>q[0]</code>에 X 게이트를 적용합니다.<br>
+        <code>X</code>는 게이트의 이름이고, 괄호 안에는 그 게이트를 적용할 대상을 적습니다.<br>
+        앞에서 이 큐비트를 0이 나오는 상태로 준비했으므로, 이 줄을 실행한 뒤에는 1이 나오는 상태가 됩니다.<br>
+        상태가 바뀐 뒤에도 같은 큐비트를 <code>q[0]</code>으로 가리킵니다.
+      </p>
+
+      </div>
+      <div class="code-explanation" id="code-step-3">
+      <h3 data-step="03">측정 결과에 이름 붙이기</h3>
+      <pre><code class="language-qora">var result: bit = M(q[0]);</code></pre>
+      <p>
+        이 줄에서는 먼저 오른쪽의 <code>M(q[0])</code>을 실행합니다.<br>
+        <code>M</code>은 측정 명령이며, 괄호 안에 적힌 <code>q[0]</code>을 측정해서 0 또는 1을 얻습니다.<br>
+        지금은 X를 적용해 1이 나오는 상태로 바꾼 뒤이므로, 측정 결과는 1입니다.
+      </p>
+      <p>
+        왼쪽의 <code>var result: bit</code>는 측정 결과를 저장할 변수 <code>result</code>를 만드는 부분입니다.<br>
+        변수는 값을 저장하고 이름으로 다시 가리킬 때 사용합니다.<br>여기서는 측정으로 얻은 값을 보관합니다.<br>
+        <code>var</code>는 변수를 만든다는 뜻이고, <code>: bit</code>는 저장할 값의 종류가 비트라는 표시입니다.<br>
+        <code>=</code>는 오른쪽의 측정으로 얻은 값을 왼쪽 변수 <code>result</code>에 저장한다는 뜻입니다.<br>
+        따라서 이 줄을 실행한 뒤에는 <code>result</code>에 1이 저장됩니다.
+      </p>
+      <p>
+        여기서 <code>q[0]</code>과 <code>result</code>는 서로 다릅니다.<br>
+        <code>q[0]</code>은 게이트를 적용하고 측정한 큐비트이고, <code>result</code>는 측정 결과인 비트 값을 저장한 변수입니다.<br>
+        <code>result</code>에 들어 있는 것은 1이라는 결과이지, 측정 전 큐비트의 상태 전체가 아닙니다.
+      </p>
+
+      </div>
+      <div class="code-explanation" id="code-step-4">
+      <h3 data-step="04">실행 결과로 돌려주기</h3>
+      <pre><code class="language-qora">return result;</code></pre>
+      <p>
+        이미 <code>M</code>으로 측정했는데, 왜 <code>return</code>이 또 필요할까요?<br>
+        <strong>측정값을 얻는 것</strong>과 <strong>그 값을 작업의 결과로 돌려주는 것</strong>은 서로 다른 일이기 때문입니다.
+      </p>
+      <p>
+        <code>return</code>은 현재 작업을 끝내고 값을 돌려주는 명령입니다.<br>
+        여기서는 <code>Main</code>이 <code>result</code>에 저장된 1을 실행 도구에 돌려줍니다.<br>
+        이렇게 돌려주는 값을 <strong>반환값</strong>이라고 하며, 실행 도구는 이 값을 받아 결과로 표시합니다.
+      </p>
+      <p>
+        Qora는 프로그램 안에서 측정한 값을 모두 자동으로 표시하지 않습니다.<br>
+        이 예제에서 1을 실행 결과로 확인할 수 있는 이유는 마지막 줄에서 그 값을 반환했기 때문입니다.
+      </p>
+      <div class="result-line">
+        <span class="label">이상적인 환경에서 예상하는 한 번의 실행 결과 · 실제 실행 화면이 아닌 설명용 표시</span>
+        <strong>반환값: 1</strong>
+      </div>
+      </div>
+      <p>
+        전체 코드는 <strong>큐비트 준비 → X 적용 → 측정값 저장 → 반환</strong>의 순서로 실행됩니다.<br>
+        앞에서 말로 설명한 회로에, 측정한 값을 저장하고 돌려주는 명령이 더해진 것입니다.
+      </p>
+    </section>
+
+    <section aria-labelledby="what-is-different">
+<h2 id="what-is-different"><span class="section-number">05</span><span>결과는 0과 1인데, 무엇이 다를까?</span></h2>
+      <p>
+        그런데 0을 1로 바꾸는 일은 보통 컴퓨터도 할 수 있습니다.<br>
+        그렇다면 양자컴퓨터는 무엇이 다를까요?<br>
+        차이는 결과를 0과 1로 표시하는 방식이 아니라, <strong>측정 전 큐비트의 상태와 그 상태를 바꾸는 연산</strong>에 있습니다.
+      </p>
+      <p>
+        비트 하나에 저장된 값은 0 또는 1입니다.<br>
+        반면에 큐비트는 측정 결과가 0과 1 중 어느 쪽일지 확정할 수 없는 상태일 수도 있습니다.<br>
+        이것은 단순히 “이미 0이나 1로 정해져 있지만 우리가 모르는 상태”와는 다릅니다.<br>아래 예제를 펼치면 그 차이가 드러나는 경우를 살펴볼 수 있습니다.
+      </p>
+      <details class="check">
+        <summary>앞으로 풀어볼 질문: 같은 동작을 두 번 하면?</summary>
+        <p>
+          X와는 다른 연산인 <strong>H</strong>, 즉 “에이치 게이트”가 있습니다.<br>
+          계산 규칙은 5장에서 자세히 다룹니다.<br>여기서는 0이 나오는 상태에 H를 한 번 적용한 경우와 두 번 적용한 경우의 결과를 먼저 비교하겠습니다.
+        </p>
+        <div class="table-wrap">
+          <table>
+            <caption>각 경우마다 0이 나오는 상태로 새로 준비하며, 이상적인 조건을 가정합니다.<br>H를 두 번 적용하는 경우에는 두 게이트 사이에 측정하지 않습니다.</caption>
+            <thead><tr><th scope="col">준비 뒤의 동작</th><th scope="col">마지막 측정의 이론적 확률</th></tr></thead>
+            <tbody>
+              <tr><td>바로 측정</td><td>0이 100%</td></tr>
+              <tr><td>H 한 번 → 측정</td><td>0이 50%, 1이 50%</td></tr>
+              <tr><td>H 두 번 → 측정</td><td>0이 100%</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          두 번째 줄에서는 H를 한 번 적용한 뒤 측정합니다.<br>이때는 0과 1이 나올 확률이 각각 50%입니다.<br>
+          반면에 세 번째 줄에서는 첫 번째 H 뒤에 측정하지 않고, H를 한 번 더 적용합니다.<br>그다음 측정하면 0이 확실히 나옵니다.<br>
+          따라서 H를 “무작위로 0이나 1을 고르는 동작”으로 이해하면, 두 번 적용했을 때 왜 항상 0이 나오는지 설명할 수 없습니다.
+        </p>
+        <p>
+          이 표는 결과를 먼저 보여준 것이며, 아직 그 이유까지 설명한 것은 아닙니다.<br>
+          3~5장에서 상태를 수식으로 표현하는 방법을 배운 뒤, 첫 번째 H와 두 번째 H가 각각 무엇을 바꾸는지 중간 계산까지 확인하겠습니다.
+        </p>
+      </details>
+      <p>
+        양자 회로를 이해하려면 측정 결과뿐 아니라, <strong>측정 전에 어떤 상태였고 게이트가 그 상태를 어떻게 바꿨는지</strong>도 알아야 합니다.<br>
+        이 책에서 수식을 배우는 이유는 이런 변화를 직접 계산하고 확인하기 위해서입니다.
+      </p>
+    </section>
+
+    <section aria-labelledby="simulator">
+<h2 id="simulator"><span class="section-number">06</span><span>내 컴퓨터에서 어떻게 실행할까?</span></h2>
+      <p>
+        Qora 예제를 실행하기 위해 실제 양자컴퓨터를 준비할 필요는 없습니다.<br>
+        일반 컴퓨터에서 양자 회로의 동작을 계산하는 프로그램인 <strong>시뮬레이터</strong>를 사용할 수 있기 때문입니다.
+      </p>
+      <p>
+        시뮬레이터는 각 연산을 적용했을 때 큐비트의 상태가 어떻게 바뀌는지 수학적으로 계산합니다.<br>
+        측정 명령을 만나면 계산한 확률에 따라 결과를 생성합니다.<br>앞의 X 예제에서는 1이 나올 확률이 100%이므로 결과가 1입니다.<br>
+        실제 큐비트를 조작하는 대신 그 동작을 수학으로 계산하는 것이므로, 노트북에서 예제를 실행한다고 노트북이 양자컴퓨터가 되는 것은 아닙니다.
+      </p>
+      <h3>코드를 적는 것부터 결과를 확인하기까지</h3>
+      <ol class="pipeline">
+        <li><strong>Qora 코드 작성</strong><br>어떤 큐비트에 어떤 동작을 적용할지 순서대로 적습니다.</li>
+        <li><strong>코드 검사와 번역</strong><br>작성한 코드를 검사하고 다른 도구가 처리할 명령으로 바꾸는 프로그램을 컴파일러라고 합니다.<br>Qora 컴파일러는 코드를 검사한 뒤, 양자 회로 명령을 적는 형식인 OpenQASM으로 번역합니다.</li>
+        <li><strong>시뮬레이터에서 계산</strong><br>실행 도구가 번역된 명령을 시뮬레이터에 전달하면, 시뮬레이터가 회로의 동작을 계산하고 측정 결과를 생성합니다.</li>
+        <li><strong>반환값 확인</strong><br>실행 도구가 <code>Main</code>의 반환값을 모아 보여줍니다.<br>앞의 예제에서는 측정한 값을 그대로 반환하므로, 실행 결과에서 그 측정값을 확인할 수 있습니다.</li>
+      </ol>
+      <p>
+        즉, Qora는 동작을 적는 언어이고, 컴파일러는 그 코드를 번역하며, 시뮬레이터는 번역된 명령에 따라 계산합니다.<br>
+        실제 설치와 실행은 2장에서 Qora의 VS Code 확장을 이용해 진행하겠습니다.
+      </p>
+      <h3>여러 번 실행할 때는 매번 처음 상태부터</h3>
+      <p>
+        측정 결과가 매번 같지 않은 회로도 있습니다.<br>이런 회로에서는 한 번 실행한 결과만으로 0과 1이 얼마나 자주 나오는지 알 수 없습니다.<br>
+        그래서 “큐비트 준비 → 게이트 적용 → 측정 → 반환”을 여러 번 반복하고, 각 결과가 나온 횟수를 확인합니다.<br>
+        이렇게 <strong>큐비트를 새로 준비해서 회로를 끝까지 실행하는 한 번</strong>을 <strong>샷(shot)</strong>이라고 합니다.
+      </p>
+      <p>
+        이것은 이미 측정한 큐비트를 그대로 다시 측정하는 것과 다릅니다.<br>
+        매번 처음 상태로 준비한 뒤 같은 회로를 실행해야 동일한 조건에서 결과를 비교할 수 있습니다.<br>
+        앞의 X 예제는 이상적인 조건에서 매번 1을 반환합니다.<br>반면에 0과 1이 나올 확률이 각각 50%인 회로는 100번 실행하더라도 결과가 반드시 50번씩 나뉘지는 않습니다.
+      </p>
+    </section>
+
+    <section aria-labelledby="purpose">
+<h2 id="purpose"><span class="section-number">07</span><span>어떤 문제를 풀기 위한 계산일까?</span></h2>
+      <p>
+        앞의 예제에서는 0이 나오는 상태를 바꿔 1을 얻는 것이 목표였습니다.<br>
+        더 복잡한 문제에서도 풀려는 문제를 먼저 정하고, 필요한 정보를 큐비트의 상태로 표현한 뒤 어떤 연산을 적용할지 설계합니다.<br>
+        마지막에는 측정으로 얻은 결과를 문제의 답과 연결해 해석합니다.<br>이처럼 문제를 풀기 위한 절차를 <strong>알고리즘</strong>이라고 합니다.
+      </p>
+      <p>
+        양자 알고리즘은 양자 상태의 특성을 이용해 문제를 풉니다.<br>
+        예를 들어 분자나 물질의 성질을 계산하는 것은 양자컴퓨팅의 중요한 연구 분야입니다.<br>
+        다만 어떤 프로그램이든 양자컴퓨터에 옮기기만 하면 빨라지는 것은 아닙니다.<br>문제에 맞는 알고리즘이 필요하며, 계산에 필요한 장치의 크기와 연산의 정확도도 따져야 합니다.
+      </p>
+      <p>
+        큐비트가 많다고 가능한 모든 답을 한꺼번에 읽어낼 수 있는 것도 아닙니다.<br>
+        측정에서 얻는 결과에는 제약이 있으므로, 원하는 정보를 얻으려면 측정 전에 적용할 연산을 적절히 설계해야 합니다.
+      </p>
+      <p>
+        이 책의 초판에서는 큐비트 한 개와 두 개로 만든 회로를 중심으로 상태, 기본 게이트, 측정을 배웁니다.<br>
+        목표는 <strong>짧은 Qora 코드의 각 줄에서 무엇이 달라지고, 왜 그런 결과가 나오는지 직접 설명하는 것</strong>입니다.<br>
+        이번 장에서는 그 첫 예제로 X를 적용하는 회로를 읽었습니다.
+      </p>
+    </section>
+
+    <section aria-labelledby="check-understanding">
+<h2 id="check-understanding"><span class="section-number">08</span><span>직접 확인하고 다음 장으로</span></h2>
+      <div class="prediction" id="prediction-quiz" hidden>
+        <span class="eyebrow">먼저 예상해보기</span>
+        <h3>X를 몇 번 적용했는지에 따라</h3>
+        <p class="prediction-intro">매번 0이 나오는 상태로 새로 준비하고, X를 아래 횟수만큼 적용한 뒤 마지막에 측정합니다. 장치 오류는 없다고 가정합니다.<br>측정 결과를 골라보세요.</p>
+        <div class="quiz-rows">
+          <div class="quiz-row" data-quiz="0">
+            <p class="quiz-question"><strong>X 0회</strong><span>바로 측정</span></p>
+            <div class="quiz-choices" role="group" aria-label="X 0회 뒤의 측정 결과 예상"><button type="button" data-answer="0" aria-pressed="false">0</button><button type="button" data-answer="1" aria-pressed="false">1</button></div>
+            <div class="quiz-feedback" role="status" aria-live="polite" aria-atomic="true"></div>
+          </div>
+          <div class="quiz-row" data-quiz="1">
+            <p class="quiz-question"><strong>X 1회</strong><span>X → 측정</span></p>
+            <div class="quiz-choices" role="group" aria-label="X 1회 뒤의 측정 결과 예상"><button type="button" data-answer="0" aria-pressed="false">0</button><button type="button" data-answer="1" aria-pressed="false">1</button></div>
+            <div class="quiz-feedback" role="status" aria-live="polite" aria-atomic="true"></div>
+          </div>
+          <div class="quiz-row" data-quiz="2">
+            <p class="quiz-question"><strong>X 2회</strong><span>X → X → 측정</span></p>
+            <div class="quiz-choices" role="group" aria-label="X 2회 뒤의 측정 결과 예상"><button type="button" data-answer="0" aria-pressed="false">0</button><button type="button" data-answer="1" aria-pressed="false">1</button></div>
+            <div class="quiz-feedback" role="status" aria-live="polite" aria-atomic="true"></div>
+          </div>
+        </div>
+      </div>
+      <p>방금 본 예제로 답할 수 있는 질문 세 가지입니다.<br>먼저 답을 생각해보세요.<br>각 질문을 펼치면 해설을 확인할 수 있습니다.</p>
+      <details class="check">
+        <summary>① 측정하기 전에 X를 두 번 적용하면 무엇이 나올까요?</summary>
+        <p>
+          처음에는 0이 나오는 상태입니다.<br>
+          첫 번째 X를 적용하면 1이 나오는 상태가 되고, 두 번째 X를 적용하면 다시 0이 나오는 상태가 됩니다.<br>
+          따라서 X를 두 번 적용한 뒤 측정하면, 이상적인 조건에서 결과는 0입니다.
+        </p>
+        <pre><code class="language-plaintext">준비       : 0이 나오는 상태
+첫 번째 X 후: 1이 나오는 상태
+두 번째 X 후: 0이 나오는 상태</code></pre>
+      </details>
+      <details class="check">
+        <summary>② X를 적용하면 q[0]이라는 이름도 q[1]로 바뀔까요?</summary>
+        <p>
+          아닙니다.<br><code>q[0]</code>의 0은 큐비트 묶음에서의 위치 번호입니다.<br>
+          X는 그 위치에 있는 큐비트의 상태를 바꿀 뿐, 다른 위치의 큐비트로 바꾸지 않습니다.<br>
+          이 예제에는 큐비트가 하나뿐이므로 <code>q[1]</code>이라는 두 번째 큐비트 자체가 없습니다.
+        </p>
+      </details>
+      <details class="check">
+        <summary>③ M으로 측정하는 것과 return으로 돌려주는 것은 같은 일일까요?</summary>
+        <p>
+          아닙니다.<br><code>M(q[0])</code>은 큐비트를 측정해 비트 값을 얻는 동작입니다.<br>
+          반면에 <code>return result;</code>는 변수에 저장된 값을 작업의 결과로 돌려주는 동작입니다.<br>
+          이 예제에서는 측정으로 1을 얻어 변수에 저장한 다음, 그 값을 반환합니다.
+        </p>
+      </details>
+      <div class="next">
+        <h3>이제 명령을 직접 실행해볼 차례</h3>
+        <p>
+          이번 장에서는 큐비트를 준비하고 X를 적용한 뒤 측정해서 1을 얻는 과정을 살펴봤습니다.<br>
+          같은 동작을 Qora 코드로 읽으면서, 큐비트 자체와 측정값을 저장한 변수, 작업이 돌려주는 반환값도 구별했습니다.
+        </p>
+        <p>
+          다음 장에서는 Qora 실행 환경을 준비하고 이 코드를 직접 실행합니다.<br>
+          X가 없는 예제부터 시작해 X를 한 번, 두 번 추가하면서 예상한 결과가 나오는지 확인하겠습니다.
+        </p>
+        <p><a href="index.html#plan-chapter-02">2장 구성 보기 — Qora로 첫 프로그램 실행하기 (작성 예정)</a></p>
+      </div>
+    </section>
+
+    <nav class="page-nav" aria-label="장 이동">
+      <a href="intro.html"><span class="k">이전</span><span class="t">들어가며. 작은 회로에서 시작하기</span></a>
+      <a href="index.html"><span class="k">목차</span><span class="t">초판 전체 구성</span></a>
+      <a href="index.html#plan-chapter-02"><span class="k">다음 장 · 작성 예정</span><span class="t">2장. Qora로 첫 프로그램 실행하기</span></a>
+    </nav>
+    <details class="references">
+      <summary>더 확인하고 싶다면 · 참고 자료</summary>
+      <ul>
+        <li><a href="https://learn.microsoft.com/en-us/azure/quantum/concepts-the-qubit">Microsoft Learn — 큐비트와 게이트, 측정의 기본 규칙</a></li>
+        <li><a href="https://quantum.cloud.ibm.com/learning/en/courses/basics-of-quantum-information/single-systems/quantum-information">IBM Quantum Learning — 상태와 측정, X·H 연산</a></li>
+        <li><a href="https://www.ibm.com/think/topics/quantum-computing">IBM — 양자컴퓨팅의 목적과 활용 분야</a></li>
+        <li><a href="https://github.com/AJ-comp/Qora/blob/main/vscode/README.ko.md">Qora 실행 안내 — 반환값과 실행 결과</a></li>
+      </ul>
+      <p>더 자세한 설명이 필요한 경우 참고할 자료입니다.<br>이 장을 읽기 전에 미리 공부할 필요는 없습니다.</p>
+    </details>
+    <footer>Qora로 처음 만나는 양자컴퓨팅 · 한국어 초판 원고 · 1장</footer>
   </main>
 </div>
+<script>
+(() => {
+  const experiment = document.getElementById('circuit-experiment');
+  const sceneButtons = experiment.querySelectorAll('[data-scene]');
+  const scenes = [
+    {
+      state: '0', result: '미측정', resultCaption: '아직 측정하지 않았습니다.',
+      description: '0이 나오는 상태로 준비했습니다. 지금은 상태만 준비했으며, 측정 결과를 얻은 것은 아닙니다.'
+    },
+    {
+      state: '1', result: '미측정', resultCaption: '상태만 바뀌었습니다.',
+      description: 'X를 적용해 1이 나오는 상태가 되었습니다. 하지만 아직 측정하지 않았으므로 얻은 측정 결과는 없습니다.'
+    },
+    {
+      state: '1', result: '1', resultCaption: '측정으로 얻은 비트 값입니다.',
+      description: '측정해서 결과 1을 얻었습니다. 이 예제에서는 측정 후에도 큐비트가 1이 나오는 상태에 남습니다.'
+    }
+  ];
 
+  for (const button of sceneButtons) {
+    button.addEventListener('click', () => {
+      const scene = scenes[Number(button.dataset.scene)];
+      for (const option of sceneButtons) {
+        option.setAttribute('aria-pressed', String(option === button));
+      }
+      document.getElementById('scene-state-number').textContent = scene.state;
+      document.getElementById('scene-state-caption').textContent = '지금 측정하면 ' + scene.state;
+      document.getElementById('scene-result').textContent = scene.result;
+      document.getElementById('scene-result-caption').textContent = scene.resultCaption;
+      document.getElementById('scene-description').textContent = scene.description;
+    });
+  }
+  experiment.hidden = false;
+  document.querySelector('.static-flow').hidden = true;
+
+  for (const link of document.querySelectorAll('[data-code-link]')) {
+    link.addEventListener('click', () => {
+      for (const row of document.querySelectorAll('[data-code-step]')) {
+        row.classList.toggle('highlight', row.dataset.codeStep === link.dataset.codeLink);
+      }
+    });
+  }
+
+  const answers = [
+    { value: '0', explanation: 'X를 적용하지 않았으므로 처음 준비한 상태 그대로입니다. 측정 결과는 0입니다.' },
+    { value: '1', explanation: '0이 나오는 상태에 X를 한 번 적용하면 1이 나오는 상태가 됩니다. 측정 결과는 1입니다.' },
+    { value: '0', explanation: '첫 번째 X가 0이 나오는 상태를 1이 나오는 상태로, 두 번째 X가 다시 0이 나오는 상태로 바꿉니다. 측정 결과는 0입니다.' }
+  ];
+  for (const row of document.querySelectorAll('[data-quiz]')) {
+    const answer = answers[Number(row.dataset.quiz)];
+    const choices = row.querySelectorAll('[data-answer]');
+    for (const button of choices) {
+      button.addEventListener('click', () => {
+        for (const choice of choices) {
+          choice.setAttribute('aria-pressed', String(choice === button));
+        }
+        const correct = button.dataset.answer === answer.value;
+        const feedback = row.querySelector('.quiz-feedback');
+        feedback.dataset.correct = String(correct);
+        feedback.textContent = (correct ? '맞습니다. ' : '이 경우에는 ' + answer.value + '이 나옵니다. ') + answer.explanation;
+      });
+    }
+  }
+  document.getElementById('prediction-quiz').hidden = false;
+})();
+</script>
 </body>
 </html>

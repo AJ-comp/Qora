@@ -6,7 +6,7 @@ using Janglim.FrontEnd.RegularGrammar;
 namespace Qora;
 
 /// <summary>
-/// Qora v0.40.0 — a Q#/C#-flavored quantum language on the Janglim engine.
+/// Qora v0.41.0 — a Q#/C#-flavored quantum language on the Janglim engine.
 ///
 ///   operation Bell(q: Qubit[]) {        // a subroutine, with trailing-type parameters (name: T)
 ///       H(q[0]);
@@ -253,8 +253,6 @@ public class QoraGrammar : Grammar
     private NonTerminal arrayInitializer = new NonTerminal("arrayInitializer");
     private NonTerminal arrayLiteral = new NonTerminal("arrayLiteral");
     private NonTerminal arrayNew = new NonTerminal("arrayNew");
-    private NonTerminal condition = new NonTerminal("condition");
-    private NonTerminal condAtom = new NonTerminal("condAtom");
     private NonTerminal expr = new NonTerminal("expr");
     private NonTerminal arithmetic = new NonTerminal("arithmetic");
     private NonTerminal primary = new NonTerminal("primary");
@@ -289,7 +287,6 @@ public class QoraGrammar : Grammar
     public static MeaningUnit ForM { get; } = new MeaningUnit("For");
     public static MeaningUnit WhileM { get; } = new MeaningUnit("While");
     public static MeaningUnit RepeatM { get; } = new MeaningUnit("Repeat");
-    public static MeaningUnit ConditionM { get; } = new MeaningUnit("Condition");
     public static MeaningUnit ExprM { get; } = new MeaningUnit("Expr");
     public static MeaningUnit CallM { get; } = new MeaningUnit("Call");
     public static MeaningUnit IndexAccessM { get; } = new MeaningUnit("IndexAccess");
@@ -353,7 +350,7 @@ public class QoraGrammar : Grammar
         returnStmt.AddItem(Return + Semicolon, ReturnM);
 
         // use q = Qubit[2];
-        useStmt.AddItem(Use + Ident + Assign + Qubit + LBracket + Num + RBracket + Semicolon, UseM);
+        useStmt.AddItem(Use + Ident + Assign + Qubit + LBracket + expr + RBracket + Semicolon, UseM);
 
         // Gate, rotation, and operation calls share one syntax. Resolution and signature validation bind
         // each call before MIR lowering: H(q[0]); CNOT(q[0],q[1]); Rx(pi/2, q[0]); Bell(q); Reset(q[0]);
@@ -387,37 +384,30 @@ public class QoraGrammar : Grammar
         assignStmt.AddItem(indexAccess + Assign + expr + Semicolon, AssignM);
 
         // if (cond) { … }   /   if (cond) { … } else { … }   /   if (cond) { … } else if (…) { … }
-        ifStmt.AddItem(If + LParen + condition + RParen + LBrace + statement.ZeroOrMore() + RBrace, IfM);
-        ifStmt.AddItem(If + LParen + condition + RParen + LBrace + statement.ZeroOrMore() + RBrace + Else + LBrace + statement.ZeroOrMore() + RBrace, IfM);
-        ifStmt.AddItem(If + LParen + condition + RParen + LBrace + statement.ZeroOrMore() + RBrace + Else + ifStmt, IfM);
+        ifStmt.AddItem(If + LParen + expr + RParen + LBrace + statement.ZeroOrMore() + RBrace, IfM);
+        ifStmt.AddItem(If + LParen + expr + RParen + LBrace + statement.ZeroOrMore() + RBrace + Else + LBrace + statement.ZeroOrMore() + RBrace, IfM);
+        ifStmt.AddItem(If + LParen + expr + RParen + LBrace + statement.ZeroOrMore() + RBrace + Else + ifStmt, IfM);
 
         // bounds are expressions so a loop can range over an array: `for i in 0..q.Count-1`.
         forStmt.AddItem(For + Ident + In + expr + DotDot + expr + LBrace + statement.ZeroOrMore() + RBrace, ForM);
-        whileStmt.AddItem(While + LParen + condition + RParen + LBrace + statement.ZeroOrMore() + RBrace, WhileM);
-        repeatStmt.AddItem(Repeat + LBrace + statement.ZeroOrMore() + RBrace + Until + LParen + condition + RParen + Semicolon, RepeatM);
+        whileStmt.AddItem(While + LParen + expr + RParen + LBrace + statement.ZeroOrMore() + RBrace, WhileM);
+        repeatStmt.AddItem(Repeat + LBrace + statement.ZeroOrMore() + RBrace + Until + LParen + expr + RParen + Semicolon, RepeatM);
 
         typeName.AddItem(Int | Bit | Bool | FloatType | AngleType);
         arrayType.AddItem(typeName + LBracket + RBracket, ArrayTypeM);
         qubitArrayType.AddItem(Qubit + LBracket + RBracket, ArrayTypeM);
         arrayInitializer.AddItem(arrayLiteral | arrayNew);
         arrayLiteral.AddItem(LBracket + expr + (Comma + expr).ZeroOrMore() + RBracket, ArrayLiteralM);
-        arrayNew.AddItem(New + typeName + LBracket + Num + RBracket, ArrayNewM);
+        arrayNew.AddItem(New + typeName + LBracket + expr + RBracket, ArrayNewM);
 
-        // condition: the parser retains a flat operator sequence. AST-to-HIR lowering reduces that sequence
-        // with Qora's precedence rules, so the resulting HIR and every later stage see one explicit tree.
-        condition.AddItem(condAtom + ((Eq | Neq | Le | Ge | Lt | Gt | And | Or) + condAtom).ZeroOrMore(), ConditionM);
-        // Keep the existing condition operand boundary: !a == b means (!a) == b, not !(a == b).
-        condAtom.AddItem(arithmetic);
-        condAtom.AddItem(Not + arithmetic);
-
-        // A comparison is an ordinary bool-valued expression. The lowering boundary restores ordering
-        // before equality precedence; arithmetic operands retain their existing Expr-shaped AST.
-        expr.AddItem(arithmetic + ((Eq | Neq | Le | Ge | Lt | Gt) + arithmetic).ZeroOrMore(), ExprM);
-        // A leading unary minus is its own production (e.g. -pi/2 for rotation angles).
+        // Every value position, including a control-flow condition, uses the same expression grammar.
+        // AST-to-HIR lowering owns operator precedence; semantic validation owns operand/context types.
+        expr.AddItem(arithmetic + ((Eq | Neq | Le | Ge | Lt | Gt | And | Or) + arithmetic).ZeroOrMore(), ExprM);
         arithmetic.AddItem(primary + ((Plus | Minus | Mul | Div) + primary).ZeroOrMore(), ExprM);
         primary.AddItem(Num | Float | Ident | call | memberAccess | indexAccess);
         primary.AddItem(Minus + primary);
-        // Keep a grouped expression as one operand, including a grouped comparison.
+        primary.AddItem(Not + primary);
+        // A group is one operand at every precedence level, including nested logical expressions.
         primary.AddItem(LParen + expr + RParen, ExprM);
         // Semantic validation currently exposes exactly one member, Array.Count. Keeping the grammar
         // general lets it produce a precise diagnostic for `q.Length` instead of a low-level parse error.
