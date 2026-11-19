@@ -555,7 +555,8 @@
   </p>
 
   <p>
-    A Qora program starts with <code>operation</code>, and the operation that runs first is usually named <code>Main</code>.
+    In Qora, quantum work is written as an <code>operation</code>. Among a program's operations, the one named <code>Main</code> is where the program starts, that is, its <strong>entry point</strong>.<br>
+    This is a rule of the language, not a convention. That is why <code>Main</code> cannot take parameters, and it cannot be called from anywhere else.
   </p>
 
   <div class="practice">
@@ -576,7 +577,8 @@
     This code prepares one qubit and gives the name <code>q</code> to that bundle of qubits.<br>
     <code>Qubit[1]</code> means there is one qubit,
     and you refer to that qubit as <code>q[0]</code>.<br>
-    In this book, we'll read a freshly prepared qubit as starting in the computational basis state <code>|0⟩</code>.
+    The simulator that runs this book's examples starts a freshly prepared qubit in the computational basis state <code>|0⟩</code>. So in this book, we'll read a freshly prepared qubit as starting in <code>|0⟩</code>.<br>
+    However, the specification of OpenQASM 3, the language Qora generates, does not itself fix the initial state of a new qubit. To make sure a qubit starts in <code>|0⟩</code> in any execution environment, you can initialize it with a line like <code>Reset(q[0]);</code>.
   </p>
 
   <h3>Applying gates</h3>
@@ -604,6 +606,24 @@
     and after measurement, either the measurement outcome 0 or the measurement outcome 1 is stored in the classical bit.
   </p>
 
+  <h3>Returning results</h3>
+
+  <p>To see a measurement result as the execution result, <code>Main</code> has to return that value.</p>
+
+  <div class="math mono">operation Main(): bit { … return result; }</div>
+
+  <p>
+    The <code>: bit</code> after <code>Main()</code> shows that Main returns one measurement outcome, and <code>return result;</code> is the line that returns that value.<br>
+    Qora shows only the value that <code>Main</code> returns as the execution result. A value that the program only measures, without returning it, does not appear in the execution result.<br>
+    When you run a program in the Qora extension for VS Code, it runs the same program many times and shows how many times each returned value appeared.
+  </p>
+
+  <p>
+    To return the results of two qubits together, pack the two measurement outcomes into a bit array, as in <code>var result: bit[] = [first, second];</code>, then read it as a single integer and return it with <code>return AsInt(result);</code>.<br>
+    In that case, write <code>: int</code> after <code>Main()</code> to show that it returns an integer.<br>
+    Because the left digit is read as <code>q[0]</code>, <code>00</code> comes out as 0, <code>01</code> as 1, <code>10</code> as 2, and <code>11</code> as 3.
+  </p>
+
   <h3>Writing comments</h3>
 
   <p>
@@ -615,7 +635,7 @@
   <div class="practice">
     <span class="practice-label">Qora code with comments</span>
     <h3>Let's note the state change on each line of code</h3>
-    <pre><code>operation Main() {
+    <pre><code>operation Main(): bit {
     // prepare one qubit
     use q = Qubit[1];
 
@@ -624,6 +644,10 @@
 
     // measure q[0]
     var result: bit = M(q[0]);
+
+    // return the measurement outcome as the execution result
+    // over many runs, 0 and 1 appear about half each
+    return result;
 }</code></pre>
   </div>
                         <nav class="page-nav" aria-label="Chapter navigation">

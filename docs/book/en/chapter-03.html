@@ -596,13 +596,13 @@
 
   <p>
     If you measure this state, measurement outcome 0 always appears.<br>
-    In Qora, a newly prepared qubit starts in the <code>|0⟩</code> state by default.
+    The simulator that runs this book's examples starts a newly prepared qubit in the <code>|0⟩</code> state. So in this book, you can read a newly prepared qubit as starting in <code>|0⟩</code>. We'll come back to the grounds for this assumption in Chapter 10.
   </p>
 
   <div class="practice">
     <span class="practice-label">Try It in Qora</span>
     <h3>Measure a qubit right after preparing it</h3>
-    <pre><code>operation Main() {
+    <pre><code>operation Main(): bit {
     // Prepare one qubit
     // Right after preparation, q[0] is in the |0⟩ state
     // Amplitude of measurement outcome 0 = 1
@@ -610,8 +610,11 @@
     use q = Qubit[1];
 
     // Measure q[0]
-    // In an ideal execution environment: measurement outcome 0
+    // In an ideal (noise-free) environment: measurement outcome 0 on every run
     var result: bit = M(q[0]);
+
+    // Return the measurement outcome as the execution result
+    return result;
 }</code></pre>
   </div>
 
@@ -648,7 +651,7 @@
   <div class="practice">
     <span class="practice-label">Try It in Qora</span>
     <h3>Create the <code>|1⟩</code> state with the X gate</h3>
-    <pre><code>operation Main() {
+    <pre><code>operation Main(): bit {
     // Prepare one qubit
     // Right after preparation, q[0] is in the |0⟩ state
     use q = Qubit[1];
@@ -657,8 +660,11 @@
     // The |0⟩ state changes to the |1⟩ state
     X(q[0]);
 
-    // In an ideal execution environment: measurement outcome 1
+    // In an ideal (noise-free) environment: measurement outcome 1 on every run
     var result: bit = M(q[0]);
+
+    // Return the measurement outcome as the execution result
+    return result;
 }</code></pre>
   </div>
 

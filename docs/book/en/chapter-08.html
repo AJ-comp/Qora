@@ -691,13 +691,13 @@
   <p>
     Entangled states are often created by applying an H gate to one qubit and then applying a two-qubit gate such as CNOT.<br>
     Here, we will not calculate the detailed CNOT rule yet. We only need the meaning of entanglement first.<br>
-    We return to the CNOT gate carefully in Chapter 13.
+    We return to the CNOT gate carefully in Chapter 14.
   </p>
 
   <div class="practice">
     <span class="practice-label">Qora Preview</span>
     <h3>First see the shape of an entangling circuit</h3>
-    <pre><code>operation Main() {
+    <pre><code>operation Main(): int {
     // Prepare two qubits
     // Starting state: |00⟩
     use q = Qubit[2];
@@ -710,9 +710,15 @@
     // We revisit the detailed rule in the CNOT chapter
     CNOT(q[0], q[1]);
 
-    // In an ideal execution environment: 00 or 11 appears together
+    // In an ideal (noise-free) environment: over many runs, only 00 and 11 appear, about half each
     var first: bit = M(q[0]);
     var second: bit = M(q[1]);
+
+    // Pack the two measurement outcomes into one integer and return it as the execution result
+    // The left digit is q[0]: 00 → 0, 01 → 1, 10 → 2, 11 → 3
+    // So only 0 and 3 appear in the execution results
+    var result: bit[] = [first, second];
+    return AsInt(result);
 }</code></pre>
   </div>
 

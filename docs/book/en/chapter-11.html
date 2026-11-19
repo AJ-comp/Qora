@@ -616,7 +616,7 @@
   <div class="practice">
     <span class="practice-label">Try It in Qora</span>
     <h3>Let's apply the X gate once</h3>
-    <pre><code>operation Main() {
+    <pre><code>operation Main(): bit {
     // Prepare one qubit
     // Right after preparation, q[0] is in the |0⟩ state
     use q = Qubit[1];
@@ -625,8 +625,11 @@
     // The |0⟩ state changes to the |1⟩ state
     X(q[0]);
 
-    // Ideal execution environment: measurement outcome 1
+    // In an ideal (noise-free) environment: measurement outcome 1 on every run
     var result: bit = M(q[0]);
+
+    // Return the measurement outcome as the execution result
+    return result;
 }</code></pre>
   </div>
                         <nav class="page-nav" aria-label="Chapter navigation">

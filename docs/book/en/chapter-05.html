@@ -591,8 +591,10 @@
 
   <div class="call why">
     <span class="h">Probabilities alone can't tell you the whole state</span>
-    A quantum state contains not only measurement probabilities but also the signs and phases of the amplitudes.<br>
-    This information may seem to vanish if you measure right away, but it creates interference as the state passes through other gates, so it affects the actual result of the computation.
+    A quantum state contains not only measurement probabilities but also the relative signs between its components.<br>
+    This direction information carried by an amplitude is called its <strong>phase</strong>. In general, amplitudes are complex numbers that have both a size and a direction, but in this book's examples that direction shows up only as a + or − sign.<br>
+    This information may seem to vanish if you measure right away, but it creates interference as the state passes through other gates, so it affects the actual result of the computation.<br>
+    However, a sign attached equally to the whole state (a <strong>global phase</strong>) does not change measurement results. What can change measurement results is the difference between components, that is, the <strong>relative phase</strong>. We'll look at this again with the Z gate in Chapter 13.
   </div>
 
   <h3>They both look like the same 50% — are they really the same state?</h3>
