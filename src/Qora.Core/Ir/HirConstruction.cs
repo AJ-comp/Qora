@@ -409,12 +409,15 @@ internal abstract class HirConstructionSession
 
     internal HirExpression ArrayCreation(
         QType elementType,
-        int length,
-        SourceSpan? span = null) =>
-        new HirArrayCreationExpression(
+        HirExpression length,
+        SourceSpan? span = null)
+    {
+        RequireOwned(length, nameof(length));
+        return new HirArrayCreationExpression(
             Fresh(span),
             elementType,
             length);
+    }
 
     internal HirExpression QualifiedName(
         string name,
@@ -518,9 +521,12 @@ internal abstract class HirConstructionSession
 
     internal HirQubitDeclarationStatement QubitDeclaration(
         string name,
-        int size,
-        SourceSpan? span = null) =>
-        new(Fresh(span), name, size);
+        HirExpression size,
+        SourceSpan? span = null)
+    {
+        RequireOwned(size, nameof(size));
+        return new HirQubitDeclarationStatement(Fresh(span), name, size);
+    }
 
     internal HirCallExpression Call(
         string name,

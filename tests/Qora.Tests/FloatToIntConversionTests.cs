@@ -162,7 +162,7 @@ public sealed class FloatToIntConversionTests
     [InlineData("var value: int = (1 + 2) * 3; value = (value + 1) * 2;")]
     [InlineData("var values: float[] = [0.5, 1]; values[0] = 1;")]
     [InlineData("var values: int[] = [1, (2 + 3)]; values[0] = (1 + 2) * 3;")]
-    [InlineData("var value: bit = 2; var angleValue: angle = 1; var bits: bit[] = [2]; var angles: angle[] = [1];")]
+    [InlineData("var value: bit = 1; var angleValue: angle = 1.0; var bits: bit[] = [1]; var angles: angle[] = [1.0];")]
     [InlineData("var value: int = 1; if (value != 0) { value = 2; }")]
     public void ExistingNonNarrowingAndUnrelatedAssignmentsRemainAccepted(string body) =>
         Compiler.Accepts($"operation Main() {{ {body} }}");

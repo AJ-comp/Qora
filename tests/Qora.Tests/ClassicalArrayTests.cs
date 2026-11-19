@@ -1181,7 +1181,7 @@ public class ClassicalArrayTests
             operation Main() {
                 use q = Qubit[1];
                 var flags: bit[] = new bit[2];
-                if (CountBits(flags) == 0) { Rx(CountBits(flags), q[0]); }
+                if (CountBits(flags) == 0) { Rx(CountBits(flags) * 1.0, q[0]); }
             }
             """);
 

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>5장. 중첩은 그냥 "모르는 상태"일까? - Qora</title>
+<title>기존 초안 · 5장. 중첩은 그냥 "모르는 상태"일까? - Qora</title>
 <style>
 :root {
     --bg: #ffffff;
@@ -511,41 +511,69 @@
       grid-template-columns: 1fr;
     }
   }
+
+  .side-nav summary {
+    cursor: pointer;
+    padding: 8px;
+    font-size: .94rem;
+    font-weight: 700;
+  }
+  .side-nav details[open] { margin-bottom: 12px; }
 </style>
 </head>
 <body>
 <div class="qora-lang-switch" style="position:sticky;top:0;z-index:99;text-align:right;padding:8px 16px;background:rgba(255,255,255,.92);backdrop-filter:blur(4px);border-bottom:1px solid #e6e8ee;font-size:13px;font-family:sans-serif;"><a href="../en/chapter-05.html" onclick="try{localStorage.setItem(&quot;qora-lang&quot;,&quot;en&quot;)}catch(e){}">English</a> · <strong>한국어</strong> · <a href="../ja/chapter-05.html" onclick="try{localStorage.setItem(&quot;qora-lang&quot;,&quot;ja&quot;)}catch(e){}">日本語</a></div>
 
 <header class="hero">
-  <div class="tag">Qora · 양자 게이트 문서</div>
-  <h1>5장. 중첩은 그냥 "모르는 상태"일까?</h1>
+  <div class="tag">Qora · 참고용 기존 초안</div>
+  <h1>기존 초안 · 5장. 중첩은 그냥 "모르는 상태"일까?</h1>
   <p>중첩을 숨은 고전적 상태와 구분해서 읽어보자</p>
 </header>
 
 <div class="book-shell">
-                        <aside class="side-nav" aria-label="책 차례">
-    <strong>Qora로 배우는 양자 게이트</strong>
-      <a href="index.html">개요</a>
-      <a href="intro.html">들어가며. 왜 Qora로 양자 게이트를 배울까?</a>
-      <a href="chapter-01.html">1장. 큐비트 상태와 진폭에 대해 알아보자</a>
-      <a href="chapter-02.html">2장. 진폭과 확률은 어떻게 연결될까?</a>
-      <a href="chapter-03.html">3장. |0⟩ 상태와 |1⟩ 상태를 직접 읽어보자</a>
-      <a href="chapter-04.html">4장. 중첩은 무엇이고 간섭은 무엇일까?</a>
-      <a class="current" href="chapter-05.html">5장. 중첩은 그냥 "모르는 상태"일까?</a>
-      <a href="chapter-06.html">6장. 간섭은 언제 생길까?</a>
-      <a href="chapter-07.html">7장. 두 큐비트 상태는 어떻게 읽을까?</a>
-      <a href="chapter-08.html">8장. 얽힘은 무엇이 함께 묶인다는 뜻일까?</a>
-      <a href="chapter-09.html">9장. 양자 게이트는 되돌릴 수 있어야 한다.</a>
-      <a href="chapter-10.html">10장. Qora 코드는 어떻게 읽을까?</a>
-      <a href="summary.html">정리. 1부에서 배운 것을 정리해보자</a>
-      <a href="chapter-11.html">11장. X 게이트는 무엇을 뒤집을까?</a>
-      <a href="chapter-12.html">12장. H 게이트는 진폭을 어떻게 나눌까?</a>
-      <a href="chapter-13.html">13장. Z 게이트는 무엇의 부호를 바꿀까?</a>
-      <a href="chapter-14.html">14장. CNOT 게이트는 두 큐비트를 어떻게 연결할까?</a>
-      <a href="chapter-15.html">15장. 작은 회로 하나를 끝까지 읽어보자</a>
+<aside class="side-nav" aria-label="책 차례">
+    <strong>Qora로 처음 만나는 양자컴퓨팅</strong>
+    <a href="index.html">초판 개요와 목차</a>
+    <a href="intro.html">들어가며. 작은 회로에서 시작하기</a>
+    <a href="chapter-01.html">1장. 양자컴퓨터는 무엇을 계산할까?</a>
+    <details class="book-toc">
+      <summary>초판 전체 차례 · 12장</summary>
+      <div class="group">
+        <strong>1부. 양자컴퓨팅과 첫 만남</strong>
+        <a href="chapter-01.html">1장. 양자컴퓨터는 무엇을 계산할까?</a>
+        <a href="index.html#plan-chapter-02">2장. Qora로 첫 프로그램 실행하기 (예정)</a>
+        <a href="index.html#plan-chapter-03">3장. 큐비트의 상태는 어떻게 적을까? (예정)</a>
+      </div>
+      <div class="group">
+        <strong>2부. 큐비트 하나의 상태를 바꿔보자</strong>
+        <a href="index.html#plan-chapter-04">4장. 확률진폭과 측정 확률 (예정)</a>
+        <a href="index.html#plan-chapter-05">5장. X와 H는 상태를 어떻게 바꿀까? (예정)</a>
+        <a href="index.html#plan-chapter-06">6장. 부호와 복소수가 왜 중요할까? (예정)</a>
+      </div>
+      <div class="group">
+        <strong>3부. 큐비트 두 개를 함께 읽어보자</strong>
+        <a href="index.html#plan-chapter-07">7장. 텐서곱으로 공동 상태 만들기 (예정)</a>
+        <a href="index.html#plan-chapter-08">8장. CNOT과 얽힘 (예정)</a>
+        <a href="index.html#plan-chapter-09">9장. 측정하면 공동 상태는 어떻게 바뀔까? (예정)</a>
+      </div>
+      <div class="group">
+        <strong>4부. 배운 내용을 Qora 회로로 완성하기</strong>
+        <a href="index.html#plan-chapter-10">10장. 되돌리기와 초기화는 무엇이 다를까? (예정)</a>
+        <a href="index.html#plan-chapter-11">11장. 작은 회로를 읽기 좋은 Qora 코드로 만들기 (예정)</a>
+        <a href="index.html#plan-chapter-12">12장. 예측하고 실행하고 설명하기 (예정)</a>
+      </div>
+    </details>
+    <a href="index.html#appendices">부록 구성 (예정)</a>
+    <a href="index.html#previous-drafts">참고용 기존 초안</a>
   </aside>
-  <main class="article">
-    <div class="breadcrumb">Qora로 배우는 양자 게이트 / 5장</div>
+<main class="article">
+    <div class="call warn" role="note">
+      <span class="h">새 초판 목차와 다른 기존 초안이에요</span>
+      이 페이지는 이전 구성의 내용을 보존한 참고용 초안이에요.<br>
+      장 번호와 설명 순서, 예제는 새 초판 기준으로 다시 정리하기 전 상태예요.<br>
+      처음 읽는 분은 <a href="chapter-01.html">새 1장</a>에서 시작하거나, <a href="index.html">초판 목차</a>로 돌아가 주세요.
+    </div>
+<div class="breadcrumb">참고용 기존 초안 / 5장</div>
   <h2 id="superposition">5장. 중첩은 그냥 "모르는 상태"일까?</h2>
   <p>
     중첩은 양자컴퓨팅을 배울 때 가장 많이 오해되는 말이에요.<br>
@@ -617,10 +645,10 @@
     측정 결과값 1의 진폭 부호가 다르고, 이 부호 차이가 다른 게이트를 한 번 더 적용할 때 결과 차이를 만들어요.<br>
     이 차이를 정석적으로 말하면 두 상태는 서로 다른 상태 벡터이고, H 게이트 같은 변환을 다시 만나면 서로 다른 방향으로 이동해요.
   </p>
-                <nav class="page-nav" aria-label="장 이동">
-    <a href="chapter-04.html"><span class="k">이전</span><span class="t">4장. 중첩은 무엇이고 간섭은 무엇일까?</span></a>
-    <a class="home" href="index.html"><span class="k">개요</span><span class="t">전체 차례로 돌아가기</span></a>
-    <a href="chapter-06.html"><span class="k">다음</span><span class="t">6장. 간섭은 언제 생길까?</span></a>
+<nav class="page-nav" aria-label="기존 초안 이동">
+    <a href="chapter-04.html"><span class="k">이전 기존 초안</span><span class="t">4장. 중첩은 무엇이고 간섭은 무엇일까?</span></a>
+    <a class="home" href="index.html#previous-drafts"><span class="k">기존 초안 목록</span><span class="t">참고용 문서 모음</span></a>
+    <a href="chapter-06.html"><span class="k">다음 기존 초안</span><span class="t">6장. 간섭은 언제 생길까?</span></a>
   </nav>
     <footer>
       <p>Qora — 직접 만드는 양자 토이 언어</p>

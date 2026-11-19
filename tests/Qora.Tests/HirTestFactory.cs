@@ -217,7 +217,7 @@ internal sealed class HirTestFactory
         int length) =>
         (HirArrayCreationExpression)_lowering.ArrayCreation(
             elementType,
-            length);
+            Integer(length));
 
     public HirParameter Parameter(
         string name,
@@ -277,7 +277,7 @@ internal sealed class HirTestFactory
     public HirQubitDeclarationStatement QubitDeclaration(
         string name,
         int size) =>
-        _lowering.QubitDeclaration(name, size);
+        _lowering.QubitDeclaration(name, Integer(size));
 
     public HirCallStatement Apply(
         string name,
@@ -691,8 +691,13 @@ internal sealed class HirTestFactory
         HirSnapshot source)
     {
         ArgumentNullException.ThrowIfNull(source);
+        QoraValidator.Validate(source, out var model);
+        var validation = new HirSemanticArtifact(
+            source,
+            model ?? throw new InvalidOperationException(
+                "Validation did not produce a semantic model for the test snapshot."));
         return Monomorphizer.Run(
-            source.Program,
+            validation,
             source.ConstructionCore.BeginRewrite(
                 source,
                 nameof(Monomorphizer)));

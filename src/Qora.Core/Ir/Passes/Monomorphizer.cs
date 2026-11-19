@@ -1,3 +1,5 @@
+using Qora.Compiler;
+
 namespace Qora.Ir.Passes;
 
 /// <summary>
@@ -12,15 +14,20 @@ internal static class Monomorphizer
     }
 
     public static Result Run(
-        HirProgram program,
+        HirSemanticArtifact validatedSource,
         HirRewriteSession rewrite)
     {
-        ArgumentNullException.ThrowIfNull(program);
+        ArgumentNullException.ThrowIfNull(validatedSource);
         ArgumentNullException.ThrowIfNull(rewrite);
-        if (!ReferenceEquals(rewrite.Source.Program, program))
+        if (validatedSource.Phase != HirSemanticPhase.Validation || !validatedSource.IsAccepted)
             throw new ArgumentException(
-                "Monomorphization must consume the rewrite session's exact source program.",
-                nameof(program));
+                "Monomorphization requires an accepted validation artifact.",
+                nameof(validatedSource));
+        if (!ReferenceEquals(rewrite.Source, validatedSource.Source))
+            throw new ArgumentException(
+                "Monomorphization must consume the rewrite session's exact validated source snapshot.",
+                nameof(validatedSource));
+        var program = validatedSource.Program;
 
         static bool IsUnsizedArray(HirParameter parameter) =>
             parameter.NeedsMonoSizing;
@@ -81,7 +88,21 @@ internal static class Monomorphizer
             return registers;
         }
 
-        static void CollectUses(
+        int DeclarationSize(HirStatement declaration)
+        {
+            var symbol = validatedSource.Model.FindSymbol(declaration.Id)
+                ?? throw new InvalidOperationException(
+                    "QINTERNAL: a validated array declaration has no declaration symbol");
+            var size = symbol.Type == QType.Qubit
+                ? symbol.RegisterSize
+                : symbol.ArrayLength;
+            return size is > 0
+                ? size.Value
+                : throw new InvalidOperationException(
+                    "QINTERNAL: a validated array declaration has no positive compile-time size");
+        }
+
+        void CollectUses(
             HirBlock body,
             Dictionary<string, int> registers)
         {
@@ -90,7 +111,7 @@ internal static class Monomorphizer
                 switch (statement)
                 {
                     case HirQubitDeclarationStatement declaration:
-                        registers[declaration.Name] = declaration.Size;
+                        registers[declaration.Name] = DeclarationSize(declaration);
                         break;
                     case HirIfStatement branch:
                         CollectUses(branch.Then, registers);
@@ -130,6 +151,8 @@ internal static class Monomorphizer
                     RewriteMeasurement(measurement, registers, copy),
                 HirArrayLiteralExpression literal =>
                     RewriteArrayLiteral(literal, registers, copy),
+                HirArrayCreationExpression creation =>
+                    RewriteArrayCreation(creation, registers, copy),
                 _ => copy
                     ? rewrite.DeriveExpression(source)
                     : source,
@@ -277,6 +300,19 @@ internal static class Monomorphizer
             return literal;
         }
 
+        HirArrayCreationExpression RewriteArrayCreation(
+            HirArrayCreationExpression creation,
+            IReadOnlyDictionary<string, int> registers,
+            bool copy)
+        {
+            var length = RewriteExpression(creation.Length, registers, copy);
+            return copy
+                ? rewrite.DeriveArrayCreation(creation, creation.ElementType, length)
+                : ReferenceEquals(length, creation.Length)
+                    ? creation
+                    : rewrite.RewriteArrayCreation(creation, creation.ElementType, length);
+        }
+
         HirCallExpression RewriteCall(
             HirCallExpression call,
             IReadOnlyDictionary<string, int> registers,
@@ -394,10 +430,9 @@ internal static class Monomorphizer
                 {
                     IsArray: true,
                     Type: QType.Bit,
-                }
-                && BitArrayLength(declaration) is int length)
+                })
             {
-                registers[declaration.Name] = length;
+                registers[declaration.Name] = DeclarationSize(declaration);
             }
             else
             {
@@ -861,17 +896,6 @@ internal static class Monomorphizer
 
         return new Result(rewrite.Publish(result));
     }
-
-    private static int? BitArrayLength(
-        HirVariableDeclarationStatement declaration) =>
-        declaration.Value switch
-        {
-            HirArrayLiteralExpression literal =>
-                literal.Elements.Count,
-            HirArrayCreationExpression allocation =>
-                allocation.Length,
-            _ => null,
-        };
 
     private static bool HasGenericCall(
         HirProgram program,

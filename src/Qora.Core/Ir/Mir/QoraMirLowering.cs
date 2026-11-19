@@ -458,10 +458,13 @@ internal static class QoraMirLowering
             _currentFlowState.TrackDeclaredHirSymbol(hirQubitSymbol.Id);
 
             var mirOrigin = MirOriginFor(hirQubitDeclaration);
+            var registerSize = hirQubitSymbol.RegisterSize
+                ?? throw MirLoweringError(
+                    $"validated qubit allocation `{hirQubitDeclaration.Name}` has no constant size");
             var mirAllocatedQubit = new MirQubitFromUse(
                 AllocateMirQubitId(),
                 hirQubitDeclaration.Name,
-                hirQubitDeclaration.Size,
+                registerSize,
                 mirOrigin);
             RegisterInitialMirQubit(hirQubitSymbol.Id, mirAllocatedQubit);
             EmitMirInstruction(new MirQubitAllocate(
@@ -491,8 +494,10 @@ internal static class QoraMirLowering
 
                 switch (hirDeclaration.Value)
                 {
-                    case HirArrayCreationExpression hirArrayCreation:
-                        declaredArrayLength = hirArrayCreation.Length;
+                    case HirArrayCreationExpression:
+                        declaredArrayLength = hirDeclaredSymbol.ArrayLength
+                            ?? throw MirLoweringError(
+                                $"validated array `{hirDeclaration.Name}` has no constant length");
                         mirArrayInitialization =
                             MirArrayInitialization.ZeroInitialized;
                         mirElementValueIds = new List<MirValueId>();

@@ -2,6 +2,18 @@
 
 All notable changes to the Qora Language extension.
 
+## 0.34.0 — 2026-11-19
+
+- Bundles **Qora 0.41.0**. Logical expressions (`!`, `&&`, `||`) can now be stored, passed, and returned
+  as `bool` values, with left-to-right short-circuit evaluation.
+- Qubit registers and classical arrays can use compile-time integer expressions for their size.
+  Zero, negative, overflowing, and runtime-dependent sizes are rejected during compilation.
+- Implicit scalar conversions now follow the same rules for initializers, assignments, arguments,
+  returns, and array elements. For rotation gates, use a `float` or `angle`, e.g. `Rx(1.0, q[0])`.
+- The runner's result format and the pinned Braket packages are unchanged. The pinned simulator 1.43.1
+  passes 71 of the 80 execution cases; all 80 pass with the four local simulator fixes combined.
+  See the [language release notes](https://github.com/AJ-comp/Qora/blob/main/CHANGELOG.md#0410--2026-11-19).
+
 ## 0.33.0 — 2026-11-11
 
 - Bundles the **Qora v0.40.0** compiler.

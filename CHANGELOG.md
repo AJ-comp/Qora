@@ -17,6 +17,80 @@ emitted as **OpenQASM 3.0**.
 > named there may have been retired by a later release; the newest release notes and current architecture
 > documents define the present pipeline.
 
+## 0.41.0 — 2026-11-19
+
+VS Code extension **0.34.0** bundles the Qora 0.41.0 compiler.
+
+### Added
+
+- **Compile-time expressions for qubit and array sizes.** `Qubit[N]` and `new T[N]` accept earlier
+  compile-time integer `const` bindings, arithmetic, parentheses, and already-concrete `.Count` values.
+  Both use the existing checked integer folder and require a final size from 1 to 2,147,483,647.
+  Zero, negatives, oversized results, signed 64-bit arithmetic overflow, division by zero, non-integer
+  expressions, and runtime-dependent sizes are compile errors. Immutable bindings initialized from
+  runtime values are not compile-time constants; functions are not evaluated at compile time.
+  Runtime-sized allocation, unresolved parameter-length specialization, and new qubit-allocation
+  scopes are not introduced.
+- **Logical expressions are ordinary `bool` values.** `!`, `&&`, and `||` now work in variable/constant
+  initializers, assignments, function/operation arguments, returns, array elements, and nested groups.
+  Conditions and values share one expression grammar and one AST-to-HIR precedence path rather than
+  separate condition parsing. Unary `!` binds with unary `-`, equality binds above `&&`, and `&&` binds
+  above `||`; parentheses and repeated negation are supported.
+  The existing MIR branch-and-merge lowering preserves left-to-right short-circuit evaluation, including
+  effectful operation calls and mutable-array access. Boolean-only operand rules and measurement-placement
+  restrictions remain unchanged.
+
+### Fixed
+
+- **Scalar conversion rules no longer depend on the value's context.** Variable/constant initializers,
+  assignments, function/operation arguments, returns, array literal elements, and indexed element writes
+  now use the same compatibility rules. Besides identical types, the allowed implicit conversions are
+  `bit` → `int`, `int` → `float`, `float` → `angle`, and integer literals `0`/`1` → `bit`.
+  Conversions are not implicitly chained; `bool` remains separate from every other scalar type.
+  Array arguments still require exact element types rather than converting shared array storage.
+- **Built-in gate arguments and measurement destinations use that same contract.** Rotation parameters
+  accept `float` → `angle`, but no longer bypass the rule for other numeric types. In existing supported
+  measurement positions, a measured `bit` can be assigned or returned as `int`; incompatible destination
+  types use the ordinary type diagnostic instead of the retired bit-only `QSEM017` check.
+  Measurement placement restrictions are unchanged.
+
+### Migration
+
+- Previously accepted loose conversions such as `var b: bit = 2;`, `angle` → `int`, and `bit` → `float`
+  are now compile errors in every value-assignment context, matching the existing return-value rules.
+  Keep a value in its actual type or change the consuming declaration/signature to a permitted type.
+  This does not add explicit cast syntax or broaden the set of implicit conversions.
+- Write `Rx(1.0, q[0])` instead of `Rx(1, q[0])`: only the former uses the permitted `float` → `angle`
+  conversion. Expressions such as `Rx(pi/2, q[0])` remain valid.
+
+### Documentation
+
+- The [Korean beginner book](docs/book/ko/index.html) now opens with an illustrated, interactive
+  [first chapter](docs/book/ko/chapter-01.html) on preparing, flipping, and measuring one qubit.
+  Later chapters in the new first-edition outline are marked as planned; the earlier drafts remain available.
+
+### Execution validation
+
+- Debug and Release solution builds pass with no warnings or errors. Each configuration passes 1,686
+  compiler tests and 15 language-service tests, including 164 new conversion regressions, 77 new
+  logical-expression regressions, and 108 new compile-time allocation-size regressions. The 12 extension
+  tests and 38 Python result-contract/standard-gate tests also pass.
+- Added 26 Braket execution cases: nine scalar-conversion, twelve logical-value/short-circuit, and five
+  compile-time allocation cases. All **80 cases pass** with the four pending Braket fixes combined;
+  stock simulator **1.43.1 passes 71 and fails 9**. All five allocation cases pass in both environments.
+  One added stock failure is a helper returning a measured bit as `int`,
+  which yields 0 instead of the expected 1.
+  Published Qora 0.40.0 and the current compiler emit the same instructions and result metadata for this case.
+  Standalone OpenQASM reproduces the failure on stock and passes with the combined patches, so this is
+  an existing backend issue exposed by the added regression, not a new Qora compilation regression.
+  Logical cases L7/L8 hit the known Boolean-array `BoolType.size` failure, and L9 hits the known
+  readonly-array parser failure; these add coverage of existing limitations, not new backend bugs.
+  The separate unresolved `Qubit[]` helper-measurement and noncontiguous controlled-gate cases remain
+  outside this suite; 80 passing cases do not establish support for those programs.
+- The separate Qiskit importer probe compiles all 10 examples, but the pinned importer rejects all
+  10 before simulation (unsupported `int`/`float` declarations or subroutine definitions). The emitted
+  OpenQASM and entry-result metadata match Qora 0.40.0 apart from the compiler version comment.
+
 ## 0.40.0 — 2026-11-11
 
 Accompanied by VS Code extension **0.33.0**, which bundles the Qora 0.40.0 compiler.

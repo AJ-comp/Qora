@@ -2,7 +2,7 @@ namespace Qora.Tests;
 
 /// <summary>QSEM026 — a qubit cannot appear where a CLASSICAL value is required (a condition, a range bound,
 /// arithmetic, a rotation angle, or as an assignment target). A qubit has no numeric value, so any of these
-/// would emit invalid OpenQASM. Also QSEM017 (a measurement result is a bit) and QSEM024 (const) at
+/// would emit invalid OpenQASM. Also measurement bit-to-int conversion and QSEM024 (const) at
 /// assignment sites.</summary>
 public class ClassicalValueTests
 {
@@ -27,8 +27,8 @@ public class ClassicalValueTests
     public void QubitTwiceInOneExpressionReportsOnce(string source) => Compiler.RejectsExactly(source, "QSEM026");
 
     [Fact]
-    public void MeasurementIntoNonBitTargetIsQsem017() =>
-        Compiler.Rejects("operation Main(){ use q=Qubit[1]; var x: int=0; x = M(q[0]); }", "QSEM017");
+    public void MeasurementIntoIntTargetUsesBitToIntConversion() =>
+        Compiler.Accepts("operation Main(){ use q=Qubit[1]; var x: int=0; x = M(q[0]); }");
 
     [Fact]
     public void ReassigningConstIsQsem024() =>
@@ -41,6 +41,6 @@ public class ClassicalValueTests
     [InlineData("operation Main(){ use q=Qubit[3]; const n: int=2; for i in 0..n { X(q[i]); } }")] // const int as a bound
     [InlineData("operation Flip(q: Qubit[]){ for i in 0..q.Count-1 { X(q[i]); } }\noperation Main(){ use q=Qubit[3]; Flip(q); }")] // array Count in a bound
     [InlineData("operation Main(){ use q=Qubit[2]; var r: bit=M(q[0]); r = M(q[1]); }")]     // reassign a bit with a measurement
-    [InlineData("operation Main(){ use q=Qubit[1]; var c: int=0; c = c + 1; Rx(c, q[0]); }")] // reassign a classical
+    [InlineData("operation Main(){ use q=Qubit[1]; var c: float=0.0; c = c + 1; Rx(c, q[0]); }")] // reassign a classical
     public void AcceptsLegitimateClassicalUse(string source) => Compiler.Accepts(source);
 }

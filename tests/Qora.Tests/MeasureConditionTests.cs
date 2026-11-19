@@ -18,7 +18,7 @@ public class MeasureConditionTests
     [InlineData("operation Main(){ use q=Qubit[2]; if(M(q[0])==1){ if(M(q[1])==0){ X(q[0]); } } }")] // nested
     [InlineData("operation Foo(a: Qubit[]){ if(M(a[0])==1){ X(a[0]); } }\noperation Main(){ use q=Qubit[1]; Foo(q); }")] // inside a def
     [InlineData("operation Main(){ use q=Qubit[1]; if(!(M(q[0])==1)){ X(q[0]); } }")] // negated measurement comparison
-    [InlineData("operation Main(){ use q=Qubit[1]; var __m0 = 5; if(M(q[0])==1){ Rx(__m0, q[0]); } }")] // temp name avoids a user's __m0
+    [InlineData("operation Main(){ use q=Qubit[1]; var __m0 = 5.0; if(M(q[0])==1){ Rx(__m0, q[0]); } }")] // temp name avoids a user's __m0
     public void AcceptsMeasurementInCondition(string source) => Compiler.Accepts(source);
 
     [Fact]

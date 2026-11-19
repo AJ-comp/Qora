@@ -27,7 +27,7 @@ public class TypeInferenceTests
     public void UntypedVarFromIntRemainsIntThroughTheTarget()
     {
         var compilation = AssertVariableType(
-            "operation Main(){ use q=Qubit[1]; var cnt: int = 5; var got = cnt; Rx(got, q[0]); }",
+            "operation Main(){ use q=Qubit[1]; var cnt: int = 5; var got = cnt; if(got==5){ X(q[0]); } }",
             "got",
             QType.Int);
 

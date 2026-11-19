@@ -35,7 +35,7 @@ public static class HirExpressions
         HirArrayLiteralExpression literal =>
             $"[{string.Join(", ", literal.Elements.Select(Render))}]",
         HirArrayCreationExpression creation =>
-            $"new {creation.ElementType.ToString().ToLowerInvariant()}[{creation.Length}]",
+            $"new {creation.ElementType.ToString().ToLowerInvariant()}[{Render(creation.Length)}]",
         _ => string.Empty,
     };
 

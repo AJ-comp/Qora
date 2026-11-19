@@ -231,7 +231,7 @@ public class NodeIdentityTests
     public void TargetAstOwnsEmittedNamesAndSourceNameStaysUserSpelling()
     {
         var compilation = QoraCompiler.Compile(
-            "operation Main(){ use q=Qubit[1]; const x: int = 1; Rx(x, q[0]); }");
+            "operation Main(){ use q=Qubit[1]; const x: float = 1.0; Rx(x, q[0]); }");
         AssertSucceeded(compilation);
 
         var analyzed = Assert.IsType<HirSemanticArtifact>(

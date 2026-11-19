@@ -50,7 +50,7 @@ public sealed class ComparisonValueTests
     [InlineData("var values: int[] = [1, 2]; var value: bool = values[0] < values[1];")]
     [InlineData("var value: bool = 0.5 < 1;")]
     [InlineData("var value: bool = pi > 3;")]
-    [InlineData("var a: angle = 1; var b: angle = 2; var value: bool = a < b;")]
+    [InlineData("var a: angle = 1.0; var b: angle = 2.0; var value: bool = a < b;")]
     [InlineData("var value: bool = true == false;")]
     public void ComparisonsWorkInStoragePositions(string body) =>
         Compiler.Accepts($"operation Main() {{ {body} }}");
@@ -278,8 +278,8 @@ public sealed class ComparisonValueTests
     [InlineData("true && false")]
     [InlineData("true || false")]
     [InlineData("!true")]
-    public void LogicalValueExpressionsAreNotAddedByComparisonSupport(string expression) =>
-        Compiler.Rejects($"operation Main() {{ var value: bool = {expression}; }}", "CE0001");
+    public void LogicalValueExpressionsComposeWithComparisonValues(string expression) =>
+        Compiler.Accepts($"operation Main(): bool {{ var value: bool = {expression}; return value == (1 == 1); }}");
 
     private static string Shape(HirExpression expression) => expression switch
     {

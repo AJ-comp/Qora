@@ -161,6 +161,11 @@ internal static class Resolver
         private HirStatement ResolveStatement(HirStatement statement) =>
             statement switch
             {
+                HirQubitDeclarationStatement qubit =>
+                    _rewrite.RewriteQubitDeclaration(
+                        qubit,
+                        qubit.Name,
+                        ResolveExpression(qubit.Size)),
                 HirCallStatement call =>
                     _rewrite.RewriteCallStatement(
                         call,
@@ -245,6 +250,11 @@ internal static class Resolver
                         literal.Elements
                             .Select(ResolveExpression)
                             .ToArray()),
+                HirArrayCreationExpression creation =>
+                    _rewrite.RewriteArrayCreation(
+                        creation,
+                        creation.ElementType,
+                        ResolveExpression(creation.Length)),
                 _ => expression,
             };
 

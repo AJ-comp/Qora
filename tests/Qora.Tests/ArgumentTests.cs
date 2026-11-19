@@ -48,7 +48,7 @@ public class ArgumentTests
     [InlineData("operation Foo(a: Qubit){ H(a); }\noperation Main(){ use q=Qubit[2]; Foo(q[0]); }")]              // single qubit
     [InlineData("operation Rot(t: angle, a: Qubit){ Rx(t, a); }\noperation Main(){ use q=Qubit[1]; Rot(pi/2, q[0]); }")] // classical param
     [InlineData("operation Flip(q: Qubit[]){ for i in 0..q.Count-1 { X(q[i]); } }\noperation Main(){ use q=Qubit[3]; Flip(q); }")] // internally specialized
-    [InlineData("operation Main(){ use q=Qubit[1]; Rx(1, q[0]); }")] // built-in angle rules remain target-specific
+    [InlineData("operation Main(){ use q=Qubit[1]; Rx(1.0, q[0]); }")] // built-ins share the float-to-angle conversion
     public void AcceptsWellFormedCalls(string source) => Compiler.Accepts(source);
 
     [Fact]

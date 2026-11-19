@@ -70,7 +70,7 @@ internal static class ExpressionTypes
                 new QValueShape(
                     allocation.ElementType,
                     IsArray: true,
-                    allocation.Length),
+                    ConstantAllocationLength(allocation.Length, scope, semanticModel, callableById)),
 
             HirArrayLiteralExpression literal =>
                 ArrayTypeOf(literal, scope, semanticModel, callableById),
@@ -125,8 +125,37 @@ internal static class ExpressionTypes
         };
 
     /// <summary>
-    /// Assignment compatibility for a declared value contract. Shape must agree. Established contextual
-    /// scalar conversions remain bit-to-int, int-to-float, float-to-angle, and integer literal 0/1 to bit.
+    /// Allocation requires an int-valued compile-time constant in the existing positive 32-bit size
+    /// range. The canonical folder checks each intermediate operation in Qora's 64-bit integer domain.
+    /// </summary>
+    internal static int? ConstantAllocationLength(
+        HirExpression expression,
+        Scope scope,
+        IReadOnlyDictionary<HirNodeId, HirCallable> callableById) =>
+        ConstantAllocationLength(expression, scope, semanticModel: null, callableById);
+
+    private static int? ConstantAllocationLength(
+        HirExpression expression,
+        Scope? scope,
+        HirSemanticModel? semanticModel,
+        IReadOnlyDictionary<HirNodeId, HirCallable> callableById)
+    {
+        if (TypeOf(expression, scope, semanticModel, callableById) is not
+            { Type: QType.Int, IsArray: false })
+            return null;
+
+        var bound = semanticModel is null
+            ? BoundFolder.Fold(expression, scope!)
+            : BoundFolder.Fold(expression, semanticModel);
+        return bound is BoundNum { Value: >= 1 and <= int.MaxValue } number
+            ? (int)number.Value
+            : null;
+    }
+
+    /// <summary>
+    /// Compatibility for initializers, assignments, arguments, returns, and array elements. Whole arrays
+    /// require identical element types. Scalar conversions are bit-to-int, int-to-float, float-to-angle,
+    /// and integer literal 0/1 to bit; conversions do not implicitly chain.
     /// </summary>
     internal static bool CanAssign(
         QValueShape target,
@@ -137,6 +166,8 @@ internal static class ExpressionTypes
             return false;
         if (target.Type == source.Type)
             return true;
+        if (target.IsArray)
+            return false;
         if (target.Type is QType.Qubit or QType.Bool || source.Type is QType.Qubit or QType.Bool)
             return false;
 
