@@ -131,6 +131,12 @@
     <a class="doc-link" href="index.html#uncompute-course">코스 목차</a>
     <a class="doc-link" href="uncompute-02-ladder.html">2. 컴파일러는 어떤 큐빗을 정리하는가 — 판별 사다리 →</a>
   </nav>
+  <div class="call">
+    <span class="h">구현 상태</span>
+    이 코스는 자동 uncomputation의 원리와, 앞으로 구현할 MIR cleanup scheduler의 목표 설계를 설명합니다.<br>
+    현재 컴파일러는 정리 코드를 자동으로 삽입하지 않으며, 측정하지 않은 <code>use</code> 레지스터가 |0⟩로 반납되는지도 아직 검사하지 않습니다.<br>
+    따라서 아래 2단계처럼 얽힌 앤실라를 방치한 프로그램도 지금은 에러 없이 컴파일되므로, 정리가 필요하면 해결 단계처럼 정리 코드를 직접 작성해야 합니다.
+  </div>
 
   <p>
     자동 uncomputation은 컴파일러가 다 쓴 작업 큐빗을 |0⟩로 되돌려 주는 기능입니다.<br>
@@ -242,9 +248,9 @@ var m: bit = M(q[0]);
     같아졌습니다.<br>
     그래서 두 번째 H 게이트가 다시 두 기저 상태 항의 진폭 기여를 같은 기저 상태로 모아 상쇄시킬 수 있게 되고, 측정 결과는 1단계와 똑같이 100%
     확률로 0이 됩니다.<br>
-    이렇게 앤실라를 |0⟩로 되돌리는 일을 <strong>uncomputation</strong>이라 부르며, Qora는 이 정리
-    코드를 사용자가 작성하지 않아도 컴파일러가 자동으로 삽입합니다.<br>
-    그래서 언어 규칙도 하나로 정해집니다.<br>
+    이렇게 앤실라를 |0⟩로 되돌리는 일을 <strong>uncomputation</strong>이라 부르며, Qora의 목표 설계에서는 이 정리
+    코드를 사용자가 작성하지 않아도 향후 MIR scheduler가 자동으로 삽입하게 됩니다(현재 컴파일러는 아직 삽입하지 않습니다).<br>
+    그래서 목표 설계의 언어 규칙도 하나로 정해집니다.<br>
     <strong>측정하지 않은 <code>use</code> 레지스터는 스코프가 끝날 때 |0⟩로 반납되어야 합니다.</strong>
   </p>
 
