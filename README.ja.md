@@ -122,23 +122,25 @@ operation Main()
 OPENQASM 3;
 include "stdgates.inc";
 
-def Bell__sz2(qubit[2] q) {
-  int v0;
-  int v1;
+def Bell__sz2(qubit[2] q_1) {
+  int v0_1;
+  int v1_1;
   int v2;
-  v0 = 0;
-  h q[v0];
-  v1 = 0;
+  v0_1 = 0;
+  h q_1[v0_1];
+  v1_1 = 0;
   v2 = 1;
-  cx q[v1], q[v2];
+  cx q_1[v1_1], q_1[v2];
 }
 
 qubit[2] q;
 int v0;
 bit v1;
+output int __qora_completed;
 Bell__sz2(q);
 v0 = 0;
 v1 = measure q[v0];
+__qora_completed = 1;
 ```
 
 </td>
@@ -146,8 +148,12 @@ v1 = measure q[v0];
 </table>
 
 出力には `v0` や `v1` のような MIR の一時変数が含まれます。この例では、ソースの束縛 `r` は `v1` で表されます。
-callable とストレージの名前は、OpenQASM で安全に使える場合に保持されます。保持する名前がキーワード、組み込みゲート、
-ほかの出力名と衝突する場合、ターゲット lowering が安全な名前を割り当て、変更理由を `// Qora:` ノートに記録します。
+callable とストレージの名前は、OpenQASM で安全に使える場合に保持されます。トップレベルとすべての `def` は
+出力名を共有するため、キーワード、組み込みゲート、ほかの出力名と衝突する名前には数字の接尾辞が付きます。
+この例では、ヘルパーの `q`、`v0`、`v1` が `q_1`、`v0_1`、`v1_1` になります。
+`Main` に戻り値の型がないため、プログラムは最後に `output int __qora_completed` を `1` に設定します。
+この完了マーカーはランナーのための実行プロトコルのデータであり、Qora の戻り値ではありません。
+`// Qora:` ノートは、ヘルパーのローカル配列を OpenQASM のグローバルストレージへ移すときにだけ出力されます。
 
 ## クイックスタート
 
@@ -178,7 +184,7 @@ dotnet run --project src/Qora -- --json bell.qor
 dotnet run --project src/Qora -- --json --stages bell.qor
 ```
 
-VS Code 拡張機能も同じ `--json` インターフェイスを使います。各応答には `{success, qasm, errors[]}` が含まれ、
+VS Code 拡張機能も同じ `--json` インターフェイスを使います。各応答には `{success, qasm, entryResult, errors[]}` が含まれ、
 `--stages` を指定すると AST、HIR、シンボル、MIR、量子効果の要約も含まれます。
 ファイルパスを指定しない場合、`--json` は標準入力からソースを読みます。
 

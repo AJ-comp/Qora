@@ -121,23 +121,25 @@ operation Main()
 OPENQASM 3;
 include "stdgates.inc";
 
-def Bell__sz2(qubit[2] q) {
-  int v0;
-  int v1;
+def Bell__sz2(qubit[2] q_1) {
+  int v0_1;
+  int v1_1;
   int v2;
-  v0 = 0;
-  h q[v0];
-  v1 = 0;
+  v0_1 = 0;
+  h q_1[v0_1];
+  v1_1 = 0;
   v2 = 1;
-  cx q[v1], q[v2];
+  cx q_1[v1_1], q_1[v2];
 }
 
 qubit[2] q;
 int v0;
 bit v1;
+output int __qora_completed;
 Bell__sz2(q);
 v0 = 0;
 v1 = measure q[v0];
+__qora_completed = 1;
 ```
 
 </td>
@@ -146,8 +148,11 @@ v1 = measure q[v0];
 
 출력에는 `v0`, `v1` 같은 MIR 임시값이 포함되며, 이 예제의 소스 바인딩 `r`은 `v1`로 표현됩니다.
 callable과 storage의 이름은 OpenQASM에서 안전하게 사용할 수 있으면 유지합니다.
-유지할 이름이 키워드, 내장 게이트 또는 다른 출력 이름과 충돌하면 타깃 lowering이 안전한 이름을 지정하고,
-변경 이유를 `// Qora:` 노트로 남깁니다.
+최상위 코드와 모든 `def`는 출력 이름을 함께 쓰므로, 키워드·내장 게이트·다른 출력 이름과 겹칠 이름에는
+숫자 접미사가 붙습니다. 이 예제에서는 헬퍼의 `q`, `v0`, `v1`이 `q_1`, `v0_1`, `v1_1`이 됩니다.
+`Main`에 반환 타입이 없으므로 프로그램은 마지막에 `output int __qora_completed`를 `1`로 설정합니다.
+이 완료 표시는 실행기를 위한 실행 프로토콜 데이터이며 Qora의 반환값이 아닙니다.
+`// Qora:` 노트는 헬퍼의 지역 배열을 OpenQASM 전역 저장소로 옮길 때만 나옵니다.
 
 ## 바로 시작하기
 
@@ -178,7 +183,7 @@ dotnet run --project src/Qora -- --json bell.qor
 dotnet run --project src/Qora -- --json --stages bell.qor
 ```
 
-VS Code 확장도 같은 `--json` 인터페이스를 사용합니다. 각 응답에는 `{success, qasm, errors[]}`가 포함되며,
+VS Code 확장도 같은 `--json` 인터페이스를 사용합니다. 각 응답에는 `{success, qasm, entryResult, errors[]}`가 포함되며,
 `--stages`를 함께 지정하면 AST, HIR, 심볼, MIR, 양자 효과 요약도 포함됩니다.
 파일 경로 없이 `--json`을 실행하면 표준 입력에서 소스를 읽습니다.
 

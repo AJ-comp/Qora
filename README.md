@@ -125,23 +125,25 @@ operation Main()
 OPENQASM 3;
 include "stdgates.inc";
 
-def Bell__sz2(qubit[2] q) {
-  int v0;
-  int v1;
+def Bell__sz2(qubit[2] q_1) {
+  int v0_1;
+  int v1_1;
   int v2;
-  v0 = 0;
-  h q[v0];
-  v1 = 0;
+  v0_1 = 0;
+  h q_1[v0_1];
+  v1_1 = 0;
   v2 = 1;
-  cx q[v1], q[v2];
+  cx q_1[v1_1], q_1[v2];
 }
 
 qubit[2] q;
 int v0;
 bit v1;
+output int __qora_completed;
 Bell__sz2(q);
 v0 = 0;
 v1 = measure q[v0];
+__qora_completed = 1;
 ```
 
 </td>
@@ -149,9 +151,13 @@ v1 = measure q[v0];
 </table>
 
 The output includes MIR temporaries such as `v0` and `v1`; the source binding `r` is represented by `v1`
-in this example. Callable and storage names are retained when safe for OpenQASM. When a retained name
-collides with a keyword, a built-in gate, or another output name, target lowering assigns a safe name
-and emits a `// Qora:` note explaining the change.
+in this example. Callable and storage names are retained when safe for OpenQASM. The top level and every
+`def` share one set of output names, so a name that would collide with a keyword, a built-in gate, or
+another output name receives a numeric suffix: here the helper's `q`, `v0`, and `v1` become `q_1`,
+`v0_1`, and `v1_1`. Because `Main` declares no return type, the program ends by setting
+`output int __qora_completed` to `1`. That completion marker is execution-protocol data for the runner,
+not a Qora return value. A `// Qora:` note appears only when a helper's local array is moved to
+global OpenQASM storage.
 
 ## Quick start
 
@@ -182,7 +188,7 @@ dotnet run --project src/Qora -- --json bell.qor
 dotnet run --project src/Qora -- --json --stages bell.qor
 ```
 
-The VS Code extension uses the same `--json` interface. Each reply contains `{success, qasm, errors[]}`;
+The VS Code extension uses the same `--json` interface. Each reply contains `{success, qasm, entryResult, errors[]}`;
 `--stages` also includes AST, HIR, symbols, MIR, and quantum-effect summaries.
 Without a file path, `--json` reads the source from standard input.
 
