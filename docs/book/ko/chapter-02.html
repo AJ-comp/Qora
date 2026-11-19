@@ -809,7 +809,7 @@
   <div class="practice">
     <span class="practice-label">Qora로 실습해보기</span>
     <h3>큐비트 하나를 준비하고 측정해보자</h3>
-    <pre><code>operation Main() {
+    <pre><code>operation Main(): bit {
     // 큐비트 하나 준비
     // 준비 직후 q[0]은 |0⟩ 상태
     // 측정 결과값 0의 진폭 = 1
@@ -818,8 +818,11 @@
 
     // q[0] 측정
     // 측정은 현재 진폭을 확률로 바꾸어 결과값 하나를 얻는 단계
-    // 이상적인 실행 환경: 측정 결과값 0
+    // 이상적인 실행 환경(노이즈 없음): 실행할 때마다 측정 결과값 0
     var result: bit = M(q[0]);
+
+    // 측정 결과값을 실행 결과로 돌려줌
+    return result;
 }</code></pre>
   </div>
 

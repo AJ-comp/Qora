@@ -707,13 +707,13 @@
   <p>
     얽힘 상태는 보통 한 큐비트에 H 게이트를 적용한 뒤, CNOT 같은 두 큐비트 게이트를 적용해서 만들 수 있어요.<br>
     여기서는 CNOT의 세부 규칙을 아직 계산하지 않고, 얽힘이 무엇을 뜻하는지 먼저 잡고 갈게요.<br>
-    CNOT 게이트는 13장에서 다시 차근차근 볼 거예요.
+    CNOT 게이트는 14장에서 다시 차근차근 볼 거예요.
   </p>
 
   <div class="practice">
     <span class="practice-label">Qora로 미리보기</span>
     <h3>얽힘을 만드는 회로 모양만 먼저 보자</h3>
-    <pre><code>operation Main() {
+    <pre><code>operation Main(): int {
     // 큐비트 두 개 준비
     // 시작 상태는 |00⟩
     use q = Qubit[2];
@@ -726,9 +726,15 @@
     // 자세한 규칙은 CNOT 장에서 다시 봄
     CNOT(q[0], q[1]);
 
-    // 이상적인 실행 환경: 00 또는 11이 함께 나옴
+    // 이상적인 실행 환경(노이즈 없음): 여러 번 실행하면 00과 11만 약 반반씩 나옴
     var first: bit = M(q[0]);
     var second: bit = M(q[1]);
+
+    // 두 측정 결과값을 정수 하나로 묶어 실행 결과로 돌려줌
+    // 왼쪽 자리가 q[0]: 00 → 0, 01 → 1, 10 → 2, 11 → 3
+    // 그래서 실행 결과에는 0과 3만 보임
+    var result: bit[] = [first, second];
+    return AsInt(result);
 }</code></pre>
   </div>
 

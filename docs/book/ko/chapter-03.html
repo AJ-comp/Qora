@@ -599,13 +599,13 @@
 
   <p>
     이 상태를 측정하면 측정 결과값 0이 반드시 나와요.<br>
-    Qora에서 큐비트를 새로 준비하면 기본적으로 <code>|0⟩</code> 상태에서 시작한다고 읽으면 돼요.
+    이 책의 예제를 실행하는 시뮬레이터는 새로 준비한 큐비트를 <code>|0⟩</code> 상태에서 시작해요. 그래서 이 책에서는 새로 준비한 큐비트가 <code>|0⟩</code>에서 시작한다고 읽으면 돼요. 이 약속의 근거는 10장에서 다시 짚을게요.
   </p>
 
   <div class="practice">
     <span class="practice-label">Qora로 실습해보기</span>
     <h3>준비한 직후의 큐비트를 측정해보자</h3>
-    <pre><code>operation Main() {
+    <pre><code>operation Main(): bit {
     // 큐비트 하나 준비
     // 준비 직후 q[0]은 |0⟩ 상태
     // 측정 결과값 0의 진폭 = 1
@@ -613,8 +613,11 @@
     use q = Qubit[1];
 
     // q[0] 측정
-    // 이상적인 실행 환경: 측정 결과값 0
+    // 이상적인 실행 환경(노이즈 없음): 실행할 때마다 측정 결과값 0
     var result: bit = M(q[0]);
+
+    // 측정 결과값을 실행 결과로 돌려줌
+    return result;
 }</code></pre>
   </div>
 
@@ -653,7 +656,7 @@
   <div class="practice">
     <span class="practice-label">Qora로 실습해보기</span>
     <h3>X 게이트로 <code>|1⟩</code> 상태를 만들어보자</h3>
-    <pre><code>operation Main() {
+    <pre><code>operation Main(): bit {
     // 큐비트 하나 준비
     // 준비 직후 q[0]은 |0⟩ 상태
     use q = Qubit[1];
@@ -662,8 +665,11 @@
     // |0⟩ 상태가 |1⟩ 상태로 바뀜
     X(q[0]);
 
-    // 이상적인 실행 환경: 측정 결과값 1
+    // 이상적인 실행 환경(노이즈 없음): 실행할 때마다 측정 결과값 1
     var result: bit = M(q[0]);
+
+    // 측정 결과값을 실행 결과로 돌려줌
+    return result;
 }</code></pre>
   </div>
 
