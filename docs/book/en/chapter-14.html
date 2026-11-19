@@ -550,11 +550,27 @@
 
   <p>
     The CNOT gate is a gate that acts on two qubits.<br>
-    The first qubit is called the control qubit, and the second qubit is called the target qubit.<br>
-    An X gate is applied to the target qubit only when the control qubit is on the measurement outcome 1 side.
+    We wrote two-qubit states with two digits, as in <code>|00⟩</code>, <code>|01⟩</code>, <code>|10⟩</code>, and <code>|11⟩</code>, where the left digit was <code>q[0]</code> and the right digit was <code>q[1]</code>.<br>
+    CNOT takes two qubits as arguments. Which qubit plays which role is decided by the <strong>order of the arguments</strong>.
   </p>
 
+  <div class="point-list">
+    <div class="point">
+      <span class="marker">First argument</span>
+      <span>We call this the <strong>control qubit</strong>.<br>If this qubit's value is on the 0 side, nothing happens; if it is on the 1 side, it serves as the condition for flipping the target qubit.</span>
+    </div>
+    <div class="point">
+      <span class="marker">Second argument</span>
+      <span>We call this the <strong>target qubit</strong>.<br>Only when the control qubit is 1 does this qubit change from 0 to 1, or from 1 to 0.</span>
+    </div>
+  </div>
+
   <div class="rule">The CNOT gate flips the target qubit only when the control qubit is 1.</div>
+
+  <p>
+    In this chapter, we write it as <code>CNOT(q[0], q[1])</code>. So you look at the first digit of the state (<code>q[0]</code>) first, and use its value to decide whether to flip the second digit (<code>q[1]</code>).<br>
+    If you swap the argument order and write <code>CNOT(q[1], q[0])</code>, then <code>q[1]</code> becomes the control qubit and <code>q[0]</code> becomes the target qubit. The table below shows the <code>CNOT(q[0], q[1])</code> case.
+  </p>
 
   <div class="panel">
     <table>
@@ -591,7 +607,7 @@
   <div class="practice">
     <span class="practice-label">Try it in Qora</span>
     <h3>Let's Connect Two Qubits with the CNOT Gate</h3>
-    <pre><code>operation Main() {
+    <pre><code>operation Main(): int {
     // Prepare two qubits
     // Right after preparation, q[0]q[1] is in the |00⟩ state
     use q = Qubit[2];
@@ -604,9 +620,15 @@
     // q[0] is the control qubit, q[1] is the target qubit
     CNOT(q[0], q[1]);
 
-    // Ideal execution environment: 00 or 11
+    // In an ideal (noise-free) environment: over many runs, only 00 and 11 appear, about half each
     var first: bit = M(q[0]);
     var second: bit = M(q[1]);
+
+    // Pack the two measurement outcomes into one integer and return it as the execution result
+    // The left digit is q[0]: 00 → 0, 01 → 1, 10 → 2, 11 → 3
+    // So only 0 and 3 appear in the execution results
+    var result: bit[] = [first, second];
+    return AsInt(result);
 }</code></pre>
   </div>
                         <nav class="page-nav" aria-label="Chapter navigation">

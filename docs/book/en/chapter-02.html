@@ -810,7 +810,7 @@
   <div class="practice">
     <span class="practice-label">Try It in Qora</span>
     <h3>Prepare one qubit and measure it</h3>
-    <pre><code>operation Main() {
+    <pre><code>operation Main(): bit {
     // Prepare one qubit
     // Right after preparation, q[0] is in the |0⟩ state
     // Amplitude of measurement outcome 0 = 1
@@ -819,8 +819,11 @@
 
     // Measure q[0]
     // Measurement turns the current amplitudes into one outcome
-    // In an ideal execution environment: measurement outcome 0
+    // In an ideal (noise-free) environment: measurement outcome 0 on every run
     var result: bit = M(q[0]);
+
+    // Return the measurement outcome as the execution result
+    return result;
 }</code></pre>
   </div>
 

@@ -574,7 +574,7 @@
     <div class="point">
       <span class="marker">Step 1</span>
       <span>
-        <strong>Different inputs must go to different outputs. <span class="mono">(orthogonality preservation)</span></strong><br>
+        <strong>Different inputs must go to different outputs. <span class="mono">(information preservation)</span></strong><br>
         If two input states merge into the same output state, the output alone cannot tell us which input we started from.<br>
         <span class="example-block">
           <span class="label">For example</span>
@@ -619,7 +619,9 @@
   <p>
     These three steps all point to the same idea.<br>
     Before measurement, a quantum gate must keep the input information, preserve the total probability, and allow us to follow the transformation backward.<br>
-    That is why different input states must be sent to distinguishable output states.
+    More precisely, before measurement, a quantum gate does not change how much two states overlap.<br>
+    So two perfectly distinguishable input states (states that are orthogonal to each other) remain perfectly distinguishable output states after the gate.<br>
+    We will work through how to calculate this overlap in Chapter 12, when we study the H gate.
   </p>
 
   <p>
@@ -631,14 +633,15 @@
 
   <p>
     Here <span class="mono">U</span> is the gate matrix, and <span class="mono">U†</span> is its conjugate transpose.<br>
-    The symbols may feel unfamiliar at first, but for now it is enough to read this as “after applying the gate, we can undo it by going backward.”
+    The symbols may feel unfamiliar at first, but this equation means “applying <span class="mono">U</span> and then <span class="mono">U†</span> brings us back to the original state.”<br>
+    In other words, the transformation that undoes the gate is given directly by <span class="mono">U†</span>, and any transformation that satisfies this condition preserves both the length of a state and the overlap between two states.
   </p>
 
   <div class="panel">
     <table>
       <tr><th>Condition</th><th>Meaning</th><th>Why it is needed</th></tr>
       <tr><td>Length preservation</td><td>The total probability of the state vector stays at 1</td><td>Measurement probabilities must always add up to 100%</td></tr>
-      <tr><td>Orthogonality preservation</td><td>Distinguishable input states stay distinguishable in the output</td><td>Different inputs must not merge into the same output</td></tr>
+      <tr><td>Overlap preservation</td><td>How much two states overlap stays the same. Perfectly distinguishable (orthogonal) inputs stay perfectly distinguishable in the output</td><td>If states that were distinguishable become indistinguishable, information is lost</td></tr>
       <tr><td>Inverse exists</td><td>The gate can be undone, step for step</td><td>Quantum evolution before measurement loses no information</td></tr>
     </table>
   </div>
@@ -647,7 +650,8 @@
     <span class="h">The point to keep</span>
     Before measurement, a quantum gate must not crush different input states into one output state.<br>
     It must also preserve the length of the state vector so the total probability remains 100%.<br>
-    That is why we treat quantum gates as reversible transformations, or unitary transformations.
+    That is why we treat quantum gates as reversible transformations that preserve length and overlap, that is, unitary transformations.<br>
+    Being reversible alone is not enough. Even a reversible transformation is not unitary if it changes length or overlap.
   </div>
 
   <p>

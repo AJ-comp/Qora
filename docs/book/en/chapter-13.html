@@ -551,7 +551,7 @@
   <p>
     The Z gate leaves the amplitude of measurement outcome 0 untouched and attaches a minus sign only to the amplitude of measurement outcome 1.<br>
     So if you measure right after a Z gate, it can look as if nothing happened at all.<br>
-    But when the state later meets a gate that mixes the amplitudes again, like the H gate, that sign difference changes the measurement result.
+    But if the state is a superposition in which a <code>|0⟩</code> component and a <code>|1⟩</code> component are both present, the sign difference between the two components changes the measurement result when the state later meets a gate that mixes the amplitudes again, like the H gate.
   </p>
 
   <div class="panel">
@@ -568,6 +568,12 @@
     That's why the Z gate's effect is better read not as “an effect that changes probabilities” but as “a sign change that shows up later, when interference happens.”
   </p>
 
+  <p>
+    Note, though, that a minus sign attached to a state that has only <code>|1⟩</code> in it, as in the second row of the table, is effectively attached to the whole state.<br>
+    Such a sign is called a <strong>global phase</strong>, and it never shows up in measurement results, no matter which gates come after it. <code>-|1⟩</code> and <code>|1⟩</code> cannot be told apart by measurement.<br>
+    What changes measurement results is the sign difference between the <code>|0⟩</code> component and the <code>|1⟩</code> component, that is, the <strong>relative phase</strong>. Let's follow that case below.
+  </p>
+
   <h3>The Z gate's effect shows up when the state meets the H gate again</h3>
 
   <p>
@@ -581,7 +587,7 @@
   <div class="practice">
     <span class="practice-label">Try It in Qora</span>
     <h3>Let's Apply H, Z, and H in Order</h3>
-    <pre><code>operation Main() {
+    <pre><code>operation Main(): bit {
     // Prepare one qubit
     // Right after preparation, q[0] is in the |0⟩ state
     use q = Qubit[1];
@@ -598,8 +604,11 @@
     // The sign difference shows up as interference, giving the |1⟩ state
     H(q[0]);
 
-    // In an ideal execution environment: measurement outcome 1
+    // In an ideal (noise-free) environment: measurement outcome 1 on every run
     var result: bit = M(q[0]);
+
+    // Return the measurement outcome as the execution result
+    return result;
 }</code></pre>
   </div>
                         <nav class="page-nav" aria-label="Chapter navigation">

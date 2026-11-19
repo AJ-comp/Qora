@@ -715,7 +715,7 @@
   <div class="practice">
     <span class="practice-label">Practice with Qora</span>
     <h3>Let's apply the H gate twice</h3>
-    <pre><code>operation Main() {
+    <pre><code>operation Main(): bit {
     // Prepare one qubit
     // Right after preparation, q[0] is in the |0⟩ state
     use q = Qubit[1];
@@ -728,8 +728,11 @@
     // Reinforcement and cancellation bring the state back to |0⟩
     H(q[0]);
 
-    // Ideal execution environment: measurement outcome 0
+    // In an ideal (noise-free) environment: measurement outcome 0 on every run
     var result: bit = M(q[0]);
+
+    // Return the measurement outcome as the execution result
+    return result;
 }</code></pre>
   </div>
                         <nav class="page-nav" aria-label="Chapter navigation">

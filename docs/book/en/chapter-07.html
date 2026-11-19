@@ -645,7 +645,7 @@
   <div class="practice">
     <span class="practice-label">Try It in Qora</span>
     <h3>Prepare two qubits</h3>
-    <pre><code>operation Main() {
+    <pre><code>operation Main(): int {
     // Prepare two qubits
     // Right after preparation, the full state is |00⟩
     // Amplitude of measurement outcome 00 = 1
@@ -657,6 +657,12 @@
 
     // Measure the second qubit
     var second: bit = M(q[1]);
+
+    // Pack the two measurement outcomes into one integer and return it as the execution result
+    // The left digit is q[0]: 00 → 0, 01 → 1, 10 → 2, 11 → 3
+    // In an ideal (noise-free) environment: 00 on every run, i.e. 0
+    var result: bit[] = [first, second];
+    return AsInt(result);
 }</code></pre>
   </div>
 
