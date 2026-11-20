@@ -123,20 +123,20 @@
 <div class="wrap">
 
   <nav class="doc-links" aria-label="코스 내비게이션">
-    <a class="doc-link" href="uncompute-02-ladder.html">← 2. 컴파일러는 어떤 큐빗을 정리하는가 — 판별 사다리</a>
+    <a class="doc-link" href="uncompute-02-ladder.html">← 2. 컴파일러는 어떤 큐비트를 정리하는가 — 판별 사다리</a>
     <a class="doc-link" href="index.html#uncompute-course">코스 목차</a>
-    <a class="doc-link" href="uncompute-04-entangle.html">4. 상태벡터를 큐빗별로 분해할 수 있는가 — 곱 상태와 얽힌 상태 →</a>
+    <a class="doc-link" href="uncompute-04-entangle.html">4. 상태벡터를 큐비트별로 분해할 수 있는가 — 곱 상태와 얽힌 상태 →</a>
   </nav>
 
   <p>
-    앞 장의 <a href="uncompute-02-ladder.html">판별 사다리</a>에서는 목표 scheduler가 청소할 큐빗을 가려낼 세 질문을 세웠습니다.<br>
-    앞의 두 질문은 큐빗이 누구의 것인지, 측정된 적이 있는지만 확인하면 답할 수 있었습니다.<br>
-    그러나 마지막 질문, 곧 큐빗을 원래의 |0⟩로 되돌릴 수 있는지는 게이트가 큐빗의 상태를 어떻게 바꾸는지 읽을 수 있어야 답할 수 있습니다.
+    앞 장의 <a href="uncompute-02-ladder.html">판별 사다리</a>에서는 목표 scheduler가 청소할 큐비트를 가려낼 세 질문을 세웠습니다.<br>
+    앞의 두 질문은 큐비트가 누구의 것인지, 측정된 적이 있는지만 확인하면 답할 수 있었습니다.<br>
+    그러나 마지막 질문, 곧 큐비트를 원래의 |0⟩로 되돌릴 수 있는지는 게이트가 큐비트의 상태를 어떻게 바꾸는지 읽을 수 있어야 답할 수 있습니다.
   </p>
   <div class="panel">
     <table class="spec">
-      <tr><th>질문</th><th>큐빗에게 묻는 것</th><th>답하는 곳</th></tr>
-      <tr><td class="k">0</td><td>누구의 큐빗인가 (<code>use</code>로 만든 앤실라인가)</td><td><a href="uncompute-02-ladder.html">2장</a></td></tr>
+      <tr><th>질문</th><th>큐비트에게 묻는 것</th><th>답하는 곳</th></tr>
+      <tr><td class="k">0</td><td>누구의 큐비트인가 (<code>use</code>로 만든 앤실라인가)</td><td><a href="uncompute-02-ladder.html">2장</a></td></tr>
       <tr><td class="k">1</td><td>측정된 적이 있는가</td><td><a href="uncompute-02-ladder.html">2장</a></td></tr>
       <tr><td class="k">2</td><td>되돌릴 수 있는가</td><td><a href="uncompute-09-qfree.html">9장</a>부터</td></tr>
     </table>
@@ -147,10 +147,10 @@
   </p>
   <p>
     그 틀의 출발점은 양자 상태의 형식적 정의입니다.<br>
-    큐빗 여러 개로 이루어진 기계의 <strong>양자 상태</strong>는, 모든 큐빗의 값 조합 하나하나를 나타내는 <strong>기저 상태</strong>들의 선형 결합이며, 결합에 참여하는 각 기저 상태에는 복소수 <strong>진폭</strong>이 하나씩 붙습니다.
+    큐비트 여러 개로 이루어진 기계의 <strong>양자 상태</strong>는, 모든 큐비트의 값 조합 하나하나를 나타내는 <strong>기저 상태</strong>들의 선형 결합이며, 결합에 참여하는 각 기저 상태에는 복소수 <strong>진폭</strong>이 하나씩 붙습니다.
   </p>
   <p>
-    예를 들어 큐빗이 둘이면 값 조합은 <code>|00⟩</code>·<code>|01⟩</code>·<code>|10⟩</code>·<code>|11⟩</code> 네 가지이고, 양자 상태는 이 네 기저 상태를 각자의 진폭으로 섞은 선형 결합입니다.<br>
+    예를 들어 큐비트가 둘이면 값 조합은 <code>|00⟩</code>·<code>|01⟩</code>·<code>|10⟩</code>·<code>|11⟩</code> 네 가지이고, 양자 상태는 이 네 기저 상태를 각자의 진폭으로 섞은 선형 결합입니다.<br>
     이를 식으로 쓰면 다음과 같습니다.
   </p>
   <div class="panel" style="text-align:center;">
@@ -159,8 +159,8 @@
     </div>
     <div style="color:var(--muted); font-size:.9rem; margin-top:10px;">
       네 <strong>기저 상태</strong>를 더한 <strong>선형 결합</strong>이고, 각 기저 상태 앞의 <b style="color:var(--accent)">c₀…c₃</b>가 그 기저 상태의 복소수 <strong>진폭</strong>입니다.<br>
-      큐빗이 <strong>n개</strong>이면 기저 상태(항)는 <strong>2ⁿ개</strong>입니다.<br>
-      지금은 큐빗이 2개라 4개여서, 진폭이 <b style="color:var(--accent)">c₀</b>부터 <b style="color:var(--accent)">c₃</b>까지인 것입니다.<br>
+      큐비트가 <strong>n개</strong>이면 기저 상태(항)는 <strong>2ⁿ개</strong>입니다.<br>
+      지금은 큐비트가 2개라 4개여서, 진폭이 <b style="color:var(--accent)">c₀</b>부터 <b style="color:var(--accent)">c₃</b>까지인 것입니다.<br>
       각 진폭의 절댓값 제곱 <b style="color:var(--accent)">|cᵢ|²</b>은 그 기저 상태가 측정될 <strong>확률</strong>이므로, 넷을 모두 더하면 항상 1입니다 (<b style="color:var(--accent)">|c₀|² + |c₁|² + |c₂|² + |c₃|² = 1</b>).
     </div>
   </div>
@@ -201,7 +201,7 @@ CNOT(a[0], b[0]);    <span class="cm">// b가 a의 값을 기록</span></code></
     <div style="text-align:center; color:var(--muted); font-size:.82rem; margin-bottom:8px;">각 켓은 <code>|b,a⟩</code> — <b>앞자리가 b, 뒷자리가 a</b></div>
     <div style="background:#fff; border:1px solid var(--line); border-radius:8px; padding:9px 14px; text-align:center;">
       <code>|0,0⟩</code>
-      <div style="color:var(--muted); font-size:.83rem; margin-top:2px;">시작 — 두 큐빗 모두 |0⟩</div>
+      <div style="color:var(--muted); font-size:.83rem; margin-top:2px;">시작 — 두 큐비트 모두 |0⟩</div>
     </div>
     <div style="text-align:center; margin:6px 0; font-size:.87rem;">
       <span style="background:var(--accent); color:#fff; border-radius:999px; padding:2px 11px; font-weight:700; font-size:.8rem;">H(a)</span>
@@ -237,7 +237,7 @@ CNOT(a[0], b[0]);    <span class="cm">// b가 a의 값을 기록</span></code></
   </div>
   <p>
     이 표에서 한 항을 읽을 때 헷갈리기 쉬운 점은 두 가지입니다.<br>
-    <strong>① 한 항의 값은 기계 전체의 값 조합 하나입니다.</strong> 기저 상태는 특정 큐빗의 값이 아니라 모든 큐빗의 값을 한 세트로 묶은 것이므로, 한 항에 <code>b</code>값과 <code>a</code>값이 함께 적힙니다.<br>
+    <strong>① 한 항의 값은 기계 전체의 값 조합 하나입니다.</strong> 기저 상태는 특정 큐비트의 값이 아니라 모든 큐비트의 값을 한 세트로 묶은 것이므로, 한 항에 <code>b</code>값과 <code>a</code>값이 함께 적힙니다.<br>
     <strong>② 진폭은 항마다 하나뿐입니다.</strong> "b의 진폭"과 "a의 진폭"이 따로 있는 것이 아니라, 진폭 하나가 그 값 조합 전체에 붙습니다.<br>
     이 둘을 식으로 쓰면 표의 한 행은 <code>c|b,a⟩</code> 꼴입니다.
   </p>
@@ -251,9 +251,9 @@ CNOT(a[0], b[0]);    <span class="cm">// b가 a의 값을 기록</span></code></
     </div>
   </div>
   <nav class="doc-links" aria-label="코스 내비게이션">
-    <a class="doc-link" href="uncompute-02-ladder.html">← 2. 컴파일러는 어떤 큐빗을 정리하는가 — 판별 사다리</a>
+    <a class="doc-link" href="uncompute-02-ladder.html">← 2. 컴파일러는 어떤 큐비트를 정리하는가 — 판별 사다리</a>
     <a class="doc-link" href="index.html#uncompute-course">코스 목차</a>
-    <a class="doc-link" href="uncompute-04-entangle.html">4. 상태벡터를 큐빗별로 분해할 수 있는가 — 곱 상태와 얽힌 상태 →</a>
+    <a class="doc-link" href="uncompute-04-entangle.html">4. 상태벡터를 큐비트별로 분해할 수 있는가 — 곱 상태와 얽힌 상태 →</a>
   </nav>
 
   <footer>

@@ -2,6 +2,14 @@
 
 All notable changes to the Qora Language extension.
 
+## Unreleased
+
+- **Run summary:** the compile line of the run log now counts only gate statements. The compiler's
+  classical assignments (for example `v0 = 0;`), declarations, control flow, `reset`, calls to `def`
+  subroutines and the bodies of `gate` definitions are no longer counted, so a program without gates
+  reports 0 gates and one `X` reports 1. Regression tests use real Qora output.
+- The Korean run log says 큐비트 instead of 큐빗, the term the Korean documentation uses.
+
 ## 0.34.0 — 2026-11-19
 
 - Bundles **Qora 0.41.0**. Logical expressions (`!`, `&&`, `||`) can now be stored, passed, and returned

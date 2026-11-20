@@ -164,7 +164,7 @@
     세 번째가 <strong>언어 층</strong>으로, Silq·Guppy·Classiq Qmod 그리고 Qora처럼 프로그램을 언어
     차원에서 받아들여 규칙을 검사하는 시스템들이 여기에 있습니다.<br>
     Silq는 자동 uncomputation의 원조인 인터프리터 언어이지만, 실기계 실행 경로가 없습니다.<br>
-    Quantinuum의 Guppy는 선형 타입으로 큐빗 누수와 복제를 컴파일 에러로 강제하되, 청소 자체는
+    Quantinuum의 Guppy는 선형 타입으로 큐비트 누수와 복제를 컴파일 에러로 강제하되, 청소 자체는
     사용자 몫으로 남깁니다.<br>
     Classiq Qmod는 추론 기반 자동 uncomputation을 클로즈드 플랫폼으로 상용화했습니다.<br>
     Qora는 이 층에서 OpenQASM 3 AOT compiler를 공개하고 있으며, 주석 없는 추론과 자동 청소, 그리고 청소할 수 없으면 명시적 오류를 내는 조합을 MIR scheduler의 목표 계약으로 두고 있습니다.
@@ -178,7 +178,7 @@
       <tr><td class="k">Qiskit · Cirq</td><td>Python이 회로를 조립</td><td>최대 생태계 — 다만 언어가 아니라서 컴파일 타임 보증이 없습니다</td></tr>
       <tr><td class="k">Silq</td><td>인터프리터 언어</td><td>자동 uncomputation의 원조 — 다만 실기계 실행 경로가 없습니다</td></tr>
       <tr><td class="k">CUDA-Q (NVIDIA)</td><td>컴파일러 인프라 (MLIR→QIR)</td><td>언어가 아니라 언어들이 올라타는 기반 + GPU 시뮬레이터</td></tr>
-      <tr><td class="k">Guppy (Quantinuum)</td><td>정적 컴파일, 선형 타입</td><td>큐빗 누수·복제를 컴파일 에러로 강제 — 청소는 사용자 몫</td></tr>
+      <tr><td class="k">Guppy (Quantinuum)</td><td>정적 컴파일, 선형 타입</td><td>큐비트 누수·복제를 컴파일 에러로 강제 — 청소는 사용자 몫</td></tr>
       <tr><td class="k">Classiq Qmod</td><td>정적 컴파일 + 합성</td><td>추론 기반 자동 uncomputation을 상용화 — 클로즈드 플랫폼</td></tr>
       <tr><td class="k"><strong>Qora</strong></td><td>정적 컴파일 (AOT → OpenQASM 3)</td><td>공개 compiler와 MIR 분석 기반은 구현됨 · 자동 cleanup scheduler는 roadmap</td></tr>
     </table>

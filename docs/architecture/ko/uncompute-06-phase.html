@@ -129,7 +129,7 @@
   </nav>
   <div class="chapter-intro">
     <p>
-      <a href="uncompute-05-trace.html">앞 장</a>에서는 두 큐빗의 상태가 각각의 상태벡터의 텐서 곱으로 분해되지 않는 과정을 따라가며 얽힘을 확인했습니다.<br>
+      <a href="uncompute-05-trace.html">앞 장</a>에서는 두 큐비트의 상태가 각각의 상태벡터의 텐서 곱으로 분해되지 않는 과정을 따라가며 얽힘을 확인했습니다.<br>
       이제 자동 uncomputation이 전체 상태를 온전히 보존하는지 판단하려면, 기저 상태의 값뿐 아니라 각 항의 진폭도 살펴봐야 합니다.
     </p>
     <p>
@@ -173,7 +173,7 @@
     <dl class="definition-list">
       <div>
         <dt>기저 상태</dt>
-        <dd>이 장에서 사용하는 한 큐빗의 계산 기저는 <code>|0⟩</code>과 <code>|1⟩</code>로 이루어집니다.</dd>
+        <dd>이 장에서 사용하는 한 큐비트의 계산 기저는 <code>|0⟩</code>과 <code>|1⟩</code>로 이루어집니다.</dd>
       </div>
       <div>
         <dt>진폭</dt>
@@ -185,7 +185,7 @@
       </div>
       <div>
         <dt>상태벡터</dt>
-        <dd>두 항의 합인 <code>|ψ⟩</code>가 큐빗 <code>q</code>의 전체 상태를 나타내는 상태벡터입니다.</dd>
+        <dd>두 항의 합인 <code>|ψ⟩</code>가 큐비트 <code>q</code>의 전체 상태를 나타내는 상태벡터입니다.</dd>
       </div>
     </dl>
     <p class="key-definition">
@@ -302,7 +302,7 @@
 
     <h3 class="subheading">텐서 곱에서 위상 인자의 위치</h3>
     <p class="section-copy">
-      큐빗 순서를 <code>|b,a⟩</code>로 정하면 <code>|01⟩ = |0⟩<sub class="qubit-b">b</sub> ⊗ |1⟩<sub class="qubit-a">a</sub></code>입니다.<br>
+      큐비트 순서를 <code>|b,a⟩</code>로 정하면 <code>|01⟩ = |0⟩<sub class="qubit-b">b</sub> ⊗ |1⟩<sub class="qubit-a">a</sub></code>입니다.<br>
       이 기저 상태의 진폭이 <code>i</code>인 항 <code>i|01⟩</code>을 텐서 곱으로 풀어 쓰면 다음 세 표현을 얻습니다.
     </p>
     <div class="equation-display long math-typeset">
@@ -328,7 +328,7 @@
     </div>
     <p class="section-copy">
       텐서 곱은 각 인자에 대해 선형이므로, 복소수 스칼라 <code>i</code>를 어느 인자에 포함해도 전체 상태벡터는 같습니다.<br>
-      따라서 이 <code>i</code>를 큐빗 <code>b</code>와 <code>a</code> 가운데 어느 한쪽의 위상이라고 유일하게 지정할 수 없습니다.
+      따라서 이 <code>i</code>를 큐비트 <code>b</code>와 <code>a</code> 가운데 어느 한쪽의 위상이라고 유일하게 지정할 수 없습니다.
     </p>
     <p class="key-definition">
       <span class="label">항의 구성</span>
@@ -428,7 +428,7 @@
     <h2 id="chapter-summary-title">자동 청소는 항 사이의 위상 관계까지 보존해야 합니다</h2>
     <p class="section-copy">
       위상은 기저 상태 자체가 아니라 각 항을 구성하는 복소수 진폭에 포함됩니다.<br>
-      따라서 자동 청소의 안전성을 판단할 때에는 텐서 곱 항 전체에 곱해진 공통 스칼라를 특정 큐빗에 임의로 귀속하지 않고, 연산이 상태 전체의 전역 위상만 바꾸는지 아니면 항 사이의 상대 위상까지 바꾸는지 구분해야 합니다.
+      따라서 자동 청소의 안전성을 판단할 때에는 텐서 곱 항 전체에 곱해진 공통 스칼라를 특정 큐비트에 임의로 귀속하지 않고, 연산이 상태 전체의 전역 위상만 바꾸는지 아니면 항 사이의 상대 위상까지 바꾸는지 구분해야 합니다.
     </p>
     <p class="section-copy">
       <a href="uncompute-07-observe.html">다음 장</a>에서는 <code>Z</code> 게이트를 <code>|1⟩</code>과 <code>(|0⟩+|1⟩)/√2</code>에 각각 적용합니다.<br>

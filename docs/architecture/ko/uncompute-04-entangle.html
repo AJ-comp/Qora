@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>상태벡터를 큐빗별로 분해할 수 있는가 — 곱 상태와 얽힌 상태 — 자동 uncomputation 코스 4/16 — Qora</title>
+<title>상태벡터를 큐비트별로 분해할 수 있는가 — 곱 상태와 얽힌 상태 — 자동 uncomputation 코스 4/16 — Qora</title>
 <style>
   :root {
     --bg: #ffffff; --ink: #1f2430; --muted: #5b6472; --line: #e6e8ee; --panel: #f7f8fb;
@@ -170,8 +170,8 @@
 
 <header class="hero">
   <div class="tag">Qora · 자동 uncomputation 코스 · 4/16</div>
-  <h1>4. 상태벡터를 큐빗별로 분해할 수 있는가 — 곱 상태와 얽힌 상태</h1>
-  <p>두 큐빗의 상태를 따로 적을 수 있는지 확인하여 곱 상태와 얽힌 상태를 구분합니다</p>
+  <h1>4. 상태벡터를 큐비트별로 분해할 수 있는가 — 곱 상태와 얽힌 상태</h1>
+  <p>두 큐비트의 상태를 따로 적을 수 있는지 확인하여 곱 상태와 얽힌 상태를 구분합니다</p>
 </header>
 
 <div class="wrap">
@@ -184,10 +184,10 @@
   <div class="chapter-intro">
     <p>
       <a href="uncompute-03-ledger.html">3장</a>에서는 상태벡터를 계산 기저의 선형 결합으로 읽고, 전체 상태벡터의 각 진폭이 해당 기저 상태 앞에 곱해지는 계수임을 확인했습니다.<br>
-      이제 두 큐빗의 전체 상태벡터를 큐빗 <code>b</code>의 상태벡터와 큐빗 <code>a</code>의 상태벡터로 분해할 수 있는지 살펴보겠습니다.
+      이제 두 큐비트의 전체 상태벡터를 큐비트 <code>b</code>의 상태벡터와 큐비트 <code>a</code>의 상태벡터로 분해할 수 있는지 살펴보겠습니다.
     </p>
     <p>
-      이 분해가 가능하면 두 큐빗을 각각의 순수 상태벡터로 기술할 수 있지만, 가능하지 않으면 독립된 순수 상태벡터 두 개로 나누어 기술할 수 없습니다.<br>
+      이 분해가 가능하면 두 큐비트를 각각의 순수 상태벡터로 기술할 수 있지만, 가능하지 않으면 독립된 순수 상태벡터 두 개로 나누어 기술할 수 없습니다.<br>
       바로 이 차이가 <strong>곱 상태</strong>와 <strong>얽힌 상태</strong>를 구분합니다.<br>
       먼저 쉬운 기준과 대각선 곱 비교로 차이를 확인한 뒤, 그 판정법이 성립하는 이유를 공식으로 정리하겠습니다.
     </p>
@@ -196,15 +196,15 @@
   <section class="chapter-section" aria-labelledby="factorization-title">
     <div class="section-heading">
       <span class="label">먼저 쉽게</span>
-      <h2 id="factorization-title">두 큐빗을 따로 적어도 원래 상태를 다시 만들 수 있는가</h2>
+      <h2 id="factorization-title">두 큐비트를 따로 적어도 원래 상태를 다시 만들 수 있는가</h2>
     </div>
     <p class="section-copy">
-      큐빗 <code>b</code>의 상태와 큐빗 <code>a</code>의 상태를 각각 따로 적은 뒤, 두 상태를 합쳐 원래의 전체 상태를 정확히 다시 만들 수 있는지 생각해보겠습니다.<br>
-      다시 만들 수 있으면 두 큐빗을 따로 기술할 수 있지만, 아무리 나누어 적어도 원래 상태를 재현할 수 없다면 두 큐빗을 하나의 전체 상태로 다루어야 합니다.
+      큐비트 <code>b</code>의 상태와 큐비트 <code>a</code>의 상태를 각각 따로 적은 뒤, 두 상태를 합쳐 원래의 전체 상태를 정확히 다시 만들 수 있는지 생각해보겠습니다.<br>
+      다시 만들 수 있으면 두 큐비트를 따로 기술할 수 있지만, 아무리 나누어 적어도 원래 상태를 재현할 수 없다면 두 큐비트를 하나의 전체 상태로 다루어야 합니다.
     </p>
     <p class="key-definition">
       <span class="label">쉬운 기준</span>
-      <span><strong>큐빗별 상태를 따로 적고 다시 합쳐 원래 상태를 만들 수 있으면 곱 상태이고, 만들 수 없으면 얽힌 상태입니다.</strong></span>
+      <span><strong>큐비트별 상태를 따로 적고 다시 합쳐 원래 상태를 만들 수 있으면 곱 상태이고, 만들 수 없으면 얽힌 상태입니다.</strong></span>
     </p>
   </section>
 
@@ -214,15 +214,15 @@
       <h2 id="diagonal-test-title">네 진폭을 놓고 두 대각선의 곱을 비교합니다</h2>
     </div>
     <p class="section-copy">
-      두 큐빗의 상태가 곱 상태인지 얽힌 상태인지 확인할 때마다 큐빗별 상태를 직접 찾아낼 필요는 없습니다.<br>
-      이 장에서 다루는 두 큐빗 순수 상태에서는 네 기저 상태의 진폭을 <code>2×2</code> 자리에 놓고 두 대각선의 곱만 비교하면 됩니다.
+      두 큐비트의 상태가 곱 상태인지 얽힌 상태인지 확인할 때마다 큐비트별 상태를 직접 찾아낼 필요는 없습니다.<br>
+      이 장에서 다루는 두 큐비트 순수 상태에서는 네 기저 상태의 진폭을 <code>2×2</code> 자리에 놓고 두 대각선의 곱만 비교하면 됩니다.
     </p>
     <p class="section-copy">
-      기저 상태 <code>|ba⟩</code>의 첫째 자리는 큐빗 <code>b</code>, 둘째 자리는 큐빗 <code>a</code>를 나타냅니다.<br>
+      기저 상태 <code>|ba⟩</code>의 첫째 자리는 큐비트 <code>b</code>, 둘째 자리는 큐비트 <code>a</code>를 나타냅니다.<br>
       각 기저 상태의 진폭을 차례로 <code>α</code>, <code>β</code>, <code>γ</code>, <code>δ</code>라고 하겠습니다.
     </p>
     <div class="equation-display math-typeset">
-      <math xmlns="http://www.w3.org/1998/Math/MathML" display="block" aria-label="일반적인 두 큐빗 상태 psi는 alpha 00, beta 01, gamma 10, delta 11 항의 합">
+      <math xmlns="http://www.w3.org/1998/Math/MathML" display="block" aria-label="일반적인 두 큐비트 상태 psi는 alpha 00, beta 01, gamma 10, delta 11 항의 합">
         <mrow>
           <mo>|</mo><mi>ψ</mi><mo>⟩</mo><mo>=</mo>
           <mi>α</mi><mo>|</mo><mn>00</mn><mo>⟩</mo><mo>+</mo>
@@ -235,7 +235,7 @@
     <figure class="diagonal-check" aria-labelledby="diagonal-check-caption">
       <div class="coefficient-map">
         <table class="coefficient-matrix">
-          <caption class="sr-only">행은 큐빗 b, 열은 큐빗 a의 값에 대응하는 진폭 배열</caption>
+          <caption class="sr-only">행은 큐비트 b, 열은 큐비트 a의 값에 대응하는 진폭 배열</caption>
           <thead>
             <tr>
               <th scope="col"></th>
@@ -280,7 +280,7 @@
             <mrow class="math-good"><mi>α</mi><mi>δ</mi><mo>=</mo><mi>β</mi><mi>γ</mi></mrow>
           </math>
         </dt>
-        <dd><strong>곱 상태</strong> — 큐빗별 상태벡터로 분해할 수 있습니다.</dd>
+        <dd><strong>곱 상태</strong> — 큐비트별 상태벡터로 분해할 수 있습니다.</dd>
       </div>
       <div>
         <dt>
@@ -288,7 +288,7 @@
             <mrow class="math-bad"><mi>α</mi><mi>δ</mi><mo>≠</mo><mi>β</mi><mi>γ</mi></mrow>
           </math>
         </dt>
-        <dd><strong>얽힌 상태</strong> — 큐빗별 상태벡터로 분해할 수 없습니다.</dd>
+        <dd><strong>얽힌 상태</strong> — 큐비트별 상태벡터로 분해할 수 없습니다.</dd>
       </div>
     </dl>
     <h3 class="subheading">앞의 두 상태에 바로 적용하기</h3>
@@ -318,10 +318,10 @@
       </table>
     </div>
     <p class="section-copy">
-      첫 번째 상태는 두 대각선 곱이 모두 0이므로 곱 상태이고, 실제로 다음과 같이 큐빗별 상태로 나눌 수 있습니다.
+      첫 번째 상태는 두 대각선 곱이 모두 0이므로 곱 상태이고, 실제로 다음과 같이 큐비트별 상태로 나눌 수 있습니다.
     </p>
     <div class="equation-display math-typeset">
-      <math xmlns="http://www.w3.org/1998/Math/MathML" display="block" aria-label="00과 10의 합을 루트 2로 나눈 상태를 큐빗 b의 균등 중첩과 큐빗 a의 0 상태로 분해">
+      <math xmlns="http://www.w3.org/1998/Math/MathML" display="block" aria-label="00과 10의 합을 루트 2로 나눈 상태를 큐비트 b의 균등 중첩과 큐비트 a의 0 상태로 분해">
         <mrow>
           <mfrac><mrow><mo>|</mo><mn>00</mn><mo>⟩</mo><mo>+</mo><mo>|</mo><mn>10</mn><mo>⟩</mo></mrow><msqrt><mn>2</mn></msqrt></mfrac>
           <mo>=</mo>
@@ -344,11 +344,11 @@
       <h2 id="formal-definition-title">판정 결과를 텐서 곱으로 정의합니다</h2>
     </div>
     <p class="section-copy">
-      앞에서 두 큐빗의 상태를 따로 적고 다시 합친다고 설명했습니다.<br>
+      앞에서 두 큐비트의 상태를 따로 적고 다시 합친다고 설명했습니다.<br>
       이때 두 부분계의 상태벡터를 하나의 전체 상태벡터로 결합하는 연산을 <strong>텐서 곱</strong>이라고 하며, 기호 <code>⊗</code>로 나타냅니다.
     </p>
     <div class="equation-display math-typeset">
-      <math xmlns="http://www.w3.org/1998/Math/MathML" display="block" aria-label="두 큐빗 상태 psi는 큐빗 b의 상태 phi와 큐빗 a의 상태 chi의 텐서 곱">
+      <math xmlns="http://www.w3.org/1998/Math/MathML" display="block" aria-label="두 큐비트 상태 psi는 큐비트 b의 상태 phi와 큐비트 a의 상태 chi의 텐서 곱">
         <mrow>
           <msub><mrow><mo>|</mo><mi>ψ</mi><mo>⟩</mo></mrow><mrow><mi class="math-qubit-b">b</mi><mi class="math-qubit-a">a</mi></mrow></msub>
           <mo>=</mo>
@@ -359,17 +359,17 @@
       </math>
     </div>
     <p class="section-copy">
-      여기서 <code>|φ⟩<sub>b</sub></code>와 <code>|χ⟩<sub>a</sub></code>는 각각 큐빗 <code>b</code>와 큐빗 <code>a</code>의 단일 큐빗 상태벡터입니다.<br>
+      여기서 <code>|φ⟩<sub>b</sub></code>와 <code>|χ⟩<sub>a</sub></code>는 각각 큐비트 <code>b</code>와 큐비트 <code>a</code>의 단일 큐비트 상태벡터입니다.<br>
       텐서 곱은 두 수를 단순히 곱하는 연산이 아니라, 두 상태벡터에 들어 있는 모든 기저 상태 조합과 그 진폭을 함께 전개합니다.
     </p>
     <dl class="definition-list">
       <div>
         <dt>곱 상태</dt>
-        <dd>위 등식을 만족하는 두 단일 큐빗 상태벡터가 존재하는 상태입니다.<br>따라서 전체 상태벡터를 큐빗별 상태벡터의 텐서 곱으로 분해할 수 있습니다.</dd>
+        <dd>위 등식을 만족하는 두 단일 큐비트 상태벡터가 존재하는 상태입니다.<br>따라서 전체 상태벡터를 큐비트별 상태벡터의 텐서 곱으로 분해할 수 있습니다.</dd>
       </div>
       <div>
         <dt>얽힌 상태</dt>
-        <dd>그러한 두 상태벡터가 존재하지 않는 상태입니다.<br>따라서 전체 상태벡터를 큐빗별 상태벡터의 텐서 곱으로 분해할 수 없습니다.</dd>
+        <dd>그러한 두 상태벡터가 존재하지 않는 상태입니다.<br>따라서 전체 상태벡터를 큐비트별 상태벡터의 텐서 곱으로 분해할 수 없습니다.</dd>
       </div>
     </dl>
     <p class="section-copy">
@@ -387,11 +387,11 @@
     <p class="section-copy">
       앞에서는 두 대각선의 곱이 같은지만 확인했습니다.<br>
       이제 곱 상태의 텐서 곱을 직접 전개하여 그 판정법이 성립하는 이유를 확인하겠습니다.<br>
-      큐빗 <code>b</code>와 큐빗 <code>a</code>의 단일 큐빗 상태벡터를 각각 다음과 같이 나타내겠습니다.<br>
-      여기서 <code>u₀</code>과 <code>u₁</code>은 큐빗 <code>b</code>의 진폭이고, <code>v₀</code>과 <code>v₁</code>은 큐빗 <code>a</code>의 진폭입니다.
+      큐비트 <code>b</code>와 큐비트 <code>a</code>의 단일 큐비트 상태벡터를 각각 다음과 같이 나타내겠습니다.<br>
+      여기서 <code>u₀</code>과 <code>u₁</code>은 큐비트 <code>b</code>의 진폭이고, <code>v₀</code>과 <code>v₁</code>은 큐비트 <code>a</code>의 진폭입니다.
     </p>
     <div class="equation-display math-typeset">
-      <math xmlns="http://www.w3.org/1998/Math/MathML" display="block" aria-label="큐빗 b의 상태 phi와 큐빗 a의 상태 chi를 각각 두 기저 상태의 선형 결합으로 표현">
+      <math xmlns="http://www.w3.org/1998/Math/MathML" display="block" aria-label="큐비트 b의 상태 phi와 큐비트 a의 상태 chi를 각각 두 기저 상태의 선형 결합으로 표현">
         <mtable rowspacing=".75em">
           <mtr>
             <mtd><msub><mrow><mo>|</mo><mi>φ</mi><mo>⟩</mo></mrow><mi class="math-qubit-b">b</mi></msub></mtd>
@@ -408,7 +408,7 @@
     </div>
     <p class="section-copy">두 상태벡터의 텐서 곱을 전개하면 네 기저 상태의 진폭이 다음과 같이 정해집니다.</p>
     <div class="equation-display long math-typeset">
-      <math xmlns="http://www.w3.org/1998/Math/MathML" display="block" aria-label="두 단일 큐빗 상태의 텐서 곱을 네 개의 두 큐빗 기저 상태 항으로 전개">
+      <math xmlns="http://www.w3.org/1998/Math/MathML" display="block" aria-label="두 단일 큐비트 상태의 텐서 곱을 네 개의 두 큐비트 기저 상태 항으로 전개">
         <mtable rowspacing=".65em">
           <mtr>
             <mtd>
@@ -437,7 +437,7 @@
       이 전개식을 앞에서 사용한 <code>α</code>, <code>β</code>, <code>γ</code>, <code>δ</code>와 비교하면 각 진폭의 관계가 다음과 같이 정해집니다.
     </p>
     <div class="equation-display long math-typeset">
-      <math xmlns="http://www.w3.org/1998/Math/MathML" display="block" aria-label="alpha beta gamma delta를 큐빗 b와 a의 진폭 곱으로 나타내고 alpha delta와 beta gamma가 같음을 유도">
+      <math xmlns="http://www.w3.org/1998/Math/MathML" display="block" aria-label="alpha beta gamma delta를 큐비트 b와 a의 진폭 곱으로 나타내고 alpha delta와 beta gamma가 같음을 유도">
         <mtable rowspacing=".75em">
           <mtr>
             <mtd>
@@ -482,7 +482,7 @@
     </div>
     <p class="section-copy">
       빠른 판정에서 네 진폭을 놓았던 <code>2×2</code> 배열을 선형대수에서는 <strong>계수 행렬</strong>이라고 합니다.<br>
-      행은 큐빗 <code>b</code>의 값, 열은 큐빗 <code>a</code>의 값에 대응하며, 이 계수 행렬을 <code>C</code>라고 하겠습니다.
+      행은 큐비트 <code>b</code>의 값, 열은 큐비트 <code>a</code>의 값에 대응하며, 이 계수 행렬을 <code>C</code>라고 하겠습니다.
     </p>
     <div class="equation-display math-typeset">
       <math xmlns="http://www.w3.org/1998/Math/MathML" display="block" aria-label="계수 행렬 C는 alpha beta gamma delta의 2 곱하기 2 행렬">
@@ -515,8 +515,8 @@
       반대 방향도 성립합니다.<br>
       행렬의 랭크는 서로 독립인 행 또는 열의 수를 나타냅니다.<br>
       정규화된 상태의 계수 행렬은 영행렬이 아니므로, 행렬식이 0이면 랭크가 1입니다.<br>
-      랭크가 1인 <code>2×2</code> 행렬은 한 열벡터와 한 행벡터의 곱으로 분해되며, 이는 곧 두 단일 큐빗 상태벡터의 텐서 곱에 해당합니다.<br>
-      그러므로 다음 조건은 두 큐빗 순수 상태에서 곱 상태를 판별하는 <strong>필요충분조건</strong>입니다.
+      랭크가 1인 <code>2×2</code> 행렬은 한 열벡터와 한 행벡터의 곱으로 분해되며, 이는 곧 두 단일 큐비트 상태벡터의 텐서 곱에 해당합니다.<br>
+      그러므로 다음 조건은 두 큐비트 순수 상태에서 곱 상태를 판별하는 <strong>필요충분조건</strong>입니다.
     </p>
     <div class="equation-display long math-typeset">
       <math xmlns="http://www.w3.org/1998/Math/MathML" display="block" aria-label="alpha delta와 beta gamma가 같음, 행렬식이 0, 랭크가 1, 곱 상태는 모두 동치">
@@ -532,12 +532,12 @@
       </math>
     </div>
     <p class="section-copy">
-      반대로 <code>αδ≠βγ</code>이면 행렬식이 0이 아니고 계수 행렬의 랭크가 2이므로, 두 단일 큐빗 상태벡터의 텐서 곱으로 분해할 수 없는 얽힌 상태입니다.
+      반대로 <code>αδ≠βγ</code>이면 행렬식이 0이 아니고 계수 행렬의 랭크가 2이므로, 두 단일 큐비트 상태벡터의 텐서 곱으로 분해할 수 없는 얽힌 상태입니다.
     </p>
     <p class="scope-note">
       <strong>적용 범위</strong><br>
-      이 대각선 곱 비교는 두 큐빗 순수 상태에 직접 적용하는 판정법입니다.<br>
-      세 큐빗 이상에서는 어떤 부분계 분할을 기준으로 분해 가능성을 검사하는지 명시해야 하며, 완전한 곱 상태와 일부 부분계만 분리되는 상태도 구분해야 합니다.<br>
+      이 대각선 곱 비교는 두 큐비트 순수 상태에 직접 적용하는 판정법입니다.<br>
+      세 큐비트 이상에서는 어떤 부분계 분할을 기준으로 분해 가능성을 검사하는지 명시해야 하며, 완전한 곱 상태와 일부 부분계만 분리되는 상태도 구분해야 합니다.<br>
       다만 주어진 분할에 대해 텐서 곱으로 분해되지 않으면 얽힌 상태라는 원리는 같습니다.
     </p>
   </section>
@@ -546,8 +546,8 @@
     <span class="label">장 요약</span>
     <h2 id="chapter-summary-title">상태벡터의 분해 가능성이 얽힘을 결정합니다</h2>
     <p>
-      두 큐빗의 전체 상태벡터를 두 단일 큐빗 상태벡터의 텐서 곱으로 분해할 수 있으면 곱 상태이고, 분해할 수 없으면 얽힌 상태입니다.<br>
-      두 큐빗 순수 상태에서는 진폭 네 개를 <code>2×2</code> 자리에 놓고 두 대각선의 곱을 비교하여 이를 빠르게 판별할 수 있습니다.<br>
+      두 큐비트의 전체 상태벡터를 두 단일 큐비트 상태벡터의 텐서 곱으로 분해할 수 있으면 곱 상태이고, 분해할 수 없으면 얽힌 상태입니다.<br>
+      두 큐비트 순수 상태에서는 진폭 네 개를 <code>2×2</code> 자리에 놓고 두 대각선의 곱을 비교하여 이를 빠르게 판별할 수 있습니다.<br>
       두 곱이 같다는 조건 <code>αδ=βγ</code>를 전문적으로 표현하면 계수 행렬의 행렬식이 0이고 랭크가 1이라는 뜻입니다.
     </p>
     <p>

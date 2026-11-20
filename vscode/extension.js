@@ -250,7 +250,7 @@ const RUN_L10N = {
     setupFailed: (m) => `Qora: 시뮬레이터 준비 실패 — ${m}`,
     running: (name) => `Qora: ${name} 실행 중…`,
     compiling: 'OpenQASM으로 컴파일 중…',
-    compiled: (s) => `컴파일 완료 — 큐빗 ${s.qubits}개 · 게이트 ${s.gates}개 · 측정 ${s.measures}개`,
+    compiled: (s) => `컴파일 완료 — 큐비트 ${s.qubits}개 · 게이트 ${s.gates}개 · 측정 ${s.measures}개`,
     executing: (shots) => `Braket LocalSimulator에서 ${shots} shots 실행 중…`,
     doneIn: (secs) => `완료 (${secs}초)`,
     noResult: '진입 operation이 void이므로 반환값이 없습니다.',
@@ -617,19 +617,38 @@ function ensureRunChannel() {
   return runChannel;
 }
 
-/** A quick shape summary of the emitted OpenQASM for the progress log — counts qubit declarations,
- *  measurements, and everything else as gate/op statements. Approximate on purpose (a display aid). */
+/** A quick shape summary of the emitted OpenQASM for the progress log: declared qubits, measurements, and gate
+ *  applications. Only gate statements count as gates (`x q[0];`, `cx q[0], q[1];`, `rx(t) q[2];`,
+ *  `ctrl @ x a, b;`). The compiler's classical assignments, declarations, control flow, `reset`, calls to `def`
+ *  subroutines, and the bodies of `gate` definitions do not. Each statement counts once as written, so a gate
+ *  inside a loop or a helper operation counts once (a display aid, not an execution count). */
 function qasmSummary(qasm) {
   let qubits = 0, gates = 0, measures = 0;
-  for (const raw of (qasm || '').split('\n')) {
-    const line = raw.trim();
+  const lines = (qasm || '').split('\n').map((raw) => raw.trim());
+  const subroutines = new Set();
+  for (const line of lines) {
+    const def = line.match(/^def\s+([A-Za-z_]\w*)\s*\(/);
+    if (def) subroutines.add(def[1]);
+  }
+  const operand = String.raw`[A-Za-z_]\w*(?:\[[^\]]*\])?`;
+  const gateStatement = new RegExp(String.raw`^(?:(?:(?:neg)?ctrl(?:\([^)]*\))?|inv|pow\([^)]*\))\s*@\s*)*([A-Za-z_]\w*)\s*(?:\([^;]*\))?\s+${operand}(?:\s*,\s*${operand})*\s*;$`);
+  const notGates = new Set(['reset', 'barrier', 'delay', 'measure']);
+  let gateDepth = 0, gatePending = false;   // inside a `gate` definition: its statements are not applications
+  for (const line of lines) {
     if (!line || line.startsWith('//') || line.startsWith('OPENQASM') || line.startsWith('include')) continue;
+    if (gatePending || gateDepth > 0 || /^gate\b/.test(line)) {
+      const opens = (line.match(/\{/g) || []).length, closes = (line.match(/\}/g) || []).length;
+      if (/^gate\b/.test(line) && opens === 0) { gatePending = true; continue; }
+      if (opens > 0) gatePending = false;
+      gateDepth = Math.max(0, gateDepth + opens - closes);
+      continue;
+    }
     const q = line.match(/^qubit(?:\[(\d+)\])?\s/);
     if (q) { qubits += q[1] ? parseInt(q[1], 10) : 1; continue; }
-    if (/^(output|bool|bit|int|uint|float|angle|array|const|def|gate)\b/.test(line)) continue;   // decls / definitions
+    if (/^(output|input|bool|bit|int|uint|float|angle|complex|duration|stretch|array|const|def|let|creg|qreg)\b/.test(line)) continue;   // decls / definitions
     if (/\bmeasure\b/.test(line)) { measures++; continue; }
-    if (line === '{' || line === '}') continue;
-    gates++;
+    const g = line.match(gateStatement);
+    if (g && !notGates.has(g[1]) && !subroutines.has(g[1])) gates++;
   }
   return { qubits, gates, measures };
 }
