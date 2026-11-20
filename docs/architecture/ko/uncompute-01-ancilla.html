@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>앤실라와 uncomputation — 작업 큐빗은 왜 되돌려야 하는가 — 자동 uncomputation 코스 1/16 — Qora</title>
+<title>앤실라와 uncomputation — 작업 큐비트는 왜 되돌려야 하는가 — 자동 uncomputation 코스 1/16 — Qora</title>
 <style>
   :root {
     --bg: #ffffff; --ink: #1f2430; --muted: #5b6472; --line: #e6e8ee; --panel: #f7f8fb;
@@ -121,15 +121,15 @@
 
 <header class="hero">
   <div class="tag">Qora · 자동 uncomputation 코스 · 1/16</div>
-  <h1>1. 앤실라와 uncomputation — 작업 큐빗은 왜 되돌려야 하는가</h1>
-  <p>use로 만든 작업 큐빗과 자동 되돌리기</p>
+  <h1>1. 앤실라와 uncomputation — 작업 큐비트는 왜 되돌려야 하는가</h1>
+  <p>use로 만든 작업 큐비트와 자동 되돌리기</p>
 </header>
 
 <div class="wrap">
 
   <nav class="doc-links" aria-label="코스 내비게이션">
     <a class="doc-link" href="index.html#uncompute-course">코스 목차</a>
-    <a class="doc-link" href="uncompute-02-ladder.html">2. 컴파일러는 어떤 큐빗을 정리하는가 — 판별 사다리 →</a>
+    <a class="doc-link" href="uncompute-02-ladder.html">2. 컴파일러는 어떤 큐비트를 정리하는가 — 판별 사다리 →</a>
   </nav>
   <div class="call">
     <span class="h">구현 상태</span>
@@ -139,14 +139,14 @@
   </div>
 
   <p>
-    자동 uncomputation은 컴파일러가 다 쓴 작업 큐빗을 |0⟩로 되돌려 주는 기능입니다.<br>
-    그 출발점은 "작업 큐빗"이 무엇이고 왜 되돌려야 하는지를 아는 것입니다.<br>
-    이 장에서는 작업 큐빗(앤실라)이 무엇인지 정의하고, 계산이 끝난 뒤 방치하면 왜 측정 결과가 망가지는지, 그래서 왜 |0⟩로 되돌려야 하는지를 봅니다.
+    자동 uncomputation은 컴파일러가 다 쓴 작업 큐비트를 |0⟩로 되돌려 주는 기능입니다.<br>
+    그 출발점은 "작업 큐비트"가 무엇이고 왜 되돌려야 하는지를 아는 것입니다.<br>
+    이 장에서는 작업 큐비트(앤실라)이 무엇인지 정의하고, 계산이 끝난 뒤 방치하면 왜 측정 결과가 망가지는지, 그래서 왜 |0⟩로 되돌려야 하는지를 봅니다.
   </p>
   <p>
-    앤실라(ancilla)는 계산 도중에만 잠깐 쓰이는 보조 큐빗으로,
+    앤실라(ancilla)는 계산 도중에만 잠깐 쓰이는 보조 큐비트로,
     클래식 프로그램에서 최종 결과를 만들기 위해 잠시 사용하는 임시 지역변수와 같은 역할을 합니다.<br>
-    Qora에서는 <code>use</code> 문으로 만든 큐빗 레지스터가 앤실라에 해당하며,
+    Qora에서는 <code>use</code> 문으로 만든 큐비트 레지스터가 앤실라에 해당하며,
     이 레지스터는 해당 연산에만 속하고 항상 |0⟩ 상태로 시작합니다.<br>
     따라서 출발점만 놓고 보면 "0으로 초기화된 지역변수"와 정확히 같습니다.<br>
     언어마다 이름은 다르지만, Q#의 <code>use</code>, Quipper의 <code>with_ancilla</code>,
@@ -156,14 +156,14 @@
 int t = 0;              <span class="cm">// 0으로 초기화된 지역 임시 변수</span>
 
 <span class="cm">// 양자:</span>
-use t = Qubit[1];       <span class="cm">// 이 연산이 소유하고 |0⟩로 시작하는 보조 큐빗 = 앤실라</span></code></pre>
+use t = Qubit[1];       <span class="cm">// 이 연산이 소유하고 |0⟩로 시작하는 보조 큐비트 = 앤실라</span></code></pre>
 
   <p>
     클래식 지역변수와 다른 점은 단 하나입니다.<br>
     클래식 변수는 스코프가 끝나면 그냥 버리면 그만이지만,
-    양자 앤실라는 계산 도중 다른 큐빗과 <strong>얽히기</strong> 때문에 그냥 버릴 수 없습니다.<br>
+    양자 앤실라는 계산 도중 다른 큐비트와 <strong>얽히기</strong> 때문에 그냥 버릴 수 없습니다.<br>
     얽힌 채로
-    방치된 앤실라는 살아남은 큐빗들의 간섭을 망가뜨려서, 프로그램의 최종 결과 자체를 바꿔 버립니다.
+    방치된 앤실라는 살아남은 큐비트들의 간섭을 망가뜨려서, 프로그램의 최종 결과 자체를 바꿔 버립니다.
   </p>
 
   <h3>예제 — 방치된 앤실라가 결과를 실제로 바꾸는 최소 사례</h3>
@@ -256,7 +256,7 @@ var m: bit = M(q[0]);
 
   <nav class="doc-links" aria-label="코스 내비게이션">
     <a class="doc-link" href="index.html#uncompute-course">코스 목차</a>
-    <a class="doc-link" href="uncompute-02-ladder.html">2. 컴파일러는 어떤 큐빗을 정리하는가 — 판별 사다리 →</a>
+    <a class="doc-link" href="uncompute-02-ladder.html">2. 컴파일러는 어떤 큐비트를 정리하는가 — 판별 사다리 →</a>
   </nav>
 
   <footer>

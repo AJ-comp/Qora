@@ -127,12 +127,12 @@
 <div class="wrap">
 
   <nav class="doc-links" aria-label="코스 내비게이션">
-    <a class="doc-link" href="uncompute-04-entangle.html">← 4. 상태벡터를 큐빗별로 분해할 수 있는가 — 곱 상태와 얽힌 상태</a>
+    <a class="doc-link" href="uncompute-04-entangle.html">← 4. 상태벡터를 큐비트별로 분해할 수 있는가 — 곱 상태와 얽힌 상태</a>
     <a class="doc-link" href="index.html#uncompute-course">코스 목차</a>
     <a class="doc-link" href="uncompute-06-phase.html">6. 언제 위상이 측정에 드러나는가 — 전역 위상과 상대 위상 →</a>
   </nav>
   <p>
-    <a href="uncompute-04-entangle.html">앞 장</a>에서 곱 상태와 얽힌 상태가 무엇인지, 그리고 상태벡터가 큐빗별로 분해되느냐로 둘을 가른다는 것을 보았습니다.<br>
+    <a href="uncompute-04-entangle.html">앞 장</a>에서 곱 상태와 얽힌 상태가 무엇인지, 그리고 상태벡터가 큐비트별로 분해되느냐로 둘을 가른다는 것을 보았습니다.<br>
     그런데 그 정의가 실제 프로그램에서 어떻게 나타나는지는 아직 직접 보지 않았습니다.<br>
     이 장에서는 짧은 프로그램 하나를 단계마다 따라가며, <code>H</code> 게이트만 쓰면 곱 상태가 되고 <code>CNOT</code> 한 줄을 더하면 얽힌 상태가 되는 과정을, 앞 장에서 세운 분해 검사로 직접 확인합니다.
   </p>
@@ -140,7 +140,7 @@
   <h4>1단계 — 기준선: H만 쓰면 상태벡터가 곱으로 분해됩니다</h4>
   <p>
     먼저 얽힘이 없는 경우를 기준선으로 세워 두겠습니다.<br>
-    아래 프로그램은 <code>a</code>에만 <code>H</code> 게이트를 적용할 뿐, 두 큐빗을 잇는 <code>CNOT</code> 게이트는 아직 쓰지 않습니다.<br>
+    아래 프로그램은 <code>a</code>에만 <code>H</code> 게이트를 적용할 뿐, 두 큐비트를 잇는 <code>CNOT</code> 게이트는 아직 쓰지 않습니다.<br>
     그래서 <code>a</code>는 |0⟩과 |1⟩의 중첩이 되고, <code>b</code>는 처음의 |0⟩ 그대로 남습니다.
   </p>
 <pre><code>use a = Qubit[1];
@@ -235,7 +235,7 @@ H(a[0]);
   </div>
 
   <nav class="doc-links" aria-label="코스 내비게이션">
-    <a class="doc-link" href="uncompute-04-entangle.html">← 4. 상태벡터를 큐빗별로 분해할 수 있는가 — 곱 상태와 얽힌 상태</a>
+    <a class="doc-link" href="uncompute-04-entangle.html">← 4. 상태벡터를 큐비트별로 분해할 수 있는가 — 곱 상태와 얽힌 상태</a>
     <a class="doc-link" href="index.html#uncompute-course">코스 목차</a>
     <a class="doc-link" href="uncompute-06-phase.html">6. 언제 위상이 측정에 드러나는가 — 전역 위상과 상대 위상 →</a>
   </nav>

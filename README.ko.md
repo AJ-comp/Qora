@@ -437,7 +437,7 @@ Qora 0.42.0은 기본 시뮬레이터에서 새 비트 배열 반환 사례를 �
 - **타입 있는 IR**(`src/Qora.Core/Ir/`)은 처음부터 끝까지 컴파일러가 소유하며, 파서 엔진은 lowering 경계에서 역할을 마칩니다.
 - **모듈 로더**는 `import` 그래프 전체를 하나의 프로그램으로 병합합니다.<br>그 뒤 **리졸버**가 연산 호출 대상을 완전한 이름(FQN)으로 고정하고, 이후 모든 호출부는 딱 하나의 연산을 가리킵니다.<br>네임스페이스를 쓰는 다른 프로그래밍 언어들처럼 모호하면 에러가 나며, 자세한 내용은 [설계 문서](docs/namespaces-design.md)에 있습니다.
 - **검증기**는 `QSEM` 진단을 수집형으로 보고합니다.<br>한 번의 컴파일에서 인자 종류와 개수, 레지스터 크기, 인덱스 범위, 예약 이름, 재귀 호출, 잘못 놓인 `use`, 선언되지 않았거나 선언 전에 사용한 식별자 등을 한꺼번에 보고합니다.<br>또한 검증기가 사용하는 통합 심볼 테이블도 컴파일 단계 뷰에 같이 나옵니다.
-- 검증을 마친 **HIR**은 소스 중심 의미 모델로 남습니다. HIR의 최종 effect summary에는 `QoraMirLowering`이 올바른 큐빗 버전을 만들 때 필요한 formal qubit의 `ParamModified` 집합만 남습니다. 그 뒤 lowering이 하나의 권위 있는 SSA/CFG MIR snapshot을 만들며, 큐빗 버전·양자 효과·분석과 모든 backend는 그 snapshot의 정확한 MIR 프로그램만 소비합니다.
+- 검증을 마친 **HIR**은 소스 중심 의미 모델로 남습니다. HIR의 최종 effect summary에는 `QoraMirLowering`이 올바른 큐비트 버전을 만들 때 필요한 formal qubit의 `ParamModified` 집합만 남습니다. 그 뒤 lowering이 하나의 권위 있는 SSA/CFG MIR snapshot을 만들며, 큐비트 버전·양자 효과·분석과 모든 backend는 그 snapshot의 정확한 MIR 프로그램만 소비합니다.
 - **자동 uncomputation은 향후 작업입니다.** 계획된 MIR scheduler는 하나의 정확한 SSA/CFG 프로그램에서 분석 정보를 읽고 cleanup 위치를 정한 뒤 필요한 역연산을 생성합니다. Qora 소스, HIR, 현재 MIR에는 `Adjoint`, inverse-request 표식, inversion 패스가 없습니다.
 - OpenQASM backend는 정확한 lowered MIR snapshot을 받아 타입 있는 `MirOpenQasmTargetProgram`을 고정합니다. 충돌 없는 이름과 구조화된 타깃 제어 흐름은 이 lowering이 담당하며, `MirQasmEmitter`는 완성된 타깃 모델만 직렬화합니다.
 
