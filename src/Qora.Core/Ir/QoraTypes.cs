@@ -3,7 +3,7 @@ namespace Qora.Ir;
 /// <summary>The compiler version stamped into emitted target artifacts.</summary>
 public static class QoraVersion
 {
-    public const string Value = "0.41.0";
+    public const string Value = "0.42.0";
 }
 
 public enum QType
@@ -97,9 +97,17 @@ public sealed record GateSig(
     public bool IsBuiltin => true;
 }
 
+/// <summary>
+/// A built-in function. <paramref name="Parameter"/> is the type of its one scalar argument (null for
+/// <c>AsInt</c>, which takes a whole <c>bit[]</c> register instead); an argument converts to it by the
+/// ordinary implicit-conversion rules. <paramref name="QasmName"/> is the OpenQASM 3 built-in it is emitted
+/// as, or null when target lowering handles the function itself.
+/// </summary>
 public sealed record BuiltinFunction(
     QType Returns,
-    bool TakesBitRegister);
+    bool TakesBitRegister,
+    QType? Parameter = null,
+    string? QasmName = null);
 
 /// <summary>The single intrinsic callable registry shared by HIR, MIR, and target lowering.</summary>
 public static class QoraGates
@@ -171,6 +179,8 @@ public static class QoraGates
 
     public const string Measurement = "M";
     public const string BitsAsInt = "AsInt";
+    public const string ArcCos = "ArcCos";
+    public const string Sqrt = "Sqrt";
     public const string IntrinsicNamespace = "Qora.Intrinsic";
 
     public static readonly IReadOnlyDictionary<string, BuiltinFunction>
@@ -180,6 +190,12 @@ public static class QoraGates
                 {
                     [BitsAsInt] =
                         new(QType.Int, TakesBitRegister: true),
+                    // Math on one real number, emitted as OpenQASM's own built-ins. ArcCos turns an
+                    // amplitude into a rotation angle: Ry(2.0 * ArcCos(0.6), q) prepares 0.6|0> + 0.8|1>.
+                    [ArcCos] =
+                        new(QType.Float, TakesBitRegister: false, Parameter: QType.Float, QasmName: "arccos"),
+                    [Sqrt] =
+                        new(QType.Float, TakesBitRegister: false, Parameter: QType.Float, QasmName: "sqrt"),
                 });
 
     public static readonly IReadOnlySet<string> MeasureLike =
@@ -288,7 +304,12 @@ public static class QoraGates
                 "u3",
             }.Concat(Gates.Values.Select(gate => gate.QasmName)));
 
+    /// <summary>Names generated code must not give a user binding: keywords, stdgates names, and the
+    /// OpenQASM built-in functions that built-in Qora functions emit as (a Qora variable named <c>sqrt</c>
+    /// would otherwise shadow the <c>sqrt</c> that <c>Sqrt</c> calls).</summary>
     public static readonly IReadOnlySet<string> QasmReserved =
         HirCollections.FreezeSet(
-            QasmKeywords.Concat(StdgatesNames));
+            QasmKeywords
+                .Concat(StdgatesNames)
+                .Concat(Functions.Values.Select(function => function.QasmName).OfType<string>()));
 }

@@ -9,6 +9,7 @@ All notable changes to the Qora Language extension.
   subroutines and the bodies of `gate` definitions are no longer counted, so a program without gates
   reports 0 gates and one `X` reports 1. Regression tests use real Qora output.
 - The Korean run log says 큐비트 instead of 큐빗, the term the Korean documentation uses.
+- Highlights the built-in functions `ArcCos` and `Sqrt` added in Qora 0.42.0.
 
 ## 0.34.0 — 2026-11-19
 

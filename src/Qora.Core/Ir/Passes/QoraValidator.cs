@@ -1706,6 +1706,39 @@ internal static class QoraValidator
     }
 
     /// <summary>
+    /// QSEM006 for the one scalar argument of a math built-in such as <c>Sqrt</c>: it must convert to the
+    /// parameter type by the shared <see cref="ExpressionTypes.CanAssign"/> rules (so an <c>int</c> becomes a
+    /// <c>float</c>, and the conversion is recorded for lowering), and it may not be an array. A qubit (QSEM026),
+    /// a measurement (QSEM005), an unknown name, or a whole <c>bit[]</c> (QSEM036) already has its own, more
+    /// precise diagnostic, so this check stays silent for them.
+    /// </summary>
+    private static void CheckBuiltinScalarArgument(
+        HirCallExpression c,
+        QType parameterType,
+        Ctx ctx,
+        string opName,
+        SourceSpan? span)
+    {
+        var argument = c.Arguments[0].Expression;
+        if (argument is HirCallExpression inner && QoraGates.MeasureLike.Contains(inner.Name))
+            return;
+        if (ExpressionTypes.TypeOf(argument, ctx.SemanticModel, ctx.OpById) is not { } actual)
+            return;
+        if (actual is { IsArray: true, Type: QType.Bit } or { Type: QType.Qubit })
+            return;
+        var expected = new QValueShape(parameterType, IsArray: false);
+        if (ExpressionTypes.CanAssign(expected, actual, argument))
+        {
+            RecordImplicitScalarConversion(argument, actual, parameterType, ctx);
+            return;
+        }
+        Add(ctx.Errors, "QSEM006",
+            $"in `{opName}`: `{c.Name}` expects one `{expected}` value, but argument `{HirExpressions.Render(argument)}` is `{actual}`; " +
+            $"`{actual}` cannot be implicitly converted to `{expected}`",
+            span);
+    }
+
+    /// <summary>
     /// A BUILT-IN function call. Its argument shape is deliberately NOT run through the shared
     /// <see cref="IParamSpec"/> path: <c>AsInt</c> takes a WHOLE <c>bit[]</c> register, and a whole register is
     /// precisely the thing that is not a value in any ordinary slot (QSEM036) — there is no value slot that
@@ -1722,6 +1755,11 @@ internal static class QoraValidator
         if (c.Arguments.Count != 1)
         {
             Add(ctx.Errors, "QSEM006", $"in `{opName}`: `{c.Name}` expects 1 argument but got {c.Arguments.Count}", span);
+            return;
+        }
+        if (fn.Parameter is { } parameterType)
+        {
+            CheckBuiltinScalarArgument(c, parameterType, ctx, opName, span);
             return;
         }
         if (!fn.TakesBitRegister) return;

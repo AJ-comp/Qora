@@ -17,6 +17,19 @@ emitted as **OpenQASM 3.0**.
 > named there may have been retired by a later release; the newest release notes and current architecture
 > documents define the present pipeline.
 
+## 0.42.0 — 2026-11-21
+
+- Built-in math functions **`Sqrt(x)`** and **`ArcCos(x)`**: one `float` argument (an `int` converts by the
+  usual implicit rule, and the conversion is emitted as `float(...)`) and a `float` result, emitted as
+  OpenQASM 3's own `sqrt` and `arccos`. A rotation angle can now be written from an amplitude instead of a
+  precomputed number: `Ry(2.0 * ArcCos(0.6), q[0])` prepares `0.6|0⟩ + 0.8|1⟩`, and `1.0 / Sqrt(2.0)` is the
+  amplitude of an equal superposition.
+- A wrong argument is QSEM006 (`ArcCos(true)`, an `angle`, an array, or a wrong argument count). A qubit or a
+  measurement keeps its own single diagnostic (QSEM026, QSEM005), and a `float` result does not become an
+  `int` (QSEM037). Like `AsInt`, the names are reserved: an operation named `Sqrt` or `ArcCos` is QSEM013.
+- Generated code never gives a binding the name `sqrt` or `arccos`, so it cannot shadow the OpenQASM
+  built-ins those calls emit.
+
 ## 0.41.0 — 2026-11-19
 
 VS Code extension **0.34.0** bundles the Qora 0.41.0 compiler.
