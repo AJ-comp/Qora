@@ -317,7 +317,7 @@ internal static class SymbolTableBuilder
                 return;   // an existing unknown/call/qubit diagnostic owns the malformed expression
             if (source.Type == QType.Qubit)
                 return;   // QSEM026 already explains why a qubit is not a classical value
-            if (source is { Type: QType.Bit, IsArray: true } && !target.IsArray)
+            if (source is { Type: QType.Bit, IsArray: true } && !target.IsArray && value is HirNameExpression)
                 return;   // QSEM036 gives the precise AsInt guidance
 
             var shapeMismatch = target.IsArray != source.IsArray;
@@ -722,16 +722,15 @@ internal static class SymbolTableBuilder
                     case HirVariableDeclarationStatement declaration:
                         // Record the initializer before declaring its binding, including a measurement's
                         // target, so a nested declaration can still read the binding it shadows.
+                        var inferred = ExpressionTypes.TypeOf(declaration.Value, scope, opById);
+                        var isArray = declaration.IsArray || declaration.Type is null
+                            && declaration.Value is HirCallExpression && inferred is { IsArray: true };
                         RecordValue(
                             scope,
                             declaration.Value,
                             $"init {declaration.Name}",
                             declaration.Span,
-                            targetIsArray: declaration.IsArray);
-                        var inferred = ExpressionTypes.TypeOf(
-                            declaration.Value,
-                            scope,
-                            opById);
+                            targetIsArray: isArray);
                         // QSEM029 owns aggregate shape errors. Check scalar conversions before
                         // declaring the new name, so they use the same assignment rule and diagnostic
                         // ownership as scalar initializers. A malformed call can still suppress this
@@ -761,19 +760,19 @@ internal static class SymbolTableBuilder
                         if (declaration.Value is not (
                                 HirArrayLiteralExpression
                                 or HirArrayCreationExpression)
-                            && !declaration.IsArray)
+                            && (!declaration.IsArray || declaration.Value is HirCallExpression))
                         {
                             if (declaration.Type is { } declaredType)
                                 CheckAssignable(
                                     declaration.Id,
                                     new QValueShape(
                                         declaredType,
-                                        IsArray: false),
+                                        IsArray: declaration.IsArray),
                                     declaration.Value,
                                     scope,
                                     declaration.Span,
                                     $"declaration `{declaration.Name}`");
-                            else if (inferred is { IsArray: true } inferredArray)
+                            else if (!isArray && inferred is { IsArray: true } inferredArray)
                                 CheckAssignable(
                                     declaration.Id,
                                     new QValueShape(
@@ -810,19 +809,19 @@ internal static class SymbolTableBuilder
                                 ? HirExpressions.Render(declaration.Value)
                                 : null,
                             declaration.Span,
-                            isArray: declaration.IsArray,
+                            isArray: isArray,
                             arrayLength: ArrayLengthOf(declaration, scope),
                             declarationNodeId: declaration.Id,
                             foldedBound:
                                 declaration.IsConst
-                                && !declaration.IsArray
+                                && !isArray
                                     ? BoundFolder.Fold(
                                         declaration.Value,
                                         scope)
                                     : null,
                             foldedBoolean:
                                 declaration.IsConst
-                                && !declaration.IsArray
+                                && !isArray
                                     ? BooleanFolder.Fold(
                                         declaration.Value,
                                         scope)
@@ -893,13 +892,19 @@ internal static class SymbolTableBuilder
                             scope,
                             returnedValue,
                             "return",
-                            returnStatement.Span);
-                        if (op.ReturnType is { } returnType)
+                            returnStatement.Span,
+                            targetIsArray: op.ReturnType is { IsArray: true });
+                        if (op.ReturnType is { IsArray: true } arrayType &&
+                            returnedValue is HirArrayLiteralExpression returnedLiteral)
+                        {
+                            foreach (var element in returnedLiteral.Elements)
+                                CheckAssignable(returnStatement.Id, arrayType.Type, element, scope,
+                                    element.Span ?? returnStatement.Span, "element of returned array");
+                        }
+                        else if (op.ReturnType is { } returnType)
                             CheckAssignable(
                                 returnStatement.Id,
-                                new QValueShape(
-                                    returnType,
-                                    IsArray: false),
+                                returnType,
                                 returnedValue,
                                 scope,
                                 returnStatement.Span,

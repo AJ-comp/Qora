@@ -9,6 +9,11 @@
     "body": ["operation ${1:Name}(${2}) {", "\t$0", "}"],
     "description": "operation(양자 서브루틴) 정의"
   },
+  "operation returning bits": {
+    "prefix": "operation-bits",
+    "body": ["operation ${1:ReadPair}(first: Qubit, second: Qubit): bit[] {", "\treturn [M(first), M(second)];", "}", "$0"],
+    "description": "두 측정 결과를 bit[]로 반환하는 operation"
+  },
   "function": {
     "prefix": "function",
     "body": ["function ${1:Name}(${2}): ${3|int,bit,float,angle,bool|} {", "\treturn ${0};", "}"],

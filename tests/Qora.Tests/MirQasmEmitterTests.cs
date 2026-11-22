@@ -79,6 +79,30 @@ public sealed class MirQasmEmitterTests
                 .Select(definition => definition.Id));
     }
 
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    public void BitArrayReturnUsesItsExactRegisterWidthEvenForOneBit(int width)
+    {
+        var type = new MirQasmBitType(width, isRegister: true);
+        var id = new MirQasmParameterId(0);
+        var definition = new MirQasmCallableDefinition(
+            new MirQasmCallableId(0),
+            "echo_bits",
+            new[] { new MirQasmParameter(id, "bits", type) },
+            type,
+            new[] { new MirQasmReturnStatement(new MirQasmParameterReferenceExpression(id)) });
+        var program = new MirOpenQasmTargetProgram(
+            Array.Empty<MirQasmStatement>(),
+            new[] { definition });
+
+        var text = MirQasmEmitter.Emit(program);
+
+        Assert.Contains($"def echo_bits(bit[{width}] bits) -> bit[{width}]", text);
+        Assert.Contains("return bits;", text);
+    }
+
     [Fact]
     public void EmitsFinalReadOnlyAndMutableArrayParameterContracts()
     {

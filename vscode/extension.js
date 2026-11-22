@@ -598,7 +598,7 @@ async function runProgram() {
         return;
       }
       try {
-        validateRunResult(parsed, result.entryResult.type, shots);
+        validateRunResult(parsed, result.entryResult, shots);
         ch.appendLine(`  ✓ ${t.doneIn(((Date.now() - t1) / 1000).toFixed(1))}`);
         appendEntryResult(ch, parsed, t);
       } catch (e) {
@@ -651,14 +651,15 @@ function validateEntryResultMetadata(metadata) {
   if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
     throw new Error('Incompatible Qora compiler: entryResult metadata is missing. Update the extension or rebuild the configured Qora CLI.');
   }
-  if (!['void', 'bool', 'bit', 'int', 'float', 'angle'].includes(metadata.type)
+  if (!['void', 'bool', 'bit', 'bit[]', 'int', 'float', 'angle'].includes(metadata.type)
+      || (metadata.type === 'bit[]' && (!Number.isSafeInteger(metadata.length) || metadata.length < 1))
       || typeof metadata.outputName !== 'string' || !metadata.outputName.trim()) {
     throw new Error('Invalid entryResult metadata from the Qora compiler.');
   }
 }
 
-function validateRunResult(reply, expectedType, expectedShots) {
-  if (!reply || reply.shots !== expectedShots || !reply.result || reply.result.type !== expectedType) {
+function validateRunResult(reply, metadata, expectedShots) {
+  if (!reply || reply.shots !== expectedShots || !reply.result || reply.result.type !== metadata.type) {
     throw new Error('Runner result type or shot count does not match the compilation.');
   }
   const result = reply.result;
@@ -672,13 +673,14 @@ function validateRunResult(reply, expectedType, expectedShots) {
   for (const value of result.values) {
     const valid = result.type === 'bool' ? typeof value === 'boolean'
       : result.type === 'bit' ? value === 0 || value === 1
+      : result.type === 'bit[]' ? Array.isArray(value) && value.length === metadata.length && value.every(bit => bit === 0 || bit === 1)
       : result.type === 'int' ? typeof value === 'string' && /^-?(0|[1-9][0-9]*)$/.test(value)
         : typeof value === 'number' && Number.isFinite(value);
     if (!valid) throw new Error(`Invalid ${result.type} entry return value from the runner.`);
   }
 }
 
-/** Group scalar entry return values for display; void never becomes a measurement histogram. */
+/** Group whole entry return values; a register is one sample, not one sample per bit. */
 function appendEntryResult(ch, reply, t) {
   ch.appendLine(`  ── ${reply.shots} shots ──`);
   if (reply.result.type === 'void') {
@@ -689,7 +691,7 @@ function appendEntryResult(ch, reply, t) {
   const counts = new Map();
   for (const value of reply.result.values) {
     // int values stay decimal strings; never convert them to Number.
-    const label = Object.is(value, -0) ? '-0' : String(value);
+    const label = Array.isArray(value) ? `[${value.join(', ')}]` : Object.is(value, -0) ? '-0' : String(value);
     counts.set(label, (counts.get(label) || 0) + 1);
   }
   const width = 40;

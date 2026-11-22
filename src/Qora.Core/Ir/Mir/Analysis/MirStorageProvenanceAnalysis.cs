@@ -170,6 +170,9 @@ internal static class MirStorageProvenanceAnalysis
                 case MirArrayCreate create when create.Result.Id == result:
                     _seeds[result] = create.Storage.Id;
                     break;
+                case MirQuantumApply { ResultStorage: { } storage } apply when apply.Result!.Id == result:
+                    _seeds[result] = storage.Id;
+                    break;
                 case MirArrayStore store when store.Result.Id == result:
                     _dependencies[result] = new List<MirValueId> { store.Array };
                     break;

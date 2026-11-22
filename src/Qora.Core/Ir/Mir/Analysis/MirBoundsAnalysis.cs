@@ -111,7 +111,8 @@ internal static class MirBoundsAnalysis
 {
     internal static MirBoundsSnapshot AnalyzeVerified(
         MirPathConditionSnapshot paths,
-        MirStorageProvenanceSnapshot storage)
+        MirStorageProvenanceSnapshot storage,
+        MirArrayLengthFacts lengths)
     {
         ArgumentNullException.ThrowIfNull(paths);
         ArgumentNullException.ThrowIfNull(storage);
@@ -119,7 +120,7 @@ internal static class MirBoundsAnalysis
         var callable = cfg.SourceCallable;
         storage.EnsureFor(callable);
 
-        var analyzer = new Analyzer(callable, cfg, paths, storage);
+        var analyzer = new Analyzer(callable, cfg, paths, storage, lengths);
         return new MirBoundsSnapshot(cfg, analyzer.Analyze());
     }
 
@@ -135,25 +136,22 @@ internal static class MirBoundsAnalysis
         private readonly Dictionary<MirValueId, IReadOnlyList<LinearExpression>> _expressions = new();
         private readonly HashSet<MirValueId> _activeExpressions = new();
         private readonly Dictionary<string, int> _lengthIdentities = new(StringComparer.Ordinal);
-        private readonly Dictionary<MirStorageId, int> _minimumLengthByStorage = new();
+        private readonly MirArrayLengthFacts _lengths;
         private readonly HashSet<(MirValueId Value, bool Expected, MirBlockId Context)> _activeTruth = new();
 
         public Analyzer(
             MirCallable callable,
             MirControlFlowSnapshot cfg,
             MirPathConditionSnapshot paths,
-            MirStorageProvenanceSnapshot storage)
+            MirStorageProvenanceSnapshot storage,
+            MirArrayLengthFacts lengths)
         {
             _callable = callable;
             _cfg = cfg;
             _paths = paths;
             _storage = storage;
+            _lengths = lengths;
             _incoming = BuildIncomingValues(callable);
-            foreach (var parameter in callable.Parameters.OfType<MirClassicalParameter>())
-            {
-                if (parameter.Storage is MirArrayStorage parameterStorage)
-                    _minimumLengthByStorage[parameterStorage.Id] = parameter.MinimumLength;
-            }
         }
 
         public IReadOnlyList<MirBoundsResult> Analyze()
@@ -1164,25 +1162,8 @@ internal static class MirBoundsAnalysis
         private LinearExpression ArrayLengthExpression(MirValueId array)
         {
             var provenance = _storage.ProvenanceOf(array);
-            if (!provenance.IsComplete || provenance.PossibleStorages.Count == 0)
-            {
-                var minimumLength = MinimumLengthFromDefiningParameter(array);
-                return LinearExpression.ArrayLength(
-                    LengthIdentityFor($"value:{array.Value}"),
-                    minimumLength);
-            }
-
-            var minimum = int.MaxValue;
-            foreach (var storage in provenance.PossibleStorages)
-            {
-                if (!_minimumLengthByStorage.TryGetValue(storage, out var storageMinimum))
-                    storageMinimum = 0;
-                minimum = Math.Min(minimum, storageMinimum);
-            }
-            if (minimum == int.MaxValue)
-                minimum = 0;
-
-            var identityKey = provenance.PossibleStorages.Count == 1
+            var minimum = _lengths.Minimum(_callable, _callable.RequireValue(array), provenance);
+            var identityKey = provenance.IsComplete && provenance.PossibleStorages.Count == 1
                 ? $"storage:{provenance.PossibleStorages[0].Value}"
                 : $"value:{array.Value}";
             return LinearExpression.ArrayLength(
@@ -1197,16 +1178,6 @@ internal static class MirBoundsAnalysis
             identity = _lengthIdentities.Count;
             _lengthIdentities.Add(key, identity);
             return identity;
-        }
-
-        private int MinimumLengthFromDefiningParameter(MirValueId array)
-        {
-            foreach (var parameter in _callable.Parameters.OfType<MirClassicalParameter>())
-            {
-                if (parameter.Value.Id == array)
-                    return parameter.MinimumLength;
-            }
-            return 0;
         }
 
         private int? QubitLength(MirQubitId qubit)

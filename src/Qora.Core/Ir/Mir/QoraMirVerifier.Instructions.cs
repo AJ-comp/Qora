@@ -530,7 +530,7 @@ internal static partial class QoraMirVerifier
                     else if (ret.Value is not MirValueId returnValue)
                         AddAtTerminator("MIR126", "value-returning callable return has no value", callable, block);
                     else if (callable.FindValue(returnValue) is { } value
-                             && value.Type != callable.ReturnType!.Value)
+                             && !callable.ReturnType.Value.Accepts(value.Type))
                     {
                         AddAtTerminator(
                             "MIR127",

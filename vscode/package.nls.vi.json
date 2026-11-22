@@ -1,6 +1,6 @@
 {
   "displayName": "Ngôn ngữ Qora",
-  "description": "Viết mạch Qora với biểu thức logic và kích thước thanh ghi tính khi biên dịch. Chẩn đoán trực tiếp, xuất OpenQASM 3 và mô phỏng cục bộ.",
+  "description": "Viết mạch lượng tử Qora, xuất OpenQASM 3 và chạy cục bộ để xem mảng bit trả về theo từng shot. Có chẩn đoán lỗi ngay khi viết mã.",
   "command.transpile.title": "Qora: Chuyển đổi sang OpenQASM",
   "command.showStages.title": "Qora: Hiển thị các giai đoạn biên dịch (AST / HIR / MIR / OpenQASM)",
   "command.openExample.title": "Qora: Mở ví dụ",

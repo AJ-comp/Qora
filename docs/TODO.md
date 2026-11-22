@@ -66,6 +66,7 @@ declared at `Main` top level and lowers to OpenQASM general arrays. (clean)
 - **Return values + typed returns** — ✅ Function returns shipped in v0.30; operation returns and
   the separate `bool` type shipped in v0.40.0. Both kinds of callable now support
   one scalar `bool` / `int` / `bit` / `float` / `angle` return type with `return expr;`.
+  Operations can also return `bit[]`; OpenQASM needs a single statically known width.
   An operation's omitted return type remains void. Only the entry operation's returned value
   is an execution result, with no implicit measurement or export of internal measurement records.
   Return paths and result types are validated before MIR and target lowering.
@@ -164,12 +165,12 @@ that exact MIR program; HIR keeps no parallel qubit history or cleanup verdict. 
   cross-check: Silq PLDI'20, Q#, Unqomp PLDI'21/Reqomp, Twist POPL'22, Quipper, Bennett'73, Gidney'18 —
   20/20 key claims source-verified). For today's quantum feature set, a future MIR scheduler can derive
   a cleanup candidate from a local `MirQubitFromUse` birth plus the absence of measurement or escape
-  effects. Operations can return classical scalars but not qubits, functions are classical-only, and there are no general qubit aliases
+  effects. Operations can return classical scalars or bit arrays but not qubits, functions are classical-only, and there are no general qubit aliases
   or closures, so those conditions cover every current escape channel. Future escape channels extend
   this MIR candidate query in the SAME change:
   - **Future qubit-returning values or other qubit escape channels** → add "not returned / does not
     escape" (Silq: return consumes; Bennett: outputs are copied out of scratch). Current function and
-    operation returns are classical scalars, so they do not create this qubit escape channel.
+    operation returns are classical values, so they do not create this qubit escape channel.
   - **Future general qubit aliasing beyond the current checked call contracts** → add "no live alias";
     long-lived borrowed aliases split ancillas into clean (end |0⟩, value-verifiable) vs **dirty**
     (end = original unknown state — verifiable only by structural compute/uncompute pairing à la

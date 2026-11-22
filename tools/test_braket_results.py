@@ -34,6 +34,17 @@ class BraketResultTests(unittest.TestCase):
             self.read([1, 0, 1]),
         )
 
+    def test_registers_require_a_bit_list_of_the_declared_width_per_shot(self):
+        metadata = dict(self.metadata("bit[]"), length=2)
+        values = [[1, 0], [0, 1]]
+        self.assertEqual(values, entry_result_from_task(self.task(values), metadata, 2)["result"]["values"])
+        for value in (1, "10", [1], [1, 0, 0], [1, 2], [True, 0], [0, 1.0]):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                entry_result_from_task(self.task([value]), metadata, 1)
+        for length in (True, 0, -1, "2", 2.5):
+            with self.subTest(length=length), self.assertRaises(ValueError):
+                entry_result_from_task(self.task(values), dict(metadata, length=length), 2)
+
     def test_bool_values_remain_json_booleans(self):
         reply = self.read([True, False, True], "bool")
         self.assertEqual(
@@ -246,12 +257,89 @@ class BraketOutputIntegrationTests(unittest.TestCase):
         self.assertEqual(1, process.returncode)
         self.assertIn("Incompatible Qora compiler", json.loads(process.stdout)["error"])
 
-    def test_compiled_phase_gates_in_tools_and_vscode_runner(self):
+    def compile_request(self, source):
         root = os.path.abspath(os.path.join(RUNNER, "..", ".."))
         compiler = os.path.join(root, "src", "Qora", "bin", "Debug", "net10.0", "Qora.dll")
         if not os.path.isfile(compiler) or shutil.which("dotnet") is None:
             self.skipTest("Build src/Qora with .NET 10 for compiler-to-runner integration tests")
+        compilation = subprocess.run(
+            ["dotnet", compiler, "--json"], input=source,
+            text=True, encoding="utf-8", capture_output=True, timeout=60,
+        )
+        self.assertEqual(0, compilation.returncode, compilation.stderr + compilation.stdout)
+        compiled = json.loads(compilation.stdout)
+        self.assertTrue(compiled["success"], compiled.get("errors"))
+        return validate_execution_request(compiled)
 
+    def test_compiled_operation_returns_and_consumes_bit_arrays(self):
+        read = """
+            operation Read(left: Qubit, right: Qubit): bit[] {
+                var first: bit = M(left);
+                var second: bit = M(right);
+                return [first, second];
+            }
+        """
+        cases = (
+            ("register", read + """
+                operation Relay(left: Qubit, right: Qubit): bit[] {
+                    var bits: bit[] = Read(left, right);
+                    X(left);
+                    return bits;
+                }
+                operation Main(): bit[] {
+                    use q = Qubit[2]; X(q[0]); return Relay(q[0], q[1]);
+                }
+            """, "bit[]", [1, 0]),
+            ("consume", read + """
+                operation Inspect(bits: bit[]): int {
+                    if (bits[0] == 1 && bits[1] == 0) { return bits.Count; }
+                    return 0;
+                }
+                operation Main(): int {
+                    use q = Qubit[2]; X(q[0]);
+                    var bits: bit[] = Read(q[0], q[1]);
+                    return Inspect(bits);
+                }
+            """, "int", "2"),
+            ("one-bit register", "operation Main(): bit[] { return [1]; }", "bit[]", [1]),
+            ("forwarded register specialized by input length", """
+                operation Make(x: bit[]): bit[] {
+                    if (x.Count == 2) { return [0, 1]; }
+                    return [0, 1, 0];
+                }
+                operation Count(bits: bit[]): int { return bits.Count; }
+                operation Main(): int {
+                    var pair: bit[] = [0, 0]; var triple: bit[] = [0, 0, 0];
+                    return 10 * Count(Make(pair)) + Count(Make(triple));
+                }
+            """, "int", "23"),
+            ("equal-width branches selected at runtime", """
+                operation Choose(flag: bit): bit[] {
+                    if (flag == 1) { return [0, 1]; }
+                    return [1, 0];
+                }
+                operation Main(): bit[] {
+                    use q = Qubit[1]; var first: bit = M(q[0]);
+                    X(q[0]); var second: bit = M(q[0]);
+                    var a: bit[] = Choose(first); var b: bit[] = Choose(second);
+                    return [a[0], a[1], b[0], b[1]];
+                }
+            """, "bit[]", [1, 0, 0, 1]),
+        )
+        for name, source, kind, expected in cases:
+            with self.subTest(case=name):
+                request = self.compile_request(source)
+                metadata = request["entryResult"]
+                self.assertEqual(kind, metadata["type"])
+                if kind == "bit[]":
+                    self.assertEqual(len(expected), metadata["length"])
+                task = self.device.run(self.program_type(source=request["qasm"]), shots=4).result()
+                self.assertEqual(
+                    {"shots": 4, "result": {"type": kind, "values": [expected] * 4}},
+                    entry_result_from_task(task, metadata, 4),
+                )
+
+    def test_compiled_phase_gates_in_tools_and_vscode_runner(self):
         expected = {"shots": 4, "result": {"type": "bit", "values": [1] * 4}}
         for gate, repetitions in (("S", 2), ("T", 4)):
             # S^2 = T^4 = Z, so H followed by either sequence and H must flip |0>.
@@ -260,14 +348,7 @@ class BraketOutputIntegrationTests(unittest.TestCase):
                 "operation Main(): bit { use q = Qubit[1]; "
                 f"H(q[0]); {gates} H(q[0]); return M(q[0]); }}"
             )
-            compilation = subprocess.run(
-                ["dotnet", compiler, "--json"], input=source,
-                text=True, encoding="utf-8", capture_output=True, timeout=60,
-            )
-            self.assertEqual(0, compilation.returncode, compilation.stderr + compilation.stdout)
-            compiled = json.loads(compilation.stdout)
-            self.assertTrue(compiled["success"], compiled.get("errors"))
-            request = validate_execution_request(compiled)
+            request = self.compile_request(source)
 
             with self.subTest(gate=gate, library="tools/stdgates.inc"):
                 metadata = request["entryResult"]

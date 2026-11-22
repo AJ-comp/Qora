@@ -984,7 +984,7 @@ public class ClassicalArrayTests
         Assert.All(specs, specialization =>
         {
             Assert.True(specialization.IsFunction);
-            Assert.Equal(QType.Int, specialization.ReturnType);
+            Assert.Equal(new QValueShape(QType.Int, IsArray: false), specialization.ReturnType);
         });
         var program = r.Targets.OpenQasm!.Program;
         var countDefinitions = program.Definitions

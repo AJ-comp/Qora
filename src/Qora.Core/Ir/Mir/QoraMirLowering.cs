@@ -78,21 +78,22 @@ internal static class QoraMirLowering
 
         var mirCallables = new List<MirCallable>();
         MirCallable? mirEntryCallable = null;
+        var lowered = new Dictionary<HirNodeId, MirCallable>();
+
+        // A caller may precede its callee in source. Lower an array-valued callee on demand so
+        // its actual return widths are known at the call site. Validated HIR excludes recursion.
+        MirCallable LowerCallable(HirCallable hirCallable)
+        {
+            if (lowered.TryGetValue(hirCallable.Id, out var existing)) return existing;
+            var result = new HirCallableToMirLowerer(hirCallable, hirArtifact, traceSink, LowerCallable)
+                .LowerToMirCallable();
+            lowered.Add(hirCallable.Id, result);
+            return result;
+        }
 
         foreach (var hirCallable in hirProgram.Callables)
         {
-            var mirCallableLowerer = new HirCallableToMirLowerer(
-                hirCallable,        // Main(h42)
-                hirArtifact,
-                traceSink);
-
-            // Main(h42)
-            //     ↓ LowerToMirCallable()
-            // Main(c42)
-            // └─ Blocks / Instructions / SSA Values
-            //    └─ xs[i] → MirArrayLoad
-            var mirCallable = mirCallableLowerer.LowerToMirCallable();
-
+            var mirCallable = LowerCallable(hirCallable);
             // mirCallables: [] → [Main(c42)]
             mirCallables.Add(mirCallable);
 
@@ -129,6 +130,7 @@ internal static class QoraMirLowering
         private readonly MirCallableId _mirCallableId;
         private readonly HirSemanticArtifact _hirArtifact;
         private readonly IMirLoweringTraceSink? _traceSink;
+        private readonly Func<HirCallable, MirCallable> _lowerCallable;
         private readonly List<MirBlockBuilder> _mirBlockBuilders = new();
         private readonly MirBlockId.Allocator _mirBlockIds = new();
         private readonly List<MirValue> _mirValues = new();
@@ -146,13 +148,15 @@ internal static class QoraMirLowering
         public HirCallableToMirLowerer(
             HirCallable hirCallable,
             HirSemanticArtifact hirArtifact,
-            IMirLoweringTraceSink? traceSink)
+            IMirLoweringTraceSink? traceSink,
+            Func<HirCallable, MirCallable> lowerCallable)
         {
             _hirCallable = hirCallable;
             _hirArtifact = hirArtifact;
             _mirCallableId =
                 new MirCallableId(hirCallable.Id.Value);
             _traceSink = traceSink;
+            _lowerCallable = lowerCallable;
         }
 
         public MirCallable LowerToMirCallable()
@@ -179,12 +183,27 @@ internal static class QoraMirLowering
                 _mirCallableId,
                 qualifiedSourceCallableName,
                 _hirCallable.IsFunction ? MirCallableKind.Function : MirCallableKind.Operation,
-                _hirCallable.ReturnType is { } returns
-                    ? MirType.Scalar(returns)
-                    : null,
+                InferReturnType(mirBlocks),
                 _mirParameters,
                 mirBlocks,
                 mirCallableOrigin);
+        }
+
+        private MirType? InferReturnType(IReadOnlyList<MirBlock> blocks)
+        {
+            if (_hirCallable.ReturnType is not { } shape) return null;
+            if (!shape.IsArray) return MirType.Scalar(shape.Type);
+
+            // Ignore disconnected blocks. Do not invent a width from the largest branch or
+            // from the first return when another reachable path has an unknown width.
+            int? width = null;
+            foreach (var value in MirCallable.ReachableReturnValues(blocks[0], id => blocks[id.Value]))
+            {
+                if (MirTypeOf(value).KnownLength is not int length || (width is int prior && prior != length))
+                    return MirType.Array(shape.Type);
+                width = length;
+            }
+            return MirType.Array(shape.Type, width);
         }
 
         private void CloseCallableBody(MirOrigin mirCallableOrigin)
@@ -480,96 +499,56 @@ internal static class QoraMirLowering
             var hirDeclaredSymbol = RequireHirDeclarationSymbol(
                 hirDeclaration.Id,
                 $"declaration `{hirDeclaration.Name}`");
-            var mirOrigin = MirOriginFor(hirDeclaration);
-
-            if (hirDeclaration.IsArray)
+            var type = hirDeclaredSymbol.Type ?? hirDeclaration.Type
+                ?? throw MirLoweringError($"binding `{hirDeclaration.Name}` has no inferred type");
+            MirValueId value;
+            if (hirDeclaration.Value is HirArrayCreationExpression or HirArrayLiteralExpression)
+                value = LowerArrayInitializer(hirDeclaration.Value, type, MirOriginFor(hirDeclaration), hirDeclaredSymbol);
+            else if (hirDeclaredSymbol.IsArray && hirDeclaration.Value is HirCallExpression call)
+                value = LowerValueCall(call, hirDeclaredSymbol);
+            else
             {
-                var declaredElementQType = hirDeclaration.Type
-                    ?? hirDeclaredSymbol.Type
-                    ?? throw MirLoweringError(
-                        $"array `{hirDeclaration.Name}` has no element type");
-                int declaredArrayLength;
-                MirArrayInitialization mirArrayInitialization;
-                List<MirValueId> mirElementValueIds;
-
-                switch (hirDeclaration.Value)
-                {
-                    case HirArrayCreationExpression:
-                        declaredArrayLength = hirDeclaredSymbol.ArrayLength
-                            ?? throw MirLoweringError(
-                                $"validated array `{hirDeclaration.Name}` has no constant length");
-                        mirArrayInitialization =
-                            MirArrayInitialization.ZeroInitialized;
-                        mirElementValueIds = new List<MirValueId>();
-                        break;
-
-                    case HirArrayLiteralExpression hirArrayLiteral:
-                        declaredArrayLength = hirArrayLiteral.Elements.Count;
-                        mirArrayInitialization =
-                            MirArrayInitialization.ExplicitElements;
-                        mirElementValueIds =
-                            new List<MirValueId>(hirArrayLiteral.Elements.Count);
-                        foreach (var hirElementExpression in hirArrayLiteral.Elements)
-                        {
-                            var mirElementValueId = LowerExpressionAs(
-                                hirElementExpression,
-                                MirType.Scalar(declaredElementQType));
-                            mirElementValueIds.Add(mirElementValueId);
-                        }
-                        break;
-
-                    default:
-                        throw MirLoweringError(
-                            $"validated array `{hirDeclaration.Name}` "
-                            + "has a non-array initializer");
-                }
-
-                var mirArrayCreationInstructionId =
-                    AllocateMirInstructionId();
-                var mirArrayStorage = new MirArrayStorage(
-                    AllocateMirStorageId(),
-                    hirDeclaration.Name,
-                    mirOrigin);
-                var mirArrayType = MirType.Array(
-                    declaredElementQType,
-                    declaredArrayLength);
-                var mirArrayValue = CreateMirValue(
-                    mirArrayType,
-                    hirDeclaredSymbol.Id,
-                    mirOrigin);
-                _traceSink?.LinkStorage(
-                    hirDeclaredSymbol.Id,
-                    _mirCallableId,
-                    mirArrayStorage.Id);
-                EmitMirInstruction(new MirArrayCreate(
-                    mirArrayCreationInstructionId,
-                    mirArrayValue,
-                    mirArrayStorage,
-                    mirArrayInitialization,
-                    mirElementValueIds,
-                    mirOrigin));
-                _currentFlowState.TrackDeclaredHirSymbol(
-                    hirDeclaredSymbol.Id);
-                _currentFlowState.CurrentMirValueByHirSymbolId[
-                        hirDeclaredSymbol.Id] =
-                    mirArrayValue.Id;
-                return;
+                value = LowerExpressionAs(hirDeclaration.Value, MirType.Scalar(type));
+                TraceMirValueForHirSymbol(value, hirDeclaredSymbol.Id);
             }
-
-            var declaredScalarQType = hirDeclaredSymbol.Type
-                ?? hirDeclaration.Type
-                ?? throw MirLoweringError(
-                    $"scalar `{hirDeclaration.Name}` has no inferred type");
-            var mirInitialValueId = LowerExpressionAs(
-                hirDeclaration.Value,
-                MirType.Scalar(declaredScalarQType));
-            TraceMirValueForHirSymbol(
-                mirInitialValueId,
-                hirDeclaredSymbol.Id);
             _currentFlowState.TrackDeclaredHirSymbol(hirDeclaredSymbol.Id);
-            _currentFlowState.CurrentMirValueByHirSymbolId[
-                    hirDeclaredSymbol.Id] =
-                mirInitialValueId;
+            _currentFlowState.CurrentMirValueByHirSymbolId[hirDeclaredSymbol.Id] = value;
+        }
+
+        private MirValueId LowerArrayInitializer(
+            HirExpression expression, QType elementType, MirOrigin origin, Symbol? binding = null)
+        {
+            var name = binding?.SourceName ?? $"array_{expression.Id.Value}";
+            IReadOnlyList<MirValueId> elements;
+            int length;
+            MirArrayInitialization initialization;
+            if (expression is HirArrayLiteralExpression literal)
+            {
+                elements = literal.Elements
+                    .Select(element => LowerExpressionAs(element, MirType.Scalar(elementType)))
+                    .ToArray();
+                length = elements.Count;
+                initialization = MirArrayInitialization.ExplicitElements;
+            }
+            else if (expression is HirArrayCreationExpression creation)
+            {
+                if (binding?.ArrayLength is int declaredLength)
+                    length = declaredLength;
+                else if (BoundFolder.Fold(creation.Length, _hirArtifact.Model) is BoundNum { Value: >= 1 and <= int.MaxValue } bound)
+                    length = (int)bound.Value;
+                else
+                    throw MirLoweringError($"validated allocation `{name}` has no constant length");
+                elements = Array.Empty<MirValueId>();
+                initialization = MirArrayInitialization.ZeroInitialized;
+            }
+            else throw MirLoweringError($"expected an array initializer, got {expression.GetType().Name}");
+
+            var storage = new MirArrayStorage(AllocateMirStorageId(), name, origin);
+            var result = CreateMirValue(MirType.Array(elementType, length), binding?.Id, origin);
+            if (binding is not null) _traceSink?.LinkStorage(binding.Id, _mirCallableId, storage.Id);
+            EmitMirInstruction(new MirArrayCreate(
+                AllocateMirInstructionId(), result, storage, initialization, elements, origin));
+            return result.Id;
         }
 
         private void LowerAssignment(HirAssignmentStatement hirAssignment)
@@ -733,7 +712,8 @@ internal static class QoraMirLowering
         private MirValueId? LowerUserOperationCall(
             HirCallExpression hirCall,
             HirCallable hirUserOperation,
-            IReadOnlyList<QGateModifier> modifiers)
+            IReadOnlyList<QGateModifier> modifiers,
+            Symbol? resultBinding = null)
         {
             var mirCallOrigin = MirOriginFor(hirCall);
             var mirCallOperands =
@@ -804,9 +784,20 @@ internal static class QoraMirLowering
             var mirUserOperationId =
                 new MirCallableId(hirUserOperation.Id.Value);
             RefreshArrayCallOperands(hirCall, mirCallOperands);
-            var result = hirUserOperation.ReturnType is { } returnType
-                ? CreateMirValue(MirType.Scalar(returnType), null, mirCallOrigin)
-                : null;
+            MirValue? result = null;
+            MirArrayStorage? resultStorage = null;
+            if (hirUserOperation.ReturnType is { } shape)
+            {
+                var type = shape.IsArray ? _lowerCallable(hirUserOperation).ReturnType!.Value : MirType.Scalar(shape.Type);
+                result = CreateMirValue(type, resultBinding?.Id, mirCallOrigin);
+                if (type.IsArray)
+                {
+                    resultStorage = new MirArrayStorage(AllocateMirStorageId(),
+                        resultBinding?.SourceName ?? $"call_result_{result.Id.Value}", mirCallOrigin);
+                    if (resultBinding is not null)
+                        _traceSink?.LinkStorage(resultBinding.Id, _mirCallableId, resultStorage.Id);
+                }
+            }
             EmitMirQuantumApply(
                 new MirUserCallableTarget(
                     mirUserOperationId),
@@ -814,7 +805,7 @@ internal static class QoraMirLowering
                 mirMutableArrayResults,
                 LowerModifiersToMirFunctors(modifiers),
                 mirCallOrigin,
-                result);
+                result, resultStorage);
             foreach (var (
                          hirSymbolId,
                          updatedMirArrayValueId) in mirMutableArrayValueUpdates)
@@ -826,14 +817,14 @@ internal static class QoraMirLowering
             return result?.Id;
         }
 
-        private MirValueId LowerValueCall(HirCallExpression hirCall)
+        private MirValueId LowerValueCall(HirCallExpression hirCall, Symbol? resultBinding = null)
         {
             var symbol = RequireHirCallTargetSymbol(hirCall);
             if (symbol.Kind == SymbolKind.Callable)
             {
                 var callable = RequireHirCallableDeclaration(symbol);
                 if (!callable.IsFunction)
-                    return LowerUserOperationCall(hirCall, callable, Array.Empty<QGateModifier>())
+                    return LowerUserOperationCall(hirCall, callable, Array.Empty<QGateModifier>(), resultBinding)
                         ?? throw MirLoweringError($"void operation `{hirCall.Name}` used as a value");
             }
             return LowerPureCall(hirCall);
@@ -905,7 +896,7 @@ internal static class QoraMirLowering
                 MirUserCallableTarget
                     when hirUserFunction?.ReturnType
                         is { } hirReturnQType =>
-                    MirType.Scalar(hirReturnQType),
+                    MirType.Scalar(hirReturnQType.Type),
                 MirBuiltinFunctionTarget mirBuiltinTarget
                     when QoraGates.Functions.TryGetValue(
                         mirBuiltinTarget.Name,
@@ -953,6 +944,19 @@ internal static class QoraMirLowering
             var mirConditionValueId = LowerExpressionAs(
                 hirIf.Condition,
                 MirType.Scalar(QType.Bool));
+            // The target needs the widths of possible returns, not those in provably dead
+            // arms. Evaluate the condition above: a constant result may still have effects.
+            if (_hirCallable.ReturnType is { IsArray: true } &&
+                BooleanFolder.Fold(hirIf.Condition, _hirArtifact.Model) is { } outcome)
+            {
+                var selected = outcome ? hirIf.Then : hirIf.Else;
+                var skipped = outcome ? hirIf.Else : hirIf.Then;
+                foreach (var statement in skipped.Statements) MarkUnreachableDeclarations(statement);
+                _currentFlowState.PushHirSymbolLifetimeFrame();
+                LowerStatements(selected.Statements);
+                _currentFlowState.PopHirSymbolLifetimeFrame();
+                return;
+            }
             var mirBranchBlock = RequireCurrentMirBlock();
             var flowStateBeforeBranch = _currentFlowState.Clone();
             var mirThenBlock = CreateMirBlock(mirOrigin);
@@ -1196,6 +1200,13 @@ internal static class QoraMirLowering
 
         private void LowerWhile(HirWhileStatement hirWhile)
         {
+            if (_hirCallable.ReturnType is { IsArray: true } &&
+                BooleanFolder.Fold(hirWhile.Condition, _hirArtifact.Model) == false)
+            {
+                LowerExpressionAs(hirWhile.Condition, MirType.Scalar(QType.Bool));
+                foreach (var statement in hirWhile.Body.Statements) MarkUnreachableDeclarations(statement);
+                return;
+            }
             var mirOrigin = MirOriginFor(hirWhile);
             var flowStateBeforeLoop = _currentFlowState.Clone();
             var mirPreheaderBlock = RequireCurrentMirBlock();
@@ -1383,7 +1394,7 @@ internal static class QoraMirLowering
             var mirReturnValueId = _hirCallable.ReturnType is { } hirReturnType
                 ? LowerExpressionAs(
                     hirReturn.Value,
-                    MirType.Scalar(hirReturnType))
+                    hirReturnType.IsArray ? MirType.Array(hirReturnType.Type) : MirType.Scalar(hirReturnType.Type))
                 : LowerExpression(hirReturn.Value);
             ReturnFromCurrentMirBlock(mirReturnValueId, mirOrigin);
         }
@@ -1655,7 +1666,7 @@ internal static class QoraMirLowering
 
                 case HirArrayLiteralExpression or HirArrayCreationExpression:
                     throw MirLoweringError(
-                        "an array value escaped its declaration during MIR lowering");
+                        "an array initializer reached MIR lowering without an expected element type");
 
                 default:
                     throw MirLoweringError(
@@ -1668,7 +1679,9 @@ internal static class QoraMirLowering
             HirExpression hirExpression,
             MirType expectedMirType)
         {
-            var mirValueId = LowerExpression(hirExpression);
+            var mirValueId = expectedMirType.IsArray && hirExpression is (HirArrayLiteralExpression or HirArrayCreationExpression)
+                ? LowerArrayInitializer(hirExpression, expectedMirType.ElementType, MirOriginFor(hirExpression))
+                : LowerExpression(hirExpression);
             RequireExactMirType(hirExpression, mirValueId, expectedMirType);
             return mirValueId;
         }
@@ -1930,17 +1943,7 @@ internal static class QoraMirLowering
             MirType expectedMirType)
         {
             var actualMirType = MirTypeOf(mirValueId);
-            if (actualMirType == expectedMirType)
-                return;
-            if (actualMirType.IsArray
-                && expectedMirType.IsArray
-                && actualMirType.ElementType == expectedMirType.ElementType
-                && (expectedMirType.KnownLength is null
-                    || actualMirType.KnownLength
-                    == expectedMirType.KnownLength))
-            {
-                return;
-            }
+            if (expectedMirType.Accepts(actualMirType)) return;
             throw MirLoweringError(
                 $"validated call argument has type {actualMirType}, expected {expectedMirType}");
         }
@@ -1986,7 +1989,7 @@ internal static class QoraMirLowering
             MirType expectedMirType)
         {
             var actualMirType = MirTypeOf(mirValueId);
-            if (actualMirType == expectedMirType)
+            if (expectedMirType.Accepts(actualMirType))
                 return;
 
             throw MirLoweringError(
@@ -2038,7 +2041,8 @@ internal static class QoraMirLowering
             IReadOnlyList<MirMutableArrayResult> mirMutableArrayResults,
             IReadOnlyList<MirFunctor> mirFunctors,
             MirOrigin mirOrigin,
-            MirValue? result = null)
+            MirValue? result = null,
+            MirArrayStorage? resultStorage = null)
         {
             // Argument expressions run left-to-right. A later argument may operate on a
             // qubit selected earlier; the call consumes its state after all arguments run.
@@ -2098,7 +2102,7 @@ internal static class QoraMirLowering
                 mirMutableArrayResults,
                 mirFunctors,
                 mirOrigin,
-                result));
+                result, resultStorage));
 
             foreach (var mirQubitResult in mirQubitResults)
                 UpdateCurrentQubitAfterWrite(mirQubitResult);

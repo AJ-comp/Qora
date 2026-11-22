@@ -6,6 +6,52 @@ namespace Qora.Tests;
 public sealed class MirOperationReturnTests
 {
     [Fact]
+    public void ConstantOutcomeDiscardsOnlyTheDeadReturnNotTheConditionEffects()
+    {
+        var program = Compile("""
+            operation Touch(q: Qubit): bool { X(q); return false; }
+            operation Main(): bit[] {
+                use q = Qubit[1];
+                if (Touch(q[0]) || true) { return [M(q[0])]; }
+                return [0, 0];
+            }
+            """);
+        Assert.Equal(MirType.Array(QType.Bit, 1), program.EntryPoint.ReturnType);
+        var call = Assert.Single(Instructions(program.EntryPoint).OfType<MirQuantumApply>());
+        Assert.Equal("Touch", program.RequireCallable(Assert.IsType<MirUserCallableTarget>(call.Target).Callable).Name);
+        Assert.Single(Instructions(program.EntryPoint).OfType<MirMeasure>());
+        Assert.Single(program.EntryPoint.Blocks.Select(b => b.Terminator).OfType<MirReturn>());
+    }
+
+    [Fact]
+    public void ReturnedArrayOwnsStorageIndependentOfTheCallersArgument()
+    {
+        var compiled = Compiler.Compile("""
+            operation Main(): bit {
+                var source: bit[] = [1, 0];
+                var copy = Snapshot(source);
+                copy[0] = 0;
+                return source[0];
+            }
+            operation Snapshot(bits: bit[]): bit[] { return bits; }
+            """);
+        Assert.True(compiled.Succeeded, string.Join(" | ", compiled.Diagnostics.Select(d => d.Error.Message)));
+        var mir = Assert.IsType<MirSnapshot>(compiled.Mir);
+        var main = mir.Program.EntryPoint;
+        var call = Assert.Single(Instructions(main).OfType<MirQuantumApply>());
+        var copy = Assert.IsType<MirArrayStorage>(call.ResultStorage);
+        var original = Assert.Single(Instructions(main).OfType<MirArrayCreate>()).Storage;
+        Assert.NotEqual(copy.Id, original.Id);
+        Assert.Equal(MirType.Array(QType.Bit, 2), main.StorageTypeOf(copy));
+
+        var provenance = mir.Analyses.StorageProvenance(main);
+        var write = Assert.Single(Instructions(main).OfType<MirArrayStore>());
+        var read = Assert.Single(Instructions(main).OfType<MirArrayLoad>());
+        Assert.Equal(copy.Id, Assert.Single(provenance.ProvenanceOf(write.Array).PossibleStorages));
+        Assert.Equal(original.Id, Assert.Single(provenance.ProvenanceOf(read.Array).PossibleStorages));
+    }
+
+    [Fact]
     public void ReturningOperationRemainsAnOperationAndItsCallIsEffectful()
     {
         var program = Compile("""

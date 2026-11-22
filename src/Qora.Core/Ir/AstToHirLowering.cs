@@ -184,7 +184,9 @@ internal static class AstToHirLowering
             .OfType<AstTerminal>()
             .Select(TerminalText)
             .FirstOrDefault(TypeKeywords.Contains);
-        var returnType = ParseType(returnKeyword);
+        QValueShape? returnType = syntax.Items.OfType<AstNonTerminal>().Any(item => item.Name == "ArrayType")
+            ? new QValueShape(QType.Bit, IsArray: true)
+            : ParseType(returnKeyword);
         if (isFunction && returnType is null)
             throw QInternal("received a function without an explicit return type");
 
@@ -272,9 +274,13 @@ internal static class AstToHirLowering
             "While" => LowerWhile(syntax, session, span),
             "Repeat" => LowerRepeat(syntax, session, span),
             "Return" => session.Return(
-                ExpressionOf(syntax) is { } returnedExpression
-                    ? LowerValueExpression(returnedExpression, session)
-                    : null,
+                syntax.Items.OfType<AstNonTerminal>().FirstOrDefault() switch
+                {
+                    null => null,
+                    { Name: "ArrayLiteral" } literal => LowerArrayLiteral(literal, session),
+                    { Name: "ArrayNew" } creation => LowerArrayCreation(creation, session),
+                    var expr => LowerValueExpression(expr, session),
+                },
                 span),
             _ => throw QInternal(
                 $"found unsupported statement AST node `{syntax.Name}`"),
@@ -396,7 +402,7 @@ internal static class AstToHirLowering
             : arrayCreation is not null
                 ? LowerArrayCreation(arrayCreation, session)
                 : LowerValueExpression(
-                    ExpressionOf(syntax),
+                    syntax.Items.OfType<AstNonTerminal>().FirstOrDefault(item => item.Name is "Expr" or "Call"),
                     session);
         var type = ParseType(DeclarationType(syntax));
 
@@ -636,7 +642,7 @@ internal static class AstToHirLowering
         AstNonTerminal syntax) =>
         syntax.Items
             .OfType<AstNonTerminal>()
-            .Where(item => !IsParameter(item));
+            .Where(item => !IsParameter(item) && item.Name != "ArrayType");
 
     private static IEnumerable<AstNonTerminal> BodyStatements(
         AstNonTerminal syntax) =>

@@ -171,6 +171,9 @@ public readonly record struct MirType
     public static MirType Array(QType elementType, int? knownLength = null) =>
         new(elementType, isArray: true, knownLength);
 
+    internal bool Accepts(MirType actual) =>
+        this == actual || (IsArray && KnownLength is null && actual.IsArray && ElementType == actual.ElementType);
+
     public override string ToString()
     {
         var element = ElementType.ToString().ToLowerInvariant();
@@ -404,7 +407,7 @@ public sealed class MirCallable
             MirArrayStorage Storage,
             MirClassicalParameter? Parameter,
             int? ParameterIndex,
-            MirArrayCreate? Allocation)> _storageSites;
+            MirInstruction? Allocation)> _storageSites;
     private readonly FrozenDictionary<MirQubitKey, MirQubit> _qubits;
 
     internal MirCallable(
@@ -472,6 +475,21 @@ public sealed class MirCallable
     public bool ContainsBlock(MirBlockId id) =>
         _blocks.ContainsKey(id);
 
+    internal static IEnumerable<MirValueId> ReachableReturnValues(
+        MirBlock entry, Func<MirBlockId, MirBlock> blockById)
+    {
+        var visited = new HashSet<MirBlockId>();
+        var pending = new Stack<MirBlockId>();
+        pending.Push(entry.Id);
+        while (pending.TryPop(out var id))
+        {
+            if (!visited.Add(id)) continue;
+            var terminator = blockById(id).Terminator;
+            if (terminator is MirReturn { Value: { } value }) yield return value;
+            foreach (var successor in terminator.Successors) pending.Push(successor);
+        }
+    }
+
     public MirBlock RequireBlock(MirBlockId id) =>
         _blocks.TryGetValue(id, out var block)
             ? block
@@ -532,7 +550,7 @@ public sealed class MirCallable
 
     /// <summary>
     /// Returns whether a storage is a parameter region or a local allocation. The kind is derived
-    /// from the parameter or array-create site which owns the storage identity.
+    /// from the parameter or instruction which owns the storage identity.
     /// </summary>
     public MirArrayStorageKind StorageKindOf(MirArrayStorage storage)
     {
@@ -545,7 +563,7 @@ public sealed class MirCallable
     /// <summary>
     /// Returns the authoritative type of a storage region from the SSA value which defines it.
     /// Parameter storage is typed by its parameter value; local storage is typed by its
-    /// <see cref="MirArrayCreate"/> result.
+    /// allocating instruction's first result (array creation or a by-value call return).
     /// </summary>
     public MirType StorageTypeOf(MirArrayStorage storage)
     {
@@ -555,7 +573,7 @@ public sealed class MirCallable
             MirArrayStorageKind.Parameter =>
                 ParameterDefining(storage).Value.Type,
             MirArrayStorageKind.Local =>
-                AllocationDefining(storage).Result.Type,
+                AllocationDefining(storage).Results[0].Type,
             _ => throw MalformedStorage(
                 storage,
                 "has an unknown derived storage kind"),
@@ -645,14 +663,14 @@ public sealed class MirCallable
         return (definition.Parameter, parameterIndex);
     }
 
-    private MirArrayCreate AllocationDefining(MirArrayStorage storage)
+    private MirInstruction AllocationDefining(MirArrayStorage storage)
     {
         var definition = _storageSites[storage.Id];
         if (definition.Allocation is not { } allocation)
         {
             throw MalformedStorage(
                 storage,
-                "does not identify its defining array-create instruction");
+                "does not identify its allocating instruction");
         }
 
         return allocation;
@@ -725,7 +743,7 @@ public sealed class MirCallable
                 MirArrayStorage Storage,
                 MirClassicalParameter? Parameter,
                 int? ParameterIndex,
-                MirArrayCreate? Allocation)> Sites) CollectStorages(
+                MirInstruction? Allocation)> Sites) CollectStorages(
         IReadOnlyList<IMirParameter> parameters,
         IReadOnlyList<MirBlock> blocks)
     {
@@ -736,7 +754,7 @@ public sealed class MirCallable
                 MirArrayStorage Storage,
                 MirClassicalParameter? Parameter,
                 int? ParameterIndex,
-                MirArrayCreate? Allocation)>();
+                MirInstruction? Allocation)>();
 
         for (var parameterIndex = 0; parameterIndex < parameters.Count; parameterIndex++)
         {
@@ -763,14 +781,17 @@ public sealed class MirCallable
         {
             foreach (var instruction in block.Instructions)
             {
-                if (instruction is not MirArrayCreate allocation)
+                var storage = instruction switch
+                {
+                    MirArrayCreate create => create.Storage,
+                    MirQuantumApply apply => apply.ResultStorage,
+                    _ => null,
+                };
+                if (storage is null)
                     continue;
-
-                var storage = allocation.Storage;
-                ArgumentNullException.ThrowIfNull(storage);
                 if (!sites.TryAdd(
                         storage.Id,
-                        (storage, Parameter: null, ParameterIndex: null, allocation)))
+                        (storage, Parameter: null, ParameterIndex: null, instruction)))
                 {
                     throw new ArgumentException(
                         $"array storage identity {storage.Id} is defined more than once",
@@ -2173,13 +2194,17 @@ public sealed record MirQuantumApply : MirInstruction
         IReadOnlyList<MirMutableArrayResult> mutableArrayResults,
         IReadOnlyList<MirFunctor> functors,
         MirOrigin origin,
-        MirValue? result = null)
+        MirValue? result = null,
+        MirArrayStorage? resultStorage = null)
         : base(id, origin)
     {
         ArgumentNullException.ThrowIfNull(target);
-        if (result is not null && (target is not MirUserCallableTarget || result.Type.IsArray))
-            throw new ArgumentException("only a user operation can return a scalar value", nameof(result));
+        if (result is not null && target is not MirUserCallableTarget)
+            throw new ArgumentException("only a user operation can return a value", nameof(result));
+        if ((result?.Type.IsArray == true) != (resultStorage is not null))
+            throw new ArgumentException("an array return requires its own caller-local storage", nameof(resultStorage));
         Result = result;
+        ResultStorage = resultStorage;
         Target = target;
         _operands = MirCollections.Freeze(operands);
         _qubitResults = MirCollections.Freeze(qubitResults);
@@ -2193,6 +2218,8 @@ public sealed record MirQuantumApply : MirInstruction
 
     public MirCallTarget Target { get; }
     public MirValue? Result { get; }
+    /// <summary>The caller's independent copy of the returned array; never aliases call operands.</summary>
+    public MirArrayStorage? ResultStorage { get; }
     public IReadOnlyList<MirCallOperand> Operands => _operands;
     public override IReadOnlyList<MirQubitAfterInstruction> QubitResults => _qubitResults;
     public IReadOnlyList<MirMutableArrayResult> MutableArrayResults => _mutableArrayResults;

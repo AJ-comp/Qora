@@ -2,6 +2,15 @@
 
 All notable changes to the Qora Language extension.
 
+## 0.35.0 — 2026-11-22
+
+- Bundles **Qora 0.42.0** for Windows x64, macOS Apple Silicon, and Linux x64. The new
+  `operation-bits` snippet demonstrates returning a bit array from an operation.
+- Run groups whole arrays in the results histogram: `[1, 0]` is one result per shot, not two
+  separate measurements. A one-element register is displayed as `[1]`, distinct from the scalar `1`.
+- If an operation can return different lengths, Qora and MIR accept it. When exporting OpenQASM,
+  the compiler reports `QASM003` instead of padding or truncating the result.
+
 ## 0.34.0 — 2026-11-19
 
 - Bundles **Qora 0.41.0**. Logical expressions (`!`, `&&`, `||`) can now be stored, passed, and returned

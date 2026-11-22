@@ -387,7 +387,23 @@ internal static class QoraValidator
                 DeferUnknownControlFlow: IsGenericOp(op) && willBeRechecked));
             if (op.IsFunction) ValidateFunctionShape(op, ctx);
             if (op.ReturnType is { } returnType && !AlwaysReturns(op.Body))
-                Add(errors, "QSEM035", $"{(op.IsFunction ? "function" : "operation")} `{Simple(op.Name)}` must return a value of type `{TypeName(returnType)}` on every path (an `if` that returns must also cover the other path — with an `else`, or with a `return` after it)", op.Span);
+                Add(errors, "QSEM035", $"{(op.IsFunction ? "function" : "operation")} `{Simple(op.Name)}` must return a value of type `{returnType}` on every path (an `if` that returns must also cover the other path — with an `else`, or with a `return` after it)", op.Span);
+        }
+
+        // All callable scopes are now bound, including forward references. A computed result
+        // may come from a concrete allocation or from a parameter forwarded through other calls.
+        // Expand both alternatives into the same floor facts as a directly passed array.
+        if (calls.Any(call => call.ResultExpression is not null))
+        {
+            var widths = new HirArrayWidths(model, sourceSnapshot?.Structure ?? new HirStructuralIndex(program), opById);
+            for (var i = 0; i < calls.Count; i++)
+                if (calls[i] is { ResultExpression: { } expression } call && widths.Of(expression) is { } range)
+                {
+                    calls[i] = call with { ArgLength = range.Minimum };
+                    foreach (var parameterId in range.Parameters)
+                        if (model.FindSymbol(parameterId) is { } parameter)
+                            calls.Add(call with { CallerParam = parameter.SourceName, ResultExpression = null });
+                }
         }
 
         // Rung B'/P4 disposition, derived from the recorded facts. First PROPAGATE: a caller that hands its
@@ -413,11 +429,12 @@ internal static class QoraValidator
         }
         var ownershipByCallable = ownershipWork.ToDictionary(work => work.Callable.Id);
         foreach (var c in calls)
-            if (c.ArgLength is int have
-                && needsByOp.TryGetValue(c.CalleeCallableId, out var calleeNeeds)
-                && calleeNeeds.TryGetValue(c.CalleeParam, out var need) && have < need)
+            if (needsByOp.TryGetValue(c.CalleeCallableId, out var calleeNeeds)
+                && calleeNeeds.TryGetValue(c.CalleeParam, out var need)
+                && c.ArgLength is int have && have < need)
             {
-                Add(errors, "QSEM016", $"in `{c.CallerOpName}`: `{c.ArgName}` has {have} element(s), but `{c.CalleeName}` indexes `{c.CalleeParam}[{need - 1}]` — it needs at least {need}", c.Span);
+                var lengthDescription = c.ResultExpression is null ? $"has {have}" : $"can return as few as {have}";
+                Add(errors, "QSEM016", $"in `{c.CallerOpName}`: `{c.ArgName}` {lengthDescription} element(s), but `{c.CalleeName}` indexes `{c.CalleeParam}[{need - 1}]` — it needs at least {need}", c.Span);
                 if (c.CallSiteId is HirNodeId statementId
                     && ownershipByCallable.TryGetValue(c.CallerCallableId, out var work))
                     work.InvalidStatements.Add(statementId);
@@ -606,7 +623,7 @@ internal static class QoraValidator
         string CalleeName,
         string CalleeParam, string ArgName, int? ArgLength, string? CallerParam,
         HirNodeId? CallSiteId,
-        SourceSpan? Span);
+        SourceSpan? Span, HirExpression? ResultExpression = null);
 
     /// <summary>Where <see cref="CheckCall"/> deposits <see cref="ArrayCallFact"/>s: the calling op's Id plus
     /// the per-run shared list. Null when the callee is not a user operation (built-in gates take no
@@ -754,8 +771,8 @@ internal static class QoraValidator
                             Add(ctx.Errors, "QSEM029", $"in `{opName}`: array `{d.Name}` needs an explicit element type such as `int[]`", d.Span);
                         if (d.Value is not (
                                 HirArrayLiteralExpression
-                                or HirArrayCreationExpression))
-                            Add(ctx.Errors, "QSEM029", $"in `{opName}`: array `{d.Name}` must be initialized with an array literal or `new T[N]`", d.Span);
+                                or HirArrayCreationExpression or HirCallExpression))
+                            Add(ctx.Errors, "QSEM029", $"in `{opName}`: array `{d.Name}` must be initialized with an array literal, `new T[N]`, or an array-returning operation", d.Span);
                         if (d.Value is
                             HirArrayLiteralExpression
                             {
@@ -798,6 +815,7 @@ internal static class QoraValidator
                     else if (ctx.SemanticModel.FindSymbol(d.Id) is
                              {
                                  Type: { } declaredScalarType,
+                                 IsArray: false,
                              }
                              && declaredScalarType != QType.Qubit)
                     {
@@ -1124,9 +1142,24 @@ internal static class QoraValidator
                         out var returnExpressionOwnsTypeError,
                         reportArrayOperatorErrors: false);
                     if (ctx.Op.ReturnType is { } returnType)
-                        RecordScalarConversion(returnedValue, returnType, ctx);
+                    {
+                        if (!returnType.IsArray)
+                        {
+                            if (returnedValue is HirArrayLiteralExpression &&
+                                ExpressionTypes.TypeOf(returnedValue, ctx.SemanticModel, ctx.OpById) is null)
+                                Add(ctx.Errors, "QSEM037", $"in `{opName}`: callable return expects `{returnType}`, not an array literal", ret.Span);
+                            RecordScalarConversion(returnedValue, returnType.Type, ctx);
+                        }
+                        else if (returnedValue is HirArrayLiteralExpression literalResult)
+                            foreach (var element in literalResult.Elements)
+                                RecordScalarConversion(element, returnType.Type, ctx);
+                    }
                     else
                         Add(ctx.Errors, "QSEM035", $"in `{opName}`: an operation without a return type can use `return;`, but cannot return a value", ret.Span);
+                    if (returnedValue is HirArrayCreationExpression returnedAllocation)
+                        CheckAllocationSize(returnedAllocation.Length,
+                            ExpressionTypes.TypeOf(returnedAllocation, ctx.SemanticModel, ctx.OpById)?.KnownLength,
+                            "returned array", ret.Span, ctx);
                     var returnCallsAreValid = true;
                     if (ContainsMisplacedMeasurement(returnedValue))
                     {
@@ -2172,6 +2205,18 @@ internal static class QoraValidator
             {
                 if (p.IsArray)
                 {
+                    // A returned array is an owned temporary. A read-only borrow can consume it directly;
+                    // explicit move/mutable arguments still require a named binding above.
+                    if (arg.Expression is HirCallExpression && argType is { IsArray: true } returnedArray &&
+                        argSym is null && permissionValid && p.Ownership == QOwnershipMode.Borrowed && p.Access == QAccessMode.ReadOnly)
+                    {
+                        if (returnedArray.Type != p.Type)
+                            Add(errors, "QSEM006", $"in `{opName}`: parameter `{p.Name}` of `{calleeName}` expects `{TypeName(p.Type)}[]`, but the operation returns `{returnedArray}`", span);
+                        else if (floors is not null && sig is HirCallable directCallee)
+                            pendingFloorFacts.Add(new ArrayCallFact(floors.CallerCallableId, opName, directCallee.Id,
+                                calleeName, p.Name, HirExpressions.Render(arg.Expression), null, null, statementId, span, arg.Expression));
+                        continue;
+                    }
                     if (argSym is not { IsArray: true, Type: { } actualType }
                         || actualType == QType.Qubit)
                         Add(errors, "QSEM006", $"in `{opName}`: parameter `{p.Name}` of `{calleeName}` expects `{TypeName(p.Type)}[]`, but the argument is not a classical array", span);
@@ -2191,9 +2236,13 @@ internal static class QoraValidator
                         RecordStorageViews(p, arg);
                         if (p.Ownership == QOwnershipMode.Moved) movedCandidates.Add(argSym);
                         if (floors is not null && sig is HirCallable callee)
-                            pendingFloorFacts.Add(argSym.ArrayLength is int have
-                                ? new ArrayCallFact(floors.CallerCallableId, opName, callee.Id, calleeName, p.Name, argSym.SourceName, have, null, statementId, span)
-                                : new ArrayCallFact(floors.CallerCallableId, opName, callee.Id, calleeName, p.Name, argSym.SourceName, null, argSym.SourceName, statementId, span));
+                        {
+                            var unsized = argSym.ArrayLength is null;
+                            var parameter = argSym.Kind == SymbolKind.Parameter;
+                            pendingFloorFacts.Add(new ArrayCallFact(floors.CallerCallableId, opName, callee.Id, calleeName,
+                                p.Name, argSym.SourceName, argSym.ArrayLength, unsized && parameter ? argSym.SourceName : null,
+                                statementId, span, unsized && !parameter ? arg.Expression : null));
+                        }
                     }
                     continue;
                 }
@@ -2810,8 +2859,7 @@ internal static class QoraValidator
 
         var length = symbol.Type == QType.Qubit ? symbol.RegisterSize : symbol.ArrayLength;
 
-        // P4 — the access is on a classical-array PARAMETER (the only unknown-length classical array: locals
-        // always have a known length, and a parameter's length arrives with each argument). The maximum index
+        // P4 — for a classical-array PARAMETER the maximum index
         // this access provably reaches becomes the parameter's minimum required length — recorded as DATA
         // from the SAME folded value the verdict logic used, and resolved against every call site after the
         // walk. A need no legal array can meet (past int.MaxValue) is provably wrong for EVERY argument.
@@ -2819,7 +2867,7 @@ internal static class QoraValidator
         {
             if (maxIndex >= int.MaxValue)
                 Add(errors, "QSEM016", $"in `{opName}`: `{name}[{index}]` can never be in bounds — no array has more than {int.MaxValue} element(s)", span);
-            else
+            else if (symbol.Kind == SymbolKind.Parameter)
                 paramNeeds[name] = System.Math.Max(paramNeeds.GetValueOrDefault(name), maxIndex + 1);
         }
 

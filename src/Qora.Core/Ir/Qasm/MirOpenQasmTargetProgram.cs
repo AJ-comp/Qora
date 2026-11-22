@@ -580,11 +580,10 @@ public sealed record MirQasmCallableDefinition
         MirQasmType? returnType,
         IEnumerable<MirQasmStatement> body)
     {
-        if (returnType is MirQasmQubitType or MirQasmArrayType
-            || returnType is MirQasmBitType { IsRegister: true })
+        if (returnType is not (null or MirQasmScalarType or MirQasmBitType))
         {
             throw new ArgumentException(
-                "the current OpenQASM target supports only scalar function returns",
+                "an OpenQASM def must return a scalar or a fixed-width bit register",
                 nameof(returnType));
         }
 

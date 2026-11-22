@@ -32,12 +32,16 @@ internal static class BoundFolder
         HirSemanticModel semanticModel) =>
         Fold(expression, scope: null, semanticModel);
 
-    private static Bound? Fold(
+    internal static Bound? Fold(
         HirExpression? expression,
         Scope? scope,
-        HirSemanticModel? semanticModel) =>
+        HirSemanticModel? semanticModel,
+        Func<HirExpression, Bound?>? specializedLeaf = null) =>
         expression switch
         {
+            HirMemberAccessExpression or HirNameExpression
+                when specializedLeaf?.Invoke(expression) is { } actual => actual,
+
             HirIntegerLiteralExpression integer =>
                 new BoundNum(integer.Value),
 
@@ -72,7 +76,7 @@ internal static class BoundFolder
                 Apply(
                     new BoundNum(0),
                     HirBinaryOperator.Subtract,
-                    Fold(unary.Operand, scope, semanticModel)),
+                    Fold(unary.Operand, scope, semanticModel, specializedLeaf)),
 
             HirBinaryExpression binary
                 when binary.Operator is
@@ -81,14 +85,14 @@ internal static class BoundFolder
                     or HirBinaryOperator.Multiply
                     or HirBinaryOperator.Divide =>
                 Apply(
-                    Fold(binary.Left, scope, semanticModel),
+                    Fold(binary.Left, scope, semanticModel, specializedLeaf),
                     binary.Operator,
-                    Fold(binary.Right, scope, semanticModel)),
+                    Fold(binary.Right, scope, semanticModel, specializedLeaf)),
 
             _ => null,
         };
 
-    private static Symbol? ReferencedSymbol(
+    internal static Symbol? ReferencedSymbol(
         HirNameExpression name,
         Scope? scope,
         HirSemanticModel? semanticModel) =>
@@ -225,7 +229,13 @@ internal static class BooleanFolder
 {
     internal static bool? Fold(
         HirExpression? expression,
-        Scope scope)
+        Scope scope) => Fold(expression, scope, semanticModel: null);
+
+    internal static bool? Fold(HirExpression? expression, HirSemanticModel semanticModel) =>
+        Fold(expression, scope: null, semanticModel);
+
+    internal static bool? Fold(HirExpression? expression, Scope? scope, HirSemanticModel? semanticModel,
+        Func<HirExpression, Bound?>? specializedInteger = null, Func<HirNameExpression, bool?>? specializedBoolean = null)
     {
         switch (expression)
         {
@@ -238,18 +248,21 @@ internal static class BooleanFolder
                 return false;
 
             case HirNameExpression name
-                when scope.Lookup(name.Name) is
+                when BoundFolder.ReferencedSymbol(name, scope, semanticModel) is
                 {
                     IsConst: true,
                     FoldedBoolean: { } constant,
                 }:
                 return constant;
 
+            case HirNameExpression name when specializedBoolean is not null:
+                return specializedBoolean(name);
+
             case HirUnaryExpression
             {
                 Operator: HirUnaryOperator.LogicalNot,
             } unary:
-                return Fold(unary.Operand, scope) is { } operand
+                return Fold(unary.Operand, scope, semanticModel, specializedInteger, specializedBoolean) is { } operand
                     ? !operand
                     : null;
 
@@ -258,8 +271,8 @@ internal static class BooleanFolder
                 Operator: HirBinaryOperator.LogicalAnd,
             } and:
             {
-                var left = Fold(and.Left, scope);
-                var right = Fold(and.Right, scope);
+                var left = Fold(and.Left, scope, semanticModel, specializedInteger, specializedBoolean);
+                var right = Fold(and.Right, scope, semanticModel, specializedInteger, specializedBoolean);
                 if (left == false || right == false)
                     return false;
                 return left == true && right == true
@@ -272,8 +285,8 @@ internal static class BooleanFolder
                 Operator: HirBinaryOperator.LogicalOr,
             } or:
             {
-                var left = Fold(or.Left, scope);
-                var right = Fold(or.Right, scope);
+                var left = Fold(or.Left, scope, semanticModel, specializedInteger, specializedBoolean);
+                var right = Fold(or.Right, scope, semanticModel, specializedInteger, specializedBoolean);
                 if (left == true || right == true)
                     return true;
                 return left == false && right == false
@@ -289,8 +302,8 @@ internal static class BooleanFolder
                     or HirBinaryOperator.LessThanOrEqual
                     or HirBinaryOperator.GreaterThan
                     or HirBinaryOperator.GreaterThanOrEqual
-                && BoundFolder.Fold(comparison.Left, scope) is BoundNum left
-                && BoundFolder.Fold(comparison.Right, scope) is BoundNum right:
+                && BoundFolder.Fold(comparison.Left, scope, semanticModel, specializedInteger) is BoundNum left
+                && BoundFolder.Fold(comparison.Right, scope, semanticModel, specializedInteger) is BoundNum right:
                 return comparison.Operator switch
                 {
                     HirBinaryOperator.Equal => left.Value == right.Value,
@@ -307,8 +320,8 @@ internal static class BooleanFolder
                     HirBinaryOperator.Equal
                     or HirBinaryOperator.NotEqual:
             {
-                var left = Fold(comparison.Left, scope);
-                var right = Fold(comparison.Right, scope);
+                var left = Fold(comparison.Left, scope, semanticModel, specializedInteger, specializedBoolean);
+                var right = Fold(comparison.Right, scope, semanticModel, specializedInteger, specializedBoolean);
                 if (left is null || right is null)
                     return null;
                 return comparison.Operator == HirBinaryOperator.Equal

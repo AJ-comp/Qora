@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using Qora;
 using Qora.Compiler;
+using Qora.Ir;
 using Qora.Ir.Mir;
 using Qora.Ir.Mir.Analysis;
 
@@ -67,12 +68,19 @@ if (args.Contains("--json"))
         var resolvedValidation = compilation.Hir.ResolvedValidation;
         var mir = compilation.Mir;
         var openQasm = compilation.Targets.OpenQasm;
-        var entryResult = openQasm is null ? null : new
+        object? entryResult = null;
+        if (openQasm is not null)
         {
-            type = openQasm.Source.Program.EntryPoint.ReturnType?.ElementType.ToString().ToLowerInvariant() ?? "void",
-            outputName = openQasm.Program.EntryOutput?.EmittedName
-                ?? throw new InvalidOperationException("OpenQASM entry output is missing."),
-        };
+            var output = openQasm.Program.EntryOutput
+                ?? throw new InvalidOperationException("OpenQASM entry output is missing.");
+            entryResult = output.Type is MirQasmBitType { IsRegister: true } register
+                ? new { type = "bit[]", outputName = output.EmittedName, length = register.Width }
+                : new
+                {
+                    type = openQasm.Source.Program.EntryPoint.ReturnType?.ElementType.ToString().ToLowerInvariant() ?? "void",
+                    outputName = output.EmittedName,
+                };
+        }
         var diagnostics = compilation.Diagnostics
             .Select(diagnostic =>
             {

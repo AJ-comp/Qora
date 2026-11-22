@@ -36,7 +36,7 @@ internal sealed partial class HirRewriteSession
         IReadOnlyList<HirParameter> parameters,
         HirBlock body,
         bool isFunction,
-        QType? returnType,
+        QValueShape? returnType,
         string? displayName)
     {
         RequireAllOwned(parameters, nameof(parameters));
@@ -434,7 +434,7 @@ internal sealed partial class HirRewriteSession
         IReadOnlyList<HirParameter> parameters,
         HirBlock body,
         bool isFunction,
-        QType? returnType,
+        QValueShape? returnType,
         string? displayName)
     {
         RequireAllOwned(parameters, nameof(parameters));
