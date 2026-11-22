@@ -1327,7 +1327,8 @@ internal static class MirOpenQasmLowering
                 case MirBuiltinFunctionTarget builtin:
                     return new MirQasmFunctionCallExpression(
                         new MirQasmBuiltinFunctionTarget(
-                            Identifier.Sanitize(builtin.Name, "builtin")),
+                            QoraGates.Functions[builtin.Name].QasmName
+                            ?? Identifier.Sanitize(builtin.Name, "builtin")),
                         arguments);
 
                 default:

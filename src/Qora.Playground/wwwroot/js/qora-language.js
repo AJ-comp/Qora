@@ -16,7 +16,7 @@
     monaco.languages.setMonarchTokensProvider('qora', {
         keywords: ['operation', 'function', 'return', 'use', 'new', 'const', 'var', 'move', 'if', 'else', 'for', 'in', 'while', 'repeat', 'until'],
         types: ['Qubit', 'int', 'float', 'bool', 'bit', 'angle'],
-        gates: ['H', 'X', 'Y', 'Z', 'S', 'T', 'CNOT', 'CX', 'CZ', 'SWAP', 'CCX', 'Rx', 'Ry', 'Rz', 'M', 'AsInt'],
+        gates: ['H', 'X', 'Y', 'Z', 'S', 'T', 'CNOT', 'CX', 'CZ', 'SWAP', 'CCX', 'Rx', 'Ry', 'Rz', 'M', 'AsInt', 'ArcCos', 'Sqrt'],
         constants: ['pi'],
         tokenizer: {
             root: [

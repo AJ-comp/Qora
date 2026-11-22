@@ -35,7 +35,7 @@
     },
     "gates": {
       "name": "support.function.qor",
-      "match": "\\b(CNOT|CCX|SWAP|CX|CY|CZ|Rx|Ry|Rz|H|X|Y|Z|S|T|M|AsInt)\\b"
+      "match": "\\b(CNOT|CCX|SWAP|CX|CY|CZ|Rx|Ry|Rz|H|X|Y|Z|S|T|M|AsInt|ArcCos|Sqrt)\\b"
     },
     "constants": {
       "name": "constant.language.qor",

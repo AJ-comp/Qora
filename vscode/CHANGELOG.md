@@ -2,13 +2,16 @@
 
 All notable changes to the Qora Language extension.
 
-## Unreleased
+## 0.36.0 — 2026-11-22
 
+- Bundles **Qora 0.43.0** for Windows x64, macOS Apple Silicon, and Linux x64, with the built-in math
+  functions `Sqrt` and `ArcCos`.
 - **Run summary:** the compile line of the run log now counts only gate statements. The compiler's
   classical assignments (for example `v0 = 0;`), declarations, control flow, `reset`, calls to `def`
   subroutines and the bodies of `gate` definitions are no longer counted, so a program without gates
   reports 0 gates and one `X` reports 1. Regression tests use real Qora output.
 - The Korean run log says 큐비트 instead of 큐빗, the term the Korean documentation uses.
+- Highlights the built-in functions `ArcCos` and `Sqrt`.
 
 ## 0.35.0 — 2026-11-22
 

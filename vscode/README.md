@@ -7,9 +7,9 @@ parser engine. You write circuits in a Q#/C#-flavored syntax and it transpiles t
 extension gives `.qor` files syntax highlighting, hover docs, **live error diagnostics**, and a
 **transpile** command, and local execution with typed entry-return results.
 
-Extension **0.35.0** bundles **Qora 0.42.0**. Operations can now return `bit[]`. When `Main` returns an array, Run shows one ordered list per shot—even a single bit is displayed as `[1]`, not `1`.
-See the [extension release notes](CHANGELOG.md#0350--2026-11-22) and
-[language release notes](https://github.com/AJ-comp/Qora/blob/main/CHANGELOG.md#0420--2026-11-22).
+Extension **0.36.0** bundles **Qora 0.43.0**, which adds the built-in math functions `Sqrt` and `ArcCos`: `Ry(2.0 * ArcCos(0.6), q[0])` writes a rotation angle from an amplitude. The run log's compile summary now counts only gate statements. Since Qora 0.42.0, operations can return `bit[]`, and Run shows one ordered list per shot—even a single bit is displayed as `[1]`, not `1`.
+See the [extension release notes](CHANGELOG.md#0360--2026-11-22) and
+[language release notes](https://github.com/AJ-comp/Qora/blob/main/CHANGELOG.md#0430--2026-11-22).
 
 ## Features
 
@@ -39,8 +39,8 @@ Large integers remain exact decimal values. A custom compiler must provide the c
 ## Known simulator limitations
 
 The standard setup pins Braket SDK 1.127.8 and default simulator 1.43.1; it does not include the pending
-upstream fixes used in local verification. The pinned simulator passes 72 of 81 execution cases in Qora 0.42.0,
-including the new bit-array return case. The same nine cases failed in 0.41.0, where all 80 passed with four Braket patches combined. Boolean arrays and other affected paths therefore
+upstream fixes used in local verification. The pinned simulator passes 72 of 81 execution cases in Qora 0.43.0,
+including the bit-array return case. The same nine cases failed in 0.41.0 and 0.42.0; in 0.41.0, all 80 passed with four Braket patches combined. Boolean arrays and other affected paths therefore
 remain restricted in the standard setup. Measuring `Qubit[]` helper-parameter elements and some
 noncontiguous controlled-gate layouts remain unresolved even with those patches. See the
 [backend limitations](https://github.com/AJ-comp/Qora/blob/main/CHANGELOG.md#known-execution-limitations)

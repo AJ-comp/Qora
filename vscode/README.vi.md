@@ -7,9 +7,9 @@
 đổi sang **OpenQASM 3**. Tiện ích này cung cấp cho tệp `.qor` khả năng tô sáng cú pháp, chú thích khi di
 chuột, **báo lỗi thời gian thực**, một lệnh **chuyển đổi** và thực thi cục bộ giữ nguyên kiểu của giá trị trả về.
 
-Tiện ích **0.35.0** đi kèm **Qora 0.42.0**. Giờ đây, operation có thể trả về `bit[]`. Nếu `Main` trả về mảng, kết quả của mỗi shot được hiển thị theo thứ tự chỉ số. Mảng một bit vẫn hiển thị dưới dạng `[1]`, không phải `1`.
-Xem [ghi chú phát hành tiện ích](CHANGELOG.md#0350--2026-11-22) và
-[ghi chú phát hành ngôn ngữ](https://github.com/AJ-comp/Qora/blob/main/CHANGELOG.md#0420--2026-11-22).
+Tiện ích **0.36.0** đi kèm **Qora 0.43.0**, bổ sung các hàm toán học dựng sẵn `Sqrt` và `ArcCos`: `Ry(2.0 * ArcCos(0.6), q[0])` viết góc quay trực tiếp từ biên độ. Phần tóm tắt biên dịch trong nhật ký chạy giờ chỉ đếm các câu lệnh cổng. Từ Qora 0.42.0, operation có thể trả về `bit[]`; nếu `Main` trả về mảng, kết quả của mỗi shot được hiển thị theo thứ tự chỉ số. Mảng một bit vẫn hiển thị dưới dạng `[1]`, không phải `1`.
+Xem [ghi chú phát hành tiện ích](CHANGELOG.md#0360--2026-11-22) và
+[ghi chú phát hành ngôn ngữ](https://github.com/AJ-comp/Qora/blob/main/CHANGELOG.md#0430--2026-11-22).
 
 ## Tính năng
 
@@ -38,7 +38,7 @@ Số nguyên lớn được giữ chính xác dưới dạng thập phân. Trìn
 ## Giới hạn đã biết của trình mô phỏng
 
 Thiết lập tiêu chuẩn dùng Braket SDK 1.127.8 và default simulator 1.43.1, không chứa các bản sửa chưa phát hành dùng khi kiểm chứng cục bộ.
-Với Qora 0.42.0, trình mô phỏng mặc định vượt qua 72 trong 81 trường hợp kiểm thử, bao gồm trường hợp mới trả về mảng bit. Chín trường hợp còn lại cũng đã thất bại ở 0.41.0. Khi đó, cả 80 trường hợp đều đạt sau khi kết hợp bốn bản sửa Braket; bản cài đặt tiêu chuẩn vẫn có hạn chế với mảng Boolean và một số trường hợp khác.
+Với Qora 0.43.0, trình mô phỏng mặc định vượt qua 72 trong 81 trường hợp kiểm thử, bao gồm trường hợp trả về mảng bit. Chín trường hợp còn lại cũng đã thất bại ở 0.41.0 và 0.42.0. Ở 0.41.0, cả 80 trường hợp đều đạt sau khi kết hợp bốn bản sửa Braket; bản cài đặt tiêu chuẩn vẫn có hạn chế với mảng Boolean và một số trường hợp khác.
 Ngay cả khi kết hợp các bản sửa, việc đo phần tử của tham số helper `Qubit[]` và một số bố trí qubit không liên tiếp của cổng có điều khiển vẫn chưa được sửa.
 Hãy xem [giới hạn backend](https://github.com/AJ-comp/Qora/blob/main/CHANGELOG.md#known-execution-limitations) trước khi dùng các chương trình bị ảnh hưởng.
 Biên dịch thành công không đảm bảo trình mô phỏng luôn trả về kết quả đúng.

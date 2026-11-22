@@ -17,6 +17,32 @@ emitted as **OpenQASM 3.0**.
 > named there may have been retired by a later release; the newest release notes and current architecture
 > documents define the present pipeline.
 
+## 0.43.0 — 2026-11-22
+
+VS Code extension **0.36.0** bundles the Qora 0.43.0 compiler.
+
+### Built-in math functions
+
+- **`Sqrt(x)`** and **`ArcCos(x)`** take one `float` argument (an `int` converts by the usual implicit rule,
+  and the conversion is emitted as `float(...)`) and return a `float`, emitted as OpenQASM 3's own `sqrt` and
+  `arccos`. A rotation angle can now be written from an amplitude instead of a precomputed number:
+  `Ry(2.0 * ArcCos(0.6), q[0])` prepares `0.6|0⟩ + 0.8|1⟩`, and `1.0 / Sqrt(2.0)` is the amplitude of an
+  equal superposition.
+- A wrong argument is QSEM006 (`ArcCos(true)`, an `angle`, an array, or a wrong argument count). A qubit or a
+  measurement keeps its own single diagnostic (QSEM026, QSEM005), and a `float` result does not become an
+  `int` (QSEM037). Like `AsInt`, the names are reserved: an operation named `Sqrt` or `ArcCos` is QSEM013.
+- Generated code never gives a binding the name `sqrt` or `arccos`, so it cannot shadow the OpenQASM
+  built-ins those calls emit. The VS Code extension and the playground highlight both names.
+
+### Execution and tooling
+
+- The VS Code run log's compile summary counts only gate statements. Classical assignments emitted by the
+  compiler (for example `v0 = 0;`), declarations, control flow, `reset`, calls to `def` subroutines and the
+  bodies of `gate` definitions are no longer counted, so a program without gates reports 0 gates. The Korean
+  run log says 큐비트 instead of 큐빗.
+- On the pinned Braket simulator 1.43.1, the execution suite still passes **72 of 81** cases; the same nine
+  cases fail as on 0.42.0. `Sqrt` and `ArcCos` are covered by compiler tests and add no execution case.
+
 ## 0.42.0 — 2026-11-22
 
 VS Code extension **0.35.0** bundles the Qora 0.42.0 compiler.
