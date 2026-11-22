@@ -1,0 +1,78 @@
+name: CI
+# Runs on every push to a branch and on every pull request: the compiler and language-service tests, the
+# extension's result tests, the Braket runner tests, and the release guard (tools/check_release.py), which
+# keeps the version numbers, changelogs, README samples and released history consistent. On branches other
+# than main and in pull requests the guard also rejects version changes: version numbers change only in the
+# release commit on main. When this workflow passes for a push to main, the Release workflow runs.
+# See RELEASING.md.
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  # Keep every run on main: each one is the gate for the Release workflow.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  test:
+    name: tests and release guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The release guard compares against the release tags and main.
+          fetch-depth: 0
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Compiler and language-service tests
+        run: dotnet test Qora.slnx -c Release
+
+      - name: Build the CLI for the runner tests and the release guard
+        run: dotnet build src/Qora -c Debug
+
+      - name: Extension tests
+        run: |
+          npm ci --prefix vscode
+          npm test --prefix vscode
+
+      - name: Runner tests
+        run: |
+          python -m pip install -r vscode/runner/requirements.txt
+          python -m unittest discover -s tools -p 'test_*.py'
+
+      - name: Release guard
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          REF: ${{ github.ref }}
+        run: |
+          base=""
+          if [ "$EVENT" = "pull_request" ]; then
+            base="origin/$BASE_REF"
+          elif [ "$REF" != "refs/heads/main" ]; then
+            base="origin/main"
+          fi
+          python tools/check_release.py --cli src/Qora/bin/Debug/net10.0/Qora.dll ${base:+--base-ref "$base"}
