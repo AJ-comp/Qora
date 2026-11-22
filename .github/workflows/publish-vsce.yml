@@ -2,12 +2,16 @@ name: Release
 
 # Releases Qora from main. It runs after the CI workflow passes for a push to main, and by hand from the
 # Actions tab. Each run brings three places up to date with the versions in the repository:
-#   1. the VS Code Marketplace: the extension version in vscode/package.json, one package per platform;
-#   2. the git tag vX.Y.Z: the Qora version in src/Qora.Core/Ir/QoraTypes.cs, on the release commit;
+#   1. the git tag vX.Y.Z: the Qora version in src/Qora.Core/Ir/QoraTypes.cs, on the release commit;
+#   2. the VS Code Marketplace: the extension version in vscode/package.json, one package per platform;
 #   3. the GitHub release "Qora X.Y.Z / VS Code extension A.B.C": the CHANGELOG entry and the .vsix files.
-# Whatever already exists is left alone, so a run with nothing new does nothing, and a missing piece (for
-# example a release that stopped half way) is filled in by the next run. tools/check_release.py runs first
-# and stops the release when the versions, changelogs or release history disagree. See RELEASING.md.
+# Only what is missing is created: each platform is checked on its own, and an existing release only gets the
+# .vsix files it lacks. The tag comes first, so a run that stops half way is finished by the next run from the
+# same commit. tools/check_release.py stops the release when the versions, changelogs or release history
+# disagree, and decides what is missing (decide_release, tested in tools/test_check_release.py).
+#
+# A run by hand only builds the packages unless "publish" is turned on; a publishing run must be on main and
+# its commit must have passed CI. See RELEASING.md.
 #
 # For each target OS/arch it builds a self-contained, single-file Qora CLI (NO trim / NO AOT — Janglim's
 # grammar reflection breaks under both) and bundles it into a platform-specific .vsix.
@@ -22,8 +26,8 @@ on:
     branches: [main]
   workflow_dispatch:
     inputs:
-      dry_run:
-        description: "Package only: no Marketplace publish, no tag, no GitHub release"
+      publish:
+        description: "Publish what is missing (tag, Marketplace, GitHub release). Off: only build the packages."
         type: boolean
         default: false
 
@@ -44,13 +48,17 @@ jobs:
        github.event.workflow_run.event == 'push' &&
        github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
     outputs:
       tag: ${{ steps.plan.outputs.tag }}
       title: ${{ steps.plan.outputs.title }}
       sha: ${{ steps.plan.outputs.sha }}
-      publish: ${{ steps.plan.outputs.publish }}
+      publish_targets: ${{ steps.plan.outputs.publish_targets }}
       tag_needed: ${{ steps.plan.outputs.tag_needed }}
       release_needed: ${{ steps.plan.outputs.release_needed }}
+      missing_assets: ${{ steps.plan.outputs.missing_assets }}
       build: ${{ steps.plan.outputs.build }}
     steps:
       - uses: actions/checkout@v4
@@ -67,53 +75,58 @@ jobs:
         run: npm ci --prefix vscode
 
       - id: plan
-        name: Decide what to publish
+        name: Decide what is missing
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
           HEAD_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
-          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+          PUBLISH: ${{ inputs.publish }}
         run: |
           set -euo pipefail
-          python3 tools/check_release.py --plan-out plan.env --notes-out release-notes.md
-          source plan.env
-
-          # The Marketplace: is this extension version live yet? A failed query stops the run rather than guess.
-          extension_id="$(node -p "const p = require('./vscode/package.json'); p.publisher + '.' + p.name")"
-          meta="$(./vscode/node_modules/.bin/vsce show "$extension_id" --json)"
-          published="$(printf '%s' "$meta" | node -e "let s='';process.stdin.on('data',c=>s+=c).on('end',()=>process.stdout.write(((JSON.parse(s).versions||[])[0]||{}).version||''))")"
-          publish=false; [ "$published" = "$ext" ] || publish=true
-
-          # The tag and the GitHub release.
-          tag_needed=true; [ -z "$tag_sha" ] || tag_needed=false
-          release_needed=true
-          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then release_needed=false; fi
-
-          # The commit to build, tag and release: the tagged commit if the tag exists; the commit being
-          # published now if the Marketplace lacks this version; otherwise the commit that set the version
-          # (the Marketplace already has the packages built from it).
-          if [ -n "$tag_sha" ]; then sha="$tag_sha"
-          elif [ "$publish" = true ]; then sha="$HEAD_SHA"
-          else sha="$intro_sha"; fi
-
-          build=false
-          if [ "$DRY_RUN" = true ]; then
-            publish=false; tag_needed=false; release_needed=false; build=true
-          elif [ "$publish" = true ] || [ "$release_needed" = true ]; then
-            build=true
+          package_only=()
+          if [ "$EVENT" = workflow_dispatch ]; then
+            if [ "$PUBLISH" != true ]; then
+              package_only=(--package-only)
+            else
+              if [ "$REF" != refs/heads/main ]; then
+                echo "::error::A publishing run must be on main (this run is on $REF)."; exit 1
+              fi
+              passed="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$HEAD_SHA&status=success" --jq '.total_count')"
+              if [ "$passed" -lt 1 ]; then
+                echo "::error::CI has not passed for $HEAD_SHA; publish after it passes."; exit 1
+              fi
+            fi
           fi
 
+          # The release guard first; it also gives the tag name.
+          python3 tools/check_release.py --plan-out base.env
+          source base.env
+
+          # What already exists. A failed Marketplace query stops the run rather than guess.
+          extension_id="$(node -p "const p = require('./vscode/package.json'); p.publisher + '.' + p.name")"
+          ./vscode/node_modules/.bin/vsce show "$extension_id" --json > marketplace.json
+          if ! gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json assets > release.json 2> release.err; then
+            if grep -qi 'release not found' release.err; then echo null > release.json; else cat release.err; exit 1; fi
+          fi
+
+          python3 tools/check_release.py --plan-out plan.env --notes-out release-notes.md \
+            --marketplace-json marketplace.json --release-json release.json --head-sha "$HEAD_SHA" "${package_only[@]}"
+          source plan.env
           {
-            echo "tag=$tag"; echo "title=$title"; echo "sha=$sha"; echo "publish=$publish"
-            echo "tag_needed=$tag_needed"; echo "release_needed=$release_needed"; echo "build=$build"
+            echo "tag=$tag"; echo "title=$title"; echo "sha=$sha"; echo "publish_targets=$publish_targets"
+            echo "tag_needed=$tag_needed"; echo "release_needed=$release_needed"
+            echo "missing_assets=$missing_assets"; echo "build=$build"
           } >> "$GITHUB_OUTPUT"
           {
             echo "### Release plan for $title"
+            [ ${#package_only[@]} -eq 0 ] || echo "Run by hand without publish: the packages are only built."
             echo "| | |"; echo "|---|---|"
-            echo "| Marketplace | has ${published:-nothing}; publish $ext: **$publish** |"
-            echo "| Tag $tag | create: **$tag_needed** |"
-            echo "| GitHub release | create: **$release_needed** |"
             echo "| Commit | \`$sha\` |"
+            echo "| Tag $tag | create: **$tag_needed** |"
+            echo "| Marketplace $ext | publish: **${publish_targets:-nothing}** |"
+            echo "| GitHub release | create: **$release_needed**; add files: **${missing_assets:-none}** |"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Keep the release notes
@@ -122,10 +135,36 @@ jobs:
           name: release-notes
           path: release-notes.md
 
+  tag:
+    name: tag
+    needs: plan
+    if: needs.plan.outputs.tag_needed == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+
+      # The tag comes before any publishing, so a rerun after a partial failure builds the same commit.
+      - name: Create the tag
+        env:
+          TAG: ${{ needs.plan.outputs.tag }}
+          TITLE: ${{ needs.plan.outputs.title }}
+          SHA: ${{ needs.plan.outputs.sha }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "$TITLE" "$SHA"
+          git push origin "refs/tags/$TAG"
+
   build:
     name: ${{ matrix.target }}
-    needs: plan
-    if: needs.plan.outputs.build == 'true'
+    needs: [plan, tag]
+    if: >-
+      !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.build == 'true' &&
+      (needs.tag.result == 'success' || needs.tag.result == 'skipped')
     strategy:
       fail-fast: false
       # Publish one platform at a time: on a brand-new extension the first job CREATES it and the rest
@@ -184,7 +223,7 @@ jobs:
         run: npx --no-install vsce package --target ${{ matrix.target }} -o "qora-${{ matrix.target }}.vsix"
 
       - name: Publish to Marketplace
-        if: needs.plan.outputs.publish == 'true'
+        if: contains(format(',{0},', needs.plan.outputs.publish_targets), format(',{0},', matrix.target))
         run: npx --no-install vsce publish --packagePath "qora-${{ matrix.target }}.vsix"
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
@@ -196,24 +235,19 @@ jobs:
           path: vscode/qora-${{ matrix.target }}.vsix
 
   github-release:
-    name: tag and GitHub release
+    name: GitHub release
     needs: [plan, build]
     if: >-
       !cancelled() && needs.plan.result == 'success' && needs.build.result == 'success' &&
-      (needs.plan.outputs.tag_needed == 'true' || needs.plan.outputs.release_needed == 'true')
+      (needs.plan.outputs.release_needed == 'true' || needs.plan.outputs.missing_assets != '')
     runs-on: ubuntu-latest
     permissions:
       contents: write
     env:
+      GH_TOKEN: ${{ github.token }}
       TAG: ${{ needs.plan.outputs.tag }}
       TITLE: ${{ needs.plan.outputs.title }}
-      SHA: ${{ needs.plan.outputs.sha }}
     steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.plan.outputs.sha }}
-          fetch-depth: 0
-
       - name: Collect the .vsix files
         uses: actions/download-artifact@v4
         with:
@@ -227,19 +261,18 @@ jobs:
           name: release-notes
           path: notes
 
-      - name: Create the tag
-        if: needs.plan.outputs.tag_needed == 'true'
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -a "$TAG" -m "$TITLE" "$SHA"
-          git push origin "refs/tags/$TAG"
-
       - name: Create the GitHub release
         if: needs.plan.outputs.release_needed == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           ls dist/qora-*.vsix
           gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --latest \
             --title "$TITLE" --notes-file notes/release-notes.md dist/qora-*.vsix
+
+      - name: Add the missing .vsix files
+        if: needs.plan.outputs.release_needed != 'true' && needs.plan.outputs.missing_assets != ''
+        env:
+          MISSING: ${{ needs.plan.outputs.missing_assets }}
+        run: |
+          files=()
+          for name in ${MISSING//,/ }; do files+=("dist/$name"); done
+          gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" "${files[@]}"

@@ -49,17 +49,20 @@ tests, the runner tests and the release guard (`tools/check_release.py`).
 
 **Release** (`.github/workflows/publish-vsce.yml`) runs after CI passes for a push to `main`:
 
-1. *plan*: runs the release guard again, then compares the repository with the Marketplace, the tags and
-   the GitHub releases;
-2. *build*: builds the self-contained CLI and a `.vsix` for Windows x64, macOS arm64 and Linux x64, and
-   publishes them to the Marketplace if that extension version is not there yet;
-3. *tag and GitHub release*: creates `vX.Y.Z` on the release commit and the release
-   "Qora X.Y.Z / VS Code extension A.B.C" with the changelog entry and the three `.vsix` files, if they do
-   not exist yet.
+1. *plan*: runs the release guard again, then compares the repository with what already exists: each
+   platform's package on the Marketplace, the tag, the GitHub release and each of its `.vsix` files;
+2. *tag*: creates `vX.Y.Z` on the release commit before anything is published;
+3. *build*: builds the self-contained CLI and a `.vsix` for Windows x64, macOS arm64 and Linux x64 from the
+   tagged commit, and publishes the platforms the Marketplace does not have yet;
+4. *GitHub release*: creates the release "Qora X.Y.Z / VS Code extension A.B.C" with the changelog entry and
+   the three `.vsix` files, or adds the `.vsix` files an existing release lacks.
 
-Each piece is created only when it is missing. A run with nothing new does nothing, and a release that
-stopped half way is finished by the next run, or by *Actions → Release → Run workflow*. A *dry run* only
-builds the packages.
+Each piece is created only when it is missing, and each platform is checked on its own. A run with nothing
+new does nothing. If a run stops half way (say, after only Windows was published), the next run finishes it
+from the same tagged commit; to finish it at once, use *Actions → Release → Run workflow* on `main` with
+*publish* turned on. A run by hand without *publish* only builds the packages. A publishing run by hand must
+be on `main`, and CI must have passed for its commit. `decide_release` in `tools/check_release.py` makes these
+decisions, and `tools/test_check_release.py` covers the cases.
 
 The release guard fails when:
 

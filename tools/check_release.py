@@ -23,7 +23,10 @@ What it checks (RELEASING.md explains the rules):
    in the release commit on main.
 
 --plan-out and --notes-out are for the Release workflow: they write the versions, the tag and the commits
-it needs as shell assignments, and the GitHub release notes (the CHANGELOG entry plus install links).
+it needs as shell assignments, and the GitHub release notes (the CHANGELOG entry plus install links). Given
+what the Marketplace and GitHub already have (--marketplace-json from `vsce show --json`, --release-json from
+`gh release view --json assets` or `null`) and --head-sha, the plan also says what is missing: the platforms
+to publish, the tag, the release or single .vsix files, and the commit to build (decide_release).
 """
 from __future__ import annotations
 
@@ -46,6 +49,8 @@ EXT_CHANGELOG = 'vscode/CHANGELOG.md'
 READMES = ('README.md', 'README.ko.md', 'README.ja.md')
 EXT_READMES = ('vscode/README.md', 'vscode/README.ko.md', 'vscode/README.ja.md', 'vscode/README.vi.md')
 LLMS = 'docs/llms.txt'
+
+TARGETS = ('win32-x64', 'darwin-arm64', 'linux-x64')   # the Release workflow builds one .vsix per target
 
 VERSION_CONST = re.compile(r'public const string Value = "(\d+\.\d+\.\d+)";')
 DATED_HEADING = r'## {v} — \d{{4}}-\d{{2}}-\d{{2}}'
@@ -259,7 +264,38 @@ def check_branch(errors: list[str], q: str, e: str, base_ref: str) -> None:
                       f'Version numbers change only in the release commit on main; see RELEASING.md.')
 
 
-def write_plan(q: str, e: str, plan_out: str | None, notes_out: str | None) -> None:
+def decide_release(ext: str, tag_sha: str, intro_sha: str, head_sha: str, marketplace: dict | None,
+                   release: dict | None, package_only: bool = False, targets: tuple[str, ...] = TARGETS) -> dict:
+    """What the Release workflow still has to do for this extension version.
+
+    marketplace is the `vsce show --json` object; every published package is one entry of its "versions" list,
+    per target platform. release is the `gh release view --json assets` object, or None when there is no release.
+    The commit to build is the tagged commit once the tag exists (so a rerun after a partial failure rebuilds the
+    same commit), the commit being published when platforms are missing, and otherwise the commit that set the
+    version (the Marketplace already has packages built from it).
+    """
+    platforms = {entry.get('targetPlatform') for entry in (marketplace or {}).get('versions') or []
+                 if entry.get('version') == ext}
+    if None in platforms or 'universal' in platforms:
+        publish_targets: list[str] = []            # one package for every platform is already live
+    else:
+        publish_targets = [target for target in targets if target not in platforms]
+    expected_assets = [f'qora-{target}.vsix' for target in targets]
+    if release is None:
+        release_needed, missing_assets = True, []
+    else:
+        present = {asset.get('name') for asset in release.get('assets') or []}
+        release_needed, missing_assets = False, [name for name in expected_assets if name not in present]
+    if package_only:
+        return dict(sha=head_sha, publish_targets=[], tag_needed=False, release_needed=False, missing_assets=[], build=True)
+    sha = tag_sha or (head_sha if publish_targets else intro_sha)
+    build = bool(publish_targets) or release_needed or bool(missing_assets)
+    return dict(sha=sha, publish_targets=publish_targets, tag_needed=not tag_sha, release_needed=release_needed,
+                missing_assets=missing_assets, build=build)
+
+
+def write_plan(q: str, e: str, plan_out: str | None, notes_out: str | None, marketplace_json: str | None = None,
+               release_json: str | None = None, head_sha: str | None = None, package_only: bool = False) -> None:
     tag = f'v{q}'
     tag_sha = git('rev-list', '-n', '1', f'refs/tags/{tag}') or ''
     intro_sha = git('log', '-1', '--format=%H', '-S', f'public const string Value = "{q}";', '--', QORA_TYPES) or ''
@@ -268,6 +304,13 @@ def write_plan(q: str, e: str, plan_out: str | None, notes_out: str | None) -> N
     title = f'Qora {q} / VS Code extension {e}'
     if plan_out:
         values = dict(qora=q, ext=e, tag=tag, tag_sha=tag_sha, intro_sha=intro_sha, previous_tag=previous, title=title)
+        if marketplace_json and release_json and head_sha:
+            decision = decide_release(e, tag_sha, intro_sha, head_sha,
+                                      json.loads(Path(marketplace_json).read_text(encoding='utf-8')),
+                                      json.loads(Path(release_json).read_text(encoding='utf-8')), package_only)
+            values.update(sha=decision['sha'], publish_targets=','.join(decision['publish_targets']),
+                          tag_needed=str(decision['tag_needed']).lower(), release_needed=str(decision['release_needed']).lower(),
+                          missing_assets=','.join(decision['missing_assets']), build=str(decision['build']).lower())
         Path(plan_out).write_text(''.join(f'{key}={shlex.quote(value)}\n' for key, value in values.items()), encoding='utf-8')
     if notes_out:
         entry = sections(read(CHANGELOG) or '').get(q, '')
@@ -291,9 +334,15 @@ def main() -> int:
     parser.add_argument('--base-ref', help='on a branch or pull request: the main ref whose versions must be kept')
     parser.add_argument('--plan-out', help='write the release plan as shell assignments (Release workflow)')
     parser.add_argument('--notes-out', help='write the GitHub release notes (Release workflow)')
+    parser.add_argument('--marketplace-json', help='`vsce show --json` output: the packages already on the Marketplace')
+    parser.add_argument('--release-json', help='`gh release view --json assets` output, or a file containing null')
+    parser.add_argument('--head-sha', help='the commit the Release workflow runs on')
+    parser.add_argument('--package-only', action='store_true', help='plan a build without publishing anything')
     args = parser.parse_args()
     if args.fix_samples and not args.cli:
         parser.error('--fix-samples needs --cli')
+    if bool(args.marketplace_json) + bool(args.release_json) + bool(args.head_sha) not in (0, 3):
+        parser.error('--marketplace-json, --release-json and --head-sha go together')
 
     errors: list[str] = []
     notes: list[str] = []
@@ -312,7 +361,8 @@ def main() -> int:
             print(f'  - {error}', file=sys.stderr)
         return 1
     if args.plan_out or args.notes_out:
-        write_plan(q, e, args.plan_out, args.notes_out)
+        write_plan(q, e, args.plan_out, args.notes_out, args.marketplace_json, args.release_json, args.head_sha,
+                   args.package_only)
     print(f'release guard: OK (Qora {q}, extension {e})')
     return 0
 
