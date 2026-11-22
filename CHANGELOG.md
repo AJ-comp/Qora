@@ -17,6 +17,36 @@ emitted as **OpenQASM 3.0**.
 > named there may have been retired by a later release; the newest release notes and current architecture
 > documents define the present pipeline.
 
+## 0.42.0 — 2026-11-22
+
+VS Code extension **0.35.0** bundles the Qora 0.42.0 compiler.
+
+### Operation returns
+
+- An operation can return an array of bits by value. A caller can index the returned array, read
+  its `.Count`, pass it to another operation, or return it from `Main`. Changing the original array
+  after the call does not change the returned copy. Function return types are unchanged.
+- The Qora language and MIR allow different lengths on different return paths. OpenQASM export
+  needs one compile-time width per emitted operation: two paths of length 2 produce `bit[2]`;
+  paths of lengths 2 and 3 produce target diagnostic `QASM003`. No padding or truncation is performed.
+
+```qora
+operation Pair(): bit[] { return [1, 0]; }
+operation Main(): bit[] {
+    var bits: bit[] = Pair();
+    return bits;
+}
+```
+
+### Execution and tooling
+
+- The example returns `[1, 0]` per shot, in Qora index order. Single-element arrays remain lists
+  (`[1]`, not `1`); only the entry return value is displayed. For tool authors, CLI JSON uses
+  `entryResult: { type: "bit[]", outputName, length }`. Scalar and void result formats have not changed.
+- On the pinned Braket simulator 1.43.1, the new array-return case passes. The full execution suite
+  passes **72 of 81** cases, compared with **71 of 80** on 0.41.0. The same nine cases fail on both
+  compilers; they concern existing simulator limitations, not the new return type.
+
 ## 0.41.0 — 2026-11-19
 
 VS Code extension **0.34.0** bundles the Qora 0.41.0 compiler.

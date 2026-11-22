@@ -198,7 +198,7 @@ public static class MirQasmEmitter
                 ", ",
                 definition.Parameters.Select(RenderParameter));
             var returns = definition.ReturnType is { } returnType
-                ? $" -> {RenderReturnType(returnType)}"
+                ? $" -> {RenderValueType(returnType)}"
                 : string.Empty;
             text.AppendLine($"def {definition.EmittedName}({parameters}){returns} {{");
             EmitStatements(definition.Body, text, indent: 1, bindings);
@@ -407,15 +407,6 @@ public static class MirQasmEmitter
 
             return $"{RenderDeclarationType(parameter.Type)} {parameter.EmittedName}";
         }
-
-        private static string RenderReturnType(MirQasmType type) =>
-            type switch
-            {
-                MirQasmScalarType scalar => RenderScalarType(scalar),
-                MirQasmBitType { IsRegister: false } => "bit",
-                _ => throw new InvalidOperationException(
-                    $"QINTERNAL: unsupported OpenQASM return type {type}"),
-            };
 
         private static string RenderValueType(MirQasmType type) =>
             type switch

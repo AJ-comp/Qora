@@ -246,7 +246,7 @@ public sealed class HirCallable : HirDeclaration, ICallableSig
         IReadOnlyList<HirParameter> parameters,
         HirBlock body,
         bool isFunction = false,
-        QType? returnType = null,
+        QValueShape? returnType = null,
         string? displayName = null)
         : base(stamp)
     {
@@ -270,7 +270,7 @@ public sealed class HirCallable : HirDeclaration, ICallableSig
     public IReadOnlyList<HirParameter> Parameters { get; }
     public HirBlock Body { get; }
     public bool IsFunction { get; }
-    public QType? ReturnType { get; }
+    public QValueShape? ReturnType { get; }
     public string? DisplayName { get; }
     public string CalleeName => DisplayName ?? Name;
 

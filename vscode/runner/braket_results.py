@@ -10,8 +10,12 @@ def validate_entry_result(entry_result):
             "Incompatible Qora compiler: entryResult metadata is missing. "
             "Update the extension's compiler bundle or rebuild the configured Qora CLI."
         )
-    if entry_result.get("type") not in ("void", "bool", "bit", "int", "float", "angle"):
+    if entry_result.get("type") not in ("void", "bool", "bit", "bit[]", "int", "float", "angle"):
         raise ValueError("Unsupported entryResult type in Qora compiler output")
+    if entry_result["type"] == "bit[]":
+        length = entry_result.get("length")
+        if type(length) is not int or length < 1:
+            raise ValueError("A bit[] entryResult requires a positive register length")
     name = entry_result.get("outputName")
     if not isinstance(name, str) or not name.strip():
         raise ValueError("Qora compiler entryResult metadata has no outputName")
@@ -32,8 +36,15 @@ def validate_shots(shots):
         raise ValueError("shots must be a positive integer")
 
 
-def _return_value(value, return_type, shot_index):
+def _return_value(value, entry_result, shot_index):
+    return_type = entry_result["type"]
     where = f"Entry return value in shot {shot_index}"
+    if return_type == "bit[]":
+        if not isinstance(value, list) or len(value) != entry_result["length"]:
+            raise ValueError(f"{where} does not match the declared bit[] length")
+        if any(type(bit) is not int or bit not in (0, 1) for bit in value):
+            raise ValueError(f"{where} contains a non-bit element")
+        return value
     if return_type == "bool":
         if type(value) is not bool:
             raise ValueError(f"{where} is not a bool (true or false)")
@@ -59,7 +70,7 @@ def _return_value(value, return_type, shot_index):
 
 
 def entry_result_from_task(task_result, entry_result, shots):
-    """Preserve shot order and expose only the entry point's declared scalar return value."""
+    """One declared return value per shot; registers retain their original element order."""
     validate_entry_result(entry_result)
     validate_shots(shots)
     reported_shots = getattr(getattr(task_result, "task_metadata", None), "shots", None)
@@ -88,7 +99,7 @@ def entry_result_from_task(task_result, entry_result, shots):
             if type(value) is not int or value != 1:
                 raise ValueError(f"Missing entry completion marker in shot {index}")
         else:
-            values.append(_return_value(value, return_type, index))
+            values.append(_return_value(value, entry_result, index))
 
     result = {"type": return_type}
     if return_type != "void":

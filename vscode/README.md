@@ -7,9 +7,9 @@ parser engine. You write circuits in a Q#/C#-flavored syntax and it transpiles t
 extension gives `.qor` files syntax highlighting, hover docs, **live error diagnostics**, and a
 **transpile** command, and local execution with typed entry-return results.
 
-Extension **0.34.0** bundles **Qora 0.41.0**. Use short-circuit expressions as Boolean values and size qubit registers or classical arrays with compile-time integer expressions.
-See the [extension release notes](CHANGELOG.md#0340--2026-11-19) and
-[language migration guide](https://github.com/AJ-comp/Qora/blob/main/CHANGELOG.md#0410--2026-11-19).
+Extension **0.35.0** bundles **Qora 0.42.0**. Operations can now return `bit[]`. When `Main` returns an array, Run shows one ordered list per shot—even a single bit is displayed as `[1]`, not `1`.
+See the [extension release notes](CHANGELOG.md#0350--2026-11-22) and
+[language release notes](https://github.com/AJ-comp/Qora/blob/main/CHANGELOG.md#0420--2026-11-22).
 
 ## Features
 
@@ -29,7 +29,8 @@ See the [extension release notes](CHANGELOG.md#0340--2026-11-19) and
 
 ## Execution results
 
-The Run command displays only explicit entry return values: `bool`, `bit`, `int`, `float`, or `angle` (radians).
+The Run command displays only explicit entry return values: `bool`, `bit`, `bit[]`, `int`, `float`, or `angle` (radians).
+For a `bit[]`, each shot returns one ordered list (e.g. `[1, 0]`); its length must be known when exporting OpenQASM.
 `bool` results display as `true`/`false`, while measurement-oriented `bit` results remain `0`/`1`.
 For example, `operation Main(): bit { use q = Qubit[1]; H(q[0]); return M(q[0]); }` returns one bit per shot.
 Measurements stored in local variables and helper return values are not additional outputs, and Run does not add a final measurement.
@@ -38,8 +39,8 @@ Large integers remain exact decimal values. A custom compiler must provide the c
 ## Known simulator limitations
 
 The standard setup pins Braket SDK 1.127.8 and default simulator 1.43.1; it does not include the pending
-upstream fixes used in local verification. The pinned simulator passes 71 of 80 execution cases;
-with four Braket patches combined, all 80 pass. Boolean arrays and other affected paths therefore
+upstream fixes used in local verification. The pinned simulator passes 72 of 81 execution cases in Qora 0.42.0,
+including the new bit-array return case. The same nine cases failed in 0.41.0, where all 80 passed with four Braket patches combined. Boolean arrays and other affected paths therefore
 remain restricted in the standard setup. Measuring `Qubit[]` helper-parameter elements and some
 noncontiguous controlled-gate layouts remain unresolved even with those patches. See the
 [backend limitations](https://github.com/AJ-comp/Qora/blob/main/CHANGELOG.md#known-execution-limitations)

@@ -45,11 +45,19 @@ def load_and_run(name, src, expect_keys=None, subset=False, shots=1000):
         check(f"{name} (braket run)", False, f"{type(e).__name__}: {str(e)[:140]}"); return
     if expect_keys is None:
         check(f"{name} (void, {shots} completed shots)", returned == {"type": "void"}); return
-    got = set(returned.get("values", []))
+    got = {tuple(value) if isinstance(value, list) else value for value in returned["values"]}
     ok = got <= set(expect_keys) if subset else got == set(expect_keys)
     check(f"{name} (run: {sorted(got)})", ok, f"expected {sorted(expect_keys)}")
 
 print("== Qora entry return values on Braket LocalSimulator ==")
+
+load_and_run("bit[] helper result is returned in index order, one array per shot", """
+operation Pair(a: bit, b: bit): bit[] { return [a, b]; }
+operation Main(): bit[] {
+    use q = Qubit[2]; X(q[0]);
+    var a: bit = M(q[0]); var b: bit = M(q[1]);
+    return Pair(a, b);
+}""", {(1, 0)}, shots=4)
 
 load_and_run("B1 def Bell (서브루틴)", """
 operation Bell(q: Qubit[]) {

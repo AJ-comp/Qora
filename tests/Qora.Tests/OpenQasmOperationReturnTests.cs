@@ -94,6 +94,62 @@ public sealed class OpenQasmOperationReturnTests
     }
 
     [Fact]
+    public void DiscardedBitRegisterReturnKeepsItsEffectsButDoesNotBecomeAnEntryOutput()
+    {
+        var artifact = Compile("""
+            operation Read(q: Qubit): bit[] {
+                X(q);
+                var measured: bit[] = [M(q)];
+                return measured;
+            }
+            operation Main() {
+                use q = Qubit[1];
+                Read(q[0]);
+            }
+            """);
+
+        var output = Assert.IsType<MirQasmValueDeclarationStatement>(artifact.Program.EntryOutput);
+        Assert.Equal(new MirQasmScalarType(MirQasmScalarKind.Int), output.Type);
+        Assert.Null(artifact.Source.Program.EntryPoint.ReturnType);
+        Assert.Single(artifact.Program.Statements().OfType<MirQasmMeasurementAssignmentStatement>());
+        var call = Assert.Single(MirQasmTestModel.Statements(artifact.Program.EntryBody)
+            .OfType<MirQasmAssignmentStatement>(), value => value.Value is MirQasmFunctionCallExpression);
+        Assert.NotEqual(new MirQasmDeclarationReferenceExpression(output.Declaration), call.Target);
+    }
+
+    [Fact]
+    public void ReturningBorrowedBitArrayUsesTheActualWidthsAtBothCalls()
+    {
+        var artifact = Compile("""
+            operation Copy(bits: bit[]): bit[] { return bits; }
+            operation Main(): bit {
+                var first: bit[] = [1, 0];
+                var second: bit[] = [0, 1, 1];
+                var shortCopy: bit[] = Copy(first);
+                var longCopy: bit[] = Copy(second);
+                first[0] = 0;
+                second[2] = 0;
+                if (shortCopy[0] == 1) { return longCopy[2]; }
+                return 0;
+            }
+            """);
+
+        var widths = artifact.Program.Definitions.Select(definition =>
+        {
+            var parameter = Assert.Single(definition.Parameters);
+            var type = Assert.IsType<MirQasmBitType>(parameter.Type);
+            Assert.True(type.IsRegister);
+            Assert.Equal(type, definition.ReturnType);
+            return type.Width;
+        });
+        Assert.Equal(new[] { 2, 3 }, widths.Order());
+        var assignments = MirQasmTestModel.Statements(artifact.Program.EntryBody)
+            .OfType<MirQasmAssignmentStatement>()
+            .Where(assignment => assignment.Value is MirQasmFunctionCallExpression { Target: MirQasmUserFunctionTarget });
+        Assert.Equal(2, assignments.Select(assignment => assignment.Target).Distinct().Count());
+    }
+
+    [Fact]
     public void ReturningAnEarlierMeasurementDoesNotRemeasureTheQubit()
     {
         var artifact = Compile("""

@@ -464,7 +464,7 @@ internal abstract class HirConstructionSession
         IReadOnlyList<HirParameter> parameters,
         HirBlock body,
         bool isFunction = false,
-        QType? returnType = null,
+        QValueShape? returnType = null,
         string? displayName = null,
         SourceSpan? span = null)
     {

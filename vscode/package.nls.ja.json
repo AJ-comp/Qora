@@ -1,6 +1,6 @@
 {
   "displayName": "Qora 言語",
-  "description": "Qora 量子回路を記述し、リアルタイム診断、OpenQASM 3 変換、ローカルシミュレーションを利用できます。論理式と定数式によるレジスタ長の指定に対応。",
+  "description": "Qora 量子回路を記述し、OpenQASM 3 に出力できます。リアルタイム診断に対応し、ローカル実行時はショットごとのビット配列の結果を確認できます。",
   "command.transpile.title": "Qora: OpenQASM に変換",
   "command.showStages.title": "Qora: コンパイル段階を表示 (AST / HIR / MIR / OpenQASM)",
   "command.openExample.title": "Qora: サンプルを開く",

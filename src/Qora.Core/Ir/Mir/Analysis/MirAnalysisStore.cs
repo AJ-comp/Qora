@@ -118,7 +118,8 @@ public sealed class MirAnalysisStore
             _ => NewLazy(
                 () => MirBoundsAnalysis.AnalyzeVerified(
                     PathConditions(source),
-                    StorageProvenance(source)))).Value;
+                    StorageProvenance(source),
+                    new MirArrayLengthFacts(_program, StorageProvenance)))).Value;
     }
 
     private static Lazy<T> NewLazy<T>(Func<T> factory) =>

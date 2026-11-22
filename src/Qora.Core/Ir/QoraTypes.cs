@@ -3,7 +3,7 @@ namespace Qora.Ir;
 /// <summary>The compiler version stamped into emitted target artifacts.</summary>
 public static class QoraVersion
 {
-    public const string Value = "0.41.0";
+    public const string Value = "0.42.0";
 }
 
 public enum QType
@@ -14,6 +14,15 @@ public enum QType
     Float,
     Angle,
     Bool,
+}
+
+/// <summary>A scalar or whole-array value. An array's length need not be known by the language.</summary>
+public readonly record struct QValueShape(QType Type, bool IsArray, int? KnownLength = null)
+{
+    public static implicit operator QValueShape(QType scalar) => new(scalar, IsArray: false);
+
+    public override string ToString() =>
+        Type.ToString().ToLowerInvariant() + (IsArray ? "[]" : string.Empty);
 }
 
 public enum QOwnershipMode

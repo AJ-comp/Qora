@@ -65,6 +65,11 @@ internal static class Monomorphizer
             && genericById.TryGetValue(id, out var callable)
                 ? callable
                 : null;
+        var widths = new HirArrayWidths(validatedSource.Model, validatedSource.Source.Structure,
+            program.Callables.ToDictionary(c => c.Id));
+        int? RegisterWidth(HirExpression expression, IReadOnlyDictionary<string, int> registers) =>
+            widths.Of(expression, n => registers.TryGetValue(n.Name, out var size)
+                ? HirArrayWidths.Range.Of(size) : null)?.Exact;
 
         Dictionary<string, int> ConcreteRegisters(HirCallable callable)
         {
@@ -360,18 +365,9 @@ internal static class Monomorphizer
             HirCallable? specialization = null;
             if (generic is not null)
             {
-                var actualNames = new string?[arguments.Length];
-                for (var index = 0; index < arguments.Length; index++)
-                {
-                    actualNames[index] =
-                        arguments[index].Expression is HirNameExpression name
-                            ? name.Name
-                            : null;
-                }
-
                 specialization = SpecializationFor(
                     generic,
-                    actualNames,
+                    call.Arguments,
                     registers);
             }
 
@@ -426,13 +422,10 @@ internal static class Monomorphizer
                 declaration.Value,
                 registers,
                 copy);
-            if (declaration is
-                {
-                    IsArray: true,
-                    Type: QType.Bit,
-                })
+            if (validatedSource.Model.FindSymbol(declaration.Id) is { IsArray: true, Type: QType.Bit } symbol &&
+                (symbol.ArrayLength ?? RegisterWidth(declaration.Value, registers)) is int width)
             {
-                registers[declaration.Name] = DeclarationSize(declaration);
+                registers[declaration.Name] = width;
             }
             else
             {
@@ -702,10 +695,10 @@ internal static class Monomorphizer
 
         HirCallable SpecializationFor(
             HirCallable callee,
-            IReadOnlyList<string?> actualNames,
+            IReadOnlyList<HirArgument> arguments,
             IReadOnlyDictionary<string, int> registers)
         {
-            var bindings = new Dictionary<HirNodeId, int>();
+            var bindings = new Dictionary<HirNodeId, int?>();
             for (var index = 0;
                  index < callee.Parameters.Count;
                  index++)
@@ -713,13 +706,8 @@ internal static class Monomorphizer
                 var parameter = callee.Parameters[index];
                 if (!IsUnsizedArray(parameter))
                     continue;
-                var actualName = index < actualNames.Count
-                    ? actualNames[index]
-                    : null;
-                if (actualName is null
-                    || !registers.TryGetValue(
-                        actualName,
-                        out var size))
+                var size = RegisterWidth(arguments[index].Expression, registers);
+                if (size is null && parameter.IsQubitArray)
                 {
                     throw new InvalidOperationException(
                         $"QINTERNAL: call to `{callee.Name}` cannot bind the size of array parameter `{parameter.Name}` after validation");
@@ -737,7 +725,7 @@ internal static class Monomorphizer
             }
 
             var sizes = arrays
-                .Select(parameter => bindings[parameter.Id])
+                .Select(parameter => bindings[parameter.Id]?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "dynamic")
                 .ToArray();
             var key =
                 $"{callee.Id.Value}|{string.Join(",", sizes)}";
@@ -764,7 +752,7 @@ internal static class Monomorphizer
         string MakeName(
             string namespacePath,
             string baseName,
-            IReadOnlyList<int> sizes)
+            IReadOnlyList<string> sizes)
         {
             if (!namesByNamespace.TryGetValue(
                     namespacePath,
@@ -794,7 +782,7 @@ internal static class Monomorphizer
 
         HirCallable Specialize(
             HirCallable source,
-            IReadOnlyDictionary<HirNodeId, int> bindings,
+            IReadOnlyDictionary<HirNodeId, int?> bindings,
             string specializationName)
         {
             var parameters = new HirParameter[source.Parameters.Count];
@@ -888,10 +876,10 @@ internal static class Monomorphizer
         }
         if (result.Callables
             .SelectMany(callable => callable.Parameters)
-            .Any(IsUnsizedArray))
+            .Any(parameter => parameter.IsQubitArray && IsUnsizedArray(parameter)))
         {
             throw new InvalidOperationException(
-                "QINTERNAL: monomorphization left an unresolved Qubit[]/bit[] parameter in the specialized HIR");
+                "QINTERNAL: monomorphization left an unresolved Qubit[] parameter in the specialized HIR");
         }
 
         return new Result(rewrite.Publish(result));

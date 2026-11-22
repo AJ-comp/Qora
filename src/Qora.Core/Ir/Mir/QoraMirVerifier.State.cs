@@ -148,6 +148,7 @@ internal static partial class QoraMirVerifier
             MirCallable caller,
             MirStorageProvenanceSnapshot provenance)
         {
+            var lengths = new MirArrayLengthFacts(_program, MirStorageProvenanceAnalysis.AnalyzeUnchecked);
             foreach (var block in caller.Blocks)
             {
                 foreach (var instruction in block.Instructions)
@@ -200,10 +201,7 @@ internal static partial class QoraMirVerifier
 
                     var actual = (MirClassicalCallOperand)operands[index];
                     var actualValue = caller.RequireValue(actual.Value);
-                    var actualMinimumLength = GuaranteedMinimumArrayLength(
-                        caller,
-                        actualValue,
-                        provenance);
+                    var actualMinimumLength = lengths.Minimum(caller, actualValue, provenance.ProvenanceOf(actual.Value));
                     if (actualMinimumLength >= expected.MinimumLength)
                         continue;
 
@@ -217,37 +215,6 @@ internal static partial class QoraMirVerifier
             }
         }
 
-        private static int GuaranteedMinimumArrayLength(
-            MirCallable caller,
-            MirValue value,
-            MirStorageProvenanceSnapshot provenance)
-        {
-            if (value.Type.KnownLength is int knownLength)
-                return knownLength;
-
-            var possibleStorages = provenance.ProvenanceOf(value.Id);
-            if (!possibleStorages.IsComplete || possibleStorages.PossibleStorages.Count == 0)
-                return 0;
-
-            var guaranteedMinimumLength = int.MaxValue;
-            foreach (var storageId in possibleStorages.PossibleStorages)
-            {
-                var storage = caller.RequireStorage(storageId);
-                var storageMinimumLength = caller.StorageKindOf(storage) switch
-                {
-                    MirArrayStorageKind.Parameter =>
-                        ((MirClassicalParameter)caller.Parameters[
-                            caller.StorageParameterIndexOf(storage)]).MinimumLength,
-                    MirArrayStorageKind.Local => caller.StorageTypeOf(storage).KnownLength ?? 0,
-                    _ => 0,
-                };
-                guaranteedMinimumLength = Math.Min(
-                    guaranteedMinimumLength,
-                    storageMinimumLength);
-            }
-
-            return guaranteedMinimumLength;
-        }
 
         /// <summary>
         /// Validates the memory-SSA contract. Scalar dominance only proves that an old array ValueId is

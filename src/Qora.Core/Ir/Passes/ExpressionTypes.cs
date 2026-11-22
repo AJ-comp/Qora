@@ -1,20 +1,6 @@
 namespace Qora.Ir.Passes;
 
 /// <summary>
-/// The type and value shape of one classical expression. <see cref="Type"/> is the scalar type, while
-/// <see cref="IsArray"/> distinguishes a whole <c>T[]</c> value from one <c>T</c> element.
-/// </summary>
-internal readonly record struct QValueShape(
-    QType Type,
-    bool IsArray,
-    int? KnownLength = null)
-{
-    public override string ToString() =>
-        Type.ToString().ToLowerInvariant()
-        + (IsArray ? "[]" : string.Empty);
-}
-
-/// <summary>
 /// The single type reader for the unified HIR expression tree. Value-returning calls follow the resolved
 /// <see cref="HirCallExpression.CalleeId"/> reference; a spelling is never used to recover a missing
 /// semantic link.
@@ -111,7 +97,7 @@ internal static class ExpressionTypes
                     callableById,
                     out var callable)
                 && callable.ReturnType is { } returns =>
-                new QValueShape(returns, IsArray: false),
+                returns,
 
             HirCallExpression call
                 when call.CalleeId is null

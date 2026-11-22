@@ -1,4 +1,4 @@
-# Qora v0.41.0 — complete language reference for AI assistants
+# Qora v0.42.0 — complete language reference for AI assistants
 
 Qora is a quantum programming language (Q#/C#-flavored syntax) that compiles to OpenQASM 3.
 File extension: `.qor`. This file is the full, authoritative surface spec: everything below is
@@ -166,12 +166,12 @@ operation Main()                // global namespace; the entry point; takes NO p
   Backend limitation: the unpatched Braket local simulator used for validation crashes when reading `bool[]`
   elements or passing Boolean arrays (`BoolType.size` is missing). This also reproduces with standalone
   OpenQASM `array[bool, 2]`. Issue #429 and PR #430 in amazon-braket-default-simulator-python track the fix.
-  Combining PR #430 with #425/#426/#428 passes the current 80-case Qora execution suite locally. Upstream merge and
-  release remain pending; do not claim an ordinary package install includes these fixes or change Boolean semantics.
-  The pinned stock simulator 1.43.1 passes 71 cases and fails 9. Alongside the existing readonly-array,
+  Combining PR #430 with #425/#426/#428 passed the 80-case Qora 0.41.0 execution suite locally; the
+  pinned stock simulator 1.43.1 does not include those patches. In Qora 0.42.0 it passes 72 of 81 cases,
+  including the new bit-array return case; the same nine cases fail as in 0.41.0. Alongside the existing readonly-array,
   helper-loop, and Boolean-array failures, a helper returning a measured bit as `int` can yield 0 instead
-  of 1. That case emits the same instructions and result metadata with published Qora 0.40.0 and the current
-  compiler; standalone OpenQASM also fails on stock and succeeds with the combined patches. It is not
+  of 1. Qora 0.40.0 and 0.41.0 emitted the same instructions and result metadata for that case;
+  standalone OpenQASM also fails on stock and succeeds with the combined patches. It is not
   a newly introduced Qora regression.
   Three logical-value cases additionally hit known backend limitations: two Boolean-array failures
   (`BoolType.size`) and one readonly-array parser failure, not three new underlying bugs.
@@ -254,16 +254,21 @@ operation Main()                // global namespace; the entry point; takes NO p
   `var count: int = M(q[i]);` is valid, and an operation returning `int` may `return M(q[i]);`.
   A `float`, `angle`, or `bool` destination is incompatible (QSEM037), not an automatic reinterpretation
   of the measurement result. This changes destination compatibility, not measurement placement.
-- `operation Name(params): T { ... return value; }` may return one scalar `bool`/`int`/`bit`/`float`/`angle`.
+- `operation Name(params): T { ... return value; }` may return one scalar `bool`/`int`/`bit`/`float`/`angle`, or `bit[]`.
   Omitting `: T` keeps it void; a void operation can exit with `return;` but cannot return a value.
   Typed operations must return a compatible value on every path. They can be used in expressions inside
   operations, and retain their quantum/mutation effects; functions cannot call them.
   `return M(q);` returns that measurement's bit. Measurement does not otherwise become an execution output.
   Only the entry operation's returned value is exposed per shot. Helper returns go to their caller;
   a void entry exposes no measurement results. The runner never adds final measurements.
-  Array/tuple return types are not supported. Angle execution results are radians.
+  An operation may return a bit array by value, e.g. `return [1, 0];`. A caller can bind it with
+  `var bits: bit[] = Read();` and use `bits[i]` or `bits.Count`. Different return paths may yield different
+  lengths in Qora/MIR. OpenQASM requires a single compile-time width per emitted operation; otherwise QASM003.
+  Other array and tuple return types are not supported. Angle execution results are radians.
   Boolean execution results remain JSON `true`/`false`; bit results remain integer `0`/`1`.
 - CLI JSON includes `entryResult: { type, outputName }` from the same compilation as `qasm`.
+  For bit arrays this is `{ type: "bit[]", outputName, length }`. Each shot's value is a list of
+  0/1 in Qora index order; a one-element register is a list, not a scalar bit.
   Runners read only that declared OpenQASM output, never guess from names or expose all measurements.
   For void entries, OpenQASM carries an internal completion marker set to 1 so Braket does not fall back
   to exporting measurements. It is execution protocol data, NOT a Qora return value: the Qora runner
@@ -403,6 +408,7 @@ QSEM040 the program contains no callable at all, or contains functions but no ru
 QSEM041 expression type is invalid for its HIR context (condition, range bound, scalar operator, or array operator)
 QASM002 OpenQASM cannot represent a valid MIR feature, including a dynamic general-array comparison or
         caller-visible mutation through borrowed mutable `var bit[]` (moved `move var bit[]` is supported)
+QASM003 OpenQASM cannot establish a single compile-time width for an operation's bit[] return
 
 ## CLI contract (for tooling/agents)
 
@@ -420,7 +426,7 @@ qora --json [file] [--stages] [--base-dir <dir>] [--source-path <path>]
   original/FQN source names unmangled. These views are read from the same completed immutable
   `Compilation`; the CLI does not rerun compiler passes to reconstruct them. A stage not reached
   because of an earlier error is returned as an empty string.
-- Emitted QASM starts with `// generated by Qora v0.41.0`.
+- Emitted QASM starts with `// generated by Qora v0.42.0`.
 
 ## Executing programs
 

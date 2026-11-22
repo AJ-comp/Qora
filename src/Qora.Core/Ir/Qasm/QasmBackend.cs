@@ -43,12 +43,16 @@ internal static class QasmBackend
     }
 
     /// <summary>
-    /// Lowers MIR to OpenQASM. Unproven MIR bounds results are rejected before target
-    /// structure recovery, so every diagnostic still resolves through its exact MIR origin.
+    /// Lowers MIR to OpenQASM. Validate return widths before bounds: an unknown-width result
+    /// cannot be represented even if a caller guards all of its indexed accesses.
     /// </summary>
     public static Result Run(MirSnapshot source)
     {
         ArgumentNullException.ThrowIfNull(source);
+
+        var widthErrors = ValidateReturnWidths(source);
+        if (widthErrors.Count > 0)
+            return Result.Failed(source, widthErrors);
 
         var boundsErrors = OpenQasmBoundsValidation.Run(source);
         if (boundsErrors.Count > 0)
@@ -73,5 +77,36 @@ internal static class QasmBackend
             lowering.Target
             ?? throw new InvalidOperationException(
                 "QINTERNAL: successful MIR OpenQASM lowering has no target program"));
+    }
+
+    private static IReadOnlyList<Diagnostic> ValidateReturnWidths(MirSnapshot source)
+    {
+        var errors = new List<Diagnostic>();
+        foreach (var callable in source.Program.Callables)
+        {
+            if (callable.ReturnType is not { IsArray: true, ElementType: QType.Bit, KnownLength: null })
+                continue;
+
+            var widths = source.Analyses.ControlFlow(callable).ReachableBlocks
+                .Select(id => callable.RequireBlock(id).Terminator)
+                .OfType<MirReturn>()
+                .Select(returned => returned.Value)
+                .OfType<MirValueId>()
+                .Select(id => callable.RequireValue(id).Type.KnownLength)
+                .OfType<int>()
+                .Distinct()
+                .Order()
+                .ToArray();
+            var detail = widths.Length > 1
+                ? $" Reachable return paths have different widths: {string.Join(", ", widths)}."
+                : "";
+            var error = new QoraError(
+                $"operation `{callable.Name}` returns bit[], but OpenQASM requires a single " +
+                $"compile-time width (bit[n]) for the return value.{detail}",
+                "QASM003",
+                callable.Origin.SourceHirOrigin.Span);
+            errors.Add(new Diagnostic(error, callable.Origin));
+        }
+        return errors;
     }
 }

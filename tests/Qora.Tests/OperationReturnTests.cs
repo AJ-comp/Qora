@@ -35,6 +35,16 @@ public class OperationReturnTests
     public void AcceptsTypedOperationsAndVoidEarlyReturns(string source) => Compiler.Accepts(source);
 
     [Theory]
+    [InlineData("operation Read(): bit[] { return [1, 0]; } operation Main(): bit { var bits = Read(); return bits[0]; }")]
+    [InlineData("operation Read(): bit[] { return [1]; } operation First(a: bit[]): bit { return a[0]; } operation Main(): bit { return First(Read()); }")]
+    [InlineData("operation Main(): bit[] { const size = 2; return new bit[size]; }")]
+    [InlineData("operation Main(): bit[] { use q = Qubit[2]; return [M(q[0]), M(q[1])]; }")]
+    [InlineData("operation Read(): bit[] { return [1, 0]; return [1, 0, 1]; } operation First(a: bit[]): bit { return a[0]; } operation Main(): bit { return First(Read()); }")]
+    [InlineData("operation Read(q: Qubit[]): bit[] { var b: bit = M(q[0]); return [b, b]; } operation First(a: bit[]): bit { return a[1]; } operation Main(): bit { use q = Qubit[1]; var a = Read(q); return First(a); }")]
+    [InlineData("operation Read(): bit[] { if (true) { return [0,1]; } return [0,1,0]; } operation First(a: bit[]): bit { return a[1]; } operation Main(): bit { return First(Read()); }")]
+    public void AcceptsBitArrayOperationResults(string source) => Compiler.Accepts(source);
+
+    [Theory]
     [InlineData("operation Main(): int { return; }", "QSEM035")]
     [InlineData("operation Main() { return 1; }", "QSEM035")]
     [InlineData("operation Main(): int { var n: int = 1; }", "QSEM035")]
@@ -45,6 +55,14 @@ public class OperationReturnTests
     [InlineData("operation Read(): float { return 0.5; } operation Main() { var value: int = Read(); }", "QSEM037")]
     [InlineData("operation Read() {} operation Main(): int { return Read(); }", "QSEM005")]
     [InlineData("operation Main(): int[] { return [1]; }", "CE0001")]
+    [InlineData("function Read(): bit[] { return [1]; } operation Main() {}", "CE0001")]
+    [InlineData("operation Read(): bit[] { return [1]; } operation Main() { var a: int[] = Read(); }", "QSEM037")]
+    [InlineData("operation Main(): bit[] { return [true, 1]; }", "QSEM037")]
+    [InlineData("operation Main(): int { return [true, 1]; }", "QSEM037")]
+    [InlineData("operation Main(): bit[] { return new bit[0]; }", "QSEM016")]
+    [InlineData("operation Pick(b: bool): bit[] { if (b) { return [1,0]; } return [1,0,1]; } operation Third(a: bit[]): bit { return a[2]; } operation Main(): bit { use q = Qubit[1]; var b: bit = M(q[0]); return Third(Pick(b == 1)); }", "QSEM016")]
+    [InlineData("operation Pick(b: bool): bit[] { if (b) { return [1,0]; } return [1,0,1]; } operation Third(a: bit[]): bit { return a[2]; } operation Main(): bit { use q = Qubit[1]; var b: bit = M(q[0]); var a = Pick(b == 1); return Third(a); }", "QSEM016")]
+    [InlineData("operation Copy(a: bit[]): bit[] { return a; } operation Third(a: bit[]): bit { return a[2]; } operation ViaCopy(a: bit[]): bit { return Third(Copy(a)); } operation Pick(flag: bool): bit[] { if (flag) { return [1,0]; } return [1,0,1]; } operation Main(): bit { use q = Qubit[1]; var b: bit = M(q[0]); return ViaCopy(Pick(b == 1)); }", "QSEM016")]
     [InlineData("operation Main(): Qubit { use q = Qubit[1]; return q[0]; }", "CE0001")]
     [InlineData("operation Main(): (int, bit) { return (1, 0); }", "CE0001")]
     [InlineData("operation Read(): int { return Read(); } operation Main() {}", "QSEM011")]

@@ -349,6 +349,13 @@ internal static class MirOpenQasmLowering
                     case MirClassicalParameter classical:
                     {
                         var classicalType = classical.Value.Type;
+                        if (classicalType is { IsArray: true, ElementType: QType.Bit, KnownLength: null })
+                        {
+                            throw Unsupported(
+                                $"bit-array parameter `{classical.Name}` has no single compile-time " +
+                                "width for its OpenQASM bit register",
+                                classical.Value.Origin);
+                        }
                         if (classicalType is { IsArray: true, ElementType: QType.Bit }
                             && classical.Ownership == QOwnershipMode.Borrowed
                             && classical.Access == QAccessMode.Mutable)

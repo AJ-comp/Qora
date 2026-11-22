@@ -6,7 +6,7 @@ using Janglim.FrontEnd.RegularGrammar;
 namespace Qora;
 
 /// <summary>
-/// Qora v0.41.0 — a Q#/C#-flavored quantum language on the Janglim engine.
+/// Qora v0.42.0 — a Q#/C#-flavored quantum language on the Janglim engine.
 ///
 ///   operation Bell(q: Qubit[]) {        // a subroutine, with trailing-type parameters (name: T)
 ///       H(q[0]);
@@ -249,6 +249,8 @@ public class QoraGrammar : Grammar
     private NonTerminal repeatStmt = new NonTerminal("repeatStmt");
     private NonTerminal typeName = new NonTerminal("typeName");
     private NonTerminal arrayType = new NonTerminal("arrayType");
+    private NonTerminal operationReturnType = new NonTerminal("operationReturnType");
+    private NonTerminal bitArrayReturnType = new NonTerminal("bitArrayReturnType");
     private NonTerminal qubitArrayType = new NonTerminal("qubitArrayType");
     private NonTerminal arrayInitializer = new NonTerminal("arrayInitializer");
     private NonTerminal arrayLiteral = new NonTerminal("arrayLiteral");
@@ -309,11 +311,13 @@ public class QoraGrammar : Grammar
         openStmt.AddItem(Open + qname + Semicolon, OpenM);
         qname.AddItem(Ident + (Dot + Ident).ZeroOrMore());
 
-        // Operations may omit the return annotation (void) or return one classical scalar.
+        // Operations may omit the return annotation (void), return a classical scalar, or return bit[].
         operation.AddItem(Operation + Ident + LParen + RParen + LBrace + statement.ZeroOrMore() + RBrace, OperationM);
         operation.AddItem(Operation + Ident + LParen + paramList + RParen + LBrace + statement.ZeroOrMore() + RBrace, OperationM);
-        operation.AddItem(Operation + Ident + LParen + RParen + Colon + typeName + LBrace + statement.ZeroOrMore() + RBrace, OperationM);
-        operation.AddItem(Operation + Ident + LParen + paramList + RParen + Colon + typeName + LBrace + statement.ZeroOrMore() + RBrace, OperationM);
+        operationReturnType.AddItem(typeName | bitArrayReturnType);
+        bitArrayReturnType.AddItem(Bit + LBracket + RBracket, ArrayTypeM);
+        operation.AddItem(Operation + Ident + LParen + RParen + Colon + operationReturnType + LBrace + statement.ZeroOrMore() + RBrace, OperationM);
+        operation.AddItem(Operation + Ident + LParen + paramList + RParen + Colon + operationReturnType + LBrace + statement.ZeroOrMore() + RBrace, OperationM);
 
         // function Name(): T { … }  /  function Name(params): T { … } — a classical, pure, value-returning
         // subroutine (Q#'s `function`). The return type is TRAILING (`): T`), a scalar classical type only
@@ -347,6 +351,8 @@ public class QoraGrammar : Grammar
 
         // A value-returning callable uses return e; a void operation may exit with return;.
         returnStmt.AddItem(Return + expr + Semicolon, ReturnM);
+        returnStmt.AddItem(Return + arrayLiteral + Semicolon, ReturnM);
+        returnStmt.AddItem(Return + arrayNew + Semicolon, ReturnM);
         returnStmt.AddItem(Return + Semicolon, ReturnM);
 
         // use q = Qubit[2];
@@ -396,7 +402,7 @@ public class QoraGrammar : Grammar
         typeName.AddItem(Int | Bit | Bool | FloatType | AngleType);
         arrayType.AddItem(typeName + LBracket + RBracket, ArrayTypeM);
         qubitArrayType.AddItem(Qubit + LBracket + RBracket, ArrayTypeM);
-        arrayInitializer.AddItem(arrayLiteral | arrayNew);
+        arrayInitializer.AddItem(arrayLiteral | arrayNew | call);
         arrayLiteral.AddItem(LBracket + expr + (Comma + expr).ZeroOrMore() + RBracket, ArrayLiteralM);
         arrayNew.AddItem(New + typeName + LBracket + expr + RBracket, ArrayNewM);
 
