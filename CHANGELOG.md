@@ -17,7 +17,9 @@ emitted as **OpenQASM 3.0**.
 > named there may have been retired by a later release; the newest release notes and current architecture
 > documents define the present pipeline.
 
-## Unreleased
+## 0.44.0 — 2026-11-28
+
+VS Code extension **0.37.0** bundles the Qora 0.44.0 compiler.
 
 ### Phase gates
 

@@ -2,8 +2,9 @@
 
 All notable changes to the Qora Language extension.
 
-## Unreleased
+## 0.37.0 — 2026-11-28
 
+- Bundles **Qora 0.44.0** for Windows x64, macOS Apple Silicon, and Linux x64.
 - Adds syntax highlighting and hover examples for `Sdg`, `Tdg`, `P` and the `Controlled` modifier.
 - Updates the bundled Braket gate definitions for controlled Z rotations. The upstream [qubit-placement limitation](https://github.com/amazon-braket/amazon-braket-default-simulator-python/issues/440) still applies to local execution, including `Controlled P`.
 

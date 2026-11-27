@@ -7,9 +7,8 @@
 đổi sang **OpenQASM 3**. Tiện ích này cung cấp cho tệp `.qor` khả năng tô sáng cú pháp, chú thích khi di
 chuột, **báo lỗi thời gian thực**, một lệnh **chuyển đổi** và thực thi cục bộ giữ nguyên kiểu của giá trị trả về.
 
-Tiện ích **0.36.0** đi kèm **Qora 0.43.0**, bổ sung các hàm toán học dựng sẵn `Sqrt` và `ArcCos`: `Ry(2.0 * ArcCos(0.6), q[0])` viết góc quay trực tiếp từ biên độ. Phần tóm tắt biên dịch trong nhật ký chạy giờ chỉ đếm các câu lệnh cổng. Từ Qora 0.42.0, operation có thể trả về `bit[]`; nếu `Main` trả về mảng, kết quả của mỗi shot được hiển thị theo thứ tự chỉ số. Mảng một bit vẫn hiển thị dưới dạng `[1]`, không phải `1`.
-Xem [ghi chú phát hành tiện ích](CHANGELOG.md#0360--2026-11-22) và
-[ghi chú phát hành ngôn ngữ](https://github.com/AJ-comp/Qora/blob/main/CHANGELOG.md#0430--2026-11-22).
+Tiện ích **0.37.0** đi kèm **Qora 0.44.0**. Dùng `Sdg` và `Tdg` để đảo ngược tác dụng của `S` và `T`, hoặc dùng `P(theta, q)` để chỉ định độ dịch pha theo radian. Di chuột lên `Controlled` để xem ví dụ cho hai qubit.
+Trình mô phỏng cục bộ của Braket có thể trả về kết quả đo sai mà không báo lỗi với một số cách bố trí qubit. Xem [ghi chú phát hành tiện ích](CHANGELOG.md#0370--2026-11-28) và [ghi chú phát hành ngôn ngữ](https://github.com/AJ-comp/Qora/blob/main/CHANGELOG.md#0440--2026-11-28).
 
 ## Tính năng
 

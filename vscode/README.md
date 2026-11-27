@@ -7,9 +7,8 @@ parser engine. You write circuits in a Q#/C#-flavored syntax and it transpiles t
 extension gives `.qor` files syntax highlighting, hover docs, **live error diagnostics**, and a
 **transpile** command, and local execution with typed entry-return results.
 
-Extension **0.36.0** bundles **Qora 0.43.0**, which adds the built-in math functions `Sqrt` and `ArcCos`: `Ry(2.0 * ArcCos(0.6), q[0])` writes a rotation angle from an amplitude. The run log's compile summary now counts only gate statements. Since Qora 0.42.0, operations can return `bit[]`, and Run shows one ordered list per shot—even a single bit is displayed as `[1]`, not `1`.
-See the [extension release notes](CHANGELOG.md#0360--2026-11-22) and
-[language release notes](https://github.com/AJ-comp/Qora/blob/main/CHANGELOG.md#0430--2026-11-22).
+Extension **0.37.0** bundles **Qora 0.44.0**. Use `Sdg` and `Tdg` to undo `S` and `T`, or `P(theta, q)` to set the phase shift in radians. Hover over `Controlled` for the two-qubit form.
+Braket's local simulator can silently give incorrect results for some controlled-gate placements. See the [extension notes](CHANGELOG.md#0370--2026-11-28) and [language release notes](https://github.com/AJ-comp/Qora/blob/main/CHANGELOG.md#0440--2026-11-28).
 
 ## Features
 
