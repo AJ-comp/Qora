@@ -4,6 +4,27 @@ namespace Qora.Tests;
 
 public sealed class MirOpenQasmLoweringTests
 {
+    [Theory]
+    [InlineData("Sdg", "sdg")]
+    [InlineData("Tdg", "tdg")]
+    public void EmitsInversePhaseGatesWithTheirOpenQasmNames(string gate, string qasmName)
+    {
+        var qasm = Compile($$"""
+            operation Apply(c: Qubit, target: Qubit) {
+                {{gate}}(target);
+                Controlled {{gate}}(c, target);
+            }
+            operation Main() {
+                use q = Qubit[2];
+                Apply(q[0], q[1]);
+            }
+            """);
+
+        var lines = qasm.Split('\n', StringSplitOptions.TrimEntries);
+        Assert.Contains($"{qasmName} target;", lines);
+        Assert.Contains($"ctrl @ {qasmName} c, target;", lines);
+    }
+
     [Fact]
     public void PreservesLengthOneRegisterShape()
     {

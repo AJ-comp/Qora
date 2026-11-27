@@ -331,17 +331,21 @@ operation Main()                // global namespace; the entry point; takes NO p
 
 ## Built-in gates (complete list; case-sensitive)
 
-- 1-qubit: `H X Y Z S T` — e.g. `H(q[0]);`
+- 1-qubit: `H X Y Z S Sdg T Tdg` — `Sdg(q[0]);` and `Tdg(q[0]);` apply the inverses of `S` and `T` and emit OpenQASM `sdg` and `tdg`, respectively.
 - 2-qubit: `CNOT CX CY CZ SWAP` — e.g. `CNOT(q[0], q[1]);` (CNOT and CX are the same gate)
 - 3-qubit: `CCX`
 - Rotations (ANGLE FIRST): `Rx Ry Rz` — e.g. `Rx(pi/2, q[0]);` Constants: `pi`, `tau`, `euler`.
+- Phase (ANGLE FIRST): `P(theta, q[0]);` — multiplies only the |1⟩ amplitude by exp(i theta); emits OpenQASM `p`.
 - Reset: `Reset(q[0]);` `ResetAll(q);` — statements, not gates: no functors on them.
 - Measurement: `M(q[i])` in the assignment forms above. `Measure`/`measure` are NOT valid.
 
 ## Functors
 
-- `Controlled G(ctrl, ...args);` — adds a control qubit (FIRST argument). Qora source permits
-  `Controlled` only when `G` resolves to `Qora.Intrinsic`; a user operation is QSEM002.
+- `Controlled` adds a control as the first **qubit** argument of a built-in unitary gate. Any angle stays first:
+  `Controlled X(c, t);` emits `ctrl @ x c, t;`; `Controlled P(theta, c, t);` emits `ctrl @ p(theta) c, t;`.
+  A user-defined operation cannot be controlled (QSEM002).
+- Braket local simulator 1.43.1 can silently return incorrect results for some qubit placements, including
+  `Controlled P` and `Controlled X` on control q[1], target q[3] in a four-qubit register. This does not change the emitted OpenQASM.
 - There is no inverse/Adjoint functor in Qora source, HIR, or the current MIR, and there is no inverse
   materializer. Automatic uncomputation is planned as a future MIR scheduler that will analyze exact
   SSA/CFG facts and generate the required cleanup operations.

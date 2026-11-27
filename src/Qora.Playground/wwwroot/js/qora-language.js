@@ -14,9 +14,9 @@
     monaco.languages.register({ id: 'qora' });
 
     monaco.languages.setMonarchTokensProvider('qora', {
-        keywords: ['operation', 'function', 'return', 'use', 'new', 'const', 'var', 'move', 'if', 'else', 'for', 'in', 'while', 'repeat', 'until'],
+        keywords: ['operation', 'function', 'return', 'use', 'new', 'const', 'var', 'move', 'if', 'else', 'for', 'in', 'while', 'repeat', 'until', 'Controlled'],
         types: ['Qubit', 'int', 'float', 'bool', 'bit', 'angle'],
-        gates: ['H', 'X', 'Y', 'Z', 'S', 'T', 'CNOT', 'CX', 'CZ', 'SWAP', 'CCX', 'Rx', 'Ry', 'Rz', 'M', 'AsInt', 'ArcCos', 'Sqrt'],
+        gates: ['H', 'X', 'Y', 'Z', 'S', 'Sdg', 'T', 'Tdg', 'CNOT', 'CX', 'CY', 'CZ', 'SWAP', 'CCX', 'P', 'Rx', 'Ry', 'Rz', 'M', 'AsInt', 'ArcCos', 'Sqrt'],
         constants: ['pi'],
         tokenizer: {
             root: [
@@ -61,14 +61,18 @@
         'Y': '**Y** — 파울리-Y\n\n비트와 위상을 함께 뒤집는 회전.\n\n`Y(q[0]);` → `y q[0];`',
         'Z': '**Z** — 파울리-Z (위상 뒤집기)\n\n|1⟩의 **위상만** 뒤집어요(부호 −). |0⟩은 그대로.\n\n`Z(q[0]);` → `z q[0];`',
         'S': '**S** — 위상 게이트 (√Z)\n\nZ축으로 90° 회전 (Z의 절반).\n\n`S(q[0]);` → `s q[0];`',
+        'Sdg': '**Sdg (S†)** — S의 역게이트\n\n|0⟩ 성분은 그대로 두고 |1⟩ 성분의 위상을 −90° 바꿉니다.\n\n`Sdg(q[0]);` → `sdg q[0];`',
         'T': '**T** — π/8 게이트 (√S)\n\nZ축으로 45° 회전 (S의 절반).\n\n`T(q[0]);` → `t q[0];`',
+        'Tdg': '**Tdg (T†)** — T의 역게이트\n\n|0⟩ 성분은 그대로 두고 |1⟩ 성분의 위상을 −45° 바꿉니다.\n\n`Tdg(q[0]);` → `tdg q[0];`',
         // multi-qubit gates
+        'Controlled': '**Controlled** — 제어 큐비트를 추가합니다\n\n각도가 있으면 각도를 먼저 씁니다. `Controlled P(theta, c, t);`는 |11⟩ 성분의 위상만 바꿉니다.\n\n`Controlled P(theta, c, t);` → `ctrl @ p(theta) c, t;`',
         'CNOT': '**CNOT** — 제어-NOT (2큐비트)\n\n**제어**가 |1⟩일 때만 **대상**을 뒤집어요. **얽힘**을 만드는 핵심 게이트.\n\n`CNOT(q[0], q[1]);` → `cx q[0], q[1];`',
         'CX': '**CX** — 제어-NOT (CNOT과 같음)\n\n제어가 |1⟩일 때 대상을 뒤집어요.\n\n`CX(q[0], q[1]);` → `cx q[0], q[1];`',
         'CZ': '**CZ** — 제어-Z (2큐비트)\n\n두 큐비트가 모두 |1⟩일 때 위상을 뒤집어요.\n\n`CZ(q[0], q[1]);` → `cz q[0], q[1];`',
         'SWAP': '**SWAP** — 교환 (2큐비트)\n\n두 큐비트의 상태를 서로 **맞바꿔요**.\n\n`SWAP(q[0], q[1]);` → `swap q[0], q[1];`',
         'CCX': '**CCX** — 토폴리 (3큐비트)\n\n**제어 2개**가 모두 |1⟩일 때만 대상을 뒤집어요. 양자판 AND.\n\n`CCX(q[0], q[1], q[2]);` → `ccx q[0], q[1], q[2];`',
         // rotation gates
+        'P': '**P(θ, q)** — 위상 게이트\n\n|0⟩ 성분은 그대로 두고 |1⟩ 성분의 위상을 θ라디안만큼 바꿉니다.\n\n`P(theta, q);` → `p(theta) q;`',
         'Rx': '**Rx(θ, q)** — X축 회전\n\n큐비트를 X축으로 **각도 θ만큼** 회전. θ는 `pi/2`, `0.5` 등.\n\n`Rx(pi/2, q[0]);` → `rx(pi/2) q[0];`',
         'Ry': '**Ry(θ, q)** — Y축 회전\n\n큐비트를 Y축으로 각도 θ만큼 회전.\n\n`Ry(0.5, q[0]);` → `ry(0.5) q[0];`',
         'Rz': '**Rz(θ, q)** — Z축 회전\n\n큐비트의 **위상**을 각도 θ만큼 회전.\n\n`Rz(pi/4, q[0]);` → `rz(pi/4) q[0];`',

@@ -25,6 +25,25 @@ test('bool hover documents logical values separately from measured bits', () => 
   assert.match(DOCS.bool, /bit/);
 });
 
+test('inverse phase gates are highlighted and have OpenQASM hover examples', () => {
+  const grammar = require('../syntaxes/qora.tmLanguage.json');
+  const gate = new RegExp(grammar.repository.gates.match);
+  for (const name of ['Sdg', 'Tdg']) {
+    assert.match(name, gate);
+    assert.doesNotMatch(name.toLowerCase(), gate);
+    assert.ok(DOCS[name].includes(`${name.toLowerCase()} q[0];`));
+  }
+});
+
+test('phase gate and its control modifier are highlighted separately', () => {
+  const { gates, keywords } = require('../syntaxes/qora.tmLanguage.json').repository;
+  assert.match('P', new RegExp(gates.match));
+  assert.doesNotMatch('p', new RegExp(gates.match));
+  assert.match('Controlled', new RegExp(keywords.match));
+  assert.match(DOCS.P, /p\(theta\) q;/);
+  assert.match(DOCS.Controlled, /ctrl @ p\(theta\) c, t;/);
+});
+
 test('mutable-array hover documentation includes Boolean arrays', () => {
   assert.match(DOCS.var, /bool\[\]/);
   assert.match(DOCS.move, /bool\[\]/);

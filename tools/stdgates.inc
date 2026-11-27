@@ -1,18 +1,21 @@
-// OpenQASM 3 standard gate library (canonical definitions from the spec)
+// OpenQASM 3 standard gates for the Braket runner. Braket's U already gives
+// X, Y, H, Rx and Ry below their standard phases; no gphase correction is needed.
 gate p(lambda) a { ctrl @ gphase(lambda) a; }
-gate x a { U(pi, 0, pi) a; gphase(-pi/2); }
-gate y a { U(pi, pi/2, pi/2) a; gphase(-pi/2); }
+gate x a { U(pi, 0, pi) a; }
+gate y a { U(pi, pi/2, pi/2) a; }
 gate z a { p(pi) a; }
-gate h a { U(pi/2, 0, pi) a; gphase(-pi/4); }
+gate h a { U(pi/2, 0, pi) a; }
 // Fractional powers need a floating-point value: integer 1/2 evaluates to zero.
 gate s a { pow(0.5) @ z a; }
 gate sdg a { inv @ pow(0.5) @ z a; }
 gate t a { pow(0.5) @ s a; }
 gate tdg a { inv @ pow(0.5) @ s a; }
 gate sx a { pow(0.5) @ x a; }
-gate rx(theta) a { U(theta, -pi/2, pi/2) a; gphase(-theta/2); }
-gate ry(theta) a { U(theta, 0, 0) a; gphase(-theta/2); }
-gate rz(lambda) a { gphase(-lambda/2); U(0, 0, lambda) a; }
+gate rx(theta) a { U(theta, -pi/2, pi/2) a; }
+gate ry(theta) a { U(theta, 0, 0) a; }
+// H Rx(lambda) H = Rz(lambda). Braket does not apply an enclosing ctrl
+// to a bare gphase in a gate body, so retain both eigenphases on the target.
+gate rz(lambda) a { h a; rx(lambda) a; h a; }
 gate cx a, b { ctrl @ x a, b; }
 gate cy a, b { ctrl @ y a, b; }
 gate cz a, b { ctrl @ z a, b; }
