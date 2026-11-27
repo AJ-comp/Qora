@@ -1,5 +1,7 @@
 """Run with: python -m unittest discover -s tools -p test_braket_results.py."""
 
+from contextlib import chdir
+from itertools import permutations
 import json
 import math
 import os
@@ -174,9 +176,9 @@ class BraketOutputIntegrationTests(unittest.TestCase):
     def tearDownClass(cls):
         os.chdir(cls.previous_directory)
 
-    def run_output(self, source, kind, name="returned"):
-        result = self.device.run(self.program_type(source=source), shots=4).result()
-        return entry_result_from_task(result, {"type": kind, "outputName": name}, 4)
+    def run_output(self, source, kind, name="returned", shots=4):
+        result = self.device.run(self.program_type(source=source), shots=shots).result()
+        return entry_result_from_task(result, {"type": kind, "outputName": name}, shots)
 
     def test_measurement_then_gate_returns_stored_value_not_final_qubit(self):
         reply = self.run_output(
@@ -340,29 +342,222 @@ class BraketOutputIntegrationTests(unittest.TestCase):
                 )
 
     def test_compiled_phase_gates_in_tools_and_vscode_runner(self):
-        expected = {"shots": 4, "result": {"type": "bit", "values": [1] * 4}}
-        for gate, repetitions in (("S", 2), ("T", 4)):
-            # S^2 = T^4 = Z, so H followed by either sequence and H must flip |0>.
-            gates = " ".join(f"{gate}(q[0]);" for _ in range(repetitions))
+        # Between the two H gates, Z changes the final bit to 1; an inverse
+        # pair restores the relative phase of |+>, so the final bit must be 0.
+        cases = (
+            (("S", "S"), 1),
+            (("T", "T", "T", "T"), 1),
+            (("S", "Sdg"), 0),
+            (("T", "Tdg"), 0),
+        )
+        shots = 128
+        for sequence, bit in cases:
+            expected = {"shots": shots, "result": {"type": "bit", "values": [bit] * shots}}
+            gates = " ".join(f"{gate}(q[0]);" for gate in sequence)
             source = (
                 "operation Main(): bit { use q = Qubit[1]; "
                 f"H(q[0]); {gates} H(q[0]); return M(q[0]); }}"
             )
             request = self.compile_request(source)
 
-            with self.subTest(gate=gate, library="tools/stdgates.inc"):
+            with self.subTest(sequence=sequence, library="tools/stdgates.inc"):
                 metadata = request["entryResult"]
-                reply = self.run_output(request["qasm"], metadata["type"], metadata["outputName"])
+                reply = self.run_output(request["qasm"], metadata["type"], metadata["outputName"], shots)
                 self.assertEqual(expected, reply)
 
-            with self.subTest(gate=gate, library="vscode/runner/stdgates.inc"):
+            with self.subTest(sequence=sequence, library="vscode/runner/stdgates.inc"):
                 process = subprocess.run(
-                    [sys.executable, os.path.join(RUNNER, "braket_run.py"), "--shots", "4"],
+                    [sys.executable, os.path.join(RUNNER, "braket_run.py"), "--shots", str(shots)],
                     input=json.dumps(request), text=True, encoding="utf-8",
                     capture_output=True, timeout=60,
                 )
                 self.assertEqual(0, process.returncode, process.stderr + process.stdout)
                 self.assertEqual(expected, json.loads(process.stdout))
+
+    def test_compiled_p_and_controlled_p_interference_returns(self):
+        # H-P(pi)-H flips |0> deterministically. The controlled version only
+        # flips it when the separate control was prepared in |1>.
+        source = """
+            operation Main(): bit[] {
+                use q = Qubit[4];
+                H(q[1]); P(pi, q[1]); H(q[1]);
+                H(q[2]); Controlled P(pi, q[0], q[2]); H(q[2]);
+                X(q[0]);
+                H(q[3]); Controlled P(pi, q[0], q[3]); H(q[3]);
+                return [M(q[1]), M(q[2]), M(q[3])];
+            }
+        """
+        request = self.compile_request(source)
+        shots = 16
+        result = self.device.run(self.program_type(source=request["qasm"]), shots=shots).result()
+        self.assertEqual(
+            {"shots": shots, "result": {"type": "bit[]", "values": [[1, 0, 1]] * shots}},
+            entry_result_from_task(result, request["entryResult"], shots),
+        )
+
+    def test_compiled_p_and_all_controlled_gate_matrices(self):
+        self.check_gate_matrices(noncontiguous=False)
+
+    def test_rotation_angle_argument_wraps_to_one_turn(self):
+        # Check the actual value of a Qora angle independently of any gate matrix.
+        for radians in (-1.17, 7.03):
+            with self.subTest(radians=radians):
+                source = f"operation Main(): angle {{ var theta: angle = {radians}; return theta; }}"
+                request = self.compile_request(source)
+                name = request["entryResult"]["outputName"]
+                observed = self.run_output(request["qasm"], "angle", name, shots=1)
+                self.assertAlmostEqual(radians % math.tau, observed["result"]["values"][0])
+
+    @unittest.skipUnless(os.environ.get("QORA_TEST_NONCONTIGUOUS") == "1",
+                         "opt-in Braket noncontiguous-control backend diagnostic; see README")
+    def test_compiled_controlled_gates_on_noncontiguous_qubits(self):
+        self.check_gate_matrices(noncontiguous=True)
+        # Same routing error as a regular entry result, without a state-vector pragma.
+        with self.subTest(gate="Controlled P(pi)", control=1, target=3, result="measured bit"):
+            request = self.compile_request("""
+                operation Main(): bit {
+                    use q = Qubit[4];
+                    X(q[0]); X(q[1]); X(q[2]);
+                    H(q[3]); Controlled P(pi, q[1], q[3]); H(q[3]);
+                    return M(q[3]);
+                }
+            """)
+            reply = self.run_output(request["qasm"], "bit", request["entryResult"]["outputName"])
+            self.assertEqual([1] * 4, reply["result"]["values"])
+
+    @unittest.skipUnless(os.environ.get("QORA_TEST_NONCONTIGUOUS") == "1",
+                         "opt-in Braket noncontiguous-control backend diagnostic; see README")
+    def test_noncontiguous_control_with_no_compiler_or_gate_library(self):
+        # Every qubit is active. q[1] is |1>, so both spellings must flip q[3].
+        # No compiler, include file, or tensor-axis interpretation is involved.
+        for instruction in ("cnot", "ctrl @ x"):
+            with self.subTest(instruction=instruction):
+                source = f"""
+                    OPENQASM 3; qubit[4] q; output bit returned;
+                    i q[0]; x q[1]; i q[2]; {instruction} q[1], q[3];
+                    returned = measure q[3];
+                """
+                values = self.run_output(source, "bit", shots=4)["result"]["values"]
+                self.assertEqual([1] * 4, values)
+
+    @staticmethod
+    def gate_matrix_cases(angles, include_plain_p):
+        import numpy as np
+        from braket.circuits import Gate
+
+        # SDK matrices are an independent reference: the simulator executes the
+        # compiler's OpenQASM through the shipped gate definitions instead.
+        fixed = {
+            "H": Gate.H(), "X": Gate.X(), "Y": Gate.Y(), "Z": Gate.Z(),
+            "S": Gate.S(), "Sdg": Gate.Si(), "T": Gate.T(), "Tdg": Gate.Ti(),
+            "CX": Gate.CNot(), "CNOT": Gate.CNot(), "CY": Gate.CY(),
+            "CZ": Gate.CZ(), "SWAP": Gate.Swap(), "CCX": Gate.CCNot(),
+        }
+        cases = [(name, True, None, gate) for name, gate in fixed.items()]
+        for angle in angles:
+            # Qora's rotation parameter is an angle, reduced modulo 2π. Under
+            # control, a 2π shift of Rx/Ry/Rz changes the relative sign, so use
+            # the typed argument. P itself is 2π-periodic even under control:
+            # its expected matrix can be computed from the signed source value.
+            for name, rotation in (("Rx", Gate.Rx), ("Ry", Gate.Ry), ("Rz", Gate.Rz)):
+                cases.append((name, True, angle, rotation(angle % math.tau)))
+            cases.append(("P", True, angle, Gate.PhaseShift(angle)))
+            if include_plain_p:
+                cases.append(("P", False, angle, Gate.PhaseShift(angle)))
+
+        for name, controlled, angle, gate in cases:
+            matrix = gate.to_matrix()
+            if controlled:
+                # I on the new control's |0> branch, the entire original gate
+                # on its |1> branch, including any existing controls.
+                size = len(matrix)
+                expected = np.eye(2 * size, dtype=complex)
+                expected[size:, size:] = matrix
+            else:
+                expected = matrix
+            yield name, controlled, angle, gate.qubit_count + int(controlled), expected
+
+    @staticmethod
+    def gate_call(name, controlled, angle, operands):
+        args = ([] if angle is None else [str(angle)]) + [f"q[{i}]" for i in operands]
+        return ("Controlled " if controlled else "") + f"{name}({', '.join(args)});"
+
+    @staticmethod
+    def assert_equal_up_to_global_phase(actual, expected):
+        import numpy as np
+
+        # Never align components/columns independently: that would mask a wrong
+        # relative phase. Works for a state vector or a complete gate matrix.
+        phase = np.vdot(expected, actual) / np.vdot(expected, expected)
+        np.testing.assert_allclose(abs(phase), 1, atol=1e-9, rtol=0)
+        np.testing.assert_allclose(actual, phase * expected, atol=1e-9, rtol=0)
+
+    def check_gate_matrices(self, noncontiguous):
+        import numpy as np
+
+        tools_directory = os.path.dirname(os.path.abspath(__file__))
+        angles = (0.731,) if noncontiguous else (0.0, 0.731, -1.17, 7.03)
+        for name, controlled, angle, count, expected in self.gate_matrix_cases(angles, not noncontiguous):
+            with self.subTest(gate=name, controlled=controlled, angle=angle):
+                # One Bell pair per operand. Before the gate the state is
+                # sum_x |x>|x> / sqrt(d); afterward it is sum_x (U|x>)|x> / sqrt(d).
+                # Each spectator label x selects a whole column of U. This tests
+                # all basis inputs *and* relative phases between columns in one run.
+                dimension = 2 ** count
+                if noncontiguous:
+                    operands = list(range(1, 2 * count, 2))
+                    references = list(range(0, 2 * count, 2))
+                else:
+                    operands = list(range(count))
+                    references = list(range(count, 2 * count))
+                applied = self.gate_call(name, controlled, angle, operands)
+                source = f"operation Main() {{ use q = Qubit[{2 * count}]; {applied} }}"
+                request = self.compile_request(source)
+                # Prepare an independent input with Braket's native CNOT, not the
+                # controlled-gate implementation under test. The compiled operation
+                # and Qora's actual output declarations are left unchanged.
+                declaration = f"qubit[{2 * count}] q;"
+                self.assertEqual(1, request["qasm"].count(declaration))
+                pairs = "\n".join(f"h q[{i}]; cnot q[{i}], q[{j}];"
+                                  for i, j in zip(operands, references))
+                qasm = request["qasm"].replace(declaration, declaration + "\n" + pairs)
+                qasm += "\n#pragma braket result state_vector\n"
+                for directory in (tools_directory, RUNNER):
+                    with self.subTest(library=directory), chdir(directory):
+                        state = self.device.run(self.program_type(source=qasm), shots=0).result().values[0]
+                        axes = np.reshape(state, [2] * (2 * count))
+                        ordered = np.transpose(axes, operands + references)
+                        actual = ordered.reshape(dimension, dimension) * math.sqrt(dimension)
+                        self.assert_equal_up_to_global_phase(actual, expected)
+
+    @unittest.skipUnless(os.environ.get("QORA_TEST_ALL_LAYOUTS") == "1",
+                         "opt-in exhaustive four-qubit Braket layout diagnostic; see README")
+    def test_compiled_gates_on_every_four_qubit_placement(self):
+        import numpy as np
+
+        # Distinct, nonzero amplitudes on all four wires expose permutation errors.
+        # Both preparation and gate application are unmodified compiler output.
+        initial = np.ones(1, dtype=complex)
+        preparation = []
+        for i, theta in enumerate((0.41, 0.67, 1.03, 1.41)):
+            preparation.append(f"Ry({theta}, q[{i}]);")
+            initial = np.kron(initial, [math.cos(theta / 2), math.sin(theta / 2)])
+        prefix = "operation Main() { use q = Qubit[4]; " + " ".join(preparation)
+        for name, controlled, angle, count, matrix in self.gate_matrix_cases((0.731,), True):
+            for operands in permutations(range(4), count):
+                with self.subTest(gate=name, controlled=controlled, operands=operands):
+                    applied = self.gate_call(name, controlled, angle, operands)
+                    qasm = self.compile_request(prefix + " " + applied + " }")["qasm"]
+                    program = self.program_type(source=qasm + "\n#pragma braket result state_vector\n")
+                    actual = self.device.run(program, shots=0).result().values[0]
+
+                    # Apply the reference gate on the chosen axes, leaving the
+                    # other qubits untouched, then restore the original wire order.
+                    axes = operands + tuple(i for i in range(4) if i not in operands)
+                    columns = initial.reshape((2,) * 4).transpose(axes).reshape(len(matrix), -1)
+                    result = (matrix @ columns).reshape((2,) * 4)
+                    expected = result.transpose(np.argsort(axes)).ravel()
+                    self.assert_equal_up_to_global_phase(actual, expected)
 
 
 if __name__ == "__main__":

@@ -17,6 +17,18 @@ emitted as **OpenQASM 3.0**.
 > named there may have been retired by a later release; the newest release notes and current architecture
 > documents define the present pipeline.
 
+## Unreleased
+
+### Phase gates
+
+- Use `Sdg(q);` to undo `S(q);` and `Tdg(q);` to undo `T(q);`. They compile to the OpenQASM 3 gates `sdg` and `tdg`.
+- `P(theta, q);` emits `p(theta) q;` and shifts the phase of the |1⟩ component by `theta` radians. `Controlled P(theta, c, t);` emits `ctrl @ p(theta) c, t;` and shifts only the |11⟩ component.
+- Corrected the gate definitions bundled with the Braket runners so `Controlled Rz` preserves both target eigenphases. The previous definition could act like `Controlled P` on a superposed control.
+
+### Known Braket execution limitation
+
+On the pinned local simulator (1.43.1), the existing execution suite passes 72 of 81 cases, unchanged from the previous release. In a separate test of 288 controlled-gate placements on four active qubits, 264 matched the reference. The other 24 use a controlled single-qubit gate on wires 1 → 3 or 2 → 0; plain `P` passed on every wire. The same 24 failures reproduce on Braket 1.43.2 without Qora. See [upstream issue #440](https://github.com/amazon-braket/amazon-braket-default-simulator-python/issues/440) and [the proposed fix, PR #415](https://github.com/amazon-braket/amazon-braket-default-simulator-python/pull/415). This release does not change the Braket dependency.
+
 ## 0.43.0 — 2026-11-22
 
 VS Code extension **0.36.0** bundles the Qora 0.43.0 compiler.

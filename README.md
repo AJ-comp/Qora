@@ -204,7 +204,9 @@ Rx(pi/2, q[2]);                // rotations take the angle first
 Reset(q[2]);                   // back to |0⟩
 ```
 
-Built-in gates: `H X Y Z S T` · `CNOT/CX CY CZ SWAP CCX` · `Rx Ry Rz` · `Reset ResetAll`.
+Built-in gates: `H X Y Z S Sdg T Tdg` · `CNOT/CX CY CZ SWAP CCX` · `P Rx Ry Rz`. Use `Reset` or `ResetAll` to reset qubits.
+`Sdg(q[0]);` undoes `S(q[0]);`, and `Tdg(q[0]);` undoes `T(q[0]);`.
+`P(theta, q[0]);` shifts the phase of the `|1⟩` component by `theta` radians. With `Controlled P(theta, q[0], q[1]);`, only the `|11⟩` component acquires that phase. The arguments are the angle, control qubit, and target qubit, in that order.
 
 Built-in functions: `AsInt(f)` reads a whole `bit[]` as an unsigned `int`. `Sqrt(x)` and `ArcCos(x)` take one `float`
 (an `int` converts) and return a `float`, so a rotation angle can be written from an amplitude:
@@ -496,6 +498,8 @@ All five compile-time allocation cases pass on both the stock and combined-patch
 Separate Braket failures remain even in that combined-patch environment: measuring an element of a
 `Qubit[]` helper parameter can fail, and some noncontiguous controlled-gate layouts can return wrong
 results. These cases are outside the passing 80-case suite, so that result is not blanket backend support.
+For example, on the pinned simulator 1.43.1, prepare the second of four qubits (`q[1]`) in |1⟩ and apply `H → Controlled P(pi) → H` to `q[3]` with `q[1]` as the control. The target measures 0 instead of 1. A `Controlled X` on the same wires also fails to flip the target in standalone OpenQASM, without Qora.
+To reproduce locally, build the Debug CLI and run `python -m unittest discover -s tools -p test_braket_results.py`. Set `QORA_TEST_NONCONTIGUOUS=1` for the interleaved-qubit and standalone OpenQASM probes, or `QORA_TEST_ALL_LAYOUTS=1` to check every ordered placement on four qubits. Both opt-in diagnostics assert the correct physics, so they report failures on the affected simulator.
 
 ## How the compiler works
 
